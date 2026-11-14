@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="002" project="reuse-governance-tightening-r1">
+  <metadata>
+    <title>Wire the capability index into the reuse gate</title>
+    <phase>1 Capability index</phase>
+    <gate>blocked until 001</gate>
+    <status>completed</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Modifies skill directives and root CLAUDE.md under explicit project constraints (FR-02)</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Five small, exactly-located prose edits with the wording given in the spec</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>touches .claude/ — main-session-only (permission boundary)</parallel-reason>
+    <deps>001</deps>
+    <tags>config</tags>
+    <estimated-effort>2 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Make the existing reuse gate start from the capability index: task-create Step 3.5.6, code-review Step 6.6, .claude/patterns/INDEX.md, root CLAUDE.md section 11 and doc-drift-audit each get one small edit pointing at .claude/patterns/CAPABILITY-INDEX.md.</prompt>
+  <role>SPAARKE platform developer maintaining AI procedure files. Follows ai-procedure-maintenance and the root CLAUDE.md maintainer notes.</role>
+  <goal>All five files cite the index; the &lt;existing&gt; citation rule reads "CAPABILITY-INDEX row N plus file:line, or CAPABILITY-INDEX: no row plus the Grep command run".</goal>
+
+  <context>
+    <background>spec.md FR-02, design.md section 3.3. OQ-7 decided one pointer line in root CLAUDE.md section 11. OQ-3 as revised: no lint rule; code-review 6.6 checks the citation.</background>
+    <relevant-files>
+      <file role="modify">.claude/skills/task-create/SKILL.md</file>
+      <file role="modify">.claude/skills/task-create/references/component-justification.md</file>
+      <file role="modify">.claude/skills/code-review/SKILL.md</file>
+      <file role="modify">.claude/patterns/INDEX.md</file>
+      <file role="modify">CLAUDE.md</file>
+      <file role="modify">.claude/skills/doc-drift-audit/SKILL.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="001" status="pending">The index file to point at</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">task-create Step 3.5.6 (around line 246-252): the &lt;existing&gt; instruction becomes "consult .claude/patterns/CAPABILITY-INDEX.md first, then Grep"; the answer cites the row or "no row" plus the Grep command. Keep the step number and heading unchanged (external contract).</constraint>
+    <constraint source="project">code-review Step 6.6 (around line 350): add one line that the &lt;existing&gt; check uses the same index. No other change to the step.</constraint>
+    <constraint source="project">Root CLAUDE.md section 11: exactly one added line: "`&lt;existing&gt;` starts at `.claude/patterns/CAPABILITY-INDEX.md`." Read the maintainer notes in the HTML comment at the top of the file first and follow them.</constraint>
+    <constraint source="project">.claude/patterns/INDEX.md: one line describing the index as a concept-to-component lookup, a different shape from the 25-line pointer files.</constraint>
+    <constraint source="project">doc-drift-audit: add the index to its scan list (lines around 73 and 83), and state that a project adding a canonical component or changing an extension point updates its row in the same PR.</constraint>
+    <constraint source="project">Do not change scripts/Validate-TaskPoml.ps1 (design.md section 10.7).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/reuse-governance-tightening-r1/spec.md</file>
+      <file>.claude/skills/ai-procedure-maintenance/SKILL.md</file>
+      <file>.claude/patterns/CAPABILITY-INDEX.md</file>
+      <file>CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Step-number contract" location=".claude/skills/task-create/SKILL.md">Step numbers are cited across the repo; never renumber or rename a step heading.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Read each target file at the cited location.</step>
+    <step order="2">Make the five edits described in the constraints, and the matching one-line update in references/component-justification.md if it restates the &lt;existing&gt; rule.</step>
+    <step order="3">Run grep -rn "task-create.*Step 3" and confirm no step reference broke.</step>
+    <step order="4">Run pwsh scripts/quality/Test-InstructionPaths.ps1 and confirm no new missing path.</step>
+    <step order="5">Update TASK-INDEX.md: change this task's status cell to `✅ [done]`.</step>
+    <step order="6">If any deviations from plan, document in projects/reuse-governance-tightening-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the root CLAUDE.md maintainer notes forbid or constrain the section 11 line in a way the spec did not anticipate, STOP and ask the owner.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="terminal">Grep and the instruction-path checker</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">.claude/skills/task-create/SKILL.md</output>
+    <output type="docs">.claude/skills/code-review/SKILL.md</output>
+    <output type="docs">.claude/patterns/INDEX.md</output>
+    <output type="docs">CLAUDE.md</output>
+    <output type="docs">.claude/skills/doc-drift-audit/SKILL.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Grep for CAPABILITY-INDEX finds a hit in each of the five output files.</criterion>
+    <criterion testable="true">Root CLAUDE.md diff is exactly one added line in section 11.</criterion>
+    <criterion testable="true">No step heading or number changed in task-create or code-review (diff shows no heading lines changed).</criterion>
+    <criterion testable="true">Negative: scripts/Validate-TaskPoml.ps1 is unchanged.</criterion>
+    <criterion testable="true">Test-InstructionPaths.ps1 reports no new missing path.</criterion>
+  </acceptance-criteria>
+
+  <completion-notes>Completed 2026-11-11. All five outputs cite .claude/patterns/CAPABILITY-INDEX.md: task-create Step 3.5.6 (the &lt;existing&gt; line, plus one line that a task adding or changing a canonical component updates its row in the same PR), code-review Step 6.6 (one line in check 3a), .claude/patterns/INDEX.md (one line), root CLAUDE.md section 11 item 1, doc-drift-audit (Step 2 classification and a Step 3 stale-row check). Deviations: (1) Root CLAUDE.md: the pointer was folded into the existing item-1 line instead of an added line, because the file is at 218 lines, over its 200-line budget, and the maintainer notes require an equal trim or the owner's OK. The owner chose the fold (2026-11-11): line count unchanged, +57 bytes, .claude/CHANGELOG.md entry added. (2) doc-drift-audit line 73 is unchanged: its git-diff scope already includes .claude/patterns/, so the index is scanned; the row-staleness check went into Step 3 instead. (3) references/component-justification.md is unchanged: it does not restate the &lt;existing&gt; rule. Verification: no step heading changed; every task-create Step 3.x number cited in the repo still has its heading; scripts/Validate-TaskPoml.ps1 unchanged; Test-InstructionPaths.ps1 reports no new path from these edits (only the 2 pre-existing false positives fixed by PR #2714; the #2714 checker also shows none from this task); task-create is 576 lines and carries a length-justification. Quality gates skipped: documentation-only, no tests touched (STANDARD).
+rework: none task 002</completion-notes>  <notes>Skill-directive hot path: many projects edit these files. Keep each edit to the cited lines so merges stay trivial.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

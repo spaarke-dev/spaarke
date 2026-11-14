@@ -24,7 +24,9 @@ namespace Sprk.Bff.Api.Infrastructure.Dataverse;
 /// <b>The ONE exception</b> (unified-access-control-r2 task 188, D7; CLAUDE.md §6.5 path B, APPROVED in owner round 111,
 /// 2026-10-21): the injected app-only NARROWING seams — <c>AppOnlyDocumentNarrowing</c> (with its hide-only overload
 /// <c>AppOnlyDocumentNarrowingExtensions.HiddenDocumentIdsAsync</c>) and, off the tool namespace,
-/// <c>InternalRouteDocumentNarrowing</c>. They re-read documents by id under the BFF's app-only identity and return a HIDE
+/// <c>InternalRouteDocumentNarrowing</c>; the (a') invoice-family hiding (ebilling-r1 task 098); and
+/// <c>AppOnlyExternalVisibility</c> (uac-r2 task 191h, THE external visibility predicate of task 191b, asked by id for an
+/// external caller's rows). They re-read rows by id under the BFF's app-only identity and return a HIDE
 /// DECISION ONLY: no app-only row or column reaches a tool result, and every row a tool returns still comes from a read
 /// through this interface. Their consumers are an allow-list (<c>ExternalDocumentNarrowingGuardTests</c>, K7). See
 /// <c>.claude/constraints/auth.md</c>, "External document narrowing — D7".

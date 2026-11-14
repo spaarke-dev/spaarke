@@ -1,0 +1,102 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="080" project="spaarke-SPA-external-access-platform-r4">
+  <metadata>
+    <title>Draft standards proposals: record-action icon map, child dialogs in MODAL-DESIGN-SYSTEM, the Xrm-free SPA case in record-modal-selection (FR-34)</title>
+    <phase>Closing</phase>
+    <gate>after 018 (the icon map and child-dialog pattern exist in code)</gate>
+    <status>not-started</status>
+    <rigor>MINIMAL</rigor>
+    <rigor-reason>Documentation drafts only; the approved edits are applied by the main session</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Documentation drafting from shipped code and the spec's ADR-tension rationale</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Proposals target .claude/ and docs/; .claude/ edits are main-session-only (root CLAUDE.md §3) and only after owner approval</parallel-reason>
+    <deps>018</deps>
+    <tags>documentation</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Write three short proposals for owner approval: (a) the record-modal action icon map as repo guidance; (b) a MODAL-DESIGN-SYSTEM.md note that child dialogs (SprkModal presets) mount inside the parent SprkModal; (c) a record-modal-selection.md note that SprkModal `lg` is the layout for an Xrm-free surface such as the external SPA. Record the owner's decision on each; apply the approved edits in the main session only.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. Technical writer for the repo's standards and patterns.</role>
+  <goal>Three drafts in project notes, each with the exact proposed text, its target file and section, its evidence in code, and the owner's recorded decision; approved edits applied by the main session.</goal>
+
+  <context>
+    <background>Spec FR-34 and §ADR Tensions: the icon map (FR-05: Refresh ArrowClockwise, Upload ArrowUpload, New message ChatAdd, Add to-do TaskListAdd, Add event CalendarAdd, Submit invoice ReceiptAdd, Copy link Link, Expand section Open; Download ArrowDownload, Delete Delete, History History, Send Send; 20Regular) lives in one exported constant shipped with RecordCommandBar by task 001 (src/client/shared/Spaarke.UI.Components/src/components/RecordCommandBar/ — confirm the file from 001's outputs). MODAL-DECISION-CRITERIA warns about nested modals from DIFFERENT chrome families; child dialogs here are the same family (SprkModal presets in SprkModal), guarded by task 004's focus/Esc test. record-modal-selection's Layout 1 is `Xrm.Navigation.navigateTo` at 85%; the SPA has no Xrm, so Layout 2 / SprkModal `lg` is its case. The owner adopted the icon map as a standard on 2026-11-08.</background>
+    <relevant-files>
+      <file role="canonical-reference">docs/standards/MODAL-DESIGN-SYSTEM.md</file>
+      <file role="canonical-reference">docs/standards/MODAL-DECISION-CRITERIA.md</file>
+      <file role="canonical-reference">.claude/patterns/ui/record-modal-selection.md</file>
+      <file role="canonical-reference">.claude/adr/ADR-050-canonical-modal-shell.md</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/HeaderToolbar/README.md</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/RecordCommandBar/ (task 001 output)</file>
+      <file role="new-artifact">projects/spaarke-SPA-external-access-platform-r4/notes/task-080-standards-proposals.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="018" status="pending">P1 shipped the icon map, RecordCommandBar and child dialogs (tasks 001, 004) and deployed them</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="root CLAUDE.md §3 / spec FR-34">This task writes only projects/spaarke-SPA-external-access-platform-r4/notes/task-080-standards-proposals.md. Edits to .claude/ (record-modal-selection.md) and docs/standards/ happen in the main session, after the owner approves each proposal.</constraint>
+    <constraint source="root CLAUDE.md §2">Every claim in a proposal cites the code that makes it true (file and symbol); the icon list is copied from the exported constant, not from the spec.</constraint>
+    <constraint source="root CLAUDE.md §16 (enforcement ladder)">Each proposal states how the rule is enforced (type, lint, guard, test, or prose with a one-line reason), e.g. the icon map as a typed constant plus a test that record-modal actions use only it.</constraint>
+    <constraint source="project">Proposals are additive notes in the target files' existing sections; no renumbering or restructuring of those files.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-SPA-external-access-platform-r4/spec.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r4/CLAUDE.md</file>
+      <file>docs/standards/MODAL-DESIGN-SYSTEM.md</file>
+      <file>docs/standards/MODAL-DECISION-CRITERIA.md</file>
+      <file>.claude/patterns/ui/record-modal-selection.md</file>
+      <file>.claude/adr/ADR-050-canonical-modal-shell.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/skills/ai-procedure-maintenance/SKILL.md</file>
+    </files>
+    <patterns>
+      <pattern name="Pattern pointer file" location=".claude/patterns/ui/record-modal-selection.md">Sections When / Read These Files / Constraints / Key Rules — add the SPA case under Key Rules.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load the knowledge files, read the relevant files, declare rigor and model tier per task-execute Step 0.5.</step>
+    <step order="1">Read the shipped icon map constant, RecordCommandBar and the child-dialog implementation and test from P1; note file and symbol for each claim.</step>
+    <step order="2">Draft (a): where the icon map guidance lives (recommend one target: a section in MODAL-DESIGN-SYSTEM.md or a new pattern pointer under .claude/patterns/ui/ — state why), the exact text, and its enforcement.</step>
+    <step order="3">Draft (b): the MODAL-DESIGN-SYSTEM.md note (target section, exact text): child dialogs are SprkModal presets mounted inside the parent SprkModal; focus stays in parent+child; Esc closes child first; Cancel on the left (ADR-050); cite task 004's test.</step>
+    <step order="4">Draft (c): the record-modal-selection.md Key Rules note: no Xrm → SprkModal `lg` (Layout 2); cite the SPA's template shell.</step>
+    <step order="5">Present the three drafts to the owner; record each decision (approve / change / reject) with the date in the proposals file. Hand approved edits to the main session (list target file, section, text).</step>
+    <step order="6">Update tasks/TASK-INDEX.md: set this task's status cell to `✅ [done]` and this POML's &lt;status&gt; to completed; run `pwsh scripts/check-task-status-drift.ps1`.</step>
+    <step order="7">Record deviations and decisions in projects/spaarke-SPA-external-access-platform-r4/notes/task-080-notes.md.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If a proposal would change an ADR's rule (not just add a documented case), STOP and present it as an ADR amendment (root CLAUDE.md §6.5 path B) for the owner instead.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="terminal">Read-only inspection</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/spaarke-SPA-external-access-platform-r4/notes/task-080-standards-proposals.md</output>
+    <output type="docs">projects/spaarke-SPA-external-access-platform-r4/notes/task-080-notes.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The proposals file holds drafts (a), (b) and (c), each with target file and section, exact text, code evidence (file + symbol) and enforcement mechanism.</criterion>
+    <criterion testable="true">The owner's decision on each draft is recorded with its date.</criterion>
+    <criterion testable="true">Approved edits are listed for the main session; no file under .claude/ or docs/ was edited by this task's agent.</criterion>
+    <criterion testable="true">Negative: no proposal changes an ADR rule without being raised as an amendment.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-34; ADR tensions (ADR-012, MODAL-DECISION-CRITERIA, record-modal-selection), all Path C. Tag "documentation" is outside the Standard Tag Vocabulary (no mapping row); the knowledge list names the target docs directly.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

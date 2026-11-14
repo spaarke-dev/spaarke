@@ -1,0 +1,126 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="024" project="spaarke-SPA-external-access-platform-r4">
+  <metadata>
+    <title>Shared EmptyState in DocumentLibrary, EventsCalendar, SmartTodo and every template section (FR-17)</title>
+    <phase>2 Invoices and documents</phase>
+    <gate>after 018 and 023</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .tsx code across several SPA components</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Mechanical convergence onto an existing shared component with a fixed prop contract</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches DocumentLibrary.tsx after 023 and the template sections shared with 020, 021, 022</parallel-reason>
+    <deps>018, 023</deps>
+    <tags>frontend, fluent-ui, react</tags>
+    <estimated-effort>2-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Replace every hand-rolled empty state in DocumentLibrary, EventsCalendar, SmartTodo and the record-template sections with the shared `EmptyState` from @spaarke/ui-components.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. Fluent UI v9 developer.</role>
+  <goal>No hand-rolled empty-state styles remain in the named files; each empty list renders `EmptyState` (size `compact`) with the same wording as today, keeping the Upload/Create hints only when that action is offered.</goal>
+
+  <context>
+    <background>Spec FR-17; design §6 reuse map. The shared component is `src/client/shared/Spaarke.UI.Components/src/components/EmptyState.tsx` (props: icon, heading, description, footer, ariaLabel, size `compact`|`default`, className hooks; it already sets `role="status"` and `aria-live="polite"`). The SPA already imports it by deep path in `components/auth/OrganizationNotSetUp.tsx:23`. Hand-rolled sites verified 2026-11-10 (design §6 line numbers have drifted): DocumentLibrary `emptyState*` styles `:147-165`, render `:1048-1058` and the empty toolbar text `:1034-1036`, version-history empty text `:459-463` (023 may have moved these); EventsCalendar styles `:92-110`, render `:734-743`; SmartTodo styles `:194-207`, render `:855-864`; RecordDetailModal `RelatedList` empty `:347-349` and RecordMessages empty `:450` / unavailable `:415` (task 005 may have moved these into the template section renderers).</background>
+    <relevant-files>
+      <file role="modify">src/client/external-spa/src/components/DocumentLibrary.tsx</file>
+      <file role="modify">src/client/external-spa/src/components/EventsCalendar.tsx</file>
+      <file role="modify">src/client/external-spa/src/components/SmartTodo.tsx</file>
+      <file role="modify">src/client/external-spa/src/components/detail/RecordMessages.tsx</file>
+      <file role="modify">src/client/external-spa/src/components/detail/RecordDetailModal.tsx</file>
+      <file role="modify">The template section renderers created by task 005 (under src/client/external-spa/src/components/detail/), and the Invoice Files section from task 021 if merged</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/EmptyState.tsx</file>
+      <file role="canonical-reference">src/client/external-spa/src/components/auth/OrganizationNotSetUp.tsx</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="018" status="pending">Template sections deployed</dependency>
+      <dependency task="023" status="pending">DocumentLibrary rework done</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec FR-17">In every file this task touches, every "no items" state renders the shared `EmptyState`; remove the now-unused `emptyState*`/`empty` makeStyles entries. Loading, error, access-denied and truncated-list states are NOT empty states and stay as they are.</constraint>
+    <constraint source="ADR-012">The shared `EmptyState.tsx` is not modified. Spacing differences go through its `className` props.</constraint>
+    <constraint source="project">Wording is kept as today; a hint that names an action ("Use the Upload button…", 'Use "Add Task"…') is shown only when that action is offered to the caller (hide, don't disable).</constraint>
+    <constraint source="ADR-021">Icons keep their current @fluentui/react-icons glyphs; colour via semantic tokens.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-SPA-external-access-platform-r4/CLAUDE.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r4/spec.md</file>
+      <file>.claude/skills/fluent-v9-component/SKILL.md</file>
+      <file>.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>src/client/external-spa/README.md</file>
+    </files>
+    <patterns>
+      <pattern name="EmptyState in the SPA" location="src/client/external-spa/src/components/auth/OrganizationNotSetUp.tsx">deep import `@spaarke/ui-components/components/EmptyState`</pattern>
+      <pattern name="Compact list empty state" location="src/client/shared/Spaarke.UI.Components/src/components/EmptyState.tsx">size="compact" for panels, columns and lists</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load the knowledge files, read the relevant files, declare rigor and model tier per task-execute Step 0.5.</step>
+    <step order="1">Grep the named files for `emptyState`, `styles.empty`, and "No … yet/found" texts; list each site in the notes.</step>
+    <step order="2">Replace each site with `EmptyState` (compact), keeping wording, icon and the action-conditional hint.</step>
+    <step order="3">Delete the unused style entries; keep test ids that existing tests query (or update those tests).</step>
+    <step order="4">Run the SPA tests and the SPA build.</step>
+    <step order="5">Update tasks/TASK-INDEX.md: set this task's status cell to `✅ [done]` and this POML's &lt;status&gt; to completed; run `pwsh scripts/check-task-status-drift.ps1`.</step>
+    <step order="6">Record deviations in projects/spaarke-SPA-external-access-platform-r4/notes/task-024-notes.md.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If a site cannot match its current look without changing the shared `EmptyState.tsx`, STOP and report the gap instead of editing the shared component.</trigger>
+  </escalation>
+
+  <ui-tests>
+    <test name="Empty sections">
+      <url>https://{spa-dev-host}/?record=matter:{empty-matter-id}</url>
+      <steps>
+        <step>Open a record with no documents, events, to-dos or messages</step>
+        <step>Verify each section shows the shared empty state with today's wording</step>
+        <step>As View-only, verify no hint names Upload or Add Task</step>
+        <step>Check the console for errors</step>
+      </steps>
+      <expected>Consistent empty states; hints only for offered actions</expected>
+    </test>
+    <test name="Dark Mode Compliance (ADR-021)">
+      <steps><step>Switch to dark and high-contrast</step><step>Verify heading and description colours adapt</step></steps>
+      <expected>Semantic tokens only</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">Run SPA tests and build</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/external-spa/src/components/DocumentLibrary.tsx</output>
+    <output type="code">src/client/external-spa/src/components/EventsCalendar.tsx</output>
+    <output type="code">src/client/external-spa/src/components/SmartTodo.tsx</output>
+    <output type="code">src/client/external-spa/src/components/detail/RecordMessages.tsx</output>
+    <output type="docs">projects/spaarke-SPA-external-access-platform-r4/notes/task-024-notes.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">DocumentLibrary, EventsCalendar, SmartTodo and every template section render the shared `EmptyState` for an empty list.</criterion>
+    <criterion testable="true">No hand-rolled empty-state style (`emptyState*`, `empty`) remains in those files.</criterion>
+    <criterion testable="true">An action hint shows only when that action is offered; a View-only caller sees none.</criterion>
+    <criterion testable="true">Loading, error, access-denied and truncated states are unchanged; a truncated empty list still shows the notice, not "no items".</criterion>
+    <criterion testable="true">`EmptyState.tsx` in the shared library is unchanged.</criterion>
+    <criterion testable="true">SPA build passes; all SPA tests pass.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-17. Design §6 anchors drifted: DocumentLibrary.tsx:1025 → :1048, EventsCalendar.tsx:723 → :734, SmartTodo.tsx:833 → :856.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

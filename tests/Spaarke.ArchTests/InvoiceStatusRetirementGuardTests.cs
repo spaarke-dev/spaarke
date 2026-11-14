@@ -142,7 +142,7 @@ public class InvoiceStatusRetirementGuardTests
 
         Assert.Contains("src/server/api/Sprk.Bff.Api/Services/Finance/FinanceBaseValues.cs", files);
         Assert.Contains("src/dataverse/solutions/SpaarkeMaster/Entities/sprk_Invoice/Entity.xml", files);
-        Assert.Contains("src/client/external-spa/src/components/detail/RecordDetailModal.tsx", files);
+        Assert.Contains("src/client/external-spa/src/components/record/sections/InvoicesSection.tsx", files);
         Assert.Contains("scripts/ebilling/Deploy-EbillingInvoiceHeaderSchema.ps1", files);
         Assert.Contains("tests/unit/Sprk.Bff.Api.Tests/Services/Finance/FinanceBaseValuesTests.cs", files);
         Assert.DoesNotContain(files, f => f.EndsWith("/" + GuardFileName, StringComparison.OrdinalIgnoreCase));

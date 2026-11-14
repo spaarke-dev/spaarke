@@ -27,6 +27,7 @@ import {
   pushErrorText,
   pushFieldMappings,
   PushRequestError,
+  RESTRICTED_SOURCE_NOT_RESTRICTED_REASON_CODE,
   SECURE_SOURCE_NOT_ISOLATED_REASON_CODE,
   SECURE_SOURCE_REFILE_NOT_ALLOWED_REASON_CODE,
   SECURE_SOURCE_UNDETERMINED_REASON_CODE,
@@ -349,7 +350,7 @@ describe('RecordFamilyActionPanel', () => {
 
     expect(
       await screen.findByText(
-        '1 record will not be updated because it could not be checked whether the source record is secure. Try again later.'
+        "1 record will not be updated because it could not be checked whether the source record's access allows copying. Try again later."
       )
     ).toBeTruthy();
     expect(screen.getByText('Nothing to update among the records that can be updated.')).toBeTruthy();
@@ -392,7 +393,7 @@ describe('RecordFamilyActionPanel', () => {
 
     expect(
       await screen.findByText(
-        "1 record will not be updated because its filing can't be changed by a push from a secure record."
+        "1 record will not be updated because its filing can't be changed by a push from a secure or Restricted record."
       )
     ).toBeTruthy();
     expect(screen.queryByText('server text')).toBeNull();
@@ -419,7 +420,56 @@ describe('RecordFamilyActionPanel', () => {
     expect(await screen.findByText('1 record was updated. 1 record was not updated.')).toBeTruthy();
     expect(
       screen.getByText(
-        "No fields were copied to this record because its filing can't be changed by a push from a secure record."
+        "No fields were copied to this record because its filing can't be changed by a push from a secure or Restricted record."
+      )
+    ).toBeTruthy();
+    expect(screen.queryByText('server text')).toBeNull();
+  });
+
+  // Task 022c (the Restricted-source rule): values copied from a source whose access is Restricted are written only into a
+  // record that is Restricted; a record that is not is returned with its own code, on the preview and the apply.
+  it('says, on the preview, that a record that is not Restricted will not be updated from a Restricted source, and does not list it', async () => {
+    const { fetchFn, sent } = pushServer({
+      preview: () =>
+        previewBody([CHANGE_A], {
+          errors: [
+            { recordId: EVENT_B, error: 'server text', reasonCode: RESTRICTED_SOURCE_NOT_RESTRICTED_REASON_CODE },
+          ],
+        }),
+      apply: () => ({ success: true, updatedCount: 1, failedCount: 0, errors: [] }),
+    });
+    renderPanel({ authenticatedFetch: fetchFn });
+
+    expect(
+      await screen.findByText(
+        "1 record will not be updated because the source record's access is Restricted and its access is not."
+      )
+    ).toBeTruthy();
+    expect(screen.queryByText('server text')).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Update 1 record' }));
+    await screen.findByText('1 record was updated.');
+    expect(sent.filter(b => !b.preview)[0].childIds).toEqual([EVENT_A]);
+  });
+
+  it('shows the Restricted wording, never a generic error, for a record the apply did not write', async () => {
+    const { fetchFn } = pushServer({
+      preview: () => previewBody([CHANGE_A, CHANGE_B]),
+      apply: () => ({
+        success: true,
+        updatedCount: 1,
+        failedCount: 1,
+        errors: [{ recordId: EVENT_B, error: 'server text', reasonCode: RESTRICTED_SOURCE_NOT_RESTRICTED_REASON_CODE }],
+      }),
+    });
+    renderPanel({ authenticatedFetch: fetchFn });
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Update 2 records' }));
+
+    expect(await screen.findByText('1 record was updated. 1 record was not updated.')).toBeTruthy();
+    expect(
+      screen.getByText(
+        "No fields were copied to this record because the source record's access is Restricted and this record's is not."
       )
     ).toBeTruthy();
     expect(screen.queryByText('server text')).toBeNull();
@@ -749,23 +799,30 @@ describe('recordFamilyPushService', () => {
         { recordId: EVENT_A, error: 'server text A', reasonCode: SECURE_SOURCE_NOT_ISOLATED_REASON_CODE },
         { recordId: EVENT_B, error: 'server text B', reasonCode: SECURE_SOURCE_UNDETERMINED_REASON_CODE },
         { recordId: EVENT_A, error: 'server text R', reasonCode: SECURE_SOURCE_REFILE_NOT_ALLOWED_REASON_CODE },
+        { recordId: EVENT_B, error: 'server text X', reasonCode: RESTRICTED_SOURCE_NOT_RESTRICTED_REASON_CODE },
         { recordId: INVOICE_A, error: 'server text C' },
         { recordId: MATTER, error: 'server text D', reasonCode: 'constructor' },
       ],
     });
 
     expect(SECURE_SOURCE_REFILE_NOT_ALLOWED_REASON_CODE).toBe('field_mapping.push.secure_source_refile_not_allowed');
+    expect(SECURE_SOURCE_UNDETERMINED_REASON_CODE).toBe('field_mapping.push.secure_source_undetermined');
+    expect(RESTRICTED_SOURCE_NOT_RESTRICTED_REASON_CODE).toBe('field_mapping.push.restricted_source_not_restricted');
     expect(parsed.errors.map(e => e.reasonCode)).toEqual([
       SECURE_SOURCE_NOT_ISOLATED_REASON_CODE,
       SECURE_SOURCE_UNDETERMINED_REASON_CODE,
       SECURE_SOURCE_REFILE_NOT_ALLOWED_REASON_CODE,
+      RESTRICTED_SOURCE_NOT_RESTRICTED_REASON_CODE,
       undefined,
       'constructor',
     ]);
+    // The same texts the server sends (FieldMappingPushSourceGate.MessageFor; pinned there by
+    // FieldMappingPushSourceGateTests.EachCodesText_IsTheFixedTextTheClientShows).
     expect(parsed.errors.map(pushErrorText)).toEqual([
       'No fields were copied to this record because the source record is secure.',
-      'No fields were copied to this record because it could not be checked whether the source record is secure. Try again later.',
-      "No fields were copied to this record because its filing can't be changed by a push from a secure record.",
+      "No fields were copied to this record because it could not be checked whether the source record's access allows copying. Try again later.",
+      "No fields were copied to this record because its filing can't be changed by a push from a secure or Restricted record.",
+      "No fields were copied to this record because the source record's access is Restricted and this record's is not.",
       'server text C',
       'server text D',
     ]);
@@ -784,10 +841,28 @@ describe('recordFamilyPushService', () => {
         entry(SECURE_SOURCE_UNDETERMINED_REASON_CODE),
       ])
     ).toEqual([
-      "1 record will not be updated because its filing can't be changed by a push from a secure record.",
+      "1 record will not be updated because its filing can't be changed by a push from a secure or Restricted record.",
       '2 records will not be updated because the source record is secure.',
-      '3 records will not be updated because it could not be checked whether the source record is secure. Try again later.',
+      "3 records will not be updated because it could not be checked whether the source record's access allows copying. Try again later.",
     ]);
     expect(sourceRuleSkipText([])).toEqual([]);
+  });
+
+  // Task 022c: the Restricted-source code is counted too, singular and plural, beside the secure-source codes.
+  it('counts the records the Restricted-source code keeps from the push', () => {
+    const entry = (reasonCode: string) => ({ recordId: EVENT_A, error: 'x', reasonCode });
+    expect(sourceRuleSkipText([entry(RESTRICTED_SOURCE_NOT_RESTRICTED_REASON_CODE)])).toEqual([
+      "1 record will not be updated because the source record's access is Restricted and its access is not.",
+    ]);
+    expect(
+      sourceRuleSkipText([
+        entry(RESTRICTED_SOURCE_NOT_RESTRICTED_REASON_CODE),
+        entry(RESTRICTED_SOURCE_NOT_RESTRICTED_REASON_CODE),
+        entry(SECURE_SOURCE_REFILE_NOT_ALLOWED_REASON_CODE),
+      ])
+    ).toEqual([
+      "1 record will not be updated because its filing can't be changed by a push from a secure or Restricted record.",
+      "2 records will not be updated because the source record's access is Restricted and their access is not.",
+    ]);
   });
 });

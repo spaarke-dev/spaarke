@@ -25,7 +25,7 @@ import {
   MessageBarActions,
 } from "@fluentui/react-components";
 import { ChatRegular, ChatAddRegular, DismissRegular, ArrowClockwiseRegular } from "@fluentui/react-icons";
-import { PaneHeader, SprkChat, createConsumerDispatcher, RichFilePreviewDialog, createXrmNavigationService, createXrmDataService, searchUsersAndContacts, launchSurface, resolveSurfaceLaunch, launchSummarizeFilesWizard, SendEmailDialog } from "@spaarke/ui-components";
+import { PaneHeader, SprkChat, createConsumerDispatcher, RichFilePreviewDialog, createXrmNavigationService, createXrmDataService, searchUsersAndContacts, launchSurface, resolveSurfaceLaunch, launchSummarizeFilesWizard, SendEmailDialog, createXrmEmailComposeHandlers } from "@spaarke/ui-components";
 import { WelcomeStartCards } from "./WelcomeStartCards";
 import { QuickStartModal } from "./QuickStartModal";
 import { MemoryDialog } from "./MemoryDialog";
@@ -915,6 +915,14 @@ export function ConversationPane(): React.JSX.Element {
   const handleSearchRecipients = React.useCallback(
     (query: string) => searchUsersAndContacts(emailLookupDataService, query),
     [emailLookupDataService]
+  );
+  // D-219 Q3 (task 186): the Send Email dialog shows the compose template picker and the AI-draft
+  // sparkle only when the host passes these handlers (EmailComposer hides both otherwise). The same
+  // Xrm-backed factory the per-item cards (EmailPerItemCards) and EmailWorkspaceWidget use; one
+  // instance for this pane's dialog.
+  const emailComposeHandlers = React.useMemo(
+    () => createXrmEmailComposeHandlers({ authenticatedFetch, bffBaseUrl }),
+    [authenticatedFetch, bffBaseUrl]
   );
   // task 025 (FR-09/FR-10) — email per-item ACTION CARDS (Reply/Reply All/Forward/Summarize the
   // thread), keyed to the active-item conduit's email handle (`generalizedActiveItem`, task 001/012).
@@ -3595,6 +3603,10 @@ export function ConversationPane(): React.JSX.Element {
         onSearchRecipients={handleSearchRecipients}
         authenticatedFetch={authenticatedFetch}
         bffBaseUrl={bffBaseUrl}
+        onListEmailTemplates={emailComposeHandlers.onListEmailTemplates}
+        onRenderEmailTemplate={emailComposeHandlers.onRenderEmailTemplate}
+        onDraftWithAi={emailComposeHandlers.onDraftWithAi}
+        onUploadLocalAttachment={emailComposeHandlers.onUploadLocalAttachment}
         onSent={() => setEmailSeed(null)}
       />
 

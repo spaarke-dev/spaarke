@@ -16,7 +16,8 @@
 // only member of the two ontology-writer field-security profiles; since task 267 (#2618) it sits ALONE in its own business
 // unit "Spaarke Ontology Writer" (H10), whose default team holds no role and is in no field-security profile, and holds that
 // unit's copy of the role — plus S25 (task 267, #2618): the customer unit's default team holds the customer-unit copy of
-// "Spaarke Basic User", so it can own ordinary records (contacts included — Dataverse requires the owner to hold Read).
+// "Spaarke Basic User", so it can own ordinary records (contacts included — Dataverse requires the owner to hold Read) —
+// plus S26 (task 268; ebilling-r1 task 166, EB-D-200): the shipped lock on the invoice amounts and firm, VERIFIED ONLY.
 // Every step READS first and writes only what is missing, so a second run against a configured environment performs no
 // write at all.
 //
@@ -127,8 +128,16 @@ public sealed class SecureRecordSetupProcedure
     /// <summary>S10/S12: Read/Create/Update on those columns; the BFF's application users are its only members.</summary>
     public const string WriterProfileName = "Spaarke BFF-Managed Field Writers";
 
-    /// <summary>S14: the platform's own field-security profile, exempt from the other-writer rule (owner decision F4).</summary>
+    /// <summary>The display name of <see cref="SystemAdministratorFieldSecurityProfileId"/> — for messages only; never matched.</summary>
     public const string SystemAdministratorProfileName = "System Administrator";
+
+    /// <summary>
+    /// S14/S18/S19/S22/S26: the platform's own "System Administrator" field-security profile — a fixed ID in every environment,
+    /// which Dataverse grants every secured column — the only profile besides a lock's writer excused from the other-writer
+    /// rule (owner decision F4). Matched by ID, never by name (task 268 review: a look-alike name would be excused; the same ID
+    /// as scripts/ebilling/Set-EbillingInvoiceMoneyFieldSecurity.ps1 <c>$SystemAdministratorProfileId</c>).
+    /// </summary>
+    public static readonly Guid SystemAdministratorFieldSecurityProfileId = Guid.Parse("572329c1-a042-4e22-be47-367c6374ea45");
 
     /// <summary>S13/S14: the secure flag only the BFF writes (task 150).</summary>
     public const string SecureFlagColumn = "sprk_issecure";
@@ -167,6 +176,33 @@ public sealed class SecureRecordSetupProcedure
         ("contact", "sprk_identitycollisionreason"),
         ("contact", "sprk_identitycollisionparties"),
     ];
+
+    /// <summary>S26 (ebilling-r1 task 166, owner decision EB-D-200): the table whose amounts and firm only the BFF sets.</summary>
+    public const string InvoiceMoneyTable = "sprk_invoice";
+
+    /// <summary>
+    /// S26 (ebilling-r1 task 166, EB-D-200): the invoice columns that are field-secured, readable by everyone through
+    /// <see cref="ReaderProfileName"/> and settable only by the BFF through <see cref="WriterProfileName"/> — the billed total,
+    /// the five derived totals and the firm lookup (docs/data-model/sprk_invoice.md). Exactly the <c>$Columns</c> of
+    /// scripts/ebilling/Set-EbillingInvoiceMoneyFieldSecurity.ps1 and the package's grants (InvoiceMoneyColumnLockPackagedTests).
+    /// </summary>
+    public static readonly IReadOnlyList<string> InvoiceMoneyColumns =
+    [
+        "sprk_totalamount",
+        "sprk_approvedtotal",
+        "sprk_feestotal",
+        "sprk_expensestotal",
+        "sprk_lineadjustmentstotal",
+        "sprk_invoiceadjustmentstotal",
+        "sprk_vendororg",
+    ];
+
+    /// <summary>S26: the remedy an incomplete invoice money lock names.</summary>
+    internal const string InvoiceMoneyLockRemedy =
+        "The published SpaarkeMaster 1.3.0.0 predates ebilling task 166 and H6 skips an installed version: either import a " +
+        "SpaarkeMaster release ABOVE 1.3.0.0 that carries task 166 (a new run, H6), or run " +
+        "scripts/ebilling/Set-EbillingInvoiceMoneyFieldSecurity.ps1 (apply, then -Verify) on this environment with the " +
+        "owner's OK, then resume. Nothing was written.";
 
     /// <summary>
     /// S19/S20 (ISS-020 / #1565): the profile whose membership lets an identity READ the field-secured
@@ -839,8 +875,9 @@ public sealed class SecureRecordSetupProcedure
                 $"'{WriterProfileName}' grants {SecureFlagColumn} on no table: the package's field-security lock (task 150) " +
                 "is missing. Import SpaarkeMaster (H6), then resume. Nothing was written.");
         }
-        var systemAdministratorProfiles = await dv.FindFieldSecurityProfilesAsync(t, SystemAdministratorProfileName, ct)
-            .ConfigureAwait(false);
+        // The platform's own profile, matched by its fixed ID, never by name: Dataverse's name filter ignores case and accents, so
+        // a look-alike profile named "System Administrator" (or "Systém Administrator") would otherwise be excused (task 268 review).
+        IReadOnlyCollection<Guid> systemAdministratorProfiles = [SystemAdministratorFieldSecurityProfileId];
         foreach (var table in lockedTables)
         {
             var secured = await dv.IsAttributeSecuredAsync(t, table, SecureFlagColumn, ct).ConfigureAwait(false);
@@ -871,6 +908,46 @@ public sealed class SecureRecordSetupProcedure
                 $"Profiles other than '{WriterProfileName}' may create or update {SecureFlagColumn}: " +
                 $"{string.Join(", ", otherWriters.Take(NamedPrincipalLimit).Select(p => $"{p.ProfileId} on {p.EntityName}"))}. " +
                 "The lock is only as strong as its writer list (owner decision F4). Nothing was written.");
+        }
+
+        // S26 (ebilling-r1 task 166, EB-D-200) — the lock on the invoice amounts and firm ships in SpaarkeMaster: verify it is
+        // whole (secured, Readers read 4, Writers 4/4/4) and that nobody else may write. A BFF built from master assumes only it
+        // sets these columns. Verify only: nothing here is written or removed.
+        foreach (var column in InvoiceMoneyColumns)
+        {
+            var columnPermissions = (await dv.ListFieldPermissionsAsync(t, column, ct).ConfigureAwait(false))
+                .Where(p => Same(p.EntityName, InvoiceMoneyTable))
+                .ToArray();
+            var secured = await dv.IsAttributeSecuredAsync(t, InvoiceMoneyTable, column, ct).ConfigureAwait(false);
+            var reader = columnPermissions.FirstOrDefault(p => p.ProfileId == readerProfileId);
+            var writer = columnPermissions.FirstOrDefault(p => p.ProfileId == writerProfileId);
+            if (secured != true
+                || reader is null || reader.CanRead != FieldPermissionAllowed
+                || writer is null || writer.CanRead != FieldPermissionAllowed || writer.CanCreate != FieldPermissionAllowed
+                || writer.CanUpdate != FieldPermissionAllowed)
+            {
+                return Refuse(FailureClass.Resumable, SecureRecordSetupRejectionCodes.InvoiceMoneyLockIncomplete,
+                    $"{InvoiceMoneyTable}.{column}: IsSecured={secured?.ToString() ?? "(no such column)"}, " +
+                    $"'{ReaderProfileName}' read={reader?.CanRead.ToString() ?? "(none)"}, " +
+                    $"'{WriterProfileName}' read/create/update={Rights(writer)} (expected secured, 4, 4/4/4). The package's " +
+                    "lock on the invoice amounts and firm (ebilling task 166) is incomplete: a user could set them. " +
+                    InvoiceMoneyLockRemedy);
+            }
+            var otherMoneyWriters = columnPermissions
+                .Where(p => p.ProfileId != writerProfileId
+                            && !systemAdministratorProfiles.Contains(p.ProfileId)
+                            && (p.CanCreate == FieldPermissionAllowed || p.CanUpdate == FieldPermissionAllowed))
+                .ToArray();
+            if (otherMoneyWriters.Length > 0)
+            {
+                return Refuse(FailureClass.QuarantineRequired, SecureRecordSetupRejectionCodes.InvoiceMoneyLockOtherWriter,
+                    $"Profiles other than '{WriterProfileName}' may create or update {InvoiceMoneyTable}.{column}: " +
+                    $"{string.Join(", ", otherMoneyWriters.Take(NamedPrincipalLimit).Select(p => $"{p.ProfileId} read/create/update={Rights(p)}"))}" +
+                    (otherMoneyWriters.Any(p => p.ProfileId == readerProfileId)
+                        ? $" — '{ReaderProfileName}' among them, so every user (every default team is its member)" : string.Empty) +
+                    ". Only the BFF sets an invoice's amounts and firm (EB-D-200); who else may is an owner decision. Nothing " +
+                    "is removed here. Nothing was written.");
+            }
         }
 
         // S15 — the two identity-link profiles (INCOMING-141) ship in SpaarkeMaster: exactly one of each.
@@ -965,7 +1042,7 @@ public sealed class SecureRecordSetupProcedure
         {
             return Refuse(FailureClass.QuarantineRequired, SecureRecordSetupRejectionCodes.StandingGrantLockOtherWriter,
                 $"Profiles other than '{StandingGrantProfileName}' may create or update {StandingGrantTable}.{StandingGrantColumn}: " +
-                $"{Ids(standingOtherWriters.Select(p => p.ProfileId))} (the Readers profile included — every default team is its " +
+                $"{Ids(standingOtherWriters.Select(p => p.ProfileId))} (the Readers profile is not exempt — every default team is its " +
                 "member). Only Standing Grant Administrators and System Administrator may create or update the standing grant; " +
                 "who was granted more is an operator decision. Nothing was written.");
         }
@@ -1080,7 +1157,7 @@ public sealed class SecureRecordSetupProcedure
         {
             return Refuse(FailureClass.QuarantineRequired, SecureRecordSetupRejectionCodes.InviteMarkerLockOtherWriter,
                 $"Profiles other than '{WriterProfileName}' may create or update {InviteTable}.{InviteMarkerColumn}: " +
-                $"{Ids(markerOtherWriters.Select(p => p.ProfileId))} (the Readers profile included — every default team is its " +
+                $"{Ids(markerOtherWriters.Select(p => p.ProfileId))} (the Readers profile is not exempt — every default team is its " +
                 "member). Whoever can write the marker can open a contact to an email bind. Nothing was written.");
         }
 
@@ -1204,7 +1281,7 @@ public sealed class SecureRecordSetupProcedure
             {
                 return Refuse(FailureClass.QuarantineRequired, SecureRecordSetupRejectionCodes.AccessRemovedOnLockOtherWriter,
                     $"Profiles other than '{WriterProfileName}' may create or update {InviteTable}.{AccessRemovedOnColumn}: " +
-                    $"{Ids(removedOtherWriters.Select(p => p.ProfileId))} (the Readers profile included — every default team " +
+                    $"{Ids(removedOtherWriters.Select(p => p.ProfileId))} (the Readers profile is not exempt — every default team " +
                     "is its member). Only the BFF records that a person's external access was removed. Nothing was written.");
             }
             notes.Add($"{InviteTable}.{AccessRemovedOnColumn}: present, secured, Readers 4/0/0, Writers 4/4/4, no other writer.");

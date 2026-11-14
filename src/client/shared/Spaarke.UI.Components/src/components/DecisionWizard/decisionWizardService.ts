@@ -24,6 +24,7 @@ import type {
   DecisionCommitStep,
   DecisionPlan,
   DecisionReview,
+  DecisionUnfinishedReview,
   DecisionWizardService,
   SuppressionStatus,
 } from './decisionWizardTypes';
@@ -61,8 +62,37 @@ function failureFrom(
     recordMayExist: p.recordMayExist === true,
     sentButNotRecorded: p.sentButNotRecorded === true,
     resumable: p.resumable === true,
+    sendChoiceRequired: p.sendChoiceRequired === true,
     replayed: p.replayed === true,
   };
+}
+
+/**
+ * Task 191 fix round 1: the plan's `unfinished` as the wizard uses it. The review is posted back exactly as stored, so only what
+ * the commit route reads is kept (the server's nulls and its `retry: false` are dropped); the failure is read like a 409 replay.
+ */
+function unfinishedFrom(raw: unknown): DecisionUnfinishedReview | null {
+  if (typeof raw !== 'object' || raw === null) return null;
+  const u = raw as { reviewId?: unknown; signalId?: unknown; review?: unknown; failure?: unknown };
+  if (typeof u.reviewId !== 'string' || typeof u.signalId !== 'string') return null;
+  if (typeof u.review !== 'object' || u.review === null) return null;
+  const r = u.review as Record<string, unknown>;
+  const review: DecisionReview = {
+    reviewId: typeof r.reviewId === 'string' ? r.reviewId : u.reviewId,
+    confirmed: r.confirmed === true,
+    actions: asArray<DecisionReview['actions'][number]>(r.actions),
+  };
+  if (Array.isArray(r.alsoResolve)) review.alsoResolve = r.alsoResolve as string[];
+  if (Array.isArray(r.nextSteps)) review.nextSteps = r.nextSteps as DecisionReview['nextSteps'];
+  if (typeof r.dismissal === 'object' && r.dismissal !== null)
+    review.dismissal = r.dismissal as DecisionReview['dismissal'];
+  if (typeof r.because === 'string') review.because = r.because;
+  const failure = failureFrom(
+    409,
+    typeof u.failure === 'object' && u.failure !== null ? (u.failure as IThrownProblemDetails) : null,
+    'An earlier attempt to record this decision did not finish.'
+  );
+  return { reviewId: u.reviewId, signalId: u.signalId, review, failure: { ...failure, replayed: true } };
 }
 
 async function readProblem(response: Response): Promise<IThrownProblemDetails | null> {
@@ -110,7 +140,10 @@ export function createDecisionWizardService({ fetch, baseUrl }: DecisionWizardSe
   }
 
   return {
-    getPlan: signalId => getJson<DecisionPlan>(url(signalId, 'decision-plan'), 'The decision plan'),
+    async getPlan(signalId: string): Promise<DecisionPlan> {
+      const plan = await getJson<DecisionPlan>(url(signalId, 'decision-plan'), 'The decision plan');
+      return { ...plan, unfinished: unfinishedFrom(plan.unfinished) };
+    },
 
     getSuppression: signalId => getJson<SuppressionStatus>(url(signalId, 'suppression'), 'The dismissal history'),
 

@@ -22,6 +22,8 @@ import { parseDataParams } from './parseDataParams';
 import { createXrmDataService } from './adapters/xrmDataServiceAdapter';
 import { createXrmUploadService } from './adapters/xrmUploadServiceAdapter';
 import { createXrmNavigationService } from './adapters/xrmNavigationServiceAdapter';
+import { createXrmEmailComposeHandlers } from '../components/EmailComposer/createXrmEmailComposeHandlers';
+import type { IEmailComposeHandlers } from '../components/EmailComposer/composeOnlySend';
 import { resolveRuntimeConfig, initAuth, authenticatedFetch } from '@spaarke/auth';
 import { cleanGuid } from './guid';
 import { getXrm } from './xrmContext';
@@ -48,6 +50,8 @@ export interface IWizardPageBootstrap {
   dataService: ReturnType<typeof createXrmDataService>;
   uploadService: ReturnType<typeof createXrmUploadService>;
   navigationService: ReturnType<typeof createXrmNavigationService>;
+  /** The Send Email step's composer handlers (task 182, D-219): recipient pane, record lookup, upload, templates, AI draft. */
+  emailComposeHandlers: IEmailComposeHandlers;
   /** The `@spaarke/auth` authenticated fetch (bearer + 401-retry). */
   authenticatedFetch: typeof authenticatedFetch;
   /** Resolves the current user's business-unit SPE container id for uploads. */
@@ -138,6 +142,10 @@ export function useWizardPageBootstrap(logPrefix: string): IWizardPageBootstrap 
   const dataService = React.useMemo(() => createXrmDataService(), []);
   const uploadService = React.useMemo(() => createXrmUploadService(bffBaseUrl), [bffBaseUrl]);
   const navigationService = React.useMemo(() => createXrmNavigationService(), []);
+  const emailComposeHandlers = React.useMemo<IEmailComposeHandlers>(
+    () => createXrmEmailComposeHandlers({ authenticatedFetch, bffBaseUrl: bffBaseUrl || undefined }),
+    [bffBaseUrl]
+  );
 
   // Assistant → surface hand-off (task 012). Read once from this page's own
   // launch URL; hydrate the envelope from sessionStorage. `null` when opened
@@ -196,6 +204,7 @@ export function useWizardPageBootstrap(logPrefix: string): IWizardPageBootstrap 
     dataService,
     uploadService,
     navigationService,
+    emailComposeHandlers,
     authenticatedFetch,
     resolveSpeContainerId,
     closeDialog,

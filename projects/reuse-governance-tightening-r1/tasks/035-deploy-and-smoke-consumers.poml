@@ -1,0 +1,120 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="035" project="reuse-governance-tightening-r1">
+  <metadata>
+    <title>Deploy SpaarkeAi and SemanticSearch to DEV and smoke-test</title>
+    <phase>4 Package reviews</phase>
+    <gate>blocked until 031, 032, 033 and owner OK to deploy</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Deployment task in phase 4 (integration/deployment)</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Deployment through an existing skill plus a scripted smoke check</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>live deployment; needs the owner's OK and runs alone</parallel-reason>
+    <deps>031, 032, 033</deps>
+    <tags>deploy, e2e-test</tags>
+    <estimated-effort>1-2 hours</estimated-effort>
+  </metadata>
+
+  <prompt>After the owner approves, deploy the rebuilt SpaarkeAi (Spaarke Console) and SemanticSearch code pages to DEV with code-page-deploy, and confirm that the behaviour moved by item 4 still works.</prompt>
+  <role>SPAARKE platform developer handling DEV deployments.</role>
+  <goal>Both code pages are deployed to DEV from this branch, and the smoke tests below pass with no new console errors.</goal>
+
+  <context>
+    <background>spec.md FR-09 and plan.md Phase 4. Item 4 changed package wiring only; the user-visible behaviour (open in Word, download, delete; AI context; LegalWorkspace sections) must be unchanged. Compose.Components ships inside SpaarkeAi.</background>
+    <relevant-files>
+      <file role="canonical-reference">.claude/skills/code-page-deploy/SKILL.md</file>
+      <file role="canonical-reference">src/solutions/SpaarkeAi/package.json</file>
+      <file role="canonical-reference">src/client/code-pages/SemanticSearch/package.json</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="033" status="pending">All three package actions applied</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Ask the owner for explicit OK before deploying (project CLAUDE.md section 5); DEV only.</constraint>
+    <constraint source="project">Deploy only through the code-page-deploy skill; no manual web resource upload.</constraint>
+    <constraint source="project">If a smoke test fails, do not attempt a hotfix in DEV; record it and return to the owning task.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/code-page-deploy/SKILL.md</file>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/patterns/pcf/control-initialization.md</file>
+      <file>.claude/patterns/pcf/theme-management.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>docs/guides/PCF-DEPLOYMENT-GUIDE.md</file>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+    </files>
+    <patterns>
+      <pattern name="Code page deploy" location=".claude/skills/code-page-deploy/SKILL.md">Build and deploy React code pages as web resources.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="1">Ask the owner for OK to deploy to DEV; wait for a yes.</step>
+    <step order="2">Deploy SpaarkeAi and SemanticSearch via code-page-deploy.</step>
+    <step order="3">Run the ui-tests below; capture console errors.</step>
+    <step order="4">Record results in projects/reuse-governance-tightening-r1/notes/035-smoke.md.</step>
+    <step order="5">Update TASK-INDEX.md: change this task's status cell to `✅ [done]`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If any smoke test fails or a new console error appears, STOP and report; do not continue to task 080.</trigger>
+  </escalation>
+
+  <ui-tests>
+    <test name="console-document-operations">
+      <steps>
+        <step>Open the Spaarke Console in {org} and open a matter with documents.</step>
+        <step>Use Open in Word, Download and Delete (on a test document) from the document list.</step>
+      </steps>
+      <expected>Each action behaves as before the change; no new console errors.</expected>
+    </test>
+    <test name="console-ai-context-and-legal-workspace">
+      <steps>
+        <step>Open the Console Assistant and a LegalWorkspace section.</step>
+      </steps>
+      <expected>The Assistant loads its context and the section registry renders; no new console errors.</expected>
+    </test>
+    <test name="semantic-search-document-actions">
+      <steps>
+        <step>Open the SemanticSearch code page in {org}, run a search, and open a result's document actions.</step>
+      </steps>
+      <expected>Document actions work; no new console errors.</expected>
+    </test>
+    <test name="dark-mode">
+      <steps>
+        <step>Switch to dark mode and repeat the first test.</step>
+      </steps>
+      <expected>Moved components render with theme tokens (ADR-021); no hard-coded colours.</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="terminal">code-page-deploy skill</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/reuse-governance-tightening-r1/notes/035-smoke.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The owner's OK is recorded before deployment.</criterion>
+    <criterion testable="true">Both code pages are deployed to DEV from this branch.</criterion>
+    <criterion testable="true">All four ui-tests pass with no new console errors, recorded in the smoke note.</criterion>
+    <criterion testable="true">Negative: no deployment to any environment other than DEV.</criterion>
+  </acceptance-criteria>
+
+  <notes>If the owner declines a DEV deploy, mark this task deferred with the reason; 080 then notes that runtime behaviour is unverified.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

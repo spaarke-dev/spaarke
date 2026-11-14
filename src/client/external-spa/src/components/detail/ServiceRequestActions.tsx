@@ -1,10 +1,15 @@
 /**
- * ServiceRequestActions — "Delete request" and "Send recall request" on the service request detail view
+ * ServiceRequestActions — "Delete request" and "Send recall request" on the service request record
  * (spaarke-SPA-external-access-platform-r3 task 054, FR-26; owner decisions 2026-10-11).
  *
  * WHO SEES IT. Only the request's requester: the record's `sprk_requestedby` is the signed-in caller's contact
- * (`isRequestedByCaller`, from the `/me` identity the detail view already read). That is a convenience: the server's
+ * (`isRequestedByCaller`, from the `/me` identity the record view already read). That is a convenience: the server's
  * requester gate decides every DELETE, and a wrong guess comes back as the uniform 403 (the shared denial message).
+ *
+ * STARTED FROM THE TOOLBAR (R4 task 005, FR-05 / FR-07). "Delete request" is the record toolbar's Delete action: this
+ * component no longer draws a button. It reports whether the action is offered and how to start it through
+ * `onDeleteActionChange` (hidden, not disabled: not the requester, a closed request, or after a recall), and keeps
+ * everything that follows here: the confirmation, the notices, the 409 recall box. Their texts are R3's.
  *
  * THE FLOW. `DELETE /api/v1/external/servicerequests/{id}` through the shared confirm-then-delete flow (`useDeleteOwn`,
  * `DeleteOwnConfirm`, ADR-050 `ConfirmModal`):
@@ -38,7 +43,6 @@ import {
   Text,
   Textarea,
 } from '@fluentui/react-components';
-import { DeleteRegular } from '@fluentui/react-icons';
 import { FormModal } from '@spaarke/ui-components/components/SprkModal';
 import {
   REASON_HAS_RELATED_RECORDS,
@@ -66,11 +70,6 @@ const useStyles = makeStyles({
     display: 'flex',
     flexDirection: 'column',
     gap: tokens.spacingVerticalS,
-  },
-  actions: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: tokens.spacingHorizontalS,
   },
   recallBody: {
     display: 'flex',
@@ -104,6 +103,18 @@ export interface ServiceRequestActionsProps {
   onRecalled: () => void;
   /** True while the recall post is in flight, so the host can hold paging and closing. */
   onBusyChange?: (busy: boolean) => void;
+  /**
+   * The "Delete request" action for the host's toolbar: whether it is offered, and how to start it (asks first). Called
+   * when that changes, and with `visible: false` on unmount.
+   */
+  onDeleteActionChange: (action: ServiceRequestDeleteAction) => void;
+}
+
+/** The toolbar's "Delete request": shown only when `visible` (hide, don't disable). */
+export interface ServiceRequestDeleteAction {
+  visible: boolean;
+  /** Opens the delete confirmation; does nothing while a delete is in flight. */
+  onClick: () => void;
 }
 
 export const ServiceRequestActions: React.FC<ServiceRequestActionsProps> = ({
@@ -114,6 +125,7 @@ export const ServiceRequestActions: React.FC<ServiceRequestActionsProps> = ({
   onDeleted,
   onRecalled,
   onBusyChange,
+  onDeleteActionChange,
 }) => {
   const styles = useStyles();
   const [recallOpen, setRecallOpen] = React.useState(false);
@@ -142,17 +154,40 @@ export const ServiceRequestActions: React.FC<ServiceRequestActionsProps> = ({
     []
   );
 
-  if (!isRequestedByCaller(record, caller)) return null;
-
-  const text = recallText.trim();
-  const tooLong = text.length > MAX_MESSAGE_BODY_LENGTH;
-  const canSend = text.length > 0 && !tooLong && !sending;
-  const hasActivity = del.failure?.kind === 'error' && del.failure.reasonCode === REASON_HAS_RELATED_RECORDS;
+  const isRequester = isRequestedByCaller(record, caller);
   // A closed request cannot be deleted (owner decision 2026-10-12): no Delete, whether the record said so up front
   // (statecode / statuscode) or the server's 409 service_request_closed just did (the read was stale).
   const closed =
     isServiceRequestClosed(record) ||
     (del.failure?.kind === 'error' && del.failure.reasonCode === REASON_SERVICE_REQUEST_CLOSED);
+  // Delete is offered to the requester of an open request until a recall was posted (the request then has a message of
+  // its own, so the server would refuse the delete with a 409).
+  const offerDelete = isRequester && !closed && !recalled;
+
+  // The toolbar action. Its click is read through a ref so a new closure never re-reports the action; the report changes
+  // only when the action appears or goes.
+  const startDeleteRef = React.useRef<() => void>(() => undefined);
+  startDeleteRef.current = () => {
+    if (!del.busy) del.ask(requestId, label);
+  };
+  const onDeleteActionChangeRef = React.useRef(onDeleteActionChange);
+  onDeleteActionChangeRef.current = onDeleteActionChange;
+  React.useEffect(() => {
+    onDeleteActionChangeRef.current({ visible: offerDelete, onClick: () => startDeleteRef.current() });
+  }, [offerDelete]);
+  React.useEffect(
+    () => () => {
+      onDeleteActionChangeRef.current({ visible: false, onClick: () => undefined });
+    },
+    []
+  );
+
+  if (!isRequester) return null;
+
+  const text = recallText.trim();
+  const tooLong = text.length > MAX_MESSAGE_BODY_LENGTH;
+  const canSend = text.length > 0 && !tooLong && !sending;
+  const hasActivity = del.failure?.kind === 'error' && del.failure.reasonCode === REASON_HAS_RELATED_RECORDS;
   // Recall is only ever offered after a has_related_records 409, which the server answers only for an open request, so
   // a closed request has no recall either.
   if (closed && !recalled && !del.failure) return null;
@@ -195,23 +230,10 @@ export const ServiceRequestActions: React.FC<ServiceRequestActionsProps> = ({
 
   return (
     <div className={styles.root} data-testid="service-request-actions">
-      {recalled ? (
+      {recalled && (
         <MessageBar intent="success" role="status" data-testid="service-request-recalled">
           <MessageBarBody>{RECALLED_TEXT}</MessageBarBody>
         </MessageBar>
-      ) : (
-        !closed && (
-          <div className={styles.actions}>
-            <Button
-              appearance="subtle"
-              icon={<DeleteRegular />}
-              disabled={del.busy}
-              onClick={() => del.ask(requestId, label)}
-            >
-              Delete request
-            </Button>
-          </div>
-        )
       )}
 
       <DeleteOwnConfirm del={del} />

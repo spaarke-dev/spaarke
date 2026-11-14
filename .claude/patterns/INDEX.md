@@ -7,6 +7,7 @@
 > **Format**: Each pattern file is max 25 lines pointing to canonical source code.
 > **Structure**: When (context) → Read These Files (source paths) → Constraints (ADRs) → Key Rules
 > **Principle**: Code is the source of truth — patterns point to it, not describe it.
+> **Capability index**: `.claude/patterns/CAPABILITY-INDEX.md` has a different shape — one table that maps a concept (what you want to do, with synonyms) to the canonical component to extend. Use it first when you don't know what a component is called; the pattern files then say how to use it.
 
 ---
 

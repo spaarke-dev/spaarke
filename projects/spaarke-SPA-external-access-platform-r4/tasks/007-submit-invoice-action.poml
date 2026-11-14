@@ -1,0 +1,140 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="007" project="spaarke-SPA-external-access-platform-r4">
+  <metadata>
+    <title>"Submit invoice" record action on Matter, Project and Work Assignment (FR-10)</title>
+    <phase>1 Record template and actions</phase>
+    <gate>after 006; step 1 is a coordination gate with ebilling-r1 (see escalation)</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .tsx files (tags frontend, react; code implementation)</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Single action wired with an explicit canonical reference (`InvoicesWidget.tsx` gating) and an existing destination page</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Sequential chain on the template files (003 → 005 → 004 → 006 → 007)</parallel-reason>
+    <deps>006</deps>
+    <tags>frontend, react</tags>
+    <estimated-effort>2-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Add a "Submit invoice" toolbar action to the Matter, Project and Work Assignment record templates that opens ebilling's existing submission page for that record, shown only when `/me` `firms` is non-empty (the `InvoicesWidget` rule) and the server says one of the caller's firms is linked to this record.</prompt>
+  <role>SPAARKE platform developer. Expert in React and the external SPA's routing/host boundary. Follow ADRs strictly.</role>
+  <goal>The action appears on Matter, Project and Work Assignment only under the FR-10 condition, never on Invoice, Service Request or Document, and lands on `/invoices/submit` with this record preselected in the wizard's Record step; tests prove visible/hidden cases and the landing.</goal>
+
+  <context>
+    <background>Spec FR-10; owner 2026-11-08; design §3 ("Submit invoice" opens ebilling's wizard). ebilling owns the flow (`InvoiceSubmitPage.tsx`, the shared `InvoiceSubmissionWizard`); R4 only links to it (spec Out of Scope). Today: `InvoicesWidget.tsx:59` computes `canSubmit = onNavigate !== undefined &amp;&amp; me?.firms != null &amp;&amp; me.firms.length > 0` and the button at :63-68 navigates to `INVOICE_SUBMIT_PATH` (`InvoiceSubmitPage.tsx:42`, `/invoices/submit`). The page reads only `?submissionId=` (:98-103) and the wizard props (`InvoiceSubmissionWizard.tsx:123-141`) have no initial-record input, so "lands on the correct record" needs a preselect the flow does not offer today. The record-to-firm link is answered by `GET /api/v1/external/invoice-submissions/firm-records?firmId=` (`web-api-client.ts:978-987`, `:1008-1014`).</background>
+    <relevant-files>
+      <file role="modify">src/client/external-spa/src/components/record/recordTemplates.ts</file>
+      <file role="modify">src/client/external-spa/src/components/record/RecordTemplateModal.tsx</file>
+      <file role="modify">src/client/external-spa/src/components/record/recordAccess.ts</file>
+      <file role="modify">src/client/external-spa/src/components/detail/RecordOpener.tsx</file>
+      <file role="modify">src/client/external-spa/src/App.tsx</file>
+      <file role="modify">src/client/external-spa/src/api/web-api-client.ts</file>
+      <file role="new">src/client/external-spa/tests/RecordTemplateSubmitInvoice.test.tsx</file>
+      <file role="canonical-reference">src/client/external-spa/src/widgets/InvoicesWidget.tsx</file>
+      <file role="canonical-reference">src/client/external-spa/src/pages/InvoiceSubmitPage.tsx</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/InvoiceSubmission/InvoiceSubmissionWizard.tsx</file>
+      <file role="canonical-reference">src/client/external-spa/tests/InvoiceSubmitPage.test.tsx</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="006" status="pending">Per-record action visibility in `recordAccess.ts`</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="FR-10">The action id is `submitInvoice` with icon `RECORD_ACTION_ICONS.submitInvoice` (`ReceiptAdd20Regular`). It is listed only in the Matter, Project and Work Assignment template entries.</constraint>
+    <constraint source="FR-10">Visible only when `/me` `firms` is a non-empty array (absent, null, empty or a failed `/me` read = hidden, as `InvoicesWidget.tsx:59`) AND the firm-records answer for at least one of the caller's firms lists this record's id under its kind. A failed firm-records read = hidden. Hidden is not rendered.</constraint>
+    <constraint source="FR-10">Navigation goes through a host-supplied `onNavigate` (as `InvoicesWidget` receives it from `App.tsx`); the template imports no router API. Without `onNavigate` the action is hidden.</constraint>
+    <constraint source="Spec Out of Scope">Do not change the submission flow's logic, routes or server calls. The only allowed change to ebilling-owned files is the additive record preselect agreed in step 1, with ebilling-r1's review recorded.</constraint>
+    <constraint source="ADR-021">Fluent v9 tokens only; the action is a RecordCommandBar descriptor (no hand-built button).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-SPA-external-access-platform-r4/CLAUDE.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r4/spec.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/skills/fluent-v9-component/SKILL.md</file>
+      <file>.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+    </files>
+    <patterns>
+      <pattern name="Submit invoice gating" location="src/client/external-spa/src/widgets/InvoicesWidget.tsx">`useCallerContext` + `firms` non-empty + `onNavigate` present (:53-68).</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Coordination gate: confirm with ebilling-r1 (and the owner) how the page receives the record — recommended: an additive optional query `?record={kind}:{id}` on `/invoices/submit` and an optional `initialRecord` prop on `InvoiceSubmissionWizard` that preselects it on the Record step. Record the agreement and who implements it in the task notes. Do not proceed past this step without it.</step>
+    <step order="2">Load the knowledge files, read the relevant files, declare rigor and model tier per task-execute Step 0.5.</step>
+    <step order="3">Add `submitInvoice` to the three template entries; add the visibility rule to `recordAccess.ts` with a firm-records read (one per firm, cached per opening).</step>
+    <step order="4">Pass `onNavigate` from `App.tsx` through `RecordOpenerProvider` to the template; the action navigates to `INVOICE_SUBMIT_PATH` with the agreed record parameter and closes the modal.</step>
+    <step order="5">Write `tests/RecordTemplateSubmitInvoice.test.tsx` and extend `InvoiceSubmitPage.test.tsx` for the preselect if this task implements it.</step>
+    <step order="6">Run `npm run typecheck`, `npm run lint` and `npm test` in `src/client/external-spa` (and the shared-lib Jest suite if the wizard changed).</step>
+    <step order="7">Update `tasks/TASK-INDEX.md`: set this task's status cell to `✅ [done]` and this POML's &lt;status&gt; to completed; run `pwsh scripts/check-task-status-drift.ps1`.</step>
+    <step order="8">Record deviations and decisions in `projects/spaarke-SPA-external-access-platform-r4/notes/task-007-notes.md`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If ebilling-r1 does not agree to an additive record preselect, STOP and escalate to the owner with the options: (a) ebilling adds it; (b) R4 adds it under ebilling review; (c) land on the Record step without preselect — (c) fails FR-10's "lands on the correct record" acceptance, so it needs the owner's explicit acceptance.</trigger>
+    <trigger>If the firm-records answer is `partial` or `truncated` and does not list the record, keep the action hidden and record the case in the task notes; do not show it from `firms` alone.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>The "Submit invoice" button and gating in `InvoicesWidget.tsx:59-68`; the submission page `InvoiceSubmitPage.tsx`; the firm-records client in `listInvoiceCoreRecords` (`web-api-client.ts:1003`).</existing>
+    <extension>Yes: the action reuses the widget's gating rule, the existing page and the existing firm-records route; the only new surface is a descriptor in the template config, a visibility rule and (if agreed) an optional preselect parameter.</extension>
+    <cost-of-doing-nothing>A partner reading a matter, project or work assignment must leave it, find the Invoices widget and pick the same record again in the wizard (owner requirement 2026-11-08, FR-10).</cost-of-doing-nothing>
+  </justification>
+
+  <ui-tests>
+    <test name="Submit invoice lands on the record">
+      <url>{spa-dev-url}/?record=matter:{matter-id-firm-linked}</url>
+      <steps><step>As a partner with a firm linked to the matter, open the matter and click Submit invoice.</step><step>Check the console.</step></steps>
+      <expected>The submission page opens on the Record step with this matter selected; no console errors.</expected>
+    </test>
+    <test name="Hidden cases">
+      <steps><step>As a caller with no firms, open a matter; as a firm caller, open an invoice, a service request and a document.</step></steps>
+      <expected>No Submit invoice action in any of these.</expected>
+    </test>
+    <test name="Dark Mode (ADR-021)">
+      <steps><step>Repeat the first test in dark theme.</step></steps>
+      <expected>The action icon and tooltip use semantic tokens.</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">typecheck, lint and vitest in src/client/external-spa</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/external-spa/src/components/record/recordTemplates.ts</output>
+    <output type="code">src/client/external-spa/src/components/record/recordAccess.ts</output>
+    <output type="code">src/client/external-spa/src/components/detail/RecordOpener.tsx</output>
+    <output type="test">src/client/external-spa/tests/RecordTemplateSubmitInvoice.test.tsx</output>
+    <output type="docs">projects/spaarke-SPA-external-access-platform-r4/notes/task-007-notes.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given `firms` non-empty and the record listed for one of those firms, Submit invoice is visible on Matter, Project and Work Assignment and navigates to `/invoices/submit` with this record, which the wizard shows preselected.</criterion>
+    <criterion testable="true">Given `firms` absent, null, empty, or a failed `/me` read, the action is not in the DOM.</criterion>
+    <criterion testable="true">Given firms but the record not listed for any of them, or a failed firm-records read, the action is not in the DOM.</criterion>
+    <criterion testable="true">The action is never rendered on Invoice, Service Request or Document (a test per type).</criterion>
+    <criterion testable="true">Without a host `onNavigate` the action is hidden; the template imports nothing from `react-router-dom`.</criterion>
+    <criterion testable="true">The ebilling-r1 agreement on the preselect is recorded in the task notes (or the owner's escalation decision).</criterion>
+    <criterion testable="true">`InvoicesWidget` and `InvoiceSubmitPage` existing tests pass.</criterion>
+    <criterion testable="true">typecheck, lint and the vitest suite pass.</criterion>
+    <criterion testable="true">Test scope: cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-10. Anchor drift: spec cites `InvoicesWidget.tsx:66` for the gating; :66 is the button label — the condition is at :59 (verified 2026-11-10). Design §3 says the submission routes hang off `/{matters,projects,workassignments}/{id}/invoice-submissions`; the server re-checks Read, Create and the firm link on submit, so the client rule is a display rule only.
+
+Completed 2026-11-12: page param is `?invoiceRecord={kind}:{id}` (renamed from the agreed `?record=`, which collided with the app-wide deep link; ebilling-r1 re-confirmed and approved the page diff). Router-free link module `pages/invoiceSubmitLink.ts`; shared `components/detail/RouterRecordOpener.tsx`. Opus adversarial pass + scoped Sonnet re-check; every F-class finding fixed. Browser check of #2658 after navigating from a grid-opened record is left to task 018. Details: notes/task-007-notes.md.
+rework: fix-round-1 task 007</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

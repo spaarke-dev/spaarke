@@ -1,0 +1,155 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="020" project="spaarke-SPA-external-access-platform-r4">
+  <metadata>
+    <title>Review detail (082c) at four render points + held-Accepted badge (FR-11, FR-12)</title>
+    <phase>2 Invoices and documents</phase>
+    <gate>after 018; the column read is gated on ebilling's 082c-2 allow-list entry (see escalation)</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .ts/.tsx code (InvoicesWidget, template sections, InvoiceSubmissionOutcome) with a binding render gate</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Single-feature rendering with a fully specified gate and option map; canonical references named</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>018</deps>
+    <tags>frontend, react, unit-test</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Render the invoice field sprk_reviewdetail in the four places FR-11 names, only while the invoice statuscode is 1 (In Review), and make a held Accepted submission show "In Review" in the warning tone (FR-12).</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. Fluent UI v9 and React developer for the external SPA.</role>
+  <goal>One pure helper maps (statuscode, sprk_reviewdetail) to the display text and explanation line; the Invoices grid column, the record Invoices section, the Invoice header status-fact secondary line and the Information field all use it; the held-Accepted badge logic is tested for its three states.</goal>
+
+  <context>
+    <background>Spec FR-11/FR-12 and design §7 (082c row: option values 659490000/659490001/659490002 and the owner-approved texts, verbatim). The column belongs to ebilling: it adds `sprk_reviewdetail` and its `ReadableColumns` entry (082c-2). Verified 2026-11-10: the invoice `ReadableColumns` block on master (`ExternalAccessModule.cs:528-539`) does NOT contain `sprk_reviewdetail`. The external fetch seam refuses an unlisted column with HTTP 400 (`DV_FETCHXML_COLUMN_NOT_PERMITTED`, see `RecordDetailFields.tsx:8-12`), so requesting the column before the entry is live turns the whole grid, related list or record read into an error, not a blank field. The Invoices tab is a config-driven grid (`InvoicesWidget.tsx:24` config `3ff4102c-…`, columns live only in the Dataverse `sprk_gridconfiguration` record; R3 `notes/task-002-notes.md` §3.5 holds the PATCH and rollback recipe). The submission outcome badge tone is decided in `InvoiceSubmissionOutcome.tsx:105-110` (`toneFor`: Accepted → success). The "held" signal (082c-3 `warning` on the status view) is ebilling's and is not on master: `InvoiceSubmission/types.ts:83-91` has `outcomeReasonCode` but no `warning`.</background>
+    <relevant-files>
+      <file role="modify">src/client/external-spa/src/widgets/InvoicesWidget.tsx</file>
+      <file role="modify">src/client/external-spa/src/widgets/GridWidgetBody.tsx</file>
+      <file role="modify">src/client/external-spa/src/components/detail/RecordDetailModal.tsx</file>
+      <file role="modify">src/client/external-spa/src/components/detail/RecordDetailFields.tsx</file>
+      <file role="modify">The Invoices, Information and header section renderers created by tasks 003/005 (under src/client/external-spa/src/components/detail/); INVOICE_COLUMNS is at RecordDetailModal.tsx:367-374 today and may have moved there</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/InvoiceSubmission/InvoiceSubmissionOutcome.tsx</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/StatusBadge/StatusBadge.tsx</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/DataGrid/configResolution.ts</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Infrastructure/DI/ExternalAccessModule.cs</file>
+      <file role="new">src/client/external-spa/src/components/detail/reviewDetail.ts</file>
+      <file role="new">src/client/external-spa/tests/ReviewDetail.test.tsx</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="018" status="pending">P1 deployed: the record template, its header, Information and Invoices sections exist</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec FR-11 (uac-r2 binding gate)">Every render point in this task shows a Review detail value or explanation line ONLY when the row's raw `statuscode` equals 1. Any other status renders blank. Values 659490000, 659490001 and 659490002 map to the design §7 texts verbatim; blank while In Review shows "The client is reviewing this invoice."; any other value renders blank. The client never derives a priority. "Your access" never reads this field.</constraint>
+    <constraint source="project">All four render points call the one helper in `reviewDetail.ts`; no render point re-implements the gate.</constraint>
+    <constraint source="project">Do NOT add `sprk_reviewdetail` to `ReadableColumns` or any BFF file: ebilling owns that entry. Add the column to a read projection (INVOICE_COLUMNS, the Invoice record fetch, the grid configuration) only when the entry is on master AND live on dev; otherwise leave it out of every projection (see escalation).</constraint>
+    <constraint source="project">The grid column is added by changing the live `sprk_gridconfiguration` record 3ff4102c, a live Dataverse write. This task does not write it: it records the exact PATCH body and the rollback slot in the task notes for task 028, where the owner approves it. The gated cell text comes from a `overrides.columnRenderers.sprk_reviewdetail` renderer passed through `createGridWidgetBody` (add an optional `overrides` parameter); `ExternalDataGrid.tsx` is not edited (its text is pinned by `ExternalSpaGridViewSelectorGuardTests`).</constraint>
+    <constraint source="project">`InvoiceSubmissionOutcome.tsx` is shared with ebilling-r1 (082c-3 changes it). Run `/conflict-check` before the PR; if 082c-3 is on master, build on its held signal and do not add a second one.</constraint>
+    <constraint source="ADR-021">Tones through `StatusBadge` (`warning`, `success`); Fluent v9 semantic tokens only.</constraint>
+    <constraint source="ADR-038">Tests live in `src/client/external-spa/tests/` and the shared lib's `__tests__`; the must-not-fire pair is required (NFR-07).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-SPA-external-access-platform-r4/CLAUDE.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r4/spec.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r4/design.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r3/notes/task-002-notes.md</file>
+      <file>.claude/skills/fluent-v9-component/SKILL.md</file>
+      <file>.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>.claude/patterns/testing/mocking-patterns.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/architecture/SPAARKE-DATAGRID-FRAMEWORK-ARCHITECTURE.md</file>
+      <file>src/client/external-spa/README.md</file>
+    </files>
+    <patterns>
+      <pattern name="Formatted value first" location="src/client/external-spa/src/components/detail/RecordDetailFields.tsx">formatDetailValue reads @formattedValues; the gate reads the RAW statuscode and raw option value, never the label</pattern>
+      <pattern name="Badge tone map" location="src/client/shared/Spaarke.UI.Components/src/components/InvoiceSubmission/InvoiceSubmissionOutcome.tsx">toneFor/labelFor at :105-115 — the held-Accepted branch goes here</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load the knowledge files, read the relevant files, declare rigor and model tier per task-execute Step 0.5.</step>
+    <step order="1">Check master for ebilling's `sprk_reviewdetail` ReadableColumns entry and for 082c-3's held signal on the status view; record both answers in the task notes.</step>
+    <step order="2">Write `reviewDetail.ts`: a pure function (statuscode, rawValue) → { text, explanation } | blank, with the three verbatim texts and the In Review blank line.</step>
+    <step order="3">Wire render point (b) the record Invoices section, (c) the Invoice header status-fact secondary line, (d) the Information field plus the explanation line — each through the helper, with the column in the projection only when step 1 found the entry live.</step>
+    <step order="4">Render point (a): add the optional `overrides` parameter to `createGridWidgetBody`, pass the gated renderer from `InvoicesWidget.tsx`, and write the configjson PATCH (column after Status) plus the rollback slot into the task notes for task 028.</step>
+    <step order="5">FR-12: in `InvoiceSubmissionOutcome.tsx`, a held Accepted shows label "In Review" with tone warning; un-held and overridden (`outcomeReasonCode` `ebilling.submission.overridden`) Accepted stay "Accepted" / success.</step>
+    <step order="6">Tests: the helper (three values, blank-in-review, unknown value, every non-1 status incl. Paid and Rejected); each render point renders the approved text; the must-not-fire case; the three badge states.</step>
+    <step order="7">Run `npm test` in src/client/external-spa and the shared-lib tests for InvoiceSubmission; run `npm run build` for the SPA.</step>
+    <step order="8">Update tasks/TASK-INDEX.md: set this task's status cell to `✅ [done]` and this POML's &lt;status&gt; to completed; run `pwsh scripts/check-task-status-drift.ps1`.</step>
+    <step order="9">Record deviations, decisions and the 028 PATCH body in projects/spaarke-SPA-external-access-platform-r4/notes/task-020-notes.md.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If ebilling's `sprk_reviewdetail` entry is not on master and live on dev, do NOT add it and do NOT put the column in any read projection: ship the helper, renderers and tests with the field blank, record the deferral in the notes, and tell the operator the column is added at task 028 or later. Never add the allow-list entry yourself (ebilling owns it).</trigger>
+    <trigger>If 082c-3's held signal is not on master, implement only what can be tested against the status-view shape on master, STOP before inventing a held flag, and ask the operator whether FR-12 waits for ebilling's PR.</trigger>
+    <trigger>If the option values or texts on master differ from design §7, STOP and escalate; never adapt the texts.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>No Review detail rendering exists (grep `reviewdetail` under src/client/external-spa: none); the nearest is `formatDetailValue` (RecordDetailFields.tsx:201), with no status gate.</existing>
+    <extension>The helper is new because the binding gate must be one function shared by four render points; `formatDetailValue` stays the generic formatter and is called by it.</extension>
+    <cost-of-doing-nothing>A held invoice reads plain "In Review" with no reason, and four separately coded render points could show a stale value on a Paid or Rejected row, breaking uac-r2's binding gate.</cost-of-doing-nothing>
+  </justification>
+
+  <ui-tests>
+    <test name="Review detail in four places">
+      <url>https://{spa-dev-host}/</url>
+      <steps>
+        <step>On the Invoices tab, check a held In Review invoice's Review detail column</step>
+        <step>Open it: check the header line, the Information field and explanation</step>
+        <step>Open its matter: check the Invoices section</step>
+        <step>Check the console</step>
+      </steps>
+      <expected>Same approved text in all four places; no console errors</expected>
+    </test>
+    <test name="Must-not-fire">
+      <steps><step>Open a Paid or Rejected invoice that carries a value</step><step>Check all four places</step></steps>
+      <expected>Blank everywhere</expected>
+    </test>
+    <test name="Dark Mode Compliance (ADR-021)">
+      <steps><step>Switch to dark and high-contrast; check the badge and secondary line</step></steps>
+      <expected>Theme tokens only; readable in every theme</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">Run tests and the SPA build</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/external-spa/src/components/detail/reviewDetail.ts</output>
+    <output type="code">src/client/external-spa/src/widgets/InvoicesWidget.tsx</output>
+    <output type="code">src/client/external-spa/src/widgets/GridWidgetBody.tsx</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/InvoiceSubmission/InvoiceSubmissionOutcome.tsx</output>
+    <output type="test">src/client/external-spa/tests/ReviewDetail.test.tsx</output>
+    <output type="docs">projects/spaarke-SPA-external-access-platform-r4/notes/task-020-notes.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">With statuscode 1, each of 659490000, 659490001 and 659490002 renders its approved text in the grid column, the record Invoices section, the header secondary line and the Information field (with its explanation line).</criterion>
+    <criterion testable="true">With statuscode 1 and a blank value, the Information field shows "The client is reviewing this invoice."</criterion>
+    <criterion testable="true">Must-not-fire: a Paid or Rejected row (any statuscode other than 1) that carries a value renders blank in all four places.</criterion>
+    <criterion testable="true">An unknown option value renders blank in all four places.</criterion>
+    <criterion testable="true">A held Accepted shows "In Review" with tone warning; an un-held Accepted and an overridden Accepted (`ebilling.submission.overridden`) show "Accepted" with tone success.</criterion>
+    <criterion testable="true">No file under src/server is changed, and `sprk_reviewdetail` is in a read projection only if its allow-list entry is on master (stated in the notes either way).</criterion>
+    <criterion testable="true">Other grid widgets render exactly as before (createGridWidgetBody without overrides is unchanged).</criterion>
+    <criterion testable="true">SPA build passes; all SPA and InvoiceSubmission tests pass.</criterion>
+    <criterion testable="true">Test scope: cover the stated contract plus the edge cases named in these criteria. Anything beyond that needs a one-line justification in the task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-11, FR-12; design §7 (082c row) for the verbatim texts. If task 005 put the Invoice and Document section renderers in one file, run 020 and 022 one after the other.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

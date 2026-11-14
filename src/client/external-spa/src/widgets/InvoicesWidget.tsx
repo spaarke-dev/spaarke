@@ -17,7 +17,7 @@
 import { Button, makeStyles, tokens } from '@fluentui/react-components';
 import { AddRegular } from '@fluentui/react-icons';
 import { useCallerContext } from '../hooks/useCallerContext';
-import { INVOICE_SUBMIT_PATH } from '../pages/InvoiceSubmitPage';
+import { INVOICE_SUBMIT_PATH } from '../pages/invoiceSubmitLink';
 import type { WidgetBodyComponent } from '../registry/PlaceholderWidgetBody';
 import { createGridWidgetBody } from './GridWidgetBody';
 

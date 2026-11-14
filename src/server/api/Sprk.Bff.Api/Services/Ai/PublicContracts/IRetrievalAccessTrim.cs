@@ -20,9 +20,11 @@ namespace Sprk.Bff.Api.Services.Ai.PublicContracts;
 /// caller who is not an internal systemuser: after the Read check, every readable DOCUMENT key (by id, or by drive item
 /// through the document rows the caller's read returned on that item) also passes THE external document narrowing
 /// (<see cref="Infrastructure.ExternalAccess.AppOnlyDocumentNarrowing"/>: own or ancestor Restricted, or an internal-only or
-/// non-Open communication, hides it). The narrowing reads app-only and can only hide what the caller's own read returned.
-/// Parent-record keys are not narrowed. A failed externality lookup applies the narrowing; a failed narrowing withholds
-/// the document keys only.</para>
+/// non-Open communication, hides it) AND, uac-r2 task 191h, THE external visibility predicate
+/// (<see cref="Infrastructure.ExternalAccess.AppOnlyExternalVisibility"/>: no root, a Restricted or unreadable root, an
+/// internal-only lineage or a hidden invoice hides it; a key is kept only when BOTH show it). Both read app-only and can only
+/// hide what the caller's own read returned. Parent-record keys are not narrowed. A failed externality lookup applies both;
+/// a failed (or faulted) narrowing or predicate withholds the document keys only.</para>
 /// <para><b>Fail closed.</b> No declared caller, no request principal, or a request principal that is not the declared
 /// caller: no rows (<see cref="RetrievalTrimOutcome.NoVerifiedCaller"/>). A row without a parseable document id is
 /// dropped. A read that fails for any reason (no token, OBO failure, 4xx/5xx, 429, malformed body): no rows

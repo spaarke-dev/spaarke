@@ -8,6 +8,7 @@ import { launchAssociationFromParams } from "@spaarke/ui-components/utils/launch
 import { createXrmDataService } from "@spaarke/ui-components/utils/adapters/xrmDataServiceAdapter";
 import { createXrmUploadService } from "@spaarke/ui-components/utils/adapters/xrmUploadServiceAdapter";
 import { createXrmNavigationService } from "@spaarke/ui-components/utils/adapters/xrmNavigationServiceAdapter";
+import { createXrmEmailComposeHandlers } from "@spaarke/ui-components/components/EmailComposer";
 import { CreateProjectWizard, mapProjectHandoffSeed } from "@spaarke/ui-components/components/CreateProjectWizard";
 import { readHandoffFromUrl, handoffSeed as computeHandoffSeed, completeHandoff as writeCompleteHandoff } from "@spaarke/ui-components/services/surfaceHandoff";
 import { resolveRuntimeConfig, initAuth, authenticatedFetch } from "@spaarke/auth";
@@ -52,6 +53,11 @@ function App() {
   const dataService = React.useMemo(() => createXrmDataService(), []);
   const uploadService = React.useMemo(() => createXrmUploadService(resolvedBffBaseUrl), [resolvedBffBaseUrl]);
   const navigationService = React.useMemo(() => createXrmNavigationService(), []);
+  // Send Email step (task 182, D-219): recipient pane, record lookup, upload, templates, AI draft.
+  const emailComposeHandlers = React.useMemo(
+    () => createXrmEmailComposeHandlers({ authenticatedFetch, bffBaseUrl: resolvedBffBaseUrl || undefined }),
+    [resolvedBffBaseUrl]
+  );
 
   // Assistant → surface hand-off pre-seed (spaarkeai-assistant-enhancements-r1 UAT #1):
   // when this wizard was launched from the Assistant's surface_launch create flow
@@ -124,6 +130,7 @@ function App() {
         dataService={dataService}
         uploadService={uploadService}
         navigationService={navigationService}
+        emailComposeHandlers={emailComposeHandlers}
         embedded={true}
         onClose={handleClose}
         onComplete={handleComplete}

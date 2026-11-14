@@ -183,6 +183,10 @@ public sealed partial class RecordCreationServiceMappingSeamTests
                 if (table == "sprk_event" && columns.SequenceEqual(["sprk_eventnumber"]))
                     return Task.FromResult(new Entity(table, id) { ["sprk_eventnumber"] = "EVT-000001" });
 
+                // Task 045d: the invoice-family rule's derive reads the core record's name and number (not a mapping-source read).
+                if (RegardingRecordType.GetPrimaryNameField(table) is { } nameField && columns.SequenceEqual([nameField, table + "number"]))
+                    return Task.FromResult(new Entity(table, id) { [nameField] = "Core record", [table + "number"] = "CR-000001" });
+
                 _journal.Add("source-read");
                 _sourceReads.Add((table, id, columns));
                 if (!_sources.TryGetValue((table, id), out var row))
@@ -805,8 +809,10 @@ public sealed partial class RecordCreationServiceMappingSeamTests
 
         outcome.Succeeded.Should().BeTrue(outcome.Refusal?.Detail);
         StringOf(_creates.Should().ContainSingle().Subject.Fields, "sprk_location").Should().Be("Room 1");
-        // Task 022 fix round 2: the mapping-source rule reads whether the source is secure (its owner and flag), nothing else.
-        _sourceReads.Should().ContainSingle().Which.Columns.Should().BeEquivalentTo("ownerid", AccessFollowsParent.SecureFlagColumn);
+        // Task 022 fix round 2: the mapping-source rule reads whether the source is secure (its owner and flag); task 022b: and
+        // its Access Permission (a matter carries the column). Nothing else.
+        _sourceReads.Should().ContainSingle().Which.Columns.Should().BeEquivalentTo(
+            "ownerid", AccessFollowsParent.SecureFlagColumn, InheritedAccessPermission.Column);
         _callerRead.Paths.Should().BeEmpty("no mapped source column was read app-only, so there is nothing to mask");
         outcome.MappingWarnings.Should().BeEmpty();
     }
@@ -1175,11 +1181,22 @@ public sealed partial class RecordCreationServiceMappingSeamTests
         return new RecordCreationService(
             resolver, _appOnly.Object, _sourceReader.Object,
             _rootFiling(), restamper, shares,
-            _scopes ?? new ServiceCollection().BuildServiceProvider().GetRequiredService<IServiceScopeFactory>(), _publisher,
+            _scopes ?? new ServiceCollection().AddSingleton(RecordTypeCatalog()).BuildServiceProvider().GetRequiredService<IServiceScopeFactory>(), _publisher,
             _logger ?? NullLogger<RecordCreationService>.Instance)
         {
             TableRules = t => _tableRules(t),
         };
+    }
+
+    /// <summary>Task 045d: the app-only record-type catalog — one active row per table, naming the table's number column.</summary>
+    private static ICommunicationDataverseService RecordTypeCatalog()
+    {
+        var catalog = new Mock<ICommunicationDataverseService>(MockBehavior.Strict);
+        catalog
+            .Setup(c => c.QueryRecordTypeRefAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string table, CancellationToken _) =>
+                new Entity("sprk_recordtype_ref", Guid.NewGuid()) { [RegardingRecordType.RecordNumberFieldColumn] = table + "number" });
+        return catalog.Object;
     }
 
     /// <summary>Registers a fixture pre-write rule on the event table (the invoice-family rule is not on this branch).</summary>
@@ -1194,7 +1211,7 @@ public sealed partial class RecordCreationServiceMappingSeamTests
                     (row, _) =>
                     {
                         asked.Add(row);
-                        return Task.FromResult<PreWriteRefusal?>(null);
+                        return Task.FromResult(PreWriteResult.Admit);
                     }),
             ],
         };

@@ -6,9 +6,13 @@
  * When a value is selected it renders as a dismissible chip (same visual as
  * the inline LookupField). When no value is selected a "Select" button is shown.
  *
- * Falls back to the inline LookupField when no navigationService is provided
- * or when the caller passes an explicit onSearch function and the lookup returns
- * an empty result (graceful no-op in non-Dataverse contexts such as the BFF SPA).
+ * With a navigationService the field never falls back to inline search: an empty
+ * result or a failed pane is a cancel and the current value stays. Without a
+ * navigationService it renders the inline LookupField when onSearch is given
+ * (otherwise a read-only chip).
+ *
+ * A pane is opened at most once at a time (single flight). A rejection from
+ * openLookup (for example no Xrm host) is logged and treated as a cancel.
  *
  * Usage:
  * ```tsx
@@ -19,7 +23,7 @@
  *   value={matterTypeValue}
  *   onChange={handleMatterTypeChange}
  *   navigationService={navigationService}
- *   // Fallback: used when navigationService is absent or returns empty
+ *   // Fallback: used only when navigationService is absent
  *   onSearch={handleSearchMatterTypes}
  *   isAiPrefilled={isAiField('matterTypeId')}
  * />
@@ -39,7 +43,7 @@ import * as React from 'react';
 import { Button, Field, Spinner, Text, makeStyles, tokens } from '@fluentui/react-components';
 import { DismissRegular, SearchRegular } from '@fluentui/react-icons';
 import type { ILookupItem } from '../../types/LookupTypes';
-import type { INavigationService } from '../../types/serviceInterfaces';
+import type { INavigationService, LookupOptions } from '../../types/serviceInterfaces';
 import { LookupField } from './LookupField';
 import { cleanGuid } from '../../services/PolymorphicResolverService';
 
@@ -78,6 +82,13 @@ export interface IDataverseLookupFieldProps {
   labelExtra?: React.ReactNode;
   /** Minimum characters before fallback search fires. Default: 1. */
   minSearchLength?: number;
+  /**
+   * Row filters for the side pane, passed unchanged to INavigationService.openLookup
+   * (e.g. limit contacts to active ones). Omitted from the options when not set.
+   */
+  filters?: LookupOptions['filters'];
+  /** Optional hint text rendered under the field (Fluent Field hint). */
+  hint?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -192,17 +203,29 @@ export const DataverseLookupField: React.FC<IDataverseLookupFieldProps> = ({
   placeholder,
   labelExtra,
   minSearchLength = 1,
+  filters,
+  hint,
 }) => {
   const styles = useStyles();
   const [isOpening, setIsOpening] = React.useState(false);
+  // Single flight: a second activation while a pane is open opens nothing.
+  const opening = React.useRef(false);
+  const mounted = React.useRef(true);
+  React.useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
 
   // ── Open Dataverse lookup side pane ──────────────────────────────────────
   const handleOpenLookup = React.useCallback(async () => {
-    if (!navigationService) return;
+    if (!navigationService || opening.current) return;
 
+    opening.current = true;
     setIsOpening(true);
     try {
-      const results = await navigationService.openLookup({ entityType });
+      const results = await navigationService.openLookup(filters ? { entityType, filters } : { entityType });
       if (results.length > 0) {
         // Use first result (allowMultiSelect defaults to false).
         // cleanGuid defensively (the adapter already normalizes at the platform
@@ -210,10 +233,16 @@ export const DataverseLookupField: React.FC<IDataverseLookupFieldProps> = ({
         onChange({ id: cleanGuid(results[0].id), name: results[0].name });
       }
       // If results is empty the user cancelled — preserve existing value
+    } catch {
+      // A failed pane is a cancel: the value is unchanged and the user can retry.
+      // Log the entity only, never the error object (it can carry host/session detail).
+      // eslint-disable-next-line no-restricted-syntax -- a failed pane is a cancel: the value is unchanged and the user can retry; the warning is the diagnostic
+      console.warn(`[DataverseLookupField] openLookup failed for "${entityType}"; treated as cancel`);
     } finally {
-      setIsOpening(false);
+      opening.current = false;
+      if (mounted.current) setIsOpening(false);
     }
-  }, [navigationService, entityType, onChange]);
+  }, [navigationService, entityType, filters, onChange]);
 
   // ── Clear selection ───────────────────────────────────────────────────────
   const handleClear = React.useCallback(() => {
@@ -233,6 +262,7 @@ export const DataverseLookupField: React.FC<IDataverseLookupFieldProps> = ({
           onSearch={onSearch}
           labelExtra={labelExtra}
           minSearchLength={minSearchLength}
+          hint={hint}
         />
       );
     }
@@ -242,6 +272,7 @@ export const DataverseLookupField: React.FC<IDataverseLookupFieldProps> = ({
         <Field
           label={<LabelContent label={label} required={required} labelExtra={labelExtra} styles={styles} />}
           required={required}
+          hint={hint}
         >
           {value ? (
             <div className={styles.selectedChip}>
@@ -265,6 +296,7 @@ export const DataverseLookupField: React.FC<IDataverseLookupFieldProps> = ({
       <Field
         label={<LabelContent label={label} required={required} labelExtra={labelExtra} styles={styles} />}
         required={required}
+        hint={hint}
       >
         {value ? (
           // Selected: show chip with dismiss button

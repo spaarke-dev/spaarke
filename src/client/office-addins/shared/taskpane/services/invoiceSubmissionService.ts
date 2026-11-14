@@ -92,11 +92,14 @@ export interface InvoiceFromEmailRequestBody {
   targetEntity: InvoiceSubmissionTarget;
   email: OfficeSaveRequestBody['email'];
   marks: InvoiceWireMarkEntry[];
+  /** Always a firm id: the pane never sends an invoice without one (the server refuses it). */
   firmId: string;
   firmInvoiceNumber: string;
   poNumber: string | null;
   mode: 'New' | 'Correction';
   invoiceId: string | null;
+  /** 095f: the trimmed note of a Correction. The property is absent on a New invoice (the server refuses it there). */
+  correctionNote?: string;
 }
 
 /** The §3 202 body. */
@@ -362,6 +365,9 @@ export function buildInvoiceFromEmailBody(
     poNumber: input.poNumber,
     mode: input.mode,
     invoiceId: input.mode === 'Correction' ? input.invoiceId : null,
+    ...(input.mode === 'Correction' && input.correctionNote !== undefined
+      ? { correctionNote: input.correctionNote }
+      : {}),
   };
 }
 
@@ -631,14 +637,17 @@ const UNREADABLE_PREFILL_MESSAGE = "Spaarke's answer about this invoice couldn't
 function readCorrectionPrefill(json: unknown): InvoiceCorrectionPrefill | undefined {
   if (!json || typeof json !== 'object') return undefined;
   const body = json as Record<string, unknown>;
-  const firm = body.firm && typeof body.firm === 'object' ? (body.firm as Record<string, unknown>) : undefined;
+  // `firm` is null (a no-firm invoice, EB-D-185) or absent: no firm. A present object must carry a valid id and name.
+  const hasFirm = body.firm !== null && body.firm !== undefined;
+  if (hasFirm && typeof body.firm !== 'object') return undefined;
+  const firm = hasFirm ? (body.firm as Record<string, unknown>) : undefined;
   const firmId = stringOrUndefined(firm?.id);
   const firmName = stringOrUndefined(firm?.name);
   const coreRecord = readFiledUnder(body.coreRecord);
   const invoiceId = stringOrUndefined(body.invoiceId);
   const firmInvoiceNumber = stringOrUndefined(body.firmInvoiceNumber);
-  if (!invoiceId || !firmId || firmName === undefined || !coreRecord || firmInvoiceNumber === undefined)
-    return undefined;
+  if (hasFirm && (!firmId || firmName === undefined)) return undefined;
+  if (!invoiceId || !coreRecord || firmInvoiceNumber === undefined) return undefined;
   if (typeof body.canCorrect !== 'boolean') return undefined;
   const replaced =
     body.replacedBy && typeof body.replacedBy === 'object' ? (body.replacedBy as Record<string, unknown>) : undefined;
@@ -646,7 +655,7 @@ function readCorrectionPrefill(json: unknown): InvoiceCorrectionPrefill | undefi
   const replacedName = stringOrUndefined(replaced?.name);
   return {
     invoiceId,
-    firm: { id: firmId, name: firmName },
+    firm: hasFirm && firmId && firmName !== undefined ? { id: firmId, name: firmName } : null,
     coreRecord,
     invoiceStatus: stringOrUndefined(body.invoiceStatus) ?? null,
     trackingNumber: stringOrUndefined(body.trackingNumber) ?? null,
@@ -736,6 +745,10 @@ function readPreviousSubmission(json: Record<string, unknown> | null): InvoicePr
   const by =
     json.submittedBy && typeof json.submittedBy === 'object' ? (json.submittedBy as Record<string, unknown>) : null;
   const submittedBy = stringOrUndefined(by?.name)?.trim() || null;
+  // `firmName` (§11, 095e) is a top-level string next to `firmId`; null when the attempt has no firm or the firm has no
+  // name. It is read tolerantly: an absent, null, non-string or blank value adds nothing, and never makes the body
+  // unreadable.
+  const firmName = stringOrUndefined(json.firmName)?.trim() || null;
   return {
     submissionId,
     statusUrl: `${SUBMISSIONS_BY_EMAIL_ROUTE}/${encodeURIComponent(cleanGuid(submissionId))}`,
@@ -750,6 +763,7 @@ function readPreviousSubmission(json: Record<string, unknown> | null): InvoicePr
     submittedOn: stringOrUndefined(json.submittedOn) || null,
     submittedBy,
     isCorrection: json.isCorrection === true,
+    ...(firmName ? { firmName } : {}),
   };
 }
 

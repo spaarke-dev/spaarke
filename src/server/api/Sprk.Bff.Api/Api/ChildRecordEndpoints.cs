@@ -246,7 +246,9 @@ public static class ChildRecordEndpoints
             .ProducesProblem(StatusCodes.Status401Unauthorized)
             .ProducesProblem(StatusCodes.Status403Forbidden)
             .ProducesProblem(StatusCodes.Status404NotFound)
-            .ProducesProblem(StatusCodes.Status409Conflict);
+            .ProducesProblem(StatusCodes.Status409Conflict)
+            // fm task 054 piece 3b: the owner the update needs could not be read now (nothing written; try again).
+            .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
     }
 
     /// <summary>POST /api/v1/child-records/{table}.</summary>
@@ -805,6 +807,8 @@ public static class ChildRecordEndpoints
                 { Invalid: { } pairInvalid } => Problem(StatusCodes.Status400BadRequest, InvalidPayloadCode,
                     $"The {Noun(entity)} was not saved: {pairInvalid}"),
                 { ParentUnavailable: true } => ParentNotFound(entity),
+                // Task 045d: an invoice-family row's resolver fields that could not be derived — the guard's code, as the re-file core's.
+                { InvoiceFamilyRefusal: { } family } => InvoiceFamilyRefused(family, entity),
                 { Denied: { } denied } => Problem(StatusCodes.Status403Forbidden, DeniedCode, denied),
                 _ => Problem(StatusCodes.Status500InternalServerError, "child_record.no_decision", "The record was not updated."),
             };
@@ -816,7 +820,9 @@ public static class ChildRecordEndpoints
         try
         {
             outcome = await OwnedChildWrite.RefileAsync(
-                user, ownership, entity, id, entitySet, primaryId, mapped.Item!, CallerObjectId(httpContext), ct, appOnlyEntities)
+                user, ownership, entity, id, entitySet, primaryId, mapped.Item!, CallerObjectId(httpContext), ct, appOnlyEntities,
+                // fm task 054 piece 3b: the step that returns an unfiled Direct message to the Direct team.
+                httpContext.RequestServices?.GetService<Sprk.Bff.Api.Services.Communication.Access.DirectMessageOwnerStep>())
                 .ConfigureAwait(false);
         }
         catch (RecordOwnerUnsettledException)

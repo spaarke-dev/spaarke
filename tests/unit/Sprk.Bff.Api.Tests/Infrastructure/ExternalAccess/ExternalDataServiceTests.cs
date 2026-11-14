@@ -321,7 +321,7 @@ public class ExternalDataServiceTests
                 ExternalDataService.TryGetRootBinding(ExternalDataService.TodoRootKind.Project)!, RootId, "Project", null,
                 TeamId, null),
             CreatePath.Event => ExternalDataService.BuildEventCreatePayload(
-                RootId, JsonSerializer.Deserialize<CreateExternalEventRequest>("{\"sprk_name\":\"Created\"}", web)!, TeamId),
+                ExternalDataService.TodoRootKind.Project, RootId, JsonSerializer.Deserialize<CreateExternalEventRequest>("{\"sprk_name\":\"Created\"}", web)!, TeamId),
             CreatePath.Document => ExternalDataService.BuildDocumentCreatePayload(
                 ExternalDataService.DocumentParentKind.Project, RootId, new ExternalUploadedFilePointers("drive-1", "item-1", "a.pdf", 10, null), TeamId),
             _ => throw new ArgumentOutOfRangeException(nameof(path)),
@@ -398,7 +398,7 @@ public class ExternalDataServiceTests
                 JsonSerializer.Deserialize<CreateExternalTodoRequest>(requestJson, web)!, TeamId,
                 creator.ContactId == Guid.Empty ? null : creator.ContactId, creator),
             CreatePath.Event => service.CreateEventAsync(
-                RootId, JsonSerializer.Deserialize<CreateExternalEventRequest>(requestJson, web)!, TeamId, creator),
+                ExternalDataService.TodoRootKind.Project, RootId, JsonSerializer.Deserialize<CreateExternalEventRequest>(requestJson, web)!, TeamId, creator),
             // The upload route's body is the file only; the pointers are built server-side from the SPE upload.
             CreatePath.Document => service.CreateDocumentAsync(
                 ExternalDataService.DocumentParentKind.Project, RootId, new ExternalUploadedFilePointers("drive-1", "item-1", "a.pdf", 10, null), TeamId, creator),

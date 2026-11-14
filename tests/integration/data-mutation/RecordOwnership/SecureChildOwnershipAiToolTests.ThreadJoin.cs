@@ -280,10 +280,10 @@ public sealed partial class SecureChildOwnershipAiToolTests
             "the mirror removal (which revokes every direct share) ran before the grant, never after it");
     }
 
-    [Theory(DisplayName = "#2110 (ontology K3): the ONE re-file core re-binding a communication's held matter runs the step once only when it also MOVES the thread")]
+    [Theory(DisplayName = "fm 054b: the ONE re-file core re-binding a communication's held matter AND naming its thread is refused 403, and nothing is written or reconciled")]
     [InlineData(true)]
     [InlineData(false)]
-    public async Task RefileCore_TheHeldMatterAndAThread_RunsTheStepOnlyWhenTheThreadMoves_2110(bool movesTheThread)
+    public async Task RefileCore_TheHeldMatterAndAThread_IsRefused_054b(bool movesTheThread)
     {
         var heldThread = Guid.Parse("a2110000-0000-4000-8000-0000000000e5");
         var otherThread = Guid.Parse("a2110000-0000-4000-8000-0000000000e6");
@@ -298,8 +298,8 @@ public sealed partial class SecureChildOwnershipAiToolTests
         ShareWorld.OrdinaryChild("sprk_communication", JoiningMessage, ("sprk_regardingmatter", "sprk_matter", OrdinaryMatter));
         var threads = new Mock<IThreadResolver>();
 
-        // The core every child re-file route calls (ChildRecordEndpoints.UpdateAsync), with no filing-only shape: no route of
-        // today names a communication's thread, so this pins the core for any that will.
+        // The core every child re-file route calls (ChildRecordEndpoints.UpdateAsync), with no filing-only shape: a message's
+        // thread lookup is written only by the BFF's typed writers (fm task 054b), so the core refuses it for any route.
         var result = await Sprk.Bff.Api.Api.ChildRecordEndpoints.UpdateAsync(
             "sprk_communication", JoiningMessage,
             Payload(new()
@@ -310,11 +310,12 @@ public sealed partial class SecureChildOwnershipAiToolTests
             _user, _world.Resolver(), Restamper(), Children(threads.Object), HttpContextOfCaller(), NullLogger<Program>.Instance,
             CancellationToken.None);
 
-        Status(result).Should().Be(Microsoft.AspNetCore.Http.StatusCodes.Status204NoContent, Detail(result));
-        _world.Assignments.Should().BeEmpty("the thread decides no owner, and the matter is the one held");
-        threads.Verify(t => t.ReconcileThreadForFilingAsync(JoiningMessage, It.IsAny<Sprk.Bff.Api.Services.Communication.FilingReconcileHost>(), It.IsAny<Sprk.Bff.Api.Services.Access.SecureRemovalCaller?>(), It.IsAny<Func<CancellationToken, Task>?>(), It.IsAny<CancellationToken>()),
-            movesTheThread ? Times.Once() : Times.Never(),
-            movesTheThread ? "the thread moved: the step after a re-file ran once" : "nothing moved: no step");
+        Status(result).Should().Be(Microsoft.AspNetCore.Http.StatusCodes.Status403Forbidden, Detail(result));
+        Detail(result).Should().Contain("sprk_communicationthread").And.Contain("set by Spaarke");
+        _user.Patches.Should().BeEmpty("the refusal comes before any write");
+        _world.Assignments.Should().BeEmpty();
+        threads.Verify(t => t.ReconcileThreadForFilingAsync(It.IsAny<Guid>(), It.IsAny<Sprk.Bff.Api.Services.Communication.FilingReconcileHost>(), It.IsAny<Sprk.Bff.Api.Services.Access.SecureRemovalCaller?>(), It.IsAny<Func<CancellationToken, Task>?>(), It.IsAny<CancellationToken>()),
+            Times.Never());
     }
 
     /// <summary>How many times the gate Decision Record step ran for the joining message's gate record (its one log line per run).</summary>

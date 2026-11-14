@@ -416,6 +416,37 @@ public sealed class H7bSecureRecordSetupHandlerTests
         dv.Writes.Should().Equal($"AssociateTeamRole {dv.CustomerDefaultTeamId} {dv.BasicUserRoleId}");
     }
 
+    [Fact]
+    public async Task ARunCompletedUnderProcedureVersion8_DoesNotShortCircuit_AndChecksTheInvoiceMoneyLock()
+    {
+        // An environment H7b configured before task 268, whose package predates ebilling task 166: the run row records the
+        // phase under the v8 key, and sprk_invoice.sprk_totalamount is not secured. The re-run reaches S26 and refuses.
+        var dv = FakeSecureRecordSetupDataverse.NewEnvironment(Set);
+        (await BuildHandler(new FakeRepository(BuildRun(dv)), dv).HandleAsync(Envelope(), CancellationToken.None))
+            .Should().BeOfType<HandlerResult.Success>();
+        dv.SecuredColumns[FakeSecureRecordSetupDataverse.ColumnKey(
+            SecureRecordSetupProcedure.InvoiceMoneyTable, "sprk_totalamount")] = false;
+        dv.Writes.Clear();
+        var v8Hash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(
+            "secure-setup-procedure=8\n" + Set.RoleName + "\n" + Set.BusinessUnitName + "\n" + Set.SetHash()))).ToLowerInvariant();
+        var run = BuildRun(dv);
+        run.CompletedPhases.Add(new CompletedPhase
+        {
+            Phase = "H7b",
+            IdempotencyKey = H7bSecureRecordSetupHandler.BuildIdempotencyKey(CustomerId, v8Hash),
+            StartedAt = DateTimeOffset.UtcNow,
+            CompletedAt = DateTimeOffset.UtcNow,
+            JobId = RunId,
+        });
+
+        var result = await BuildHandler(new FakeRepository(run), dv).HandleAsync(Envelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.Class.Should().Be(FailureClass.Resumable);
+        failure.RejectionCode.Should().Be(SecureRecordSetupRejectionCodes.InvoiceMoneyLockIncomplete);
+        dv.Writes.Should().BeEmpty();
+    }
+
     [Theory]
     [InlineData(null)]
     [InlineData("not-a-guid")]

@@ -4,7 +4,7 @@
     <title>Repair pass IScheduledJob (5-minute, forward-only) + on-demand admin trigger (FR-25, NFR-03, NFR-04)</title>
     <phase>5 W5 Records created outside the product</phase>
     <gate>016+050 complete</gate>
-    <status>not-started</status>
+    <status>in-progress</status>
     <rigor>FULL</rigor>
     <rigor-reason>Security-critical: a background job writing Dataverse rows with the system principal plus an admin-triggered endpoint (NFR-01 auth rule); modifies .cs in Sprk.Bff.Api; adds tests at KEEP paths.</rigor-reason>
     <model-tier>opus</model-tier>

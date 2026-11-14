@@ -16,8 +16,10 @@ namespace Sprk.Bff.Api.Tests.DataMutation.ChildAccessPermission;
 /// <c>sprk_accesspermission</c> or its own-narrowing record <c>sprk_accessinheritance</c>. Its rules are a configuration
 /// applied to every child the push reaches, so one push from a Standard matter would otherwise clear the own narrowing of
 /// each child document (D7: a child narrows, never widens). Such a rule is skipped with its reason
-/// (<see cref="InheritedAccessPermission.RefuseAppOnlyWrite"/>), and the rest of the push applies. Must not fire: the same
-/// column on a to-do or an event, and the document's other columns. ebilling-r1 task 088: a rule targeting the submission
+/// (<see cref="InheritedAccessPermission.RefuseAppOnlyWrite"/>; task 022c: the two access columns are asked first as access
+/// columns and carry <see cref="FieldMappingEndpoints.AccessColumnNotMappedReasonCode"/>), and the rest of the push applies. Must not fire: the
+/// document's other columns. Task 022c: on a to-do or an event the same column is skipped too, as an access column that is
+/// never a mapping target (<see cref="AccessColumnPushTargetTests"/>). ebilling-r1 task 088: a rule targeting the submission
 /// marker <c>sprk_restrictedbysubmission</c> on a document is skipped the same way.
 /// </summary>
 public class DocumentAccessPermissionPushTargetTests
@@ -45,12 +47,15 @@ public class DocumentAccessPermissionPushTargetTests
             "sprk_document", Child,
             It.Is<Dictionary<string, object?>>(f => f.Count == 1 && f.ContainsKey("sprk_documentdescription")),
             Caller, It.IsAny<CancellationToken>()), Times.Once);
-        results.Should().ContainSingle(r => r.TargetField == target)
-            .Which.Should().Match<FieldMappingResultDto>(r =>
-                r.Status == FieldMappingStatus.Skipped && r.ErrorMessage!.Contains("set by Spaarke"));
         var isMarker = string.Equals(target.Trim(), "sprk_restrictedbysubmission", StringComparison.OrdinalIgnoreCase);
-        results.Single(r => r.TargetField == target).ErrorMessage.Should().Contain(
-            isMarker ? "only the invoice submission writes it" : "keeps the document's own narrowing");
+        results.Should().ContainSingle(r => r.TargetField == target)
+            .Which.Status.Should().Be(FieldMappingStatus.Skipped);
+        // Task 022c: the two access columns carry the one access-column code (asked first); the submission marker keeps its text.
+        if (isMarker)
+            results.Single(r => r.TargetField == target).ErrorMessage.Should().Contain("set by Spaarke")
+                .And.Contain("only the invoice submission writes it");
+        else
+            results.Single(r => r.TargetField == target).ErrorMessage.Should().Be(FieldMappingEndpoints.AccessColumnNotMappedMessage);
         results.Should().ContainSingle(r => r.TargetField == "sprk_documentdescription")
             .Which.Status.Should().Be(FieldMappingStatus.Mapped);
     }
@@ -69,16 +74,14 @@ public class DocumentAccessPermissionPushTargetTests
     [Theory]
     [InlineData("sprk_todo")]
     [InlineData("sprk_event")]
-    public async Task APushRule_TargetingTheSameColumnOnAToDoOrAnEvent_IsPushed(string table)
+    public async Task APushRule_TargetingTheSameColumnOnAToDoOrAnEvent_IsSkipped_AsAnAccessColumn(string table)
     {
-        var (updated, failed, _, _, results) = await Push(
+        var (updated, failed, skipped, _, results) = await Push(
             table, Rule("sprk_accesspermission", "sprk_accesspermission", "OptionSet"));
 
-        (updated, failed).Should().Be((1, 0));
-        _writes.Verify(w => w.UpdateExistingRecordFieldsAsync(
-            table, Child, It.Is<Dictionary<string, object?>>(f => f.ContainsKey("sprk_accesspermission")),
-            Caller, It.IsAny<CancellationToken>()), Times.Once);
-        results.Should().ContainSingle().Which.Status.Should().Be(FieldMappingStatus.Mapped);
+        (updated, failed, skipped).Should().Be((0, 0, 1));
+        _writes.Invocations.Should().BeEmpty("an access column is never a mapping target (task 022c)");
+        results.Should().ContainSingle().Which.ErrorMessage.Should().Be(FieldMappingEndpoints.AccessColumnNotMappedMessage);
     }
 
     private static FieldMappingRuleDto Rule(string source, string target, string type) =>

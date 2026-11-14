@@ -738,6 +738,14 @@ public class EmailArchiveCommunicationLinkSweepJobTests
         var services = new ServiceCollection();
         services.AddLogging();
         services.AddSingleton<IConfiguration>(configuration);
+        // Enumerating the registrations resolves EVERY scheduled job in the module. The inbound polling job (#2749, an
+        // IScheduledJob since PR #2757) needs these host-wide services, which other modules register in production.
+        services.AddSingleton(Mock.Of<ICommunicationDataverseService>());
+        services.AddSingleton(Mock.Of<IGenericEntityService>());
+        services.AddSingleton(Mock.Of<Microsoft.Extensions.Caching.Distributed.IDistributedCache>());
+        services.AddSingleton(Mock.Of<Sprk.Bff.Api.Infrastructure.Graph.IGraphClientFactory>());
+        services.AddSingleton(new Mock<Azure.Messaging.ServiceBus.ServiceBusClient>().Object);
+        services.AddSingleton<Sprk.Bff.Api.Services.Jobs.JobSubmissionService>();
         services.AddCommunicationModule(configuration);
         using var provider = services.BuildServiceProvider();
 

@@ -1,0 +1,28 @@
+{
+  "path": ["src"],
+  "format": ["typescript", "tsx", "csharp"],
+  "minTokens": 50,
+  "minLines": 5,
+  "ignore": [
+    "**/node_modules/**",
+    "**/bin/**",
+    "**/obj/**",
+    "**/dist/**",
+    "**/out/**",
+    "**/generated/**",
+    "**/*.generated.*",
+    "**/*.g.cs",
+    "**/*.Designer.cs",
+    "**/*.d.ts",
+    "**/*.test.*",
+    "**/__tests__/**",
+    "tests/**",
+    ".claude/worktrees/agent-*/**"
+  ],
+  "gitignore": true,
+  "absolute": true,
+  "reporters": ["json", "markdown"],
+  "output": "jscpd-report",
+  "exitCode": 0,
+  "silent": true
+}

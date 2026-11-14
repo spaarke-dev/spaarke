@@ -374,6 +374,7 @@ Extends Step 6.5 from the BFF to every new component: it enforces root CLAUDE.md
 
 3. VERIFY each of the three answers is concrete:
    a. <existing> cites a file:line found with Grep, OR shows the grep command and its "no matches" output.
+      It starts from .claude/patterns/CAPABILITY-INDEX.md: "CAPABILITY-INDEX row N" + file:line, or "CAPABILITY-INDEX: no row" + the Grep run.
       - "None" with no grep evidence -> WARNING (lazy answer)
       - "Similar to FooService but different in X" with no file:line -> SUGGESTION (sharpen)
    b. <extension> is a yes/no with a reason. Acceptable reasons include:

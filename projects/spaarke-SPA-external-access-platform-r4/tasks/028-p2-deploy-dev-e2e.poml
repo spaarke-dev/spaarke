@@ -1,0 +1,134 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="028" project="spaarke-SPA-external-access-platform-r4">
+  <metadata>
+    <title>P2 deploy (SPA to dev) + E2E (FR-11/FR-13 checks once ebilling's BFF changes are live)</title>
+    <phase>2 Invoices and documents</phase>
+    <gate>after 018, 020, 022, 023, 024 (021 may be deferred if ebilling slips) — owner approval to deploy</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Deployment and E2E task (tags deploy, e2e-test); no code authored</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Runbook deployment through the existing workflow plus scripted E2E checks</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Live deployment and a live Dataverse configuration write</parallel-reason>
+    <deps>018, 020, 021, 022, 023, 024</deps>
+    <tags>deploy, e2e-test</tags>
+    <estimated-effort>3-5 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Deploy the Phase 2 SPA build to swa-spaarke-external-spa-dev through the deploy workflow, apply the Review detail grid-column change once ebilling's 082c-2 BFF is live, and prove Phase 2 end to end on dev.</prompt>
+  <role>SPAARKE platform developer. Release engineer. Follow ADRs strictly.</role>
+  <goal>The dev SWA serves the P2 commit; the P2 E2E checks pass and are recorded; FR-11 and FR-13 checks are either passed (ebilling live) or recorded as deferred with the reason.</goal>
+
+  <context>
+    <background>NFR-06 staged delivery. Phase 2 has no R4 BFF change, so no R4 BFF deploy request is made here. Two ebilling BFF changes gate parts of P2 and are deployed only by uac-r2 (`docs/procedures/dev-bff-deploy-coordination.md`): 082c-2 (`sprk_reviewdetail` partner-readable; FR-11) and the `/invoices/{id}/files` routes (FR-13, back to back: the files routes first, then this SPA). Task 020's notes hold the `sprk_gridconfiguration` 3ff4102c PATCH body for the Review detail column and its rollback slot (recipe: R3 `notes/task-002-notes.md` §3.5 and §4: read raw configjson + modifiedon + versionnumber first, PATCH with `If-Match: *`). The SPA's BFF host is baked in at Vite build time; the environment `external-spa-dev` supplies the VITE_* variables.</background>
+    <relevant-files>
+      <file role="canonical-reference">.github/workflows/deploy-external-spa.yml</file>
+      <file role="canonical-reference">docs/procedures/dev-bff-deploy-coordination.md</file>
+      <file role="canonical-reference">projects/spaarke-SPA-external-access-platform-r4/notes/task-020-notes.md</file>
+      <file role="canonical-reference">projects/spaarke-SPA-external-access-platform-r3/notes/task-002-notes.md</file>
+      <file role="new-artifact">projects/spaarke-SPA-external-access-platform-r4/notes/task-028-deploy-record.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="018" status="pending">P1 deployed and E2E-proved</dependency>
+      <dependency task="020" status="pending">Review detail + badge</dependency>
+      <dependency task="021" status="pending">Invoice Files (may be deferred if ebilling's routes are not live)</dependency>
+      <dependency task="022" status="pending">Inline preview</dependency>
+      <dependency task="023" status="pending">Documents on the shared grid, hasFile</dependency>
+      <dependency task="024" status="pending">Shared EmptyState</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Owner approval and a stated rollback before every live change in this task: the SPA deploy (rollback: re-run the workflow on the previous deployed commit) and the grid-configuration PATCH (rollback: PATCH the saved raw configjson back).</constraint>
+    <constraint source="project">Deploy the SPA only through `deploy-external-spa.yml` (workflow_dispatch, environment dev); no manual SWA upload.</constraint>
+    <constraint source="dev-bff-deploy-coordination">Never deploy the dev BFF. If ebilling's 082c-2 or files routes are not live, ask uac-r2 (through the operator) for their status; do not request or run a BFF deploy from this task.</constraint>
+    <constraint source="project">Live reads are read-only and the commands are shown to the owner first. Never print tokens, emails, UPNs or object ids in the record.</constraint>
+    <constraint source="spec FR-13">If the files routes are not live, the 021 commit is not in the deployed build (deploy the commit before it or with 021 reverted, owner's choice), and FR-13 is recorded as deferred.</constraint>
+    <constraint source="task 020">The 3ff4102c column PATCH runs only after `sprk_reviewdetail` is confirmed partner-readable on dev (082c-2 live); otherwise the grid fetch would fail with DV_FETCHXML_COLUMN_NOT_PERMITTED for every partner.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-SPA-external-access-platform-r4/CLAUDE.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r4/spec.md</file>
+      <file>docs/procedures/dev-bff-deploy-coordination.md</file>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+      <file>.claude/skills/ci-cd/SKILL.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+    </files>
+    <patterns>
+      <pattern name="SPA dev deploy" location="projects/spaarke-SPA-external-access-platform-r3/tasks/070-deploy-spa-dev.poml">owner approval, workflow dispatch, smoke test, deploy record</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Context + rigor declaration">Load the knowledge files, read the relevant files, declare rigor and model tier per task-execute Step 0.5.</step>
+    <step order="1">Confirm 018 is complete and the P2 tasks are merged; record the commit SHA to deploy.</step>
+    <step order="2">Ask uac-r2 (via the operator) whether ebilling's 082c-2 and files-routes BFF changes are live on dev; record the answer and the live BFF SHA.</step>
+    <step order="3">Decide with the owner whether 021 ships (files routes live) or is held; record the decision.</step>
+    <step order="4">Show the owner the deploy plan (workflow, environment, SHA) and the rollback; wait for approval.</step>
+    <step order="5">Run `deploy-external-spa.yml` (workflow_dispatch, environment dev) on the approved SHA; record the run id and the served build.</step>
+    <step order="6">If 082c-2 is live: show the owner the read-only `sprk_gridconfigurations(3ff4102c…)` read, save raw configjson/modifiedon/versionnumber in the record, get approval, PATCH per task 020's notes, then re-open the Invoices tab.</step>
+    <step order="7">Run the E2E checks in &lt;ui-tests&gt; in the browser at both access levels; record each result with evidence.</step>
+    <step order="8">Record everything in notes/task-028-deploy-record.md: SHA, run id, ebilling status, PATCH before/after, E2E results, deferrals.</step>
+    <step order="9">Update tasks/TASK-INDEX.md: set this task's status cell to `✅ [done]` and this POML's &lt;status&gt; to completed; run `pwsh scripts/check-task-status-drift.ps1`.</step>
+    <step order="10">Record deviations in projects/spaarke-SPA-external-access-platform-r4/notes/task-028-notes.md; file deferred FR-11/FR-13 checks with `/project-defer-issue-tracking`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If any E2E check shows an offered action answering 403, or a partner grid erroring after the deploy or PATCH, roll back that change (with the owner's approval) and stop.</trigger>
+    <trigger>If the grid configuration's raw configjson differs from what task 020 based its PATCH on (modifiedon later, columns changed), STOP and re-plan with the owner; do not merge by hand.</trigger>
+  </escalation>
+
+  <ui-tests>
+    <test name="Preview">
+      <url>https://{spa-dev-host}/?record=document:{pdf-document-id}</url>
+      <steps><step>Open a PDF and a PNG document</step><step>Open a .docx and a document with no file</step></steps>
+      <expected>PDF and PNG preview in place; .docx Download only; no-file shows neither</expected>
+    </test>
+    <test name="Documents grid">
+      <steps><step>At 1000px open a matter's Documents</step><step>Resize a column; upload, download and delete own as a writer; check View-only</step></steps>
+      <expected>No overlap; actions per access; none answers 403</expected>
+    </test>
+    <test name="Review detail (only if 082c-2 live)">
+      <steps><step>Open a held In Review invoice and its parent matter</step><step>Open a Paid invoice</step></steps>
+      <expected>Approved text in all four places for the held invoice; blank on the Paid invoice</expected>
+    </test>
+    <test name="Invoice Files (only if files routes live)">
+      <steps><step>Open an invoice with a clean and a pending file</step></steps>
+      <expected>Clean downloads; pending shows "Checking file…"; no upload or versions</expected>
+    </test>
+    <test name="Empty states and themes (ADR-021)">
+      <steps><step>Open an empty record in light, dark and high-contrast</step><step>Check the console</step></steps>
+      <expected>Shared empty states, semantic colours, no console errors</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="terminal">Run gh workflow and read-only Dataverse commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/spaarke-SPA-external-access-platform-r4/notes/task-028-deploy-record.md</output>
+    <output type="docs">projects/spaarke-SPA-external-access-platform-r4/notes/task-028-notes.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The dev SWA serves the approved P2 SHA (workflow run id recorded).</criterion>
+    <criterion testable="true">Preview, Documents grid, hasFile and EmptyState checks pass in the browser at writer and View-only levels, with evidence recorded.</criterion>
+    <criterion testable="true">No action offered on dev answers 403 in the checks run.</criterion>
+    <criterion testable="true">FR-11 checks are passed with a held invoice, or recorded as deferred because 082c-2 is not live (with a deferral issue).</criterion>
+    <criterion testable="true">FR-13 checks are passed, or 021 was held from the build and FR-13 is recorded as deferred (with a deferral issue).</criterion>
+    <criterion testable="true">Each live change has an owner approval and a rollback recorded before it ran; no BFF deploy was made or requested by this task.</criterion>
+  </acceptance-criteria>
+
+  <notes>NFR-06. Rollback targets: previous SPA commit (from the last deploy record) and the saved raw configjson for 3ff4102c.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

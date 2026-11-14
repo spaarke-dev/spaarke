@@ -14,6 +14,7 @@ import { render, screen, within } from '@testing-library/react';
 import { FluentProvider, webLightTheme } from '@fluentui/react-components';
 import { AccessGrantModal, CURRENT_ACCESS_READ_FAILED_MESSAGE } from '../AccessGrantModal';
 import type { IAccessGrantModalProps, IAccessGrantRecord } from '../types';
+import { openAccessNotes } from '../../../__tests__/helpers/accessNotes';
 
 // Fluent's Badge renders `appearance` only as hashed classes; surface it as a data attribute so a test can read it.
 jest.mock('@fluentui/react-components', () => {
@@ -390,7 +391,8 @@ describe('AccessGrantModal — one failure, one message (task 099a, verifier F1 
     expect(screen.getByText('Rory Role')).toBeInTheDocument();
     expect(screen.getByText('Suggested Access')).toBeInTheDocument();
     expect(screen.getByText(/Sue Suggested/)).toBeInTheDocument();
-    expect(screen.getByText('Olive Owner')).toBeInTheDocument();
+    // Task 196: the secure owner is a note behind the header bell.
+    expect(within(await openAccessNotes()).getByText('Olive Owner')).toBeInTheDocument();
     expect(screen.queryByText(GENERIC_NOTICE)).not.toBeInTheDocument();
     expect(screen.queryByText('Write and Share required')).not.toBeInTheDocument();
   });

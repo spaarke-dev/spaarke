@@ -1,0 +1,132 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="090" project="spaarke-SPA-external-access-platform-r4">
+  <metadata>
+    <title>Project wrap-up: quality gates, SC-7 issue checklist, /test-diet, lessons learned, archive</title>
+    <phase>Wrap-up</phase>
+    <gate>after every other task (a task deferred by owner decision is recorded with its reason)</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Mandatory wrap-up (task-create Step 3.7): code-review + adr-check over all project code; /test-diet changes tests</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Procedural close-out driven by skills; fix rounds use the implementer per finding</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Final serial task; promoting lessons may touch .claude/ (main-session-only)</parallel-reason>
+    <deps>001, 002, 003, 004, 005, 006, 007, 018, 020, 021, 022, 023, 024, 028, 030, 031, 032, 033, 034, 035, 036, 038, 040, 041, 042, 043, 044, 045, 046, 047, 048, 058, 080</deps>
+    <tags>testing</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Close the project: run the final quality gates and fix every F-class finding, prove each SC-7 issue is closed by shipped behaviour (or hand it off), run /test-diet and /repo-cleanup, update README and plan, append lessons to notes/lessons-learned.md, verify, and archive with /devops-project-archive.</prompt>
+  <role>SPAARKE platform developer. Project lead. Follow ADRs strictly.</role>
+  <goal>No F-class finding remains; every SC-7 issue is closed with evidence or has a named home; /test-diet and /repo-cleanup actions are done; README and plan show Complete; lessons are recorded; the project is archived.</goal>
+
+  <context>
+    <background>task-create Step 3.7 (mandatory wrap-up) and root CLAUDE.md §7 (`task-execute` Steps 10-11 own completion and the project-close /test-diet gate). Spec Success Criteria SC-1–SC-9; SC-7 lists the issues R4 must close. Hand-offs decided in design §7.2 / spec Out of scope: #2270 and #2278 → unified-access-control-r2; #1840 and #1737 deferred; #2534 → spaarke-auth-system-of-record-r1; #2163 closed as a duplicate of #2578. Deferred items from tasks live in notes/defer-issues.md (written by /project-defer-issue-tracking).</background>
+    <relevant-files>
+      <file role="modify">projects/spaarke-SPA-external-access-platform-r4/README.md</file>
+      <file role="modify">projects/spaarke-SPA-external-access-platform-r4/plan.md</file>
+      <file role="modify">projects/spaarke-SPA-external-access-platform-r4/tasks/TASK-INDEX.md</file>
+      <file role="modify">projects/INDEX.md</file>
+      <file role="new-artifact">projects/spaarke-SPA-external-access-platform-r4/notes/lessons-learned.md</file>
+      <file role="new-artifact">projects/spaarke-SPA-external-access-platform-r4/notes/sc7-issue-checklist.md</file>
+      <file role="new-artifact">projects/spaarke-SPA-external-access-platform-r4/notes/test-diet-report.md</file>
+      <file role="canonical-reference">projects/spaarke-SPA-external-access-platform-r4/notes/defer-issues.md</file>
+      <file role="canonical-reference">projects/spaarke-SPA-external-access-platform-r3/tasks/090-project-wrap-up.poml</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="058" status="pending">P4 deployed and E2E-proved</dependency>
+      <dependency task="080" status="pending">Standards proposals decided</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="root CLAUDE.md §8.5">Classify every code-review, adr-check and adversarial finding (F1-F4 fix-now, K1-K4 known-limit); fix every F-class finding before closing; a known-limit class never holds a confirmed defect on a real path. Every defect found is fixed in scope or filed and reported.</constraint>
+    <constraint source="spec SC-7">An issue is closed only with evidence of the described behaviour (task, PR/commit, test or E2E record). An issue whose FR shipped partially or not at all stays open and is reported with its reason and owner — never closed on intent.</constraint>
+    <constraint source="ADR-038 / tests/CLAUDE.md">/test-diet acts on its report: build-class tests deleted, maintain-class tests kept or moved to KEEP paths; removing a KEEP-path test needs a same-PR replacement or the orphan-test exception (Amendment A3).</constraint>
+    <constraint source="task-create Step 3.7">Lessons go to notes/lessons-learned.md only (no central store); promotion to .claude/FAILURE-MODES.md or a constraint is main-session-only and owner-approved.</constraint>
+    <constraint source="task-create Step 3.7">Do NOT rename or move the project folder (no x- prefix); /devops-project-archive writes the .archived marker and keeps the worktree.</constraint>
+    <constraint source="bff-extensions">The final BFF publish size is measured against a fresh master build (≤ 60 MB, no new HIGH CVE) and recorded.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-SPA-external-access-platform-r4/spec.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r4/CLAUDE.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r4/plan.md</file>
+      <file>.claude/skills/code-review/SKILL.md</file>
+      <file>.claude/skills/adr-check/SKILL.md</file>
+      <file>.claude/skills/test-diet/SKILL.md</file>
+      <file>.claude/skills/repo-cleanup/SKILL.md</file>
+      <file>.claude/skills/devops-project-archive/SKILL.md</file>
+      <file>.claude/skills/project-defer-issue-tracking/SKILL.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>.claude/patterns/testing/mocking-patterns.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/FAILURE-MODES.md</file>
+    </files>
+    <patterns>
+      <pattern name="Wrap-up precedent" location="projects/spaarke-SPA-external-access-platform-r3/tasks/090-project-wrap-up.poml">R3's close-out: review findings, test diet, hygiene, hand-off table.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load the knowledge files, read the relevant files, declare rigor and model tier per task-execute Step 0.5.</step>
+    <step order="1">Final quality gates: /code-review and /adr-check over all project code (the branch diff against master); one full adversarial-reviewer pass over the change set, two because it contains auth and access code (FR-24, FR-25, FR-28). Classify per task-execute Step 9.5; fix every F-class finding (implementer per finding); record known limits with class.</step>
+    <step order="2">SC-7 issue checklist — write notes/sc7-issue-checklist.md with one row per issue: number, FR, closing evidence (task, PR/commit, test, E2E record), state. Issues: #2155 (FR-26), #2192 (FR-25), #2269 (FR-28), #2271 (FR-09), #2275 (FR-29), #2445 (FR-23), #2446 and #2447 (FR-20), #2449 (FR-27), #2452 (FR-21), #2453 (FR-22), #2466 (FR-32), #2489 (FR-19), #2490 (FR-16), #2499 (FR-30), #2508 (FR-24), #2578 (FR-31), #1828 (DEF-003). Close each issue that has evidence (gh issue close with a comment citing it); leave the rest open with the reason and owner. Confirm #2163 is closed as a duplicate of #2578. Add a hand-off table: #2270, #2278 (uac-r2), #1840, #1737 (deferred), #2534 (auth-system-of-record-r1), and every open entry in notes/defer-issues.md with its GitHub issue.</step>
+    <step order="3">Run /test-diet for the project's tests; act on notes/test-diet-report.md (delete build-class, keep or move maintain-class); run the affected suites.</step>
+    <step order="4">BFF hygiene: final publish-size delta against a fresh master build and the vulnerable-package check; record both.</step>
+    <step order="5">Run /repo-cleanup projects/spaarke-SPA-external-access-platform-r4; review the report; approve removals (notes/debug/, notes/spikes/, notes/drafts/); archive notes/handoffs/ to .archive/.</step>
+    <step order="6">README.md: Status Complete, Last Updated, Phase Complete, Progress 100%, Completed Date, every Graduation Criterion checked (or the blocker named), Changelog completion entry. plan.md: Status Complete; every milestone ✅.</step>
+    <step order="7">Lessons learned: append to notes/lessons-learned.md — one lesson per entry with a one-line summary, recording both corrections and confirmed non-obvious approaches and why they mattered. Offer durable ones for promotion (main session, owner-approved).</step>
+    <step order="8">Final verification: every task completed (or deferred/cancelled by owner decision) in TASK-INDEX.md; `pwsh scripts/check-task-status-drift.ps1` clean; no open F-class finding; documentation current; cleanup done; projects/INDEX.md shows the final status.</step>
+    <step order="9">Archive: run /devops-project-archive (closes the Project Issue, sets board Status, writes projects/spaarke-SPA-external-access-platform-r4/.archived). Do not rename or move the folder.</step>
+    <step order="10">Run the full test suites once more (BFF under quiet machine load — R3 gotcha; external-spa vitest; shared lib) and confirm all pass.</step>
+    <step order="11">Update tasks/TASK-INDEX.md: set this task's status cell to `✅ [done]` and this POML's &lt;status&gt; to completed; run `pwsh scripts/check-task-status-drift.ps1`.</step>
+    <step order="12">Record deviations and decisions in projects/spaarke-SPA-external-access-platform-r4/notes/task-090-notes.md.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If fixes for a finding are not converging, STOP and escalate to the owner with the finding and the attempts (root CLAUDE.md §8.5) rather than downgrading it to a known limit.</trigger>
+    <trigger>If an SC-7 issue's behaviour shipped only partly (e.g. ebilling-gated FR-11/FR-13, ontology-gated FR-23/FR-30), keep it open and ask the owner whether it moves to a named project or a follow-up; do not close it.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Build and test the BFF; publish-size measurement</tool>
+    <tool name="npm">Run the external-spa and shared-lib test suites</tool>
+    <tool name="terminal">gh issue view/close; skills</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/spaarke-SPA-external-access-platform-r4/notes/sc7-issue-checklist.md</output>
+    <output type="docs">projects/spaarke-SPA-external-access-platform-r4/notes/test-diet-report.md</output>
+    <output type="docs">projects/spaarke-SPA-external-access-platform-r4/notes/lessons-learned.md</output>
+    <output type="docs">projects/spaarke-SPA-external-access-platform-r4/README.md</output>
+    <output type="docs">projects/spaarke-SPA-external-access-platform-r4/plan.md</output>
+    <output type="docs">projects/spaarke-SPA-external-access-platform-r4/.archived</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">code-review, adr-check and the adversarial passes report no open F-class finding; known limits are listed with their class.</criterion>
+    <criterion testable="true">notes/sc7-issue-checklist.md has a row for each of #2155, #2192, #2269, #2271, #2275, #2445, #2446, #2447, #2449, #2452, #2453, #2466, #2489, #2490, #2499, #2508, #2578 and #1828, each closed with cited evidence or open with a reason and owner; #2163 is confirmed closed as a duplicate.</criterion>
+    <criterion testable="true">Negative: no issue is closed without evidence of the shipped behaviour.</criterion>
+    <criterion testable="true">The hand-off table names a home for #2270, #2278, #1840, #1737, #2534 and every open defer-issues entry.</criterion>
+    <criterion testable="true">/test-diet has run and its actions are done; /repo-cleanup has run and its approved removals are done.</criterion>
+    <criterion testable="true">README shows Complete with Graduation Criteria checked (or each blocker named) and a Changelog entry; plan.md shows Complete with every milestone ✅.</criterion>
+    <criterion testable="true">notes/lessons-learned.md has the project's lessons, one per entry with a one-line summary.</criterion>
+    <criterion testable="true">The final BFF publish size (≤ 60 MB, delta vs fresh master) and the vulnerable-package result are recorded.</criterion>
+    <criterion testable="true">/devops-project-archive has run: the Project Issue is closed, the board Status is set, .archived exists, and the folder is not renamed or moved.</criterion>
+    <criterion testable="true">All test suites pass; TASK-INDEX and POML statuses agree (drift check clean).</criterion>
+  </acceptance-criteria>
+
+  <notes>Mandatory final task (task-create Step 3.7). The test-diet skill keys on `090-wrapup-*`; this task invokes /test-diet explicitly (step 3) so the gate runs regardless of the slug.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

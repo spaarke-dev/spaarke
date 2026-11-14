@@ -28,6 +28,11 @@ namespace Sprk.Bff.Api.Services.Ai.PublicContracts;
 /// tools, CLAUDE.md §6.5 path B; approved, owner round 111): the narrowing is reached only through the injected
 /// <see cref="AppOnlyDocumentNarrowing"/>, which re-reads the documents BY ID under the BFF's app-only identity and returns
 /// only a hide decision. It can only remove a key the caller's own read returned; no app-only data reaches the result.</para>
+/// <para><b>THE external visibility predicate</b> (uac-r2 task 191h, #2369 part 2, #2179 design §3.3). On top of the narrowing,
+/// a document key is kept only when THE predicate (<see cref="AppOnlyExternalVisibility"/>, the same hide-only app-only shape)
+/// also shows the document: an invoice's associated document whose invoice the (a') rule hides, a document filed under a
+/// Restricted root or tainted through any registry lookup, and a document whose closure reaches no root are withheld. A
+/// predicate that faults or throws withholds every document key, as a failed narrowing does (parent-record keys stay).</para>
 /// <para><b>Component Justification (CLAUDE.md §11), the three new constructor dependencies.</b> (1) Existing — the
 /// externality rule (<see cref="ExternalCallerCommunicationGuard.IsExternalCallerAsync"/> over
 /// <see cref="ICallerSystemUserResolver"/> and <see cref="ISystemUserIdentityResolver"/>) and the narrowing
@@ -49,6 +54,7 @@ public sealed class RetrievalAccessTrim : IRetrievalAccessTrim
     private readonly ICallerSystemUserResolver _callerResolver;
     private readonly ISystemUserIdentityResolver _identityResolver;
     private readonly AppOnlyDocumentNarrowing _narrowDocuments;
+    private readonly AppOnlyExternalVisibility _externalVisibility;
     private readonly ILogger<RetrievalAccessTrim> _logger;
 
     public RetrievalAccessTrim(
@@ -57,6 +63,7 @@ public sealed class RetrievalAccessTrim : IRetrievalAccessTrim
         ICallerSystemUserResolver callerResolver,
         ISystemUserIdentityResolver identityResolver,
         AppOnlyDocumentNarrowing narrowDocuments,
+        AppOnlyExternalVisibility externalVisibility,
         ILogger<RetrievalAccessTrim> logger)
     {
         _httpContextAccessor = httpContextAccessor ?? throw new ArgumentNullException(nameof(httpContextAccessor));
@@ -64,6 +71,7 @@ public sealed class RetrievalAccessTrim : IRetrievalAccessTrim
         _callerResolver = callerResolver ?? throw new ArgumentNullException(nameof(callerResolver));
         _identityResolver = identityResolver ?? throw new ArgumentNullException(nameof(identityResolver));
         _narrowDocuments = narrowDocuments ?? throw new ArgumentNullException(nameof(narrowDocuments));
+        _externalVisibility = externalVisibility ?? throw new ArgumentNullException(nameof(externalVisibility));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -269,11 +277,28 @@ public sealed class RetrievalAccessTrim : IRetrievalAccessTrim
         }
 
         DocumentNarrowingResult? narrowing = null;
+        ExternalRowVisibility? visibility = null;
         if (documentIds.Count > 0)
         {
             try
             {
                 narrowing = await _narrowDocuments(documentIds, cancellationToken).ConfigureAwait(false);
+                // Task 191h: THE external visibility predicate over the same documents, in one call. A faulted decision
+                // withholds every document key, as a failed narrowing does.
+                var answer = await _externalVisibility(
+                    documentIds.Select(id => (ExternalCallerCommunicationGuard.DocumentTable, id)).ToList(), cancellationToken)
+                    .ConfigureAwait(false);
+                if (answer.Faulted)
+                {
+                    _logger.LogWarning(
+                        "[RETRIEVAL-TRIM] external visibility could not be decided for {Count} document(s); withholding all "
+                        + "{Keys} document record(s) (fail closed; parent records unaffected)",
+                        documentIds.Count, documentKeys.Count);
+                }
+                else
+                {
+                    visibility = answer;
+                }
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
@@ -288,17 +313,29 @@ public sealed class RetrievalAccessTrim : IRetrievalAccessTrim
             }
         }
 
+        // A document is shown only when BOTH the 188 narrowing and THE predicate (task 191h) show it; a decision that is
+        // missing (a fault) shows nothing.
+        bool Shown(RetrievalRecordKey key, Func<Guid, bool> isShown) =>
+            RetrievalRecordKey.IsDocumentIdKey(key.EntitySetName, key.KeyField)
+                ? isShown(Guid.Parse(key.Value))
+                : itemDocuments.TryGetValue(key, out var onItem) && onItem.Any(isShown);
+        bool NarrowingShows(Guid id) => narrowing is not null && narrowing.IsVisible(id);
+        bool BothShow(Guid id) =>
+            NarrowingShows(id) && visibility is not null
+            && visibility.IsVisible(ExternalCallerCommunicationGuard.DocumentTable, id);
+
         var hidden = 0;
+        var hiddenByVisibility = 0;
         foreach (var key in documentKeys)
         {
-            var shown = narrowing is not null
-                && (RetrievalRecordKey.IsDocumentIdKey(key.EntitySetName, key.KeyField)
-                    ? narrowing.IsVisible(Guid.Parse(key.Value))
-                    : itemDocuments.TryGetValue(key, out var onItem) && onItem.Any(narrowing.IsVisible));
-            if (!shown)
+            if (!Shown(key, BothShow))
             {
                 readable.Remove(key);
                 hidden++;
+                if (visibility is not null && Shown(key, NarrowingShows))
+                {
+                    hiddenByVisibility++;
+                }
             }
         }
 
@@ -306,9 +343,12 @@ public sealed class RetrievalAccessTrim : IRetrievalAccessTrim
         {
             _logger.LogInformation(
                 "[RETRIEVAL-TRIM] external caller: {Hidden} of {Keys} readable document record(s) withheld by the external "
-                + "document narrowing (faulted={Faulted}; hidden documents by reason: {Reasons})",
-                hidden, documentKeys.Count, documentIds.Count > 0 && narrowing is null,
-                narrowing?.HiddenSummary(documentIds) ?? "none-decided");
+                + "document narrowing and visibility predicate (faulted={Faulted}; by the predicate alone: {ByVisibility}; "
+                + "hidden documents by reason: {Reasons}; predicate: {VisibilityReasons})",
+                hidden, documentKeys.Count, documentIds.Count > 0 && (narrowing is null || visibility is null),
+                hiddenByVisibility,
+                narrowing?.HiddenSummary(documentIds) ?? "none-decided",
+                visibility?.Summary(documentIds.Select(id => (ExternalCallerCommunicationGuard.DocumentTable, id))) ?? "none-decided");
         }
     }
 

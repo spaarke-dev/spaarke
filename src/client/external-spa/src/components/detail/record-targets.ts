@@ -11,7 +11,7 @@
  *   - a notification's `recordType`, which is an API ROUTE SEGMENT (`projects` | `matters` | `workassignments` |
  *     `invoices` | `servicerequests`; task 037), not an SPA route. {@link FEED_RECORD_TYPES} maps it to the detail view's entity.
  *
- * What comes out is a {@link RecordTarget}: an entity name `RecordDetailModal` knows and a lowercase GUID. It carries no
+ * What comes out is a {@link RecordTarget}: an entity name the record view (`RecordTemplateModal`) knows and a lowercase GUID. It carries no
  * URL, host or scope, and it grants nothing: the detail view reads the record through the caller's own external-plane
  * token, and the server answers "denied" for a record outside the caller's set. A link can therefore only ever ASK to
  * open a record; it cannot widen what the caller may see.
@@ -89,6 +89,25 @@ export function parseRecordLink(search: string): RecordTarget | null {
   const recordId = value.slice(colon + 1);
   if (!entityName || !isGuid(recordId)) return null;
   return { entityName, recordId: recordId.toLowerCase() };
+}
+
+/**
+ * The shareable link to a record: `{origin}{pathname}?record={token}:{id}` (R4 task 003, FR-04 Copy link). It is the
+ * inverse of {@link parseRecordLink}: the token is the record's own key in {@link RECORD_LINK_TOKENS} and the id its
+ * lowercase GUID, so `parseRecordLink` of the link's query string gives back the same target. Null for an entity with no
+ * token or an id that is not a GUID (never a link that the parser would ignore).
+ *
+ * Only the origin and the path of `base` are used: every other query parameter and the hash are dropped, so the link
+ * carries nothing but the record (a link can only ask to open a record; it grants nothing).
+ */
+export function recordLinkFor(
+  entityName: string,
+  recordId: string,
+  base: { origin: string; pathname: string }
+): string | null {
+  const token = Object.keys(RECORD_LINK_TOKENS).find(key => RECORD_LINK_TOKENS[key] === entityName);
+  if (!token || !isGuid(recordId)) return null;
+  return `${base.origin}${base.pathname}?${RECORD_PARAM}=${token}:${recordId.toLowerCase()}`;
 }
 
 /** The query string without its `record` parameter (every other parameter, e.g. `customer`, is kept as written). */

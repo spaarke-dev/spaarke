@@ -1,7 +1,9 @@
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
+using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Services.Access;
 using Sprk.Bff.Api.Services.Communication.Membership;
 using Sprk.Bff.Api.Services.Dataverse;
@@ -55,6 +57,7 @@ public sealed class DirectThreadAccessService : IDirectThreadAccessService
     private readonly DirectMessageOwnerTeam _directMessageOwnerTeam;
     private readonly DataverseWebApiClient? _webApi;
     private readonly CoreAncestorResolver? _coreAncestors;
+    private readonly IServiceScopeFactory? _scopes;
 
     /// <param name="membershipDerivation">
     /// Lazily-resolved (task 052 / FR-11): <see cref="IThreadMembershipDerivationService"/>'s default
@@ -76,6 +79,10 @@ public sealed class DirectThreadAccessService : IDirectThreadAccessService
     /// grants them).</param>
     /// <param name="coreAncestors">uac-r2 task 198 Part C: the column probe of the bar's filing walk. Optional; without it a
     /// participant flagged external is not granted here.</param>
+    /// <param name="scopes">uac-r2 task 197b: a scope per decision for THE external visibility predicate (the 191h seam,
+    /// <c>AppOnlyExternalVisibility</c>, registered scoped; this service is a singleton). Optional so the test compositions keep
+    /// compiling; the container always supplies it. Without it no participant flagged external is granted here (the share job
+    /// grants them).</param>
     public DirectThreadAccessService(
         IGenericEntityService entityService,
         IDataverseRecordShareService accessGrant,
@@ -85,10 +92,12 @@ public sealed class DirectThreadAccessService : IDirectThreadAccessService
         Sprk.Bff.Api.Services.Signals.GateDecisionRecordSharing gateDecisionRecords,
         DirectMessageOwnerTeam directMessageOwnerTeam,
         DataverseWebApiClient? webApi = null,
-        CoreAncestorResolver? coreAncestors = null)
+        CoreAncestorResolver? coreAncestors = null,
+        IServiceScopeFactory? scopes = null)
     {
         _webApi = webApi;
         _coreAncestors = coreAncestors;
+        _scopes = scopes;
         _directMessageOwnerTeam = directMessageOwnerTeam ?? throw new ArgumentNullException(nameof(directMessageOwnerTeam));
         _entityService = entityService ?? throw new ArgumentNullException(nameof(entityService));
         _accessGrant = accessGrant ?? throw new ArgumentNullException(nameof(accessGrant));
@@ -270,7 +279,10 @@ public sealed class DirectThreadAccessService : IDirectThreadAccessService
 
             IReadOnlyList<Guid> principals = assignment.Audience switch
             {
-                ThreadGrantAudience.DirectParticipants => await ReadDirectParticipantsForGrantAsync(threadId, ct),
+                // uac-r2 197b: a participant flagged external is granted only what THE predicate allows (the NoRoot exemption only
+                // for a member of a recognized unfiled Direct message's stamped pair, bound i').
+                ThreadGrantAudience.DirectParticipants => await ClearDirectParticipantsAsync(
+                    communicationId, threadId, await ReadDirectParticipantsForGrantAsync(threadId, ct), ct),
                 ThreadGrantAudience.AnchorRecordMembers => await ClearAnchorGranteesAsync(
                     communicationId, threadId, await GetAnchorGranteesAsync(communicationId, assignment, messageOwningTeam, ct), ct),
                 _ => Array.Empty<Guid>(),
@@ -380,16 +392,16 @@ public sealed class DirectThreadAccessService : IDirectThreadAccessService
         // here; the share job retries the message. R2: a disabled participant is not granted either (settled, not retried).
         var bar = new RestrictedFilingShareBar(
             _entityService, _coreAncestors is { } resolver ? resolver.ProbeColumnsAsync : null, _accessGrant, _webApi, _logger);
-        var (eligible, complete) = await bar.EligibleForGrantAsync(communicationId, participants, excludeDisabled: true, ct);
-        if (!complete)
+        var eligibility = await bar.EligibilityForGrantAsync(communicationId, participants, excludeDisabled: true, ct);
+        if (!eligibility.Complete)
         {
             _logger.LogWarning(
                 "Message {CommunicationId}: {NotCleared} of its {Participants} participant(s) could not be cleared by the Restricted " +
                 "bar; they are not granted now, and the share reconciliation retries it (ThreadId={ThreadId}).",
-                communicationId, participants.Count - eligible.Count, participants.Count, threadId);
+                communicationId, participants.Count - eligibility.Eligible.Count, participants.Count, threadId);
         }
 
-        participants = eligible;
+        participants = eligibility.Eligible;
         if (participants.Count == 0)
             return;
 
@@ -397,17 +409,201 @@ public sealed class DirectThreadAccessService : IDirectThreadAccessService
         if (!await DirectMessageParticipantShares.OwnerUnchangedAsync(_entityService, communicationId, directTeam, "grant", _logger, ct))
             return;
 
-        await GrantReadAccessToPrincipalsAsync(communicationId, threadId, participants, ct);
-        await GrantDirectContentRowsAsync(communicationId, threadId, directTeam, participants, ct);
+        var contentRows = await ReadDirectContentRowsAsync(communicationId, threadId, directTeam, ct);
+
+        // uac-r2 task 197b: a participant flagged external is granted a row only when THE predicate allows it
+        // (DirectMessageParticipantShares.DecideForDirectParticipantsAsync, one call over the message and its content rows). The
+        // participant-scoped NoRoot exemption applies only when the message is positively recognized as an unfiled Direct message
+        // (bound i': RecognizeUnfiledDirectMessageAsync) whose stamped pair is this audience (bound iii). This grant never revokes:
+        // a flagged participant's share on a hidden row is removed by the share job's reconcile, which lists the message after its
+        // owner write. Unflagged participants never ask the predicate.
+        var flagged = participants.Where(eligibility.FlaggedExternal.Contains).ToHashSet();
+        Func<string, Guid, IReadOnlyList<Guid>> granteesFor = (_, _) => participants;
+        DirectMessageParticipantShares.DirectMessageRecognition? recognition = null;
+        if (flagged.Count > 0)
+        {
+            recognition = await DirectMessageParticipantShares.RecognizeUnfiledDirectMessageAsync(_entityService, communicationId, _logger, ct);
+            if (recognition is not null && !recognition.Pair.SetEquals(derivedParticipants))
+                recognition = null; // re-stamped since the audience was read: no exemption on this pass
+            var answers = await DecideForFlaggedParticipantsAsync(
+                communicationId, contentRows.Append((Table: MessageEntity, Id: communicationId)).ToList(),
+                directPairRecognized: recognition is not null, ct);
+            granteesFor = (table, id) => participants
+                .Where(u => !flagged.Contains(u)
+                            || (answers.TryGetValue((table, id), out var answer) && answer == DirectMessageParticipantShares.FlaggedAnswer.Grant))
+                .ToList();
+
+            // 197b review F1: the decision above took reads of its own, so the owner and what the exemption rests on (still unfiled,
+            // still on the same Direct thread and pair) are read again right before the message grant; a changed message grants
+            // nothing here (the share job lists it and reconciles).
+            if (!await StillTheSameDirectMessageAsync(communicationId, directTeam, recognition, "grant after the visibility decision", ct))
+                return;
+        }
+
+        await GrantReadAccessToPrincipalsAsync(communicationId, threadId, granteesFor(MessageEntity, communicationId), ct);
+
+        // 197b review pass 2 F1: with flagged participants in the audience, the content rows are granted only while the message is
+        // still the Direct team's, and still the recognized Direct message (each content row is also confirmed by its own owner below).
+        if (flagged.Count > 0 && !await StillTheSameDirectMessageAsync(communicationId, directTeam, recognition, "content grants", ct))
+            return;
+
+        await GrantDirectContentRowsAsync(communicationId, threadId, directTeam, contentRows, granteesFor, ct);
     }
 
     /// <summary>
-    /// Read on each <see cref="DirectContentRows"/> row of the message that <paramref name="directTeam"/> owns, to each
-    /// participant. Best-effort per table, row and principal, as the message grant is.
+    /// 197b review F1 (bound i'): the message is still owned by <paramref name="directTeam"/> and, when the NoRoot exemption was
+    /// in play (<paramref name="recognition"/> not null), still the same unfiled Direct message on the same thread and pair.
+    /// Either changed (or unreadable): <c>false</c>, logged, and the caller grants nothing more.
     /// </summary>
-    private async Task GrantDirectContentRowsAsync(
-        Guid communicationId, Guid threadId, Guid directTeam, IReadOnlyList<Guid> participants, CancellationToken ct)
+    private async Task<bool> StillTheSameDirectMessageAsync(
+        Guid communicationId, Guid directTeam, DirectMessageParticipantShares.DirectMessageRecognition? recognition, string step,
+        CancellationToken ct)
     {
+        if (!await DirectMessageParticipantShares.OwnerUnchangedAsync(_entityService, communicationId, directTeam, step, _logger, ct))
+            return false;
+        return recognition is null || await StillRecognizedAsync(communicationId, recognition, step, ct);
+    }
+
+    /// <summary>
+    /// 197b bound (i'): the message is re-read and is still the unfiled Direct message <paramref name="recognition"/> found (same
+    /// thread, same pair). Otherwise (re-filed, moved, re-stamped, or unreadable) <c>false</c>, logged.
+    /// </summary>
+    private async Task<bool> StillRecognizedAsync(
+        Guid communicationId, DirectMessageParticipantShares.DirectMessageRecognition recognition, string step, CancellationToken ct)
+    {
+        var now = await DirectMessageParticipantShares.RecognizeUnfiledDirectMessageAsync(_entityService, communicationId, _logger, ct);
+        if (recognition.SameAs(now))
+            return true;
+        _logger.LogInformation(
+            "Message {CommunicationId} is no longer the unfiled Direct message it was at the external visibility decision (before " +
+            "{Step}); nothing more is granted here (ThreadId={ThreadId}).", communicationId, step, recognition.ThreadId);
+        return false;
+    }
+
+    /// <summary>
+    /// uac-r2 task 197b: THE predicate (the 191h seam, scoped, so resolved in a scope of its own: this service is a singleton) for
+    /// the flagged participants of a Direct message. <paramref name="directPairRecognized"/>: the message was positively
+    /// recognized as an unfiled Direct message (bound i', <see cref="DirectMessageParticipantShares.RecognizeUnfiledDirectMessageAsync"/>)
+    /// and the answer is applied only to members of its stamped pair (the participant-scoped NoRoot exemption applies); otherwise
+    /// NoRoot is not granted. No scope factory (a test composition): every row defers (no flagged participant is granted here).
+    /// </summary>
+    private async Task<IReadOnlyDictionary<(string Table, Guid Id), DirectMessageParticipantShares.FlaggedAnswer>> DecideForFlaggedParticipantsAsync(
+        Guid communicationId, IReadOnlyCollection<(string Table, Guid Id)> rows, bool directPairRecognized, CancellationToken ct)
+    {
+        if (_scopes is null)
+        {
+            return await DirectMessageParticipantShares.DecideForDirectParticipantsAsync(
+                null, communicationId, rows, directPairRecognized, _logger, ct);
+        }
+
+        await using var scope = _scopes.CreateAsyncScope();
+        AppOnlyExternalVisibility? seam;
+        try
+        {
+            seam = scope.ServiceProvider.GetService<AppOnlyExternalVisibility>();
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            // The seam could not be built: no flagged participant is granted here (every row defers), and the grant goes on.
+            _logger.LogWarning(ex, "Message {CommunicationId}: the external visibility decision could not be created.", communicationId);
+            seam = null;
+        }
+
+        return await DirectMessageParticipantShares.DecideForDirectParticipantsAsync(
+            seam, communicationId, rows, directPairRecognized, _logger, ct);
+    }
+
+    /// <summary>
+    /// uac-r2 task 197b: the Direct two-party list of a message the Direct team does NOT own (user-owned, or another ordinary team's:
+    /// the join's Direct branch), cleared for users flagged external. A user the flag read returns unflagged is granted as before.
+    /// A flagged user, or one whose flag cannot be read (not returned, a read fault, no reader; treated as flagged), is granted
+    /// only when THE predicate allows it: Visible, or, for a member of the message's stamped pair on a message positively
+    /// recognized as an unfiled Direct message (bound i', whoever owns it), exactly no root (the participant-scoped exemption).
+    /// An unfiled message that is not recognized (an ordinary email, no valid pair), or a grantee outside the pair, gets nothing
+    /// on no root. A Hidden message grants them nothing. When the exemption granted anyone, the message is re-recognized right
+    /// before returning; if it changed (re-filed, moved, re-stamped) nobody is granted here. Never revokes (the 191c engine owns
+    /// flagged users' shares on such rows, and consults the same exemption).
+    /// </summary>
+    private async Task<IReadOnlyList<Guid>> ClearDirectParticipantsAsync(
+        Guid communicationId, Guid threadId, IReadOnlyList<Guid> participants, CancellationToken ct)
+    {
+        if (participants.Count == 0)
+            return participants;
+
+        Dictionary<Guid, Sprk.Bff.Api.Api.ExternalAccess.InternalShareEndpoints.SystemUserRow> users = new();
+        if (_webApi is not null)
+        {
+            // 197b review F2: no job re-grants a message the Direct team does not own, so a transient fault is retried once here.
+            // A second fault fails closed (only a participant the predicate shows the message to is granted) and is logged as an
+            // Error: an internal participant may then lack Read on this message until it is granted again.
+            for (var attempt = 1; ; attempt++)
+            {
+                try
+                {
+                    users = await RestrictedExternalShareRemover.ReadUsersAsync(_webApi, participants.Distinct().ToList(), ct);
+                    break;
+                }
+                catch (Exception ex) when (attempt < 2 && (ex is not OperationCanceledException || !ct.IsCancellationRequested))
+                {
+                    _logger.LogWarning(ex, "Message {CommunicationId}: its Direct participants' external flags could not be read; " +
+                        "retrying once (ThreadId={ThreadId}).", communicationId, threadId);
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+                {
+                    _logger.LogError(ex, "Message {CommunicationId}: its Direct participants' external flags could not be read twice; " +
+                        "only a participant the external visibility predicate shows the message to is granted, and the others are NOT " +
+                        "granted Read on it (ThreadId={ThreadId}).", communicationId, threadId);
+                    break;
+                }
+            }
+        }
+
+        var unflagged = participants.Where(id => users.TryGetValue(id, out var user) && user.IsExternal != true).ToList();
+        var others = participants.Where(id => !unflagged.Contains(id)).ToList();
+        if (others.Count == 0)
+            return participants;
+
+        // Bound (i'): the exemption is asked only for the flagged members of a recognized unfiled Direct message's stamped pair
+        // (bound iii); everyone else flagged is asked without it.
+        var recognition = await DirectMessageParticipantShares.RecognizeUnfiledDirectMessageAsync(_entityService, communicationId, _logger, ct);
+        List<Guid> inPair = recognition is null ? [] : others.Where(recognition.Pair.Contains).ToList();
+        var outsidePair = others.Where(id => !inPair.Contains(id)).ToList();
+
+        var granted = new List<Guid>();
+        if (inPair.Count > 0 && await MessageAllowedAsync(directPairRecognized: true))
+            granted.AddRange(inPair);
+        var exemptionGranted = granted.Count > 0;
+        if (outsidePair.Count > 0 && await MessageAllowedAsync(directPairRecognized: false))
+            granted.AddRange(outsidePair);
+
+        _logger.LogInformation("Message {CommunicationId}: {Granted} of {Count} Direct participant(s) flagged external (or unreadable) " +
+            "are granted ({InPair} of them in its recognized Direct pair) (ThreadId={ThreadId}).",
+            communicationId, granted.Count, others.Count, inPair.Count, threadId);
+
+        // Bound (i') re-check: the exemption rests on the message being this unfiled Direct message; re-filed in between, nobody
+        // is granted here (its new filing's own grant and reconcile decide).
+        if (exemptionGranted && !await StillRecognizedAsync(communicationId, recognition!, "the participant grant", ct))
+            return [];
+
+        return participants.Where(id => unflagged.Contains(id) || granted.Contains(id)).ToList();
+
+        async Task<bool> MessageAllowedAsync(bool directPairRecognized)
+        {
+            var answers = await DecideForFlaggedParticipantsAsync(
+                communicationId, [(MessageEntity, communicationId)], directPairRecognized, ct);
+            return answers.TryGetValue((MessageEntity, communicationId), out var answer)
+                && answer == DirectMessageParticipantShares.FlaggedAnswer.Grant;
+        }
+    }
+
+    /// <summary>
+    /// The <see cref="DirectContentRows"/> rows of the message that <paramref name="directTeam"/> owns. Best-effort per table: a
+    /// read that faults is logged and that table's rows are not granted here (the share job retries them).
+    /// </summary>
+    private async Task<IReadOnlyList<(string Table, Guid Id)>> ReadDirectContentRowsAsync(
+        Guid communicationId, Guid threadId, Guid directTeam, CancellationToken ct)
+    {
+        var found = new List<(string Table, Guid Id)>();
         foreach (var (table, messageLookup) in DirectContentRows)
         {
             List<Guid> rowIds;
@@ -441,36 +637,53 @@ public sealed class DirectThreadAccessService : IDirectThreadAccessService
                     MaxDirectContentRowsPerTable, communicationId, threadId, table);
             }
 
-            foreach (var rowId in rowIds)
-            {
-                // 198 pass 2 F1: the row's shares first (198 fix round K2: only a participant holding NO share on it is granted,
-                // so a mismatch below never revokes a share this call did not make), then grant-then-confirm by the row's owner id.
-                // A read fault, a grant fault, or an owner that is no longer exactly the Direct team grants nothing that stays
-                // here; the share job (SecureChildShareReconciliationJob's Direct pass) retries the message.
-                IReadOnlyList<DataversePrincipalAccess> existingShares;
-                try
-                {
-                    existingShares = await _accessGrant.GetPrincipalAccessOrThrowAsync(table, rowId, ct);
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(
-                        ex,
-                        "Direct message content-row shares could not be read; not granted here, the share reconciliation retries it " +
-                        "| CommunicationId={CommunicationId}, ThreadId={ThreadId}, Table={Table}, RowId={RowId}",
-                        communicationId, threadId, table, rowId);
-                    continue;
-                }
+            found.AddRange(rowIds.Select(id => (table, id)));
+        }
 
-                var (_, complete) = await DirectMessageParticipantShares.GrantContentRowAndConfirmAsync(
-                    _entityService, _accessGrant, table, rowId, directTeam, participants, existingShares, communicationId, _logger, ct);
-                if (!complete)
-                {
-                    _logger.LogWarning(
-                        "Direct message content row not settled (a grant failed, or its owner is no longer the Direct team); the share " +
-                        "reconciliation retries it | CommunicationId={CommunicationId}, ThreadId={ThreadId}, Table={Table}, RowId={RowId}",
-                        communicationId, threadId, table, rowId);
-                }
+        return found;
+    }
+
+    /// <summary>
+    /// Read on each of <paramref name="rows"/> (the message's Direct-team-owned content rows) to the participants
+    /// <paramref name="granteesFor"/> names for that row. Best-effort per row and principal, as the message grant is.
+    /// </summary>
+    private async Task GrantDirectContentRowsAsync(
+        Guid communicationId, Guid threadId, Guid directTeam, IReadOnlyList<(string Table, Guid Id)> rows,
+        Func<string, Guid, IReadOnlyList<Guid>> granteesFor, CancellationToken ct)
+    {
+        foreach (var (table, rowId) in rows)
+        {
+            var participants = granteesFor(table, rowId);
+            if (participants.Count == 0)
+                continue;
+
+            // 198 pass 2 F1: the row's shares first (198 fix round K2: only a participant holding NO share on it is granted,
+            // so a mismatch below never revokes a share this call did not make), then grant-then-confirm by the row's owner id.
+            // A read fault, a grant fault, or an owner that is no longer exactly the Direct team grants nothing that stays
+            // here; the share job (SecureChildShareReconciliationJob's Direct pass) retries the message.
+            IReadOnlyList<DataversePrincipalAccess> existingShares;
+            try
+            {
+                existingShares = await _accessGrant.GetPrincipalAccessOrThrowAsync(table, rowId, ct);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(
+                    ex,
+                    "Direct message content-row shares could not be read; not granted here, the share reconciliation retries it " +
+                    "| CommunicationId={CommunicationId}, ThreadId={ThreadId}, Table={Table}, RowId={RowId}",
+                    communicationId, threadId, table, rowId);
+                continue;
+            }
+
+            var (_, complete) = await DirectMessageParticipantShares.GrantContentRowAndConfirmAsync(
+                _entityService, _accessGrant, table, rowId, directTeam, participants, existingShares, communicationId, _logger, ct);
+            if (!complete)
+            {
+                _logger.LogWarning(
+                    "Direct message content row not settled (a grant failed, or its owner is no longer the Direct team); the share " +
+                    "reconciliation retries it | CommunicationId={CommunicationId}, ThreadId={ThreadId}, Table={Table}, RowId={RowId}",
+                    communicationId, threadId, table, rowId);
             }
         }
     }

@@ -888,6 +888,28 @@ public sealed class ExternalDeleteOwnTests : IClassFixture<ExternalDeleteOwnTest
         _fixture.Steps.Should().BeEmpty("neither the file nor the row is deleted");
     }
 
+    // uac-r2 task 191h fix round 1 (F1): a to-do or event the external lists hide (THE external visibility predicate) is not
+    // deleted either: Hidden and Undecided are the uniform 403, a decision that could not be made is the 503.
+
+    [Theory]
+    [InlineData("todos", LiveParentDecision.Withheld, HttpStatusCode.Forbidden, "sdap.access.deny.delete_own")]
+    [InlineData("todos", LiveParentDecision.Unavailable, HttpStatusCode.ServiceUnavailable, "sdap.access.delete_own_unavailable")]
+    [InlineData("events", LiveParentDecision.Withheld, HttpStatusCode.Forbidden, "sdap.access.deny.delete_own")]
+    [InlineData("events", LiveParentDecision.Unavailable, HttpStatusCode.ServiceUnavailable, "sdap.access.delete_own_unavailable")]
+    public async Task Task191h_ARowTheExternalListsHide_IsRefused_AndNothingIsDeleted(
+        string segment, LiveParentDecision decision, HttpStatusCode expected, string reasonCode)
+    {
+        var id = _fixture.Seed(KindOf(segment), contact: CallerContact, parents: Project(RecordA));
+        _fixture.Principal = ContactOn(RecordA, ExternalAccessLevel.Collaborate);
+        _fixture.Data.ExternalVisibility[(KindOf(segment), id)] = decision;
+
+        using var response = await Delete(segment, id);
+
+        response.StatusCode.Should().Be(expected);
+        ProblemCode(await response.Content.ReadAsStringAsync()).Should().Be(reasonCode);
+        _fixture.Exists(KindOf(segment), id).Should().BeTrue("nothing is deleted");
+    }
+
     [Fact]
     public async Task RequesterReadFault_OnAServiceRequestParent_Is503_AndNothingIsDeleted()
     {
@@ -2077,6 +2099,14 @@ public sealed class ExternalDeleteOwnTests : IClassFixture<ExternalDeleteOwnTest
         public override Task<LiveParentDecision> CheckLiveParentsAsync(
             DeletableKind kind, Guid id, CallerPrincipal caller, CancellationToken ct = default) =>
             Task.FromResult(LiveParents.TryGetValue((kind, id), out var decision) ? decision : LiveParentDecision.Readable);
+
+        /// <summary>uac-r2 task 191h fix round 1: what the external visibility write gate answers per row (Readable when a test sets
+        /// nothing; the gate itself is pinned by <c>ExternalListVisibilityTests</c> over the real predicate).</summary>
+        public ConcurrentDictionary<(DeletableKind Kind, Guid Id), LiveParentDecision> ExternalVisibility { get; } = new();
+
+        public override Task<LiveParentDecision> CheckExternalVisibilityAsync(
+            DeletableKind kind, Guid id, CallerPrincipal caller, CancellationToken ct = default) =>
+            Task.FromResult(ExternalVisibility.TryGetValue((kind, id), out var decision) ? decision : LiveParentDecision.Readable);
 
         public ConcurrentDictionary<Guid, Guid> Requesters { get; } = new();
 

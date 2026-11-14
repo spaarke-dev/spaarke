@@ -1,0 +1,116 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="268" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>H7b S26: verify the invoice money and firm column lock (ebilling task 166, EB-D-200)</title>
+    <phase>Model 1 dedicated-stamp remediation — ebilling coordination (owner go 2026-11-11: "Do the H7b check first")</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .cs in H7b (SecureRecordSetupProcedure.cs) and its ProcedureVersion; a field-security lock check whose false pass would let users set invoice amounts.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Security lock verification in the H7b procedure; tags security and field-security.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Changes H7b SecureRecordSetupProcedure.cs and its ProcedureVersion; sequential with any other H7b work (H7c, the Set-CustomerOwnerTeams follow-up touch neither file but H7c touches H7b's neighbours).</parallel-reason>
+    <deps>267</deps>
+    <tags>provisioning, provisioning-handler, l2-controlplane, dataverse, security, field-security, testing</tags>
+    <estimated-effort>0.5 day</estimated-effort>
+  </metadata>
+
+  <prompt>ebilling-r1 task 166 (owner decision EB-D-200) field-secured seven sprk_invoice columns — the billed total, the five derived totals and the firm lookup — so that only the BFF can set them; it reached master with ebilling PR #2689 (merge 2fc434c912, 2026-11-11). Add an H7b step that refuses a stamp whose lock on those seven columns is not whole, so a BFF built from master never runs where a user could set an invoice amount.</prompt>
+
+  <role>SPAARKE platform developer (L2 handler H7b). Verification only: the lock ships in SpaarkeMaster and H7b already maintains the two BFF-managed profiles' memberships (S10–S12).</role>
+
+  <goal>
+    H7b passes only when, for each of the seven columns on sprk_invoice: the column exists and IsSecured is true; "Spaarke BFF-Managed Field
+    Readers" grants Read (4); "Spaarke BFF-Managed Field Writers" grants Read/Create/Update (4/4/4); and no profile other than the Writers
+    profile and the platform System Administrator profile may create or update it. An incomplete lock refuses Resumable (import the release /
+    run ebilling's script, then resume); another writer refuses QuarantineRequired. Nothing is written by the new step.
+  </goal>
+
+  <context>
+    <background>
+      Columns (docs/data-model/sprk_invoice.md "Field security on the amounts and the firm"): sprk_totalamount, sprk_approvedtotal,
+      sprk_feestotal, sprk_expensestotal, sprk_lineadjustmentstotal, sprk_invoiceadjustmentstotal, sprk_vendororg. Source of truth for the
+      list: scripts/ebilling/Set-EbillingInvoiceMoneyFieldSecurity.ps1 `$Columns` (pinned to the package by ebilling's
+      InvoiceMoneyFieldSecurityAgreementTests). Packaged: src/dataverse/solutions/SpaarkeMaster/Entities/sprk_Invoice/Entity.xml (IsSecured=1)
+      and Other/FieldSecurityProfiles.xml (Readers R4, Writers 4/4/4; no other profile). sprk_firmhold is secured by a different ebilling
+      script and is NOT in EB-D-200 — out of scope here (note it as a known limit). SpaarkeMaster's Solution.xml still reads 1.3.0.0 on
+      master; ACME has 1.3.0.0 installed from before task 166, so ACME would refuse S26 until a release carrying 166 is imported — the
+      correct outcome (the ordering rule "no stamp BFF with ebilling 092+ before …" made mechanical for 166).
+    </background>
+    <relevant-files>
+      <file role="modify">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/SecureRecordSetup/SecureRecordSetupProcedure.cs — constants InvoiceMoneyTable + InvoiceMoneyColumns (beside IdentityLinkColumns); S26 right after S14 (reuses readerProfileId, writerProfileId, systemAdministratorProfiles); copy S18's loop shape</file>
+      <file role="modify">.../SecureRecordSetup/SecureRecordSetupRejectionCodes.cs — InvoiceMoneyLockIncomplete (Resumable), InvoiceMoneyLockOtherWriter (QuarantineRequired)</file>
+      <file role="modify">.../SecureRecordSetup/H7bSecureRecordSetupHandler.cs — ProcedureVersion → "secure-setup-procedure=9"</file>
+      <file role="modify">src/server/services/Sprk.Provisioning.ControlPlane.Tests/Handlers/SecureRecordSetup/FakeSecureRecordSetupDataverse.cs — seed the seven columns' lock by default (as IdentityLinkColumns, line ~169)</file>
+      <file role="modify">.../SecureRecordSetup/SecureRecordSetupProcedureTests.cs — theory rows (copy the IdentityLinkLock rows ~638–669)</file>
+      <file role="modify">.../SecureRecordSetup/H7bSecureRecordSetupHandlerTests.cs — v8-completed run does not short-circuit (copy the v7 test ~401)</file>
+      <file role="create">src/server/services/Sprk.Provisioning.ControlPlane.Tests/Handlers/InvoiceMoneyColumnLockPackagedTests.cs — pin InvoiceMoneyColumns to ebilling's script `$Columns`, to the packaged profiles (Readers R4/C0/U0, Writers 4/4/4, no other profile) and to Entity.xml IsSecured=1; seeded-text controls (copy ContactIdentityBindingSchemaPackagedTests)</file>
+      <file role="modify">docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md — H7b row / S-list: S26 and its remedy</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="verify only">S26 writes nothing and removes nothing; it reads ListFieldPermissionsAsync / IsAttributeSecuredAsync (existing seam members) only. No new seam member.</constraint>
+    <constraint source="EB-D-200">The list is exactly ebilling's seven; a test fails if ebilling's script list and H7b's list differ.</constraint>
+    <constraint source="F4">System Administrator is the only profile excepted from the other-writer check; the Readers profile is NOT excepted (every default team is its member).</constraint>
+    <constraint source="H7b idempotency">ProcedureVersion → "secure-setup-procedure=9" with a test that a v8-completed run does not short-circuit.</constraint>
+    <constraint source="owner">No live Azure/Dataverse change and no deploy in this task.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/provisioning.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>docs/data-model/sprk_invoice.md ("Field security on the amounts and the firm")</file>
+      <file>projects/customer-provisioning-orchestration-r1/tasks/267-writer-unit-and-customer-team-basic-user.poml (notes: H7b review findings)</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Constants + rejection codes + S26 after S14 + ProcedureVersion 9.</step>
+    <step order="2">Fake seeding; procedure theory rows; v8 re-run test; packaged pin test with controls.</step>
+    <step order="3">Guide; control-plane tests; ArchTests; code-review + adr-check; adversarial ×2 (security).</step>
+    <step order="4">TASK-INDEX `✅ [done]`; notes; current-task.md; message ebilling-r1.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the packaged profiles grant any of the seven to a profile other than Readers/Writers, or the Readers grant is not 4/0/0, STOP and tell ebilling-r1 and the owner (the package contradicts EB-D-200).</trigger>
+  </escalation>
+
+  <justification>
+    <existing>S14 (sprk_issecure lock on the BFF-managed profiles) and S18 (identity-link column lock loop) in SecureRecordSetupProcedure.cs; ebilling's Set-EbillingInvoiceMoneyFieldSecurity.ps1 -Verify (operator-run, not part of a provisioning run).</existing>
+    <extension>Yes — S26 extends the H7b procedure with S18's loop shape over a new codified list; it adds two rejection codes and no seam member. The script cannot be extended instead: the L2 Worker runs no PowerShell (G38/T253).</extension>
+    <cost-of-doing-nothing>A stamp whose package predates ebilling 166, or whose lock was loosened, passes provisioning, and a BFF from master runs there while any user can set an invoice's billed or approved total or its firm.</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="code">H7b SecureRecordSetupProcedure.cs (S26), SecureRecordSetupRejectionCodes.cs, H7bSecureRecordSetupHandler.cs</output>
+    <output type="test">src/server/services/Sprk.Provisioning.ControlPlane.Tests (procedure, handler, packaged pin)</output>
+    <output type="docs">docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">S26 passes when all seven columns are secured with Readers R4 and Writers 4/4/4 and no other writer; writes nothing.</criterion>
+    <criterion testable="true">Negative (Resumable, InvoiceMoneyLockIncomplete): a column absent; IsSecured false; Readers grant missing or Read != 4; Writers grant missing or any of Read/Create/Update != 4. The message names the table.column and the remedy.</criterion>
+    <criterion testable="true">Negative (QuarantineRequired, InvoiceMoneyLockOtherWriter): another profile — the Readers profile included — with Create or Update on a column. Must-not-fire: System Administrator with Create/Update.</criterion>
+    <criterion testable="true">A v8-completed run does not short-circuit past S26.</criterion>
+    <criterion testable="true">Packaged pin: H7b's list equals ebilling's script `$Columns`; each is IsSecured=1 in Entity.xml; the package's Readers/Writers grants match; no other packaged profile grants them; the scans have seeded must-fire and must-not-fire controls.</criterion>
+    <criterion testable="true">All Sprk.Provisioning.ControlPlane tests pass; ArchTests pass. Test scope: the stated contract plus the negatives above.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    <note date="2026-11-11">Created after ebilling PR #2689 reached master (2fc434c912). Owner: "Do the H7b check first". Master merged into the branch first (b94d351d2a).</note>
+    <note date="2026-11-12">Implemented (1fa31177d0): S26 in SecureRecordSetupProcedure right after S14, before any write — per column ListFieldPermissionsAsync filtered to sprk_invoice + IsAttributeSecuredAsync; incomplete → Resumable secure_setup.invoice_money_lock_incomplete, other writer (Create or Update = 4, not Writers, not System Administrator) → QuarantineRequired secure_setup.invoice_money_lock_other_writer. ProcedureVersion 9. InvoiceMoneyColumnLockPackagedTests pins the list to ebilling's script ($Columns, $Table), Entity.xml IsSecured and FieldSecurityProfiles.xml grants. Three files added to ebilling's D-130 AmountColumnBaseline (they name the columns for a lock check; no amount read or summed). Guide H7b row + S26 bullet + change log, provisioning.md updated. sprk_firmhold excluded (not EB-D-200). No live change.</note>
+    <note date="2026-11-12">Step 9.5: adversarial ×2 (opus security, sonnet tests). Fixed: F1 System Administrator was excused by NAME (a look-alike profile would pass) → matched by its fixed id 572329c1-a042-4e22-be47-367c6374ea45 (same as ebilling's script) in S14/S18/S19/S22/S26, with must-fire look-alike rows; F2 the remedy named a re-import of 1.3.0.0, which H6 skips → names a release ABOVE 1.3.0.0 carrying 166 or ebilling's script; F2 misleading Readers wording in four refusals; F2 stale guide row + missing change-log row; K3/K4 test hardening. Fix round 6929b3b10f. Scoped sonnet re-check of the fix diff: one F3 (the "Systém Administrator" row passed under the old code too — the fake's name lookup ignores case, not accents) → row now uses the exact name on S14's path; both look-alike rows proven to FAIL with the by-name exemption put back, and pass now. rework: fix-round-1 task 268.</note>
+    <note date="2026-11-12">Known limits (K, not defects): K1 refusals stop at the first failing column/check, so one fix → resume → next refusal; K2 the script-column regex stops at ')' (fails loudly, never silently); sec-K1 per-record field shares (POA) are not checked; sec-K2 an extra read-only grant is not refused (ebilling's -Verify is stricter); sec-K3 field mapping / AI writes are BFF-side, not checked here; K an org whose System Administrator profile had another id would be quarantined (fail closed, same as the script).</note>
+    <note date="2026-11-12">RELEASE CONSEQUENCE: the published SpaarkeMaster 1.3.0.0 predates 166 and H6 skips an installed version, so from procedure 9 every new run stops at H7b S26 until a SpaarkeMaster ABOVE 1.3.0.0 carrying 166 is published (ebilling-r1 owes it) or Set-EbillingInvoiceMoneyFieldSecurity.ps1 is run per stamp with the owner's OK. Out of scope, filed: #2725 / ISS-028 — 19 operator scripts excuse System Administrator by name (owners uac-r2 / external-access r3, ebilling-r1).</note>
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

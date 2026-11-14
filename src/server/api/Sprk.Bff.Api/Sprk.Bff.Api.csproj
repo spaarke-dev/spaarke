@@ -22,8 +22,9 @@
     <RootNamespace>Sprk.Bff.Api</RootNamespace>
     <!-- task 041 (r3 mechanical baseline): BFF surface opts IN to the root Directory.Build.props
          TreatWarningsAsErrors=true gate. Non-curated nullable warnings (CS8602/CS8619/CS8625/CS8766)
-         were FIXED (not suppressed); the curated WarningsNotAsErrors allowlist (CS0618 deferred-NG4
-         obsolete usage, CS8601/CS8604 per-site nullable, CS1998, CS0109) remains the documented policy. -->
+         were FIXED (not suppressed). The root WarningsNotAsErrors allowlist is now empty: CS0109/CS1998/
+         CS8601/CS8604 were removed 2026-08-15 and CS0618 re-armed 2026-11-11 (reuse-governance-tightening-r1
+         task 042). Policy: Directory.Build.props comment. -->
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <UserSecretsId>cbc576fa-6ea6-485a-bb2a-d96130f21f20</UserSecretsId>
     <!-- FR-A1: framework-dependent linux-x64 publish (App Service is Linux). Trims multi-platform native RIDs. -->

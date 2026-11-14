@@ -8,11 +8,12 @@
  *
  * RIGHTS (task 054). Upload needs Create and download needs Read on the record. A host that knows better passes
  * `canUpload` / `canDownload`; otherwise download follows `accessLevel` (Collaborate / Full Access), and Upload follows
- * the BFF's `canCreate` on the record's document list (a matter, work assignment or service request) or `accessLevel`
- * (a project). For a caller whose write access is decided per record (`writeAccessPerRecord`, task 036), download and
- * version history are offered wherever the list rendered (the list already passed the Read the download routes need), and
- * a project's Upload follows its list's `canCreate`. This is only what is SHOWN: the server decides, and a refused upload
- * shows its 403 as an error.
+ * the BFF's `canCreate` on the record's document list (a matter, work assignment or service request), or, on a project,
+ * that `canCreate` AND `accessLevel` (R4 D-9: the shared `listCreateRightOf` rule; a list that answered without
+ * `canCreate` follows the level; nothing is offered before the list answers). For a caller whose write access is decided
+ * per record (`writeAccessPerRecord`, task 036), download and version history are offered wherever the list rendered (the
+ * list already passed the Read the download routes need), and a project's Upload follows its list's `canCreate` alone.
+ * This is only what is SHOWN: the server decides, and a refused upload shows its 403 as an error.
  *
  * DELETE-OWN (task 054, FR-26). With a `caller` identity, a row the caller created (creator stamp = the signed-in
  * principal) shows Delete, which asks first (shared ConfirmModal). 204 removes the row; a 403 / 409 / 503 / 500 shows a
@@ -47,12 +48,6 @@ import {
   Spinner,
   Text,
   Badge,
-  Dialog,
-  DialogSurface,
-  DialogTitle,
-  DialogBody,
-  DialogActions,
-  DialogContent,
   Tooltip,
   MessageBar,
   MessageBarBody,
@@ -64,12 +59,12 @@ import {
   DeleteRegular,
   HistoryRegular,
   DocumentRegular,
-  DismissRegular,
 } from '@fluentui/react-icons';
 // Deep component imports — avoids loading Virtualized* components that need react-window
 import { FileUploadZone, UploadedFileList } from '@spaarke/ui-components/components/FileUpload';
 import type { IUploadedFile, IFileValidationError } from '@spaarke/ui-components/components/FileUpload';
 import { AiSummaryPopover } from '@spaarke/ui-components/components/AiSummaryPopover';
+import { FormModal, SprkModal } from '@spaarke/ui-components/components/SprkModal';
 import {
   getDocuments,
   getRecordDocuments,
@@ -83,7 +78,16 @@ import {
 import { isCreatedByCaller, type CallerIdentity } from '../api/delete-own';
 import { useDeleteOwn, DeleteOwnConfirm, DeleteFailureNotice } from './DeleteOwn';
 import { TruncatedListNotice } from './TruncatedListNotice';
+import {
+  currentFocusTarget,
+  type FocusTarget,
+  restoreFocusTo,
+  useChildDialog,
+  useOfferCreateAction,
+  type CreateActionReporter,
+} from './createAction';
 import { bffApiCall, bffApiBlob, problemMessage } from '../auth/bff-client';
+import { levelVerdictOf, listCreateRightOf, type CreateRight } from './record/recordAccess';
 import { AccessLevel, ApiError } from '../types';
 
 // ---------------------------------------------------------------------------
@@ -429,67 +433,59 @@ const VersionHistoryPanel: React.FC<VersionHistoryPanelProps> = ({
     };
   }, [root, recordId, documentId, open]);
 
+  // A read-only list: the base SprkModal (task 004, FR-03). `BrowseModal` is a record-browse preset (a stage + metadata grid
+  // with a "N of M" nav), which a version list is not. Light dismiss (Esc, backdrop, ×) closes it, and the footer's single
+  // Close is the right-hand primary, as the other Close-only presets (`PreviewModal`, `BrowseModal`) place it.
   return (
-    <Dialog
+    <SprkModal
       open={open}
-      onOpenChange={(_ev, data) => {
-        if (!data.open) onClose();
-      }}
+      onClose={onClose}
+      title={`Version History — ${documentName}`}
+      size="sm"
+      footer={
+        <Button appearance="primary" onClick={onClose}>
+          Close
+        </Button>
+      }
     >
-      <DialogSurface>
-        <DialogTitle
-          action={<Button appearance="subtle" aria-label="Close" icon={<DismissRegular />} onClick={onClose} />}
-        >
-          Version History — {documentName}
-        </DialogTitle>
-        <DialogBody>
-          <DialogContent>
-            {loading && (
-              <div className={styles.loadingContainer}>
-                <Spinner size="small" label="Loading versions..." />
+      {loading && (
+        <div className={styles.loadingContainer}>
+          <Spinner size="small" label="Loading versions..." />
+        </div>
+      )}
+
+      {error && !loading && (
+        <MessageBar intent="error">
+          <MessageBarBody>{error}</MessageBarBody>
+        </MessageBar>
+      )}
+
+      {!loading && !error && versions.length === 0 && (
+        <Text size={300} className={styles.emptyStateText}>
+          No version history available for this document.
+        </Text>
+      )}
+
+      {!loading && !error && versions.length > 0 && (
+        <div className={styles.versionList}>
+          {versions.map((version, index) => (
+            <React.Fragment key={version.versionId}>
+              {index > 0 && <Divider />}
+              <div className={styles.versionItem}>
+                <Text size={300} weight="semibold">
+                  Version {version.versionLabel}
+                </Text>
+                <Text size={200} className={styles.versionLabel}>
+                  {formatDate(version.createdAt)}
+                  {version.createdByName ? ` · ${version.createdByName}` : ''}
+                  {version.fileSizeBytes != null ? ` · ${formatFileSize(version.fileSizeBytes)}` : ''}
+                </Text>
               </div>
-            )}
-
-            {error && !loading && (
-              <MessageBar intent="error">
-                <MessageBarBody>{error}</MessageBarBody>
-              </MessageBar>
-            )}
-
-            {!loading && !error && versions.length === 0 && (
-              <Text size={300} className={styles.emptyStateText}>
-                No version history available for this document.
-              </Text>
-            )}
-
-            {!loading && !error && versions.length > 0 && (
-              <div className={styles.versionList}>
-                {versions.map((version, index) => (
-                  <React.Fragment key={version.versionId}>
-                    {index > 0 && <Divider />}
-                    <div className={styles.versionItem}>
-                      <Text size={300} weight="semibold">
-                        Version {version.versionLabel}
-                      </Text>
-                      <Text size={200} className={styles.versionLabel}>
-                        {formatDate(version.createdAt)}
-                        {version.createdByName ? ` · ${version.createdByName}` : ''}
-                        {version.fileSizeBytes != null ? ` · ${formatFileSize(version.fileSizeBytes)}` : ''}
-                      </Text>
-                    </div>
-                  </React.Fragment>
-                ))}
-              </div>
-            )}
-          </DialogContent>
-        </DialogBody>
-        <DialogActions>
-          <Button appearance="secondary" onClick={onClose}>
-            Close
-          </Button>
-        </DialogActions>
-      </DialogSurface>
-    </Dialog>
+            </React.Fragment>
+          ))}
+        </div>
+      )}
+    </SprkModal>
   );
 };
 
@@ -503,15 +499,38 @@ interface UploadDialogProps {
   open: boolean;
   onClose: () => void;
   onUploadComplete: () => void;
+  /** Called with `true` while the upload is in flight and `false` otherwise (and on unmount), so a host can hold. */
+  onBusyChange?: (busy: boolean) => void;
 }
 
-const UploadDialog: React.FC<UploadDialogProps> = ({ root, recordId, open, onClose, onUploadComplete }) => {
+const UploadDialog: React.FC<UploadDialogProps> = ({
+  root,
+  recordId,
+  open,
+  onClose,
+  onUploadComplete,
+  onBusyChange,
+}) => {
   const styles = useStyles();
   const noun = RECORD_NOUN[root];
   const [selectedFiles, setSelectedFiles] = React.useState<IUploadedFile[]>([]);
   const [validationErrors, setValidationErrors] = React.useState<IFileValidationError[]>([]);
   const [uploading, setUploading] = React.useState<boolean>(false);
   const [uploadError, setUploadError] = React.useState<string | null>(null);
+
+  // The record template holds browsing, Close and Refresh while the post is in flight (task 004). The latest callback is
+  // read through a ref so a new function identity never re-fires the effect, and unmount always reports "not busy".
+  const onBusyChangeRef = React.useRef(onBusyChange);
+  onBusyChangeRef.current = onBusyChange;
+  React.useEffect(() => {
+    onBusyChangeRef.current?.(uploading);
+  }, [uploading]);
+  React.useEffect(
+    () => () => {
+      onBusyChangeRef.current?.(false);
+    },
+    []
+  );
 
   const handleFilesAccepted = (files: IUploadedFile[]) => {
     // Replace existing selection — dialog uploads one file at a time
@@ -592,67 +611,40 @@ const UploadDialog: React.FC<UploadDialogProps> = ({ root, recordId, open, onClo
     onClose();
   };
 
+  // A FormModal (task 004, FR-03): Cancel in the left footer slot, Upload on the right. Esc does nothing (modal
+  // standard: an explicit dialog keeps a draft), so typed input survives a stray Esc.
   return (
-    <Dialog
+    <FormModal
       open={open}
-      onOpenChange={(_ev, data) => {
-        if (!data.open) handleDialogClose();
-      }}
+      onClose={handleDialogClose}
+      onSubmit={() => void handleUpload()}
+      title="Upload Document"
+      submitLabel={uploading ? 'Uploading…' : 'Upload'}
+      submitDisabled={selectedFiles.length === 0}
+      busy={uploading}
     >
-      <DialogSurface>
-        <DialogTitle
-          action={
-            <Button
-              appearance="subtle"
-              aria-label="Close"
-              icon={<DismissRegular />}
-              onClick={handleDialogClose}
-              disabled={uploading}
-            />
-          }
-        >
-          Upload Document
-        </DialogTitle>
-        <DialogBody>
-          <DialogContent>
-            <div className={styles.uploadDialogContent}>
-              {uploadError && (
-                <MessageBar intent="error">
-                  <MessageBarBody>{uploadError}</MessageBarBody>
-                </MessageBar>
-              )}
+      <div className={styles.uploadDialogContent}>
+        {uploadError && (
+          <MessageBar intent="error">
+            <MessageBarBody>{uploadError}</MessageBarBody>
+          </MessageBar>
+        )}
 
-              {validationErrors.length > 0 && (
-                <MessageBar intent="warning">
-                  <MessageBarBody>{validationErrors.map(e => `${e.fileName}: ${e.reason}`).join(' · ')}</MessageBarBody>
-                </MessageBar>
-              )}
+        {validationErrors.length > 0 && (
+          <MessageBar intent="warning">
+            <MessageBarBody>{validationErrors.map(e => `${e.fileName}: ${e.reason}`).join(' · ')}</MessageBarBody>
+          </MessageBar>
+        )}
 
-              <FileUploadZone
-                onFilesAccepted={handleFilesAccepted}
-                onValidationErrors={handleValidationErrors}
-                disabled={uploading}
-              />
+        <FileUploadZone
+          onFilesAccepted={handleFilesAccepted}
+          onValidationErrors={handleValidationErrors}
+          disabled={uploading}
+        />
 
-              <UploadedFileList files={selectedFiles} onRemove={handleRemoveFile} disabled={uploading} />
-            </div>
-          </DialogContent>
-        </DialogBody>
-        <DialogActions>
-          <Button
-            appearance="primary"
-            icon={uploading ? <Spinner size="tiny" /> : <ArrowUploadRegular />}
-            onClick={() => void handleUpload()}
-            disabled={selectedFiles.length === 0 || uploading}
-          >
-            {uploading ? 'Uploading…' : 'Upload'}
-          </Button>
-          <Button appearance="secondary" onClick={handleDialogClose} disabled={uploading}>
-            Cancel
-          </Button>
-        </DialogActions>
-      </DialogSurface>
-    </Dialog>
+        <UploadedFileList files={selectedFiles} onRemove={handleRemoveFile} disabled={uploading} />
+      </div>
+    </FormModal>
   );
 };
 
@@ -680,9 +672,10 @@ export type DocumentLibraryProps = DocumentLibraryTarget & {
   /** The authenticated user's access level for this record: the default for `canUpload` / `canDownload`. */
   accessLevel?: AccessLevel;
   /**
-   * Show the Upload control. When the host passes none: a project follows `accessLevel` (Collaborate / Full Access); any
-   * other record follows the BFF's `canCreate` on its document list (the right the upload route checks), else
-   * `accessLevel`. The server enforces Create either way.
+   * The level's verdict on Upload, decided by the host. When the host passes none: a project uses `accessLevel`
+   * (Collaborate / Full Access) for a caller whose write access is not per record; any other record follows the BFF's
+   * `canCreate` on its document list (the right the upload route checks), else `accessLevel`. On a project (and inside the
+   * record template) the list's `canCreate` must agree (D-9). The server enforces Create either way.
    */
   canUpload?: boolean;
   /**
@@ -699,6 +692,21 @@ export type DocumentLibraryProps = DocumentLibraryTarget & {
    * the Read those routes check.
    */
   writeAccessPerRecord?: boolean;
+  /**
+   * Record template only (task 004, FR-03). When given, the toolbar's Upload is the entry point: this list shows no
+   * "Upload Document" button of its own, offers its Upload action through this callback (shown exactly when its own button
+   * would have been) and renders the upload dialog itself, so the dialog is a descendant of the host that owns the toolbar.
+   * Omit it everywhere else (the project page keeps its button).
+   */
+  onCreateActionChange?: CreateActionReporter;
+  /** Called with `true` while an upload is in flight and `false` otherwise (and on unmount), so the host can hold. */
+  onBusyChange?: (busy: boolean) => void;
+  /**
+   * Record template, a list that keeps its own Upload button (the invoice Files list; task 006 fix round 1): told the
+   * Upload right as the shared rule reads it (`createRightOf`: `true` / `false`, `null` while unknown, and `null` on
+   * unmount), so the record's "Your access" and the Files card's read-only line follow it. Changes nothing on screen here.
+   */
+  onUploadRightChange?: (right: CreateRight) => void;
 };
 
 // ---------------------------------------------------------------------------
@@ -731,6 +739,9 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
   canDownload,
   caller,
   writeAccessPerRecord = false,
+  onCreateActionChange,
+  onBusyChange,
+  onUploadRightChange,
 }) => {
   const styles = useStyles();
   // The props type refuses a call with neither; an empty id that still arrives (a caller that casts, or a blank id from
@@ -750,17 +761,55 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
   // list did, and a stored, already-interpreted value would then be stale (task 036 fix round 2).
   const [listCanCreate, setListCanCreate] = React.useState<boolean | null>(null);
   const [loading, setLoading] = React.useState<boolean>(true);
+  // True once a list read has answered, so a re-read after an upload does not withdraw the toolbar's Upload (and with it
+  // the control focus returns to).
+  const [loadedOnce, setLoadedOnce] = React.useState<boolean>(false);
   const [error, setError] = React.useState<string | null>(null);
-  const [uploadDialogOpen, setUploadDialogOpen] = React.useState<boolean>(false);
+  const upload = useChildDialog();
   const [versionHistoryDoc, setVersionHistoryDoc] = React.useState<ODataDocument | null>(null);
+  // The control that opened the version history, so focus returns to it when the dialog closes.
+  const versionInvoker = React.useRef<FocusTarget | null>(null);
   const [downloadingId, setDownloadingId] = React.useState<string | null>(null);
   // Task 066: why the last download failed (null = none); cleared when the next download starts.
   const [downloadError, setDownloadError] = React.useState<string | null>(null);
 
-  // A project follows the access level unless the caller's write access is per record (task 036 fix round 1); then it
-  // follows `canCreate` like every other record, and a missing one reads as "cannot".
-  const uploadFromList = root === 'projects' ? (writeAccessPerRecord ? (listCanCreate ?? false) : null) : listCanCreate;
-  const showUpload = canUpload ?? uploadFromList ?? canUploadOrDownload(accessLevel);
+  // The Upload right (task 006, FR-06: `listCreateRightOf` / `createRightOf`, the rule SmartTodo and EventsCalendar
+  // share): offered exactly when it is known to be `true`. The list must have answered (a re-read after an upload keeps
+  // the last answer, so the action does not blink out) and its `canCreate` must allow. A level that decides must allow
+  // too: the host's `canUpload` (the record template's `uploadOverride`), else, on a project, the `/me` level for a caller
+  // whose write access is not per record (`levelVerdictOf`; a per-record caller follows the list alone, task 036 fix round
+  // 1). D-9 (#2716): the project page used to offer Upload on that level alone, so a `canCreate: false` (a workforce role
+  // ceiling) was offered an upload the POST refuses with 403.
+  const levelAllows =
+    canUpload ?? (root === 'projects' ? levelVerdictOf(accessLevel, writeAccessPerRecord) : undefined);
+  const { right, allowed: uploadAllowed } = listCreateRightOf({
+    loaded: loadedOnce && !error,
+    listCanCreate,
+    levelAllows,
+  });
+  // The list's own button (outside the template, and the invoice Files list inside it). A project follows the shared
+  // rule; every other record keeps its R3 rule, unchanged: the host's `canUpload`, else the list's `canCreate`, else
+  // `accessLevel`.
+  const showUpload =
+    root === 'projects' ? uploadAllowed : (canUpload ?? listCanCreate ?? canUploadOrDownload(accessLevel));
+  // In the record template the toolbar's Upload replaces this list's button (task 004), and the dialog stays here.
+  const ownUploadButton = onCreateActionChange === undefined;
+  useOfferCreateAction(onCreateActionChange, uploadAllowed, upload.show, right);
+  // The same right, told to a host that wants it without a toolbar action (the invoice Files list). Read through a ref, so
+  // a new callback identity never re-reports; unmount reports "unknown".
+  const onUploadRightChangeRef = React.useRef(onUploadRightChange);
+  onUploadRightChangeRef.current = onUploadRightChange;
+  React.useEffect(() => {
+    onUploadRightChangeRef.current?.(right);
+  }, [right]);
+  React.useEffect(
+    () => () => {
+      onUploadRightChangeRef.current?.(null);
+    },
+    []
+  );
+  // Whether Upload is available at all: the list's own button outside the template, the toolbar's inside it.
+  const uploadAvailable = ownUploadButton ? showUpload : uploadAllowed;
   // Download / version history need only Read on the record (the server checks it). A per-record caller's level says only
   // what they may SEE, and the list rendering at all proves that Read, so they are offered (task 036 fix round 2).
   const canActOnDocuments = canDownload ?? (writeAccessPerRecord || canUploadOrDownload(accessLevel));
@@ -795,11 +844,13 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
         setDocuments(data.items);
         setTruncated(data.truncated);
         setListCanCreate(data.canCreate ?? null);
+        setLoadedOnce(true);
       } else {
         const data = await getRecordDocuments(root, recordId);
         setDocuments(data.items);
         setTruncated(data.truncated);
         setListCanCreate(data.canCreate ?? null);
+        setLoadedOnce(true);
       }
     } catch (err) {
       console.error('[DocumentLibrary] Failed to load documents:', err);
@@ -948,7 +999,10 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
                           appearance="subtle"
                           size="small"
                           icon={<HistoryRegular />}
-                          onClick={() => setVersionHistoryDoc(item)}
+                          onClick={() => {
+                            versionInvoker.current = currentFocusTarget();
+                            setVersionHistoryDoc(item);
+                          }}
                           aria-label={`View version history for ${item.sprk_name}`}
                         />
                       </Tooltip>
@@ -1028,7 +1082,7 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
           </MessageBar>
         )}
         {/* Toolbar — show upload button even when empty so users can add their first doc */}
-        {showUpload && (
+        {uploadAvailable && (
           <div className={styles.toolbar}>
             <div className={styles.toolbarLeft}>
               <Text size={300} className={styles.emptyStateText}>
@@ -1036,9 +1090,11 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
               </Text>
             </div>
             <div className={styles.toolbarRight}>
-              <Button appearance="primary" icon={<ArrowUploadRegular />} onClick={() => setUploadDialogOpen(true)}>
-                Upload Document
-              </Button>
+              {ownUploadButton && (
+                <Button appearance="primary" icon={<ArrowUploadRegular />} onClick={upload.show}>
+                  Upload Document
+                </Button>
+              )}
             </div>
           </div>
         )}
@@ -1051,7 +1107,7 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
               No Documents
             </Text>
             <Text size={300} className={styles.emptyStateText}>
-              {showUpload
+              {uploadAvailable
                 ? `No documents have been uploaded to this ${noun} yet. Use the Upload button to add your first document.`
                 : `No documents have been uploaded to this ${noun} yet.`}
             </Text>
@@ -1062,9 +1118,10 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
         <UploadDialog
           root={root}
           recordId={recordId}
-          open={uploadDialogOpen}
-          onClose={() => setUploadDialogOpen(false)}
+          open={upload.open}
+          onClose={upload.hide}
           onUploadComplete={() => void fetchDocuments()}
+          onBusyChange={onBusyChange}
         />
         <DeleteOwnConfirm del={del} />
       </div>
@@ -1093,8 +1150,8 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
           </Text>
         </div>
         <div className={styles.toolbarRight}>
-          {showUpload && (
-            <Button appearance="primary" icon={<ArrowUploadRegular />} onClick={() => setUploadDialogOpen(true)}>
+          {showUpload && ownUploadButton && (
+            <Button appearance="primary" icon={<ArrowUploadRegular />} onClick={upload.show}>
               Upload Document
             </Button>
           )}
@@ -1129,9 +1186,10 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
       <UploadDialog
         root={root}
         recordId={recordId}
-        open={uploadDialogOpen}
-        onClose={() => setUploadDialogOpen(false)}
+        open={upload.open}
+        onClose={upload.hide}
         onUploadComplete={() => void fetchDocuments()}
+        onBusyChange={onBusyChange}
       />
 
       {/* Delete confirmation (shared modal system, ADR-050) */}
@@ -1145,7 +1203,11 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
           documentId={versionHistoryDoc.sprk_documentid}
           documentName={versionHistoryDoc.sprk_name}
           open={versionHistoryDoc !== null}
-          onClose={() => setVersionHistoryDoc(null)}
+          onClose={() => {
+            setVersionHistoryDoc(null);
+            restoreFocusTo(versionInvoker.current);
+            versionInvoker.current = null;
+          }}
         />
       )}
     </div>

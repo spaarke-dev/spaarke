@@ -1,0 +1,131 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="058" project="spaarke-SPA-external-access-platform-r4">
+  <metadata>
+    <title>P4 deploy (BFF via uac-r2, SPA to dev, Teams package) and E2E</title>
+    <phase>4 Access, sign-in, carry-overs, Teams</phase>
+    <gate>after 040-048; owner go for the exact BFF SHA (via uac-r2) and owner approval + stated rollback for the SPA and Teams package</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Deployment and E2E task (tags deploy, e2e-test); no code</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Runbook deployment through the existing workflows and the uac-r2 process; E2E checklist</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Live deployment</parallel-reason>
+    <deps>040, 041, 042, 043, 044, 045, 046, 047, 048</deps>
+    <tags>deploy, e2e-test</tags>
+    <estimated-effort>3-5 hours plus coordination wait</estimated-effort>
+  </metadata>
+
+  <prompt>Get Phase 4's BFF changes onto the dev BFF through uac-r2, deploy this branch's SPA to swa-spaarke-external-spa-dev, build and hand over the dev Teams package, then prove every P4 requirement on dev and record the evidence.</prompt>
+  <role>SPAARKE platform developer. Release engineer. Follow ADRs strictly.</role>
+  <goal>Dev runs the P4 BFF (uac-r2 gate PASS, 0 new 5xx) and the P4 SPA; the owner has the new Teams package installed; the P4 E2E checklist passes with evidence in notes/task-058-e2e-record.md.</goal>
+
+  <context>
+    <background>NFR-06: each phase ends with a dev deploy and E2E; BFF deploys go only through uac-r2 with the owner's go for the exact SHA. P4 BFF changes (if their tasks changed the BFF): 040 entitlement rule, 041 registration_required hint, 042 prefill email, 043 binder-fault 503, 045 log labels and gate tenant read, 047 foreign-environment log level. SPA: 040, 041, 042, 043, 048. The SPA's BFF host is baked in at Vite build time (rebuild after any BFF host change). Deploy record precedent: projects/spaarke-SPA-external-access-platform-r3/notes/task-070-deploy-record.md and task-072-e2e-record.md; Teams package precedent: R3 notes/task-076-notes.md.</background>
+    <relevant-files>
+      <file role="canonical-reference">.github/workflows/deploy-external-spa.yml</file>
+      <file role="canonical-reference">.github/workflows/deploy-teams-app.yml</file>
+      <file role="canonical-reference">docs/procedures/dev-bff-deploy-coordination.md</file>
+      <file role="canonical-reference">projects/spaarke-SPA-external-access-platform-r3/notes/task-070-deploy-record.md</file>
+      <file role="canonical-reference">projects/spaarke-SPA-external-access-platform-r3/notes/task-076-notes.md</file>
+      <file role="new-artifact">projects/spaarke-SPA-external-access-platform-r4/notes/task-058-e2e-record.md</file>
+      <file role="new-artifact">projects/spaarke-SPA-external-access-platform-r4/notes/task-058-notes.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="040" status="pending">Workforce-contact tabs</dependency>
+      <dependency task="041" status="pending">Licensed first sign-in</dependency>
+      <dependency task="042" status="pending">Email texts and rule</dependency>
+      <dependency task="043" status="pending">Binder-fault 503 + retry</dependency>
+      <dependency task="044" status="pending">Test warm-up (no deploy content)</dependency>
+      <dependency task="045" status="pending">Log labels + gate fix</dependency>
+      <dependency task="046" status="pending">acme data fix</dependency>
+      <dependency task="047" status="pending">Foreign-environment log level</dependency>
+      <dependency task="048" status="pending">Teams mobile layout</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="NFR-06 / dev-bff-deploy-coordination">Never deploy the dev BFF directly. Ask uac-r2 for a coordinated deploy of the merged master SHA that carries the P4 BFF changes; the owner gives the go for that exact SHA in uac-r2's session. Record the SHA, the gate result and the rollback target uac-r2 reports.</constraint>
+    <constraint source="project">Owner approval and a stated rollback before the SPA deploy (re-run deploy-external-spa.yml, environment dev, on the previous deployed commit) and before the Teams package (re-install the previous package version). Deploy only through the workflows (workflow_dispatch, environment dev); no manual SWA upload.</constraint>
+    <constraint source="project">The SPA deploys after the BFF it calls is live and /healthz is 200; if the BFF host changed, rebuild the SPA.</constraint>
+    <constraint source="NFR-04">E2E evidence carries no token, email, UPN, tenant or object id (screenshots cropped or redacted).</constraint>
+    <constraint source="project">If a P4 task shipped partially (e.g. 043's ProjectPage fold waiting for ebilling, 045's gate part waiting for ontology), record it in the E2E record as deferred, not failed.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-SPA-external-access-platform-r4/spec.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r4/CLAUDE.md</file>
+      <file>docs/procedures/dev-bff-deploy-coordination.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>src/client/external-spa/README.md</file>
+    </files>
+    <patterns>
+      <pattern name="SPA dev deploy" location="projects/spaarke-SPA-external-access-platform-r3/tasks/070-deploy-spa-dev.poml">Owner approval → workflows → smoke → record.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Context + rigor declaration">Load the knowledge files, read the relevant files, declare rigor and model tier per task-execute Step 0.5.</step>
+    <step order="1">Confirm every P4 task is complete or recorded as partially shipped; list the BFF-changing tasks and the merged master SHA that carries them.</step>
+    <step order="2">Request the dev BFF deploy from uac-r2 for that SHA; wait for the owner's go, the deploy, the readback and the 30-minute gate. Record SHA, gate result (0 new 5xx), acme fault count, rollback target.</step>
+    <step order="3">Get owner approval for the SPA and Teams package with the stated rollbacks; record it.</step>
+    <step order="4">Dispatch deploy-external-spa.yml (environment dev) and deploy-teams-app.yml (environment dev); record run ids and the deployed commit; give the package to the owner to install.</step>
+    <step order="5">E2E on dev (record each with evidence): FR-24 granted workforce contact sees the five tabs with only granted records, ungranted sees none, partner unchanged; FR-25 licensed first sign-in skips the form, non-licensed sees it; FR-26 email-missing text; FR-27 prefill email equals the registration email; FR-28 binder fault answers 503 and the SPA retries then shows the message (where a fault can be induced with owner approval; else cite 043's tests), not-invited stays 403; FR-30 no tenant/oid in failed-read logs (App Insights query, owner-approved); FR-31 acme faults 0 in 30 minutes or at Warning; FR-32 Teams mobile (or 375px with the Teams host) one column, no horizontal scroll.</step>
+    <step order="6">Write notes/task-058-e2e-record.md (environment SHAs, run ids, per-FR result and evidence, deferred items).</step>
+    <step order="7">Update tasks/TASK-INDEX.md: set this task's status cell to `✅ [done]` and this POML's &lt;status&gt; to completed; run `pwsh scripts/check-task-status-drift.ps1`.</step>
+    <step order="8">Record deviations and decisions in projects/spaarke-SPA-external-access-platform-r4/notes/task-058-notes.md.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the uac-r2 gate reports FAIL or any new 5xx on the external routes, stop the SPA deploy and ask uac-r2 and the owner whether to roll back; do not deploy the SPA on a failing BFF.</trigger>
+    <trigger>If sign-in fails on dev after the SPA deploy, roll the SPA back by the stated rollback and investigate before re-deploying.</trigger>
+  </escalation>
+
+  <ui-tests>
+    <test name="P4 browser E2E">
+      <url>https://{spa-dev-host}/</url>
+      <steps>
+        <step>Run the FR-24 to FR-28 checks from step 5 as a granted workforce contact, an ungranted one, a licensed user and a partner</step>
+        <step>Check the console for errors on each screen</step>
+      </steps>
+      <expected>Each check passes as recorded; no console errors; nothing sensitive printed.</expected>
+    </test>
+    <test name="Teams mobile + dark mode (ADR-021)">
+      <steps>
+        <step>Open the Teams tab on a phone (or 375px with the Teams host); open a record of each type</step>
+        <step>Switch to the Teams dark theme</step>
+      </steps>
+      <expected>One column, no horizontal scroll, targets ≥ 44px; semantic tokens only in dark mode.</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="terminal">gh workflow run / gh run view; read-only checks</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/spaarke-SPA-external-access-platform-r4/notes/task-058-e2e-record.md</output>
+    <output type="docs">projects/spaarke-SPA-external-access-platform-r4/notes/task-058-notes.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The dev BFF runs the owner-approved SHA carrying the P4 BFF changes, deployed by uac-r2, with a gate PASS and 0 new 5xx recorded.</criterion>
+    <criterion testable="true">The dev SWA serves this branch's build (commit recorded from the workflow run); the dev Teams package is built and installed by the owner.</criterion>
+    <criterion testable="true">Each P4 E2E check in step 5 has a recorded pass with evidence, or is recorded as deferred with its reason and owner.</criterion>
+    <criterion testable="true">Negative: the ungranted workforce contact sees no record tabs, the non-licensed contact still sees the form, and a not-invited caller still gets 403 on dev.</criterion>
+    <criterion testable="true">The rollbacks were stated and approved before each deploy, and recorded.</criterion>
+    <criterion testable="true">No evidence in the record carries a token, email, UPN, tenant or object id.</criterion>
+  </acceptance-criteria>
+
+  <notes>NFR-06; spec Success Criteria 9. Phase-deploy convention: 080 and 090 follow; the next phase's deploy is wrap-up only.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

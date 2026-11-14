@@ -80,7 +80,7 @@ REPORT: "Auditing drift in {N} files changed between {FROM} and {TO}"
 Group changed files by type:
 - **Source code changes**: `src/**` — may have moved/renamed classes, changing what docs should reference
 - **Doc changes**: `docs/**` — may have introduced new refs that need validation
-- **Pattern/constraint changes**: `.claude/patterns/**`, `.claude/constraints/**` — pointer files that must stay accurate
+- **Pattern/constraint changes**: `.claude/patterns/**`, `.claude/constraints/**` — pointer files that must stay accurate, including the capability index `.claude/patterns/CAPABILITY-INDEX.md`
 
 ### Step 3: Build Audit Task List
 
@@ -90,6 +90,7 @@ For each category, generate audit checks:
 - For each deleted file in src/: grep docs/ and .claude/ for references → flag stale
 - For each renamed class/file: grep for old name → flag stale
 - For each new class: check if it should be added to a pattern/architecture doc
+- For each deleted, moved or renamed canonical component, or changed extension point: check its row in `.claude/patterns/CAPABILITY-INDEX.md`. The PR that changes the component updates its row; a stale row is drift
 
 **Doc changes → validate internal references**:
 - For each file path mentioned in a changed doc: check it exists

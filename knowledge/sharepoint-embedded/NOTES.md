@@ -161,7 +161,7 @@ Spaarke has **two identity sources** that grant access to SPE containers, with v
 | **Dataverse users** | Entra AD users with Dataverse access; OBO from BFF | Standard — user already authenticates via Entra; their `oid` is used in SPE grant |
 | **External Power Pages SPA contacts** | Dataverse Contact records (NOT direct Entra), authenticating via external IdP (Entra External ID / Azure AD B2C) into a **Power Pages** site | **Invitation-based linking** — admin pre-creates Contact + Invitation; user redeems invitation code; redemption links external identity to the pre-existing Contact |
 
-**Important scoping**: The external user surface is the **Power Pages custom web app** (deployed via `.claude/skills/power-page-deploy/`), NOT a SPA hosted inside a model-driven app. Two different surfaces — don't confuse them. The pattern below applies only to the Power Pages external workspace.
+**Important scoping**: The external user surface is the **Power Pages custom web app** (as written; the external surface is now the SPA in `src/client/external-spa/` on Azure Static Web Apps, deployed by `.github/workflows/deploy-external-spa.yml`, and the Power Pages deploy was retired 2026-11-12), NOT a SPA hosted inside a model-driven app. Two different surfaces — don't confuse them. The pattern below applies only to the Power Pages external workspace.
 
 #### External Power Pages contact onboarding — invitation flow
 
@@ -269,7 +269,7 @@ Container = security boundary. Permission changes are immediate on the SPE conta
 #### Cross-references
 
 - Microsoft: [Power Pages — Invite contacts](https://learn.microsoft.com/en-us/power-pages/security/invite-contacts)
-- Spaarke skill: `.claude/skills/power-page-deploy/` — Power Pages SPA deployment
+- Spaarke deploy: `.github/workflows/deploy-external-spa.yml` (Azure Static Web Apps). The Power Pages deploy skill was retired 2026-11-12 (archived at `.claude/archive/2026-11-12/skills/power-page-deploy/`)
 - Spaarke code: external-workspace SPA source (path TBD — likely `src/client/external-spa/` or `src/solutions/<workspace>/`)
 
 _TODO: Permission scope vocabulary in Spaarke — what role grants are typical? `read` for SPA contacts viewing a matter? `write` for collaborators? `owner` only for the system?_

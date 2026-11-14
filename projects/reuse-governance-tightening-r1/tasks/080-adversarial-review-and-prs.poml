@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="080" project="reuse-governance-tightening-r1">
+  <metadata>
+    <title>Adversarial review of items 1-4 and their PRs</title>
+    <phase>6 Review and wrap-up</phase>
+    <gate>blocked until 002, 012, 020, 021, 033, 034, 035</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Fixes review findings in code and skill files; depends on 3+ tasks</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Orchestrates the one fable review pass and triages findings across the whole change set</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>touches .claude/ — main-session-only (permission boundary); spans the whole change set</parallel-reason>
+    <deps>002, 012, 020, 021, 033, 034, 035</deps>
+    <tags>testing, refactoring</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Run the project's single adversarial-reviewer pass over the items 1-4 change set with spec.md, fix every F-class finding, then (with the owner's OK) open the items 1-3 PR and the item 4 PR.</prompt>
+  <role>SPAARKE planning-tier orchestrator and reviewer-finding triager.</role>
+  <goal>One reviewer report is recorded, no F-class finding remains open, and two PRs exist: items 1-3 (index, scan, sweep, reviewer checks) and item 4 (package actions, ADR-012, census test).</goal>
+
+  <context>
+    <background>spec.md NFR-03 and NFR-05; root CLAUDE.md section 8.5 (one top-tier review per change set; every defect fixed or filed and reported). If 011/012 were cancelled, the change set excludes them. If 035 was deferred, the PR states that runtime behaviour is unverified.</background>
+    <relevant-files>
+      <file role="canonical-reference">.claude/agents/adversarial-reviewer.md</file>
+      <file role="canonical-reference">projects/reuse-governance-tightening-r1/spec.md</file>
+      <file role="canonical-reference">.claude/skills/pull-from-github/SKILL.md</file>
+      <file role="new">projects/reuse-governance-tightening-r1/notes/080-review.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="033" status="pending">Last item-4 change</dependency>
+      <dependency task="021" status="pending">Reviewer checks this pass itself uses</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Exactly one adversarial-reviewer launch (model fable) over the items 1-4 diff against origin/master, passing spec.md so the F4 trace runs. Re-checks of fixes use the implementer or a scoped sonnet agent, not a second fable pass, unless a fix changes the approach (record a one-line reason).</constraint>
+    <constraint source="project">Every F-class finding is fixed in scope; K-class findings are recorded with their class; defects outside scope are filed via /project-defer-issue-tracking and named to the owner.</constraint>
+    <constraint source="project">PR split: items 1-3 files in one PR; item 4 files (src/client/shared, src/solutions/SpaarkeAi, SemanticSearch, ADR-012, census test) in another. Each PR body ends with the required attribution line. Ask the owner before opening each PR.</constraint>
+    <constraint source="project">Merge origin/master before the review; run conflict-check against open PRs (notably #935 on ADR-012 and the census test).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/agents/adversarial-reviewer.md</file>
+      <file>.claude/skills/task-execute/SKILL.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>.claude/patterns/testing/mocking-patterns.md</file>
+      <file>.claude/skills/conflict-check/SKILL.md</file>
+      <file>projects/reuse-governance-tightening-r1/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Finding triage" location=".claude/skills/task-execute/SKILL.md">Step 9.5: F1-F4 fix-now, K1-K4 known-limit; re-check scope is the fix diff and its direct callers.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Merge origin/master; run conflict-check.</step>
+    <step order="2">Launch the adversarial-reviewer (fable) with the diff range and spec.md; save its report to notes/080-review.md.</step>
+    <step order="3">Fix each F-class finding; re-check with a scoped sonnet agent; record K-class findings.</step>
+    <step order="4">Run builds and tests touched by fixes, including the SharedPackageCensus ArchTests.</step>
+    <step order="5">With the owner's OK, open the two PRs (items 1-3; item 4).</step>
+    <step order="6">Update TASK-INDEX.md: change this task's status cell to `✅ [done]`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If fixes are not converging (the same finding class returns after two fixes), STOP and escalate rather than looping.</trigger>
+    <trigger>If a finding requires re-adding something listed in design.md section 10.7, STOP and ask the owner.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>No review record exists for this project (Glob projects/reuse-governance-tightening-r1/notes/*).</existing>
+    <extension>No: a project-local record of the single review pass, not repo surface.</extension>
+    <cost-of-doing-nothing>Findings, their classes and the F4 trace would exist only in a transcript, so the PRs could not cite what was fixed or accepted.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="Agent">adversarial-reviewer (fable); scoped sonnet re-check agent</tool>
+    <tool name="terminal">gh pr create</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/reuse-governance-tightening-r1/notes/080-review.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The reviewer report is saved and includes a per-criterion trace against spec.md.</criterion>
+    <criterion testable="true">No F-class finding is open; each K-class finding carries its class and reason.</criterion>
+    <criterion testable="true">Out-of-scope defects are filed and listed for the owner.</criterion>
+    <criterion testable="true">Two PRs exist with the agreed split, opened only after the owner's OK.</criterion>
+    <criterion testable="true">Negative: only one fable reviewer launch, unless a recorded approach change justified a second.</criterion>
+  </acceptance-criteria>
+
+  <notes>Item-5 PRs are opened by their own tasks.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

@@ -85,6 +85,14 @@ public class FinanceBaseValuesSingleDefinitionGuardTests
         ["Services/Finance/InvoiceReviewService.cs"] = "holds the sprk_invoice column-name constants the submission persister writes (050a: it no longer writes an invoice); no sum",
         ["Services/Finance/InvoiceTotalsService.cs"] = "writes sprk_totalamount / sprk_approvedtotal (the source of the amount)",
         ["Services/Insights/LiveFacts/InvoiceLiveFactResolver.cs"] = "per-invoice fact documented as the billed total; not an aggregate",
+        // customer-provisioning-orchestration-r1 task 268 (L2 control plane, outside the BFF): H7b S26 names the seven EB-D-200 columns
+        // to verify their field-security lock (ebilling task 166). It reads metadata and profile grants, never an amount.
+        ["../../services/Sprk.Provisioning.ControlPlane.Core/Handlers/SecureRecordSetup/SecureRecordSetupProcedure.cs"] =
+            "H7b S26 (task 268): the column names whose field-security lock it verifies; reads no amount, no sum",
+        ["../../services/Sprk.Provisioning.ControlPlane.Tests/Handlers/SecureRecordSetup/SecureRecordSetupProcedureTests.cs"] =
+            "tests of H7b S26 (task 268): seed and break the lock on named columns; no amount, no sum",
+        ["../../services/Sprk.Provisioning.ControlPlane.Tests/Handlers/SecureRecordSetup/H7bSecureRecordSetupHandlerTests.cs"] =
+            "test of H7b S26 (task 268): unsecures a named column; no amount, no sum",
     };
 
     private static string RelativeToBff(string file) =>

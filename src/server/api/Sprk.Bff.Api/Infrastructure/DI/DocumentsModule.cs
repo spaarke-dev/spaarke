@@ -69,7 +69,8 @@ public static class DocumentsModule
         // unified-access-control-r2 task 171 (owner rounds 69 + 70): the just-in-time Office-edit grant on a SECURE
         // container, used by GET /api/documents/{id}/office and /open-links. UNCONDITIONAL because FileAccessEndpoints maps
         // unconditionally (bff-extensions.md section F.1); its dependencies (RecordContainerResolver, CallerRecordAccessProbe,
-        // SpeContainerMembershipService, IGenericEntityService) are registered unconditionally too.
+        // SpeContainerMembershipService, IGenericEntityService) are registered unconditionally too. Task 191g: it also takes
+        // AppOnlyExternalVisibility (191h, AddExternalAccess, unconditional) and IConfiguration (ExternalAccess:FlaggedOfficeEdit:Enabled).
         services.AddScoped<Sprk.Bff.Api.Services.Documents.OfficeEditAccessService>();
 
         // The legacy migration (ADR-036 IScheduledJob, ADR-052 "BFF, schedule"): registered DISABLED — it runs only when

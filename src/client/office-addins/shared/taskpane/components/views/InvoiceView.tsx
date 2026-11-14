@@ -12,10 +12,11 @@ import {
   Select,
   Spinner,
   Text,
+  Textarea,
   makeStyles,
   tokens,
 } from '@fluentui/react-components';
-import { ReceiptRegular } from '@fluentui/react-icons';
+import { OpenRegular, ReceiptRegular } from '@fluentui/react-icons';
 import type { IHostAdapter } from '@shared/adapters';
 import type { EntitySearchResult, EntityType } from '../../hooks/useEntitySearch';
 import { useAnnounce } from '../../hooks/useAnnounce';
@@ -25,6 +26,7 @@ import { fetchRelatedCandidates, type RelatedCandidate } from '../../services/co
 import {
   INVOICE_CORE_RECORD_TYPES,
   buildInvoiceSubmissionInput,
+  correctionNoteProblem,
   normalizeFirmInvoiceNumber,
   toInvoiceMarkingAttachments,
   applyMarkingBudget,
@@ -33,7 +35,11 @@ import {
   filedUnderRecord,
   describeSubmittedLine,
   previousSubmissionTitle,
+  CORRECTION_NOTE_MAX,
+  CORRECTION_NOTE_PROBLEM_MESSAGES,
   FIRM_INVOICE_NUMBER_MAX,
+  LOGICAL_NAME_BY_CORE_TYPE,
+  NO_FIRM_REFUSAL,
   PO_NUMBER_MAX,
   type InvoiceCoreRecordType,
   type InvoiceCorrectionPrefill,
@@ -49,7 +55,13 @@ import {
   type LoadInvoiceFirms,
   type LoadPreviousSubmission,
 } from '../../services/invoiceSubmissionSeam';
-import { describeCorrectionBlock } from '../../utils/invoiceSubmissionMessages';
+import { canOpenSpaarkeRecords, openRecord } from '../../services/openRecordLauncher';
+import { cleanGuid } from '@spaarke/ui-components/guid';
+import {
+  CORRECTION_NO_FIRM_MESSAGE,
+  NO_FIRM_LINKED_MESSAGE,
+  describeCorrectionBlock,
+} from '../../utils/invoiceSubmissionMessages';
 import {
   InvoiceAttachmentMarking,
   defaultInvoiceMarking,
@@ -63,9 +75,11 @@ import {
  * Reached from the pane's Invoice tab (package 1.1.4, owner UAT 2026-11-03; a received email only — `canGetAttachments`),
  * and from a cached older manifest's ribbon `?action=submitInvoice` (outlook/taskpane/index.tsx → App `initialAction`).
  *
- * - New invoice: the core record (Matter, Project or Work Assignment — required), the firm (required; its options
- *   come from {@link InvoiceViewProps.loadFirms}), the firm's invoice number (required, 1-100), an optional PO number,
- *   and the email's attachments marked Invoice / Supporting / Don't save.
+ * - New invoice: the core record (Matter, Project or Work Assignment — required), the firm (required; its options come
+ *   from {@link InvoiceViewProps.loadFirms}; owner ruling 2026-11-13: an invoice is never submitted without one, so
+ *   Submit stays disabled until a firm is chosen, and a record with no linked firm says how to add one), the firm's
+ *   invoice number (required, 1-100), an optional PO number, and the email's attachments marked Invoice / Supporting /
+ *   Don't save. The chosen record, and the chosen invoice, offer "Open in Spaarke" (`openRecordLauncher`).
  * - Existing invoice: pick the invoice, then submit a corrected invoice or add supporting files. Corrections are shown
  *   disabled with their reason until {@link InvoiceViewProps.correctionAvailable} (ebilling 097 on the server); supporting
  *   files until the upload route exists (ebilling 123; its contract is agreed, the route is not built, so the add-in
@@ -73,7 +87,8 @@ import {
  * - Correction: the chosen invoice's prefill ({@link InvoiceViewProps.loadCorrectionPrefill}, contract §10) decides.
  *   When it can be corrected, the form shows the firm, core record and firm invoice number the correction keeps (not
  *   editable: the server refuses any other) and the attachment marking; otherwise the view says why, and offers a
- *   Superseded invoice's replacement.
+ *   Superseded invoice's replacement. An invoice with no firm (`firm: null`) can't be corrected from the pane: the
+ *   view says to set its firm in Spaarke (with the link) and never sends the correction.
  *
  * Submit goes through the injected {@link InvoiceViewProps.onSubmit} seam (App wires `invoiceSubmissionService`);
  * without it the view says submitting is not available and Submit stays disabled. Once the server accepts the
@@ -184,6 +199,10 @@ const CORE_TYPE_LABEL: Record<InvoiceCoreRecordType, string> = {
   WorkAssignment: 'Work assignment',
 };
 
+/** Why a firm the server named cannot be used (its id is not a valid GUID, so the builder refuses it). */
+const INVALID_FIRM_MESSAGE =
+  "The firm's id isn't valid, so the invoice can't be submitted. Choose another firm, or fix the firm in Spaarke.";
+
 type InvoiceMode = 'new' | 'existing';
 
 /** Adding supporting files to an existing invoice needs ebilling 123's upload route, which is not built yet. */
@@ -259,9 +278,13 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
   const [coreRecord, setCoreRecord] = useState<EntitySearchResult | null>(null);
   const [invoice, setInvoice] = useState<EntitySearchResult | null>(null);
   const [firms, setFirms] = useState<FirmLoad>({ status: 'none' });
+  /** The request `firms` describes ({@link firmsKey} when its effect last ran); it lags the chosen record by a render. */
+  const [firmsFor, setFirmsFor] = useState<string | null>(null);
   const [firmId, setFirmId] = useState('');
   const [firmInvoiceNumber, setFirmInvoiceNumber] = useState('');
   const [poNumber, setPoNumber] = useState('');
+  /** Why the invoice is corrected (a correction only; contract §2, 095f). Sent trimmed, and again on every Retry. */
+  const [correctionNote, setCorrectionNote] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [outcome, setOutcome] = useState<InvoiceSubmissionOutcome | null>(null);
   /** Set between the server's 202 and the submission's final status. */
@@ -364,7 +387,14 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
       }
       if (controller.signal.aborted || !followed) return;
       setPrevious({ status: 'ready', submission: followed, following: false });
-      if (!isRunning(followed.status)) announce(previousSubmissionTitle(followed), 'polite');
+      if (!isRunning(followed.status)) {
+        announce(
+          followed.message
+            ? `${previousSubmissionTitle(followed)}. ${followed.message}`
+            : previousSubmissionTitle(followed),
+          'polite'
+        );
+      }
     })();
     return () => controller.abort();
   }, [loadPreviousSubmission, followPreviousSubmission, previousReload, announce]);
@@ -404,10 +434,14 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
     };
   }, [hostAdapter]);
 
-  // The firms linked to the chosen core record. A newer choice supersedes an older request.
+  // The firms linked to the chosen core record. A newer choice supersedes an older request. `firmsKey` names the
+  // record and the reload count, so `firms` is only used for the record it was loaded for (see `detailsReady`), and a
+  // reload (Retry, or Done on a finished submission) re-runs this even when the record object is unchanged.
+  const firmsKey = coreRecord ? `${coreRecord.id}:${firmsReload}` : null;
   useEffect(() => {
     const request = ++firmRequestRef.current;
     setFirmId('');
+    setFirmsFor(firmsKey);
     if (!coreRecord || !isCoreRecordType(coreRecord.entityType)) {
       setFirms({ status: 'none' });
       return;
@@ -433,7 +467,7 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
         });
       }
     );
-  }, [coreRecord, loadFirms, firmsReload]);
+  }, [coreRecord, loadFirms, firmsReload, firmsKey]);
 
   // A correction of the chosen invoice: read what it must keep and whether it can be made (§10). A newer choice
   // supersedes an older request.
@@ -470,7 +504,14 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
     lastAttemptRef.current = null;
     setOutcome(prev => (prev?.kind === 'retryable' ? null : prev));
     setRetryableInARow(0);
-  }, [coreRecord, invoice, mode, correctionChosen, firmId, firmInvoiceNumber, poNumber, marking]);
+  }, [coreRecord, invoice, mode, correctionChosen, firmId, firmInvoiceNumber, poNumber, correctionNote, marking]);
+
+  // The note belongs to the correction it was typed for: leaving correction mode, or choosing another invoice, drops it
+  // (as the other correction fields reset). Keyed on the invoice id, so a prefill reload keeps what was typed.
+  const invoiceId = invoice?.id ?? null;
+  useEffect(() => {
+    setCorrectionNote('');
+  }, [invoiceId, mode, correctionChosen]);
 
   // A refusal describes the invoice it was for: choosing another invoice or another kind of submission drops it, so it
   // never shows under the new choice. (A result the server accepted locks these choices until Done.)
@@ -533,19 +574,37 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
   // The submission form applies to a new invoice, or to a correction the server says can be made.
   const formActive = mode === 'new' || correction !== null;
 
+  // A firm counts only by its CANONICAL id (what is sent): an id that cleans to nothing (e.g. "{}" from a malformed
+  // server answer) is no firm, so Submit stays disabled instead of the builder throwing in the click handler.
+  const firmReady = cleanGuid(firmId).length > 0;
+
   const missing = useMemo(() => {
     const list: string[] = [];
     if (mode !== 'new') return list;
     if (!coreRecord) list.push('the matter, project or work assignment');
-    if (!firmId) list.push('the firm');
+    if (!firmReady) list.push('the firm');
     if (!normalizedNumber) list.push("the firm's invoice number");
     return list;
-  }, [mode, coreRecord, firmId, normalizedNumber]);
+  }, [mode, coreRecord, firmReady, normalizedNumber]);
 
   const detailsReady =
     mode === 'new'
-      ? coreRecord !== null && isCoreRecordType(coreRecord.entityType) && firmId.length > 0 && normalizedNumber !== null
-      : correction !== null && normalizeFirmInvoiceNumber(correction.firmInvoiceNumber) !== null;
+      ? // A firm is required (owner ruling 2026-11-13). `firms` must describe the CURRENT record: for the render in which
+        // the record changed, it still describes the previous one (and a firm id chosen for it is cleared by the effect).
+        coreRecord !== null &&
+        isCoreRecordType(coreRecord.entityType) &&
+        firms.status === 'ready' &&
+        firmsFor === firmsKey &&
+        firmReady &&
+        normalizedNumber !== null
+      : // A correction keeps the invoice's own firm; an invoice with no firm cannot be corrected from the pane.
+        correction !== null &&
+        correction.firm !== null &&
+        cleanGuid(correction.firm.id).length > 0 &&
+        normalizeFirmInvoiceNumber(correction.firmInvoiceNumber) !== null;
+
+  // A correction needs a note (contract §2, 095f): blank, over 2000 characters or a control character blocks Submit.
+  const correctionNoteCheck = correctionNoteProblem(correctionNote);
 
   const canSubmit =
     onSubmit !== undefined &&
@@ -553,6 +612,7 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
     load.status === 'ready' &&
     detailsReady &&
     !poTooLong &&
+    (correction === null || correctionNoteCheck === null) &&
     markingCheck.ok &&
     overBudget.length === 0 &&
     !locked;
@@ -595,7 +655,10 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
     if (result.kind !== 'success' && result.kind !== 'ended') setPreviousReload(n => n + 1);
     announce(
       result.kind === 'success'
-        ? 'Invoice submitted.'
+        ? // The outcome sentence too (firm_missing, held, replaced): the visible bar says it, so a screen reader must.
+          result.message
+          ? `Invoice submitted. ${result.message}`
+          : 'Invoice submitted.'
         : result.kind === 'ended'
           ? `${ENDED_TITLES[result.status]}. ${result.message}`
           : result.message,
@@ -606,29 +669,42 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
   const handleSubmit = (): void => {
     if (!canSubmit) return;
     let input: InvoiceSubmissionInput;
-    if (correction) {
-      input = buildInvoiceSubmissionInput({
-        target: { entityType: correction.coreRecord.entityType, entityId: correction.coreRecord.entityId },
-        attachments,
-        marking,
-        firmId: correction.firm.id,
-        firmInvoiceNumber: correction.firmInvoiceNumber,
-        poNumber,
-        mode: 'Correction',
-        invoiceId: correction.invoiceId,
-      });
-    } else {
-      if (!coreRecord || !isCoreRecordType(coreRecord.entityType)) return;
-      input = buildInvoiceSubmissionInput({
-        target: { entityType: coreRecord.entityType, entityId: coreRecord.id },
-        attachments,
-        marking,
-        firmId,
-        firmInvoiceNumber,
-        poNumber,
-        mode: 'New',
-        invoiceId: null,
-      });
+    try {
+      if (correction) {
+        // Never a correction without a firm (canSubmit already holds it back; this is the same rule at the point of use).
+        if (!correction.firm) return;
+        input = buildInvoiceSubmissionInput({
+          target: { entityType: correction.coreRecord.entityType, entityId: correction.coreRecord.entityId },
+          attachments,
+          marking,
+          firmId: correction.firm.id,
+          firmInvoiceNumber: correction.firmInvoiceNumber,
+          poNumber,
+          mode: 'Correction',
+          invoiceId: correction.invoiceId,
+          correctionNote,
+        });
+      } else {
+        if (!coreRecord || !isCoreRecordType(coreRecord.entityType) || !firmReady) return;
+        input = buildInvoiceSubmissionInput({
+          target: { entityType: coreRecord.entityType, entityId: coreRecord.id },
+          attachments,
+          marking,
+          firmId,
+          firmInvoiceNumber,
+          poNumber,
+          mode: 'New',
+          invoiceId: null,
+        });
+      }
+    } catch (err) {
+      // The builder refuses what the gates should already have held back (a firm id that is no valid GUID): say so,
+      // visibly, and send nothing.
+      const message =
+        err instanceof Error && err.message && err.message !== NO_FIRM_REFUSAL ? err.message : INVALID_FIRM_MESSAGE;
+      setOutcome({ kind: 'refused', message });
+      announce(message, 'assertive');
+      return;
     }
     void runAttempt(input, newActionId());
   };
@@ -650,8 +726,12 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
       setCoreRecord(filedRecord);
       setInvoice(null);
       setFirmId('');
+      // The firm effect re-runs even when the record is unchanged (the filed record is the same object): it lists the
+      // firms again and re-selects a record's only firm, which `setFirmId('')` above just cleared.
+      setFirmsReload(n => n + 1);
       setFirmInvoiceNumber('');
       setPoNumber('');
+      setCorrectionNote('');
       setRetryableInARow(0);
       if (load.status === 'ready') setMarking(defaultInvoiceMarking(load.attachments, 'new'));
       setFormKey(k => k + 1);
@@ -669,6 +749,43 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
     setOutcome(null);
     announce(`${record.name} chosen. Submit to send the invoice to it.`);
   };
+
+  // "Open in Spaarke": the pane's one gate (ORG_URL set, and a way to open a tab: `openBrowserWindow`, or `window.open`
+  // on Office on the web) and its one opener (`openRecord`, which builds the link and falls back to `window.open` from
+  // this click). ORG_URL unset: no link at all, never a dead one.
+  const openRecordAvailable = canOpenSpaarkeRecords(hostAdapter.getCapabilities());
+  // A failed open (a blocked pop-up) is shown beside the link that was clicked, not only said to the live region:
+  // a sighted user never sees an sr-only announcement. The next click on it, or a successful open, clears it.
+  const [openFailure, setOpenFailure] = useState<{ testId: string; reason: string } | null>(null);
+  const handleOpenRecord = (entityType: string, recordId: string, testId: string): void => {
+    const result = openRecord({ orgUrl: process.env.ORG_URL, entityType, recordId });
+    if (result.opened) {
+      setOpenFailure(null);
+      return;
+    }
+    const reason = result.reason ?? "Couldn't open the record.";
+    setOpenFailure({ testId, reason });
+    announce(reason, 'assertive');
+  };
+  const renderOpenInSpaarke = (entityType: string, recordId: string, testId: string) =>
+    openRecordAvailable ? (
+      <div>
+        <Button
+          appearance="transparent"
+          size="small"
+          icon={<OpenRegular />}
+          onClick={() => handleOpenRecord(entityType, recordId, testId)}
+          data-testid={testId}
+        >
+          Open in Spaarke
+        </Button>
+        {openFailure?.testId === testId && (
+          <Text size={200} className={styles.note} data-testid={`${testId}-error`}>
+            {openFailure.reason}
+          </Text>
+        )}
+      </div>
+    ) : null;
 
   const doneAction = (
     <MessageBarActions>
@@ -928,12 +1045,31 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
       );
     }
     if (firms.firms.length === 0) {
+      // Nothing can be submitted for this record until a firm is added to it in Spaarke: say how, and link to the record.
       return (
-        <Field label="Firm" required validationState="warning" validationMessage="No firm is linked to this record">
-          <Select disabled value="">
-            <option value="">Choose a firm</option>
-          </Select>
-        </Field>
+        <>
+          <Field label="Firm" required validationState="warning" validationMessage={NO_FIRM_LINKED_MESSAGE}>
+            <Select disabled value="">
+              <option value="">Choose a firm</option>
+            </Select>
+          </Field>
+          {coreRecord &&
+            isCoreRecordType(coreRecord.entityType) &&
+            renderOpenInSpaarke(
+              coreRecord.logicalName || LOGICAL_NAME_BY_CORE_TYPE[coreRecord.entityType],
+              coreRecord.id,
+              'invoice-no-firm-open'
+            )}
+          {/* The user adds the firm in Spaarke and comes back: nothing here changes on its own, so ask again on request. */}
+          <Button
+            appearance="subtle"
+            size="small"
+            data-testid="invoice-no-firm-recheck"
+            onClick={() => setFirmsReload(n => n + 1)}
+          >
+            Check again
+          </Button>
+        </>
       );
     }
     return (
@@ -957,7 +1093,7 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
         Correcting{c.trackingNumber ? ` (tracking ${c.trackingNumber})` : ''}
       </Text>
       <Text size={200}>{`${CORE_TYPE_LABEL[c.coreRecord.entityType]}: ${c.coreRecord.name}`}</Text>
-      <Text size={200}>{`Firm: ${c.firm.name}`}</Text>
+      <Text size={200}>{`Firm: ${c.firm ? c.firm.name : 'none'}`}</Text>
       <Text size={200}>{`Firm invoice number: ${c.firmInvoiceNumber}`}</Text>
       <Text size={200} className={styles.note}>
         {"A correction keeps the original invoice's firm, record and firm invoice number."}
@@ -966,6 +1102,23 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
         <Text size={200} className={styles.note} data-testid="invoice-filed-record-note">
           {`This email is filed to ${filedRecord.displayInfo ? `${filedRecord.displayInfo} ` : ''}${filedRecord.name} in Spaarke, but this invoice is for ${c.coreRecord.name}. Spaarke accepts a correction only from an email filed to the invoice's record.`}
         </Text>
+      )}
+      {c.firm === null && (
+        <>
+          <Text size={200} className={styles.note} role="status" data-testid="invoice-correction-no-firm">
+            {CORRECTION_NO_FIRM_MESSAGE}
+          </Text>
+          {renderOpenInSpaarke('sprk_invoice', c.invoiceId, 'invoice-correction-no-firm-open')}
+          {/* After the firm is set in Spaarke, read the prefill again (the cached one still says "no firm"). */}
+          <Button
+            appearance="subtle"
+            size="small"
+            data-testid="invoice-correction-no-firm-recheck"
+            onClick={() => setPrefillReload(n => n + 1)}
+          >
+            Check again
+          </Button>
+        </>
       )}
       {normalizeFirmInvoiceNumber(c.firmInvoiceNumber) === null && (
         <Text size={200} className={styles.note} role="status" data-testid="invoice-correction-no-number">
@@ -1023,9 +1176,39 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
     );
   };
 
+  // Required, multi-line: why the invoice is corrected. The counter is on the TRIMMED length, as the server counts it.
+  const renderCorrectionNote = () => {
+    const shownProblem =
+      correctionNoteCheck === 'too-long' || correctionNoteCheck === 'control-characters' ? correctionNoteCheck : null;
+    return (
+      <div className={styles.section}>
+        <Field
+          label="Correction note"
+          required
+          hint="Why this invoice is corrected."
+          {...(shownProblem
+            ? { validationState: 'error' as const, validationMessage: CORRECTION_NOTE_PROBLEM_MESSAGES[shownProblem] }
+            : {})}
+        >
+          <Textarea
+            value={correctionNote}
+            onChange={(_, d) => setCorrectionNote(d.value)}
+            rows={4}
+            resize="vertical"
+            disabled={locked}
+          />
+        </Field>
+        <Text size={200} className={styles.note} data-testid="invoice-correction-note-count">
+          {`${correctionNote.trim().length} / ${CORRECTION_NOTE_MAX}`}
+        </Text>
+      </div>
+    );
+  };
+
   const renderSubmissionForm = () => (
     <>
       {correction ? renderCorrectionDetails(correction) : renderNewInvoiceDetails()}
+      {correction && renderCorrectionNote()}
 
       <Field
         label="PO number"
@@ -1058,6 +1241,15 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
           defaultType={filedRecord && isCoreRecordType(filedRecord.entityType) ? filedRecord.entityType : 'Matter'}
           disabled={locked}
         />
+        {/* Not while the Firm field's "No firm is linked" message is showing: its link opens this same record. */}
+        {coreRecord &&
+          isCoreRecordType(coreRecord.entityType) &&
+          !(firms.status === 'ready' && firms.firms.length === 0 && firmsFor === firmsKey) &&
+          renderOpenInSpaarke(
+            coreRecord.logicalName || LOGICAL_NAME_BY_CORE_TYPE[coreRecord.entityType],
+            coreRecord.id,
+            'invoice-core-record-open'
+          )}
         {filedRecord && coreRecord && (
           <Text size={200} className={styles.note} data-testid="invoice-filed-record-note">
             {sameRecordId(coreRecord.id, filedRecord.id)
@@ -1186,6 +1378,10 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
                 defaultType="Invoice"
                 disabled={choicesLocked}
               />
+              {/* Not while the correction's "no firm" message is showing: its link opens this same invoice. */}
+              {invoice &&
+                !(correction !== null && correction.firm === null) &&
+                renderOpenInSpaarke('sprk_invoice', invoice.id, 'invoice-existing-open')}
               {/* Both choices are shown disabled with their reason until the server can take them. A correction is
                   offered once the server accepts one (ebilling 097). Adding supporting files is ebilling 123
                   (POST /api/finance/invoices/{invoiceId}/files; contract 123-upload-contract.md, agreed) — the

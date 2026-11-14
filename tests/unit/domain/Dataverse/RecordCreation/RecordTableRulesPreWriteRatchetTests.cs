@@ -51,7 +51,7 @@ public class RecordTableRulesPreWriteRatchetTests
     [Fact]
     public void Recipe_FiresOnATableWhoseOnlyRuleIsAnotherRule()
     {
-        var other = new PreWriteRule(new NamedRule("Fixture", "A fixture rule."), (_, _) => Task.FromResult<PreWriteRefusal?>(null));
+        var other = new PreWriteRule(new NamedRule("Fixture", "A fixture rule."), (_, _) => Task.FromResult(PreWriteResult.Admit));
         var registry = RecordTableRules.All
             .Select(r => string.Equals(r.Table, "sprk_billingevent", StringComparison.OrdinalIgnoreCase) ? r with { PreWriteRules = [other] } : r)
             .ToList();

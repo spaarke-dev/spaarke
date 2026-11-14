@@ -19,6 +19,7 @@
  * No `@spaarke/auth` import (ADR-028) — `authenticatedFetch` is injected via props.
  */
 import * as React from 'react';
+import { MessageBar, MessageBarBody, makeStyles, tokens } from '@fluentui/react-components';
 import { SprkModal } from '../../SprkModal';
 
 import { EmailComposer } from '../EmailComposer';
@@ -244,7 +245,20 @@ export interface ISendEmailDialogProps {
    * MDA/PCF hosts that wire the native lookup callbacks. (owner UAT 2026-08-12.)
    */
   nonBlocking?: boolean;
+  /**
+   * A short host note shown as a warning bar above the composer (unified-access-control-r2 task 196): e.g. the
+   * TrackingFieldTrio "Email members" host says when some recipients could not be loaded, so a pre-filled To line that
+   * is narrower than the record's people never reads as complete. Omitted → the dialog renders exactly as before.
+   */
+  notice?: string;
 }
+
+const useStyles = makeStyles({
+  // Only when a notice is shown: the bar on top, the composer filling the rest of the body.
+  withNotice: { display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 },
+  notice: { flexShrink: 0, margin: tokens.spacingHorizontalM },
+  composerArea: { flex: 1, minHeight: 0 },
+});
 
 export function SendEmailDialog(props: ISendEmailDialogProps) {
   const {
@@ -258,8 +272,10 @@ export function SendEmailDialog(props: ISendEmailDialogProps) {
     fullBleed,
     uiScale,
     nonBlocking,
+    notice,
     ...composerProps
   } = props;
+  const styles = useStyles();
 
   // Shell title: mirrors the engine's mode-derived header word (which the seam
   // suppresses), honoring the same `titleOverride` hosts already pass (e.g.
@@ -316,6 +332,28 @@ export function SendEmailDialog(props: ISendEmailDialogProps) {
     [nonBlocking]
   );
 
+  const composer = (
+    <EmailComposer
+      {...composerProps}
+      // Wrap the native-lookup callbacks so the modal auto-hides while the
+      // Xrm lookup pane is open (#2A/#2B). No-op when not nonBlocking.
+      onLookupRecipients={wrapLookup(composerProps.onLookupRecipients)}
+      onLookupRecord={wrapLookup(composerProps.onLookupRecord)}
+      onAddRelationship={wrapLookup(composerProps.onAddRelationship)}
+      associations={mergedAssociations}
+      mount="dialog"
+      mode={effectiveMode}
+      // The shell draws title + window controls — suppress the engine's header.
+      hostOwnsChrome
+      onSent={result => {
+        onSent?.(result.communicationId);
+        onClose();
+      }}
+      onCancel={onClose}
+      onError={onError}
+    />
+  );
+
   return (
     <SprkModal
       open={open}
@@ -339,25 +377,16 @@ export function SendEmailDialog(props: ISendEmailDialogProps) {
       padded={false}
       uiScale={uiScale}
     >
-      <EmailComposer
-        {...composerProps}
-        // Wrap the native-lookup callbacks so the modal auto-hides while the
-        // Xrm lookup pane is open (#2A/#2B). No-op when not nonBlocking.
-        onLookupRecipients={wrapLookup(composerProps.onLookupRecipients)}
-        onLookupRecord={wrapLookup(composerProps.onLookupRecord)}
-        onAddRelationship={wrapLookup(composerProps.onAddRelationship)}
-        associations={mergedAssociations}
-        mount="dialog"
-        mode={effectiveMode}
-        // The shell draws title + window controls — suppress the engine's header.
-        hostOwnsChrome
-        onSent={result => {
-          onSent?.(result.communicationId);
-          onClose();
-        }}
-        onCancel={onClose}
-        onError={onError}
-      />
+      {notice ? (
+        <div className={styles.withNotice}>
+          <MessageBar intent="warning" layout="multiline" className={styles.notice} data-testid="send-email-notice">
+            <MessageBarBody>{notice}</MessageBarBody>
+          </MessageBar>
+          <div className={styles.composerArea}>{composer}</div>
+        </div>
+      ) : (
+        composer
+      )}
     </SprkModal>
   );
 }

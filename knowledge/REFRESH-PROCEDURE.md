@@ -22,6 +22,8 @@ Microsoft platform pieces in `knowledge/` move fast — repos get retired, Learn
 | A 404 surfaces during normal development work | Log `GAP:` line in `REFRESH-LOG.md`; resolve at next refresh |
 | A new topic warrants curation (e.g., new Microsoft AI service Spaarke depends on) | Schedule as a standalone project, not as part of monthly refresh |
 
+**Staleness watchdog**: the `monthly/knowledge-refresh` quality alert (`nightly-health.yml`, job `alerts`) goes failing when the newest `## YYYY-MM-DD` heading in `REFRESH-LOG.md` is more than 35 days old, and closes itself when a newer entry lands on master.
+
 ---
 
 ## Monthly refresh — standard procedure

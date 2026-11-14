@@ -22,8 +22,9 @@ namespace Sprk.Bff.Api.Tests.Integration.DataMutation.RecordOwnership;
 /// ebilling-r1, #2081 follow-up (split out by unified-access-control-r2 from task 026's review). The three generic update
 /// paths PATCH with no If-Match, which is an UPSERT. For <c>sprk_invoice</c> and <c>sprk_billingevent</c> the guard now reads the
 /// STORED row (app-only, by id) for every write and refuses a missing row, so a stale or deleted id can never create an orphan
-/// row (no core record, owned by the app). Also here: D-96 end to end through each path for an invoice and for a line, the
-/// "no <see cref="IGenericEntityService"/>" case, and the detach, move, re-attach hint on the line mismatch refusal.
+/// row (no core record, owned by the app). Also here, through each path: an invoice's core record fixed at create and a line
+/// that keeps its invoice (task 045g rules 1 and 3), D-96's line side, the "no <see cref="IGenericEntityService"/>" case, and
+/// the return-and-resubmit hint on those refusals.
 /// </summary>
 public partial class InvoiceFamilyGenericUpdatePathTests
 {
@@ -57,7 +58,7 @@ public partial class InvoiceFamilyGenericUpdatePathTests
     private async Task<PathOutcome> RunAsync(
         GenericPath path, string table, Guid id,
         IReadOnlyDictionary<string, EntityReference?> lookups, IReadOnlyDictionary<string, object?> plain,
-        IGenericEntityService? app, Guid? playbookActsAs = null)
+        IGenericEntityService? app, Guid? playbookActsAs = null, CancellationToken ct = default)
     {
         switch (path)
         {
@@ -70,7 +71,7 @@ public partial class InvoiceFamilyGenericUpdatePathTests
                     {
                         // Master merge (#2257): a person's run writes its output mapping AS that person (playbookActsAs).
                         await Handler(app!).UpdateAsync(
-                            table, id, fields, Sprk.Bff.Api.Services.Ai.ConcurrencyMode.None, maxRetries: 1, CancellationToken.None, playbookActsAs);
+                            table, id, fields, Sprk.Bff.Api.Services.Ai.ConcurrencyMode.None, maxRetries: 1, ct, playbookActsAs);
                         return new PathOutcome(null, null);
                     }
                     catch (RecordOwnerUnresolvedException refused)
@@ -96,7 +97,7 @@ public partial class InvoiceFamilyGenericUpdatePathTests
                         await CoreOver(app).UpdateAsync(
                             new UpdateRecordActionInput(table, id, FieldMappings: null, LegacyFields: legacy, Lookups: rendered,
                                 ImpersonateSystemUserId: playbookActsAs),
-                            CancellationToken.None);
+                            ct);
                         return new PathOutcome(null, null);
                     }
                     catch (RecordOwnerUnresolvedException refused)
@@ -139,10 +140,26 @@ public partial class InvoiceFamilyGenericUpdatePathTests
                         values[column] = value;
                     }
 
+                    if (app is not null)
+                    {
+                        AnswerDeriveReads(app);
+                        // Task 045d fix round 3: the push reads the derived name and number as its caller (CallerDisplayReader),
+                        // which names the record's entity set from metadata.
+                        if (app is IMocked<IGenericEntityService> mocked)
+                        {
+                            mocked.Mock.Setup(a => a.GetEntitySetNameAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                                .ReturnsAsync((string t, CancellationToken _) => EntitySetNameFixtures.SetOf(t));
+                        }
+                    }
+
+                    // Task 045g fix round 1: the push writes as its caller, who reads each row's lookups as the app does unless
+                    // a test says otherwise (_personRows).
+                    _personReadsAsTheApp = app;
                     var (_, failed, _, errors, _) = await FieldMappingEndpoints.ApplyMappingsToChildRecordsAsync(
                 Sprk.Bff.Api.Tests.Domain.Dataverse.FieldMapping.PermissivePushSourceGate.AllowingEveryChild(),
                         _writes.Object, new StampWorld().Restamper, rules.ToArray(), values, table, [id], Caller,
-                        NullLogger.Instance, CancellationToken.None, scopes: PushScopes(), lookupBinds: binds, appOnlyEntities: app);
+                        NullLogger.Instance, ct, scopes: PushScopes(), lookupBinds: binds, appOnlyEntities: app,
+                        callerQuery: CallerQuery());
                     if (failed == 0)
                         return new PathOutcome(null, null);
 
@@ -164,8 +181,13 @@ public partial class InvoiceFamilyGenericUpdatePathTests
             Mock.Get(app)
                 .Setup(a => a.GetEntitySetNameAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync((string table, CancellationToken _) => EntitySetNameFixtures.SetOf(table));
+            AnswerDeriveReads(app);
             services.AddSingleton(app);
         }
+
+        // Task 045d fix round 4: the person the run acts as reads the derived name and number (MovedDisplayReader).
+        if (CallerQuery() is { } personQuery)
+            services.AddSingleton(personQuery);
 
         return new UpdateRecordActionCore(_writes.Object, services.BuildServiceProvider().GetRequiredService<IServiceScopeFactory>(),
             NullLogger.Instance);
@@ -255,7 +277,7 @@ public partial class InvoiceFamilyGenericUpdatePathTests
     [InlineData(GenericPath.PlaybookUpdate)]
     [InlineData(GenericPath.OutputOrchestrator)]
     [InlineData(GenericPath.FieldMappingPush)]
-    public async Task AnExistingInvoice_FollowsTheExistingRules_ARenameIsWritten_AndASecondCoreRecordIsRefused(GenericPath path)
+    public async Task AnExistingInvoice_FollowsTheExistingRules_ARenameIsWritten_AndASecondCoreRecordIsRefusedCoreRecordFixed(GenericPath path)
     {
         var renamed = await RunAsync(path, "sprk_invoice", Invoice, NoLookups, RenameOnly, InvoiceUnderAMatter().Object);
         renamed.Code.Should().BeNull();
@@ -264,7 +286,21 @@ public partial class InvoiceFamilyGenericUpdatePathTests
         _writes.Invocations.Clear();
         var second = await RunAsync(path, "sprk_invoice", Invoice,
             Lookups(("sprk_project", new EntityReference("sprk_project", Project))), NoPlain, InvoiceUnderAMatter().Object);
-        second.Code.Should().Be(InvoiceFamilyCoreRecordGuard.MultipleCoreRecordsCode);
+        second.Code.Should().Be(InvoiceFamilyCoreRecordGuard.InvoiceCoreRecordFixedCode);
+        second.Message.Should().Contain(ReturnAndResubmitHint);
+        NothingWritten();
+    }
+
+    /// <summary>Task 045g rule 1: an update that would leave an invoice under no core record changes its core record.</summary>
+    [Theory]
+    [InlineData(GenericPath.PlaybookUpdate)]
+    [InlineData(GenericPath.OutputOrchestrator)]
+    public async Task AnInvoiceWhoseCoreLookupIsCleared_IsRefusedCoreRecordFixed_AndNothingIsWritten(GenericPath path)
+    {
+        var outcome = await RunAsync(path, "sprk_invoice", Invoice, Lookups(("sprk_matter", null)), NoPlain, InvoiceUnderAMatter().Object);
+
+        outcome.Code.Should().Be(InvoiceFamilyCoreRecordGuard.InvoiceCoreRecordFixedCode);
+        outcome.Message.Should().Contain(ReturnAndResubmitHint);
         NothingWritten();
     }
 
@@ -314,13 +350,13 @@ public partial class InvoiceFamilyGenericUpdatePathTests
         NothingWritten();
     }
 
-    // ── D-96 end to end (an invoice re-file keeps its lines) and its line side, through each generic path ─────────────────
+    // ── An invoice's core record is fixed at create (task 045g rule 1), a line keeps its invoice (rule 3), and a line still
+    // regards its invoice's core record (D-96's line side), through each generic path ───────────────────────────────────────
 
     private static readonly Guid StrayLine = Guid.Parse("02200000-0000-4000-8000-0000000000c1");
 
-    private const string DetachMoveReattachHint =
-        "To move an invoice that has lines, or a line of one, detach each line (clear its invoice), move the invoice, move each line to the same matter, project or work assignment, "
-        + "then re-attach the lines to the invoice.";
+    private const string ReturnAndResubmitHint =
+        "A wrongly filed invoice is not moved: it is returned to the firm and resubmitted on the right matter, project or work assignment.";
 
     /// <summary>
     /// The app-only world: the invoice and a line, both filed under <see cref="Matter"/>, and the lines a query would find
@@ -349,34 +385,25 @@ public partial class InvoiceFamilyGenericUpdatePathTests
     }
 
     [Theory]
-    [InlineData(GenericPath.PlaybookUpdate)]
-    [InlineData(GenericPath.OutputOrchestrator)]
-    [InlineData(GenericPath.FieldMappingPush)]
-    public async Task D96_AnInvoiceMovedToAnotherMatter_WhileALineStaysOnTheOldOne_IsRefusedLineMismatch_WithTheHint(GenericPath path)
+    [InlineData(GenericPath.PlaybookUpdate, false)]
+    [InlineData(GenericPath.PlaybookUpdate, true)]
+    [InlineData(GenericPath.OutputOrchestrator, false)]
+    [InlineData(GenericPath.OutputOrchestrator, true)]
+    [InlineData(GenericPath.FieldMappingPush, false)]
+    [InlineData(GenericPath.FieldMappingPush, true)]
+    public async Task AnInvoiceMovedToAnotherMatter_IsRefusedCoreRecordFixed_WithTheHint_WhereverItsLinesAre(GenericPath path, bool linesFollow)
     {
-        var outcome = await RunAsync(path, "sprk_invoice", Invoice, Lookups(("sprk_matter", MatterRef(OtherMatter))), NoPlain,
-            WorldWithLines(OtherMatter, Matter).Object);
-
-        outcome.Code.Should().Be(InvoiceFamilyCoreRecordGuard.LineInvoiceCoreRecordMismatchCode);
-        outcome.Message.Should().Contain(DetachMoveReattachHint);
-        NoGuid(outcome);
-        NothingWritten();
-    }
-
-    [Theory]
-    [InlineData(GenericPath.PlaybookUpdate)]
-    [InlineData(GenericPath.OutputOrchestrator)]
-    [InlineData(GenericPath.FieldMappingPush)]
-    public async Task D96_AnInvoiceMovedToAnotherMatter_WhoseLinesAreAllOnIt_IsWritten(GenericPath path)
-    {
-        var app = WorldWithLines(OtherMatter);
+        // Task 045g rule 1: decided on the stored row before any other read, so the lines are never counted.
+        var app = linesFollow ? WorldWithLines(OtherMatter) : WorldWithLines(OtherMatter, Matter);
 
         var outcome = await RunAsync(path, "sprk_invoice", Invoice, Lookups(("sprk_matter", MatterRef(OtherMatter))), NoPlain, app.Object);
 
-        outcome.Code.Should().BeNull();
-        WrittenOnce("sprk_invoice", Invoice);
-        app.Verify(a => a.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()), Times.Once,
-            "the lines are counted once, as the app");
+        outcome.Code.Should().Be(InvoiceFamilyCoreRecordGuard.InvoiceCoreRecordFixedCode);
+        outcome.Message.Should().Contain(ReturnAndResubmitHint);
+        NoGuid(outcome);
+        NothingWritten();
+        app.Verify(a => a.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()), Times.Never,
+            "the lines and the catalog are never read for a refused move");
     }
 
     [Theory]
@@ -389,25 +416,31 @@ public partial class InvoiceFamilyGenericUpdatePathTests
             WorldWithLines().Object);
 
         outcome.Code.Should().Be(InvoiceFamilyCoreRecordGuard.LineInvoiceCoreRecordMismatchCode);
-        outcome.Message.Should().Contain(DetachMoveReattachHint);
+        outcome.Message.Should().Contain(ReturnAndResubmitHint);
         NoGuid(outcome);
         NothingWritten();
     }
 
     [Theory]
-    [InlineData(GenericPath.PlaybookUpdate)]
-    [InlineData(GenericPath.OutputOrchestrator)]
-    public async Task D96_ALineDetachedFromItsInvoice_AndMovedInOneWrite_IsWritten_TheSupportedSequence(GenericPath path)
+    [InlineData(GenericPath.PlaybookUpdate, false)]
+    [InlineData(GenericPath.PlaybookUpdate, true)]
+    [InlineData(GenericPath.OutputOrchestrator, false)]
+    [InlineData(GenericPath.OutputOrchestrator, true)]
+    public async Task ALineWhoseInvoiceIsCleared_IsRefusedLineInvoiceCleared_AndNothingIsWritten(GenericPath path, bool movedToo)
     {
-        // The hint's first step: with no invoice the line is decided on its own lookup alone (D-75).
-        var outcome = await RunAsync(path, "sprk_billingevent", Line,
-            Lookups(("sprk_invoice", null), ("sprk_matter", MatterRef(OtherMatter))), NoPlain, WorldWithLines().Object);
+        // Task 045g rule 3: a line keeps an invoice once it has one, whether or not the same write moves it.
+        var lookups = movedToo
+            ? Lookups(("sprk_invoice", null), ("sprk_matter", MatterRef(OtherMatter)))
+            : Lookups(("sprk_invoice", null));
 
-        outcome.Code.Should().BeNull();
-        WrittenOnce("sprk_billingevent", Line);
+        var outcome = await RunAsync(path, "sprk_billingevent", Line, lookups, NoPlain, WorldWithLines().Object);
+
+        outcome.Code.Should().Be(InvoiceFamilyCoreRecordGuard.LineInvoiceClearedCode);
+        NoGuid(outcome);
+        NothingWritten();
     }
 
-    [Theory(DisplayName = "164a-1 (must not fire): D-96's re-attach of a line to its invoice is still written; only the line's generic CREATE is refused")]
+    [Theory(DisplayName = "164a-1 (must not fire): a line's update naming its own invoice on the same matter is written; only the line's generic CREATE is refused")]
     [InlineData(GenericPath.PlaybookUpdate)]
     [InlineData(GenericPath.OutputOrchestrator)]
     public async Task D96_ALineReattachedToItsInvoice_OnTheSameMatter_IsWritten_TheCreateOnlyRefusalDoesNotFire(GenericPath path)
@@ -417,7 +450,7 @@ public partial class InvoiceFamilyGenericUpdatePathTests
         rule.GenericCreateRefused.Should().BeTrue();
         Sprk.Bff.Api.Services.RecordCreation.RecordTableRules.RefuseWriterOnlyTableUpdate("sprk_billingevent").Should().BeNull();
 
-        // The hint's last step: the line, on its invoice's matter, names its invoice again.
+        // The line, on its invoice's matter, names its invoice again.
         var outcome = await RunAsync(path, "sprk_billingevent", Line,
             Lookups(("sprk_invoice", new EntityReference("sprk_invoice", Invoice)), ("sprk_matter", MatterRef(Matter))), NoPlain,
             WorldWithLines().Object);
@@ -427,13 +460,24 @@ public partial class InvoiceFamilyGenericUpdatePathTests
     }
 
     [Fact]
-    public async Task TheMismatchRefusalOnTheThrowingPaths_PinsTheExactMessage()
+    public async Task TheCoreRecordFixedRefusalOnTheThrowingPaths_PinsTheExactMessage()
     {
         var outcome = await RunAsync(GenericPath.OutputOrchestrator, "sprk_invoice", Invoice,
             Lookups(("sprk_matter", MatterRef(OtherMatter))), NoPlain, WorldWithLines(Matter).Object);
 
         outcome.Message.Should().Be(
+            "The invoice-family core-record rule refused this write (invoice_family_invoice_core_record_fixed); nothing was written. "
+            + ReturnAndResubmitHint);
+    }
+
+    [Fact]
+    public async Task TheMismatchRefusalOnTheThrowingPaths_PinsTheExactMessage()
+    {
+        var outcome = await RunAsync(GenericPath.OutputOrchestrator, "sprk_billingevent", Line,
+            Lookups(("sprk_matter", MatterRef(OtherMatter))), NoPlain, WorldWithLines().Object);
+
+        outcome.Message.Should().Be(
             "The invoice-family core-record rule refused this write (invoice_family_line_invoice_core_record_mismatch); nothing was written. "
-            + DetachMoveReattachHint);
+            + ReturnAndResubmitHint);
     }
 }

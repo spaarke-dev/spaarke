@@ -18,6 +18,7 @@ public class DataverseUpdateHandler : IDataverseUpdateHandler
     private readonly Sprk.Bff.Api.Services.Access.SecureChildReconciler _children;
     private readonly Sprk.Bff.Api.Services.Access.IDataverseRecordShareService? _shares;
     private readonly Sprk.Bff.Api.Services.Communication.IImpersonatedCommunicationQuery? _readAsPerson;
+    private readonly Sprk.Bff.Api.Services.Communication.Access.DirectMessageOwnerStep? _directOwner;
 
     /// <param name="children">#2091: the ONE step after a re-file (<see cref="Sprk.Bff.Api.Services.Access.SecureChildReconciler.AfterRefileAsync"/>).
     /// REQUIRED: without it a re-file into a Secure record would silently leave the row business-unit readable. Scoped, like
@@ -30,6 +31,9 @@ public class DataverseUpdateHandler : IDataverseUpdateHandler
     /// unconditionally by CommunicationModule), through which an Optimistic update made AS a person reads the row's
     /// <c>versionnumber</c> AS that person, so a row they cannot read looks the same as a missing one. Optional: without it
     /// such an update writes nothing (fail closed); it never reads app-only for a person.</param>
+    /// <param name="directOwner">fm task 054 piece 3b: the step that returns an unfiled Direct message to the Direct team
+    /// (<see cref="Sprk.Bff.Api.Services.Communication.Access.DirectMessageOwnerStep.AfterReparentAsync"/>). Registered by
+    /// CommunicationModule; absent, an unfiled communication keeps its owner.</param>
     public DataverseUpdateHandler(
         IFieldMappingDataverseService fieldMappingService,
         IGenericEntityService genericEntityService,
@@ -39,8 +43,10 @@ public class DataverseUpdateHandler : IDataverseUpdateHandler
         ILogger<DataverseUpdateHandler> logger,
         Sprk.Bff.Api.Services.Access.SecureChildReconciler children,
         Sprk.Bff.Api.Services.Access.IDataverseRecordShareService? shares = null,
-        Sprk.Bff.Api.Services.Communication.IImpersonatedCommunicationQuery? readAsPerson = null)
+        Sprk.Bff.Api.Services.Communication.IImpersonatedCommunicationQuery? readAsPerson = null,
+        Sprk.Bff.Api.Services.Communication.Access.DirectMessageOwnerStep? directOwner = null)
     {
+        _directOwner = directOwner;
         _children = children ?? throw new ArgumentNullException(nameof(children));
         _shares = shares;
         _readAsPerson = readAsPerson;
@@ -132,7 +138,9 @@ public class DataverseUpdateHandler : IDataverseUpdateHandler
         // a lookup this guard decides on (it writes the pair and its display columns only), so the decision is the same.
         if (await InvoiceFamilyCoreRecordGuard.CheckGenericUpdateAsync(
                     entityLogicalName, recordId, fields, _genericEntityService, ct,
-                    writeIsImpersonated: impersonateSystemUserId is not null)
+                    writeIsImpersonated: impersonateSystemUserId is not null,
+                    // Task 045g: on a person's write, a refusal of rules 1-3 is decided on the rows as that person reads them.
+                    asPerson: OwnedChildWrite.PersonRowReader(_readAsPerson, _genericEntityService, impersonateSystemUserId))
                 .ConfigureAwait(false) is { RefusalCode: { } familyCode })
         {
             // Code only: the guard read as the app, so its reason can name records the caller has not read.
@@ -141,11 +149,29 @@ public class DataverseUpdateHandler : IDataverseUpdateHandler
 
         // Task 045b (owner decision 4 of 2026-11-04; rulings Q2, Q4, Q7): the ADR-024 pair is kept whole and in step (the update
         // planner, with this handler's own app-only reader) BEFORE the filing gate below and the write, so they see the pair as it
-        // will be written. It adds no check (UAC-r2, 2026-11-07). The caller's dictionary is not changed; a failed read refuses.
+        // will be written. The planner adds no check (UAC-r2, 2026-11-07); the same call then decides a sent regarding record URL
+        // (task 045f; on a person's write, on the row as that person reads it). The caller's dictionary is not changed; a failed
+        // read refuses.
         fields = await OwnedChildWrite.KeepRegardingPairWholeAppOnlyAsync(
                 _genericEntityService, entityLogicalName, recordId, fields, "OUTPUT-MAPPING", _logger, ct,
-                movedDisplayRecord: OwnedChildWrite.MovedDisplayReader(_readAsPerson, _genericEntityService, impersonateSystemUserId))
+                movedDisplayRecord: OwnedChildWrite.MovedDisplayReader(_readAsPerson, _genericEntityService, impersonateSystemUserId),
+                storedRowAsPerson: OwnedChildWrite.PersonStoredRowReader(
+                    _readAsPerson, _genericEntityService, impersonateSystemUserId, entityLogicalName, recordId))
             .ConfigureAwait(false);
+
+        // Task 045d (owner ruling Q8 (a); owner, 2026-11-12, option (b)): an invoice-family row whose own core lookup this write
+        // sets or clears takes the resolver fields of the record it will name, in this same write (after the pair planner so
+        // they win). The stored row and the catalog are read app-only; the name and number as the planner reads a moved pair's
+        // display (MovedDisplayReader): as the person the write runs for, cleared when they may not read it, and cleared with
+        // no person (never derived app-only). A derive that cannot be done is refused as the guard above refuses: its code only.
+        var familyFields = await OwnedChildWrite.KeepInvoiceFamilyResolverFieldsAppOnlyAsync(
+                _genericEntityService, entityLogicalName, recordId, fields, "OUTPUT-MAPPING",
+                OwnedChildWrite.MovedDisplayReader(_readAsPerson, _genericEntityService, impersonateSystemUserId),
+                _logger, ct, writeIsImpersonated: impersonateSystemUserId is not null)
+            .ConfigureAwait(false);
+        if (familyFields.RefusalCode is { } derivedCode)
+            throw InvoiceFamilyCoreRecordGuard.RefusalException(entityLogicalName, derivedCode);
+        fields = familyFields.Payload;
 
         // Task 158 (owner round 6): a work assignment or project filed under a secure matter or project is secured. Whether
         // the record this write files it under is secure must be readable, or nothing is written (fail closed).
@@ -201,6 +227,13 @@ public class DataverseUpdateHandler : IDataverseUpdateHandler
                     // #2257: as the Update Record core — a move out of a secure root (F3) is asked of the person this write
                     // runs AS; an app-only write passes no caller and is refused such a move.
                     CallerSystemUserId = impersonateSystemUserId,
+                    // fm task 054 piece 3b: the one unfile rule every re-file writer takes (an eligible Direct message returns
+                    // to the Direct team; any other communication linked to nothing goes to its creator's team or keeps its owner, #2722). An app-only write keeps the
+                    // acting-user rule, so with no person named it is refused as before.
+                    WhenUnfiled = Sprk.Bff.Api.Services.Communication.Access.DirectMessageOwnerStep.UnfiledOwnershipFor(
+                        entityLogicalName, actsForAPerson: impersonateSystemUserId is not null, _directOwner),
+                    RegardingLinksSet = RecordReparent.RegardingLinksSetIn(entityLogicalName, fields),
+                    UnfileRuleColumnsWritten = RecordReparent.UnfileRuleColumnsWrittenIn(entityLogicalName, fields),
                     SecureExitCaller = secureExitCaller = impersonateSystemUserId is { } person
                         ? Sprk.Bff.Api.Services.Access.SecureRemovalCaller.ForImpersonatedUser(person, _shares)
                         : null,
@@ -211,6 +244,10 @@ public class DataverseUpdateHandler : IDataverseUpdateHandler
             {
                 throw new RecordOwnerUnresolvedException(entityLogicalName, reparent);
             }
+
+            // Piece 3b: an unfiled Direct message returns to the Direct team now, before the step after the re-file below.
+            if (_directOwner is not null)
+                await _directOwner.AfterReparentAsync(recordId, reparent, CancellationToken.None).ConfigureAwait(false);
 
             refiled = !reparent.ParentsUnchanged;
             refiledBy = reparent;

@@ -1,35 +1,19 @@
 /**
- * TrackingFieldTrio — email-members action (task 042, teams-app-r1).
+ * TrackingFieldTrio — email-members action (task 042, teams-app-r1; task 196, unified-access-control-r2).
  *
- * `src/client/pcf/TrackingFieldTrio/index.ts` (task 042) wires the shared
- * core's `onOpenEmailMembers` callback (task 040) to:
- *   1. resolve the record's membership contacts via `fetchCandidates()` —
- *      the SAME allowlist-filtered `sprk_assigned*` data source task 041
- *      wired for the grant modal (no separate recipient-derivation rule);
- *   2. drop any candidate with no populated email, dedupe by email;
- *   3. open the canonical `SendEmailDialog` (`EmailComposer` engine,
- *      `@spaarke/ui-components`, ADR-045) pre-populated with those emails —
- *      OR, if the resulting list is empty, show an empty-state alert
- *      INSTEAD of opening a dialog with zero recipients.
+ * `src/client/pcf/TrackingFieldTrio/index.ts` wires the shared core's `onOpenEmailMembers` callback (task 040) to:
+ *   1. resolve the record's people through the SHARED `resolveEmailMembersRecipients` (task 196): role contacts +
+ *      contacts with an active grant + users the record is shared with, de-duplicated by email, No Access applied;
+ *   2. open the canonical `SendEmailDialog` (`EmailComposer` engine, `@spaarke/ui-components`, ADR-045) pre-populated
+ *      with those emails, with a visible notice when some source could not be read;
+ *   3. OR show the message dialog instead: the empty state only when every source was read and found nobody, an error
+ *      when no source could be read — never a composer with zero recipients by mistake.
  *
- * `index.ts` is a PCF `ComponentFramework.StandardControl` class (not a
- * renderable React component / not resolvable from this package's Jest
- * environment — it imports `./generated/ManifestTypes` and PCF-only globals),
- * so it is not directly unit-testable here (same constraint task 040/041
- * worked under). This suite instead mounts the REAL, unmodified
- * `TrackingFieldTrio` core + the REAL canonical `SendEmailDialog` behind a
- * thin harness component that reproduces `index.ts`'s decision logic
- * verbatim (see the inline comment on `resolveEmailMembersRecipients` below,
- * which mirrors `index.ts`'s private method of the same name) — so what's
- * under test is the real toolbar affordance + the real canonical dialog
- * receiving genuinely pre-populated recipients, not a mocked stand-in.
- *
- * Covers the task's `<ui-tests>`:
- *  - email-icon-opens-prepopulated-dialog
- *  - adr-021-dark-mode
- *  - console-error-check
- * ...and acceptance criterion 2 (empty-membership empty state, no sendable
- * dialog with zero recipients).
+ * `index.ts` is a PCF `ComponentFramework.StandardControl` class (not resolvable from this package's Jest environment —
+ * it imports `./generated/ManifestTypes` and PCF-only globals), so it is not directly unit-testable here. This suite
+ * mounts the REAL `TrackingFieldTrio` core + the REAL `SendEmailDialog` + the REAL shared resolver behind a thin harness
+ * that reproduces `index.ts`'s click handler (`openEmailMembers`): the resolution rule itself is not copied here (task
+ * 196 removed the harness's copy of it), only the three-way branch on its answer.
  */
 import * as React from 'react';
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
@@ -38,6 +22,14 @@ import { TrackingFieldTrio } from '../TrackingFieldTrio';
 import type { ITrackingFieldTrioProps, IAccessPermissionOption } from '../types';
 import { SendEmailDialog } from '../../EmailComposer';
 import type { AuthenticatedFetchFn } from '../../../services/EntityCreationService';
+import {
+  EMAIL_MEMBERS_EMPTY_MESSAGE,
+  EMAIL_MEMBERS_FAILED_MESSAGE,
+  resolveEmailMembersRecipients,
+  type EmailMembersResolution,
+  type IEmailMembersSources,
+} from '../../AccessGrantModal';
+import type { IAccessGrantCandidate } from '../../AccessGrantModal';
 
 const renderWithTheme = (ui: React.ReactElement, theme = webLightTheme) =>
   render(<FluentProvider theme={theme}>{ui}</FluentProvider>);
@@ -66,52 +58,87 @@ function makeProps(overrides?: Partial<ITrackingFieldTrioProps>): ITrackingField
 
 const COMPOSER_ACTIONS = { name: 'Composer actions' } as const;
 const BFF = 'https://bff.example.com';
+const RECORD_ID = '6f1c2d3e-4a5b-4c6d-8e7f-90a1b2c3d4e5';
+const GRANTEE_ID = 'aaaaaaaa-0000-0000-0000-000000000002';
+const USER_ID = 'cccccccc-0000-0000-0000-000000000001';
 
-interface IMembershipCandidate {
-  email?: string;
+function candidate(email?: string, n = 1): IAccessGrantCandidate {
+  return { contactId: `aaaaaaaa-0000-0000-0000-00000000010${n}`, fullName: `Person ${n}`, email, role: 'Role' };
+}
+
+/** Role contacts only — a host that is not a grant root (`index.ts` passes no `root`). */
+const rolesOnly = (candidates: IAccessGrantCandidate[]): IEmailMembersSources => ({
+  readRoleContacts: async () => candidates,
+});
+
+function json(body: unknown, status = 200): Response {
+  return { ok: status >= 200 && status < 300, status, json: async () => body } as unknown as Response;
+}
+
+/** A grant root whose role contact, grantee and shared user all have emails; `grantsFail` makes the grants read 403. */
+function rootSources(opts: { grantsFail?: boolean; everythingFails?: boolean } = {}): IEmailMembersSources {
+  const fail = async (): Promise<never> => {
+    throw new Error('403');
+  };
+  return {
+    readRoleContacts: opts.everythingFails ? fail : async () => [candidate('rita@example.com')],
+    readContactEmails: async () => new Map([[GRANTEE_ID, 'gary@example.com']]),
+    root: {
+      recordType: 'project',
+      recordId: RECORD_ID,
+      authenticatedFetch: jest.fn(async (url: string) => {
+        if (opts.everythingFails) return json({}, 500);
+        if (url.includes('/user-shares')) {
+          return json({ shares: [{ systemUserId: USER_ID, fullName: 'Uma User', accessLevel: 100000000 }] });
+        }
+        return json({
+          recordType: 'sprk_project',
+          recordId: RECORD_ID,
+          secure: 'doesNotApply',
+          noAccess: 'doesNotApply',
+          entriesState: 'complete',
+          entries: [],
+        });
+      }) as unknown as AuthenticatedFetchFn,
+      readGrants:
+        opts.grantsFail || opts.everythingFails
+          ? fail
+          : async () => [{ accessRecordId: 'g1', contactId: GRANTEE_ID, fullName: 'Gary Grantee', accessLevel: 1 }],
+      readUserEmails: async () => new Map([[USER_ID, 'uma@spaarke.example']]),
+      accessPermissionState: 'standard',
+      isSecureRecord: false,
+    },
+  };
 }
 
 /**
- * Test-harness reproduction of `TrackingFieldTrio/index.ts`'s
- * `resolveEmailMembersRecipients()` + `onOpenEmailMembers` click handler
- * (task 042): reuses the injected candidate list (standing in for
- * `fetchCandidates()`), drops candidates without a populated email, dedupes
- * by email, then either opens the canonical `SendEmailDialog` pre-populated
- * with those emails or flags the empty state — never both, never a dialog
- * with zero recipients.
+ * Test-harness reproduction of `TrackingFieldTrio/index.ts`'s `openEmailMembers` click handler: the shared resolver's
+ * answer opens the canonical `SendEmailDialog` (recipients + notice), or the message dialog (`empty` / `failed`).
  */
 function EmailMembersHarness({
-  candidates,
+  sources,
   authenticatedFetch,
 }: {
-  candidates: IMembershipCandidate[];
+  sources: IEmailMembersSources;
   authenticatedFetch: AuthenticatedFetchFn;
 }) {
   const [dialogOpen, setDialogOpen] = React.useState(false);
-  const [emptyOpen, setEmptyOpen] = React.useState(false);
+  const [message, setMessage] = React.useState<'empty' | 'failed' | null>(null);
   const [recipients, setRecipients] = React.useState<string[]>([]);
-
-  const resolveEmailMembersRecipients = React.useCallback(async (): Promise<string[]> => {
-    const emails = new Set<string>();
-    for (const candidate of candidates) {
-      if (candidate.email && candidate.email.trim().length > 0) {
-        emails.add(candidate.email.trim());
-      }
-    }
-    return Array.from(emails);
-  }, [candidates]);
+  const [notice, setNotice] = React.useState<string | null>(null);
 
   const onOpenEmailMembers = React.useCallback(() => {
     void (async () => {
-      const resolved = await resolveEmailMembersRecipients();
-      if (resolved.length === 0) {
-        setEmptyOpen(true);
-      } else {
-        setRecipients(resolved);
+      const resolution: EmailMembersResolution = await resolveEmailMembersRecipients(sources);
+      if (resolution.kind === 'recipients') {
+        setRecipients(resolution.recipients);
+        setNotice(resolution.notice);
         setDialogOpen(true);
+      } else {
+        setMessage(resolution.kind);
       }
     })();
-  }, [resolveEmailMembersRecipients]);
+  }, [sources]);
 
   return (
     <>
@@ -120,29 +147,30 @@ function EmailMembersHarness({
         open={dialogOpen}
         onClose={() => setDialogOpen(false)}
         initialTo={recipients}
+        notice={notice ?? undefined}
         authenticatedFetch={authenticatedFetch}
         bffBaseUrl={BFF}
         titleOverride="Email Members"
       />
-      {emptyOpen && (
-        <div role="status" aria-label="Email members empty state">
-          This record has no membership contacts with an email address yet.
-          <button onClick={() => setEmptyOpen(false)}>OK</button>
+      {message && (
+        <div role="status" aria-label={`Email members ${message}`}>
+          {message === 'failed' ? EMAIL_MEMBERS_FAILED_MESSAGE : EMAIL_MEMBERS_EMPTY_MESSAGE}
+          <button onClick={() => setMessage(null)}>OK</button>
         </div>
       )}
     </>
   );
 }
 
-describe('TrackingFieldTrio — email-members action (task 042)', () => {
+describe('TrackingFieldTrio — email-members action (task 042; task 196)', () => {
   const authenticatedFetch = jest.fn() as unknown as AuthenticatedFetchFn;
 
   describe('email-icon-opens-prepopulated-dialog', () => {
-    it('opens SendEmailDialog pre-populated with the record membership-contact emails', async () => {
+    it('opens SendEmailDialog pre-populated with the record role-contact emails', async () => {
       renderWithTheme(
         <EmailMembersHarness
           authenticatedFetch={authenticatedFetch}
-          candidates={[{ email: 'alice@example.com' }, { email: 'bob@example.com' }]}
+          sources={rolesOnly([candidate('alice@example.com', 1), candidate('bob@example.com', 2)])}
         />
       );
 
@@ -154,18 +182,58 @@ describe('TrackingFieldTrio — email-members action (task 042)', () => {
       const toGroup = screen.getByRole('group', { name: 'To' });
       expect(within(toGroup).getByText('alice@example.com')).toBeInTheDocument();
       expect(within(toGroup).getByText('bob@example.com')).toBeInTheDocument();
+      expect(screen.queryByTestId('send-email-notice')).not.toBeInTheDocument();
+    });
+
+    it('task 196: includes the people with an active grant and the users the record is shared with', async () => {
+      renderWithTheme(<EmailMembersHarness authenticatedFetch={authenticatedFetch} sources={rootSources()} />);
+
+      fireEvent.click(screen.getByRole('button', { name: 'Email members' }));
+
+      const toGroup = await screen.findByRole('group', { name: 'To' });
+      for (const email of ['rita@example.com', 'gary@example.com', 'uma@spaarke.example']) {
+        expect(within(toGroup).getByText(email)).toBeInTheDocument();
+      }
+      expect(screen.queryByTestId('send-email-notice')).not.toBeInTheDocument();
+    });
+
+    it('task 196: a source that could not be read opens the dialog with what was read AND a visible notice', async () => {
+      renderWithTheme(
+        <EmailMembersHarness authenticatedFetch={authenticatedFetch} sources={rootSources({ grantsFail: true })} />
+      );
+
+      fireEvent.click(screen.getByRole('button', { name: 'Email members' }));
+
+      const toGroup = await screen.findByRole('group', { name: 'To' });
+      expect(within(toGroup).getByText('rita@example.com')).toBeInTheDocument();
+      expect(within(toGroup).getByText('uma@spaarke.example')).toBeInTheDocument();
+      expect(screen.getByTestId('send-email-notice')).toHaveTextContent(
+        'Some people may be missing from the recipients: the people granted access could not be read.'
+      );
+    });
+
+    it('task 196: every source failing shows the error, never the empty state or the composer', async () => {
+      renderWithTheme(
+        <EmailMembersHarness authenticatedFetch={authenticatedFetch} sources={rootSources({ everythingFails: true })} />
+      );
+
+      fireEvent.click(screen.getByRole('button', { name: 'Email members' }));
+
+      expect(await screen.findByLabelText('Email members failed')).toHaveTextContent(EMAIL_MEMBERS_FAILED_MESSAGE);
+      expect(screen.queryByLabelText('Email members empty')).not.toBeInTheDocument();
+      expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
     });
 
     it('dedupes candidates that share an email and drops candidates with no email', async () => {
       renderWithTheme(
         <EmailMembersHarness
           authenticatedFetch={authenticatedFetch}
-          candidates={[
-            { email: 'alice@example.com' },
-            { email: 'alice@example.com' }, // duplicate — same recipient assigned two roles
-            { email: undefined }, // no email — cannot be pre-populated
-            { email: '   ' }, // blank — treated as no email
-          ]}
+          sources={rolesOnly([
+            candidate('alice@example.com', 1),
+            candidate('alice@example.com', 2), // duplicate — same recipient assigned two roles
+            candidate(undefined, 3), // no email — cannot be pre-populated
+            candidate('   ', 4), // blank — treated as no email
+          ])}
         />
       );
 
@@ -176,33 +244,37 @@ describe('TrackingFieldTrio — email-members action (task 042)', () => {
       expect(within(toGroup).getAllByText('alice@example.com')).toHaveLength(1);
     });
 
-    it('does not open the dialog and shows an empty state when no candidate has an email (acceptance criterion 2)', async () => {
+    it('does not open the dialog and shows the empty state when no one has an email (acceptance criterion 2)', async () => {
       renderWithTheme(
-        <EmailMembersHarness authenticatedFetch={authenticatedFetch} candidates={[{ email: undefined }]} />
+        <EmailMembersHarness authenticatedFetch={authenticatedFetch} sources={rolesOnly([candidate(undefined)])} />
       );
 
       fireEvent.click(screen.getByRole('button', { name: 'Email members' }));
 
-      await waitFor(() => expect(screen.getByLabelText('Email members empty state')).toBeInTheDocument());
+      await waitFor(() =>
+        expect(screen.getByLabelText('Email members empty')).toHaveTextContent(
+          'This record has no members with an email address yet. Grant access or assign a role first.'
+        )
+      );
       // No sendable composer with zero recipients was opened.
       expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
       expect(screen.queryByRole('region', COMPOSER_ACTIONS)).not.toBeInTheDocument();
     });
 
-    it('shows the empty state for a record with no membership contacts at all', async () => {
-      renderWithTheme(<EmailMembersHarness authenticatedFetch={authenticatedFetch} candidates={[]} />);
+    it('shows the empty state for a record with no members at all', async () => {
+      renderWithTheme(<EmailMembersHarness authenticatedFetch={authenticatedFetch} sources={rolesOnly([])} />);
 
       fireEvent.click(screen.getByRole('button', { name: 'Email members' }));
 
-      await waitFor(() => expect(screen.getByLabelText('Email members empty state')).toBeInTheDocument());
+      await waitFor(() => expect(screen.getByLabelText('Email members empty')).toBeInTheDocument());
       expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
     });
   });
 
   describe('adr-021-dark-mode', () => {
-    it('renders the email icon and the pre-populated dialog under webDarkTheme without a broken state', async () => {
+    it('renders the email icon and the pre-populated dialog (with a notice) under webDarkTheme', async () => {
       renderWithTheme(
-        <EmailMembersHarness authenticatedFetch={authenticatedFetch} candidates={[{ email: 'alice@example.com' }]} />,
+        <EmailMembersHarness authenticatedFetch={authenticatedFetch} sources={rootSources({ grantsFail: true })} />,
         webDarkTheme
       );
 
@@ -213,7 +285,8 @@ describe('TrackingFieldTrio — email-members action (task 042)', () => {
 
       await waitFor(() => expect(screen.getByRole('alertdialog')).toBeInTheDocument());
       const toGroup = screen.getByRole('group', { name: 'To' });
-      expect(within(toGroup).getByText('alice@example.com')).toBeInTheDocument();
+      expect(within(toGroup).getByText('rita@example.com')).toBeInTheDocument();
+      expect(screen.getByTestId('send-email-notice')).toBeInTheDocument();
     });
   });
 
@@ -223,7 +296,10 @@ describe('TrackingFieldTrio — email-members action (task 042)', () => {
       const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
 
       renderWithTheme(
-        <EmailMembersHarness authenticatedFetch={authenticatedFetch} candidates={[{ email: 'alice@example.com' }]} />
+        <EmailMembersHarness
+          authenticatedFetch={authenticatedFetch}
+          sources={rolesOnly([candidate('alice@example.com')])}
+        />
       );
       fireEvent.click(screen.getByRole('button', { name: 'Email members' }));
       await waitFor(() => expect(screen.getByRole('alertdialog')).toBeInTheDocument());
@@ -239,9 +315,12 @@ describe('TrackingFieldTrio — email-members action (task 042)', () => {
       const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
       const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
 
-      renderWithTheme(<EmailMembersHarness authenticatedFetch={authenticatedFetch} candidates={[]} />, webDarkTheme);
+      renderWithTheme(
+        <EmailMembersHarness authenticatedFetch={authenticatedFetch} sources={rolesOnly([])} />,
+        webDarkTheme
+      );
       fireEvent.click(screen.getByRole('button', { name: 'Email members' }));
-      await waitFor(() => expect(screen.getByLabelText('Email members empty state')).toBeInTheDocument());
+      await waitFor(() => expect(screen.getByLabelText('Email members empty')).toBeInTheDocument());
 
       expect(errorSpy).not.toHaveBeenCalled();
       expect(warnSpy).not.toHaveBeenCalled();

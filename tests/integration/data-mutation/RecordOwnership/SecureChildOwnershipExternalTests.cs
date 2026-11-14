@@ -185,7 +185,7 @@ public sealed class SecureChildOwnershipExternalTests : IClassFixture<ExternalCh
             new CreateExternalTodoRequest { SprkName = "Respond" },
             ExternalDataService.TryGetRootBinding(ExternalDataService.TodoRootKind.Project)!, projectId, "Project", null, team);
         var @event = ExternalDataService.BuildEventCreatePayload(
-            projectId, new CreateExternalEventRequest { SprkName = "Hearing" }, team);
+            ExternalDataService.TodoRootKind.Project, projectId, new CreateExternalEventRequest { SprkName = "Hearing" }, team);
         var document = ExternalDataService.BuildDocumentCreatePayload(
             ExternalDataService.DocumentParentKind.Project, projectId, new ExternalUploadedFilePointers("b!drive", "item-1", "brief.pdf", 3, null), team);
 
@@ -363,11 +363,11 @@ public sealed class ExternalChildOwnershipTestFixture : ExternalCollaborationTes
         }
 
         public override Task<ExternalEventDto> CreateEventAsync(
-            Guid projectId, CreateExternalEventRequest request, Guid owningTeamId, CallerPrincipal creator,
+            TodoRootKind rootKind, Guid rootId, CreateExternalEventRequest request, Guid owningTeamId, CallerPrincipal creator,
             CancellationToken ct = default)
         {
             EventCreators.Add(creator);
-            EventOwners.Add(BoundOwner(BuildEventCreatePayload(projectId, request, owningTeamId)));
+            EventOwners.Add(BoundOwner(BuildEventCreatePayload(rootKind, rootId, request, owningTeamId)));
             return Task.FromResult(new ExternalEventDto { SprkEventid = Guid.NewGuid().ToString(), SprkName = request.SprkName });
         }
 

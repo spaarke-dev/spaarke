@@ -402,20 +402,20 @@ public sealed class GateDecisionRecordSharingTests
     [Theory]
     [InlineData(Via.AtWrite)]
     [InlineData(Via.Mirror)]
-    public async Task AnExternalSharee_AGuest_OrOneWhoseFlagCannotBeRead_GetsNoShare_ABlankFlagIsInternal(Via path)
+    public async Task AnExternalSharee_OrOneWhoseFlagCannotBeRead_GetsNoShare_ABlankFlagIsInternal(Via path)
     {
         var external = Guid.NewGuid();
-        var guest = Guid.NewGuid();
+        var flaggedGuest = Guid.NewGuid();
         var unreadable = Guid.NewGuid(); // no systemuser row
         var blank = Guid.NewGuid();
         var world = new GateSharingWorld()
             .WithCommunication(CommunicationId, Owner)
             .WithUser(external, external: true)
-            .WithUser(guest, external: false, domainName: "partner_fabrikam.com#EXT#@contoso.onmicrosoft.com")
+            .WithUser(flaggedGuest, external: true, domainName: "partner_fabrikam.com#EXT#@contoso.onmicrosoft.com")
             .WithUser(blank, external: null)
             .WithGateRecord(RecordId, CommunicationId, Owner)
             .Share(GateSharingWorld.Communication, CommunicationId, external)
-            .Share(GateSharingWorld.Communication, CommunicationId, guest)
+            .Share(GateSharingWorld.Communication, CommunicationId, flaggedGuest)
             .Share(GateSharingWorld.Communication, CommunicationId, unreadable)
             .Share(GateSharingWorld.Communication, CommunicationId, blank);
 
@@ -425,7 +425,38 @@ public sealed class GateDecisionRecordSharingTests
             await world.Sharing.MirrorCommunicationSharesAsync(CommunicationId, CancellationToken.None);
 
         world.RecordSharees(RecordId).Should().Equal(new[] { blank },
-            "internal only: sprk_isexternal = true, a #EXT# guest and an unreadable flag are skipped; a blank flag is internal (owner round 67)");
+            "internal only: sprk_isexternal = true and an unreadable flag are skipped; a blank flag is internal (owner round 67)");
+    }
+
+    /// <summary>
+    /// uac-r2 task 197b (round 67; ADR-028 A9 Model 1): only the STORED flag is external. A licensed core user signs in as a B2B guest,
+    /// so a guest-shaped <c>domainname</c> with <c>sprk_isexternal</c> false or blank is INTERNAL and is shared, as any internal user.
+    /// Must-fire for the change (before it, the domainname test skipped them); must-not-fire for the unflagged internal user.
+    /// </summary>
+    [Theory]
+    [InlineData(Via.AtWrite, false)]
+    [InlineData(Via.Mirror, false)]
+    [InlineData(Via.AtWrite, null)]
+    [InlineData(Via.Mirror, null)]
+    public async Task AGuestShapedDomainName_WithNoStoredExternalFlag_IsInternal_AndIsShared(Via path, bool? flag)
+    {
+        var modelOneGuest = Guid.NewGuid();
+        var internalUser = Guid.NewGuid();
+        var world = new GateSharingWorld()
+            .WithCommunication(CommunicationId, Owner)
+            .WithUser(modelOneGuest, external: flag, domainName: "counsel_customer.com#EXT#@spaarke.onmicrosoft.com")
+            .WithUser(internalUser, external: false)
+            .WithGateRecord(RecordId, CommunicationId, Owner)
+            .Share(GateSharingWorld.Communication, CommunicationId, modelOneGuest)
+            .Share(GateSharingWorld.Communication, CommunicationId, internalUser);
+
+        if (path == Via.AtWrite)
+            await world.Sharing.ShareAtWriteAsync(RecordId, CommunicationId, Owner);
+        else
+            await world.Sharing.MirrorCommunicationSharesAsync(CommunicationId, CancellationToken.None);
+
+        world.RecordSharees(RecordId).Should().BeEquivalentTo(new[] { modelOneGuest, internalUser },
+            "only a stored sprk_isexternal = true is external; a #EXT# domainname is never read (round 67, Model 1)");
     }
 
     [Fact]

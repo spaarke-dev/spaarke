@@ -262,7 +262,9 @@ public class RecordOwnerAssignmentCensusTests
             + "message's owner and Direct-thread privacy rests on per-participant shares. It is filed only by joining a "
             + "record thread, which re-derives its owner (ThreadResolver JOIN → ReparentAsync). The registry names this "
             + "rule UnfiledCommunicationKeepsCreator (the unified service refuses such a create); this file is its only "
-            + "creator on the chat path, pinned by InboundIngestionCreatorsGuardTests (task 034).",
+            + "creator on the chat path, pinned by InboundIngestionCreatorsGuardTests (task 034). The Direct owner rule is "
+            + "not this file's: after the join the only owner change is DirectMessageOwnerStep (fm 054 piece 3a), called "
+            + "from here and pinned by the same guard.",
             WaiverKind.Permanent),
         new CensusEntry("DirectThreadAccessService.cs", "sprk_communicationthread", 1, Disposition.Waived,
             "A Direct (two-party) thread has no regarding record and is private by per-participant shares — per-user by "
@@ -570,6 +572,14 @@ public class RecordOwnerAssignmentCensusTests
         RootFollowsFiling,
 
         /// <summary>
+        /// field-mapping-server-write-path-r1 task 054 pieces 3a and 3b, the Direct owner rule: assigns a Direct message filed under NO
+        /// record, and its content rows, to the configured Direct message owner team (<c>DirectMessageOwnerStep</c>) at the join and on
+        /// an unfile, conditional on the row version. A message filed under a record stays the resolver's. Asserted
+        /// (<c>DirectMessageOwnerStepGuardTests</c>): it is the only member that reads the Direct team's id and writes an owner.
+        /// </summary>
+        DirectMessageTeam,
+
+        /// <summary>
         /// Task 182: a write the contract forbids, listed only until the named ontology task removes it. Used only by
         /// <see cref="BusinessUnitWrites"/> (a direct <c>owningbusinessunit</c> write is never anything else).
         /// </summary>
@@ -721,7 +731,9 @@ public class RecordOwnerAssignmentCensusTests
             "(ResolveOwnerOverAsync, the create's step 7), fill-only: a team-owned row, a registry ownership exception, a " +
             "secure-flagged root (flag not an explicit false; task 144 provisions it), a refusal, or — on an ownership-parent " +
             "table only — an owner in another business unit leaves it unchanged (a leaf row, which nothing inherits access " +
-            "through, is moved); one conditional update, then the owner-change eviction."),
+            "through, is moved); one conditional update, then the owner-change eviction. Task 052b: its one production caller is " +
+            "the scheduled repair pass (RecordRepairPassJob, which writes no owner itself; RecordRepairReachabilityTests); a " +
+            "contact's team is the resolver's customer-unit answer (the binder's lookup, composed into the resolver)."),
         new OwnerWriteEntry("RecordCreationService.cs", "IsolatedCreateFields", 1, OwnerWriteKind.Root,
             "Task 013: a work assignment / project (a root) filed under a secure record, created INTO isolation by the unified " +
             "create — owned by the named team SecureRootFilingGate.PlanCreateAsync resolves (the service's isolated create, which " +
@@ -777,6 +789,12 @@ public class RecordOwnerAssignmentCensusTests
         new OwnerWriteEntry("CommunicationEnrichmentService.cs", "AssignOwningTeamAsync", 1, OwnerWriteKind.UnfiledOnly,
             "FR-E7 category routing — a communication FILED under a record is the resolver's (r2): routing applies only to "
             + "a row filed under nothing (IsFiledOrUnreadableAsync first)."),
+        new OwnerWriteEntry("DirectMessageOwnerStep.cs", "WriteDirectTeamOwnerAsync", 1, OwnerWriteKind.DirectMessageTeam,
+            "The Direct owner rule's one writer (fm 054 pieces 3a and 3b): a Direct 1:1 message filed under no record, and the content "
+            + "rows that had its owner, to the resolved Direct message owner team. Reached from the join (GrantAtJoinAsync / "
+            + "OwnDirectAfterContentAsync, MessagingIngestor and CommunicationService) and from an unfile (AfterReparentAsync, behind "
+            + "UnfiledOwnershipFor on the four re-file writers). Owner only, conditional on the row version, evicted and read back; no "
+            + "other member of the server assigns a communication to the Direct team (DirectMessageOwnerStepGuardTests)."),
     };
 
     /// <summary>The gate an <see cref="OwnerWriteKind.UnfiledOnly"/> member must call before its owner write.</summary>
@@ -809,6 +827,32 @@ public class RecordOwnerAssignmentCensusTests
             "The owner-write census does not match the source (unified-access-control-r2 task 146 r2). A child's owner is "
             + "IRecordOwnershipResolver's answer — no writer computes a team itself. Route the new write through the resolver "
             + "(or classify it with its reason), then list it:\n" + string.Join("\n", problems));
+    }
+
+    /// <summary>
+    /// Field-mapping-server-write-path-r1 task 052b (UAC-r2 round 130 rule): the scheduled repair pass changes an owner only
+    /// through Repair mode, whose owner write is censused above and takes the resolver's answer. The job itself writes no owner
+    /// and asks no owner question of its own, so there is no second owner decision.
+    /// </summary>
+    [Fact(DisplayName = "Task 052b: the repair pass writes no owner and decides no owner itself")]
+    public void TheRepairPass_WritesNoOwner_AndDecidesNoOwner()
+    {
+        var files = ServerFiles();
+        Assert.True(files.ContainsKey("RecordRepairPassJob.cs"), "the repair pass moved; re-point this test");
+        var job = new Dictionary<string, string> { ["RecordRepairPassJob.cs"] = files["RecordRepairPassJob.cs"] };
+
+        Assert.Empty(ScanOwnerWrites(job));
+        Assert.DoesNotMatch(ResolverCall, job["RecordRepairPassJob.cs"]);
+        Assert.DoesNotMatch(ForgedResolution, job["RecordRepairPassJob.cs"]);
+        // Must fire: the same scan finds an owner write added to the job.
+        var seeded = SourceScan.CodeText(new[]
+        {
+            "public sealed class RecordRepairPassJob",
+            "{",
+            "    private void OwnRow(Entity row, Guid t) { row[\"ownerid\"] = new EntityReference(\"team\", t); }",
+            "}",
+        });
+        Assert.Single(ScanOwnerWrites(new Dictionary<string, string> { ["RecordRepairPassJob.cs"] = seeded }));
     }
 
     // UAC task 183: an OrdinaryReown owner write is not a resolver answer — its team is the caller's — so it is allowed only

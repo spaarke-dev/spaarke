@@ -397,6 +397,8 @@ export interface IEmailComposerProps {
   // — Pre-fill (compose mode) —
   initialTo?: string[];
   initialCc?: string[];
+  /** Task 190 (D-222): starting Bcc, so a host that commits Bcc (the decision wizard's inquiry step) restores it when the composer remounts. */
+  initialBcc?: string[];
   initialSubject?: string;
   initialBody?: string;
   initialBodyFormat?: EmailComposerBodyFormat;
@@ -671,6 +673,14 @@ export interface IEmailComposerProps {
    * `onStateChange`. Independent of {@link hostOwnsChrome}. Omitted (every existing caller): unchanged.
    */
   composeOnly?: boolean;
+
+  /**
+   * Compose-only hosts only (spaarke-ontology-platform-r1 task 182, owner D-219 Q2): show the From row — "From:" and the
+   * sender choice (My mailbox / Spaarke shared mailbox, or the fixed sender when {@link sendMode} is set) — WITHOUT the Send
+   * button, so the user picks the mailbox the host will send from. The choice is `state.sendMode` in `onStateChange`.
+   * Ignored without {@link composeOnly}. Omitted (every other compose-only host, e.g. the decision wizard): the row stays hidden.
+   */
+  composeOnlyShowsFrom?: boolean;
 
   /**
    * Optional override for the chromed (page/dialog mount) header title. When

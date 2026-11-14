@@ -28,6 +28,8 @@ import type { RecordClass } from '../ConsoleKit/consoleStatus';
  * at all (0), and anything that reports landed, possibly landed, resumable, record-may-exist or sent-but-not-recorded.
  */
 export function failureKeepsReview(failure: DecisionCommitFailure): boolean {
+  // Task 191 fix round 1: refused because ANOTHER review on the item is unfinished. This one stored nothing and wrote nothing.
+  if (failure.reasonCode === REVIEW_UNFINISHED) return false;
   if (
     failure.landed.length > 0 ||
     failure.possiblyLanded.length > 0 ||
@@ -40,6 +42,8 @@ export function failureKeepsReview(failure: DecisionCommitFailure): boolean {
   const plainRefusal = failure.httpStatus >= 400 && failure.httpStatus < 500 && failure.httpStatus !== 409;
   return !plainRefusal;
 }
+
+const REVIEW_UNFINISHED = 'ontology.decision.review_unfinished';
 
 /** The Signal states of a 200 answer that mean the item is closed. `InquirySent` and `Unchanged` leave it open. */
 const CLOSED_STATES: readonly string[] = ['Acted', 'Dismissed'];
@@ -54,9 +58,33 @@ export function closesSignal(result: DecisionCommitResult, signalId: string): bo
   return CLOSED_STATES.includes(state);
 }
 
-/** A `Failed` outcome (the route's 500): the answer that says what landed and whether the review can be resumed. */
+/**
+ * A `Failed` outcome: the answer that says what landed and whether the review can be resumed. The route answers 500 for the
+ * attempt that failed and 409 with `replayed` when it returns that stored failure again (task 191: a known state, not a fault).
+ */
 export function isFailedOutcome(failure: DecisionCommitFailure): boolean {
-  return failure.httpStatus === 500;
+  return failure.httpStatus === 500 || (failure.httpStatus === 409 && failure.replayed);
+}
+
+/** Task 191 (D-223): the review resumes only with the person's choice (the inquiry email may have been sent). */
+export function needsSendChoice(failure: DecisionCommitFailure | null | undefined): boolean {
+  return failure?.sendChoiceRequired === true && failure.resumable;
+}
+
+/**
+ * Task 191 fix round 2: the failure is resumable at a budget inquiry whose service request landed and whose email failed (sent or
+ * not), so the person may record the decision without sending. Mirrors the commit route's own test (`ResumedInquiry`).
+ */
+export function canRecordWithoutSending(failure: DecisionCommitFailure | null | undefined): boolean {
+  if (!failure?.resumable) return false;
+  return failure.steps.some(
+    s =>
+      s.code === 'send-budget-inquiry' &&
+      s.status === 'Failed' &&
+      s.possiblyWritten.length === 0 &&
+      s.written.length === 1 &&
+      s.written[0].entity.toLowerCase() === 'sprk_servicerequest'
+  );
 }
 
 /** The content of a review without its identity: two reviews with the same key are the same decision. */
@@ -64,8 +92,12 @@ export function reviewKey(review: DecisionReview): string {
   const content: Partial<DecisionReview> = { ...review };
   delete content.reviewId;
   delete content.retry;
+  delete content.sendChoice;
   return JSON.stringify(content);
 }
+
+/** Task 191 (D-223): the step status of an inquiry the person recorded without sending. */
+const NOT_SENT_BY_CHOICE = 'NotSentByChoice';
 
 const RECORD_CLASSES: readonly RecordClass[] = ['Judgement', 'Routine', 'Dismissal'];
 
@@ -86,8 +118,12 @@ export function resolutionFromRecord(
     return { code: n.code, entity: written?.entity ?? null, id: written?.id ?? null };
   });
   const derived = deriveRecordClass(plan, draft).recordClass;
+  const leftOpen = !closesSignal(result, item.row.signalId);
+  // Task 191 fix round 1 (F1): an inquiry recorded WITHOUT sending leaves the item open too, but no inquiry went out from it.
+  const notSent = result.steps.some(s => s.status === NOT_SENT_BY_CHOICE);
   return {
-    leftOpen: !closesSignal(result, item.row.signalId),
+    leftOpen,
+    ...(leftOpen && notSent ? { note: 'Decision recorded, inquiry not sent - this item is still open' } : {}),
     resolutionType: dismissed ? 'Dismissed' : 'Acted',
     recordClass: stored ?? derived,
     recordNumber: null,

@@ -325,9 +325,9 @@ public sealed partial class RecordCreationServiceMappingSeamTests
                     (row, _) =>
                     {
                         asked.Add(row);
-                        return Task.FromResult(row.Item.Lookups.Any(l => l.Column == "sprk_assignedtointernal")
+                        return Task.FromResult(PreWriteResult.Of(row.Item.Lookups.Any(l => l.Column == "sprk_assignedtointernal")
                             ? null
-                            : PreWriteRefusal.Refused("seam.needs_assignee", "The work assignment needs an assignee."));
+                            : PreWriteRefusal.Refused("seam.needs_assignee", "The work assignment needs an assignee.")));
                     }),
             ],
         };

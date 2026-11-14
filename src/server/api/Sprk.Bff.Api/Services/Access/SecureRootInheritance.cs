@@ -296,10 +296,41 @@ public sealed record SecureRootCreatePlan(
     IReadOnlyList<SecureFilingParent> SecureParents)
 {
     /// <summary>Filed under no secure record: the writer's ordinary create.</summary>
-    public static SecureRootCreatePlan Ordinary { get; } = new(null, false, null, Array.Empty<SecureFilingParent>());
+    public static SecureRootCreatePlan Ordinary { get; } =
+        new(null, false, null, Array.Empty<SecureFilingParent>()) { AccessPermissionFloor = AccessPermissionFloor.NoParent };
 
     internal static SecureRootCreatePlan Refused(RecordOwnerResolution refusal) =>
         new(refusal, false, null, Array.Empty<SecureFilingParent>());
+
+    /// <summary>
+    /// field-mapping-server-write-path-r1 task 022b (UAC-r2 Q2): the Access Permission floor the records this create files
+    /// the row under set — the strictest value the plan's own parent read returned
+    /// (<see cref="SecureParentsAnswer.StrictestPermission"/>), never read again. Read-only: the plan writes nothing from it
+    /// and decides nothing by it; the cascade sets the row's stored value after the create, as before. Undecided when the
+    /// plan's answer was not known (a parent that could not be read) and on every refusal.
+    /// </summary>
+    public AccessPermissionFloor AccessPermissionFloor { get; init; } = AccessPermissionFloor.Undecided;
+}
+
+/// <summary>
+/// field-mapping-server-write-path-r1 task 022b (UAC-r2 Q2): the Access Permission floor a create's filing parents set
+/// (<see cref="SecureRootCreatePlan.AccessPermissionFloor"/>). <see cref="Value"/> is the strictest Limited or Restricted
+/// value among them, or <see langword="null"/> (Standard); meaningful only when <see cref="Decided"/>.
+/// </summary>
+public sealed record AccessPermissionFloor(int? Value, bool Decided)
+{
+    /// <summary>The create files the row under nothing: Standard, decided.</summary>
+    public static AccessPermissionFloor NoParent { get; } = new(null, true);
+
+    /// <summary>A parent's value could not be read, or the plan was refused.</summary>
+    public static AccessPermissionFloor Undecided { get; } = new(null, false);
+
+    /// <summary>Decided, and a parent filed in the create is Restricted.</summary>
+    public bool IsRestricted => Decided && Value == InheritedAccessPermission.Restricted;
+
+    /// <summary>The floor <paramref name="answer"/> sets: its strictest value when every parent was read, else undecided.</summary>
+    internal static AccessPermissionFloor Of(SecureParentsAnswer answer) =>
+        answer.IsKnown ? new(answer.StrictestPermission?.Value, true) : Undecided;
 }
 
 /// <summary>A work assignment or project filed under a given record.</summary>
@@ -1222,7 +1253,7 @@ public sealed partial class SecureRootInheritance
             if (!answer.IsKnown)
                 return SecureRootCreatePlan.Refused(Refused(logical, answer.Unverifiable!));
             if (!secureRequested)
-                return SecureRootCreatePlan.Ordinary;
+                return SecureRootCreatePlan.Ordinary with { AccessPermissionFloor = AccessPermissionFloor.Of(answer) };
         }
 
         var why = answer.HasSecureParent ? "filed under a secure record" : "made secure";
@@ -1286,7 +1317,10 @@ public sealed partial class SecureRootInheritance
             "[SECURE-INHERIT] A new {Table} is {Why} {Parents}: it is created INTO isolation (owner team {Team}, flagged) for " +
             "{Creator}.", logical, answer.HasSecureParent ? "filed under secure record(s)" : "secure from creation, as its creator asked",
             string.Join(", ", answer.SecureParents.Select(p => $"{p.Table}:{p.Id:D}")), team, creatorSystemUserId);
-        return new SecureRootCreatePlan(null, Isolated: true, team, answer.SecureParents);
+        return new SecureRootCreatePlan(null, Isolated: true, team, answer.SecureParents)
+        {
+            AccessPermissionFloor = AccessPermissionFloor.Of(answer),
+        };
     }
 
     private RecordOwnerResolution? CreateWallRefusal(

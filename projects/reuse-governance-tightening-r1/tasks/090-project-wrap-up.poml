@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="090" project="reuse-governance-tightening-r1">
+  <metadata>
+    <title>Project wrap-up</title>
+    <phase>6 Review and wrap-up</phase>
+    <gate>blocked until all other tasks</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Project-close quality gates, cleanup and documentation (phase 6)</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Checklist execution through existing skills</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>final serial task; may touch .claude/ when promoting lessons</parallel-reason>
+    <deps>080, 040, 041, 042, 043</deps>
+    <tags>testing</tags>
+    <estimated-effort>2 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Close the project: final quality gates, test-diet, repository cleanup, README and plan to Complete, lessons learned, final verification and archive.</prompt>
+  <role>SPAARKE platform developer closing a project.</role>
+  <goal>All tasks are done or explicitly cancelled/deferred, quality gates are clean, docs say Complete, lessons are recorded, and the project is archived.</goal>
+
+  <context>
+    <background>task-create Step 3.7; root CLAUDE.md section 7 (project-close /test-diet gate for 090 tasks).</background>
+    <relevant-files>
+      <file role="modify">projects/reuse-governance-tightening-r1/README.md</file>
+      <file role="modify">projects/reuse-governance-tightening-r1/plan.md</file>
+      <file role="modify">projects/reuse-governance-tightening-r1/tasks/TASK-INDEX.md</file>
+      <file role="new">projects/reuse-governance-tightening-r1/notes/lessons-learned.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="080" status="pending">Reviewed change set and PRs</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Run /code-review and /adr-check over all project changes; fix every F-class finding before proceeding (task-execute Step 9.5).</constraint>
+    <constraint source="ADR-038">Run /test-diet over tests added or modified by the project (census test edits) and act on its classification.</constraint>
+    <constraint source="project">Do not rename or move the project folder; archive with /devops-project-archive.</constraint>
+    <constraint source="project">Lessons go in notes/lessons-learned.md, one per entry; promotion to FAILURE-MODES or an ADR is done by doc-drift-audit / ai-procedure-maintenance.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/task-execute/SKILL.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>.claude/patterns/testing/mocking-patterns.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>projects/reuse-governance-tightening-r1/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Wrap-up" location=".claude/skills/task-create/SKILL.md">Step 3.7 checklist.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="1">Final quality gates: /code-review and /adr-check; fix F-class findings.</step>
+    <step order="2">/test-diet for the project.</step>
+    <step order="3">/repo-cleanup projects/reuse-governance-tightening-r1; approve removals; archive handoffs.</step>
+    <step order="4">README.md: Status Complete, dates, Progress 100%, graduation criteria checked, changelog entry. plan.md: Status Complete.</step>
+    <step order="5">Append lessons to notes/lessons-learned.md.</step>
+    <step order="6">Verify every task in TASK-INDEX.md is done, cancelled or deferred with a reason; run pwsh scripts/check-task-status-drift.ps1.</step>
+    <step order="7">/devops-project-archive.</step>
+    <step order="8">Update TASK-INDEX.md: change this task's status cell to `✅ [done]`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If any graduation criterion cannot be met, STOP and ask the owner whether to defer it or keep the project open.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>No lessons-learned file in this project (Glob projects/reuse-governance-tightening-r1/notes/*).</existing>
+    <extension>No: per-project convention defined by task-create Step 3.7.</extension>
+    <cost-of-doing-nothing>Lessons from this project are lost and doc-drift-audit has nothing to promote.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="terminal">Skills: code-review, adr-check, test-diet, repo-cleanup, devops-project-archive</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/reuse-governance-tightening-r1/README.md</output>
+    <output type="docs">projects/reuse-governance-tightening-r1/plan.md</output>
+    <output type="docs">projects/reuse-governance-tightening-r1/notes/lessons-learned.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">No open F-class finding from the final code-review and adr-check.</criterion>
+    <criterion testable="true">test-diet has run and its classifications are applied.</criterion>
+    <criterion testable="true">README and plan show Complete; graduation criteria are checked or explicitly deferred by the owner.</criterion>
+    <criterion testable="true">check-task-status-drift.ps1 reports no drift.</criterion>
+    <criterion testable="true">The project is archived; the folder is not renamed.</criterion>
+  </acceptance-criteria>
+
+  <notes>Mandatory last task.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

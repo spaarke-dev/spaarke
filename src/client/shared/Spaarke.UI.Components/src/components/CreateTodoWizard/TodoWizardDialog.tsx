@@ -40,9 +40,10 @@ import {
   searchUsersAsLookup,
 } from '../CreateMatterWizard/matterService';
 
-import { EntityCreationService } from '../../services/EntityCreationService';
 import type { IDataService, INavigationService } from '../../types/serviceInterfaces';
 import type { AuthenticatedFetchFn } from '../../services/EntityCreationService';
+import { sendComposedEmail } from '../EmailComposer/composeOnlySend';
+import type { IEmailComposeHandlers } from '../EmailComposer/composeOnlySend';
 
 // ---------------------------------------------------------------------------
 // Props
@@ -62,6 +63,11 @@ export interface ICreateTodoWizardProps {
    * pass a real INavigationService so users can associate the To Do.
    */
   navigationService?: INavigationService;
+  /**
+   * Host-built email composer handlers for the Send Email follow-on (task 182, D-219): recipient side pane, record
+   * lookup, file upload, template picker and AI draft (`createXrmEmailComposeHandlers` in a Dataverse host).
+   */
+  emailComposeHandlers?: IEmailComposeHandlers;
   /**
    * Optional initial regarding selection (R3 FR-16). When supplied, the
    * AssociateToStep is pre-filled with this record so launch contexts that
@@ -125,6 +131,7 @@ const TodoWizardDialog: React.FC<ICreateTodoWizardProps> = ({
   onClose,
   dataService,
   navigationService,
+  emailComposeHandlers,
   initialRegarding,
   authenticatedFetch,
   bffBaseUrl,
@@ -210,6 +217,7 @@ const TodoWizardDialog: React.FC<ICreateTodoWizardProps> = ({
         renderContent: _wizardFiles => (
           <CreateTodoStep
             dataService={dataService}
+            navigationService={navigationService}
             // UAT 2026-06-21 — sprk_todo.sprk_assignedto migrated to a Contact
             // lookup. The wizard's Assignee picker now searches the OOB
             // `contact` entity (not systemuser) so the selected GUID matches
@@ -222,6 +230,12 @@ const TodoWizardDialog: React.FC<ICreateTodoWizardProps> = ({
           />
         ),
       },
+
+      // Assign Work follow-on: lookups open the Dataverse side pane (owner D-219).
+      navigationService,
+
+      // Send Email follow-on: the host's composer handlers (task 182, D-219).
+      emailComposeHandlers,
 
       searchContacts: handleSearchContacts,
       searchOrganizations: handleSearchOrganizations,
@@ -264,33 +278,14 @@ const TodoWizardDialog: React.FC<ICreateTodoWizardProps> = ({
         const warnings: string[] = [...(result.warnings ?? [])];
 
         // ── Send email (if selected) — preserved from R1/R2 follow-on flow ────────
-        if (context.selectedActions.includes('send-email') && context.followOn.emailTo.trim()) {
-          // Wrap IDataService to adapt to IWebApiWithCreate expected by EntityCreationService
-          const webApiAdapter = {
-            createRecord: async (entityName: string, data: Record<string, unknown>) => {
-              const id = await dataService.createRecord(entityName, data);
-              return { id };
-            },
-            retrieveRecord: (entityName: string, id: string, options?: string) =>
-              dataService.retrieveRecord(entityName, id, options),
-            retrieveMultipleRecords: (entityName: string, options?: string) =>
-              dataService.retrieveMultipleRecords(entityName, options),
-            updateRecord: async (entityName: string, id: string, data: Record<string, unknown>) => {
-              await dataService.updateRecord(entityName, id, data);
-              return { id };
-            },
-            deleteRecord: async (entityName: string, id: string) => {
-              await dataService.deleteRecord(entityName, id);
-              return { id };
-            },
-          };
-          const entityService = new EntityCreationService(webApiAdapter, authenticatedFetch, bffBaseUrl);
-          const emailResult = await entityService.sendEmail({
-            to: context.followOn.emailTo,
-            subject: context.followOn.emailSubject,
-            body: context.followOn.emailBody,
-            // Per FR-15: the association entity type is sprk_todo (NOT sprk_event)
+        if (context.selectedActions.includes('send-email') && context.followOn.email.to.length > 0) {
+          // Task 182 (D-219): the composer's request path (From, To, Cc, Bcc, attachments).
+          // Per FR-15: the association entity type is sprk_todo (NOT sprk_event)
+          const emailResult = await sendComposedEmail(context.followOn.email, {
             associations: [{ entityType: 'sprk_todo', entityId: todoId, entityName: todoName }],
+            authenticatedFetch,
+            bffBaseUrl,
+            onResolveShareLink: emailComposeHandlers?.onResolveShareLink,
           });
           if (!emailResult.success && emailResult.warning) warnings.push(emailResult.warning);
         }
@@ -321,6 +316,7 @@ const TodoWizardDialog: React.FC<ICreateTodoWizardProps> = ({
       formValues,
       dataService,
       navigationService,
+      emailComposeHandlers,
       initialRegarding,
       authenticatedFetch,
       bffBaseUrl,

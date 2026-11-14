@@ -1,0 +1,147 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="036" project="spaarke-SPA-external-access-platform-r4">
+  <metadata>
+    <title>Matter events show task type and assignee (FR-23, #2445, ontology D-199)</title>
+    <phase>3 Grids, information, messages</phase>
+    <gate>after 028 — data source confirmed (D-199 / D-129) and recorded before code</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Adds partner-visible columns (an internal person's name) to an external read on the shared BFF surface</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Two columns through one existing query, DTO and list once the source is confirmed</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Depends on an external ontology decision (D-199) and a uac-r2 review</parallel-reason>
+    <deps>028</deps>
+    <tags>frontend, react, bff-api</tags>
+    <estimated-effort>3-5 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Show each matter event's task type and assignee in the record template's events list, from columns on `sprk_event` (never `sprk_signal`), with an event deep link only if an external event target exists.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. Full-stack developer on the external SPA and the external-access BFF.</role>
+  <goal>A matter's events show both values; the data source is cited in the PR; the new external columns carry UAC's review; no Signal is read.</goal>
+
+  <context>
+    <background>Spec FR-23 and Assumptions; design §7 (`design.md:177`, `:196`). Ontology D-199 (`projects/spaarke-ontology-platform-r1/notes/decisions.md:412-422`) decides who is emailed on Assign Task and requires that a matter shows its related tasks in the portal; D-129 (that project's `CLAUDE.md` §3) says individuals come from Assigned To Internal (`sprk_assignedto1` on `sprk_event`, a contact lookup), never `ownerid`. Verified 2026-11-10: the external events read is a fixed query, not the module allow-list. `ExternalDataService.BuildEventsQuery` (`src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ExternalDataService.cs:2405-2421`, select at `:2414-2417`), row type `EventRow` (`:223-240`), mapper `MapEvent` (`:3732`), wire DTO `ExternalEventDto` (`Api/ExternalAccess/Dtos/ExternalProjectDtos.cs:395-437`, no type or assignee). The matter route is `GET /matters/{id}/events` (`Api/ExternalAccess/ExternalProjectDataEndpoints.cs:439`, shared `ListEventsForRoot` `:2208-2241`). `sprk_event` has `sprk_EventType_Ref` and several assignee lookups (`sprk_AssignedTo`, `sprk_AssignedTo1`, `sprk_AssignedTo2`, `sprk_AssignedToExternal`, `sprk_AssignedToInternal`; `src/dataverse/solutions/SpaarkeMaster/Entities/sprk_Event/Entity.xml:991-1144`, `:2263`); which one is "the assignee" is decided at step 1, not guessed. Existing query tests: `tests/unit/Sprk.Bff.Api.Tests/Api/Events/EventReadPathTests.cs`, `tests/integration/contract/Api/ExternalAccess/ExternalRootEventReadTests.cs`. SPA: `ODataEvent` (`src/client/external-spa/src/api/web-api-client.ts:120-141`), rendered by `EventsCalendar.tsx` in the template's events section (task 005). `RECORD_LINK_TOKENS` (`src/client/external-spa/src/record-targets.ts:35-42`) has no event token.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ExternalDataService.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/Dtos/ExternalProjectDtos.cs</file>
+      <file role="modify">tests/unit/Sprk.Bff.Api.Tests/Api/Events/EventReadPathTests.cs</file>
+      <file role="modify">tests/integration/contract/Api/ExternalAccess/ExternalRootEventReadTests.cs</file>
+      <file role="modify">src/client/external-spa/src/api/web-api-client.ts</file>
+      <file role="modify">src/client/external-spa/src/components/EventsCalendar.tsx</file>
+      <file role="modify">src/client/external-spa/tests/DetailEventsTodosRoots.test.tsx</file>
+      <file role="canonical-reference">projects/spaarke-ontology-platform-r1/notes/decisions.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="028" status="pending">P2 deployed (phase-deploy convention)</dependency>
+      <dependency task="external" status="pending">ontology D-199 / D-129: the source of task type and assignee</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec FR-23, design §5">Never read `sprk_signal` or any Signal-derived column. If the confirmed source is a Signal, STOP (see escalation).</constraint>
+    <constraint source="spec FR-23">Values come from `sprk_event` lookups through `@OData.Community.Display.V1.FormattedValue` (names only). Never project the assignee's id, email, UPN or any contact detail; the lookup GUID stays server-side.</constraint>
+    <constraint source="owner 2026-11-08, FR-18 rule">An internal person's name on the external plane needs UAC's review, recorded in the PR, per column. Run `/conflict-check` before the BFF PR.</constraint>
+    <constraint source="spec FR-23">The deep link is optional: add it only if an external event record target exists; R4 adds no seventh record type and no new route. Otherwise omit it and say so in the notes.</constraint>
+    <constraint source="R3 task 039">The read gate, multi-root withholding (`ReadableEventsAsync`), truncation and `canCreate` are unchanged; `sprk_todoflag` is never added to the events DTO.</constraint>
+    <constraint source="bff-extensions.md">BFF hygiene: Placement Justification in the PR (extension of an existing query and DTO); publish-size delta against a fresh master build, ≤ 60 MB; no new HIGH CVE; tests with the change; no new DI registration, package or background work.</constraint>
+    <constraint source="dev-bff-deploy-coordination">Never deploy the dev BFF directly — request via uac-r2 (`docs/procedures/dev-bff-deploy-coordination.md`); task 038 carries the request.</constraint>
+    <constraint source="ADR-021">SPA rendering uses Fluent v9 semantic tokens; an absent value renders as blank, not "Unknown".</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-SPA-external-access-platform-r4/CLAUDE.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r4/spec.md</file>
+      <file>projects/spaarke-ontology-platform-r1/CLAUDE.md</file>
+      <file>src/client/external-spa/README.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/adr/ADR-003-authorization-seams.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/skills/fluent-v9-component/SKILL.md</file>
+      <file>.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+      <file>.claude/skills/conflict-check/SKILL.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/procedures/dev-bff-deploy-coordination.md</file>
+      <file>tests/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Fixed external select" location="src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ExternalDataService.cs">`BuildEventsQuery` + `EventRow` + `MapEvent` — extend all three together</pattern>
+      <pattern name="Lookup display name" location="src/client/external-spa/src/components/detail/RecordDetailFields.tsx">`formatDetailValue` prefers `@formattedValues`</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load the knowledge files, read the relevant files, declare rigor and model tier per task-execute Step 0.5.</step>
+    <step order="1" name="Source">Confirm with the ontology project (via the operator) which `sprk_event` columns are "task type" and "assignee" under D-199/D-129; if live confirmation is needed, show the owner a read-only metadata command first (as task 030). Record the answer, with its source, in the notes.</step>
+    <step order="2">Get uac-r2's review for the two columns on the external events read; record it.</step>
+    <step order="3">BFF: add the two lookups to the `BuildEventsQuery` select; carry their formatted names on `EventRow`; project two name-only properties on `ExternalEventDto` via `MapEvent`.</step>
+    <step order="4">BFF tests: the query selects the two lookups; the DTO carries names only (no GUID, no contact detail); an event withheld by the multi-root rule stays withheld (must-fire) and a readable one lists (must-not-fire).</step>
+    <step order="5">SPA: add the two fields to `ODataEvent`; render task type and assignee in the events list; add the deep link only if an event target exists.</step>
+    <step order="6">SPA tests: both values render; absent values render blank; no deep link without a target.</step>
+    <step order="7">Run `/conflict-check`; measure the publish-size delta; run `dotnet list package --vulnerable --include-transitive`; run the BFF tests filtered to events and the SPA tests and build.</step>
+    <step order="8">Update tasks/TASK-INDEX.md: set this task's status cell to `✅ [done]` and this POML's &lt;status&gt; to completed; run `pwsh scripts/check-task-status-drift.ps1`.</step>
+    <step order="9">Record deviations (including the bff-api tag added to this task) and the cited data source in projects/spaarke-SPA-external-access-platform-r4/notes/task-036-notes.md.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If D-199 or the ontology project makes the source a Signal, STOP: either choose a named external projection with uac-r2's review (a new design item for the owner), or defer FR-23 with `/project-defer-issue-tracking`. Never read the raw `sprk_signal` table.</trigger>
+    <trigger>If the assignee column is a contact lookup whose name could identify an external party to another external party (not an internal person), STOP and ask uac-r2 and the owner before projecting it.</trigger>
+    <trigger>If uac-r2 rejects either column, STOP and ask the owner whether to ship the other alone or defer.</trigger>
+  </escalation>
+
+  <ui-tests>
+    <test name="Matter events">
+      <url>https://{spa-dev-host}/?record=matter:{matter-id}</url>
+      <steps>
+        <step>Open a matter with an assigned task event and one without an assignee</step>
+        <step>Check the network response for the events read</step>
+        <step>Check the console for errors</step>
+      </steps>
+      <expected>Task type and assignee name show; blank when absent; response has names only; no console errors</expected>
+    </test>
+    <test name="Dark Mode Compliance (ADR-021)">
+      <steps><step>Switch to dark mode and high contrast</step></steps>
+      <expected>New fields use semantic colours</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="dotnet">Build and run the BFF tests filtered to events</tool>
+    <tool name="npm">Run the external-spa tests and build</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ExternalDataService.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/Dtos/ExternalProjectDtos.cs</output>
+    <output type="code">src/client/external-spa/src/components/EventsCalendar.tsx</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Api/Events/EventReadPathTests.cs</output>
+    <output type="test">src/client/external-spa/tests/DetailEventsTodosRoots.test.tsx</output>
+    <output type="docs">projects/spaarke-SPA-external-access-platform-r4/notes/task-036-notes.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The data source (columns and the D-199/D-129 basis) is recorded in the notes and cited in the PR.</criterion>
+    <criterion testable="true">No query, DTO or test introduced here reads `sprk_signal`.</criterion>
+    <criterion testable="true">A matter's events show task type and assignee name; an absent value renders blank.</criterion>
+    <criterion testable="true">The DTO carries names only: no lookup GUID, email, UPN or contact detail for the assignee.</criterion>
+    <criterion testable="true">Multi-root withholding, truncation and `canCreate` behave as before (must-fire and must-not-fire tests).</criterion>
+    <criterion testable="true">The deep link exists only if an external event target exists; otherwise it is omitted and the notes say so.</criterion>
+    <criterion testable="true">UAC review recorded in the PR; `/conflict-check` run; Placement Justification, publish-size delta (≤ 60 MB) and no new HIGH CVE recorded; no BFF deploy made from this task.</criterion>
+    <criterion testable="true">Test scope: cover the stated contract plus the edge cases named in these criteria. Anything beyond that needs a one-line justification in the task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-23, issue #2445. Tag deviation: the task table lists frontend, react; bff-api is added because `ExternalEventDto` and its fixed query carry neither value.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

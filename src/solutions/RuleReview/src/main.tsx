@@ -21,6 +21,8 @@ import {
   AppErrorBoundary,
   AppInsightsService,
   ensureNavigatorSidePane,
+  createXrmNavigationService,
+  getXrm,
 } from '@spaarke/ui-components';
 import { resolveRuntimeConfig, getAuthProvider, getTelemetryConnectionString } from '@spaarke/auth';
 import { App } from './App';
@@ -125,7 +127,14 @@ function Root() {
 
   // Built once the runtime config is set (getBffBaseUrl throws before that).
   const services = React.useMemo(
-    () => (ready ? { api: createRuleSetApi(authenticatedFetch, getBffBaseUrl()), firmLookup: createFirmLookup() } : null),
+    () =>
+      ready
+        ? {
+            api: createRuleSetApi(authenticatedFetch, getBffBaseUrl()),
+            // D-219 Q5: the Firm picker opens the Dataverse side pane when this frame can reach Xrm.Utility.lookupObjects.
+            firmLookup: createFirmLookup(undefined, getXrm('lookupObjects')?.Utility?.lookupObjects ? createXrmNavigationService() : undefined),
+          }
+        : null,
     [ready]
   );
 

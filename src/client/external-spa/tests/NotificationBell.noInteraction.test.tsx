@@ -25,7 +25,7 @@ vi.mock('@microsoft/teams-js', () => ({
   nestedAppAuth: { isNAAChannelRecommended: vi.fn(() => true) },
 }));
 // The detail view is not under test here.
-vi.mock('../src/components/detail/RecordDetailModal', () => ({ RecordDetailModal: () => null }));
+vi.mock('../src/components/record/RecordTemplateModal', () => ({ RecordTemplateModal: () => null }));
 
 const RETURN_TO_KEY = 'spaarke.ext.returnTo';
 const BFF_APP_ID = 'aaaaaaaa-0000-0000-0000-00000000000a';

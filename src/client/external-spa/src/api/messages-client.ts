@@ -63,6 +63,11 @@ export interface ExternalMessagesResponse {
   value: ExternalMessage[];
   /** The read stopped at its cap, or a later page failed: the list is incomplete. Absent = complete. */
   truncated?: boolean;
+  /**
+   * Whether the caller may post to this thread: the POST's own decision (R4 task 002, FR-06; `CanPostAsync`). Absent
+   * (a BFF that predates it) is "not said", never "can".
+   */
+  canCreate?: boolean;
 }
 
 function messagesPath(root: string, id: string): string {

@@ -1099,6 +1099,12 @@ public class SpeWriteSinkContainerProvenanceGuardTests
             "The container-type-config-scoped wrapper around DeleteColumnAsync; same reasoning — column "
             + "schema, no item, no bytes (ADR-007)."),
 
+        new SinkName("DeleteItemPermissionAsync", SinkKind.NotAContentWrite,
+            "DriveItemOperations' item-permission delete (uac-r2 task 191g): removes a SHARING permission from a drive "
+            + "item — the flagged-external Office-edit grant SpeContainerMembershipService made and recorded — and "
+            + "places, replaces or destroys no content anywhere (ADR-007). Governed by the container ownership guard "
+            + "and the grant's marker, not by container provenance."),
+
         new SinkName("DeleteSubscriptionAsync", SinkKind.NotAContentWrite,
             "Deletes a Graph CHANGE-NOTIFICATION subscription (graphClient.Subscriptions[id]) — a webhook "
             + "registration, not container content (ADR-007; ADR-045 owns the notification lifecycle)."),

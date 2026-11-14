@@ -10,16 +10,21 @@
  * are now first-class `sprk_todo` records returned by the BFF route
  * `GET /api/v1/external/projects/{id}/todos` with ADR-024 polymorphic-resolver
  * fields populated server-side. Task 057: the same list reads a matter's or a work assignment's to-dos
- * (`GET /api/v1/external/{matters|workassignments}/{id}/todos`) when `root` says so - read-only there (create and
- * status toggle are project-only in this component).
+ * (`GET /api/v1/external/{matters|workassignments}/{id}/todos`) when `root` says so.
  *
  * Design reference: @spaarke/ui-components/TodoDetail
  *   (src/client/shared/Spaarke.UI.Components/src/components/TodoDetail/TodoDetail.tsx)
  *
- * Access level enforcement (ADR per project CLAUDE.md):
- *   - ViewOnly    (100000000): Read-only. Can view to-dos, cannot create or modify.
- *   - Collaborate (100000001): Can create to-dos and toggle status.
- *   - FullAccess  (100000002): Same as Collaborate plus invite rights (not relevant here).
+ * WHO MAY CREATE (R4 task 006, FR-06). Create posts to the record's own route (`createRootTodo`,
+ * POST /api/v1/external/{root}/{id}/todos). The right comes from the server's answers, never from the record kind:
+ *   the right is `createRightOf` (recordAccess.ts), in the record template and on the project page alike (D-9): the list
+ *   must have answered (loading or failed = not offered) and its `canCreate` must allow; a `/me` level (`accessLevel`; the
+ *   host passes one only for a record `/me` carries a level for, a project) must also allow for a caller without
+ *   `writeAccessPerRecord` (Collaborate / Full Access). A list that answered without `canCreate` follows that level, or,
+ *   with no level, is "cannot" (fail closed).
+ * STATUS TOGGLE. Offered only where the caller's right to PATCH the to-do is known from a server answer: the `/me` level
+ * (and, on the project page, a per-record caller, whose PATCH decides - task 036 fix round 2). No list or row carries a
+ * PATCH answer for a matter or work-assignment to-do, so it is never offered there (no level is passed for them).
  *
  * Delete-own (task 054, FR-26): independent of the access level, a to-do the caller CREATED (creator stamp = the
  * signed-in principal, passed as `caller`) shows Delete, which asks first. 204 removes it; a refusal shows an error and
@@ -46,12 +51,6 @@ import {
   Textarea,
   Spinner,
   Badge,
-  Dialog,
-  DialogSurface,
-  DialogTitle,
-  DialogBody,
-  DialogContent,
-  DialogActions,
   MessageBar,
   MessageBarBody,
   MessageBarActions,
@@ -67,11 +66,12 @@ import {
   DeleteRegular,
   WarningRegular,
 } from '@fluentui/react-icons';
+import { FormModal } from '@spaarke/ui-components/components/SprkModal';
 import { daysBetweenLocalMidnight, parseDueDate } from '@spaarke/ui-components/utils/dateLocal';
 
 import {
   getRootTodos,
-  createTodo,
+  createRootTodo,
   updateTodo,
   deleteOwnTodo,
   EVENTS_TODOS_ROOT_NOUN,
@@ -81,6 +81,8 @@ import {
 import { isCreatedByCaller, type CallerIdentity } from '../api/delete-own';
 import { useDeleteOwn, DeleteOwnConfirm, DeleteFailureNotice } from './DeleteOwn';
 import { TruncatedListNotice } from './TruncatedListNotice';
+import { useChildDialog, useOfferCreateAction, type CreateActionReporter } from './createAction';
+import { levelVerdictOf, listCreateRightOf } from './record/recordAccess';
 import { BffAccessState, accessFailureOf, type BffAccessFailure } from './auth/BffAccessState';
 import { AccessLevel, ApiError } from '../types';
 import { problemMessage } from '../auth/bff-client';
@@ -490,100 +492,89 @@ const CreateTaskDialog: React.FC<CreateTaskDialogProps> = ({
     [handleSubmit]
   );
 
+  // A FormModal (task 004, FR-03): Cancel in the left footer slot, Create Task on the right. Esc does nothing
+  // (modal standard: an explicit dialog keeps a draft); onDismiss refuses while submitting.
   return (
-    <Dialog
+    <FormModal
       open={open}
-      onOpenChange={(_ev, data) => {
-        if (!data.open) onDismiss();
-      }}
+      onClose={onDismiss}
+      onSubmit={() => void handleSubmit()}
+      title="Create Task"
+      submitLabel={isSubmitting ? 'Creating...' : 'Create Task'}
+      submitDisabled={!isTitleValid}
+      busy={isSubmitting}
     >
-      <DialogSurface aria-label="Create Task dialog">
-        <DialogBody>
-          <DialogTitle>Create Task</DialogTitle>
-          <DialogContent>
-            {submitError && (
-              <MessageBar intent="error" className={styles.errorBanner}>
-                <MessageBarBody>{submitError}</MessageBarBody>
-              </MessageBar>
-            )}
+      {submitError && (
+        <MessageBar intent="error" className={styles.errorBanner}>
+          <MessageBarBody>{submitError}</MessageBarBody>
+        </MessageBar>
+      )}
 
-            <div className={styles.dialogForm} onKeyDown={handleKeyDown}>
-              {/* Title — required */}
-              <div className={styles.fieldGroup}>
-                <label className={styles.fieldLabel}>
-                  Title
-                  <span className={styles.fieldLabelRequired} aria-hidden="true">
-                    *
-                  </span>
-                </label>
-                <Input
-                  value={title}
-                  onChange={(_ev, data) => setTitle(data.value)}
-                  placeholder="Enter task title..."
-                  autoFocus
-                  aria-required="true"
-                  aria-invalid={!isTitleValid && title.length > 0}
-                />
-              </div>
+      <div className={styles.dialogForm} onKeyDown={handleKeyDown}>
+        {/* Title — required */}
+        <div className={styles.fieldGroup}>
+          <label className={styles.fieldLabel}>
+            Title
+            <span className={styles.fieldLabelRequired} aria-hidden="true">
+              *
+            </span>
+          </label>
+          <Input
+            value={title}
+            onChange={(_ev, data) => setTitle(data.value)}
+            placeholder="Enter task title..."
+            autoFocus
+            aria-required="true"
+            aria-invalid={!isTitleValid && title.length > 0}
+          />
+        </div>
 
-              {/* Description — optional */}
-              <div className={styles.fieldGroup}>
-                <label className={styles.fieldLabel}>Description</label>
-                <Textarea
-                  value={description}
-                  onChange={(_ev, data) => setDescription(data.value)}
-                  placeholder="Add a description (optional)..."
-                  resize="vertical"
-                  rows={3}
-                />
-              </div>
+        {/* Description — optional */}
+        <div className={styles.fieldGroup}>
+          <label className={styles.fieldLabel}>Description</label>
+          <Textarea
+            value={description}
+            onChange={(_ev, data) => setDescription(data.value)}
+            placeholder="Add a description (optional)..."
+            resize="vertical"
+            rows={3}
+          />
+        </div>
 
-              {/* Due Date — optional */}
-              <div className={styles.fieldGroup}>
-                <label className={styles.fieldLabel}>Due Date</label>
-                <Input type="date" value={dueDate} onChange={ev => setDueDate(ev.target.value)} />
-              </div>
+        {/* Due Date — optional */}
+        <div className={styles.fieldGroup}>
+          <label className={styles.fieldLabel}>Due Date</label>
+          <Input type="date" value={dueDate} onChange={ev => setDueDate(ev.target.value)} />
+        </div>
 
-              {/* Priority — optional */}
-              <div className={styles.fieldGroup}>
-                <label className={styles.fieldLabel}>Priority</label>
-                <div className={styles.priorityRow}>
-                  {PRIORITY_OPTIONS.map(option => (
-                    <Badge
-                      key={option.value}
-                      className={styles.priorityBadge}
-                      appearance={selectedPriority === option.value ? 'filled' : 'tint'}
-                      color={option.color}
-                      size="large"
-                      onClick={() => setSelectedPriority(option.value)}
-                      role="radio"
-                      aria-checked={selectedPriority === option.value}
-                      tabIndex={0}
-                      onKeyDown={ev => {
-                        if (ev.key === ' ' || ev.key === 'Enter') {
-                          setSelectedPriority(option.value);
-                        }
-                      }}
-                    >
-                      {option.label}
-                    </Badge>
-                  ))}
-                </div>
-              </div>
-            </div>
-          </DialogContent>
-
-          <DialogActions>
-            <Button appearance="secondary" onClick={onDismiss} disabled={isSubmitting}>
-              Cancel
-            </Button>
-            <Button appearance="primary" onClick={handleSubmit} disabled={!isTitleValid || isSubmitting}>
-              {isSubmitting ? 'Creating...' : 'Create Task'}
-            </Button>
-          </DialogActions>
-        </DialogBody>
-      </DialogSurface>
-    </Dialog>
+        {/* Priority — optional */}
+        <div className={styles.fieldGroup}>
+          <label className={styles.fieldLabel}>Priority</label>
+          <div className={styles.priorityRow}>
+            {PRIORITY_OPTIONS.map(option => (
+              <Badge
+                key={option.value}
+                className={styles.priorityBadge}
+                appearance={selectedPriority === option.value ? 'filled' : 'tint'}
+                color={option.color}
+                size="large"
+                onClick={() => setSelectedPriority(option.value)}
+                role="radio"
+                aria-checked={selectedPriority === option.value}
+                tabIndex={0}
+                onKeyDown={ev => {
+                  if (ev.key === ' ' || ev.key === 'Enter') {
+                    setSelectedPriority(option.value);
+                  }
+                }}
+              >
+                {option.label}
+              </Badge>
+            ))}
+          </div>
+        </div>
+      </div>
+    </FormModal>
   );
 };
 
@@ -596,17 +587,30 @@ export interface SmartTodoProps {
   projectId: string;
   /** Which kind of record `projectId` is (task 057). Defaults to a project. */
   root?: EventsTodosRoot;
-  /** The current user's access level — controls create/edit permissions. */
-  accessLevel: AccessLevel;
+  /**
+   * The caller's `/me` level for this record. Pass it only for a record `/me` carries a level for (a project); omit it for
+   * a matter or work assignment, whose create follows the list's `canCreate` (task 006). The status toggle needs it, and
+   * is offered only outside the record template (task 006 fix round 1: no server answer says the caller may PATCH).
+   */
+  accessLevel?: AccessLevel;
   /** The signed-in principal. With it, to-dos the caller created show Delete (task 054); without it, none do. */
   caller?: CallerIdentity | null;
   /**
    * The caller's write access is decided per record (`/me` `writeAccessPerRecord`, task 036 fix round 1): "Add Task"
    * then follows the BFF's `canCreate` on this record's to-do list instead of `accessLevel`. The status toggle is offered
-   * on a project's to-dos (fix round 2): PATCH confirms Write on each to-do against Dataverse, a per-row Write is not asked
-   * of the list (owner round 59), so a refused toggle reverts and says so.
+   * on a record with a level (a project's to-dos, fix round 2): PATCH confirms Write on each to-do against Dataverse, a
+   * per-row Write is not asked of the list (owner round 59), so a refused toggle reverts and says so.
    */
   writeAccessPerRecord?: boolean;
+  /**
+   * Record template only (task 004, FR-03). When given, the toolbar's Add to-do is the entry point: this list shows no
+   * "Add Task" button of its own, offers its action through this callback (shown exactly when its own button would have
+   * been) and renders the create dialog itself, so the dialog is a descendant of the host that owns the toolbar. Omit it
+   * everywhere else (the project page keeps its button).
+   */
+  onCreateActionChange?: CreateActionReporter;
+  /** Called with `true` while a create is in flight and `false` otherwise (and on unmount), so the host can hold. */
+  onBusyChange?: (busy: boolean) => void;
 }
 
 /**
@@ -620,13 +624,13 @@ export interface SmartTodoProps {
 export const SmartTodo: React.FC<SmartTodoProps> = ({
   projectId,
   root = 'projects',
-  accessLevel: levelProp,
+  accessLevel,
   caller,
   writeAccessPerRecord = false,
+  onCreateActionChange,
+  onBusyChange,
 }) => {
-  // Create and the status toggle are project routes' actions: a matter or work assignment list is read-only here whatever
-  // level the host passes (task 057). Delete-own is independent of the level.
-  const accessLevel = root === 'projects' ? levelProp : AccessLevel.ViewOnly;
+  // Delete-own is independent of the level and of `canCreate` (the creator stamp; task 054).
   const styles = useStyles();
 
   // To-do list state
@@ -644,19 +648,46 @@ export const SmartTodo: React.FC<SmartTodoProps> = ({
   const [toggleError, setToggleError] = React.useState<string | null>(null);
 
   // Create dialog state
-  const [isDialogOpen, setIsDialogOpen] = React.useState(false);
+  const createDialog = useChildDialog();
   const [isSubmitting, setIsSubmitting] = React.useState(false);
   const [submitError, setSubmitError] = React.useState<string | null>(null);
 
-  const allowEdit = canEdit(accessLevel);
-  // Task 036 fix round 1: the BFF's `canCreate` on this list (null = not said). With per-record write access it decides
-  // "Add Task" (create is a project action here, task 057); otherwise the level does, as before.
+  // The record template holds browsing, Close and Refresh while the post is in flight (task 004). The latest callback is
+  // read through a ref so a new function identity never re-fires the effect, and unmount always reports "not busy".
+  const onBusyChangeRef = React.useRef(onBusyChange);
+  onBusyChangeRef.current = onBusyChange;
+  React.useEffect(() => {
+    onBusyChangeRef.current?.(isSubmitting);
+  }, [isSubmitting]);
+  React.useEffect(
+    () => () => {
+      onBusyChangeRef.current?.(false);
+    },
+    []
+  );
+
+  // Task 036 fix round 1: the BFF's `canCreate` on this list (null = not said).
   const [listCanCreate, setListCanCreate] = React.useState<boolean | null>(null);
-  const allowCreate = writeAccessPerRecord ? root === 'projects' && listCanCreate === true : allowEdit;
-  // Task 036 fix round 2: the status toggle. A per-record caller's level says only what they may SEE; PATCH /todos/{id}
-  // asks Dataverse for Write on that to-do, so the toggle is offered on a project's to-dos and the PATCH decides (a 403
-  // reverts it). Every other caller keeps the level rule, and a matter / work-assignment list stays read-only (task 057).
-  const allowToggle = allowEdit || (writeAccessPerRecord && root === 'projects');
+  // Task 006 (FR-06): the create rule lives in recordAccess.ts (`listCreateRightOf`, shared with EventsCalendar and
+  // DocumentLibrary). Offered only when the right is known `true`: the list has answered, its `canCreate` allows, and a
+  // `/me` level that decides (a level the host has - a project - for a caller whose write access is not per record) allows
+  // too. The same rule in the record template and on the project page (D-9 #2716: the page used to offer on the level
+  // alone, which a workforce role ceiling refuses with 403).
+  const inRecordTemplate = onCreateActionChange !== undefined;
+  const { right, allowed: allowCreate } = listCreateRightOf({
+    loaded: !isLoading && !accessFailure && !loadError,
+    listCanCreate,
+    levelAllows: levelVerdictOf(accessLevel, writeAccessPerRecord),
+  });
+  // The status toggle. `PATCH /todos/{id}` is decided by the caller's rights on the to-do AND, for a workforce contact,
+  // the role ceiling (`WorkforceRoleCeilingGate.UpdateTodo`), which also refuses a to-do whose root is ambiguous; no
+  // server answer about that right exists (the list's `canCreate` is the create right, and no row says it). So:
+  //   - in the record template it is never offered, on any root, projects included (task 006 fix round 1: never offer an
+  //     action that can only be refused);
+  //   - on the project page the rule is unchanged: the `/me` level (Collaborate / Full Access), or - task 036 fix round
+  //     2 - a per-record caller on a record with a level, where the PATCH decides (a 403 reverts it). Not covered by D-9:
+  //     the toggle stays level-based there until the BFF answers the PATCH right (D-10 #2717).
+  const allowToggle = !inRecordTemplate && accessLevel !== undefined && (writeAccessPerRecord || canEdit(accessLevel));
 
   // Delete-own (task 054): the to-do leaves the list on the server's 204; any refusal keeps it and is shown.
   const del = useDeleteOwn<ODataTodo>({
@@ -746,17 +777,25 @@ export const SmartTodo: React.FC<SmartTodoProps> = ({
   // Create to-do
   // ---------------------------------------------------------------------------
 
+  const showDialog = createDialog.show;
+  const hideDialog = createDialog.hide;
   const handleOpenDialog = React.useCallback(() => {
     if (!allowCreate) return;
     setSubmitError(null);
-    setIsDialogOpen(true);
-  }, [allowCreate]);
+    showDialog();
+  }, [allowCreate, showDialog]);
+
+  // In the record template the toolbar's Add to-do replaces this list's "Add Task" button (task 004): offered exactly when
+  // the right is known to be `true` (task 006), and the dialog stays here. The right goes with the offer, for the header's
+  // "Your access" and the section's read-only line.
+  const ownCreateButton = !inRecordTemplate;
+  useOfferCreateAction(onCreateActionChange, allowCreate, handleOpenDialog, right);
 
   const handleDismissDialog = React.useCallback(() => {
     if (isSubmitting) return;
-    setIsDialogOpen(false);
+    hideDialog();
     setSubmitError(null);
-  }, [isSubmitting]);
+  }, [isSubmitting, hideDialog]);
 
   const handleCreateTask = React.useCallback(
     async (formData: { title: string; description: string; dueDate: string; priority: number }) => {
@@ -764,10 +803,9 @@ export const SmartTodo: React.FC<SmartTodoProps> = ({
       setSubmitError(null);
 
       try {
-        // The BFF applies the regarding-project lookup + 4 ADR-024 resolver
-        // fields server-side using the projectId from the route — clients
-        // don't send those in the body.
-        const newTodo = await createTodo(projectId, {
+        // The BFF applies the regarding lookup + 4 ADR-024 resolver fields server-side using the record id from the
+        // route (POST /api/v1/external/{root}/{id}/todos) — clients don't send those in the body.
+        const newTodo = await createRootTodo(root, projectId, {
           sprk_name: formData.title,
           ...(formData.description ? { sprk_notes: formData.description } : {}),
           // The date input's own "yyyy-MM-dd" is the calendar day the user picked — the only shape a Date Only column
@@ -778,7 +816,7 @@ export const SmartTodo: React.FC<SmartTodoProps> = ({
 
         // Add new to-do to the top of the list
         setTasks(prev => [newTodo, ...prev]);
-        setIsDialogOpen(false);
+        hideDialog();
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Failed to create task';
         setSubmitError(message);
@@ -786,7 +824,7 @@ export const SmartTodo: React.FC<SmartTodoProps> = ({
         setIsSubmitting(false);
       }
     },
-    [projectId]
+    [projectId, root, hideDialog]
   );
 
   // ---------------------------------------------------------------------------
@@ -802,17 +840,18 @@ export const SmartTodo: React.FC<SmartTodoProps> = ({
 
   const cardTitle = totalCount > 0 ? `Tasks (${pendingCount} of ${totalCount} pending)` : 'Tasks';
 
-  const cardActions = allowCreate ? (
-    <Button
-      appearance="primary"
-      icon={<AddRegular />}
-      size="small"
-      onClick={handleOpenDialog}
-      aria-label="Create new task"
-    >
-      Add Task
-    </Button>
-  ) : undefined;
+  const cardActions =
+    allowCreate && ownCreateButton ? (
+      <Button
+        appearance="primary"
+        icon={<AddRegular />}
+        size="small"
+        onClick={handleOpenDialog}
+        aria-label="Create new task"
+      >
+        Add Task
+      </Button>
+    ) : undefined;
 
   return (
     <>
@@ -858,7 +897,9 @@ export const SmartTodo: React.FC<SmartTodoProps> = ({
               <Text>No tasks yet</Text>
               {allowCreate && (
                 <Text size={200} style={{ color: tokens.colorNeutralForeground4 }}>
-                  Use "Add Task" to create the first task for this project.
+                  {ownCreateButton
+                    ? 'Use "Add Task" to create the first task for this project.'
+                    : `Use "Add to-do" in the toolbar to create the first task for this ${noun}.`}
                 </Text>
               )}
             </div>
@@ -920,7 +961,7 @@ export const SmartTodo: React.FC<SmartTodoProps> = ({
       {/* Create task dialog — only rendered when allowCreate */}
       {allowCreate && (
         <CreateTaskDialog
-          open={isDialogOpen}
+          open={createDialog.open}
           onDismiss={handleDismissDialog}
           onSubmit={handleCreateTask}
           isSubmitting={isSubmitting}

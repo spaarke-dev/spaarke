@@ -321,6 +321,7 @@ public class DemoSpeGrantLifecycleTests
         registry.Setup(r => r.GetSecurableEntitiesAsync(It.IsAny<CancellationToken>())).ReturnsAsync(new HashSet<string>());
         return new SpeContainerMembershipSync(
             _bffDataverse.Object, _container, registry.Object, Mock.Of<IDataverseRecordShareService>(),
+            new ExternalVisibilitySeamStub().Seam, new Microsoft.Extensions.Configuration.ConfigurationBuilder().Build(),
             NullLogger<SpeContainerMembershipSync>.Instance);
     }
 

@@ -16,6 +16,7 @@
 import * as React from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { confirmRevoke } from '../../../__tests__/helpers/confirmDialog';
+import { accessNote, openAccessNotes } from '../../../__tests__/helpers/accessNotes';
 import { FluentProvider, webLightTheme, webDarkTheme } from '@fluentui/react-components';
 import { AccessGrantModal } from '../AccessGrantModal';
 import { apiErrorFor, throwingAuthenticatedFetch } from '../../../__tests__/helpers/authenticatedFetchDouble';
@@ -882,15 +883,17 @@ describe('AccessGrantModal — "Add person" internal system-user share (task 065
         businessUnitName: 'Secure Project',
       }));
       renderWithTheme(<AccessGrantModal {...makeProps({ fetchSecureOwnerInfo })} />);
+      await screen.findByText('Gene Gatekeeper');
 
-      const row = await screen.findByText(/Secure record/);
-      // Both names render as <strong> children inside the same Text row —
-      // assert on the row's combined textContent to avoid the substring
+      // Task 196: a note behind the header bell.
+      const note = accessNote(await openAccessNotes(), 'Secure record');
+      // Both names render as <strong> children inside the same note —
+      // assert on the note's combined textContent to avoid the substring
       // ambiguity (the team name "Secure Record Owner Team" contains the BU
       // name "Secure Record" as a substring, so querying for either alone
       // matches both elements).
-      expect(row.textContent).toContain('Secure Record Owner Team');
-      expect(row.textContent).toContain('Business Unit: Secure Project');
+      expect(note?.textContent).toContain('Secure Record Owner Team');
+      expect(note?.textContent).toContain('Business Unit: Secure Project');
     });
 
     it('renders nothing when fetchSecureOwnerInfo resolves null (non-secure record)', async () => {
@@ -898,13 +901,13 @@ describe('AccessGrantModal — "Add person" internal system-user share (task 065
       renderWithTheme(<AccessGrantModal {...makeProps({ fetchSecureOwnerInfo })} />);
 
       await screen.findByText('Gene Gatekeeper');
-      expect(screen.queryByText(/Secure record/)).not.toBeInTheDocument();
+      expect(accessNote(await openAccessNotes(), 'Secure record')).toBeNull();
     });
 
     it('renders nothing when fetchSecureOwnerInfo is omitted (zero-regression default)', async () => {
       renderWithTheme(<AccessGrantModal {...makeProps()} />);
       await screen.findByText('Gene Gatekeeper');
-      expect(screen.queryByText(/Secure record/)).not.toBeInTheDocument();
+      expect(accessNote(await openAccessNotes(), 'Secure record')).toBeNull();
     });
   });
 

@@ -62,6 +62,8 @@ import {
 } from '../WorkspaceShell/wizardLaunchers';
 import { createXrmDataService } from '../../utils/adapters/xrmDataServiceAdapter';
 import { createXrmNavigationService } from '../../utils/adapters/xrmNavigationServiceAdapter';
+import { createXrmEmailComposeHandlers } from '../EmailComposer/createXrmEmailComposeHandlers';
+import type { IEmailComposeHandlers } from '../EmailComposer/composeOnlySend';
 import { withBffChildWrites } from '../../utils/adapters/bffChildWriteAdapter';
 import { getXrm } from '../../utils/xrmContext';
 import { cleanGuid } from '../../utils/guid';
@@ -206,6 +208,11 @@ export const InAppWizardHost: React.FC<IInAppWizardHostProps> = ({
   // lazily against the cross-frame Xrm at call time.
   const dataService = React.useMemo(() => createXrmDataService(), []);
   const navigationService = React.useMemo(() => createXrmNavigationService(), []);
+  // The wizards' Send Email step (task 182, D-219): recipient pane, record lookup, upload, templates, AI draft.
+  const emailComposeHandlers = React.useMemo<IEmailComposeHandlers>(
+    () => createXrmEmailComposeHandlers({ authenticatedFetch, bffBaseUrl: bffBaseUrl || undefined }),
+    [authenticatedFetch, bffBaseUrl]
+  );
   // The To Do code page's data service: child writes through the BFF (UAC-r2 G5), and a successful
   // sprk_todo create broadcasts `sprk_todo:created` so the To Do widget refetches (todo.registration).
   const todoDataService = React.useMemo(
@@ -229,6 +236,7 @@ export const InAppWizardHost: React.FC<IInAppWizardHostProps> = ({
       dataService={dataService}
       todoDataService={todoDataService}
       navigationService={navigationService}
+      emailComposeHandlers={emailComposeHandlers}
     />
   );
 };
@@ -243,6 +251,7 @@ interface IInAppWizardProps extends IInAppWizardHostProps {
   dataService: ReturnType<typeof createXrmDataService>;
   todoDataService: ReturnType<typeof createXrmDataService>;
   navigationService: ReturnType<typeof createXrmNavigationService>;
+  emailComposeHandlers: IEmailComposeHandlers;
 }
 
 const InAppWizard: React.FC<IInAppWizardProps> = ({
@@ -256,6 +265,7 @@ const InAppWizard: React.FC<IInAppWizardProps> = ({
   dataService,
   todoDataService,
   navigationService,
+  emailComposeHandlers,
 }) => {
   // The launch `data` is the same `key=value&…` string the code page would receive on its URL.
   const handoff = React.useMemo(() => readHandoffFromUrl(`?${active.data}`), [active.data]);
@@ -296,7 +306,7 @@ const InAppWizard: React.FC<IInAppWizardProps> = ({
     };
   }, [active.name, todoDataService]);
 
-  const common = { open: true, embedded: false, uiScale, onClose, navigationService, bffBaseUrl };
+  const common = { open: true, embedded: false, uiScale, onClose, navigationService, bffBaseUrl, emailComposeHandlers };
   // CreateProjectWizard / CreateEventWizard / SummarizeFilesDialog type the prop as `typeof fetch`; the `@spaarke/auth`
   // function their code pages pass is the same `(url, init)` shape (string URLs only).
   const fetchForFetchTyped = authenticatedFetch as typeof fetch;

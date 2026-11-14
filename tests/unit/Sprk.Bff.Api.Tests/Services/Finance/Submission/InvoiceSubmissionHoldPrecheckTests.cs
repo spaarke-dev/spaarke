@@ -317,7 +317,7 @@ public sealed class InvoiceSubmissionHoldPrecheckTests
         var procedure = Guid.NewGuid();
         world.Add(ProcedureEntity.Entity, procedure,
             (ProcedureEntity.AreaColumn, new OptionSetValue(RuleDomains.PolicyDomainBilling)),
-            (ProcedureEntity.StatusColumn, new OptionSetValue(ProcedureEntity.StatusActive)),
+            (ProcedureEntity.StatusColumn, new OptionSetValue(ProcedureEntity.StatusActive)), ("statecode", new OptionSetValue(0)),
             (ProcedureEntity.NameColumn, "Terms"),
             (ProcedureEntity.AppliesToColumn, new OptionSetValue((int)ProcedureAppliesTo.AllRecords)));
         var set = Guid.NewGuid();

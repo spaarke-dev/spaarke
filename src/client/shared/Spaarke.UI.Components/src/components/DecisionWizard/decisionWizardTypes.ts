@@ -107,6 +107,22 @@ export interface DecisionPlan {
   dismissalReasons: DismissalReason[];
   /** The rule body in words ("How this was determined"); null when the body could not be described. */
   ruleDescription?: { clauses: RuleClauseDescription[] } | null;
+  /**
+   * Task 191 fix round 1 (criterion 134): the caller's unfinished review of this item (an attempt that failed after writes
+   * landed). The wizard resumes it: the review is posted again unchanged with `retry`, never as a new review id.
+   */
+  unfinished?: DecisionUnfinishedReview | null;
+}
+
+/** Task 191 fix round 1: an unfinished review as the plan read returns it. */
+export interface DecisionUnfinishedReview {
+  reviewId: string;
+  /** Task 191 fix round 2: the item the review was posted to; it is finished there, also when opened from an "also resolve" item. */
+  signalId: string;
+  /** The review exactly as it was posted (no `retry`, no `sendChoice`). */
+  review: DecisionReview;
+  /** Its stored failure (replayed): the steps, what landed, whether it can resume and whether a send choice is needed. */
+  failure: DecisionCommitFailure;
 }
 
 /** Task 034: the (policy, core record) dismissal count the dismissal step shows. */
@@ -158,7 +174,15 @@ export interface DecisionReview {
   because?: string;
   /** Resume a review whose first attempt failed before its record. */
   retry?: boolean;
+  /**
+   * Task 191 (D-223): the person's answer when the earlier attempt's inquiry email MAY have been sent (`sendChoiceRequired`):
+   * send it again, or record the decision without sending. Sent only with `retry` on that review; not part of its content.
+   */
+  sendChoice?: DecisionSendChoice;
 }
+
+/** Task 191 (D-223): the two answers the item offers for an inquiry email that may have been sent. */
+export type DecisionSendChoice = 'send-again' | 'record-without-sending';
 
 export interface DecisionCommitRef {
   entity: string;
@@ -169,7 +193,7 @@ export interface DecisionCommitStep {
   key: string;
   code: string;
   phase: number;
-  /** `Done`, `Refused` or `Failed`. */
+  /** `Done`, `Refused` or `Failed`; `NotSentByChoice` for an inquiry recorded without sending (task 191). */
   status: string;
   written: DecisionCommitRef[];
   possiblyWritten: DecisionCommitRef[];
@@ -219,6 +243,11 @@ export interface DecisionCommitFailure {
   sentButNotRecorded: boolean;
   /** A failed first attempt that `retry: true` may resume. */
   resumable: boolean;
+  /**
+   * Task 191 (D-223): the inquiry email may have been sent, so the attempt resumes only with the person's `sendChoice`; a retry
+   * without one is answered with this failure again and does nothing.
+   */
+  sendChoiceRequired?: boolean;
   replayed: boolean;
 }
 

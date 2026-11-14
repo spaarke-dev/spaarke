@@ -169,7 +169,7 @@ export function initialState(props: IEmailComposerProps): EmailComposerState {
     communicationId: props.communicationId ?? props.sourceRecord?.communicationId,
     to: toRecipients(props.initialTo),
     cc: toRecipients(props.initialCc),
-    bcc: [],
+    bcc: toRecipients(props.initialBcc),
     subject: props.initialSubject ?? '',
     body: props.initialBody ?? '',
     bodyFormat: props.initialBodyFormat ?? 'HTML',

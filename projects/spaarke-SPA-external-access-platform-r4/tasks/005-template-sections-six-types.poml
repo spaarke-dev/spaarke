@@ -1,0 +1,164 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="005" project="spaarke-SPA-external-access-platform-r4">
+  <metadata>
+    <title>Section renderers for all six record types; retire the R3 stacked modal (FR-01)</title>
+    <phase>1 Record template and actions</phase>
+    <gate>after 003</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Refactor across .tsx files and consumers (tags frontend, fluent-ui, refactoring)</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Cross-cutting migration: retires the R3 modal path across its consumers and test files (3+ files)</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Sequential chain on the template files: 003 → 005 → 004 → 006 → 007</parallel-reason>
+    <deps>003</deps>
+    <tags>frontend, fluent-ui, react, refactoring</tags>
+    <estimated-effort>5-7 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Write the section renderers the record template needs for all six types (Information, Documents, Invoices, Files, Messages, Tasks &amp; events, Preview), wire the Document "Download" and Service Request "Delete request" toolbar actions, switch every opener to `RecordTemplateModal`, and delete the R3 stacked modal path with its tests ported.</prompt>
+  <role>SPAARKE platform developer. Expert in React, Fluent UI v9 and safe UI migrations. Follow ADRs strictly.</role>
+  <goal>Every SPA path that opened `RecordDetailModal` (RecordOpener, GridWidgetBody, deep links, the notification bell, intake success links) opens `RecordTemplateModal` with each type's FR-01 sections; `RecordDetailModal.tsx` is deleted; the R3 behaviour its tests protected is protected by ported tests against the template; vitest, typecheck and lint pass.</goal>
+
+  <context>
+    <background>Spec FR-01 (layout table; "the R3 stacked modal code path is removed"); plan Risk R4 ("port before retiring"). Behaviour to keep exactly in P1: fields (`RecordDetailFields`), documents (`DocumentLibrary` with `uploadOverride`), invoices list (`INVOICE_COLUMNS`), messages (`RecordMessages` with the send hold), events/to-dos (EventsCalendar + SmartTodo — still with R3's ViewOnly props; task 006 removes them), document download (`DocumentDownload`, `hasFile === false` hides it), service request delete/recall (`ServiceRequestActions`). P1 interim: the Invoice "Files" section renders R3's invoice `DocumentLibrary` (task 021 replaces it with ebilling's Files routes); the Document "Preview" section renders R3's file block (task 022 adds the inline preview).</background>
+    <relevant-files>
+      <file role="new">src/client/external-spa/src/components/record/sections/InformationSection.tsx</file>
+      <file role="new">src/client/external-spa/src/components/record/sections/DocumentsSection.tsx</file>
+      <file role="new">src/client/external-spa/src/components/record/sections/InvoicesSection.tsx</file>
+      <file role="new">src/client/external-spa/src/components/record/sections/FilesSection.tsx</file>
+      <file role="new">src/client/external-spa/src/components/record/sections/MessagesSection.tsx</file>
+      <file role="new">src/client/external-spa/src/components/record/sections/TasksEventsSection.tsx</file>
+      <file role="new">src/client/external-spa/src/components/record/sections/PreviewSection.tsx</file>
+      <file role="new">src/client/external-spa/src/components/record/sections/index.ts</file>
+      <file role="modify">src/client/external-spa/src/components/record/RecordTemplateModal.tsx</file>
+      <file role="modify">src/client/external-spa/src/components/record/recordTemplates.ts</file>
+      <file role="modify">src/client/external-spa/src/components/detail/RecordOpener.tsx</file>
+      <file role="modify">src/client/external-spa/src/widgets/GridWidgetBody.tsx</file>
+      <file role="modify">src/client/external-spa/src/components/detail/ServiceRequestActions.tsx</file>
+      <file role="delete">src/client/external-spa/src/components/detail/RecordDetailModal.tsx</file>
+      <file role="delete">src/client/external-spa/tests/RecordDetailModal.test.tsx</file>
+      <file role="modify">src/client/external-spa/tests/DetailDocumentsDelete.test.tsx</file>
+      <file role="modify">src/client/external-spa/tests/DetailEventsTodosRoots.test.tsx</file>
+      <file role="modify">src/client/external-spa/tests/DocumentDetail.hasFile.test.tsx</file>
+      <file role="modify">src/client/external-spa/tests/DocumentDownload.test.tsx</file>
+      <file role="new">src/client/external-spa/tests/RecordTemplateSections.test.tsx</file>
+      <file role="canonical-reference">src/client/external-spa/src/components/detail/RecordDetailFields.tsx</file>
+      <file role="canonical-reference">src/client/external-spa/src/components/DocumentLibrary.tsx</file>
+      <file role="canonical-reference">src/client/external-spa/src/components/detail/RecordMessages.tsx</file>
+      <file role="canonical-reference">src/client/external-spa/tests/RecordDeepLink.test.tsx</file>
+      <file role="canonical-reference">src/client/external-spa/tests/NotificationBell.test.tsx</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="003" status="pending">`RecordTemplateModal`, `RECORD_TEMPLATES`, `recordReads.ts`, `recordLinkFor`</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="FR-01">Adding a type touches only `recordTemplates.ts` and the sections map: `RecordTemplateModal.tsx` keeps no entity-specific branch. Each section is one component under `components/record/sections/`, looked up by section id.</constraint>
+    <constraint source="FR-01">Section behaviour is moved, not rewritten: the code in `RecordDetailModal.tsx` (`uploadOverride` :383, `DocumentsSection` :399, `DocumentDownload` :427, `InvoicesSection` :477 with `INVOICE_COLUMNS` :367, `EventsAndTasksSection` :513, ServiceRequestActions wiring :681-694, RecordMessages wiring :701-706) moves into the section files with the same props, requests and texts. The `AccessLevel.ViewOnly` props at :524-525 move unchanged (task 006 removes them).</constraint>
+    <constraint source="FR-05 / FR-07">Document's Download and Service Request's "Delete request" become `RecordCommandBar` actions with icons from `RECORD_ACTION_ICONS`; Download is visible only when the record has a usable parent and `hasFile !== false`; Delete request only when R3's requester check passes. A hidden action is not rendered.</constraint>
+    <constraint source="project">The message-send and recall holds still block paging and Close (`holdNavigation`); the deleted-service-request state and `onRecordDeleted` still work; `onSettled` still fires once per settled record (the deep link depends on it).</constraint>
+    <constraint source="ADR-038 / tests/CLAUDE.md spirit">Every behavioural assertion in the deleted/ported R3 test files is either ported to the template or listed in the task notes with the reason it no longer applies. Do not delete a test file before its replacement passes.</constraint>
+    <constraint source="ADR-050 / ADR-021">No new envelope; Fluent v9 tokens only; each section uses the template's section card (header via `HeaderToolbar` per design §6 where a section has header actions).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-SPA-external-access-platform-r4/CLAUDE.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r4/spec.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r4/design.md</file>
+      <file>.claude/adr/ADR-050-canonical-modal-shell.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>docs/standards/MODAL-DESIGN-SYSTEM.md</file>
+      <file>.claude/skills/fluent-v9-component/SKILL.md</file>
+      <file>.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r3/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Prototype sections" location="c:\code_files\spaarke-prototype\projects\2026-10-spa-record-modal\src\sections\">Visual reference for the section cards (Information, Documents, Invoices, Messages, Tasks &amp; events).</pattern>
+      <pattern name="Section card header" location="src/client/shared/Spaarke.UI.Components/src/components/HeaderToolbar/README.md">Title + icon slots, tooltip = aria-label.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load the knowledge files, read the relevant files, declare rigor and model tier per task-execute Step 0.5.</step>
+    <step order="1">Inventory every assertion in the eleven test files that reference `RecordDetailModal` or `record-detail-*` test ids; list them in the task notes with their target (port / keep / obsolete + reason).</step>
+    <step order="2">Move each R3 section into `components/record/sections/*` and register it by section id; complete `recordTemplates.ts` section lists.</step>
+    <step order="3">Wire Download (Document) and Delete request (Service Request) as toolbar actions; adapt `ServiceRequestActions.tsx` so its delete/recall flow can be started from the toolbar while keeping its dialogs, texts and 409 `has_related_records` recall path.</step>
+    <step order="4">Switch `RecordOpener.tsx` (:16) and `GridWidgetBody.tsx` (:49) to `RecordTemplateModal`; keep the public `useOpenRecord` / `OpenRecordOptions` API unchanged.</step>
+    <step order="5">Port the tests to the template (keep the `record-detail-*` test ids where tests and E2E rely on them, or update both), add `tests/RecordTemplateSections.test.tsx` for per-type section placement, then delete `RecordDetailModal.tsx` and `tests/RecordDetailModal.test.tsx`.</step>
+    <step order="6">Grep `src/client/external-spa` for `RecordDetailModal`; only historical comments may remain, and they are reworded.</step>
+    <step order="7">Run `npm run typecheck`, `npm run lint` and `npm test` in `src/client/external-spa`.</step>
+    <step order="8">Update `tasks/TASK-INDEX.md`: set this task's status cell to `✅ [done]` and this POML's &lt;status&gt; to completed; run `pwsh scripts/check-task-status-drift.ps1`.</step>
+    <step order="9">Record deviations and decisions in `projects/spaarke-SPA-external-access-platform-r4/notes/task-005-notes.md`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If a ported R3 test cannot pass against the template without changing user-visible behaviour, STOP and escalate with the assertion and the proposed change; do not weaken the assertion.</trigger>
+    <trigger>If any code outside `src/client/external-spa` imports `RecordDetailModal`, STOP before deleting it.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>The sections already exist inside `RecordDetailModal.tsx` (:367-528) and as SPA components (`DocumentLibrary`, `RecordMessages`, `EventsCalendar`, `SmartTodo`, `ServiceRequestActions`, `RecordDetailFields`).</existing>
+    <extension>Yes, and this task does it: the section files are the existing code moved behind section ids; no new data path or component logic is introduced.</extension>
+    <cost-of-doing-nothing>The template from task 003 renders no content, and two record-detail code paths stay live, which FR-01 forbids ("the R3 stacked modal code path is removed").</cost-of-doing-nothing>
+  </justification>
+
+  <ui-tests>
+    <test name="Each type opens in the template">
+      <url>{spa-dev-url}/?record={token}:{id}</url>
+      <steps><step>Open one record of each of the six types from its grid and from a deep link.</step><step>Compare columns and toolbar with the FR-01 table.</step><step>Check the console.</step></steps>
+      <expected>Each type shows its FR-01 sections in the right column; Document shows no right column; no console errors.</expected>
+    </test>
+    <test name="R3 behaviours kept">
+      <steps><step>Post a message and try to page away while it sends.</step><step>Download a document; open a document with no file.</step><step>As the requester, delete a service request with related records.</step></steps>
+      <expected>Paging and Close are held during the send; Download works and is absent when there is no file; the 409 offers "Send recall request" as in R3.</expected>
+    </test>
+    <test name="Dark Mode (ADR-021)">
+      <steps><step>Repeat the first test in dark theme and in the Teams host.</step></steps>
+      <expected>Every section uses semantic tokens; no white panels.</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">typecheck, lint and vitest in src/client/external-spa</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/external-spa/src/components/record/sections/</output>
+    <output type="code">src/client/external-spa/src/components/record/RecordTemplateModal.tsx</output>
+    <output type="code">src/client/external-spa/src/components/detail/RecordOpener.tsx</output>
+    <output type="code">src/client/external-spa/src/widgets/GridWidgetBody.tsx</output>
+    <output type="test">src/client/external-spa/tests/RecordTemplateSections.test.tsx</output>
+    <output type="docs">projects/spaarke-SPA-external-access-platform-r4/notes/task-005-notes.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">For each of the six types, the template renders exactly the FR-01 left and right sections in order (a test per type).</criterion>
+    <criterion testable="true">Grid row click, `?record=` deep link, notification-bell item and intake success link each open the template on the right record (existing tests for those paths pass, ported where needed).</criterion>
+    <criterion testable="true">Document: Download is a toolbar action, present when a parent link exists and `hasFile !== false`, absent otherwise; a failed download shows the R3 error text.</criterion>
+    <criterion testable="true">Service request: "Delete request" is a toolbar action shown only to the requester; 204 shows the deleted state and calls `onRecordDeleted`; 409 `has_related_records` offers the recall post.</criterion>
+    <criterion testable="true">A message send or recall in flight holds paging and Close.</criterion>
+    <criterion testable="true">`RecordDetailModal.tsx` no longer exists and no source file imports it.</criterion>
+    <criterion testable="true">Every assertion from the retired/ported R3 tests is ported or listed as obsolete with a reason in the task notes.</criterion>
+    <criterion testable="true">Negative: an entity with no template entry opens nothing and throws nothing.</criterion>
+    <criterion testable="true">typecheck, lint and the vitest suite pass.</criterion>
+    <criterion testable="true">Test scope: cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-01; plan Risk R4. Consumers verified 2026-11-10: `RecordOpener.tsx:16` and `GridWidgetBody.tsx:49` import `RecordDetailModal`; test files referencing it or its test ids: RecordDetailModal, DetailDocumentsDelete, DetailEventsTodosRoots, DocumentDetail.hasFile, DocumentDownload, RecordMessages, RecordDeepLink, NotificationBell, NotificationBell.noInteraction, App.notificationBell, App.deepLinkSignIn (all under `src/client/external-spa/tests/`). `DocumentDownload` already honours `hasFile === false` (`RecordDetailModal.tsx:436`, R3 ISS-011), so part of #1886 is on master; task 023 covers the rest. Toolbar create actions (Upload, New message, Add to-do, Add event) are task 004; visibility is task 006.
+
+Completion (2026-11-11): `components/record/sections/` holds one renderer per section id (Information, Documents, Files interim, Invoices, Messages, Tasks & events, Preview interim) behind `renderRecordSection`; `components/record/actions/` holds the toolbar action hosts (Download, Delete request) keyed by action id, so the modal stays entity-agnostic. RecordTemplateModal reads `/me` once per opening, holds browsing/Close/Refresh while a section or host is busy (Refresh hidden; a failed in-flight refresh is held until release: task 003 K1 decided), and refreshes every section. RecordOpener and GridWidgetBody open the template; a type with no template opens nothing (opener reports terminal). RecordDetailModal.tsx and its test deleted after the port (47/47 R3 cases ported; only title strings changed, by FR-02). ArchTest walk path re-pointed to InvoicesSection.tsx. Suite 1343 tests in 48 files (load timeouts in 14 auth files re-run green), typecheck and lint clean. Review: no open F-class; D-5 (tests outside typecheck) filed PENDING. Detail: notes/task-005-notes.md.
+rework: none task 005</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

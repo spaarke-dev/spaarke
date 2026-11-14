@@ -1,0 +1,136 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="042" project="spaarke-SPA-external-access-platform-r4">
+  <metadata>
+    <title>Email-missing text, and the profile form's email aligned with registration (FR-26 #2155, FR-27 #2449)</title>
+    <phase>4 Access, sign-in, carry-overs, Teams</phase>
+    <gate>after 041</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .tsx and (for FR-27) the BFF's registration_required prefill (.cs)</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Two scoped changes with the exact divergence located and a canonical rule to reuse</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>F</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>041</deps>
+    <tags>frontend, react, unit-test, bff-api</tags>
+    <estimated-effort>2-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Change the registration "email missing" message to tell the user to ask their organisation's IT admin to set the Email on their Entra account and then sign in again; and make the email the profile form shows come from the same rule registration applies, so an email the form shows is never refused at registration.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. Expert in the external SPA's RegistrationPage and the BFF's A9 registration route.</role>
+  <goal>`emailMissing` renders the FR-26 text for `registration_email_missing`; the form's prefill email and the registration route use one email rule, proven by a shared test over both paths.</goal>
+
+  <context>
+    <background>FR-26: RegistrationPage.tsx `emailMissing` view (:317-322) says only "Contact your administrator" (#2155). The code is mapped at :147-148 from `registration_email_missing` (registration-client.ts:124, :139, :153). FR-27 (#2449) — the divergence, verified 2026-11-10: the form shows `prefill.email` read-only (RegistrationPage.tsx:425-426), which the BFF builds in CallerPrincipalResolver.cs's registration_required branch (:735-754) from `WorkforceCallerClaims.From(home)` → `WorkforceCallerClaims.TokenEmail` (WorkforceIdentityOptions.cs:257-263), which falls back to `preferred_username` and `upn`. Registration uses `ExternalRegistrationEndpoints.TokenEmail` (ExternalRegistrationEndpoints.cs:283-292): the `email` claim only (or its ClaimTypes.Email mapping), exactly one distinct non-empty value, no control characters; else 403 `registration_email_missing` (:181-187). So the form can show a UPN that registration then refuses.</background>
+    <relevant-files>
+      <file role="modify">src/client/external-spa/src/pages/RegistrationPage.tsx</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/CallerPrincipalResolver.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ExternalRegistrationEndpoints.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/WorkforceIdentityOptions.cs</file>
+      <file role="canonical-reference">src/client/external-spa/src/auth/registration-client.ts</file>
+      <file role="canonical-reference">src/client/external-spa/tests/registration-refusals.test.ts</file>
+      <file role="canonical-reference">src/client/external-spa/tests/registration-validation.test.ts</file>
+      <file role="new-artifact">tests/integration/regression/Issue2449_RegistrationEmailRuleTests.cs</file>
+      <file role="new-artifact">projects/spaarke-SPA-external-access-platform-r4/notes/task-042-notes.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="041" status="pending">041 changes the same first-sign-in screens (RegistrationPage) and possibly the registration_required answer</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec FR-26">The emailMissing body text says to ask the organisation's IT admin to set the Email on the Entra account, then sign in again. Plain language, no claim names, no server text echoed. Title and icon unchanged unless the text no longer fits.</constraint>
+    <constraint source="spec FR-27">One rule: the registration_required prefill email is computed by the registration route's rule (reuse `ExternalRegistrationEndpoints.TokenEmail` or move it to one shared helper both call). When that rule yields no email, the prefill carries none, and the SPA shows the emailMissing state instead of a form that cannot succeed.</constraint>
+    <constraint source="project (blast radius)">Do NOT change `WorkforceCallerClaims.TokenEmail` (WorkforceIdentityOptions.cs:257): other callers (principal composition, CallerPrincipalResolver.cs:800) rely on its fallback. Change only the prefill's email source.</constraint>
+    <constraint source="ADR-028 A9">The email stays display-only: never trusted for authorization, never taken from the request body.</constraint>
+    <constraint source="bff-extensions">Placement Justification in the PR (.claude/constraints/bff-extensions.md); publish-size delta against a fresh master build, at or under 60 MB; no new HIGH CVE; tests with the change; /conflict-check before the PR (CallerPrincipalResolver.cs is shared with unified-access-control-r2 and ebilling-r1, and changed by tasks 041/043 — rebase on them). Never deploy the dev BFF directly — request via uac-r2 (docs/procedures/dev-bff-deploy-coordination.md).</constraint>
+    <constraint source="NFR-04">No log or error carries an email, UPN, tenant, oid or token.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-SPA-external-access-platform-r4/spec.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r4/CLAUDE.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/patterns/api/endpoint-filters.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/skills/fluent-v9-component/SKILL.md</file>
+      <file>.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>.claude/patterns/testing/mocking-patterns.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+    <patterns>
+      <pattern name="Registration email rule" location="src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ExternalRegistrationEndpoints.cs">`TokenEmail` (:283-292) — the one rule to reuse.</pattern>
+      <pattern name="Refusal views" location="src/client/external-spa/src/pages/RegistrationPage.tsx">`message(icon, title, body)` views (:310-336) — keep the emailMissing view in this shape.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load the knowledge files, read the relevant files, declare rigor and model tier per task-execute Step 0.5.</step>
+    <step order="1">FR-26: update the emailMissing body text; update any SPA test asserting the old text.</step>
+    <step order="2">FR-27: make the registration_required prefill email use the registration rule (shared helper or direct reuse); decide and record how the SPA behaves when the prefill has no email (emailMissing view, no form).</step>
+    <step order="3">Shared test (KEEP path tests/integration/regression/Issue2449_*.cs) over a table of token claim shapes (email only; preferred_username only; upn only; two different email values; email with a control character): the prefill email and the registration route agree for every row.</step>
+    <step order="4">SPA tests: emailMissing renders the new text for registration_email_missing; a prefill with no email shows the emailMissing state, not the form.</step>
+    <step order="5">Run `dotnet build src/server/api/Sprk.Bff.Api/`, the affected BFF tests and the SPA tests; measure publish size.</step>
+    <step order="6">Update tasks/TASK-INDEX.md: set this task's status cell to `✅ [done]` and this POML's &lt;status&gt; to completed; run `pwsh scripts/check-task-status-drift.ps1`.</step>
+    <step order="7">Record deviations, decisions and measurements in projects/spaarke-SPA-external-access-platform-r4/notes/task-042-notes.md.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If aligning the rule needs a change to WorkforceCallerClaims.TokenEmail or to what the BFF accepts at registration (rather than what it prefills), STOP and ask UAC and the owner — that is an auth-plane change.</trigger>
+  </escalation>
+
+  <ui-tests>
+    <test name="Email-missing text">
+      <url>https://{spa-dev-host}/</url>
+      <steps>
+        <step>Sign in on the home plane with an account whose token has no email claim (or simulate registration_email_missing)</step>
+        <step>Read the message; check the console for errors</step>
+      </steps>
+      <expected>The message tells the user to ask their IT admin to set the Email on their Entra account, then sign in again; no form; no console errors.</expected>
+    </test>
+    <test name="Dark mode (ADR-021)">
+      <steps><step>Repeat in the dark theme</step></steps>
+      <expected>Semantic tokens only; text and icon legible.</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="dotnet">Build and test the BFF</tool>
+    <tool name="npm">Run the external-spa vitest suite</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/external-spa/src/pages/RegistrationPage.tsx</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/CallerPrincipalResolver.cs</output>
+    <output type="test">tests/integration/regression/Issue2449_RegistrationEmailRuleTests.cs</output>
+    <output type="docs">projects/spaarke-SPA-external-access-platform-r4/notes/task-042-notes.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">For `registration_email_missing` the page shows the FR-26 text (ask the organisation's IT admin to set the Email on the Entra account, then sign in again).</criterion>
+    <criterion testable="true">For every claim shape in the shared test table, the prefill email equals the email registration would use (both null when registration would refuse).</criterion>
+    <criterion testable="true">Negative: a token whose only address is preferred_username or upn produces no prefill email, and the SPA shows the emailMissing state, not the form.</criterion>
+    <criterion testable="true">Negative: WorkforceCallerClaims.TokenEmail and the registration route's accept/refuse behaviour are unchanged.</criterion>
+    <criterion testable="true">No log or error added carries an email, UPN, tenant, oid or token.</criterion>
+    <criterion testable="true">Build green; publish size at or under 60 MB with the delta against a fresh master build; no new HIGH CVE; /conflict-check run; BFF and SPA tests pass.</criterion>
+    <criterion testable="true">Test scope: cover the stated contract plus the claim-shape table and negative cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-26 (#2155), FR-27 (#2449). The suggested tags omitted bff-api; the located divergence is server-side, so it is added here.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

@@ -27,6 +27,19 @@
  *
  * No attachment control and no file input exist here by design (FR-11); the body is capped at 10,000 characters.
  *
+ * NEW MESSAGE DIALOG (R4 task 004, FR-03). In the record template the toolbar's New message is the entry point: the host
+ * passes `onCreateActionChange`, the inline compose box is not drawn, and the same box (same label, counter, errors, draft
+ * handling and send) renders in a `FormModal` that this thread owns, so the dialog is a descendant of the record modal.
+ * A send in flight holds the host (`onSendingChange`), a failed send leaves the dialog open with the draft and the same
+ * error text, and a sent message closes it and re-reads the thread. Without `onCreateActionChange` (R3's own page) the
+ * inline box is unchanged.
+ *
+ * WHO MAY POST (R4 task 006, FR-06 / NFR-04). In the record template New message is offered only when the thread's read
+ * answered `canCreate: true` (task 002: the POST's own decision for this caller); anything else hides it, and a `false`
+ * gives the section its read-only line instead. A re-read that fails (other than a sign-in failure, which ends the
+ * thread) keeps the messages shown but withdraws New message: the right is no longer known. The inline box of a host without a toolbar keeps R3's rule (no such host in
+ * the app since the template replaced R3's modal).
+ *
  * ADR-021: Fluent UI v9 semantic tokens only (no hard-coded colours) — the section inherits the host FluentProvider, so
  * light, dark and the Teams themes work. ADR-012: composes Fluent primitives and the shared sanitizer; the shared
  * EmailComposer / NewThreadModal are internal-plane and Xrm-bound, so only their look is mirrored.
@@ -45,6 +58,7 @@ import {
   Textarea,
 } from '@fluentui/react-components';
 import { SendRegular } from '@fluentui/react-icons';
+import { FormModal } from '@spaarke/ui-components/components/SprkModal';
 import { sanitizeEmailHtml } from '@spaarke/ui-components/utils/sanitizeEmailHtml';
 import {
   BODY_FORMAT_HTML,
@@ -58,6 +72,8 @@ import {
 import { ApiError } from '../../types';
 import { BffAccessState, accessFailureOf, type BffAccessFailure } from '../auth/BffAccessState';
 import { TruncatedListNotice } from '../TruncatedListNotice';
+import { useChildDialog, useOfferCreateAction, type CreateActionReporter } from '../createAction';
+import { createRightOf } from '../record/recordAccess';
 
 // ---------------------------------------------------------------------------
 // Copy
@@ -66,6 +82,9 @@ import { TruncatedListNotice } from '../TruncatedListNotice';
 const UNKNOWN_SENDER = 'Unknown sender';
 const OWN_SENDER = 'You';
 const EMPTY_TEXT = 'No messages yet. Write the first one below.';
+const EMPTY_TEXT_DIALOG = 'No messages yet. Use New message in the toolbar to write the first one.';
+/** Template, New message not offered: the section's read-only line (task 006) says why. */
+const EMPTY_TEXT_READ_ONLY = 'No messages yet.';
 const LOAD_FAILED = 'The existing messages could not be loaded just now.';
 const NOT_AVAILABLE = 'Messages are not available for this record.';
 const DENIED_TEXT = 'You do not have permission to view messages on this record.';
@@ -83,7 +102,7 @@ const GENERIC_DENIED_DETAIL = 'Access denied';
 
 type ThreadState =
   | { status: 'loading' }
-  | { status: 'ready'; messages: ExternalMessage[]; truncated: boolean }
+  | { status: 'ready'; messages: ExternalMessage[]; truncated: boolean; canCreate: boolean | null }
   | { status: 'error' }
   | { status: 'unavailable' }
   | { status: 'access'; failure: BffAccessFailure };
@@ -295,9 +314,18 @@ interface MessageThreadProps {
   recordId: string;
   onSendingChange?: (sending: boolean) => void;
   refreshSignal?: number;
+  embedded?: boolean;
+  onCreateActionChange?: CreateActionReporter;
 }
 
-const MessageThread: React.FC<MessageThreadProps> = ({ root, recordId, onSendingChange, refreshSignal = 0 }) => {
+const MessageThread: React.FC<MessageThreadProps> = ({
+  root,
+  recordId,
+  onSendingChange,
+  refreshSignal = 0,
+  embedded = false,
+  onCreateActionChange,
+}) => {
   const styles = useStyles();
   const [thread, setThread] = React.useState<ThreadState>({ status: 'loading' });
   const [refreshFailed, setRefreshFailed] = React.useState(false);
@@ -305,6 +333,8 @@ const MessageThread: React.FC<MessageThreadProps> = ({ root, recordId, onSending
   const [draft, setDraft] = React.useState('');
   const [sending, setSending] = React.useState(false);
   const [sendError, setSendError] = React.useState<SendError | null>(null);
+  // The New message dialog (record template only): its open state and the control that opened it.
+  const composeDialog = useChildDialog();
 
   // Only the latest read may update the thread, and none may once this record is left (stale / out-of-order reads).
   const readSeq = React.useRef(0);
@@ -334,7 +364,13 @@ const MessageThread: React.FC<MessageThreadProps> = ({ root, recordId, onSending
       try {
         const result = await listMessages(root, recordId);
         if (seq !== readSeq.current) return;
-        setThread({ status: 'ready', messages: result.value ?? [], truncated: result.truncated === true });
+        setThread({
+          status: 'ready',
+          messages: result.value ?? [],
+          truncated: result.truncated === true,
+          // Task 006: the POST's own decision for this caller (task 002); a missing one is "not said", never "can".
+          canCreate: typeof result.canCreate === 'boolean' ? result.canCreate : null,
+        });
         setRefreshFailed(false);
       } catch (err: unknown) {
         if (seq !== readSeq.current) return;
@@ -345,10 +381,14 @@ const MessageThread: React.FC<MessageThreadProps> = ({ root, recordId, onSending
             setThread({ status: 'access', failure });
             return;
           }
-          // The message was sent; only the re-read failed. Whatever is on screen stays, and the notice says so. A
-          // refresh that overtook the initial read must not leave the spinner up for ever: that read is dropped.
+          // Only the re-read failed. The messages on screen stay, and the notice says so; but the posting right they
+          // came with is no longer known (task 006 fix round 1: a 403 here may mean it was withdrawn), so it is
+          // forgotten and New message withdrawn until a read answers again. A refresh that overtook the initial read
+          // must not leave the spinner up for ever: that read is dropped.
           setRefreshFailed(true);
-          setThread(t => (t.status === 'loading' ? { status: 'error' } : t));
+          setThread(t =>
+            t.status === 'loading' ? { status: 'error' } : t.status === 'ready' ? { ...t, canCreate: null } : t
+          );
           return;
         }
         if (failure) setThread({ status: 'access', failure });
@@ -397,15 +437,81 @@ const MessageThread: React.FC<MessageThreadProps> = ({ root, recordId, onSending
     setDraft('');
     sendLock.current = false;
     setSending(false);
+    composeDialog.hide();
     await read('refresh');
   };
 
   const showCompose = thread.status !== 'access' && thread.status !== 'unavailable';
   const overBy = text.length - MAX_MESSAGE_BODY_LENGTH;
 
+  // In the record template the toolbar's New message replaces the inline box, and the dialog stays here; the draft is kept
+  // when it is cancelled. Task 006 (FR-06): it is offered only when the LATEST thread read answered `canCreate: true` (the
+  // POST's own decision, task 002). Not loaded yet, failed, refused, unavailable or silent = not offered (fail closed);
+  // a failed re-read keeps the messages on screen but forgets the right, so New message is withdrawn until a read answers
+  // again. The right goes with the offer, for "Your access" and the read-only line.
+  const composeInDialog = onCreateActionChange !== undefined;
+  const right = createRightOf({
+    loaded: thread.status === 'ready',
+    listCanCreate: thread.status === 'ready' ? thread.canCreate : null,
+  });
+  const offered = right === true;
+  useOfferCreateAction(onCreateActionChange, offered, composeDialog.show, right);
+  const closeCompose = (): void => {
+    if (sendLock.current) return;
+    composeDialog.hide();
+  };
+  // The thread read can turn the offer off while the dialog is open (a read that answers 403 or "unavailable"): the dialog
+  // then unmounts with the offer, so close it through hide() too, which resets the open state and returns focus (to the
+  // record dialog, the toolbar button having gone) instead of leaving it on the page body.
+  const { open: composeOpen, hide: hideCompose } = composeDialog;
+  React.useEffect(() => {
+    if (composeInDialog && !offered && composeOpen) hideCompose();
+  }, [composeInDialog, offered, composeOpen, hideCompose]);
+
+  const counter = (
+    <Text
+      size={200}
+      className={mergeClasses(styles.counter, tooLong && styles.counterOver)}
+      role={tooLong ? 'alert' : undefined}
+      data-testid="record-messages-counter"
+    >
+      {tooLong
+        ? `${overBy.toLocaleString()} over the ${MAX_MESSAGE_BODY_LENGTH.toLocaleString()} character limit`
+        : `${text.length.toLocaleString()} / ${MAX_MESSAGE_BODY_LENGTH.toLocaleString()}`}
+    </Text>
+  );
+  const textarea = (
+    <Textarea
+      className={styles.textarea}
+      aria-label="Write a message"
+      placeholder="Write a message..."
+      resize="vertical"
+      rows={3}
+      value={draft}
+      disabled={sending}
+      onChange={(_e, data) => setDraft(data.value)}
+    />
+  );
+  const sendErrors = (
+    <>
+      {sendError?.kind === 'signin' && <BffAccessState failure="signin" />}
+      {sendError?.kind === 'text' && (
+        <MessageBar intent="error" role="alert" data-testid="record-messages-send-error">
+          <MessageBarBody>{sendError.text}</MessageBarBody>
+        </MessageBar>
+      )}
+    </>
+  );
+
+  // Embedded in a host's section card (the record template), the card is the region and draws the heading.
+  const Root = embedded ? 'div' : 'section';
   return (
-    <section className={styles.section} aria-label="Messages" data-testid="record-detail-messages">
-      <h3 className={styles.heading}>Messages</h3>
+    <Root
+      className={styles.section}
+      aria-label={embedded ? undefined : 'Messages'}
+      data-testid="record-detail-messages"
+    >
+      {!embedded && <h3 className={styles.heading}>Messages</h3>}
 
       {thread.status === 'loading' && <Spinner size="small" label="Loading messages..." />}
 
@@ -448,7 +554,7 @@ const MessageThread: React.FC<MessageThreadProps> = ({ root, recordId, onSending
           <TruncatedListNotice truncated={thread.truncated} shown={thread.messages.length} noun="messages" />
           {thread.messages.length === 0 && !thread.truncated ? (
             <div className={styles.empty} role="status" data-testid="record-messages-empty">
-              {EMPTY_TEXT}
+              {composeInDialog ? (offered ? EMPTY_TEXT_DIALOG : EMPTY_TEXT_READ_ONLY) : EMPTY_TEXT}
             </div>
           ) : (
             <ul className={styles.list} aria-label="Message thread" data-testid="record-messages-list">
@@ -460,29 +566,11 @@ const MessageThread: React.FC<MessageThreadProps> = ({ root, recordId, onSending
         </>
       )}
 
-      {showCompose && (
+      {showCompose && !composeInDialog && (
         <div className={styles.compose} data-testid="record-messages-compose">
-          <Textarea
-            className={styles.textarea}
-            aria-label="Write a message"
-            placeholder="Write a message..."
-            resize="vertical"
-            rows={3}
-            value={draft}
-            disabled={sending}
-            onChange={(_e, data) => setDraft(data.value)}
-          />
+          {textarea}
           <div className={styles.composeFooter}>
-            <Text
-              size={200}
-              className={mergeClasses(styles.counter, tooLong && styles.counterOver)}
-              role={tooLong ? 'alert' : undefined}
-              data-testid="record-messages-counter"
-            >
-              {tooLong
-                ? `${overBy.toLocaleString()} over the ${MAX_MESSAGE_BODY_LENGTH.toLocaleString()} character limit`
-                : `${text.length.toLocaleString()} / ${MAX_MESSAGE_BODY_LENGTH.toLocaleString()}`}
-            </Text>
+            {counter}
             <Button
               appearance="primary"
               icon={sending ? <Spinner size="tiny" /> : <SendRegular />}
@@ -493,15 +581,30 @@ const MessageThread: React.FC<MessageThreadProps> = ({ root, recordId, onSending
             </Button>
           </div>
 
-          {sendError?.kind === 'signin' && <BffAccessState failure="signin" />}
-          {sendError?.kind === 'text' && (
-            <MessageBar intent="error" role="alert" data-testid="record-messages-send-error">
-              <MessageBarBody>{sendError.text}</MessageBarBody>
-            </MessageBar>
-          )}
+          {sendErrors}
         </div>
       )}
-    </section>
+
+      {/* The record template's New message (task 004): a FormModal, Cancel left, Send right. Esc does nothing (modal
+          standard: an explicit dialog keeps a draft). */}
+      {composeInDialog && offered && (
+        <FormModal
+          open={composeDialog.open}
+          onClose={closeCompose}
+          onSubmit={() => void handleSend()}
+          title="New message"
+          submitLabel={sending ? 'Sending...' : 'Send'}
+          submitDisabled={!canSend}
+          busy={sending}
+        >
+          <div className={styles.compose} data-testid="record-messages-compose">
+            {textarea}
+            {counter}
+            {sendErrors}
+          </div>
+        </FormModal>
+      )}
+    </Root>
   );
 };
 
@@ -518,13 +621,38 @@ export interface RecordMessagesProps {
   onSendingChange?: (sending: boolean) => void;
   /** Changing this number re-reads the thread (a host posted to it elsewhere, e.g. the service request recall). */
   refreshSignal?: number;
+  /**
+   * Rendered inside a host's own titled section (the record template's section card): no region and no heading of its
+   * own, so the page has one "Messages" region and one heading. Default false (its own section and heading).
+   */
+  embedded?: boolean;
+  /**
+   * Record template only (task 004, FR-03): the toolbar's New message is the entry point. The thread then draws no inline
+   * compose box, offers the action through this callback (task 006: only once the thread's read answered
+   * `canCreate: true`) and renders the compose box in a `FormModal` of its own. Omit it for R3's own page.
+   */
+  onCreateActionChange?: CreateActionReporter;
 }
 
-export const RecordMessages: React.FC<RecordMessagesProps> = ({ entity, recordId, onSendingChange, refreshSignal }) => {
+export const RecordMessages: React.FC<RecordMessagesProps> = ({
+  entity,
+  recordId,
+  onSendingChange,
+  refreshSignal,
+  embedded,
+  onCreateActionChange,
+}) => {
   const root = messageRootFor(entity);
   if (!root) return null;
   return (
-    <MessageThread root={root} recordId={recordId} onSendingChange={onSendingChange} refreshSignal={refreshSignal} />
+    <MessageThread
+      root={root}
+      recordId={recordId}
+      onSendingChange={onSendingChange}
+      refreshSignal={refreshSignal}
+      embedded={embedded}
+      onCreateActionChange={onCreateActionChange}
+    />
   );
 };
 

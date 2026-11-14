@@ -262,11 +262,11 @@ public sealed class GenericAnalysisHandler : IStreamingAnalysisToolHandler
                 context.PreResolvedLookupChoices
             );
 
-#pragma warning disable CS0618 // Obsolete BuildExecutionPrompt retained for flat-text backward compatibility
+#pragma warning disable SPRK001 // flat-text (non-JPS) actions still need BuildExecutionPrompt until the JPS migration completes
             var prompt = rendered.Format == PromptFormat.JsonPromptSchema
                 ? rendered.PromptText
                 : BuildExecutionPrompt(context, tool, config);
-#pragma warning restore CS0618
+#pragma warning restore SPRK001
 
             var inputTokens = EstimateTokens(prompt);
             var useStructuredOutput = rendered.JsonSchema != null;
@@ -417,11 +417,11 @@ public sealed class GenericAnalysisHandler : IStreamingAnalysisToolHandler
                 context.PreResolvedLookupChoices
             );
 
-#pragma warning disable CS0618 // Obsolete BuildExecutionPrompt retained for flat-text backward compatibility
+#pragma warning disable SPRK001 // flat-text (non-JPS) actions still need BuildExecutionPrompt until the JPS migration completes
             prompt = rendered.Format == PromptFormat.JsonPromptSchema
                 ? rendered.PromptText
                 : BuildExecutionPrompt(context, tool, config);
-#pragma warning restore CS0618
+#pragma warning restore SPRK001
 
             // When JPS defines structured output, use constrained decoding (non-streaming)
             // to guarantee the AI returns valid JSON matching the schema. The full response
@@ -532,7 +532,7 @@ public sealed class GenericAnalysisHandler : IStreamingAnalysisToolHandler
     /// When ActionSystemPrompt is present, it replaces the tool's prompt template entirely.
     /// Skills and knowledge context are appended as additional context sections.
     /// </remarks>
-    [Obsolete("Use PromptSchemaRenderer.Render() instead. Will be removed after JPS migration.")]
+    [Obsolete("Use PromptSchemaRenderer.Render() instead. Will be removed after JPS migration.", DiagnosticId = "SPRK001")]
     private static string BuildExecutionPrompt(ToolExecutionContext context, AnalysisTool tool, GenericToolConfig config)
     {
         // Priority: Action SystemPrompt > Tool PromptTemplate > operation default.

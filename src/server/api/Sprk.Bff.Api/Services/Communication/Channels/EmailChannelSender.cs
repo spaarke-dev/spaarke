@@ -1,8 +1,10 @@
 using Microsoft.Graph;
 using Microsoft.Graph.Models;
 using Microsoft.Graph.Models.ODataErrors;
+using Microsoft.Kiota.Abstractions;
 using Sprk.Bff.Api.Infrastructure.Exceptions;
 using Sprk.Bff.Api.Infrastructure.Graph;
+using Sprk.Bff.Api.Infrastructure.Http;
 using Sprk.Bff.Api.Services.Communication.Models;
 
 namespace Sprk.Bff.Api.Services.Communication.Channels;
@@ -30,6 +32,21 @@ public sealed class EmailChannelSender : ICommunicationChannelSender
         _logger = logger;
     }
 
+    /// <summary>
+    /// Ontology task 191 (D-223, #2779): the <c>GRAPH_SEND_FAILED</c> extension that says what is known about a failed send:
+    /// <see cref="SendOutcomeNotSent"/> or <see cref="SendOutcomeUnknown"/>.
+    /// </summary>
+    internal const string SendOutcomeExtension = "sendOutcome";
+
+    /// <summary>The email provably did not go out: the failure came before the request left (no token, an open circuit, a
+    /// refused connect), or the last attempt got a settled refusal (a 4xx other than 408, a 429 included: Graph did not
+    /// process it).</summary>
+    internal const string SendOutcomeNotSent = "NotSent";
+
+    /// <summary>The email may have gone out: the request left and got no answer (a timeout, a transport fault, a cancellation)
+    /// or an answer Graph may send after accepting it (a 5xx, a 408).</summary>
+    internal const string SendOutcomeUnknown = "Unknown";
+
     public CommunicationType SupportedType => CommunicationType.Email;
 
     public async Task<ChannelSendResult> SendAsync(ChannelSendRequest request, CancellationToken cancellationToken = default)
@@ -53,6 +70,12 @@ public sealed class EmailChannelSender : ICommunicationChannelSender
         // sending mailbox's Sent Items. Every other send is unchanged (true).
         var saveToSentItems = request.Communication.SystemMail is null;
 
+        // Ontology task 191 (D-223, #2779): sendMail is not idempotent, so the Graph handler must not send it again after a 5xx,
+        // a 408 or a transport fault (Graph may already have delivered it): only after a 429, which Graph did not process. The
+        // handler records on the option whether an attempt left and what it got, which is how a failure is classified below
+        // (the container create's pattern, ContainerOperations.CreateContainerAsync).
+        var sendOption = new NoTransientRetryOption();
+
         GraphServiceClient graphClient;
         try
         {
@@ -65,7 +88,8 @@ public sealed class EmailChannelSender : ICommunicationChannelSender
                         Message = message,
                         SaveToSentItems = saveToSentItems
                     },
-                    cancellationToken: cancellationToken);
+                    rc => rc.Options.Add(sendOption),
+                    cancellationToken);
             }
             else
             {
@@ -76,7 +100,8 @@ public sealed class EmailChannelSender : ICommunicationChannelSender
                         Message = message,
                         SaveToSentItems = saveToSentItems
                     },
-                    cancellationToken: cancellationToken);
+                    rc => rc.Options.Add(sendOption),
+                    cancellationToken);
             }
 
             _logger.LogInformation(
@@ -88,18 +113,21 @@ public sealed class EmailChannelSender : ICommunicationChannelSender
         }
         catch (ODataError ex)
         {
+            var outcome = OutcomeOf(sendOption, ex);
             _logger.LogError(
                 ex,
-                "Graph sendMail failed | CorrelationId: {CorrelationId}, StatusCode: {StatusCode}, ErrorCode: {ErrorCode}, UserMode: {UserMode}",
+                "Graph sendMail failed | CorrelationId: {CorrelationId}, StatusCode: {StatusCode}, ErrorCode: {ErrorCode}, UserMode: {UserMode}, SendOutcome: {SendOutcome}",
                 request.CorrelationId,
                 ex.ResponseStatusCode,
                 ex.Error?.Code,
-                request.UserMode);
+                request.UserMode,
+                outcome);
 
             var extensions = new Dictionary<string, object>
             {
                 ["correlationId"] = request.CorrelationId,
-                ["graphErrorCode"] = ex.Error?.Code ?? "unknown"
+                ["graphErrorCode"] = ex.Error?.Code ?? "unknown",
+                [SendOutcomeExtension] = outcome
             };
             if (request.UserMode) extensions["sendMode"] = "User";
 
@@ -114,15 +142,18 @@ public sealed class EmailChannelSender : ICommunicationChannelSender
         }
         catch (Exception ex) when (ex is not SdapProblemException)
         {
+            var outcome = OutcomeOf(sendOption, ex);
             _logger.LogError(
                 ex,
-                "Unexpected error sending communication | CorrelationId: {CorrelationId}, UserMode: {UserMode}",
+                "Unexpected error sending communication | CorrelationId: {CorrelationId}, UserMode: {UserMode}, SendOutcome: {SendOutcome}",
                 request.CorrelationId,
-                request.UserMode);
+                request.UserMode,
+                outcome);
 
             var extensions = new Dictionary<string, object>
             {
-                ["correlationId"] = request.CorrelationId
+                ["correlationId"] = request.CorrelationId,
+                [SendOutcomeExtension] = outcome
             };
             if (request.UserMode) extensions["sendMode"] = "User";
 
@@ -152,6 +183,17 @@ public sealed class EmailChannelSender : ICommunicationChannelSender
             ProviderMessageId = internetMessageId
         };
     }
+
+    /// <summary>
+    /// Ontology task 191 (D-223, #2779): <see cref="SendOutcomeUnknown"/> when an attempt left and its answer did not settle that
+    /// Graph refused it (the handler's record on <paramref name="option"/>), or when the exception itself carries a 5xx or a 408
+    /// (an answer proves the request was sent, even through a client built without the Graph handler); otherwise
+    /// <see cref="SendOutcomeNotSent"/>. Reading the option closes it, so an attempt not yet sent cannot overtake the answer.
+    /// </summary>
+    private static string OutcomeOf(NoTransientRetryOption option, Exception ex) =>
+        option.CloseAndReadOutcomeUnknown() || ex is ApiException { ResponseStatusCode: >= 500 or 408 }
+            ? SendOutcomeUnknown
+            : SendOutcomeNotSent;
 
     private static Message BuildGraphMessage(ChannelSendRequest request)
     {

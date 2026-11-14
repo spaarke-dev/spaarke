@@ -1,0 +1,157 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="001" project="spaarke-SPA-external-access-platform-r4">
+  <metadata>
+    <title>Shared RecordCommandBar + record-action icon map (FR-04, FR-05)</title>
+    <phase>1 Record template and actions</phase>
+    <gate>startable after the owner reviews the plan and tasks (owner directive 2026-11-10)</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Creates new .tsx/.ts files in the shared library (tags frontend, fluent-ui; code implementation)</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>New shared pattern/abstraction under an approved ADR-012 Path C tension; needs code-review + adr-check sign-off</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>frontend, fluent-ui, react, typescript, unit-test</tags>
+    <estimated-effort>3-5 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Add a shared, data-free `RecordCommandBar` to `@spaarke/ui-components` that renders record-level actions from descriptors (hidden actions are not rendered at all), composing `HeaderToolbar`, plus one exported icon-map constant for record actions. The external SPA's record template (task 003) consumes it for every record toolbar.</prompt>
+  <role>SPAARKE platform developer. Expert in Fluent UI v9, React and shared-library design (ADR-012, ADR-021). Follow ADRs strictly.</role>
+  <goal>`src/client/shared/Spaarke.UI.Components/src/components/RecordCommandBar/` exists with the component, its exported types, the icon map constant, an index, and Jest tests; it is exported from `src/components/index.ts`; a candidate second consumer is named with file evidence in the task notes and the PR; code-review and adr-check approve the shared placement explicitly.</goal>
+
+  <context>
+    <background>Spec FR-04/FR-05 and §ADR Tensions (ADR-012 Path C, owner 2026-11-08). Design §6 holds the icon table (icons verified present 2026-10-21). The prototype `c:\code_files\spaarke-prototype\projects\2026-10-spa-record-modal\src\template\RecordToolbar.tsx` is the visual reference only (labelled buttons); the spec contract (tooltip = aria-label, HeaderToolbar composition) wins.</background>
+    <relevant-files>
+      <file role="new">src/client/shared/Spaarke.UI.Components/src/components/RecordCommandBar/RecordCommandBar.tsx</file>
+      <file role="new">src/client/shared/Spaarke.UI.Components/src/components/RecordCommandBar/types.ts</file>
+      <file role="new">src/client/shared/Spaarke.UI.Components/src/components/RecordCommandBar/recordActionIcons.ts</file>
+      <file role="new">src/client/shared/Spaarke.UI.Components/src/components/RecordCommandBar/index.ts</file>
+      <file role="new">src/client/shared/Spaarke.UI.Components/src/components/RecordCommandBar/__tests__/RecordCommandBar.test.tsx</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/index.ts</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/HeaderToolbar/HeaderToolbar.tsx</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/HeaderToolbar/types.ts</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/HeaderToolbar/README.md</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/HeaderToolbar/__tests__/HeaderToolbar.test.tsx</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/DataGrid/commandBar/CommandBar.tsx</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.Communication.Components/src/components/EmailReadingPaneShell/EmailToolbar.tsx</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-012">`RecordCommandBar` (every file under `components/RecordCommandBar/`) has no `Xrm`, no `ComponentFramework`, no data fetching, no `fetch`/`authenticatedFetch`, and no entity-name literals (`sprk_*`, "matter", "project", …). Its prop and descriptor types are exported from its index and the components barrel.</constraint>
+    <constraint source="ADR-012 Path C (spec §ADR Tensions)">It composes `HeaderToolbar` (each visible, non-overflow action becomes an `IHeaderToolbarSlot`) and Fluent v9 primitives; it does not copy HeaderToolbar's button/tooltip markup. If review rejects shared placement, it falls back to SPA-local and the owner is told — do not decide that yourself.</constraint>
+    <constraint source="FR-04">The action descriptor fields are exactly: `id`, `label`, `icon`, `onClick`, `visible`, `tooltip`, optional `overflow`. There is no `disabled` field (hide, don't disable — owner 2026-11-08). An action with `visible === false` is not rendered: not in the DOM, no tab stop.</constraint>
+    <constraint source="FR-05">The icon map is ONE exported constant (`RECORD_ACTION_ICONS`) keyed by action id: refresh `ArrowClockwise20Regular`, upload `ArrowUpload20Regular`, newMessage `ChatAdd20Regular`, addTodo `TaskListAdd20Regular`, addEvent `CalendarAdd20Regular`, submitInvoice `ReceiptAdd20Regular`, copyLink `Link20Regular`, expandSection `Open20Regular`, download `ArrowDownload20Regular`, delete `Delete20Regular`, history `History20Regular`, send `Send20Regular`, all from `@fluentui/react-icons`.</constraint>
+    <constraint source="ADR-021">Every style in the new files uses Fluent v9 semantic tokens via `makeStyles`; no hex/rgb/hsl literals. Works in light, dark and high-contrast.</constraint>
+    <constraint source="src/client/shared/CLAUDE.md">Export from the main barrel only (`src/components/index.ts`); do not add it to `pcf-safe.ts`. Use only React 16/17-safe APIs (as HeaderToolbar does) so a PCF-hosted consumer can adopt it later. No new npm dependency.</constraint>
+    <constraint source="project">Do not change `HeaderToolbar`'s public contract (`IHeaderToolbarSlot`, `IHeaderToolbarProps`) — its types file says changes are breaking. Do not migrate any existing toolbar in this task.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-SPA-external-access-platform-r4/CLAUDE.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r4/spec.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r4/design.md</file>
+      <file>src/client/shared/CLAUDE.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/skills/fluent-v9-component/SKILL.md</file>
+      <file>.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+      <file>.claude/patterns/ui/fluent-v9-react-version-boundaries.md</file>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>.claude/patterns/testing/mocking-patterns.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+    <patterns>
+      <pattern name="HeaderToolbar slot composition" location="src/client/shared/Spaarke.UI.Components/src/components/HeaderToolbar/HeaderToolbar.tsx">Icon-only Button inside Tooltip relationship="label", aria-label = tooltip; `buttonRef` anchors a popover — use it to anchor the overflow Menu.</pattern>
+      <pattern name="Overflow menu" location="src/client/shared/Spaarke.UI.Components/src/components/DataGrid/commandBar/CommandBar.tsx">`renderOverflowMenu` (Menu/MenuTrigger/MenuPopover/MenuList) — the overflow interaction to mirror.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load the knowledge files, read the relevant files, declare rigor and model tier per task-execute Step 0.5.</step>
+    <step order="1">Write `types.ts`: `RecordCommandBarAction` (the FR-04 fields only) and `RecordCommandBarProps` (`actions`, `ariaLabel`, optional `className`). JSDoc every public prop.</step>
+    <step order="2">Write `recordActionIcons.ts`: the `RECORD_ACTION_ICONS` constant and its key type `RecordActionIconId`.</step>
+    <step order="3">Write `RecordCommandBar.tsx`: filter `visible`, map non-overflow actions to HeaderToolbar slots (tooltip = the action's tooltip), and render overflow actions in a Fluent v9 Menu behind one "More actions" slot that appears only when at least one visible action has `overflow: true`.</step>
+    <step order="4">Write `index.ts` and add `export * from './RecordCommandBar';` to `src/components/index.ts` next to the HeaderToolbar export.</step>
+    <step order="5">Write the Jest tests (React Testing Library inside `FluentProvider`), then run `npm test -- RecordCommandBar` and the package type check/build in `src/client/shared/Spaarke.UI.Components`.</step>
+    <step order="6">Name the candidate second consumer with file evidence in `projects/spaarke-SPA-external-access-platform-r4/notes/task-001-notes.md` (start from `EmailToolbar.tsx`, see notes); copy it into the PR description.</step>
+    <step order="7">Run `/code-review` and `/adr-check` on the change; record their explicit Path C approval (or rejection) in the task notes. On rejection, STOP (escalation).</step>
+    <step order="8">Run tests and verify all pass.</step>
+    <step order="9">Update `tasks/TASK-INDEX.md`: set this task's status cell to `✅ [done]` and this POML's &lt;status&gt; to completed; run `pwsh scripts/check-task-status-drift.ps1`.</step>
+    <step order="10">Record deviations and decisions in `projects/spaarke-SPA-external-access-platform-r4/notes/task-001-notes.md`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If overflow or keyboard behaviour cannot be built without changing HeaderToolbar's public types, STOP and escalate (root CLAUDE.md §6: breaking shared-lib contract) rather than editing HeaderToolbar.</trigger>
+    <trigger>If code-review or adr-check rejects the shared placement, STOP: report to the owner with the SPA-local fallback (spec §ADR Tensions); do not move the component yourself.</trigger>
+    <trigger>If an icon in FR-05 is missing from the installed `@fluentui/react-icons`, STOP and report it; do not substitute another icon.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>`HeaderToolbar` (components/HeaderToolbar/HeaderToolbar.tsx:134, section-card header icon slots), `DocumentToolbar` (components/DocumentToolbar/DocumentToolbar.tsx:105, document-grid actions with disabled states), `DataGrid/commandBar/CommandBar.tsx:310` (grid-scoped, registry-driven) — none renders record-level actions from visibility descriptors.</existing>
+    <extension>No as a direct extension: HeaderToolbar's slot contract is frozen (types.ts says changes are breaking) and has no visibility/overflow concept, and DocumentToolbar is document-specific with disabled-not-hidden semantics. RecordCommandBar composes HeaderToolbar instead of extending it.</extension>
+    <cost-of-doing-nothing>Each of the six SPA record types hand-builds its toolbar visibility, overflow and icons, so hide-don't-disable drifts per type and a View-only caller can be offered an action that answers 403 (FR-06, NFR-04).</cost-of-doing-nothing>
+  </justification>
+
+  <ui-tests>
+    <test name="Hidden actions are absent">
+      <steps><step>Render RecordCommandBar with refresh (visible), upload (visible=false), copyLink (visible).</step><step>Inspect the DOM and Tab through the bar.</step></steps>
+      <expected>No upload button exists in the DOM; Tab visits only Refresh and Copy link.</expected>
+    </test>
+    <test name="Overflow menu">
+      <steps><step>Render with two visible overflow actions.</step><step>Activate "More actions" with Enter; arrow to the second item; press Enter; press Esc on a reopened menu.</step></steps>
+      <expected>The menu opens, the item's onClick fires once, Esc closes the menu and returns focus to the trigger.</expected>
+    </test>
+    <test name="Dark Mode and High Contrast (ADR-021)">
+      <steps><step>Render inside FluentProvider with webDarkTheme, then teamsHighContrastTheme.</step><step>Verify no hard-coded colours; icons use currentColor.</step></steps>
+      <expected>All colours come from Fluent v9 semantic tokens; buttons stay visible and focus rings show; no console warnings.</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">Run Jest and the type check in src/client/shared/Spaarke.UI.Components</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/RecordCommandBar/RecordCommandBar.tsx</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/RecordCommandBar/types.ts</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/RecordCommandBar/recordActionIcons.ts</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/RecordCommandBar/index.ts</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/index.ts</output>
+    <output type="test">src/client/shared/Spaarke.UI.Components/src/components/RecordCommandBar/__tests__/RecordCommandBar.test.tsx</output>
+    <output type="docs">projects/spaarke-SPA-external-access-platform-r4/notes/task-001-notes.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given an action with `visible: false`, the bar renders no element for it and it gets no tab stop.</criterion>
+    <criterion testable="true">Every rendered action (inline or in the overflow menu) has a tooltip whose text is also its accessible name (aria-label); a test asserts it for inline and overflow actions.</criterion>
+    <criterion testable="true">Overflow actions render only inside the "More actions" menu; with no visible overflow action, no "More actions" control exists.</criterion>
+    <criterion testable="true">Keyboard: Tab reaches each inline action and the overflow trigger; Enter and Space activate an action; Esc closes the overflow menu and focus returns to its trigger.</criterion>
+    <criterion testable="true">With an empty or all-hidden action list the bar renders without error and contains no buttons.</criterion>
+    <criterion testable="true">`RECORD_ACTION_ICONS` is exported from the package barrel and holds exactly the twelve FR-05 entries.</criterion>
+    <criterion testable="true">`RecordCommandBar`, `RecordCommandBarProps`, `RecordCommandBarAction` and `RECORD_ACTION_ICONS` are importable from `@spaarke/ui-components`.</criterion>
+    <criterion testable="true">Negative: a grep of `components/RecordCommandBar/` finds no `Xrm`, `ComponentFramework`, `fetch(`, `sprk_` or hex colour literal.</criterion>
+    <criterion testable="true">It renders correctly in light, dark and high-contrast Fluent themes (test renders it under each theme without error).</criterion>
+    <criterion testable="true">HeaderToolbar's files are unchanged.</criterion>
+    <criterion testable="true">A candidate second consumer is named with file:line evidence in `notes/task-001-notes.md` and the PR.</criterion>
+    <criterion testable="true">code-review and adr-check record explicit approval of the ADR-012 Path C placement in the task notes.</criterion>
+    <criterion testable="true">The package's Jest suite and type check pass.</criterion>
+    <criterion testable="true">Test scope: cover the stated contract (visibility, tooltip/aria-label, overflow, keyboard, empty list, themes) plus the edge cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-04, FR-05, §ADR Tensions (ADR-012), Unresolved Question 3 (candidate second consumer). Candidate verified 2026-11-10: `src/client/shared/Spaarke.Communication.Components/src/components/EmailReadingPaneShell/EmailToolbar.tsx` hand-builds a record-level action bar (a Fluent Toolbar at :99 with icon-only buttons wrapped in per-button Tooltips from :127: Save to SharePoint, Create Event, Create To Do, Link Invoice, Open full form) gated by one `recordActionsDisabled` flag (disable, not hide). It renders inside `EmailWorkspace.tsx`, consumed by the Console (`src/solutions/SpaarkeAi/src/components/workspace/WorkspacePane.tsx`) and `src/solutions/EmailPage/src/main.tsx`; its header says it mirrors the `CommunicationActions` PCF bar (`CommunicationActionsApp.tsx:621`), a second hand-built copy. Name it only; migrating it is out of scope. Icon keys are action ids, not entity literals. Shared-lib tests run under Jest.
+
+Completion (2026-11-11): RecordCommandBar, types, RECORD_ACTION_ICONS and index created; exported from components/index.ts; HeaderToolbar unchanged. 14 Jest tests pass; package tsc --noEmit passes. Second consumer named: EmailToolbar.tsx (:99, :127-151) via EmailReadingPaneShell → EmailWorkspace (EmailPage, Console email widget), mirroring CommunicationActionsApp.tsx:621. code-review and adr-check approved the ADR-012 Path C placement; no F-class finding. Known limits: Fluent MenuList arrow navigation and browser UI tests not verifiable under jsdom / before task 003. Detail: notes/task-001-notes.md.
+rework: none task 001</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

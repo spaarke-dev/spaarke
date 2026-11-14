@@ -9,7 +9,13 @@
  * The search is the shared `searchOrganizationsAsLookup` (the same one the Create Matter / Invoice wizards use).
  */
 
-import { getXrm, searchOrganizationsAsLookup, type IDataService, type ILookupItem } from '@spaarke/ui-components';
+import {
+  getXrm,
+  searchOrganizationsAsLookup,
+  type IDataService,
+  type ILookupItem,
+  type INavigationService,
+} from '@spaarke/ui-components';
 
 const READ_ONLY = 'The Rule Review page does not write Dataverse rows; rule sets are changed only through the BFF (ADR-002).';
 
@@ -34,6 +40,11 @@ export function createReadOnlyDataService(): IDataService {
 }
 
 export interface FirmLookup {
+  /**
+   * The host's navigation service (D-219 Q5): with it the Firm picker opens the Dataverse side pane for `sprk_organization`; without it
+   * (no Xrm in this frame) the picker keeps the inline `search`. Built at the host root (`main.tsx`), never inside a component.
+   */
+  readonly navigationService?: INavigationService;
   /** Search firms by a name fragment (two characters or more). */
   search(query: string): Promise<ILookupItem[]>;
   /** The names of the given firms; an id that cannot be resolved is left out. */
@@ -43,8 +54,13 @@ export interface FirmLookup {
 const GUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const CHUNK = 20;
 
-export function createFirmLookup(data: IDataService = createReadOnlyDataService()): FirmLookup {
+export function createFirmLookup(
+  data: IDataService = createReadOnlyDataService(),
+  navigationService?: INavigationService
+): FirmLookup {
   return {
+    navigationService,
+
     search: query => searchOrganizationsAsLookup(data, query),
 
     async names(ids) {

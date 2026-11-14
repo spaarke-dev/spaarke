@@ -1,0 +1,150 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="022" project="spaarke-SPA-external-access-platform-r4">
+  <metadata>
+    <title>Inline PDF/image preview on the Document record (FR-14)</title>
+    <phase>2 Invoices and documents</phase>
+    <gate>after 018</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .ts/.tsx code; new preview component on the Document record</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Single component with an explicit byte path (existing content route → blob URL) and named references</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>018</deps>
+    <tags>frontend, fluent-ui, react</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Add a Preview section to the Document record that shows PDF, PNG, JPEG, GIF and WebP files up to 25 MB in place, from the existing external content route via a blob URL, and offers Download only for everything else (DEF-003, #1828).</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. Fluent UI v9 and React developer for the external SPA.</role>
+  <goal>The Document record's Preview section renders previewable files inline, shows a Download-only state for other types, larger files and documents with no file, and revokes its blob URL on unmount; tests prove each branch.</goal>
+
+  <context>
+    <background>Spec FR-14; owner 2026-11-09: PDF + PNG/JPEG/GIF/WebP, 25 MB cap. The template (FR-01) gives Document "Information, Preview" on the left. Today the Document detail has only a Download section (`RecordDetailModal.tsx:427-475`, `DocumentDownload`), which tries the document's parents in order through `downloadDocumentFromParents` (`DocumentLibrary.tsx:331`) over the content route (`documentContentPath`, `web-api-client.ts:488`). SPEC DRIFT: the spec says "through `authenticatedFetch`"; this SPA does not use `@spaarke/auth` (`bff-client.ts:12-36`) — its authenticated binary read is `bffApiBlob` (`bff-client.ts:229-243`), which returns `response.blob()` and the route streams `application/octet-stream`. The documents module row carries `sprk_filetype` and the derived `hasFile` but no file size (`ExternalAccessModule.cs:494-501`). The SWA CSP sets only `frame-ancestors` (`staticwebapp.config.json:13`), so a blob: URL may be framed.</background>
+    <relevant-files>
+      <file role="modify">The Document Preview section renderer created by task 005 (under src/client/external-spa/src/components/detail/)</file>
+      <file role="modify">src/client/external-spa/src/components/detail/RecordDetailModal.tsx</file>
+      <file role="modify">src/client/external-spa/src/auth/bff-client.ts</file>
+      <file role="canonical-reference">src/client/external-spa/src/components/DocumentLibrary.tsx</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/SprkModal/presets/PreviewModal.tsx</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/FilePreview/RichFilePreviewDialog.tsx</file>
+      <file role="new">src/client/external-spa/src/components/detail/DocumentPreview.tsx</file>
+      <file role="new">src/client/external-spa/tests/DocumentPreview.test.tsx</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="018" status="pending">P1 deployed: the Document record template and its section slots exist</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-007, ADR-028 A1">The preview reads bytes ONLY through the existing external content route with `bffApiBlob` (the SPA's authenticated binary read). No Graph call, no signed URL, no SPE pointer, no new BFF route, and nothing under src/server changes.</constraint>
+    <constraint source="spec FR-14">Previewable types are exactly PDF, PNG, JPEG, GIF and WebP, decided from `sprk_filetype` and, when absent, the document name's extension. Files over 25 MB (26,214,400 bytes) and every other type show Download only. The blob is re-typed with the decided MIME type before `URL.createObjectURL`, because the route answers `application/octet-stream`.</constraint>
+    <constraint source="spec FR-14">The size cap is enforced before the body is kept: read `Content-Length` and abort (AbortController) when it exceeds the cap; when the header is absent, check `blob.size` and discard the bytes. Any change to `bff-client.ts` is additive and optional (existing callers unchanged).</constraint>
+    <constraint source="spec FR-14">`URL.revokeObjectURL` is called when the section unmounts and whenever the document changes (record paging "1 of N").</constraint>
+    <constraint source="spec FR-15">A document with `hasFile === false` renders no preview and no fetch is made.</constraint>
+    <constraint source="ADR-021">Stage styling mirrors `PreviewModal`'s `previewStage` (neutral background 3, centred, clamped, overflow hidden); semantic tokens only; the PDF frame and image carry accessible names.</constraint>
+    <constraint source="project">Fetch failures reuse `downloadFailureMessage` (`DocumentLibrary.tsx:353`) and never block the Download action.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-SPA-external-access-platform-r4/CLAUDE.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r4/spec.md</file>
+      <file>.claude/skills/fluent-v9-component/SKILL.md</file>
+      <file>.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+      <file>.claude/patterns/ui/fluent-v9-host-visual-fit.md</file>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+      <file>.claude/adr/ADR-007-spefilestore.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-050-canonical-modal-shell.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>src/client/external-spa/README.md</file>
+    </files>
+    <patterns>
+      <pattern name="Download from parents" location="src/client/external-spa/src/components/DocumentLibrary.tsx">downloadDocumentFromParents (:331) — the same parent order and 403-move-on rule for the preview read</pattern>
+      <pattern name="Preview stage look" location="src/client/shared/Spaarke.UI.Components/src/components/SprkModal/presets/PreviewModal.tsx">previewStage styles (:23-34); do not reuse RichFilePreview's fetchPreviewUrl (it is a URL-based path)</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load the knowledge files, read the relevant files, declare rigor and model tier per task-execute Step 0.5.</step>
+    <step order="1">Write a pure `previewKindOf(fileType, name)` → 'pdf' | 'image' (with MIME) | null.</step>
+    <step order="2">Add an optional size-capped read to `bff-client.ts` (or a cap option on `bffApiBlob`) that aborts on `Content-Length` over the cap and falls back to `blob.size`.</step>
+    <step order="3">Write `DocumentPreview.tsx`: loading, rendered (PDF in an `iframe`/`object` with a title; image in `img` with alt), too-large, unsupported type, no-file and error states; revoke on unmount and on document change.</step>
+    <step order="4">Mount it in the Document record's Preview section (task 005's renderer); keep Download in the toolbar/Download section.</step>
+    <step order="5">Tests: each previewable type; .docx → Download only; a 26 MB response (Content-Length) → Download only and the body is not kept; missing Content-Length with a 26 MB blob → Download only; `hasFile === false` → no fetch; revoke called on unmount and on paging; a 403 on the first parent moves to the next.</step>
+    <step order="6">Run the SPA tests and `npm run build`.</step>
+    <step order="7">Update tasks/TASK-INDEX.md: set this task's status cell to `✅ [done]` and this POML's &lt;status&gt; to completed; run `pwsh scripts/check-task-status-drift.ps1`.</step>
+    <step order="8">Record deviations and decisions in projects/spaarke-SPA-external-access-platform-r4/notes/task-022-notes.md.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the preview cannot be built without a new BFF route, a signed URL, an SPE pointer or Graph, STOP and escalate (ADR-007, ADR-028 A1); do not add any of them.</trigger>
+    <trigger>If the PDF does not render from a blob URL in the Teams host or Edge/Chrome, STOP and report the host and error rather than adding a PDF library (a new package needs §11 justification and owner approval).</trigger>
+  </escalation>
+
+  <justification>
+    <existing>RichFilePreviewDialog/RichFilePreview (shared FilePreview) render previews from a fetched preview URL; PreviewModal is a modal preset; the SPA's DocumentDownload (RecordDetailModal.tsx:427) only downloads.</existing>
+    <extension>No: RichFilePreview's path is URL-based (`fetchPreviewUrl`), which FR-14 forbids, and PreviewModal is a modal while the template needs an in-place section; the new component reuses PreviewModal's stage look and the SPA's existing content read.</extension>
+    <cost-of-doing-nothing>Partners must download every PDF or image to read it (DEF-003, #1828 stays open) and the Document template's Preview slot stays empty.</cost-of-doing-nothing>
+  </justification>
+
+  <ui-tests>
+    <test name="PDF and image preview">
+      <url>https://{spa-dev-host}/?record=document:{document-id}</url>
+      <steps>
+        <step>Open a document record whose file is a PDF under 25 MB</step>
+        <step>Verify the PDF renders in the Preview section</step>
+        <step>Open a PNG document; verify the image renders</step>
+        <step>Check the console for errors</step>
+      </steps>
+      <expected>Both render in place, no console errors, no request other than the content route</expected>
+    </test>
+    <test name="Download only">
+      <steps><step>Open a .docx document</step><step>Open a PDF over 25 MB</step><step>Open a document with no file</step></steps>
+      <expected>No preview; .docx and the large PDF show Download; the no-file document shows neither</expected>
+    </test>
+    <test name="No leak across opens">
+      <steps><step>Page "1 of N" through ten documents and back</step><step>Inspect blob URLs in DevTools memory</step></steps>
+      <expected>Only the current document's blob URL is alive</expected>
+    </test>
+    <test name="Dark Mode Compliance (ADR-021)">
+      <steps><step>Switch to dark and high-contrast</step><step>Verify the stage background and state texts adapt</step></steps>
+      <expected>Semantic tokens only; no white stage in dark mode</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">Run SPA tests and build</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/external-spa/src/components/detail/DocumentPreview.tsx</output>
+    <output type="code">src/client/external-spa/src/auth/bff-client.ts</output>
+    <output type="test">src/client/external-spa/tests/DocumentPreview.test.tsx</output>
+    <output type="docs">projects/spaarke-SPA-external-access-platform-r4/notes/task-022-notes.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">PDF, PNG, JPEG, GIF and WebP documents up to 25 MB render in the Preview section.</criterion>
+    <criterion testable="true">A 26 MB PDF and a .docx show Download only; the oversize body is aborted or discarded, never rendered.</criterion>
+    <criterion testable="true">A document with `hasFile === false` shows no preview and makes no content request.</criterion>
+    <criterion testable="true">`URL.revokeObjectURL` is called on unmount and when the shown document changes (test asserts it).</criterion>
+    <criterion testable="true">The only network read is the existing external content route; no new route, signed URL, SPE pointer or Graph call; no file under src/server changes.</criterion>
+    <criterion testable="true">A 403 from the first parent moves to the next parent; a failure shows the shared download failure text and Download stays available.</criterion>
+    <criterion testable="true">Existing `bffApiBlob` callers behave as before.</criterion>
+    <criterion testable="true">SPA build passes; all SPA tests pass.</criterion>
+    <criterion testable="true">Test scope: cover the stated contract plus the edge cases named in these criteria. Anything beyond that needs a one-line justification in the task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-14, SC-4. Drift recorded: the spec's "authenticatedFetch" is `bffApiBlob` in this SPA. 023 later reworks DocumentLibrary; this task does not edit DocumentLibrary.tsx (it only imports its helpers).</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

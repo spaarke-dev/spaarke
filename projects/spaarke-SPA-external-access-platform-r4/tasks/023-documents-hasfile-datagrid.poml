@@ -1,0 +1,150 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="023" project="spaarke-SPA-external-access-platform-r4">
+  <metadata>
+    <title>Documents with no file (#1886) + Documents on the shared DataGrid (#2490) (FR-15, FR-16)</title>
+    <phase>2 Invoices and documents</phase>
+    <gate>after 018 and 022; step 1 is a feasibility check that may stop for an owner decision</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Multi-file rework of DocumentLibrary.tsx (.tsx) used by the record template and ProjectPage</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Complex multi-file change with a complete spec and a named host wrapper; brownfield depth, low ambiguity once step 1 is settled</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>DocumentLibrary.tsx and the Document record are shared with 022, 021 and 024</parallel-reason>
+    <deps>018, 022</deps>
+    <tags>frontend, fluent-ui, react</tags>
+    <estimated-effort>6-8 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Move the record and project-page Documents list (DocumentLibrary) onto the shared Spaarke DataGrid so columns size, resize and ellipsise without overlap, keeping upload, download and delete-own by per-record access, and keep documents with no file listed without Download, versions or preview.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. Fluent UI v9 developer familiar with the Spaarke DataGrid framework.</role>
+  <goal>DocumentLibrary renders its rows through `ExternalDataGrid`, with no column overlap at 1000px, working resize, ellipsis plus tooltip on long names, and every existing document action intact; the hasFile behaviour holds in the list, on the Document record and in the 022 preview.</goal>
+
+  <context>
+    <background>Spec FR-15/FR-16; design §7 (#2490). FR-15 is ALREADY SHIPPED BY R3 (ISS-011): the list hides Download and versions when `item.hasFile === false` (`DocumentLibrary.tsx:929-956`), the Document detail hides Download (`RecordDetailModal.tsx:433-436`), and tests exist (`tests/DocumentLibrary.hasFile.test.tsx`, `tests/DocumentDetail.hasFile.test.tsx`). The DTO field is `ExternalProjectDtos.cs:142-143`; the module fetch also derives `hasFile` (`ExternalModuleDataEndpoints.cs:426`). So FR-15 here = keep it through the grid move and extend it to 022's preview. FR-16: today DocumentLibrary renders a Fluent v9 `DataGrid` from `@fluentui/react-components` (`DocumentLibrary.tsx:34-60`, `:1106-1125`) over the record's documents route (`getRecordDocuments`; list `canCreate` at `:748-766`). The SHARED grid is config-driven: `DataGridProps.configId` is required (`DataGrid.tsx:107-109`), it reads a `sprk_gridconfiguration` record through the module fetch, accepts `hostFilters`, `parentContext` and `overrides.columnRenderers` (`configResolution.ts:41-50`), and resizes natively (`DataGrid.tsx:1281`, `:1552`). In this SPA it may only be mounted as a JSX `&lt;ExternalDataGrid&gt;` (`widgets/ExternalDataGrid.tsx`; `tests/Spaarke.ArchTests/ExternalSpaGridViewSelectorGuardTests.cs` refuses any other import). A documents grid configuration already exists (`3af4102c`, DocumentsWidget). The documents module scopes rows by project, matter and work assignment only (`ExternalAccessModule.cs:480-485`): it does not reach invoice or service-request documents.</background>
+    <relevant-files>
+      <file role="modify">src/client/external-spa/src/components/DocumentLibrary.tsx</file>
+      <file role="modify">src/client/external-spa/src/pages/ProjectPage.tsx</file>
+      <file role="modify">The Documents and Document-record section renderers created by task 005 (under src/client/external-spa/src/components/detail/)</file>
+      <file role="modify">src/client/external-spa/src/components/detail/DocumentPreview.tsx</file>
+      <file role="canonical-reference">src/client/external-spa/src/widgets/GridWidgetBody.tsx</file>
+      <file role="canonical-reference">src/client/external-spa/src/widgets/ExternalDataGrid.tsx</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/DataGrid/DataGrid.tsx</file>
+      <file role="canonical-reference">src/client/external-spa/src/widgets/DocumentsWidget.tsx</file>
+      <file role="modify">src/client/external-spa/tests/DocumentLibrary.hasFile.test.tsx</file>
+      <file role="modify">src/client/external-spa/tests/DocumentLibrary.uploadFailures.test.tsx</file>
+      <file role="modify">src/client/external-spa/tests/DetailDocumentsDelete.test.tsx</file>
+      <file role="modify">src/client/external-spa/tests/PerRecordWriteAccess.test.tsx</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="018" status="pending">P1 deployed: template sections and per-record access</dependency>
+      <dependency task="022" status="pending">DocumentPreview exists; it must honour hasFile</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ExternalSpaGridViewSelectorGuardTests">Every shared-grid mount in this task is a JSX `&lt;ExternalDataGrid&gt;`; `ExternalDataGrid.tsx` is not edited; no file imports `@spaarke/ui-components/components/DataGrid` directly.</constraint>
+    <constraint source="spec FR-06/FR-16">Upload follows the same rule as today (`DocumentLibrary.tsx:748-766`: list `canCreate`, project `accessLevel` unless `writeAccessPerRecord`); Download needs Read; Delete shows only on rows `isCreatedByCaller` returns true for. No action the list offers may answer 403. Actions a caller cannot use are hidden, not disabled.</constraint>
+    <constraint source="spec FR-15">Every row and the Document record with `hasFile === false` shows no Download, no Version history and no Preview; only an explicit false hides them (an absent flag keeps today's behaviour, as the R3 code does).</constraint>
+    <constraint source="project">No BFF change, no new `sprk_gridconfiguration` record and no live Dataverse write in this task. If the chosen option needs one, that is the escalation below.</constraint>
+    <constraint source="ADR-051">The list keeps infinite lazy-scroll and the thin scrollbar (the shared grid ships both); no pager.</constraint>
+    <constraint source="ADR-021">Long names ellipsise with a Tooltip carrying the full name; semantic tokens only.</constraint>
+    <constraint source="ADR-012">No change to the shared DataGrid in this task (032/033 own DataGrid changes).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-SPA-external-access-platform-r4/CLAUDE.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r4/spec.md</file>
+      <file>docs/architecture/SPAARKE-DATAGRID-FRAMEWORK-ARCHITECTURE.md</file>
+      <file>.claude/skills/fluent-v9-component/SKILL.md</file>
+      <file>.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+      <file>.claude/patterns/ui/infinite-scroll-list.md</file>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-051-infinite-scroll-lists.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>src/client/external-spa/README.md</file>
+    </files>
+    <patterns>
+      <pattern name="Shared grid in the SPA" location="src/client/external-spa/src/widgets/GridWidgetBody.tsx">ExternalDataGrid as a JSX tag, ambient theme, gridDataverseClient, onRecordOpen to the record template</pattern>
+      <pattern name="Per-row actions" location="src/client/shared/Spaarke.UI.Components/src/components/DataGrid/configResolution.ts">overrides.columnRenderers for the actions cell; onRecordAction for per-row actions</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load the knowledge files, read the relevant files, declare rigor and model tier per task-execute Step 0.5.</step>
+    <step order="1" name="Feasibility (stop point)">Decide how DocumentLibrary's rows reach the shared grid for each root it serves (projects, matters, workassignments, servicerequests; invoices until 021). Candidate: `&lt;ExternalDataGrid configId="3af4102c…"&gt;` with `hostFilters` on the parent lookup, plus the existing list read kept only for `canCreate`. Write the per-root answer in the task notes; if any root cannot be served without a new grid configuration, a module scope change or a BFF change, take the escalation.</step>
+    <step order="2">Render the list through `ExternalDataGrid`; map Download, Version history and Delete into the actions cell via `overrides.columnRenderers` (or `onRecordAction`), keeping the hasFile and creator-stamp rules and the existing error and confirmation components (`DeleteOwnConfirm`, `DeleteFailureNotice`, the download error bar).</step>
+    <step order="3">Keep Upload (dialog, collision/413/422/403 texts) and `TruncatedListNotice` unchanged in behaviour; keep ProjectPage working.</step>
+    <step order="4">Set the Document record's toolbar Download and the 022 preview to honour `hasFile === false`.</step>
+    <step order="5">Update the existing SPA tests to the new rendering; add a test for no overlap at 1000px (column widths sum within the container) and ellipsis + tooltip on a long name.</step>
+    <step order="6">Run the SPA tests, `dotnet test tests/Spaarke.ArchTests --filter ExternalSpaGridViewSelectorGuardTests`, and the SPA build.</step>
+    <step order="7">Update tasks/TASK-INDEX.md: set this task's status cell to `✅ [done]` and this POML's &lt;status&gt; to completed; run `pwsh scripts/check-task-status-drift.ps1`.</step>
+    <step order="8">Record deviations and the step 1 decision in projects/spaarke-SPA-external-access-platform-r4/notes/task-023-notes.md.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If any DocumentLibrary root (notably servicerequests, which the documents module does not scope) cannot be served by the shared grid without a new `sprk_gridconfiguration` record, a documents-module scope change or any BFF change, STOP before coding and raise 🔔 Human Input Required with options: (A) shared grid for project/matter/WA roots and the Fluent grid kept for the rest; (B) an opt-in items mode on the shared DataGrid (new shared surface, dataset-grid framework owners, §11); (C) a new grid configuration + scope change via uac-r2 review. Recommend one; the owner chooses.</trigger>
+    <trigger>If the move would require editing `ExternalDataGrid.tsx` or relaxing `ExternalSpaGridViewSelectorGuardTests`, STOP — that is a security guard owned with uac-r2.</trigger>
+  </escalation>
+
+  <ui-tests>
+    <test name="Documents grid at 1000px">
+      <url>https://{spa-dev-host}/?record=matter:{matter-id}</url>
+      <steps>
+        <step>Set the window to 1000px wide; open a matter with long document names</step>
+        <step>Verify no column overlaps; long names ellipsise and show a tooltip</step>
+        <step>Drag a column edge; verify it resizes</step>
+        <step>Check the console for errors</step>
+      </steps>
+      <expected>Clean layout, working resize, no console errors</expected>
+    </test>
+    <test name="Actions by access">
+      <steps>
+        <step>As a writer: upload a file, download it, delete your own row</step>
+        <step>As View-only: verify no Upload, no Delete; Download present</step>
+        <step>Open a document with no file: no Download, no Version history, no Preview</step>
+      </steps>
+      <expected>Each offered action succeeds; none answers 403</expected>
+    </test>
+    <test name="Dark Mode Compliance (ADR-021)">
+      <steps><step>Switch to dark and high-contrast</step><step>Verify grid, header and tooltip colours adapt</step></steps>
+      <expected>Semantic tokens only</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">Run SPA tests and build</tool>
+    <tool name="dotnet">Run the external-SPA grid guard arch test</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/external-spa/src/components/DocumentLibrary.tsx</output>
+    <output type="code">src/client/external-spa/src/pages/ProjectPage.tsx</output>
+    <output type="test">src/client/external-spa/tests/DocumentLibrary.hasFile.test.tsx</output>
+    <output type="docs">projects/spaarke-SPA-external-access-platform-r4/notes/task-023-notes.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The record Documents list and the ProjectPage Documents list render through `ExternalDataGrid` for every root step 1 approved; any root left on the Fluent grid is named in the notes with the owner's decision.</criterion>
+    <criterion testable="true">At 1000px no columns overlap, resize works, and a long name ellipsises with a tooltip showing the full name.</criterion>
+    <criterion testable="true">A writer can upload, download and delete their own row; a View-only caller sees no Upload and no Delete; no offered action answers 403.</criterion>
+    <criterion testable="true">A row with `hasFile === false` is listed with no Download and no Version history; the Document record shows no Download and no Preview for it; a row with no `hasFile` keeps today's behaviour.</criterion>
+    <criterion testable="true">Upload error texts (409, 413, 422, 403, 5xx) and the truncated-list notice behave as before.</criterion>
+    <criterion testable="true">`ExternalDataGrid.tsx` is unchanged and `ExternalSpaGridViewSelectorGuardTests` passes; nothing under src/server or the shared DataGrid changes.</criterion>
+    <criterion testable="true">SPA build passes; all SPA tests pass.</criterion>
+    <criterion testable="true">Test scope: cover the stated contract plus the edge cases named in these criteria. Anything beyond that needs a one-line justification in the task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-15, FR-16; issues #1886, #2490. Spec anchor drift: #1886's SPA side is already done (R3 ISS-011); this task preserves and extends it. Design §6's "DocumentLibrary.tsx:1025" empty state is now :1048 (024 replaces it).</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

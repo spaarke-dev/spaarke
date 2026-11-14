@@ -66,25 +66,36 @@ export interface IPushError {
  */
 export const SECURE_SOURCE_NOT_ISOLATED_REASON_CODE = 'field_mapping.push.secure_source_not_isolated';
 
-/** Whether the source is secure, or the child's owner, could not be checked: the child is not written. */
+/**
+ * Whether the source's access allows copying (secure, or task 022c Restricted), or the child's owner or Access Permission,
+ * could not be checked: the child is not written.
+ */
 export const SECURE_SOURCE_UNDETERMINED_REASON_CODE = 'field_mapping.push.secure_source_undetermined';
 
 /**
- * A push from a secure source never changes what a child is filed under: a child whose pushed values would change its filing
- * is not written at all (`FieldMappingPushSourceGate.RefileNotAllowedReasonCode`).
+ * A push from a secure (or, task 022c, Restricted) source never changes what a child is filed under: a child whose pushed
+ * values would change its filing is not written at all (`FieldMappingPushSourceGate.RefileNotAllowedReasonCode`).
  */
 export const SECURE_SOURCE_REFILE_NOT_ALLOWED_REASON_CODE = 'field_mapping.push.secure_source_refile_not_allowed';
 
 /**
- * The per-record wording of each mapping-source code (never a generic error). Each code skips the record whole: no field is
- * copied to it.
+ * Task 022c (the Restricted-source rule): values copied from a source whose access is Restricted are written only into a record
+ * that is Restricted. A child that is not is not written (`FieldMappingPushSourceGate.RestrictedSourceNotRestrictedReasonCode`).
+ */
+export const RESTRICTED_SOURCE_NOT_RESTRICTED_REASON_CODE = 'field_mapping.push.restricted_source_not_restricted';
+
+/**
+ * The per-record wording of each mapping-source code (never a generic error), the same text the server sends
+ * (`FieldMappingPushSourceGate.MessageFor`). Each code skips the record whole: no field is copied to it.
  */
 const SOURCE_RULE_TEXT: Readonly<Record<string, string>> = {
   [SECURE_SOURCE_NOT_ISOLATED_REASON_CODE]: 'No fields were copied to this record because the source record is secure.',
   [SECURE_SOURCE_UNDETERMINED_REASON_CODE]:
-    'No fields were copied to this record because it could not be checked whether the source record is secure. Try again later.',
+    "No fields were copied to this record because it could not be checked whether the source record's access allows copying. Try again later.",
   [SECURE_SOURCE_REFILE_NOT_ALLOWED_REASON_CODE]:
-    "No fields were copied to this record because its filing can't be changed by a push from a secure record.",
+    "No fields were copied to this record because its filing can't be changed by a push from a secure or Restricted record.",
+  [RESTRICTED_SOURCE_NOT_RESTRICTED_REASON_CODE]:
+    "No fields were copied to this record because the source record's access is Restricted and this record's is not.",
 };
 
 /** True when the entry is a child the mapping-source rule kept the push from writing. */
@@ -106,18 +117,24 @@ export function sourceRuleSkipText(errors: readonly IPushError[]): string[] {
   const notIsolated = errors.filter(e => e.reasonCode === SECURE_SOURCE_NOT_ISOLATED_REASON_CODE).length;
   const undetermined = errors.filter(e => e.reasonCode === SECURE_SOURCE_UNDETERMINED_REASON_CODE).length;
   const refile = errors.filter(e => e.reasonCode === SECURE_SOURCE_REFILE_NOT_ALLOWED_REASON_CODE).length;
+  const restricted = errors.filter(e => e.reasonCode === RESTRICTED_SOURCE_NOT_RESTRICTED_REASON_CODE).length;
   const records = (count: number) => (count === 1 ? '1 record' : `${count} records`);
   if (refile > 0) {
     lines.push(
-      `${records(refile)} will not be updated because ${refile === 1 ? 'its' : 'their'} filing can't be changed by a push from a secure record.`
+      `${records(refile)} will not be updated because ${refile === 1 ? 'its' : 'their'} filing can't be changed by a push from a secure or Restricted record.`
     );
   }
   if (notIsolated > 0) {
     lines.push(`${records(notIsolated)} will not be updated because the source record is secure.`);
   }
+  if (restricted > 0) {
+    lines.push(
+      `${records(restricted)} will not be updated because the source record's access is Restricted and ${restricted === 1 ? 'its' : 'their'} access is not.`
+    );
+  }
   if (undetermined > 0) {
     lines.push(
-      `${records(undetermined)} will not be updated because it could not be checked whether the source record is secure. Try again later.`
+      `${records(undetermined)} will not be updated because it could not be checked whether the source record's access allows copying. Try again later.`
     );
   }
   return lines;

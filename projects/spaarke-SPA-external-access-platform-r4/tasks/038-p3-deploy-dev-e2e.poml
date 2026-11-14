@@ -1,0 +1,136 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="038" project="spaarke-SPA-external-access-platform-r4">
+  <metadata>
+    <title>P3 deploy: BFF changes via uac-r2, SPA to dev, E2E</title>
+    <phase>3 Grids, information, messages</phase>
+    <gate>after 031, 032, 033, 034, 035, 036 — BFF via uac-r2 with the owner's go per SHA; owner approval for the SPA deploy</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Deployment and E2E task (tags deploy, e2e-test); no code authored</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Runbook deployment through existing procedures plus scripted E2E checks</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Live deployment on shared dev environments</parallel-reason>
+    <deps>028, 031, 032, 033, 034, 035, 036</deps>
+    <tags>deploy, e2e-test</tags>
+    <estimated-effort>3-5 hours plus uac-r2 queue time</estimated-effort>
+  </metadata>
+
+  <prompt>Get Phase 3's BFF changes (allow-list columns from 031; DTO changes from 035 and 036 if they shipped) onto the dev BFF through uac-r2, then deploy the Phase 3 SPA build through the deploy workflow, and prove Phase 3 end to end on dev.</prompt>
+  <role>SPAARKE platform developer. Release engineer. Follow ADRs strictly.</role>
+  <goal>The dev BFF runs a SHA containing every merged P3 BFF change (deployed by uac-r2); the dev SWA serves the P3 commit; the P3 E2E checks pass and are recorded, or each gap is filed as a deferral.</goal>
+
+  <context>
+    <background>NFR-06 staged delivery. Dev BFF deploys are run only by uac-r2 under `docs/procedures/dev-bff-deploy-coordination.md` (gates: owner go per exact SHA in uac-r2's session, peer OKs, Router green, content checks, ebilling schema verify, app-settings check; then snapshot, deploy, read-back, 30-minute gate). R4 asks; it never deploys. The SPA's BFF host is baked in at Vite build time, so the SPA build follows the BFF deploy and targets `external-spa-dev` (`.github/workflows/deploy-external-spa.yml`, workflow_dispatch, environment dev). The SPA must not ship ahead of the BFF: 031's Information section requests columns that the old BFF refuses with HTTP 400 `DV_RECORD_COLUMN_NOT_PERMITTED` for the whole read.</background>
+    <relevant-files>
+      <file role="canonical-reference">docs/procedures/dev-bff-deploy-coordination.md</file>
+      <file role="canonical-reference">.github/workflows/deploy-external-spa.yml</file>
+      <file role="canonical-reference">projects/spaarke-SPA-external-access-platform-r4/notes/task-028-deploy-record.md</file>
+      <file role="new-artifact">projects/spaarke-SPA-external-access-platform-r4/notes/task-038-deploy-record.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="028" status="pending">P2 deployed and E2E-proved</dependency>
+      <dependency task="031" status="pending">Information fields + allow-list (BFF)</dependency>
+      <dependency task="032" status="pending">Grid settings per browser</dependency>
+      <dependency task="033" status="pending">Money sort and export</dependency>
+      <dependency task="034" status="pending">Messages refresh and indicator</dependency>
+      <dependency task="035" status="pending">Message threads (BFF DTO if option A)</dependency>
+      <dependency task="036" status="pending">Matter events type and assignee (BFF DTO)</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="dev-bff-deploy-coordination">Never deploy the dev BFF directly — request via uac-r2 (`docs/procedures/dev-bff-deploy-coordination.md`). The owner gives the go for the exact SHA in uac-r2's session; a go relayed by this session does not count.</constraint>
+    <constraint source="project">Owner approval and a stated rollback before the SPA deploy (rollback: re-run the workflow on the P2 SHA recorded in task 028's deploy record).</constraint>
+    <constraint source="project">Deploy the SPA only through `deploy-external-spa.yml`; no manual SWA upload. The SPA deploys only after uac-r2 reports the BFF read-back and gate PASS.</constraint>
+    <constraint source="project">Live reads are read-only and the commands are shown to the owner first. No token, email, UPN or object id in the record.</constraint>
+    <constraint source="FR-18">Each new readable column's UAC review is cited in the deploy request.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-SPA-external-access-platform-r4/CLAUDE.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r4/spec.md</file>
+      <file>docs/procedures/dev-bff-deploy-coordination.md</file>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+      <file>.claude/skills/ci-cd/SKILL.md</file>
+    </files>
+    <patterns>
+      <pattern name="Phase deploy" location="projects/spaarke-SPA-external-access-platform-r4/tasks/028-p2-deploy-dev-e2e.poml">approval, workflow dispatch, E2E, deploy record</pattern>
+      <pattern name="SPA dev deploy" location="projects/spaarke-SPA-external-access-platform-r3/tasks/070-deploy-spa-dev.poml">owner approval, workflow dispatch, smoke test</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Context + rigor declaration">Load the knowledge files, read the relevant files, declare rigor and model tier per task-execute Step 0.5.</step>
+    <step order="1">Confirm 031-036 are complete and merged to master; list which carry BFF changes (031 always; 035 only under option A; 036 unless deferred) and their merge SHAs; record them.</step>
+    <step order="2">Send uac-r2 (via the operator) the deploy request: the master SHA containing those merges, the changes, the UAC reviews (031 columns, 035 thread key, 036 event columns), and a verification ask (a P3 column is readable, an unlisted column still refused). Ask the owner to give the go for that SHA in uac-r2's session.</step>
+    <step order="3">Wait for uac-r2's after-notice; record the deployed SHA, read-back result and the 30-minute gate result. If the gate fails, stop.</step>
+    <step order="4">Show the owner the SPA deploy plan (workflow, environment dev, SHA) and the rollback; wait for approval.</step>
+    <step order="5">Run `deploy-external-spa.yml` (workflow_dispatch, environment dev) on the approved SHA; record the run id and the served build.</step>
+    <step order="6">Run the E2E checks in &lt;ui-tests&gt; in the browser at writer and View-only levels; record each result with evidence (masked).</step>
+    <step order="7">Record everything in notes/task-038-deploy-record.md: SHAs, uac-r2 notice, run id, E2E results, deferrals.</step>
+    <step order="8">Update tasks/TASK-INDEX.md: set this task's status cell to `✅ [done]` and this POML's &lt;status&gt; to completed; run `pwsh scripts/check-task-status-drift.ps1`.</step>
+    <step order="9">Record deviations in projects/spaarke-SPA-external-access-platform-r4/notes/task-038-notes.md; file any failed or skipped check with `/project-defer-issue-tracking`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If uac-r2 cannot schedule the deploy or a peer withholds its OK, STOP; do not deploy the SPA ahead of the BFF.</trigger>
+    <trigger>If any E2E check shows a 400 on a record read, an action answering 403, or a remote image loaded, roll back the SPA (owner approval) and ask uac-r2 about the BFF; stop.</trigger>
+  </escalation>
+
+  <ui-tests>
+    <test name="Information fields (FR-18)">
+      <url>https://{spa-dev-host}/?record=matter:{matter-id}</url>
+      <steps><step>Open a matter, a project and a work assignment</step><step>In devtools, repeat a record read asking for a column outside the allow-list</step></steps>
+      <expected>Information fields render; the unlisted column is refused with a ProblemDetails errorCode</expected>
+    </test>
+    <test name="Grid settings (FR-19)">
+      <steps><step>Resize a column and sort the Invoices grid; reload</step><step>Click Reset columns; block storage and reload</step></steps>
+      <expected>Settings survive reload; Reset restores defaults; no error without storage</expected>
+    </test>
+    <test name="Money (FR-20)">
+      <steps><step>Sort Total amount both ways; export to CSV</step></steps>
+      <expected>Value order; exported text equals displayed text</expected>
+    </test>
+    <test name="Messages (FR-21, FR-22)">
+      <steps><step>Post from a second session; wait for the indicator; refresh</step><step>Open a thread with a reply and a remote image</step></steps>
+      <expected>Indicator shows and clears; replies grouped (if 035 option A); no remote image request</expected>
+    </test>
+    <test name="Matter events (FR-23)">
+      <steps><step>Open a matter with an assigned task event</step></steps>
+      <expected>Task type and assignee name show; response carries names only</expected>
+    </test>
+    <test name="Themes (ADR-021)">
+      <steps><step>Repeat one view in dark and high contrast; check the console</step></steps>
+      <expected>Semantic colours, no console errors</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="terminal">gh workflow run/list for the SPA deploy; read-only checks</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/spaarke-SPA-external-access-platform-r4/notes/task-038-deploy-record.md</output>
+    <output type="docs">projects/spaarke-SPA-external-access-platform-r4/notes/task-038-notes.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The dev BFF runs a SHA containing every merged P3 BFF change, deployed by uac-r2 (after-notice and gate PASS recorded); this task made no BFF deploy.</criterion>
+    <criterion testable="true">The dev SWA serves the approved P3 SHA (workflow run id recorded), deployed after the BFF gate passed.</criterion>
+    <criterion testable="true">FR-18 to FR-23 checks pass in the browser with evidence, or each failed or skipped check has a deferral issue.</criterion>
+    <criterion testable="true">An unlisted column is still refused on dev.</criterion>
+    <criterion testable="true">No offered action answers 403 and no remote image loads in the checks run.</criterion>
+    <criterion testable="true">The SPA deploy had owner approval and a stated rollback before it ran.</criterion>
+  </acceptance-criteria>
+
+  <notes>NFR-06. Rollback targets: the P2 SPA SHA (task 028 record); the BFF rollback is uac-r2's (snapshot or previous SHA).</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

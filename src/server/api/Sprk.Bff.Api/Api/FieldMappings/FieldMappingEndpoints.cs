@@ -1350,15 +1350,31 @@ public static class FieldMappingEndpoints
 
                 foreach (var rule in rules.OrderBy(r => r.Priority))
                 {
+                    // Task 022c (unified-access-control-r2, 2026-11-12): an access column is never a mapping target, on any table
+                    // and from any source (RecordCreationService.AccessColumnsNeverMapped, the list Repair uses). A stored rule
+                    // aimed at one is skipped, with its one code, and the rest of the push applies. Asked first, so a document's
+                    // access columns carry this code too.
+                    if (IsAccessColumnNeverMapped(rule.TargetField))
+                    {
+                        recordFieldResults.Add(new FieldMappingResultDto
+                        {
+                            SourceField = rule.SourceField,
+                            TargetField = rule.TargetField,
+                            Status = FieldMappingStatus.Skipped,
+                            ErrorMessage = AccessColumnNotMappedMessage,
+                        });
+                        continue;
+                    }
+
                     // Task 189 (D7 T7a, security pass 2): a document's Access Permission and its own-narrowing record are
                     // set by Spaarke (max(own, inherited)). A rule targeting either on a document is skipped, and the rest
                     // of the push applies: one push from a Standard matter would otherwise clear the own narrowing of every
                     // child document it reaches. Task 188 round 4e: the same for its D7 link columns (sprk_parentdocument,
                     // sprk_relatedcommunication; InheritedAccessPermission.DocumentLinkColumns), which decide whether partners see it.
                     // #2247: on every table, the owner and the creator. #2253 fix round 1 (K2): the push runs AS its caller,
-                    // so it asks as WriteIdentity.Caller: these refusals and the table-name check only. Access tables, a
-                    // secure root's columns and other tables' access columns are left to the caller's own Dataverse
-                    // privileges and field security (sprk_accesspermission on a matter stays editable by a Write holder).
+                    // so it asks as WriteIdentity.Caller: these refusals and the table-name check only. Access tables and a
+                    // secure root's columns are left to the caller's own Dataverse privileges and field security. The access
+                    // columns themselves are never a push's target (task 022c, the check above).
                     if (Sprk.Bff.Api.Services.Dataverse.InheritedAccessPermission.RefuseAppOnlyWrite(
                             targetEntity, [rule.TargetField],
                             Sprk.Bff.Api.Services.Dataverse.InheritedAccessPermission.WriteIdentity.Caller) is { } setBySpaarke)
@@ -1426,6 +1442,10 @@ public static class FieldMappingEndpoints
                     targetEntity, childRecordId, updatePayload,
                     Sprk.Bff.Api.Services.RecordCreation.RecordTableRules.SearchIndexOriginMapping, logger);
 
+                // Task 022c: the same safety net for the access columns. A bind plan can name an access column's key under a rule
+                // whose TargetField does not (an alias), so whatever sits under one is removed from the final payload, and logged.
+                DropAccessColumns(targetEntity, childRecordId, updatePayload, logger);
+
                 if (updatePayload.Count > 0)
                 {
                     // Task 022 fix round 4 (the mapping-source rule): values copied from a secure source are written only into a
@@ -1451,8 +1471,13 @@ public static class FieldMappingEndpoints
                     // Task 045b: and before the pair planner below, so a family row's refusal keeps its own code; the planner
                     // never writes a lookup this guard decides on (only the pair and its display columns), so the decision is the
                     // same. The filing gate below (work assignment, project — never a family table) stays after the planner.
+                    // Task 045g: the push writes AS THE CALLER, so a refusal of rules 1-3 is decided on the rows as the caller
+                    // reads them. A row not found keeps its own answer here: the push's ids come from a query the caller read
+                    // (#2081 fix round 2).
                     if (await Sprk.Bff.Api.Services.Dataverse.InvoiceFamilyCoreRecordGuard.CheckGenericUpdateAsync(
-                            targetEntity, childRecordId, updatePayload, appOnlyEntities, ct) is { RefusalCode: { } familyCode })
+                            targetEntity, childRecordId, updatePayload, appOnlyEntities, ct,
+                            asPerson: Sprk.Bff.Api.Services.Dataverse.OwnedChildWrite.PersonRowReader(
+                                callerQuery, appOnlyEntities, callerSystemUserId)) is { RefusalCode: { } familyCode })
                     {
                         failed++;
                         errors.Add(new PushFieldMappingsError
@@ -1465,7 +1490,8 @@ public static class FieldMappingEndpoints
 
                     // Task 045b (owner rulings Q4, Q7): the push never writes the pair, but a lookup it moves or clears takes the
                     // pair that repeated it along (the update planner, with the push's own app-only reader), before the checks
-                    // below and the write. It adds no check. A failed read fails THIS child (RecordOwnerUnresolvedException, below).
+                    // below and the write. The planner adds no check; the same call decides a sent regarding record URL (task 045f),
+                    // which the push never maps. A failed read fails THIS child (RecordOwnerUnresolvedException, below).
                     // The push derives display values as the caller (CallerDisplayReader): a record the caller cannot read has
                     // its display columns cleared; any other failed read fails this child.
                     updatePayload = await Sprk.Bff.Api.Services.Dataverse.OwnedChildWrite.KeepRegardingPairWholeAppOnlyAsync(
@@ -1473,6 +1499,31 @@ public static class FieldMappingEndpoints
                         lookupsAreMapped: true,
                         displayRecord: Sprk.Bff.Api.Services.Dataverse.OwnedChildWrite.CallerDisplayReader(
                             callerQuery, appOnlyEntities, callerSystemUserId));
+
+                    // Task 045d (owner ruling Q8 (a); owner, 2026-11-12, option (b)): an invoice-family child whose own core
+                    // lookup this push sets takes the resolver fields of the record it will name, in this same child write (after
+                    // the pair planner so they win). The stored row and the catalog are read app-only; the name and number as
+                    // the caller, as the planner reads display values here (a record the caller cannot read has them cleared).
+                    // They are the server's, never copied from the source, so they are added after the source gate and the
+                    // access-column scrub above, and are no access column. A derive that cannot be done fails THIS child as
+                    // the guard above does: its code only.
+                    var familyFields = await Sprk.Bff.Api.Services.Dataverse.OwnedChildWrite.KeepInvoiceFamilyResolverFieldsAppOnlyAsync(
+                        appOnlyEntities, targetEntity, childRecordId, updatePayload, "FIELD-MAPPING-PUSH",
+                        Sprk.Bff.Api.Services.Dataverse.OwnedChildWrite.CallerDisplayReader(
+                            callerQuery, appOnlyEntities, callerSystemUserId),
+                        logger, ct);
+                    if (familyFields.RefusalCode is { } derivedCode)
+                    {
+                        failed++;
+                        errors.Add(new PushFieldMappingsError
+                        {
+                            RecordId = childRecordId,
+                            Error = $"Not written: {Sprk.Bff.Api.Services.Dataverse.InvoiceFamilyCoreRecordGuard.CodeOnlyRefusalMessage(derivedCode)}"
+                        });
+                        continue;
+                    }
+
+                    updatePayload = familyFields.Payload;
 
                     // Task 158 (owner round 6): a work assignment or project this push files under a matter or project —
                     // whether that record is secure must be readable, or this record is not written (fail closed; a
@@ -1578,6 +1629,8 @@ public static class FieldMappingEndpoints
                             wasIsolated = await Sprk.Bff.Api.Services.Access.RefileIsolationRead.BeforeWriteAsync(
                                 children, targetEntity.Trim().ToLowerInvariant(), childRecordId, ct);
 
+                            var directOwner = refileScope!.ServiceProvider
+                                .GetService<Sprk.Bff.Api.Services.Communication.Access.DirectMessageOwnerStep>();
                             var reparent = await ownership.ReparentAsync(
                                 new Sprk.Bff.Api.Services.Dataverse.RecordReparent
                                 {
@@ -1585,6 +1638,14 @@ public static class FieldMappingEndpoints
                                     RecordId = childRecordId,
                                     ParentChanges = parentChanges,
                                     CallerSystemUserId = callerSystemUserId,
+                                    // fm task 054 piece 3b: the one unfile rule every re-file writer takes (an eligible Direct
+                                    // message returns to the Direct team; any other communication linked to nothing goes to its creator's team or keeps its owner, #2722).
+                                    WhenUnfiled = Sprk.Bff.Api.Services.Communication.Access.DirectMessageOwnerStep.UnfiledOwnershipFor(
+                                        targetEntity, actsForAPerson: true, directOwner),
+                                    RegardingLinksSet = Sprk.Bff.Api.Services.Dataverse.RecordReparent.RegardingLinksSetIn(
+                                        targetEntity, updatePayload),
+                                    UnfileRuleColumnsWritten = Sprk.Bff.Api.Services.Dataverse.RecordReparent.UnfileRuleColumnsWrittenIn(
+                                        targetEntity, updatePayload),
                                     // A move out of a secure root (owner round 10 item 7) is asked of the person this push acts as.
                                     SecureExitCaller = secureExitCaller = Sprk.Bff.Api.Services.Access.SecureRemovalCaller.ForImpersonatedUser(
                                         callerSystemUserId,
@@ -1604,6 +1665,10 @@ public static class FieldMappingEndpoints
                                 });
                                 continue;
                             }
+
+                            // Piece 3b: an unfiled Direct message returns to the Direct team now, before the step after the re-file.
+                            if (directOwner is not null)
+                                await directOwner.AfterReparentAsync(childRecordId, reparent, CancellationToken.None);
 
                             // #2091 round 4: a rule that re-binds the parent the child already holds moves nothing — no step.
                             refiled = !reparent.ParentsUnchanged;
@@ -1706,6 +1771,10 @@ public static class FieldMappingEndpoints
                     RecordId = childRecordId,
                     Error = RefileRefusedMessage(unresolved.RefusalCode),
                 });
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw; // the request was cancelled: the push stops; a cancellation is never one child's failure
             }
             catch (Exception ex)
             {
@@ -1910,9 +1979,53 @@ public static class FieldMappingEndpoints
         Sprk.Bff.Api.Services.RecordCreation.RecordTableRules.RefuseWriterOnlyTableUpdate(targetEntity) is null
         && Sprk.Bff.Api.Services.Dataverse.InheritedAccessPermission.RefuseAppOnlyWrite(
             targetEntity, [targetField], Sprk.Bff.Api.Services.Dataverse.InheritedAccessPermission.WriteIdentity.Caller) is null
+        && !IsAccessColumnNeverMapped(targetField)
         && Sprk.Bff.Api.Services.RecordCreation.RecordTableRules.RefuseFixedAfterCreateColumns(targetEntity, [targetField]) is null
         && !(Sprk.Bff.Api.Services.RecordCreation.RecordTableRules.OwnsSearchIndex(targetEntity)
              && Sprk.Bff.Api.Services.RecordCreation.RecordTableRules.SearchIndexColumnOf(targetField) is not null);
+
+    /// <summary>
+    /// Task 022c (unified-access-control-r2, 2026-11-12): a rule whose target is an access column
+    /// (<see cref="Sprk.Bff.Api.Services.RecordCreation.RecordCreationService.AccessColumnsNeverMapped"/>) is skipped by a push, on
+    /// every table and from every source. The access columns change only through the access endpoints and the stamp / reconcile
+    /// path. The regarding pair is not an access column: a push still re-files (FR-23).
+    /// </summary>
+    internal const string AccessColumnNotMappedReasonCode = "field_mapping.push.access_column_not_mapped";
+
+    /// <summary>The per-rule text of <see cref="AccessColumnNotMappedReasonCode"/> (its only carrier on the push, as for the
+    /// writer-only column refusal).</summary>
+    internal const string AccessColumnNotMappedMessage =
+        "This column decides who can see the record and is never copied by a push (" + AccessColumnNotMappedReasonCode
+        + "); the rule was skipped and nothing was written for it.";
+
+    /// <summary>Whether <paramref name="targetField"/> (a column name or a Web API key) is an access column a push never writes:
+    /// <see cref="Sprk.Bff.Api.Services.RecordCreation.RecordCreationService.AccessColumnsNeverMapped"/>, matched as the push
+    /// matches columns (<see cref="Sprk.Bff.Api.Services.Access.SecureRootInheritance.NormalizeColumn"/>). Pure.</summary>
+    internal static bool IsAccessColumnNeverMapped(string? targetField) =>
+        !string.IsNullOrWhiteSpace(targetField)
+        && Sprk.Bff.Api.Services.RecordCreation.RecordCreationService.AccessColumnsNeverMapped.Contains(
+            Sprk.Bff.Api.Services.Access.SecureRootInheritance.NormalizeColumn(targetField));
+
+    /// <summary>
+    /// Task 022c: removes from a push's final <paramref name="payload"/> every key whose column is an access column
+    /// (<see cref="IsAccessColumnNeverMapped"/>, any key form: a bind key, a <c>_x_value</c> key, any case), and logs each by
+    /// table, record and column (never its value). Returns how many keys were removed.
+    /// </summary>
+    internal static int DropAccessColumns(string targetEntity, Guid recordId, IDictionary<string, object?> payload, ILogger logger)
+    {
+        var dropped = payload.Keys.Where(IsAccessColumnNeverMapped).ToList();
+        foreach (var key in dropped)
+        {
+            payload.Remove(key);
+            logger.LogWarning(
+                "[FIELD-MAPPING-PUSH] {Table} {RecordId}: the access column {Column} is never a mapping target; it was removed "
+                + "from the push's payload ({Code})",
+                targetEntity, recordId, Sprk.Bff.Api.Services.Access.SecureRootInheritance.NormalizeColumn(key),
+                AccessColumnNotMappedReasonCode);
+        }
+
+        return dropped.Count;
+    }
 
     /// <summary>The fixed text of a rule that is not a Copy rule (task 040: a push applies Copy rules only).</summary>
     internal const string NotACopyRuleMessage = "Only Copy rules are applied by a push; this rule was not applied.";

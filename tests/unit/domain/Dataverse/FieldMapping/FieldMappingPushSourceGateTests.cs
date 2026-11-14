@@ -22,7 +22,7 @@ namespace Sprk.Bff.Api.Tests.Domain.Dataverse.FieldMapping;
 /// <see cref="FieldMappingPushSourceGate"/> over a mocked app-only service. The route and the preview are covered in
 /// <c>FieldMappingPushFamilyContractTests</c>.
 /// </remarks>
-public class FieldMappingPushSourceGateTests
+public partial class FieldMappingPushSourceGateTests
 {
     private static readonly Guid MatterId = Guid.Parse("02200000-0000-4000-8000-000000000001");
     private static readonly Guid ChildId = Guid.Parse("02200000-0000-4000-8000-0000000000c1");

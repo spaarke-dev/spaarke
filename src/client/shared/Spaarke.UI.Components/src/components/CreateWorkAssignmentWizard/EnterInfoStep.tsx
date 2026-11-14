@@ -26,13 +26,14 @@ import {
   makeStyles,
   tokens,
 } from '@fluentui/react-components';
-import { LookupField } from '../LookupField/LookupField';
+import { DataverseLookupField } from '../LookupField/DataverseLookupField';
+import { ACTIVE_CONTACT_LOOKUP_FILTERS } from '../LookupField/lookupFilters';
 import type { ILookupItem } from '../../types/LookupTypes';
 import { useAiPrefill, type IResolvedPrefillFields } from '../../hooks/useAiPrefill';
 import type { IUploadedFile } from '../FileUpload/fileUploadTypes';
 import { searchMatterTypes, searchPracticeAreas, searchContactsAsLookup } from './workAssignmentService';
 import type { ICreateWorkAssignmentFormState } from './formTypes';
-import type { IDataService } from '../../types/serviceInterfaces';
+import type { IDataService, INavigationService } from '../../types/serviceInterfaces';
 import type { AuthenticatedFetchFn } from '../../services/EntityCreationService';
 
 // ---------------------------------------------------------------------------
@@ -66,6 +67,11 @@ export interface IEnterInfoStepProps {
   authenticatedFetch: AuthenticatedFetchFn;
   /** BFF API base URL. */
   bffBaseUrl: string;
+  /**
+   * Host navigation service. When provided Matter Type, Practice Area and Assigned To open the Dataverse
+   * lookup side pane; when absent they use the inline search, as before.
+   */
+  navigationService?: INavigationService;
 }
 
 // ---------------------------------------------------------------------------
@@ -121,6 +127,7 @@ export const EnterInfoStep: React.FC<IEnterInfoStepProps> = ({
   hasInitialValues = false,
   authenticatedFetch,
   bffBaseUrl,
+  navigationService,
 }) => {
   const styles = useStyles();
 
@@ -327,15 +334,19 @@ export const EnterInfoStep: React.FC<IEnterInfoStepProps> = ({
       </Field>
 
       <div className={styles.row}>
-        <LookupField
+        <DataverseLookupField
           label="Matter Type"
+          entityType="sprk_mattertype_ref"
+          navigationService={navigationService}
           value={matterTypeValue}
           onChange={handleMatterTypeChange}
           onSearch={handleSearchMatterTypes}
           placeholder="Search matter types..."
         />
-        <LookupField
+        <DataverseLookupField
           label="Practice Area"
+          entityType="sprk_practicearea_ref"
+          navigationService={navigationService}
           value={practiceAreaValue}
           onChange={handlePracticeAreaChange}
           onSearch={handleSearchPracticeAreas}
@@ -362,8 +373,11 @@ export const EnterInfoStep: React.FC<IEnterInfoStepProps> = ({
         </Field>
       </div>
 
-      <LookupField
+      <DataverseLookupField
         label="Assigned To"
+        entityType="contact"
+        filters={ACTIVE_CONTACT_LOOKUP_FILTERS}
+        navigationService={navigationService}
         value={assignedToValue}
         onChange={handleAssignedToChange}
         onSearch={handleSearchAssignees}

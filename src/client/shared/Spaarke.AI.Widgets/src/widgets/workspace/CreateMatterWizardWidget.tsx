@@ -356,6 +356,7 @@ const CreateMatterWizardWidget: React.FC<WorkspaceWidgetProps<CreateMatterWizard
     dataService?: ICreateMatterWizardProps['dataService'];
     authenticatedFetch?: ICreateMatterWizardProps['authenticatedFetch'];
     navigationService?: ICreateMatterWizardProps['navigationService'];
+    emailComposeHandlers?: ICreateMatterWizardProps['emailComposeHandlers'];
     resolveSpeContainerId?: ICreateMatterWizardProps['resolveSpeContainerId'];
   };
 
@@ -380,6 +381,7 @@ const CreateMatterWizardWidget: React.FC<WorkspaceWidgetProps<CreateMatterWizard
           authenticatedFetch={wizardData.authenticatedFetch}
           bffBaseUrl={wizardData.bffBaseUrl}
           navigationService={wizardData.navigationService}
+          emailComposeHandlers={wizardData.emailComposeHandlers}
           resolveSpeContainerId={wizardData.resolveSpeContainerId}
           // embedded=true removes Dialog overlay chrome — the workspace tab
           // provides the surrounding layout and header chrome instead.

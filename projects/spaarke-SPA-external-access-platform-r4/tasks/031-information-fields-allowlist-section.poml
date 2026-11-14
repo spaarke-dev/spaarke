@@ -1,0 +1,161 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="031" project="spaarke-SPA-external-access-platform-r4">
+  <metadata>
+    <title>ReadableColumns additions (UAC review) + Information section fields (FR-18)</title>
+    <phase>3 Grids, information, messages</phase>
+    <gate>after 028 and 030 (030's final column list and owner answers recorded)</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Tags include bff-api and authorization; changes the external column allow-list (a security boundary) and .tsx code</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>The allow-list is the external security boundary; each column is a disclosure decision with UAC review</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>C</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>028, 030</deps>
+    <tags>bff-api, frontend, react, authorization, integration-test</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Add exactly the columns task 030 verified and the owner approved to the external modules' ReadableColumns, with UAC's review recorded, and show them in each record type's Information section; prove an unlisted column is still refused.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. ASP.NET Core Minimal API and external-access authorization developer; React developer for the SPA.</role>
+  <goal>Each type's Information section renders its approved fields (lookups by formatted name); every new column is on its module's `ReadableColumns` with a comment citing FR-18 and the UAC review; the regression test proves an unlisted column is still refused.</goal>
+
+  <context>
+    <background>Spec FR-18, SC-3, NFR-04. The external module fetch refuses any column outside the module's `ReadableColumns` with 400 `DV_FETCHXML_COLUMN_NOT_PERMITTED` / `DV_RECORD_COLUMN_NOT_PERMITTED` (`RecordDetailFields.tsx:8-12`). Allow-list blocks (verified 2026-11-10, `ExternalAccessModule.cs`): project `:450-455`, invoice `:528-539`, work assignment `:556-562`, matter `:580-585` (documents `:494-501`, service request `:830-833`). UAC task 157 trimmed the lists to grid columns (rule (b)); a non-grid column carries a stated reason, as the invoice `statuscode` entry does (`:532-536`). The Information section reads one row through the id-filtered module fetch and prefers `@formattedValues` (`RecordDetailFields.tsx:14-21`, `formatDetailValue` `:201-226`); the fetch seam is `Api/ExternalAccess/ExternalModuleDataEndpoints.cs`. The column list comes ONLY from `notes/task-030-information-fields.md`. ebilling adds `sprk_reviewdetail` to the same invoice block (082c-2), so the invoice block is a merge hot spot.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/DI/ExternalAccessModule.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ExternalModuleDataEndpoints.cs</file>
+      <file role="modify">tests/integration/auth/UnifiedAccessControl/ExternalModuleColumnAllowListTests.cs</file>
+      <file role="modify">The per-type RecordTemplateConfig (task 003) and the Information section renderer (task 005) under src/client/external-spa/src/components/detail/</file>
+      <file role="modify">src/client/external-spa/src/components/detail/RecordDetailFields.tsx</file>
+      <file role="modify">src/client/external-spa/tests/RecordDetailModal.test.tsx</file>
+      <file role="canonical-reference">projects/spaarke-SPA-external-access-platform-r4/notes/task-030-information-fields.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="028" status="pending">P2 deployed (phase-deploy convention)</dependency>
+      <dependency task="030" status="pending">Verified, owner-approved column list</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec FR-18 MUST">Every column this task adds to any `ReadableColumns` set comes from task 030's final list, carries a code comment naming spaarke-SPA-external-access-platform-r4 task 031, FR-18 ("NOT grid-derived: Information section") and the UAC review reference, and has UAC's review recorded in the PR before merge.</constraint>
+    <constraint source="NFR-04">No `sprk_signal` column, no pointer column (sprk_graphdriveid/itemid/filepath), and no column 030 marked NOT FOUND or field-secured-without-decision is added. Removing or reordering existing entries is out of scope.</constraint>
+    <constraint source="spec FR-18">Lookups render the formatted name from `@formattedValues` without reading the `_ref` entity; confirm in `ExternalModuleDataEndpoints.cs` that the module fetch returns it for the added lookups and cite file:line in the notes.</constraint>
+    <constraint source="ADR-010, NFR-05">No new DI registration, interface, package or route; this is a data change to existing descriptors.</constraint>
+    <constraint source="bff-extensions">State the Placement Justification in the PR (cite `.claude/constraints/bff-extensions.md`: extends the existing external allow-list). Measure the publish-size delta against a fresh master build (short paths, same zip tool, matching file counts); ≥ +5 MB needs justification; total ≤ 60 MB; no new HIGH CVE.</constraint>
+    <constraint source="project">Run `/conflict-check` before the PR: `ExternalAccessModule.cs` is shared with unified-access-control-r2 and ebilling-r1. Never deploy the dev BFF directly; the deploy is requested through uac-r2 in task 038 (`docs/procedures/dev-bff-deploy-coordination.md`).</constraint>
+    <constraint source="ADR-038">Integration tests at the KEEP path `tests/integration/auth/UnifiedAccessControl/`; no banned mocks. Must-fire: each added column reads. Must-not-fire: a column still not on the list is refused with 400 and its errorCode.</constraint>
+    <constraint source="ADR-028 A1">Data access stays app-only and Tier-2-scoped; the change adds readable columns only, never widens row scope.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-SPA-external-access-platform-r4/CLAUDE.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r4/spec.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/patterns/api/endpoint-filters.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/patterns/auth/spaarke-sso-binding.md</file>
+      <file>.claude/patterns/auth/obo-flow.md</file>
+      <file>.claude/patterns/auth/oauth-scopes.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>docs/guides/auth-deployment-setup.md</file>
+      <file>.claude/adr/ADR-001-minimal-api.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/skills/fluent-v9-component/SKILL.md</file>
+      <file>.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>.claude/patterns/testing/mocking-patterns.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>tests/CLAUDE.md</file>
+      <file>docs/procedures/dev-bff-deploy-coordination.md</file>
+    </files>
+    <patterns>
+      <pattern name="Non-grid allow-list entry with a reason" location="src/server/api/Sprk.Bff.Api/Infrastructure/DI/ExternalAccessModule.cs">invoice `statuscode` entry and comment at :532-536</pattern>
+      <pattern name="Field row config" location="src/client/external-spa/src/components/detail/RecordDetailFields.tsx">DetailFieldDef { attribute, label, kind } per type</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load the knowledge files, read the relevant files, declare rigor and model tier per task-execute Step 0.5.</step>
+    <step order="1">Read task 030's final list; for each lookup, confirm from `ExternalModuleDataEndpoints.cs` that `@formattedValues` carries the name; note file:line.</step>
+    <step order="2">Write the failing tests first in `ExternalModuleColumnAllowListTests.cs`: each new column reads through the module fetch (must-fire); a representative unlisted column (e.g. `ownerid`) is still refused with 400 and its errorCode (must-not-fire).</step>
+    <step order="3">Add the columns to the module `ReadableColumns` sets with the required comments.</step>
+    <step order="4">Seeding proof for the refusal guard: temporarily add the probe column to the list, confirm the must-not-fire test fails, restore; record it in the notes.</step>
+    <step order="5">Add the field rows (label, kind) to each type's Information config; lookups use kind `lookup` and render the formatted name; empty shows the em dash.</step>
+    <step order="6">SPA tests: each type's Information section renders the new fields; a lookup with only a formatted value renders its name and never a GUID.</step>
+    <step order="7">Run `dotnet build src/server/api/Sprk.Bff.Api/`, the integration tests filtered to ExternalModuleColumnAllowList (tests under tests/integration/auth/** compile into tests/unit/Sprk.Bff.Api.Tests; filter there, and re-run any failure in isolation — R3 gotcha on machine load), the SPA tests and build; measure publish size per bff-hygiene and record it.</step>
+    <step order="8">Prepare the UAC review request (columns, reason, disclosure of internal names) and record UAC's answer in the notes and PR.</step>
+    <step order="9">Update tasks/TASK-INDEX.md: set this task's status cell to `✅ [done]` and this POML's &lt;status&gt; to completed; run `pwsh scripts/check-task-status-drift.ps1`.</step>
+    <step order="10">Record deviations, measurements and the UAC review in projects/spaarke-SPA-external-access-platform-r4/notes/task-031-notes.md.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If UAC declines a column, drop it from both the allow-list and the Information config and tell the owner; never ship a column without the recorded review.</trigger>
+    <trigger>If a lookup's formatted name would require reading the referenced entity (a new read or a `_ref` table on the allow-list), STOP and escalate rather than adding that read.</trigger>
+    <trigger>If ebilling's or uac-r2's open work changes the same `ReadableColumns` blocks, STOP and coordinate through `/conflict-check` before merging.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>The external allow-lists in `ExternalAccessModule.cs` (:450-455, :528-539, :556-562, :580-585) and the field config `RECORD_DETAIL_ENTITIES` (`RecordDetailFields.tsx:73-171`).</existing>
+    <extension>Yes — this task extends both existing lists; it adds no new component, route or registration.</extension>
+    <cost-of-doing-nothing>The Information section cannot show the fields partners need (matter description, practice area, responsible people), and the module fetch refuses them with 400 if the SPA asks.</cost-of-doing-nothing>
+  </justification>
+
+  <ui-tests>
+    <test name="Information fields per type">
+      <url>https://{spa-dev-host}/?record=matter:{matter-id}</url>
+      <steps>
+        <step>Open a matter, a project, a work assignment and an invoice</step>
+        <step>Verify each approved field shows a value or an em dash; lookups show a name, never a GUID</step>
+        <step>Check the console and network for 400 DV_*_COLUMN_NOT_PERMITTED</step>
+      </steps>
+      <expected>All approved fields render; no 400s</expected>
+    </test>
+    <test name="Dark Mode Compliance (ADR-021)">
+      <steps><step>Switch to dark and high-contrast</step><step>Verify the Information labels and values adapt</step></steps>
+      <expected>Semantic tokens only</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="dotnet">Build and test the BFF</tool>
+    <tool name="npm">Run SPA tests and build</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/DI/ExternalAccessModule.cs</output>
+    <output type="code">src/client/external-spa/src/components/detail/RecordDetailFields.tsx</output>
+    <output type="test">tests/integration/auth/UnifiedAccessControl/ExternalModuleColumnAllowListTests.cs</output>
+    <output type="test">src/client/external-spa/tests/RecordDetailModal.test.tsx</output>
+    <output type="docs">projects/spaarke-SPA-external-access-platform-r4/notes/task-031-notes.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Every column on task 030's final list is on its module's `ReadableColumns` with the required comment, and no other column was added.</criterion>
+    <criterion testable="true">Must-fire: an integration test reads each added column through the external module fetch successfully.</criterion>
+    <criterion testable="true">Must-not-fire: a column not on the list is still refused with 400 and its `errorCode`; the seeding proof is recorded.</criterion>
+    <criterion testable="true">Each type's Information section renders the approved fields; lookups show the formatted name and never a GUID; empty values show the em dash.</criterion>
+    <criterion testable="true">No `sprk_signal` column, pointer column, new route, DI registration or package is added.</criterion>
+    <criterion testable="true">UAC's review is recorded in the task notes and cited in the PR.</criterion>
+    <criterion testable="true">BFF build is green; the filtered integration tests and the SPA tests pass; publish size is recorded, ≤ 60 MB, no new HIGH CVE.</criterion>
+    <criterion testable="true">Test scope: cover the stated contract plus the edge cases named in these criteria. Anything beyond that needs a one-line justification in the task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-18, SC-3, NFR-04/05. Design §5's allow-list line numbers (:385-388 etc.) are stale; use the ones above. Adversarial review: two passes (authorization). Deploy: task 038 via uac-r2.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

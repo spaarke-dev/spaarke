@@ -154,7 +154,8 @@ public sealed class FakeSecureRecordSetupDataverse : ISecureRecordSetupDataverse
 
         dv.ReaderProfileId = dv.AddProfile(SecureRecordSetupProcedure.ReaderProfileName);
         dv.WriterProfileId = dv.AddProfile(SecureRecordSetupProcedure.WriterProfileName);
-        dv.SystemAdministratorProfileId = dv.AddProfile(SecureRecordSetupProcedure.SystemAdministratorProfileName);
+        dv.SystemAdministratorProfileId = dv.AddProfile(SecureRecordSetupProcedure.SystemAdministratorProfileName,
+            SecureRecordSetupProcedure.SystemAdministratorFieldSecurityProfileId);
         foreach (var table in LockedTables)
         {
             dv.FieldPermissions.Add(new SecureSetupFieldPermission(dv.ReaderProfileId, table, 4, 0, 0));
@@ -173,6 +174,17 @@ public sealed class FakeSecureRecordSetupDataverse : ISecureRecordSetupDataverse
             permissions.Add(new SecureSetupFieldPermission(dv.LinkWriterProfileId, table, 4, 4, 4));
             permissions.Add(new SecureSetupFieldPermission(dv.SystemAdministratorProfileId, table, 4, 4, 4));
             dv.SecuredColumns[ColumnKey(table, column)] = true;
+        }
+
+        // Task 268 (ebilling task 166, EB-D-200): the invoice amounts and firm as SpaarkeMaster ships them (secured; Readers
+        // 4/0/0, Writers 4/4/4, plus the platform's System Administrator profile).
+        foreach (var column in SecureRecordSetupProcedure.InvoiceMoneyColumns)
+        {
+            var permissions = dv.ColumnPermissions(column);
+            permissions.Add(new SecureSetupFieldPermission(dv.ReaderProfileId, SecureRecordSetupProcedure.InvoiceMoneyTable, 4, 0, 0));
+            permissions.Add(new SecureSetupFieldPermission(dv.WriterProfileId, SecureRecordSetupProcedure.InvoiceMoneyTable, 4, 4, 4));
+            permissions.Add(new SecureSetupFieldPermission(dv.SystemAdministratorProfileId, SecureRecordSetupProcedure.InvoiceMoneyTable, 4, 4, 4));
+            dv.SecuredColumns[ColumnKey(SecureRecordSetupProcedure.InvoiceMoneyTable, column)] = true;
         }
 
         // ISS-020: the standing-grant profile as SpaarkeMaster ships it (Read/Create/Update on contact.sprk_standinggrant,
@@ -303,9 +315,9 @@ public sealed class FakeSecureRecordSetupDataverse : ISecureRecordSetupDataverse
         return permissions;
     }
 
-    internal Guid AddProfile(string name)
+    internal Guid AddProfile(string name, Guid? fixedId = null)
     {
-        var id = Guid.NewGuid();
+        var id = fixedId ?? Guid.NewGuid();
         if (!Profiles.TryGetValue(name, out var ids))
         {
             Profiles[name] = ids = [];

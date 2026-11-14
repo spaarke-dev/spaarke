@@ -1,0 +1,122 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="045" project="spaarke-SPA-external-access-platform-r4">
+  <metadata>
+    <title>Contact store log labels, faithful in-memory double, and the gate's tenant read (FR-30, #2499)</title>
+    <phase>4 Access, sign-in, carry-overs, Teams</phase>
+    <gate>after 038 (P3 deploy); the gate part needs spaarke-ontology-platform-r1's agreement</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Tag bff-api; modifies .cs in Infrastructure/ExternalAccess and Services/Signals plus a test double</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Three scoped edits with exact anchors and a canonical reference (HomeLinkAsync's stored-tenant read)</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>E</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>038</deps>
+    <tags>bff-api, testing, unit-test, integration-test</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Give the two contact-store reads that log their raw request path a fixed log label so a failed read never logs a tenant or oid; make the in-memory store's GetContactAsync stop returning the external tenant (as the real store does); and, with ontology's agreement, make AssignTaskRecipientGate read the stored home tenant instead of the always-empty RawExternalTenantId.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. Expert in the BFF's DataverseContactIdentityStore and the identity-binding test doubles.</role>
+  <goal>Failed reads in FindSystemUsersByGuestObjectIdAsync and FindHomeContactsAsync log only a fixed label; the in-memory double matches the real store's GetContactAsync columns; the gate composes the WorkforceHome principal with the stored tenant (or the gate part is filed with ontology); a log-assertion test proves no tenant or oid is logged.</goal>
+
+  <context>
+    <background>ContactIdentityStore.cs `GetAsync` (:2470) logs `{Path}` = the raw request path when no `logLabel` is passed (:2498-2506), and the catch logs `logLabel ?? path` (:2517). Two reads pass no label: `FindSystemUsersByGuestObjectIdAsync` (method :1823, GetAsync call :1825 — the path carries the guest oid) and `FindHomeContactsAsync` (method :1856, GetAsync call :1860 — the path carries the home tenant and oid). Every neighbour passes one (e.g. "home link lookup" :1800, "home tenant read" :1890). The real `GetContactAsync` (:1611) selects `ContactSelect` (:478), which leaves the A9 tenant column out (`HomeContactSelect`, :982, adds it); the in-memory double's `GetContactAsync` (tests/integration/auth/UnifiedAccessControl/IdentityBinding/InMemoryContactIdentityStore.cs:517-527) returns `Row(c)` (:1248-1259), which fills `ExternalTenantId` (:1253). So tests see a tenant production never returns. AssignTaskRecipientGate.cs:496 (`ComposePortalPrincipalAsync`) builds the WorkforceHome principal from `contact.RawExternalTenantId` — always empty in production for the `GetContactAsync` row. The same class's `HomeLinkAsync` (:451-470) already reads the stored tenant with `ReadHomeTenantAsync` (R3 task 079, #2491): that is the reference. spaarke-ontology-platform-r1 owns AssignTaskRecipientGate.cs.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ContactIdentityStore.cs</file>
+      <file role="modify">tests/integration/auth/UnifiedAccessControl/IdentityBinding/InMemoryContactIdentityStore.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Signals/AssignTaskRecipientGate.cs (only with ontology's agreement)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Signals/AssignTaskRecipientGate.cs</file>
+      <file role="canonical-reference">tests/unit/Sprk.Bff.Api.Tests/Infrastructure/ExternalAccess/DataverseContactIdentityStoreTests.cs</file>
+      <file role="canonical-reference">tests/integration/data-mutation/Signals/AssignTaskRecipientGatePlaneTests.cs</file>
+      <file role="canonical-reference">tests/integration/data-mutation/Signals/AssignTaskRecipientGateSeamTests.cs</file>
+      <file role="new-artifact">tests/integration/regression/Issue2499_ContactStoreLogLabelTests.cs</file>
+      <file role="new-artifact">projects/spaarke-SPA-external-access-platform-r4/notes/task-045-notes.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="038" status="pending">P3 deployed and E2E-proved (phase-deploy convention)</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="NFR-04 / spec FR-30">Both reads pass a fixed `logLabel` string literal (no interpolation, no id); no log line this task touches carries a tenant, oid, UPN, email or token.</constraint>
+    <constraint source="spec FR-30">Only the double's GetContactAsync result loses the tenant; every other double read keeps returning what its real counterpart selects (e.g. FindHomeContactsAsync still returns the tenant, as HomeContactSelect does). Do not change `Row(c)` for all callers.</constraint>
+    <constraint source="project coordination">AssignTaskRecipientGate.cs is changed ONLY after spaarke-ontology-platform-r1 agrees in writing (record where and when in the notes). The fix copies HomeLinkAsync's ReadHomeTenantAsync read; an unreadable tenant is "could not tell" (deny), never an empty-tenant principal.</constraint>
+    <constraint source="ADR-038">New tests under KEEP paths (tests/integration/regression/Issue2499_*.cs for the log assertion; existing data-mutation/Signals tests for the gate). No Mock&lt;HttpMessageHandler&gt; (B1); use the store's existing test seam as DataverseContactIdentityStoreTests does.</constraint>
+    <constraint source="bff-extensions">Placement Justification in the PR (.claude/constraints/bff-extensions.md); publish-size delta against a fresh master build, at or under 60 MB; no new HIGH CVE; tests with every Services/ change; /conflict-check before the PR (shared with unified-access-control-r2 and ebilling-r1). Never deploy the dev BFF directly — request via uac-r2 (docs/procedures/dev-bff-deploy-coordination.md).</constraint>
+    <constraint source="project">No change to what any read returns in production, and no new DI registration, interface or package.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-SPA-external-access-platform-r4/spec.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r4/CLAUDE.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/patterns/api/endpoint-filters.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>.claude/patterns/testing/mocking-patterns.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+    </files>
+    <patterns>
+      <pattern name="Fixed log label" location="src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ContactIdentityStore.cs">`GetAsync(..., logLabel: "home link lookup")` (:1800) — copy for both reads.</pattern>
+      <pattern name="Stored tenant read" location="src/server/api/Sprk.Bff.Api/Services/Signals/AssignTaskRecipientGate.cs">`HomeLinkAsync` (:451-470): ReadHomeTenantAsync, null → Denied.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load the knowledge files, read the relevant files, declare rigor and model tier per task-execute Step 0.5.</step>
+    <step order="1">Ask spaarke-ontology-platform-r1 for agreement on the AssignTaskRecipientGate.cs change (exact diff summary); continue with steps 2-3 while waiting.</step>
+    <step order="2">Add fixed `logLabel`s to the GetAsync calls at :1825 and :1860.</step>
+    <step order="3">Log-assertion regression test: a failed read (non-success status and a thrown request) on each method logs neither the tenant nor the oid (assert on captured log text).</step>
+    <step order="4">Seeding proof: remove one label, confirm the regression test fails, restore; record it.</step>
+    <step order="5">Change the double's GetContactAsync to return the row without ExternalTenantId; run the identity-binding and Signals tests; every failure is either a test that relied on the infidelity (fix the test) or the gate bug (step 6).</step>
+    <step order="6">With agreement: change ComposePortalPrincipalAsync (:489-501) to compose from the stored tenant (ReadHomeTenantAsync), deny on an unreadable tenant; extend the gate tests (KEEP path) for readable and unreadable tenants.</step>
+    <step order="7">Run `dotnet build src/server/api/Sprk.Bff.Api/` and the affected tests (re-run any timeout failures in isolation — R3 gotcha); measure publish size.</step>
+    <step order="8">Update tasks/TASK-INDEX.md: set this task's status cell to `✅ [done]` and this POML's &lt;status&gt; to completed; run `pwsh scripts/check-task-status-drift.ps1`.</step>
+    <step order="9">Record deviations, decisions and measurements in projects/spaarke-SPA-external-access-platform-r4/notes/task-045-notes.md.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If ontology has not agreed by the time steps 2-5 are done, change only R4-owned files, file the gate part with /project-defer-issue-tracking (notes/defer-issues.md AND a GitHub issue naming ontology), and report it; do not edit AssignTaskRecipientGate.cs.</trigger>
+    <trigger>If the corrected double makes a gate test fail and the gate cannot be fixed in this task (no agreement), STOP and report to the owner; never skip, delete or loosen the failing test.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Build and test the BFF</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ContactIdentityStore.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Signals/AssignTaskRecipientGate.cs (with agreement)</output>
+    <output type="test">tests/integration/auth/UnifiedAccessControl/IdentityBinding/InMemoryContactIdentityStore.cs</output>
+    <output type="test">tests/integration/regression/Issue2499_ContactStoreLogLabelTests.cs</output>
+    <output type="docs">projects/spaarke-SPA-external-access-platform-r4/notes/task-045-notes.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">A failed FindSystemUsersByGuestObjectIdAsync read (status failure and thrown request) logs a fixed label and no oid (test).</criterion>
+    <criterion testable="true">A failed FindHomeContactsAsync read logs a fixed label and neither the home tenant nor the oid (test).</criterion>
+    <criterion testable="true">The in-memory GetContactAsync returns no ExternalTenantId; FindHomeContactsAsync on the double still returns it.</criterion>
+    <criterion testable="true">With ontology's agreement recorded: the gate composes a WorkforceHome principal with the stored tenant, and an unreadable tenant is denied (tests). Without it: the gate part is filed (defer-issues entry + GitHub issue) and reported.</criterion>
+    <criterion testable="true">Negative: no production read's returned data changes; no test is skipped or loosened to pass against the corrected double.</criterion>
+    <criterion testable="true">The seeding proof is recorded in the notes.</criterion>
+    <criterion testable="true">Build green; publish size at or under 60 MB with the delta against a fresh master build; no new HIGH CVE; /conflict-check run; affected tests pass.</criterion>
+    <criterion testable="true">Test scope: cover the stated contract plus the negative cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-30; issue #2499. Spec anchor drift: `ContactIdentityStore.cs:1856` is the FindHomeContactsAsync declaration; its unlabelled GetAsync call is at :1860 (:1825 is correct for the other read).</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

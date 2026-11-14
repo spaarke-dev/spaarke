@@ -1,0 +1,158 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="043" project="spaarke-SPA-external-access-platform-r4">
+  <metadata>
+    <title>Binder faults answer 503 and the SPA retries; ProjectPage 404 folded into 403 (FR-28, #2269)</title>
+    <phase>4 Access, sign-in, carry-overs, Teams</phase>
+    <gate>after 038 (P3 deploy); the ProjectPage fold also needs ebilling-r1's task-130 batch on master</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Tags bff-api and auth; modifies the caller-principal deny mapping (.cs) and the SPA sign-in path (.ts/.tsx)</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Auth/access status mapping on the shared external plane (ADR-028: indeterminate → 503, never 403)</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>E</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>038</deps>
+    <tags>bff-api, auth, frontend, react, integration-test</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Make the caller-principal resolver answer a retryable 503 ProblemDetails (same reasonCode/errorCode, a retry message) when contact lookup, create or bind faults, keeping real denials at 403; make the SPA retry such a 503 three times (1 s, 2 s, 4 s) and then show "We couldn't finish signing you in. Try again" with a Retry button; fold ProjectPage's dead 404 branch into its 403 handling.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. Expert in the BFF's CallerPrincipalResolver deny mapping and the external SPA's /me client.</role>
+  <goal>`contact_lookup_failed`, `contact_create_failed` and `contact_bind_failed` give 503 on both planes; not-invited and other denials stay 403; the SPA retries then shows the message with Retry and never a default workspace for these faults; ProjectPage has one 403 path; UAC's review is recorded.</goal>
+
+  <context>
+    <background>ADR-028: an indeterminate access result is a retryable 503, never a 403. Today the three binder fault codes (`ContactBindingDecision.DenyContactLookupFailed` :797, `DenyContactBindFailed` :842, `DenyContactCreateFailed` :851) fall into 403 in TWO places in CallerPrincipalResolver.cs: the workforce plane's default branch (:790-794, the spec's anchor) AND the CIAM plane's binder refusal (:514-524, `ProblemDetailsHelper.Forbidden(answer, ...)`). Precedent for the 503 shape: the invite routes already answer 503 `sdap.access.invite.contact_lookup_failed` (tests/integration/contract/Api/ExternalAccess/ExternalAccessContractTests.cs:822-860). SPA: me-client.ts `fetchMeEntitlements` (:144-175) degrades EVERY 5xx to the plane's default modules (:165-170) — a binder 503 must not do that. WorkforceHomeGate (header :18) maps 5xx to a generic retry state; BffAccessState `accessFailureOf` maps failures to states. ebilling-r1's task-130 batch (`work/ebilling-r1` 017a965312, 2026-11-10) makes a stale grant answer 403, not 404, so ProjectPage.tsx's 404 branch (:465-476) is dead once it is on master; the 403 branch is :451-463. The list `truncated` flag needs no change.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/CallerPrincipalResolver.cs</file>
+      <file role="modify">src/client/external-spa/src/api/me-client.ts</file>
+      <file role="modify">src/client/external-spa/src/components/auth/BffAccessState.tsx</file>
+      <file role="modify">src/client/external-spa/src/components/auth/WorkforceHomeGate.tsx</file>
+      <file role="modify">src/client/external-spa/src/pages/ProjectPage.tsx</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ContactBindingDecision.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Infrastructure/Errors/ProblemDetailsHelper.cs</file>
+      <file role="canonical-reference">tests/integration/contract/Api/ExternalAccess/ExternalAccessContractTests.cs</file>
+      <file role="canonical-reference">tests/unit/Sprk.Bff.Api.Tests/Infrastructure/ExternalAccess/CallerPrincipalResolverTests.cs</file>
+      <file role="new-artifact">tests/integration/auth/ExternalAccess/BinderFaultStatusTests.cs</file>
+      <file role="new-artifact">src/client/external-spa/tests/me-client.binderFaultRetry.test.tsx</file>
+      <file role="new-artifact">projects/spaarke-SPA-external-access-platform-r4/notes/task-043-notes.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="038" status="pending">P3 deployed and E2E-proved (phase-deploy convention)</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-028 / spec FR-28">In CallerPrincipalResolver, exactly the three codes contact_lookup_failed, contact_create_failed and contact_bind_failed map to 503 on BOTH planes; every other deny code keeps its current status, body and detail (not-invited/removed stay the 403 not-invited answer; registration_required stays 403; owner-unconfigured stays 500).</constraint>
+    <constraint source="ADR-019">The 503 is ProblemDetails with the same `reasonCode` (and `errorCode`) value the 403 carried today, a fixed retry message as `detail`, and no exception text.</constraint>
+    <constraint source="spec FR-28">The SPA retries only a 503 whose reasonCode is one of the three binder codes: up to 3 retries at 1 s, 2 s, 4 s, then the fixed message "We couldn't finish signing you in. Try again" with a Retry button. It never shows a default workspace for these codes. Other 5xx keep today's behaviour.</constraint>
+    <constraint source="spec FR-28">Find and check every caller that reacts to these statuses (fetchMeEntitlements, getExternalUserContext/WorkforceHomeGate, BffAccessState, AuthGuard paths); list them with the decision per caller in the task notes.</constraint>
+    <constraint source="project wave E">Do not edit tests/no-mock-identity.test.tsx (task 044 owns it in this wave): put new SPA tests in a new file. Do not edit widgetRegistry.ts (task 040).</constraint>
+    <constraint source="bff-extensions">Placement Justification in the PR (.claude/constraints/bff-extensions.md); publish-size delta against a fresh master build, at or under 60 MB; no new HIGH CVE; tests with the change; /conflict-check before the PR (CallerPrincipalResolver.cs is shared with unified-access-control-r2 and ebilling-r1). Never deploy the dev BFF directly — request via uac-r2 (docs/procedures/dev-bff-deploy-coordination.md).</constraint>
+    <constraint source="NFR-04">Logs and errors carry no tenant, oid, UPN, email or token.</constraint>
+    <constraint source="ADR-038">BFF tests go under a KEEP path (tests/integration/auth/** or tests/integration/contract/**); no banned mocks (B1-B17); time in SPA retry tests via fake timers, not real delays.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-SPA-external-access-platform-r4/spec.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r4/CLAUDE.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/patterns/api/endpoint-filters.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/patterns/auth/spaarke-sso-binding.md</file>
+      <file>.claude/patterns/auth/obo-flow.md</file>
+      <file>.claude/patterns/auth/oauth-scopes.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>docs/guides/auth-deployment-setup.md</file>
+      <file>.claude/adr/ADR-001-minimal-api.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>.claude/patterns/testing/mocking-patterns.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/skills/fluent-v9-component/SKILL.md</file>
+      <file>.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+    </files>
+    <patterns>
+      <pattern name="Retryable 503 for an unreadable lookup" location="tests/integration/contract/Api/ExternalAccess/ExternalAccessContractTests.cs">The invite routes' 503 contact_lookup_failed answer and its test (:822-860) — copy its assertion shape.</pattern>
+      <pattern name="Status mapping by deny code" location="src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/CallerPrincipalResolver.cs">The owner-unconfigured 500 branch (:756-770) shows a non-403 branch keyed on the deny code with reasonCode + errorCode.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load the knowledge files, read the relevant files, declare rigor and model tier per task-execute Step 0.5.</step>
+    <step order="1">Add the 503 branch for the three codes on the workforce plane (before the default at :790) and on the CIAM plane (:514-524); leave every other branch untouched.</step>
+    <step order="2">BFF tests (KEEP path): each of the three codes → 503 with the same reasonCode on each plane; must-not-fire: contact_not_invited (and removed) → 403 unchanged; registration_required → 403 unchanged.</step>
+    <step order="3">Seeding proof on the mapping: map one fault code back to 403, confirm its 503 test fails, restore; record it in the notes.</step>
+    <step order="4">SPA: add the binder-503 retry (1/2/4 s, 3 retries) and the final message with Retry in the shared place the callers use; make fetchMeEntitlements skip the plane-default degrade for these codes; audit the other callers and record the list.</step>
+    <step order="5">SPA tests (new file, fake timers): retry then success; retries exhausted then the message with a working Retry; a plain 503 without a binder code keeps today's behaviour; a 403 is not retried.</step>
+    <step order="6">ProjectPage: once ebilling's task-130 batch is on master (check with `git merge-base --is-ancestor` or the merged PR), remove the 404 branch (:465-476) and let a 404 fall to the 403/denied handling; update tests/ProjectPage.*.test.tsx if they assert the 404 text.</step>
+    <step order="7">Request UAC's review; record it in the notes and the PR.</step>
+    <step order="8">Run `dotnet build src/server/api/Sprk.Bff.Api/`, the affected BFF tests, and the SPA tests; measure publish size per bff-extensions.</step>
+    <step order="9">Update tasks/TASK-INDEX.md: set this task's status cell to `✅ [done]` and this POML's &lt;status&gt; to completed; run `pwsh scripts/check-task-status-drift.ps1`.</step>
+    <step order="10">Record deviations, decisions and measurements in projects/spaarke-SPA-external-access-platform-r4/notes/task-043-notes.md.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If ebilling's task-130 batch is not on master when the rest is done, ship without the ProjectPage fold, record it in the notes, and leave the fold as a named follow-up in this task's notes; do not fold early (the 404 is still live until then).</trigger>
+    <trigger>If any caller cannot tell a binder 503 from another 5xx without a new response field, STOP and ask UAC before changing the response contract.</trigger>
+  </escalation>
+
+  <ui-tests>
+    <test name="Binder fault retry then message">
+      <url>https://{spa-dev-host}/</url>
+      <steps>
+        <step>With the BFF answering 503 contact_lookup_failed (test double or dev fault injection approved by the owner), sign in</step>
+        <step>Watch the retries; after the last, check the message and click Retry</step>
+        <step>Check the console: no token, email or oid printed</step>
+      </steps>
+      <expected>Three retries, then "We couldn't finish signing you in. Try again" with a Retry button; no default workspace.</expected>
+    </test>
+    <test name="Message in dark mode (ADR-021)">
+      <steps><step>Repeat with the dark theme</step></steps>
+      <expected>Semantic tokens only; the message and button are legible.</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="dotnet">Build and test the BFF</tool>
+    <tool name="npm">Run the external-spa vitest suite</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/CallerPrincipalResolver.cs</output>
+    <output type="code">src/client/external-spa/src/api/me-client.ts</output>
+    <output type="code">src/client/external-spa/src/pages/ProjectPage.tsx</output>
+    <output type="test">tests/integration/auth/ExternalAccess/BinderFaultStatusTests.cs</output>
+    <output type="test">src/client/external-spa/tests/me-client.binderFaultRetry.test.tsx</output>
+    <output type="docs">projects/spaarke-SPA-external-access-platform-r4/notes/task-043-notes.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Each of contact_lookup_failed, contact_create_failed and contact_bind_failed answers 503 ProblemDetails with the same reasonCode/errorCode and a retry message, on the workforce and the CIAM plane.</criterion>
+    <criterion testable="true">Must-not-fire: a not-invited (or removed) caller still gets the 403 not-invited answer; registration_required stays 403; owner-unconfigured stays 500.</criterion>
+    <criterion testable="true">The SPA retries a binder 503 three times at 1 s, 2 s and 4 s and succeeds when a retry succeeds (test).</criterion>
+    <criterion testable="true">After the retries are exhausted the SPA shows "We couldn't finish signing you in. Try again" with a Retry button that restarts the sequence (test).</criterion>
+    <criterion testable="true">Negative: a binder 503 never yields the plane-default workspace; a 403 is never retried; a 5xx without a binder code behaves as before.</criterion>
+    <criterion testable="true">Every caller of these statuses is listed in the notes with its handling.</criterion>
+    <criterion testable="true">ProjectPage has no 404-specific branch once ebilling's task-130 is on master (or the escalation is recorded).</criterion>
+    <criterion testable="true">The seeding proof is recorded; UAC's review is recorded in the notes and the PR.</criterion>
+    <criterion testable="true">Build green; publish size at or under 60 MB with the delta against a fresh master build; no new HIGH CVE; /conflict-check run; all BFF and SPA tests pass.</criterion>
+    <criterion testable="true">Test scope: cover the stated contract plus the must-not-fire and negative cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-28; issue #2269; NFR-07 must-fire/must-not-fire pair. Spec anchor drift: the spec cites only CallerPrincipalResolver.cs:790-794 (workforce); the CIAM plane's binder refusal at :514-524 also maps these codes to 403 and is in scope. Two adversarial-review passes (auth).</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

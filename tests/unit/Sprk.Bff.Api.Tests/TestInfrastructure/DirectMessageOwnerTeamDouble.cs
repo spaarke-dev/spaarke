@@ -33,6 +33,9 @@ internal sealed class DirectMessageOwnerTeamDouble
     /// <summary>When set, every read throws (a Dataverse fault).</summary>
     public bool Faults { get; set; }
 
+    /// <summary>fm task 054 piece 3b: how many reads the lookup has sent (a fault included).</summary>
+    public int Reads { get; private set; }
+
     /// <summary>When set, every read throws what it returns instead (#1821: the caller's own cancellation, observed mid-read).</summary>
     public Func<Exception>? Fault { get; set; }
 
@@ -80,6 +83,12 @@ internal sealed class DirectMessageOwnerTeamDouble
         NullLogger<DirectMessageOwnerTeam>.Instance);
 
     private List<object> Answer(string entitySet, string? filter)
+    {
+        Reads++;
+        return AnswerRead(entitySet, filter);
+    }
+
+    private List<object> AnswerRead(string entitySet, string? filter)
     {
         if (Fault is not null)
             throw Fault();

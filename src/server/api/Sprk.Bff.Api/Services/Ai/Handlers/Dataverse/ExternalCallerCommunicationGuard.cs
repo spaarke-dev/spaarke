@@ -32,8 +32,14 @@ namespace Sprk.Bff.Api.Services.Ai.Handlers.Dataverse;
 /// <c>describe</c> included): its links are read as the user
 /// (<see cref="ReadSourceDocumentIdsAsync"/>), the documents are decided by the hide-only overload
 /// (<see cref="AppOnlyDocumentNarrowingExtensions.HiddenDocumentIdsAsync"/>). A row with no source document is unaffected.</para>
-/// <para><b>Who is external.</b> Decided only when the request touches the communication family, <c>sprk_document</c> or a
-/// document-derived table,
+/// <para><b>Every lineage table (uac-r2 task 191h, #2189).</b> On top of the rules above, every row of a root or lineage-child
+/// table (<see cref="IsVisibilityGuarded"/>) an external caller's tool call returns is asked of THE external visibility predicate
+/// (<see cref="AppOnlyExternalVisibility"/>, task 191b's <c>ExternalVisibility</c> over the app-only readers) by id, and only a
+/// Visible row is kept (<see cref="NotVisibleRowsAsync"/>). The predicate holds the 065 rule, task 188's document rule, ebilling
+/// (a′), the effective Restricted bar and the taint closure over the registry, so the document and derived-row checks above
+/// are subsumed by it; they stay until the owner rules on the stricter document result (191h notes).</para>
+/// <para><b>Who is external.</b> Decided only when the request touches the communication family, <c>sprk_document</c>, a
+/// document-derived table, an invoice-family table or a lineage table (<see cref="IsVisibilityGuarded"/>),
 /// so other requests are byte-identical. The request principal → <see cref="ICallerSystemUserResolver"/> →
 /// <see cref="ISystemUserIdentityResolver.IsExternalAsync"/>. A caller with no principal, no oid or no active systemuser
 /// is EXTERNAL (fail closed); a caller whose lookup FAILED (a swallowed Dataverse or cache fault) makes the tool call fail
@@ -112,6 +118,61 @@ internal static class ExternalCallerCommunicationGuard
     /// <summary>True for the <c>sprk_document</c> table (row-filtered by <see cref="ExternalDocumentNarrowing"/>).</summary>
     internal static bool IsDocumentTable(string? logicalName) =>
         string.Equals(logicalName, DocumentTable, StringComparison.OrdinalIgnoreCase);
+
+    // ── uac-r2 task 191h: THE external visibility predicate over every lineage table (#2189, #2179 design §3.3) ──────
+
+    /// <summary>
+    /// uac-r2 task 191h: true for a table THE external visibility predicate decides (<see cref="AppOnlyExternalVisibility"/>):
+    /// one of the three roots or a lineage child (<see cref="SecureChildLineage"/>, the one registry; every child declares its
+    /// external marker). For an external caller, every row of such a table that a tool returns is asked, after the read, by id;
+    /// only a Visible row is kept. This is the derived-row filter of #2189: a to-do, event, memo, signal, decision record or
+    /// analysis is hidden with the communication, document or Restricted root it is filed under or about (an analysis linked
+    /// only through <c>sprk_regardingcommunication</c> included), whatever the table, with no per-table list here.
+    /// </summary>
+    internal static bool IsVisibilityGuarded(string? logicalName) =>
+        SecureChildLineage.IsChild(logicalName) || SecureChildLineage.IsRoot(logicalName);
+
+    /// <summary>
+    /// uac-r2 task 191h: the rows of <paramref name="rows"/> (table, id) THE external visibility predicate does NOT show
+    /// (Hidden or Undecided; a row with no usable id is not asked and counts as not shown), decided app-only by id in ONE call.
+    /// A decision that could not be made for every row (<see cref="ExternalRowVisibility.Faulted"/>) THROWS, so the tool call
+    /// fails with no data, as a failed document narrowing does. Rows of a table <see cref="IsVisibilityGuarded"/> does not cover
+    /// are not asked and never returned. Cancellation propagates.
+    /// </summary>
+    internal static async Task<IReadOnlySet<(string Table, Guid Id)>> NotVisibleRowsAsync(
+        AppOnlyExternalVisibility visibility, IEnumerable<(string Table, Guid Id)> rows, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(visibility);
+        ArgumentNullException.ThrowIfNull(rows);
+        var guarded = rows
+            .Where(r => IsVisibilityGuarded(r.Table))
+            .Select(r => (Table: r.Table.ToLowerInvariant(), r.Id))
+            .Distinct()
+            .ToList();
+        var asked = guarded.Where(r => r.Id != Guid.Empty).ToList();
+        var notVisible = new HashSet<(string Table, Guid Id)>(guarded.Where(r => r.Id == Guid.Empty));
+        if (asked.Count == 0)
+            return notVisible;
+
+        var answer = await visibility(asked, ct).ConfigureAwait(false);
+        if (answer.Faulted)
+        {
+            throw new InvalidOperationException(
+                "The external visibility of the returned rows could not be decided; no rows are returned (fail closed).");
+        }
+
+        notVisible.UnionWith(asked.Where(r => !answer.IsVisible(r.Table, r.Id)));
+        return notVisible;
+    }
+
+    /// <summary>uac-r2 task 191h: <see cref="NotVisibleRowsAsync"/> for the rows of ONE table, as their ids.</summary>
+    internal static async Task<IReadOnlySet<Guid>> NotVisibleIdsAsync(
+        AppOnlyExternalVisibility visibility, string logicalName, IEnumerable<Guid> rowIds, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(rowIds);
+        var notVisible = await NotVisibleRowsAsync(visibility, rowIds.Select(id => (logicalName, id)), ct).ConfigureAwait(false);
+        return notVisible.Select(r => r.Id).ToHashSet();
+    }
 
     // ── Task 188 round 3 slice C: rows that DERIVE from a document ────────────────────────────────────────────────
 

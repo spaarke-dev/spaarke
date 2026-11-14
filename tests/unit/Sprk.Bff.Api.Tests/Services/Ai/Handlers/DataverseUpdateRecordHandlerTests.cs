@@ -81,6 +81,66 @@ public sealed class DataverseUpdateRecordHandlerTests : TypedToolHandlerTestFixt
     }
 
     // ═════════════════════════════════════════════════════════════════════════════
+    // fm task 054b: a BFF-owned communication column is refused before the confirm dialog
+    // ═════════════════════════════════════════════════════════════════════════════
+
+    /// <summary>Each of the five columns in the forms a model item key can take.</summary>
+    public static TheoryData<string, string> TheBffOwnedCommunicationColumnForms => new()
+    {
+        { "sprk_communication", "sprk_communicationthread" },
+        { "sprk_communication", "sprk_communicationthread@odata.bind" },
+        { "sprk_communication", "SPRK_CommunicationThread" },
+        { "sprk_communication", "sprk_sentby" },
+        { "sprk_communication", "sprk_sentby@odata.bind" },
+        { "sprk_communication", "Sprk_SentBy" },
+        { "sprk_communication", "_sprk_sentby_value" },
+        { "sprk_communication", "sprk_directrecipient" },
+        { "sprk_communication", "sprk_directrecipient@odata.bind" },
+        { "sprk_communication", "SPRK_DIRECTRECIPIENT" },
+        { "sprk_communicationthread", "sprk_threadtype" },
+        { "sprk_communicationthread", "SPRK_ThreadType" },
+        { "sprk_communicationthread", "sprk_isdefaultthread" },
+        { "sprk_communicationthread", "Sprk_IsDefaultThread" },
+    };
+
+    private static string UpdateArgs(string table, string column) =>
+        JsonSerializer.Serialize(new
+        {
+            tablename = table,
+            recordId = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+            item = new Dictionary<string, object> { [column] = "x" },
+        });
+
+    [Theory]
+    [MemberData(nameof(TheBffOwnedCommunicationColumnForms))]
+    public async Task ValidateChat_ABffOwnedCommunicationColumn_IsRefusedBeforeTheConfirmation_InThePostConfirmWords_054b(
+        string table, string column)
+    {
+        var ctx = BuildChatInvocationContext(toolArgumentsJson: UpdateArgs(table, column));
+
+        var validation = CreateHandler().ValidateChat(ctx, BuildUpdateTool());
+        var afterConfirm = await CreateHandler().ExecuteChatAsync(ctx, BuildUpdateTool(), CancellationToken.None);
+
+        validation.IsValid.Should().BeFalse("a proposal the update can never write is refused before the confirm dialog");
+        afterConfirm.Success.Should().BeFalse();
+        string.Join(" ", validation.Errors).Should().Be(afterConfirm.ErrorMessage, "only the timing changed");
+        string.Join(" ", validation.Errors).Should().Contain("NOT written");
+        _dataverse.VerifyNoOtherCalls();
+    }
+
+    [Theory]
+    [InlineData("account", "name")]
+    [InlineData("sprk_communication", "sprk_subject")]
+    [InlineData("sprk_communicationthread", "sprk_name")]
+    [InlineData("sprk_matter", "sprk_communicationthread")] // the same name on another table is not a BFF-owned column
+    public void ValidateChat_AnOrdinaryUpdate_StillPassesToItsConfirmation_054b_MustNotFire(string table, string column)
+    {
+        var ctx = BuildChatInvocationContext(toolArgumentsJson: UpdateArgs(table, column));
+
+        CreateHandler().ValidateChat(ctx, BuildUpdateTool()).IsValid.Should().BeTrue();
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════════
     // Successful update — round-shape + updated-record citation
     // ═════════════════════════════════════════════════════════════════════════════
 

@@ -21,7 +21,7 @@ namespace Sprk.Bff.Api.Tests.TestInfrastructure;
 /// writers must propagate rather than report as a refusal (task 146).
 /// </para>
 /// <para>
-/// <b>Unchanged.</b> A context that opted into <see cref="UnfiledOwnership.KeepCreator"/> and names no parent is
+/// <b>Unchanged.</b> A context that opted into <see cref="UnfiledOwnership.KeepCreator"/> (or <see cref="UnfiledOwnership.UnfiledCommunication"/>) and names no parent is
 /// answered <see cref="RecordOwnerOutcome.Unchanged"/>, exactly as the real resolver does — so writer tests see the
 /// E1 branch without a second knob.
 /// </para>
@@ -114,7 +114,7 @@ public sealed class RecordOwnershipResolverDouble : IRecordOwnershipResolver
         if (Fault is not null)
             throw Fault;
 
-        if (!hasParent && whenUnfiled == UnfiledOwnership.KeepCreator)
+        if (!hasParent && whenUnfiled is UnfiledOwnership.KeepCreator or UnfiledOwnership.UnfiledCommunication)
             return RecordOwnerResolution.Unchanged("double: unfiled row keeps its creator");
 
         return TeamId is { } team

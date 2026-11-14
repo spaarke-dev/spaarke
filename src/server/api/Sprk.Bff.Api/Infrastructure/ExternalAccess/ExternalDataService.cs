@@ -338,7 +338,8 @@ public class ExternalDataService
         ILogger<ExternalDataService> logger,
         IGenericEntityService? filing = null,
         Sprk.Bff.Api.Services.Dataverse.CoreAncestorResolver? columns = null,
-        Sprk.Bff.Api.Services.Identity.ISystemUserIdentityResolver? identity = null)
+        Sprk.Bff.Api.Services.Identity.ISystemUserIdentityResolver? identity = null,
+        AppOnlyExternalVisibility? visibility = null)
     {
         _httpClient = httpClient;
         _configuration = configuration;
@@ -346,6 +347,7 @@ public class ExternalDataService
         _logger = logger;
         _filing = filing;
         _identity = identity;
+        _visibility = visibility;
         // Task 187: which lineage lookups a parent table has in this environment (the 6h-cached metadata probe the stamp path
         // uses), so the live-parent walk never selects a column a later schema adds. Without one (a test double), every
         // lookup of the lineage map is taken as present.
@@ -365,6 +367,14 @@ public class ExternalDataService
     /// narrowed (fail closed).
     /// </summary>
     private readonly Sprk.Bff.Api.Services.Identity.ISystemUserIdentityResolver? _identity;
+
+    /// <summary>
+    /// uac-r2 task 191h: THE external visibility predicate (<see cref="AppOnlyExternalVisibility"/>) the to-do and event lists
+    /// ask for every caller who is not an internal systemuser. Registered in <c>AddExternalAccess</c>, so the typed-client factory
+    /// supplies it. Without one (a test double), every row of such a caller's list is hidden and the list says truncated (fail
+    /// closed).
+    /// </summary>
+    private readonly AppOnlyExternalVisibility? _visibility;
 
     /// <summary>Task 187: the column probe the live-parent walk reads parent tables through (see the constructor).</summary>
     private readonly Sprk.Bff.Api.Services.Dataverse.CoreAncestorResolver.EntityColumnProbe _columnProbe;
@@ -1997,13 +2007,19 @@ public class ExternalDataService
             .Select(r => ChildRowRoots.Of(TodoTable, r.Extra, r.RootStamps(), live))
             .ToList();
         var flags = await ReadSecureRootFlagsAsync(caller, roots.Select(r => (IEnumerable<(ExternalGrantRootType, string?)>)r), ct);
-        var readable = read.Rows.Where((_, i) => ExternalMultiRootRule.ChildRowReadable(caller, flags, roots[i])).ToList();
-        if (readable.Count != read.Rows.Count)
+        var rootReadable = read.Rows.Where((_, i) => ExternalMultiRootRule.ChildRowReadable(caller, flags, roots[i])).ToList();
+        if (rootReadable.Count != read.Rows.Count)
         {
             _logger.LogInformation(
                 "[EXT-DATA] todos: {Withheld} of {Total} to-do(s) regarding {RootKind} {RootId} withheld - also filed to a secure record the caller cannot read",
-                read.Rows.Count - readable.Count, read.Rows.Count, rootKind, rootId);
+                read.Rows.Count - rootReadable.Count, read.Rows.Count, rootKind, rootId);
         }
+
+        // uac-r2 task 191h (#2179 design §3.10, #2189): a to-do regarding an internal-only communication, a hidden document or a
+        // Restricted root (through ANY lineage parent, not only the stamp) is not shown to a caller who is not an internal
+        // systemuser: THE external visibility predicate, one call for the page; Undecided drops the row and says truncated.
+        var (readable, undecided) = await HideExternallyHiddenRowsAsync(
+            caller, TodoTable, rootReadable, r => RowIdOf(r.SprkTodoid), "todos", ct);
 
         // F3b fix round 1: a to-do follows the invoices of every row it is filed under (its event, document, communication, analysis,
         // agreement or service request, up the chain); a chain read that fails drops the to-dos that have a parent and says truncated.
@@ -2015,8 +2031,8 @@ public class ExternalDataService
         return new ExternalCollectionResponse<ExternalTodoDto>
         {
             Value = todos,
-            Truncated = read.Truncated || RuleReadCutListShort(flags, live, read.Rows.Count - readable.Count)
-                        || todos.Count < readable.Count,
+            Truncated = read.Truncated || RuleReadCutListShort(flags, live, read.Rows.Count - rootReadable.Count)
+                        || undecided || todos.Count < readable.Count,
         };
     }
 
@@ -2083,13 +2099,19 @@ public class ExternalDataService
 
         // Task 105: paged to the cap, and a cut-short list says so (see GetDocumentsAsync).
         var read = await GetCollectionAsync<EventRow>(url, ct);
-        var (readable, flags, live) = await ReadableEventsAsync(read.Rows, caller, ct);
-        if (readable.Count != read.Rows.Count)
+        var (rootReadable, flags, live) = await ReadableEventsAsync(read.Rows, caller, ct);
+        if (rootReadable.Count != read.Rows.Count)
         {
             _logger.LogInformation(
                 "[EXT-DATA] events: {Withheld} of {Total} event(s) regarding {RootKind} {RootId} withheld - also filed to a secure record the caller cannot read",
-                read.Rows.Count - readable.Count, read.Rows.Count, rootKind, rootId);
+                read.Rows.Count - rootReadable.Count, read.Rows.Count, rootKind, rootId);
         }
+
+        // uac-r2 task 191h (#2179 design §3.10, #2189): an event regarding an internal-only communication (an event built from an
+        // email copies its subject, sender and recipients), a hidden document or a Restricted root is not shown to a caller who is
+        // not an internal systemuser (THE external visibility predicate; see GetTodosAsync).
+        var (readable, undecided) = await HideExternallyHiddenRowsAsync(
+            caller, EventTable, rootReadable, r => RowIdOf(r.SprkEventid), "events", ct);
 
         // F3b fix round 1: an event follows the invoices of every row it is filed under (an event, a document, a communication ...,
         // up the chain); a chain read that fails drops the events that have a parent and says truncated.
@@ -2101,8 +2123,8 @@ public class ExternalDataService
         return new ExternalCollectionResponse<ExternalEventDto>
         {
             Value = events,
-            Truncated = read.Truncated || RuleReadCutListShort(flags, live, read.Rows.Count - readable.Count)
-                        || events.Count < readable.Count,
+            Truncated = read.Truncated || RuleReadCutListShort(flags, live, read.Rows.Count - rootReadable.Count)
+                        || undecided || events.Count < readable.Count,
         };
     }
 
@@ -2171,6 +2193,119 @@ public class ExternalDataService
         var narrowing = await ExternalDocumentNarrowing.DecideOrFailClosedAsync(rows, QueryRowsOrThrowAsync, _logger, ct);
         LogNarrowingCost("external", rows.Count, rows.Count(row => !narrowing.IsVisible(row)), narrowing);
         return narrowing;
+    }
+
+    /// <summary>
+    /// uac-r2 task 191h (#2179 design §3.3 "Callers", §3.10; #2189): the rows of ONE list page THE external visibility predicate
+    /// (<see cref="AppOnlyExternalVisibility"/>) shows to <paramref name="caller"/>. An internal systemuser (the test
+    /// <see cref="NarrowDocumentsAsync"/> uses) is not narrowed and nothing is asked, so an internal caller's list is unchanged;
+    /// every other caller's rows (a contact, a systemuser flagged external, one whose flag cannot be read) are asked in ONE call
+    /// and only a Visible row stays. A row a rule hides is dropped; a row the predicate could not decide (Undecided: a closure past
+    /// a bound, a row or parent that does not come back, a fault; or no seam, or a seam that throws) is dropped AND the list says
+    /// truncated (ruling D-70: on a list a fault hides the rows and sets truncated). Logs carry counts and reason codes only (ADR-015).
+    /// </summary>
+    internal async Task<(List<T> Visible, bool Undecided)> HideExternallyHiddenRowsAsync<T>(
+        CallerPrincipal caller, string table, IReadOnlyList<T> rows, Func<T, Guid> idOf, string surface, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(caller);
+        ArgumentNullException.ThrowIfNull(rows);
+        if (rows.Count == 0 || await IsInternalSystemUserAsync(caller, ct))
+            return (rows.ToList(), false);
+
+        var asked = rows.Select(idOf).Where(id => id != Guid.Empty).Distinct().Select(id => (table, id)).ToList();
+        var answer = ExternalRowVisibility.NothingDecided;
+        if (_visibility is null)
+        {
+            _logger.LogWarning(
+                "[EXT-VISIBILITY] {Surface}: no external visibility predicate is configured; all {Total} row(s) hidden (fail closed).",
+                surface, rows.Count);
+        }
+        else if (asked.Count > 0)
+        {
+            try
+            {
+                answer = await _visibility(asked, ct);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(
+                    "[EXT-VISIBILITY] {Surface}: the external visibility decision failed ({ErrorType}); all {Total} row(s) hidden (fail closed).",
+                    surface, ex.GetType().Name, rows.Count);
+            }
+        }
+
+        var visible = rows.Where(r => answer.IsVisible(table, idOf(r))).ToList();
+        var undecided = rows.Any(r => !answer.IsVisible(table, idOf(r)) && answer.IsUndecided(table, idOf(r)));
+        if (visible.Count != rows.Count)
+        {
+            _logger.LogInformation(
+                "[EXT-VISIBILITY] {Surface}: {Hidden} of {Total} row(s) hidden by the external visibility predicate (faulted={Faulted}; {Reasons}).",
+                surface, rows.Count - visible.Count, rows.Count, answer.Faulted, answer.Summary(asked));
+        }
+
+        return (visible, undecided);
+    }
+
+    /// <summary>
+    /// uac-r2 task 191h fix round 1 (adversarial pass 2, F1): the single-row form of <see cref="HideExternallyHiddenRowsAsync{T}"/>
+    /// for the routes that CHANGE one to-do or event (the to-do PATCH and the to-do / event delete-own routes): "a caller cannot
+    /// change what it cannot see" (ebilling-r1 task 130-0), so a row the lists hide is not written either. An internal systemuser is
+    /// <see cref="LiveParentDecision.Readable"/> and nothing is asked. For every other caller: Visible is
+    /// <see cref="LiveParentDecision.Readable"/>; Hidden and Undecided are ONE answer, <see cref="LiveParentDecision.Withheld"/>
+    /// (the route's same 403, so hidden never reads differently from absent, NFR-01); no seam, a seam that throws, or a faulted
+    /// decision that did not show the row is <see cref="LiveParentDecision.Unavailable"/> (the route's 503, nothing written).
+    /// </summary>
+    /// <remarks><c>virtual</c> per ADR-038 section 4 (substitution seam), as <see cref="CheckLiveParentsAsync"/>.</remarks>
+    public virtual async Task<LiveParentDecision> CheckExternalVisibilityAsync(
+        DeletableKind kind, Guid id, CallerPrincipal caller, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(caller);
+        var table = kind switch
+        {
+            DeletableKind.Todo => TodoTable,
+            DeletableKind.Event => EventTable,
+            _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "The external visibility write check covers to-dos and events."),
+        };
+
+        if (await IsInternalSystemUserAsync(caller, ct))
+            return LiveParentDecision.Readable;
+        if (id == Guid.Empty)
+            return LiveParentDecision.Withheld;
+        if (_visibility is null)
+        {
+            _logger.LogWarning(
+                "[EXT-VISIBILITY] {Kind} write: no external visibility predicate is configured; nothing written (fail closed).", kind);
+            return LiveParentDecision.Unavailable;
+        }
+
+        ExternalRowVisibility answer;
+        try
+        {
+            answer = await _visibility(new[] { (table, id) }, ct);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(
+                "[EXT-VISIBILITY] {Kind} write: the external visibility decision failed ({ErrorType}); nothing written (fail closed).",
+                kind, ex.GetType().Name);
+            return LiveParentDecision.Unavailable;
+        }
+
+        if (answer.IsVisible(table, id))
+            return LiveParentDecision.Readable;
+
+        _logger.LogInformation(
+            "[EXT-VISIBILITY] {Kind} write refused by the external visibility predicate (faulted={Faulted}; {Reasons}).",
+            kind, answer.Faulted, answer.Summary(new[] { (table, id) }));
+        return answer.Faulted ? LiveParentDecision.Unavailable : LiveParentDecision.Withheld;
     }
 
     /// <summary>
@@ -3155,21 +3290,27 @@ public class ExternalDataService
     private const string SecureFlagColumn = "sprk_issecure";
 
     /// <summary>
-    /// Creates a new <c>sprk_event</c> record associated with the supplied project via
-    /// <c>sprk_regardingproject</c>.
+    /// Creates a new <c>sprk_event</c> record associated with the supplied accessible ROOT — project, matter or work
+    /// assignment — via that root's regarding lookup (<c>sprk_regardingproject</c>, <c>sprk_regardingmatter</c>,
+    /// <c>sprk_regardingworkassignment</c>).
     /// </summary>
     /// <remarks>
-    /// Unlike <see cref="CreateTodoAsync"/> this does NOT apply the four ADR-024 resolver fields:
-    /// those are a <c>sprk_todo</c> construct (the 11-entity regarding model). <c>sprk_event</c>
-    /// carries a direct project lookup only.
+    /// <para>Unlike <see cref="CreateTodoAsync"/> this does NOT yet write the ADR-024 resolver fields
+    /// (<c>sprk_regardingrecordid</c>/<c>…name</c>/<c>…url</c>/<c>sprk_RegardingRecordType</c>), although
+    /// <c>sprk_event</c> has them and the internal <c>EventEndpoints</c> create writes them: an event created here
+    /// carries the direct root lookup only, so a read keyed on the resolver fields misses it. Known gap, recorded in
+    /// R4 <c>notes/defer-issues.md</c> (task 002 review, F1); out of task 002's scope.</para>
+    /// <para><b>spaarke-SPA-external-access-platform-r4 task 002 (FR-08) widened this from project-only</b>, as task 029
+    /// widened the to-do create: the root kind comes from the ROUTE, and the bind from
+    /// <see cref="TryGetRootBinding"/>, never from the request.</para>
     /// </remarks>
     // `virtual` per ADR-038 §4 (substitution seam), added by task 146 so the endpoint tests can assert the owner the
     // route resolved reached the create — and that a refused owner never reached Dataverse at all.
     public virtual async Task<ExternalEventDto> CreateEventAsync(
-        Guid projectId, CreateExternalEventRequest request, Guid owningTeamId, CallerPrincipal creator,
+        TodoRootKind rootKind, Guid rootId, CreateExternalEventRequest request, Guid owningTeamId, CallerPrincipal creator,
         CancellationToken ct = default)
     {
-        var body = BuildEventCreatePayload(projectId, request, owningTeamId);
+        var body = BuildEventCreatePayload(rootKind, rootId, request, owningTeamId);
         StampCreator(body, creator); // FR-25 (task 030)
 
         var token = await GetAppOnlyTokenAsync(ct);
@@ -3190,8 +3331,8 @@ public class ExternalDataService
         if (!response.IsSuccessStatusCode)
         {
             var errorBody = await response.Content.ReadAsStringAsync(ct);
-            _logger.LogWarning("[EXT-DATA] Create event failed for project {ProjectId}: {Status} — {Body}",
-                projectId, response.StatusCode, errorBody);
+            _logger.LogWarning("[EXT-DATA] Create event failed for {RootKind} {RootId}: {Status} — {Body}",
+                rootKind, rootId, response.StatusCode, errorBody);
             throw new InvalidOperationException($"Failed to create event: {response.StatusCode}");
         }
 
@@ -3229,17 +3370,25 @@ public class ExternalDataService
     internal static string BuildEventsQuery(Guid projectId) => BuildEventsQuery(TodoRootKind.Project, projectId);
 
     /// <summary>
-    /// The COMPLETE create payload for an external calendar event: the caller's fields, the project bind, and the
-    /// OWNER the route resolved from the project (task 146 — the named Secure team for a secure project). Pure so a
+    /// The COMPLETE create payload for an external calendar event: the caller's fields, the ROOT bind, and the
+    /// OWNER the route resolved from the root (task 146 — the named Secure team for a secure root). Pure so a
     /// test can read it. Task 097: the DTO's sprk_name / sprk_status are written to the LIVE sprk_eventname / statuscode
     /// (with the paired statecode) — sprk_event has neither sprk_name nor sprk_status, so the former body was a 400.
-    /// <exception cref="ArgumentOutOfRangeException">sprk_status is not in <see cref="ExternalCreatableStatuses"/>.</exception>
+    /// R4 task 002 (FR-08): the bind comes from <see cref="TryGetRootBinding"/> for the route's root kind — the same row
+    /// the to-do create and the events list use; <c>sprk_event</c>'s three regarding lookups carry the same schema names
+    /// as <c>sprk_todo</c>'s (<c>docs/data-model/sprk_event-related-tables.md</c>).
+    /// <exception cref="ArgumentOutOfRangeException">sprk_status is not in <see cref="ExternalCreatableStatuses"/>, or
+    /// <paramref name="rootKind"/> is a deny state (None/Ambiguous).</exception>
     /// </summary>
     internal static Dictionary<string, object?> BuildEventCreatePayload(
-        Guid projectId, CreateExternalEventRequest request, Guid owningTeamId)
+        TodoRootKind rootKind, Guid rootId, CreateExternalEventRequest request, Guid owningTeamId)
     {
-        if (projectId == Guid.Empty)
-            throw new ArgumentException("Project id must be a non-empty GUID.", nameof(projectId));
+        var binding = TryGetRootBinding(rootKind)
+            ?? throw new ArgumentOutOfRangeException(nameof(rootKind), rootKind,
+                "Events can only be created against a project, matter or work assignment. "
+                + "None/Ambiguous are deny states — a caller reaching here has skipped its gate.");
+        if (rootId == Guid.Empty)
+            throw new ArgumentException("Root id must be a non-empty GUID.", nameof(rootId));
         ArgumentNullException.ThrowIfNull(request);
         RequireOwner(owningTeamId, "sprk_event");
 
@@ -3259,8 +3408,9 @@ public class ExternalDataService
         body[EventStatusColumn] = status;
         body["statecode"] = EventStatusCode.GetStateCode(status);
 
-        // R5 002: PascalCase nav prop (metadata-verified) — same binding the to-do create uses.
-        body["sprk_RegardingProject@odata.bind"] = $"/sprk_projects({projectId})";
+        // R5 002: PascalCase nav prop (metadata-verified) — same binding the to-do create uses. ONE root, ONE bind: the key
+        // and the entity set come from the same binding row (R4 task 002).
+        body[binding.BindKey] = $"/{binding.EntitySet}({rootId})";
         body[OwnerBindKey] = $"/teams({owningTeamId})";
         return body;
     }

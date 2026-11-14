@@ -1,0 +1,145 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="035" project="spaarke-SPA-external-access-platform-r4">
+  <metadata>
+    <title>Messages shown as threads; HTML through sanitizeEmailHtml, never allowRemoteImages (FR-22, #2453)</title>
+    <phase>3 Grids, information, messages</phase>
+    <gate>after 028 and 034 — owner chooses the thread-key path at step 1</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Renders partner-visible HTML (sanitizer constraint) and needs an external DTO change on the shared BFF surface</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Scoped grouping change once the thread key exists; the decision is the owner's</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>D</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>028, 034</deps>
+    <tags>frontend, react, unit-test, bff-api</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Show a record's Messages grouped into threads, as the model-driven app does, using a server-supplied thread key; keep every HTML body on the shared sanitizer without remote images.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. Full-stack developer on the external SPA and the external-access BFF.</role>
+  <goal>Replies group under their thread in the record template's Messages; a test proves remote `&lt;img&gt;` sources are stripped; the external message DTO change (if chosen) is UAC-reviewed and allow-listed.</goal>
+
+  <context>
+    <background>Spec FR-22; design §7 (`design.md:176`, `:244`). Verified 2026-11-10: the external message wire shape has NO thread key. `ExternalMessageDto` (`src/server/api/Sprk.Bff.Api/Api/ExternalAccess/Dtos/ExternalMessageDtos.cs:13-51`) is projected by `ToExternalDto` (`Api/ExternalAccess/ExternalMessageEndpoints.cs:854-864`) from the internal `ThreadMessageDto` (`Services/Communication/CommunicationThreadReadModels.cs:55-73`), which has `InReplyTo` but no thread id; `AppOnlyRegardingReadResult` (`:131-133`) carries only messages. The thread lookup on a message is `_sprk_communicationthread_value` (`Services/Communication/CommunicationOpenThreadGate.cs:38`). The SPA type `ExternalMessage` (`src/client/external-spa/src/api/messages-client.ts:45-59`) mirrors the DTO. So FR-22 needs a BFF change or a deferral; grouping by subject on the client is not acceptable (a guess, not the model-driven app's thread). `CommunicationTimeline` (`src/client/shared/Spaarke.UI.Components/src/components/CommunicationTimeline/`) groups by threadId / `inReplyTo` (`CommunicationTimeline.buildTimeline.ts`) but its props take `authenticatedFetch` + `bffBaseUrl` and call internal routes, so it does not fit the external plane as-is; reuse only its pure grouping logic if it can be imported without the fetch layer. `RecordMessages.tsx` renders bodies through `sanitizeEmailHtml` (`:48`, `:242`; `src/client/shared/Spaarke.UI.Components/src/utils/sanitizeEmailHtml.ts:508`, option `allowRemoteImages` `:474`).</background>
+    <relevant-files>
+      <file role="modify">src/client/external-spa/src/components/detail/RecordMessages.tsx</file>
+      <file role="modify">src/client/external-spa/src/api/messages-client.ts</file>
+      <file role="modify">src/client/external-spa/tests/RecordMessages.test.tsx</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/Dtos/ExternalMessageDtos.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ExternalMessageEndpoints.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationThreadReadModels.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationThreadReadService.cs</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/CommunicationTimeline/CommunicationTimeline.buildTimeline.ts</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/utils/sanitizeEmailHtml.ts</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="028" status="pending">P2 deployed (phase-deploy convention)</dependency>
+      <dependency task="034" status="pending">Refresh and indicator land first (same component)</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec FR-22, design §4">Every message body goes through the shared `sanitizeEmailHtml`; `allowRemoteImages` is never passed (no option object that sets it, no spread of caller options). No other HTML sink (`dangerouslySetInnerHTML` only on sanitizer output).</constraint>
+    <constraint source="spec FR-22">Grouping uses a server-supplied thread key only. No grouping by subject, sender or time on the client.</constraint>
+    <constraint source="NFR-04, ADR-003">The thread key exposes nothing new: an opaque value per thread (the thread id or a per-response key, decided at step 1), no thread name unless it is already readable to the caller, no private or internal-only thread revealed by grouping (the existing internal-only and privilege filters run first, unchanged).</constraint>
+    <constraint source="FR-18 rule, coordination">The DTO change is reviewed by uac-r2 and the review is recorded in the PR. Run `/conflict-check` before the BFF PR (shared external-access surface with uac-r2 and ebilling-r1).</constraint>
+    <constraint source="bff-extensions.md">BFF hygiene: Placement Justification in the PR (existing route, existing service — extension only); publish-size delta against a fresh master build, ≤ 60 MB; no new HIGH CVE; tests with the `Api/` and `Services/` change; no new DI registration, package or background work.</constraint>
+    <constraint source="dev-bff-deploy-coordination">Never deploy the dev BFF directly — request via uac-r2 (`docs/procedures/dev-bff-deploy-coordination.md`); task 038 carries the request.</constraint>
+    <constraint source="ADR-019">The route's ProblemDetails `errorCode`s are unchanged.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-SPA-external-access-platform-r4/CLAUDE.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r4/spec.md</file>
+      <file>src/client/external-spa/README.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/skills/fluent-v9-component/SKILL.md</file>
+      <file>.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+      <file>.claude/skills/conflict-check/SKILL.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/procedures/dev-bff-deploy-coordination.md</file>
+      <file>tests/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Allow-list DTO projection" location="src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ExternalMessageEndpoints.cs">`ToExternalDto` — add the key here, nothing else</pattern>
+      <pattern name="Thread grouping" location="src/client/shared/Spaarke.UI.Components/src/components/CommunicationTimeline/CommunicationTimeline.buildTimeline.ts">model-driven grouping order (thread, then replies)</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load the knowledge files, read the relevant files, declare rigor and model tier per task-execute Step 0.5. Check ADR-008 file name with Glob before loading.</step>
+    <step order="1" name="Decision">Present the owner the finding (no thread key on the external DTO) and the options in &lt;escalation&gt;; record the choice in the notes. Do not start code before the choice.</step>
+    <step order="2">BFF (option A): read the message's `_sprk_communicationthread_value` in the app-only by-regarding read, carry it on `ThreadMessageDto` (optional, default null, so internal callers are unchanged), and project it as one new property on `ExternalMessageDto`.</step>
+    <step order="3">BFF tests: the new property is present for a threaded message and null for an unthreaded one; an internal-only or private-thread message is still filtered (must-fire) and a normal one still listed (must-not-fire); the projected property list equals the allow-list.</step>
+    <step order="4">SPA: add the key to `ExternalMessage`; group messages by key (unthreaded messages stand alone), thread order by latest message, replies oldest first inside a thread; keep 034's refresh and indicator and R3's states.</step>
+    <step order="5">SPA tests: replies group under their thread; an unthreaded message stands alone; a body with a remote `&lt;img src="https://…"&gt;` renders without it; a source scan or assertion proves no call passes `allowRemoteImages`.</step>
+    <step order="6">Run `/conflict-check`; measure the publish-size delta; run `dotnet list package --vulnerable --include-transitive`; run the BFF tests filtered to the touched areas and the SPA tests and build.</step>
+    <step order="7">Update tasks/TASK-INDEX.md: set this task's status cell to `✅ [done]` and this POML's &lt;status&gt; to completed; run `pwsh scripts/check-task-status-drift.ps1`.</step>
+    <step order="8">Record deviations (including the bff-api tag added to this task) in projects/spaarke-SPA-external-access-platform-r4/notes/task-035-notes.md.</step>
+  </steps>
+
+  <escalation>
+    <trigger>STOP at step 1 and ask the owner: (A) add a thread key to the external message DTO in this task, with uac-r2 review (recommended: the model-driven app's own thread, no guess); (B) defer FR-22 with `/project-defer-issue-tracking`. Grouping by subject on the client is not offered.</trigger>
+    <trigger>If uac-r2 rejects exposing the thread id, STOP and ask whether a per-response opaque key is acceptable or FR-22 is deferred.</trigger>
+    <trigger>If the app-only read cannot select the thread lookup without changing its access filters, STOP; filters are not changed in this task.</trigger>
+  </escalation>
+
+  <ui-tests>
+    <test name="Threads">
+      <url>https://{spa-dev-host}/?record=matter:{matter-id}</url>
+      <steps>
+        <step>Open Messages on a record with a reply chain and a standalone message</step>
+        <step>Open a message whose HTML has a remote image</step>
+        <step>Check the network log and the console</step>
+      </steps>
+      <expected>Replies grouped under their thread; no request for the remote image; no console errors</expected>
+    </test>
+    <test name="Dark Mode Compliance (ADR-021)">
+      <steps><step>Switch to dark mode and high contrast</step></steps>
+      <expected>Thread grouping uses semantic tokens; readable in both themes</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="dotnet">Build and run the BFF tests filtered to the touched areas</tool>
+    <tool name="npm">Run the external-spa tests and build</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/external-spa/src/components/detail/RecordMessages.tsx</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/Dtos/ExternalMessageDtos.cs</output>
+    <output type="test">src/client/external-spa/tests/RecordMessages.test.tsx</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests (external message projection tests)</output>
+    <output type="docs">projects/spaarke-SPA-external-access-platform-r4/notes/task-035-notes.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The owner's choice (A or B) is recorded before any code; under B the deferral issue exists and no code changed.</criterion>
+    <criterion testable="true">Under A: replies group under their thread; unthreaded messages stand alone; no client-side subject grouping exists.</criterion>
+    <criterion testable="true">A test asserts a remote `&lt;img&gt;` source is stripped from a rendered body.</criterion>
+    <criterion testable="true">No code path passes `allowRemoteImages`; every body goes through `sanitizeEmailHtml`.</criterion>
+    <criterion testable="true">Under A: the DTO gains exactly one property; internal-only and private-thread filtering is unchanged (must-fire and must-not-fire tests).</criterion>
+    <criterion testable="true">UAC review recorded in the PR; `/conflict-check` run; Placement Justification, publish-size delta (≤ 60 MB) and no new HIGH CVE recorded.</criterion>
+    <criterion testable="true">No BFF deploy made from this task.</criterion>
+    <criterion testable="true">Test scope: cover the stated contract plus the edge cases named in these criteria. Anything beyond that needs a one-line justification in the task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-22, issue #2453; ISS-003/#1636 sanitizer hardening is the baseline. Tag deviation: the task table lists frontend, react, unit-test; bff-api is added because the external DTO has no thread key.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

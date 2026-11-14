@@ -103,6 +103,26 @@ function reasonCodeOf(err: unknown): string | undefined {
   return undefined;
 }
 
+/**
+ * The server's ProblemDetails `detail`, when it carries one: an `ApiError`'s `problemDetails.detail`, or a
+ * {@link ChildRecordWriteError}'s message (the adapter's `detail`). Not when the message is the adapter's own fallback
+ * ("... (HTTP 400).") or an unfilled template.
+ */
+function serverDetailOf(err: unknown): string | undefined {
+  if (typeof err !== 'object' || err === null) return undefined;
+  const pd = (err as { problemDetails?: unknown }).problemDetails;
+  const detail =
+    typeof pd === 'object' && pd !== null
+      ? (pd as { detail?: unknown }).detail
+      : typeof (err as Partial<ChildRecordWriteError>).reasonCode === 'string'
+        ? (err as { message?: unknown }).message
+        : undefined;
+  if (typeof detail !== 'string') return undefined;
+  const text = detail.trim();
+  if (!text || UNFILLED_PLACEHOLDER.test(text) || /\(HTTP \d{3}\)\.$/.test(text)) return undefined;
+  return text;
+}
+
 function neutralSentence(recordNoun: string): string {
   return `You don't have permission to save this ${recordNoun} with the values you selected. Ask your administrator.`;
 }
@@ -170,8 +190,11 @@ export function describeWebApiCreateError(
   }
 
   if (reason === MAPPING_SOURCE_SECURE_FILING) {
+    // The server's own sentence says which rule refused it (a secure source, or a Restricted one); this one is the fallback.
     return {
-      message: `This ${recordNoun} can't be created with values copied from a secure record, because it would not be secure. Create it as secure, or file it under a different record.`,
+      message:
+        serverDetailOf(err) ??
+        `This ${recordNoun} can't be created with values copied from a secure record, because it would not be secure. Create it as secure, or file it under a different record.`,
       isAccessDenied: false,
     };
   }

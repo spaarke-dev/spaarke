@@ -16,6 +16,7 @@ import type { IWizardSuccessConfig } from '../Wizard/wizardShellTypes';
 import type { AssociationResult, EntityTypeOption } from '../AssociateToStep/types';
 import type { INavigationService, IDataService } from '../../types/serviceInterfaces';
 import type { FollowOnCardConfig } from '../WizardFollowOns';
+import type { IComposedEmail, IEmailComposeHandlers } from '../EmailComposer/composeOnlySend';
 
 // Re-export for convenience
 export type { AssociationResult, EntityTypeOption };
@@ -205,6 +206,10 @@ export interface ICreateEventFollowOnState {
   createEventPriority: number;
   /** Description free text (optional). Maps to sprk_description. */
   createEventDescription: string;
+  /** Assigned To contact GUID (optional; '' = no assignee). Bound as the event's Assigned To contact lookup. */
+  createEventAssignedToId: string;
+  /** Assigned To contact display name. */
+  createEventAssignedToName: string;
 }
 
 /** State collected from the optional follow-on steps. */
@@ -215,6 +220,12 @@ export interface IFollowOnState extends IAssignWorkFollowOnState, ICreateEventFo
   emailSubject: string;
   /** Email body text. */
   emailBody: string;
+  /**
+   * The whole composed email (task 182, D-219): From, To, Cc, Bcc, subject, body, attachments. The entity's onFinish
+   * sends it with `sendComposedEmail` and the created record as the association. `emailTo` / `emailSubject` /
+   * `emailBody` above are derived from it.
+   */
+  email: IComposedEmail;
 }
 
 // ---------------------------------------------------------------------------
@@ -388,6 +399,16 @@ export interface ICreateRecordWizardConfig {
   searchPracticeAreas?: SearchCallback;
 
   /**
+   * Host navigation service. When supplied, the Assign Work follow-on step opens the
+   * Dataverse side pane for its lookups (Matter Type, Practice Area, Assigned
+   * Attorney / Paralegal / Outside Counsel), and so does the Create Event follow-on
+   * (Event Type, Assigned To), instead of the inline search fields
+   * (owner D-219, 2026-11-12). Omitted: the steps render the inline fields as before.
+   * Separate from the services inside `associateToStep` / `existingRecordPicker`.
+   */
+  navigationService?: INavigationService;
+
+  /**
    * Optional callback to get initial (auto-fill) values for the Assign Work step.
    * Called when the assign-work follow-on card is first selected. Allows entity
    * wizards to seed Matter Type and Practice Area from the parent record form.
@@ -441,6 +462,13 @@ export interface ICreateRecordWizardConfig {
    * `CreateProjectWizard`) — fully backward compatible, opt-in only.
    */
   followOnCards?: FollowOnCardConfig[];
+
+  /**
+   * Host-built email composer handlers for the Send Email follow-on (task 182, D-219): recipient side pane, record
+   * lookup, file upload, template picker and AI draft (`createXrmEmailComposeHandlers` in a Dataverse host). A missing
+   * handler hides its feature in the step.
+   */
+  emailComposeHandlers?: IEmailComposeHandlers;
 }
 
 // ---------------------------------------------------------------------------

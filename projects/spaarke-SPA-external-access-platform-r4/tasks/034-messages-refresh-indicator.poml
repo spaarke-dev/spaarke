@@ -1,0 +1,129 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="034" project="spaarke-SPA-external-access-platform-r4">
+  <metadata>
+    <title>Messages: Refresh action + "New message" indicator (FR-21, #2452)</title>
+    <phase>3 Grids, information, messages</phase>
+    <gate>after 028</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>SPA component change (.tsx) on an existing read path; no BFF, no new route</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Extends one component's existing read/refresh logic</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>C</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>028</deps>
+    <tags>frontend, react</tags>
+    <estimated-effort>2-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Give the record template's Messages section a Refresh action and a "New message" indicator that shows when a later read finds messages newer than the ones on screen, and clears when the caller refreshes.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. React developer on the external SPA.</role>
+  <goal>A caller can refresh Messages at any time, and is told politely, without the thread jumping, that newer messages exist; R3's error, sign-in and truncation handling is unchanged.</goal>
+
+  <context>
+    <background>Spec FR-21; design §7 (`design.md:175`). `RecordMessages.tsx` (`src/client/external-spa/src/components/detail/`) already has `read('initial' | 'refresh')` (`:331-360`), a `refreshSignal` prop that triggers `read('refresh')` (`:297`, `:369-376`), a refresh-failed MessageBar with a Refresh button (`:422-433`), an error state (`:435-444`), the empty state (`:449-452`) and the unavailable state (`:414-418`). Reads go through `listMessages(root, id)` (`src/client/external-spa/src/api/messages-client.ts:73`), which today passes no `auth.noInteraction` option; `bffApiCall` (`src/client/external-spa/src/auth/bff-client.ts:199`) supports it. `ExternalMessage` (`messages-client.ts:45-59`) carries `sprk_communicationid` and `createdon`, enough to tell "newer". The section header and its Refresh button use the template section renderer created by task 005 (under `src/client/external-spa/src/components/detail/`) and the icon map from task 001 (ArrowClockwise for Refresh).</background>
+    <relevant-files>
+      <file role="modify">src/client/external-spa/src/components/detail/RecordMessages.tsx</file>
+      <file role="modify">src/client/external-spa/src/api/messages-client.ts</file>
+      <file role="modify">src/client/external-spa/tests/RecordMessages.test.tsx</file>
+      <file role="canonical-reference">src/client/external-spa/src/auth/bff-client.ts</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="028" status="pending">P2 deployed (phase-deploy convention)</dependency>
+      <dependency task="005" status="pending">Template section renderer (section header actions)</dependency>
+      <dependency task="001" status="pending">Icon map (Refresh = ArrowClockwise)</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec FR-21">Refresh reuses `read('refresh')`: it re-reads from the server and replaces the list, never appends. While a refresh is in flight a second click does nothing.</constraint>
+    <constraint source="spec FR-21">The indicator comes from a lightweight periodic re-read of `listMessages` with `auth.noInteraction` set (no sign-in prompt from a background read). It pauses while `document.visibilityState` is hidden and stops on unmount or when the record changes (reuse the `readSeq` guard). Put the interval in one named constant; record the value chosen in the notes.</constraint>
+    <constraint source="spec FR-21">A background read that finds newer messages does NOT replace the visible list; it sets the indicator only. The indicator is announced through a polite live region (`role="status"` / `aria-live="polite"`), and clears on Refresh, on a successful send, and on a record change.</constraint>
+    <constraint source="R3 behaviour">A failing background read is silent (no MessageBar, no sign-in state change); only user-initiated reads show R3's error, sign-in and refresh-failed states, which stay exactly as they are.</constraint>
+    <constraint source="FR-06, NFR-04">Refresh is a read action, shown at every access level; the compose box's visibility rules are untouched.</constraint>
+    <constraint source="ADR-021">Fluent v9 semantic tokens only; the indicator uses existing Fluent components (Badge or MessageBar), no hard-coded colours.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-SPA-external-access-platform-r4/CLAUDE.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r4/spec.md</file>
+      <file>src/client/external-spa/README.md</file>
+      <file>.claude/skills/fluent-v9-component/SKILL.md</file>
+      <file>.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+    <patterns>
+      <pattern name="Stale-read guard" location="src/client/external-spa/src/components/detail/RecordMessages.tsx">`readSeq` / `dropPendingReads` — reuse for the background read</pattern>
+      <pattern name="Component tests" location="src/client/external-spa/tests/RecordMessages.test.tsx">existing mocks of listMessages and fake timers</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load the knowledge files, read the relevant files, declare rigor and model tier per task-execute Step 0.5.</step>
+    <step order="1">Add an optional `options` argument to `listMessages` that forwards `auth.noInteraction`; existing calls are unchanged.</step>
+    <step order="2">Add the section Refresh action (icon map) wired to `read('refresh')`, with an in-flight guard.</step>
+    <step order="3">Add the background check: interval constant, visibility pause, record-change and unmount stop, newest-id/createdon comparison against the list on screen; set the indicator only.</step>
+    <step order="4">Render the indicator in a polite live region with a "Show new messages" action that runs the refresh; clear it per the constraints.</step>
+    <step order="5">Tests (fake timers): Refresh replaces the list; a background read with a newer message shows the indicator and leaves the list unchanged; Refresh clears it; a background read with nothing new shows nothing; a hidden document makes no read; a failing background read shows no error; record change stops the timer.</step>
+    <step order="6">Run the SPA tests and build.</step>
+    <step order="7">Update tasks/TASK-INDEX.md: set this task's status cell to `✅ [done]` and this POML's &lt;status&gt; to completed; run `pwsh scripts/check-task-status-drift.ps1`.</step>
+    <step order="8">Record deviations and the interval value in projects/spaarke-SPA-external-access-platform-r4/notes/task-034-notes.md.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If task 005's section renderer offers no header-action slot, STOP and ask whether to add one there (task 005's file) or place Refresh inside the Messages body; do not fork the renderer.</trigger>
+    <trigger>If the owner or uac-r2 objects to the background read's request volume on the BFF, STOP and ask for the interval (or a manual-only indicator) before shipping.</trigger>
+  </escalation>
+
+  <ui-tests>
+    <test name="Refresh and indicator">
+      <url>https://{spa-dev-host}/?record=matter:{matter-id}</url>
+      <steps>
+        <step>Open Messages on a matter in two sessions</step>
+        <step>Post from the second session; wait for the interval</step>
+        <step>Click "Show new messages" (or Refresh)</step>
+        <step>Hide the tab, wait two intervals, check the network log</step>
+        <step>Check the console for errors</step>
+      </steps>
+      <expected>Indicator appears without the list moving; refresh shows the new message and clears it; no reads while hidden; no console errors</expected>
+    </test>
+    <test name="Dark Mode Compliance (ADR-021)">
+      <steps><step>Switch to dark mode and high contrast with the indicator shown</step></steps>
+      <expected>Semantic colours, readable indicator</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">Run the external-spa tests and build</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/external-spa/src/components/detail/RecordMessages.tsx</output>
+    <output type="code">src/client/external-spa/src/api/messages-client.ts</output>
+    <output type="test">src/client/external-spa/tests/RecordMessages.test.tsx</output>
+    <output type="docs">projects/spaarke-SPA-external-access-platform-r4/notes/task-034-notes.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Refresh re-reads from the server and replaces the list; a second click during a refresh makes no second read.</criterion>
+    <criterion testable="true">A background read that finds a newer message shows the indicator in a polite live region and leaves the visible list unchanged.</criterion>
+    <criterion testable="true">The indicator clears on Refresh, on a successful send and on a record change.</criterion>
+    <criterion testable="true">No background read runs while the document is hidden, after unmount, or for a record no longer shown.</criterion>
+    <criterion testable="true">Background reads pass `auth.noInteraction`; a failing background read shows no error or sign-in state.</criterion>
+    <criterion testable="true">R3's error, refresh-failed, sign-in, unavailable, empty and truncated states behave as before (existing tests pass).</criterion>
+    <criterion testable="true">Refresh uses the icon map's icon; semantic tokens only.</criterion>
+    <criterion testable="true">Test scope: cover the stated contract plus the edge cases named in these criteria. Anything beyond that needs a one-line justification in the task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-21, issue #2452. No BFF change: the existing `GET /{root}/{id}/messages` read is reused.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

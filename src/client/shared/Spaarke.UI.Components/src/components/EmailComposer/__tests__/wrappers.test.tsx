@@ -149,6 +149,29 @@ describe('SendEmailPage', () => {
   });
 });
 
+describe('SendEmailPage — Send Email dialog feature handlers (task 188, D-219 Q3)', () => {
+  const featureHandlers = () => ({
+    onListEmailTemplates: jest.fn().mockResolvedValue([{ id: 't-1', name: 'Welcome Letter' }]),
+    onRenderEmailTemplate: jest.fn().mockResolvedValue({ subject: 's', body: 'b', isHtml: false }),
+    onDraftWithAi: jest.fn().mockResolvedValue({ text: 'drafted' }),
+    onUploadLocalAttachment: jest.fn().mockResolvedValue({ documentId: 'doc-1' }),
+  });
+
+  it('forwards the handlers to the engine: template picker and AI sparkle appear', () => {
+    renderWithProviders(
+      <SendEmailPage mode="compose" authenticatedFetch={authenticatedFetch} bffBaseUrl={BFF} {...featureHandlers()} />
+    );
+    expect(screen.getByRole('button', { name: /apply template/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /draft with ai/i })).toBeInTheDocument();
+  });
+
+  it('hides both features when the host passes no handlers (the silent-omission failure this task closes)', () => {
+    renderWithProviders(<SendEmailPage mode="compose" authenticatedFetch={authenticatedFetch} bffBaseUrl={BFF} />);
+    expect(screen.queryByRole('button', { name: /apply template/i })).toBeNull();
+    expect(screen.queryByRole('button', { name: /draft with ai/i })).toBeNull();
+  });
+});
+
 describe('SendEmailPane (spaarkeai-word-add-in-r1 task 096 — a chromeless side pane that owns its send)', () => {
   function jsonResponse(status: number, body: unknown): Response {
     return {

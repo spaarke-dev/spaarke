@@ -3,7 +3,8 @@
  * Download only for a document that has a file. The BFF derives `hasFile` on the documents-module row; `false` hides the
  * File section (the document stays shown, with its fields), and a row without the member (an older BFF) keeps Download.
  *
- * Same harness as DocumentDownload.test.tsx: the real widget body, RecordDetailModal, RecordDetailFields and Fluent v9; only
+ * Same harness as DocumentDownload.test.tsx: the real widget body, RecordTemplateModal (R4 task 005), RecordDetailFields
+ * and Fluent v9; only
  * the network seam, the shared grid and the browser-only helpers are substituted.
  */
 import * as React from 'react';
@@ -28,7 +29,7 @@ vi.mock('@spaarke/ui-components/utils/themeStorage', () => ({
 }));
 vi.mock('../src/services/gridDataverseClient', () => ({ gridDataverseClient: {} }));
 
-// The shared grid, as in RecordDetailModal.test.tsx: reports its rows and opens one through `onRecordOpen`.
+// The shared grid, as in RecordTemplateSections.test.tsx: reports its rows and opens one through `onRecordOpen`.
 vi.mock('../src/widgets/ExternalDataGrid', async () => {
   const R = await import('react');
   return {

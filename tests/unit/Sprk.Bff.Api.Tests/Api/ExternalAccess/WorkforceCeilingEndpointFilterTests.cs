@@ -72,6 +72,43 @@ public sealed class WorkforceCeilingEndpointFilterTests
         ceiling.Reads.Should().Be(0, "the ceiling does not apply to a systemuser");
     }
 
+    /// <summary>
+    /// spaarke-SPA-external-access-platform-r4 task 002, uac-r2 review F4-1: <see cref="WorkforceRoleCeilingGate.AdmitsAsync"/>
+    /// refuses an empty requirement set even for a caller the ceiling does not apply to. The list routes' <c>canCreate</c>
+    /// fallbacks pass an empty set as their deny state, so admitting it would offer a create the route refuses.
+    /// </summary>
+    [Fact]
+    public async Task AdmitsAsync_EmptySetForASystemuser_ReturnsFalse()
+    {
+        var ceiling = new WorkforceCeilingDouble();
+
+        var admitted = await WorkforceRoleCeilingGate.AdmitsAsync(
+            Systemuser(), ceiling, Array.Empty<WorkforceCeilingRequirement>(), CancellationToken.None);
+
+        admitted.Should().BeFalse("an empty set is the callers' deny state, whoever the caller is");
+        ceiling.Reads.Should().Be(0, "the refusal needs no role read");
+    }
+
+    [Fact]
+    public async Task AdmitsAsync_NonEmptySetForASystemuser_ReturnsTrue()
+    {
+        var ceiling = new WorkforceCeilingDouble();
+
+        var admitted = await WorkforceRoleCeilingGate.AdmitsAsync(
+            Systemuser(), ceiling, WorkforceRoleCeilingGate.SubmitServiceRequest, CancellationToken.None);
+
+        admitted.Should().BeTrue("the ceiling does not apply to a systemuser");
+        ceiling.Reads.Should().Be(0);
+    }
+
+    private static CallerPrincipal Systemuser() => new()
+    {
+        Plane = CallerPrincipalPlane.Workforce,
+        ContactId = Me,
+        SystemUserId = Guid.NewGuid(),
+        ProjectAccess = Array.Empty<CallerProjectAccess>(),
+    };
+
     private static DefaultEndpointFilterInvocationContext Invocation(
         CallerPrincipal principal, WorkforceCeilingDouble ceiling, bool hasEndpoint)
     {

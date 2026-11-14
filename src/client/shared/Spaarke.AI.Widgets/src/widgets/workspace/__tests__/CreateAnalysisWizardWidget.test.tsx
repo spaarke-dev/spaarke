@@ -362,7 +362,9 @@ describe('CreateAnalysisWizardWidget', () => {
     const authenticatedFetch = jest
       .fn()
       .mockResolvedValue({ ok: true, json: async () => ({ documentIds: ['uploaded-doc-id'] }) });
-    const searchUsers = jest.fn().mockResolvedValue([{ id: 'user-1', name: 'Jordan Lee' }]);
+    const searchUsers = jest
+      .fn()
+      .mockResolvedValue([{ id: 'user-1', name: 'Jordan Lee', email: 'jordan.lee@firm.example' }]);
     const data = buildData({ dataService, authenticatedFetch, searchUsers });
 
     renderWidget(data);
@@ -381,14 +383,16 @@ describe('CreateAnalysisWizardWidget', () => {
     fireEvent.click(screen.getByRole('checkbox', { name: /Send Notification Email/i }));
     clickPrimary('Next');
 
-    // Send Email step: pick a "To" user via the LookupField search.
-    const toInput = await screen.findByPlaceholderText('Search users...');
+    // Send Email step (task 182: the shared EmailComposer, compose-only): pick a "To" user via the recipient search.
+    const toInput = await screen.findByRole('textbox', { name: 'To' });
     fireEvent.change(toInput, { target: { value: 'jo' } });
-    await screen.findByText('Jordan Lee');
-    fireEvent.click(screen.getByText('Jordan Lee'));
+    fireEvent.click(await screen.findByText(/Jordan Lee/));
 
-    fireEvent.change(screen.getByLabelText('Subject'), { target: { value: 'User-typed subject' } });
-    fireEvent.change(screen.getByLabelText('Message body'), { target: { value: 'User-typed body' } });
+    fireEvent.change(screen.getByRole('textbox', { name: 'Subject' }), { target: { value: 'User-typed subject' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Switch to plain text' }));
+    fireEvent.change(await screen.findByRole('textbox', { name: 'Message body' }), {
+      target: { value: 'User-typed body' },
+    });
 
     await act(async () => {
       clickPrimary('Finish');
@@ -411,6 +415,42 @@ describe('CreateAnalysisWizardWidget', () => {
     const sentBody = JSON.parse(sendCall[1].body as string);
     expect(sentBody.subject).toBe('Mapped subject from profile');
     expect(sentBody.body).toBe('Mapped body from profile');
+    // Task 182: sent through the composer's request path — To from the composer, filed under the analysis.
+    expect(sentBody.to).toEqual(['jordan.lee@firm.example']);
+    expect(sentBody.associations).toEqual([expect.objectContaining({ entityType: 'sprk_analysis' })]);
+  });
+
+  it('Create To Do follow-on: Assigned To opens the Dataverse side pane over active contacts (ontology 180, D-219)', async () => {
+    const navigationService = buildNavigationService([
+      { id: 'existing-doc-id', name: 'MSA Draft', entityType: 'sprk_document' },
+    ]);
+    renderWidget(buildData({ navigationService }));
+
+    skipAssociateTo();
+    await selectExistingDocument();
+    clickPrimary('Next');
+    fireEvent.change(screen.getByLabelText('Analysis name'), { target: { value: 'MSA Review' } });
+    clickPrimary('Next');
+    fireEvent.click(screen.getByRole('checkbox', { name: /Create To Do/i }));
+    clickPrimary('Next');
+
+    // A side-pane field: a Select button, no inline contact search.
+    const select = await screen.findByRole('button', { name: 'Select Assigned To' });
+    expect(screen.queryByPlaceholderText('Search contacts...')).not.toBeInTheDocument();
+
+    (navigationService.openLookup as jest.Mock).mockClear();
+    (navigationService.openLookup as jest.Mock).mockResolvedValue([
+      { id: 'contact-1', name: 'Alex Contact', entityType: 'contact' },
+    ]);
+    fireEvent.click(select);
+
+    await screen.findByRole('button', { name: 'Clear Assigned To' });
+    expect(navigationService.openLookup).toHaveBeenCalledWith(
+      expect.objectContaining({
+        entityType: 'contact',
+        filters: [expect.objectContaining({ entityLogicalName: 'contact' })],
+      })
+    );
   });
 
   it('ADR-021: renders correctly under both light and dark Fluent themes', () => {

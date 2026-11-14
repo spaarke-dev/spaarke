@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="196" project="unified-access-control-r2">
+  <metadata>
+    <title>"Email members" emails everyone with access; Manage Access informational banners move behind a header bell</title>
+    <phase>Session 28: UAC (owner decisions 2026-11-12)</phase>
+    <status>in-progress</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Changes .ts/.tsx in the Manage Access modal and the TrackingFieldTrio PCF host; who receives an email about a record is access-adjacent (No Access must apply).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Client-only, scoped by the owner's two decisions, with the readers to reuse named.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits AccessGrantModal.tsx (tasks touching it serialize, project CLAUDE.md section 4).</parallel-reason>
+    <tags>pcf, react, fluent-ui, access-control, testing</tags>
+    <estimated-effort>1 day</estimated-effort>
+    <origin>
+      Owner, 2026-11-12, in the uac-r2 session. (1) Bug: on a project with an active Full Access contact grant and an internal user share, "Email members" said "This record has no membership contacts with an email address yet". Cause: the recipients were read only from the record's sprk_assigned* role lookups. (2) UX: Manage Access's informational banners stack at the top, take space and cannot be dismissed; move them behind a bell.
+    </origin>
+  </metadata>
+
+  <goal>
+"Email members" pre-fills the record's people as Manage Access lists them: role contacts, contacts with an active grant and internal users the record is shared with, de-duplicated by email, with anyone the No Access list walls off left out. A source that cannot be read never breaks the button and is said in the dialog. Manage Access's informational messages sit behind a bell in the header with a count; messages that block an action or report a failure stay inline.
+  </goal>
+
+  <component-justification>
+    1. Existing: the role-contact read (TrackingFieldTrio fetchCandidates), the grants read (fetchExistingGrants, GET /record-grants), the user-share read (the modal's fetchUserShares, GET /user-shares), the No Access rules (noAccess.ts buildVetoIndex / vetoFor / suppressionFor) and the org-membership read (fetchContactOrganizationMemberships). The recipient rule existed twice: index.ts resolveEmailMembersRecipients and a verbatim copy in TrackingFieldTrio.emailMembers.test.tsx.
+    2. Extension: one shared pure resolver (AccessGrantModal/emailMembers.ts) over the existing reads, injected by the host; the /user-shares mapping is moved out of the modal into userShares.ts so the modal and the resolver read shares the same way. The test harness now calls the real resolver (the copy is gone). SendEmailDialog gains one optional `notice` prop (renders nothing when unset). The bell is a small component in the modal's folder placed in SprkModal's existing headerActions slot. No new BFF route, no new query path for grants or shares, no Dataverse column.
+    3. Cost of doing nothing: the email icon tells a user the record has no members while people hold grants and shares on it, so they cannot email the people who have access; and without the notice prop a recipient list narrowed by a failed read would read as complete.
+  </component-justification>
+
+  <steps mode="directional">
+    1. Shared resolver emailMembers.ts: role contacts + active (non-expired) grant contacts + user shares; No Access veto (contact, user, organization through memberships) and the record policy's "No effect" (suppressionFor; an external user's share on a Restricted record) applied as Current Access applies them; role contacts are never policy-suppressed (owner list item a) but are walled off. Organization-wide grants are not expanded (stated). De-dup by trimmed email, case-insensitive. Result: recipients + notice | empty | failed.
+    2. userShares.ts: buildUserSharesPath + mapUserShares moved out of AccessGrantModal.fetchUserShares (behaviour unchanged).
+    3. PCF host: readRoleCandidates(strict) (fetchCandidates = soft, unchanged for the modal), strict readContactEmails / readUserEmails (chunked, GUID-checked); resolveEmailMembers passes root sources only on a grant root (project, matter, work assignment); openEmailMembers drops a late answer for a record the form left; empty-state text fixed; an all-failed error message.
+    4. SendEmailDialog `notice` prop: a warning MessageBar above the composer; unset renders exactly as before.
+    5. AccessNotesBell in the modal header: Access Permission note, parent floor (link kept), secure owner. Everything else stays inline (classification table in notes/task-196-email-members-and-access-bell.md).
+    6. Tests (fail before, pass after); bump TrackingFieldTrio to 1.0.63; npm run build:prod; jest, tsc, client-lint.
+  </steps>
+
+  <acceptance-criteria>
+    - On a grant root, the recipients are the union of role contacts, active grantees and shared users, one per email (case-insensitive).
+    - Expired grants, No Access-walled people (contact, user, organization member), grants the record's policy cancels and external users' shares on a Restricted record are not recipients.
+    - A failed grants, shares, role, email, No Access or org-membership read opens the dialog with what was read and a visible notice naming what was not.
+    - The empty state appears only when every source and check succeeded and nobody has an email; its text says "members". All sources failing shows an error, not the empty state.
+    - Not a grant root: role contacts only, as before, with no notice.
+    - The modal header has a bell (aria-label "Access notes (N)", keyboard reachable) whose popover lists the informational notes in full; the parent link works from it; the deny banner, Current Access and No Access List errors and action notices stay inline and are not counted.
+    - Negative: no new BFF route, no new grants/shares query path, no change to the modal's layout beyond the moved notes; SendEmailDialog without `notice` renders as before.
+  </acceptance-criteria>
+
+  <constraints>
+    - Root CLAUDE.md section 11 (reuse; three answers above); ADR-012 (shared code knows no table names; reads injected); ADR-021 (tokens only); ADR-022 (React 16 PCF host); MODAL-DESIGN-SYSTEM.md section 3 (headerActions before the window controls).
+    - PCF: npm run build:prod; import only through scripts/Import-SolutionScoped.ps1 (main session).
+    - No Dataverse, Entra, Key Vault or app-setting changes; no merge or deploy from this task.
+  </constraints>
+</task>
