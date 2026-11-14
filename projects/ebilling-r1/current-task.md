@@ -69,6 +69,7 @@
    - Split: 2a (lifecycle extension + reject/return), 2b (adjustment), 2c (override + blocked return), 2d (line-decision notes), 2e (from-document Correction note, 094 route + CreateInvoiceWizard). Overwrite with the latest reason; Decision Records keep the history.
 8. DONE 2026-11-14 03:45Z: `sprk_createinvoicewizard` redeployed to dev from master `cfa97d718b`. The owner's go was typed. uac-r2 got notices before and after. Recorded in `notes/053-wp2-deploy.md`.
 9. Then task 112 (deploy). The 095f hold is RELEASED: word-add-in-r1's pane, which sends `correctionNote`, is live on dev at 942b2889bf (#2815 759dc4b1f6, #2820). `Deploy-EbillingInvoiceCorrectionNoteColumn.ps1` must run on every environment beyond dev before 095f goes there.
+   - **112 also deploys `sprk_recordprocedures` for the FIRST time.** It is not on dev yet, and uac-r2's BFF deploy of 2747977f47 left it out. `Deploy-WebResourceInline.ps1` places a NEW resource only in the Default/Active solution (#1492), so 112 must also add it to SpaarkeMaster (AddSolutionComponent) with the form import. Owner go typed here.
 
 **Master now:** `cfa97d718b`. It includes 045g (#2819, merged at b76276a314). #2794 (ISS-020) is CLOSED.
 
