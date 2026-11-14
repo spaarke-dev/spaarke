@@ -30,15 +30,21 @@
 4. **When 045g is on work**:
    - reword `InvoiceApprovalLineOriginTests.LinesDetachedMovedToANewCoreAndReattached_Approve` to state the rule only. Name NO route; the repo is public.
    - Add a runbook line: a legacy invoice with no core, or with two, cannot be filed through the BFF (EB-D-231).
-5. **PR #2822 open.** ontology-r1 PASSED it at 565f82624b, with K1–K4 and no F findings. uac-r2's review is in progress.
-   - Do NOT push to the work branch while uac-r2 reviews; commit locally only.
-   - Asked ontology-r1 which test was its 1/2990 failure (it needed a file that isn't in the repo); fix or file that.
-   - K4: should a per-record Procedure override file a Decision Record? This goes to the owner.
-   - Merging needs uac-r2's pass plus the owner's go. After the merge, send the master SHA to word-add-in-r1 and spa-r4.
-6. **095g build.** The owner answered every question (EB-D-233..235; 095g notes, "Owner answers").
-   - Q2 changed to ALLOW an inactive record. uac-r2 was asked whether its approval still holds; wait for that answer before building.
-   - Q3: organization type "Law Firm", matched by `sprk_organizationtypecode`, which is empty on dev and has to be seeded (a live write). Two firms assigned on dev have no type.
-   - The build includes R1 and R2, needs two adversarial passes, and uac-r2 reviews the PR.
+5. **PR #2822 is APPROVED by both reviewers.** ontology-r1 PASSED it at 565f82624b (K1–K4, no F). uac-r2 approved it at 293d87de72, after the F4 fix (Set firm now asks Write|Append), with CI green (47 pass).
+   - The merge waits ONLY on the owner's go. The PR was CLEAN against master bd43110169.
+   - Do NOT push the work branch until #2822 merges: its head must stay 293d87de72. Local commits since then: notes, plus the 095g merge e8dcb1ef80.
+   - After the merge:
+     - tell uac-r2, which folds it into its next dev BFF deploy;
+     - send the master SHA to word-add-in-r1 and spa-r4;
+     - push work and open the next PR (095g plus notes) for ontology-r1 and uac-r2.
+   - The ontology-r1 1/2990 failure was a partial export, not a defect.
+   - K4 goes to the owner: should a per-record Procedure override file a Decision Record?
+6. **095g DONE**, merged into work locally at e8dcb1ef80.
+   - Two Opus adversarial passes; uac-r2 APPROVED at 367e5b2876.
+   - The merge resolved conflicts with the F4 fix; afterwards targeted tests 1569/0 and ArchTests 2612/0.
+   - **Not run:** `scripts/ebilling/Set-EbillingLawFirmTypeCode.ps1`. It needs the owner's go typed in THIS session, with uac-r2 notices before and after. Until it runs, both routes answer 503 on dev.
+   - Two assigned firms on dev have no type; the owner was asked whether to set them.
+   - The pane is word-add-in-r1's; the contract is in the 095g notes, "Contract for word-add-in-r1 (as built)".
 7. **095f part 2.** The owner answered (EB-D-236, 237):
    - every decision allows an optional short note, line decisions included;
    - every Correction needs a note, the from-document route and the Create Invoice wizard too.
@@ -64,7 +70,7 @@
 - **field-mapping-r1:**
   - 045g round 4 PASS.
   - #2790 is merged to master; #2819 (045g) is open.
-- **spa-r4:** task 010 review PASS-with-changes; its fix 9b10699efe re-checked PASS. Owes us its master merge SHA.
+- **spa-r4:** task 010 review PASS-with-changes; fix 9b10699efe re-checked PASS. #2818 merged to master as bd43110169 (2026-11-14 06:45Z); its dev SPA deploy follows uac-r2's BFF deploy.
 - **word-add-in-r1:**
   - It has the 095e and 095f contracts; the pane follows, using a top-level `firmName`.
   - Owed: the master SHA.

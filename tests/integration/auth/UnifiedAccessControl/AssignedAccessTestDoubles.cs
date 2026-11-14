@@ -363,9 +363,15 @@ internal static class AssignedAccessTestDoubles
             return row;
         }
 
+        /// <summary>ebilling-r1 task 095g: how many access passes began (each reads its root first); a refused request ran none.</summary>
+        public int RootReads => Volatile.Read(ref _rootReads);
+
+        private int _rootReads;
+
         internal override Task<AssignedRootSnapshot?> ReadRootAsync(
             ExternalGrantRootType rootType, Guid rootId, IReadOnlyCollection<string> fields, CancellationToken ct)
         {
+            Interlocked.Increment(ref _rootReads);
             if (FailRootRead)
                 throw new HttpRequestException("Simulated root read failure.");
             if (!Roots.TryGetValue((rootType, rootId), out var values))

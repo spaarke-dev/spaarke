@@ -2058,7 +2058,15 @@ public class InvoiceSubmissionService
     /// <see cref="IsActiveFirmAsync"/>); a firm with no name is listed under its id. Returns <see langword="null"/> when any read faulted (a
     /// fault is never "no firm"). Reads only the ids it is given, so the caller's own firms are the only ones that can come back.
     /// </summary>
-    public async Task<IReadOnlyList<(Guid FirmId, string Name)>?> ReadActiveFirmNamesAsync(IReadOnlyCollection<Guid> firmIds, CancellationToken ct)
+    public Task<IReadOnlyList<(Guid FirmId, string Name)>?> ReadActiveFirmNamesAsync(IReadOnlyCollection<Guid> firmIds, CancellationToken ct) =>
+        ReadActiveFirmNamesAsync(_entities, _logger, firmIds, ct);
+
+    /// <summary>
+    /// <see cref="ReadActiveFirmNamesAsync(IReadOnlyCollection{Guid}, CancellationToken)"/> over a given app-only entity service: the ONE
+    /// definition, also used by the firm-assign route (ebilling-r1 task 095g) for the record's firm list after its write.
+    /// </summary>
+    internal static async Task<IReadOnlyList<(Guid FirmId, string Name)>?> ReadActiveFirmNamesAsync(
+        IGenericEntityService entities, ILogger logger, IReadOnlyCollection<Guid> firmIds, CancellationToken ct)
     {
         var wanted = firmIds.Where(id => id != Guid.Empty).Distinct().ToList();
         if (wanted.Count == 0)
@@ -2078,7 +2086,7 @@ public class InvoiceSubmissionService
                 var query = new QueryExpression(OrganizationEntity) { ColumnSet = new ColumnSet("statecode", nameColumn) };
                 query.Criteria.AddCondition("sprk_organizationid", ConditionOperator.In, chunk.Cast<object>().ToArray());
                 query.Criteria.AddCondition("statecode", ConditionOperator.Equal, 0);
-                foreach (var firm in (await _entities.RetrieveMultipleAsync(query, ct)).Entities)
+                foreach (var firm in (await entities.RetrieveMultipleAsync(query, ct)).Entities)
                 {
                     var name = firm.GetAttributeValue<string>(nameColumn);
                     found[firm.Id] = string.IsNullOrWhiteSpace(name) ? firm.Id.ToString() : name;
@@ -2087,7 +2095,7 @@ public class InvoiceSubmissionService
         }
         catch (Exception ex) when (!IsCallerCancellation(ex, ct))
         {
-            _logger.LogWarning(ex, "Firm list unavailable: the firms could not be read");
+            logger.LogWarning(ex, "Firm list unavailable: the firms could not be read");
             return null;
         }
 

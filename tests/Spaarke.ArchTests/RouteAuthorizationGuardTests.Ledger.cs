@@ -483,6 +483,21 @@ public partial class RouteAuthorizationGuardTests
             + "closed; the kill switch runs after them. InvoiceAssignFirmService then asks, as the caller, AppendTo on the core record and Write on "
             + "the firm_missing Signal's subject, and the firm's link to the core record; the submission, the number and the decision id are "
             + "derived server-side."),
+        new GovernedFile("Api/Finance/CoreRecordFirmEndpoints.cs", Scope.RouteLevelGate,
+            "GET /api/finance/firms and POST /api/finance/core-records/{entityType}/{entityId}/firms (ebilling-r1 task 095g, EB-D-224) -- the "
+            + "law firms an internal user may assign, and add / replace / clear of a matter's, project's or work assignment's assigned firm. "
+            + "Step 0 on the group (RequireInternalFinanceCaller). Both routes carry AddFinanceAuthorizationFilter in the fail-closed mode "
+            + "(FinanceDenial.UniformNotFoundFailClosed: a denial is the uniform 404, a rights fault 503), and the eBilling kill switch runs "
+            + "after it. The LIST is credited by step 0 plus the caller's Read privilege on sprk_organization (prvReadsprk_Organization): it is "
+            + "internal only, firm names are not access-sensitive, and the access decision is made when a firm is assigned, so internal "
+            + "callers may see every active law firm. The ASSIGN asks, as the caller and from one snapshot, Read, Write and Append on the "
+            + "route record for an add or replace (ebilling.record.assign_firm) or Read and Write for a clear (ebilling.record.remove_firm; "
+            + "Read because every answer describes the record's firms); an unknown "
+            + "record answers no rights, the same 404. CoreRecordFirmAssignmentService then asks the caller's Read and AppendTo on the body's "
+            + "firm (the same Finance check, as the caller; unknown = denied, the same 404), refuses a Restricted, secure or limited record "
+            + "through the materializer's own organization rule, an inactive or non-law firm and a firm on the record's No Access list, "
+            + "writes only the two slot columns app-only under a row-version condition, and runs the Assigned-To materializer inline with "
+            + "the caller as grantor."),
         new GovernedFile("Api/Finance/InvoiceRejectReturnEndpoints.cs", Scope.RouteLevelGate,
             "POST /api/finance/invoices/{invoiceId}/reject and POST /api/finance/invoices/{invoiceId}/return (ebilling-r1 task 104, FR-36, "
             + "FR-11, D-43, D-122) -- an eligible approver rejects an invoice (final) or returns it to the firm. Each route carries "
@@ -1220,7 +1235,12 @@ public partial class RouteAuthorizationGuardTests
     // /api/finance/{matters|projects|workassignments}/{recordId}/procedures and .../rules-in-force. Classified by GovernedFiles
     // (RouteLevelGate: step 0 on the group, then AddFinanceAuthorizationFilter("finance.read") on the route record as the caller);
     // .RequireEbillingEnabled is already in NotAuthorizationForms.
-    private const int ExpectedEndpointFileCount = 153;
+    //
+    // 153 -> 154 (2026-11-14, ebilling-r1 task 095g, EB-D-224). Net +1: Api/Finance/CoreRecordFirmEndpoints.cs ADDED -- GET
+    // /api/finance/firms and POST /api/finance/core-records/{entityType}/{entityId}/firms. Classified by GovernedFiles (RouteLevelGate: step 0
+    // on the group, then AddFinanceAuthorizationFilter in the fail-closed mode as the caller); .RequireEbillingEnabled is already in
+    // NotAuthorizationForms.
+    private const int ExpectedEndpointFileCount = 154;
 
     // =============================================================================================
     // THE CREDITED ALLOW-LIST — the only attachment forms Rule A credits as a per-resource decision
