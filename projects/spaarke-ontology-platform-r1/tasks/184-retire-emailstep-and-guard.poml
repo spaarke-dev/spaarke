@@ -4,7 +4,7 @@
     <title>Retire the old EmailStep and dead wizard steps; source-scan guard against inline lookups and EmailStep in wizard folders</title>
     <phase>12 Create-wizard lookups and composer (UAT round 4)</phase>
     <gate>after 179, 180, 181, 182, 183</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies shared client code (.ts/.tsx) used by several wizards.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -109,6 +109,7 @@
     <criterion testable="true">All existing tests pass; tsc clean; no new ESLint errors in touched files.</criterion>
   </acceptance-criteria>
   <notes> Source: projects/spaarke-ontology-platform-r1/notes/create-wizard-lookup-composer-review.md (Fable review 2026-11-12) and UAT round 4 findings F-R4-2 / F-R4-3 (notes/uat-v4-log.md).</notes>
+  <completion>Done 2026-11-14: PR #2831 merged to master (f7174f6fc1). 10 dead files removed by git rm (recoverable from ab75d18874; no archive folder exists - recorded deviation from move-never-delete). Guard wizardLookupPatternGuard.test.ts (66 tests, 60 controls; tier-1 xrm-capability-guard job; empty baseline). Opus review: no F; guard-bypass K2 fixed. Pattern file updated on docs (02fc99d7fc). Notes: notes/task-184-notes.md. rework: fix-round-2 task 184</completion>
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
     <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist. Work in a fresh worktree from origin/master; PR to master.</protocol>
