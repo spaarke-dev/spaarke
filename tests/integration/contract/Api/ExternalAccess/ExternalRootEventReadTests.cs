@@ -104,12 +104,13 @@ public sealed class ExternalRootEventReadTests : IClassFixture<ExternalRootEvent
         var raw = await client.GetStringAsync($"/api/v1/external/{segment}/{RecordA}/events");
 
         // The wire shape is the project route's: one envelope, one row shape, the creator stamps for Delete, and no
-        // member that names another root (the extra lookups are read to withhold rows, never returned).
+        // member that names another root (the extra lookups are read to withhold rows, never returned). R4 task 008 (uac-r2 C):
+        // plus isTask, the ONLY trace of the event type on the wire (never the lookup id).
         using var doc = JsonDocument.Parse(raw);
         var row = doc.RootElement.GetProperty("value")[0];
         row.EnumerateObject().Select(p => p.Name).Should().BeEquivalentTo(
             "sprk_eventid", "sprk_name", "sprk_duedate", "sprk_status", "createdon", "_sprk_regardingproject_value",
-            "_sprk_createdbyperson_value", "_sprk_createdbycontact_value");
+            "_sprk_createdbyperson_value", "_sprk_createdbycontact_value", "isTask");
     }
 
     // =====================================================================
@@ -344,6 +345,8 @@ public sealed class ExternalRootEventReadTests : IClassFixture<ExternalRootEvent
             + "&$select=sprk_eventid,sprk_eventname,sprk_duedate,statuscode,createdon,_sprk_regardingproject_value"
             + ",_sprk_regardingmatter_value,_sprk_regardingworkassignment_value"
             + ",_sprk_createdbyperson_value,_sprk_createdbycontact_value"
+            // R4 task 008 (uac-r2 C): the event type, read server-side only to derive isTask.
+            + ",_sprk_eventtype_ref_value"
             // Task 187: the event's other parents, whose LIVE roots the rule takes in.
             + ",_sprk_regardingagreement_value,_sprk_regardinganalysis_value,_sprk_regardingbudget_value"
             + ",_sprk_regardingcommunication_value,_sprk_regardingevent_value,_sprk_regardinginvoice_value"
@@ -1014,6 +1017,9 @@ public sealed class ExternalRootEventReadTests : IClassFixture<ExternalRootEvent
             if (Fault is { } fault)
                 return Task.FromResult(new HttpResponseMessage(fault));
 
+            if (request.Method == HttpMethod.Post && request.RequestUri!.AbsolutePath.EndsWith("/sprk_events", StringComparison.Ordinal))
+                return AnswerEventCreateAsync(request, ct);
+
             // The secure-flag read: `sprk_matters?$filter=sprk_matterid eq {a} or sprk_matterid eq {b}&$select=...`. Answers the
             // seeded rows whose key is one of the ids, projected through $select, a null value omitted (as Dataverse does).
             var path = request.RequestUri!.AbsolutePath;
@@ -1136,6 +1142,40 @@ public sealed class ExternalRootEventReadTests : IClassFixture<ExternalRootEvent
             {
                 Content = new StringContent(JsonSerializer.Serialize(new { value = projected }), System.Text.Encoding.UTF8, "application/json"),
             });
+        }
+
+        /// <summary>
+        /// R4 task 008 review round 1 (K4): a <c>POST sprk_events</c> answered as Dataverse does. With
+        /// <c>Prefer: return=representation</c> it is 201 with the created row: each <c>{nav}@odata.bind: "/{set}({id})"</c> comes
+        /// back as the lookup's <c>_{nav}_value</c> id (lower-case logical name), every other column as sent. Without the header it
+        /// is 204 with no body, so a create that stopped asking for the row fails to read one.
+        /// </summary>
+        private static async Task<HttpResponseMessage> AnswerEventCreateAsync(HttpRequestMessage request, CancellationToken ct)
+        {
+            if (!request.Headers.TryGetValues("Prefer", out var prefer)
+                || !prefer.Any(p => p.Contains("return=representation", StringComparison.Ordinal)))
+                return new HttpResponseMessage(HttpStatusCode.NoContent);
+
+            const string Bind = "@odata.bind";
+            using var sent = JsonDocument.Parse(await request.Content!.ReadAsStringAsync(ct));
+            var row = new Dictionary<string, object?> { ["sprk_eventid"] = Guid.NewGuid().ToString() };
+            foreach (var column in sent.RootElement.EnumerateObject())
+            {
+                if (column.Name.EndsWith(Bind, StringComparison.Ordinal))
+                {
+                    var id = Regex.Match(column.Value.GetString() ?? "", @"\(([0-9a-fA-F-]{36})\)$").Groups[1].Value;
+                    row[$"_{column.Name[..^Bind.Length].ToLowerInvariant()}_value"] = id;
+                }
+                else
+                {
+                    row[column.Name] = column.Value.Clone();
+                }
+            }
+
+            return new HttpResponseMessage(HttpStatusCode.Created)
+            {
+                Content = new StringContent(JsonSerializer.Serialize(row), System.Text.Encoding.UTF8, "application/json"),
+            };
         }
     }
 }

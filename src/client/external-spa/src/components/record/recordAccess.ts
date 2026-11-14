@@ -3,22 +3,32 @@
  * (spaarke-SPA-external-access-platform-r4 task 006, FR-06 / FR-07 / NFR-04).
  *
  * ONE PLACE FOR:
- *   (a) the right behind each of the record's four create actions (Upload, New message, Add to-do, Add event):
- *       `createRightOf`, used by every list inside the record template, so the four follow one rule; and the list-host
- *       rule of SmartTodo, EventsCalendar and a project's DocumentLibrary, the same in and out of the template
- *       (`levelVerdictOf`, `listCreateRightOf`; D-9: the project page follows it too);
+ *   (a) the right behind each of the record's create actions (Upload, New message, Add task, Add event; each in its own
+ *       section's header since task 009): `createRightOf`, used by every list inside the record template, so they follow
+ *       one rule; and the list-host rule of EventsCalendar and a project's DocumentLibrary, the same in and out of the
+ *       template (`levelVerdictOf`, `listCreateRightOf`; D-9: the project page follows it too). Add task adds the list's
+ *       `canCreateTask` (`createTaskRightOf`, task 011);
  *   (a2) whether "Submit invoice" is offered (task 007, FR-10): `submitInvoiceRightOf`, from `/me` `firms` and the
  *       firm-records answers (read by `actions/SubmitInvoiceAction.tsx`);
- *   (b) the header's "Your access" value: `yourAccessOf`, from `recordAccessFactsOf` and the lists' rights;
+ *   (b) the header's "Your access" value: `yourAccessOf`, from `recordAccessFactsOf` (the caller's `/me` level for the
+ *       record, nothing else);
  *   (c) the one short "why" line a read-only section shows: `readOnlyNoteOf`;
- *   and the texts of (b) and (c): `RECORD_ACCESS_TEXT` (the level labels: `ACCESS_LEVEL_LABELS`).
+ *   and the texts of (b) and (c): `RECORD_ACCESS_TEXT` (the level labels: `ACCESS_LEVEL_LABELS`, the ONE label map of the
+ *   SPA since task 011 / D-11).
  *
  * WHERE THE ANSWERS COME FROM (never a guess, ADR-003 fail closed):
- *   - each list's `canCreate`: the BFF's answer of the matching POST for this caller on this record (task 002: the
- *     documents, to-do, event and message lists of projects, matters and work assignments; the message thread of every
- *     record). It is the ONLY source for a matter, a work assignment, an invoice and a service request.
- *   - a project's `/me` level, for a caller WITHOUT `writeAccessPerRecord` (the one exception): `/me` carries levels for
- *     projects only. When the project's list also answered, both must allow (on the project page too, D-9).
+ *   - each list's `canCreate` (and, for Add task, `canCreateTask`): the BFF's answer of the matching POST for this caller on
+ *     this record (task 002 / 008: the documents, event and message lists of projects, matters and work assignments; the
+ *     message thread of every record). It is the ONLY source for a matter, a work assignment, an invoice and a service
+ *     request.
+ *   - a project's `/me` level, for a caller WITHOUT `writeAccessPerRecord` (the ONE exception: a level decides writes
+ *     only there): it must also allow a create. When the project's list also answered, both must allow (on the project
+ *     page too, D-9). A matter's or work assignment's `/me` `records` level never decides a write.
+ *   - the LABEL ("Your access", task 011): `/me` `projects` for a project, `/me` `records` for a matter or work assignment
+ *     (task 008). Display only. A `writeAccessPerRecord` caller is the composed READ view (uac-r2 A2), which would
+ *     contradict their working create actions, so the line is not shown for them at all and their actions keep following
+ *     the lists' `canCreate` / `canCreateTask`. A record `/me` has no entry for (an invoice, a service request, a
+ *     document, or a matter the BFF did not list) shows no level.
  * Unknown (the list still loading, failed, or silent; `/me` not read) is `null`: the action is hidden and nothing is said.
  *
  * The client decides only what is SHOWN. It never sends a level, and every action is still checked by the server
@@ -31,10 +41,10 @@ import { canCreate as levelCanCreate, mapAccessLevelString } from '../../hooks/u
 import { AccessLevel } from '../../types';
 import type { RecordHostAction, RecordSectionId, RecordToolbarActionId } from './recordTemplate.types';
 
-/** The four create actions a record's lists offer to the toolbar (task 004). */
-export type RecordCreateActionId = Extract<RecordToolbarActionId, 'upload' | 'newMessage' | 'addTodo' | 'addEvent'>;
+/** The create actions a record's lists offer to the template (task 004; in their sections' headers since task 009). */
+export type RecordCreateActionId = Extract<RecordToolbarActionId, 'upload' | 'newMessage' | 'addTask' | 'addEvent'>;
 
-export const RECORD_CREATE_ACTIONS: readonly RecordCreateActionId[] = ['upload', 'newMessage', 'addTodo', 'addEvent'];
+export const RECORD_CREATE_ACTIONS: readonly RecordCreateActionId[] = ['upload', 'newMessage', 'addTask', 'addEvent'];
 
 /**
  * A right a section reports WITHOUT a toolbar action (task 006 fix round 1): the invoice Files list's own Upload, which
@@ -56,18 +66,14 @@ interface ReadOnlyLines {
   /** The invoice's Files card. */
   files: string;
   messages: string;
-  /** Tasks & events, both lists read-only. */
-  tasksEvents: string;
-  /** Tasks & events, only the to-do list read-only. */
-  todos: string;
-  /** Tasks & events, only the event list read-only. */
+  /** Tasks & events: its event list is read-only. */
   events: string;
 }
 
 /**
- * The label of each `/me` access level, as the SPA shows it. Exported so the other level-label copies can move here
- * (task 006 fix round 1: `ProjectPage`, `ContactsOrganizations`, `OutsideCounselDashboard` and `InviteUserDialog` still
- * hold their own; that consolidation is filed separately).
+ * The label of each access level, as Manage Access shows it ("View Only" / "Collaborate" / "Full Access"; owner
+ * 2026-11-13). The ONE label map of the SPA (task 011, D-11 #2718): `ProjectPage`, `ContactsOrganizations`,
+ * `OutsideCounselDashboard` and `InviteUserDialog` read it too.
  */
 export const ACCESS_LEVEL_LABELS: Readonly<Record<AccessLevel, string>> = {
   [AccessLevel.ViewOnly]: 'View Only',
@@ -76,39 +82,31 @@ export const ACCESS_LEVEL_LABELS: Readonly<Record<AccessLevel, string>> = {
 };
 
 export const RECORD_ACCESS_TEXT: {
-  /** "Your access" for a project, from its `/me` level (the labels the rest of the SPA uses). */
+  /** "Your access" for a record, from its `/me` level (the labels the rest of the SPA uses). */
   level: Readonly<Record<AccessLevel, string>>;
-  canContribute: string;
-  readOnly: string;
   /**
    * For a caller whose deciding `/me` level is KNOWN to be View Only (a project): the line names the level the action
    * needs. Only then is the level known to be the reason.
    */
   grantLines: ReadOnlyLines;
   /**
-   * Every other read-only answer (a Collaborate / Full Access caller refused by a role ceiling, a matter, a work
-   * assignment, an invoice, a service request, a workforce contact, a `writeAccessPerRecord` caller): the list said only
+   * Every other read-only answer (a Collaborate / Full Access caller refused by a role ceiling, a record `/me` has no
+   * level for - an invoice, a service request -, a workforce contact, a `writeAccessPerRecord` caller): the list said only
    * `false`, not why, so no grant level is named.
    */
   neutralLines: ReadOnlyLines;
 } = {
   level: ACCESS_LEVEL_LABELS,
-  canContribute: 'Can contribute',
-  readOnly: 'Read only',
   grantLines: {
     documents: 'You can view these documents. Uploading needs Collaborate access.',
     files: 'You can view these files. Uploading needs Collaborate access.',
     messages: 'You can read this thread. Posting needs Collaborate access.',
-    tasksEvents: 'You can view these tasks and events. Adding them needs Collaborate access.',
-    todos: 'You can view these tasks. Adding one needs Collaborate access.',
     events: 'You can view these events. Adding one needs Collaborate access.',
   },
   neutralLines: {
     documents: 'You can view these documents, but not upload to this record.',
     files: 'You can view these files, but not upload to this record.',
     messages: 'You can read this thread, but not post to it.',
-    tasksEvents: 'You can view these tasks and events, but not add to them.',
-    todos: 'You can view these tasks, but not add one.',
     events: 'You can view these events, but not add one.',
   },
 };
@@ -123,8 +121,9 @@ export interface CreateRightInput {
   /** The list's `canCreate`; `null` / `undefined` when it said nothing. */
   listCanCreate: boolean | null | undefined;
   /**
-   * What the caller's `/me` level says, for a record `/me` gives a level for (a project) and a caller WITHOUT
-   * `writeAccessPerRecord`; `undefined` otherwise (the list alone decides).
+   * What the caller's `/me` level says. Set ONLY for a project caller WITHOUT `writeAccessPerRecord` (the one case where
+   * a level decides a write); `undefined` for every other record and caller (the list alone decides; a matter's or work
+   * assignment's level is display only).
    */
   levelAllows?: boolean;
 }
@@ -152,9 +151,9 @@ export function levelVerdictOf(
 }
 
 /**
- * The create rule of a list that owns a create dialog (SmartTodo, EventsCalendar, DocumentLibrary's Upload on a project),
+ * The create rule of a list that owns a create dialog (EventsCalendar, DocumentLibrary's Upload on a project),
  * in one place and the same in and out of the record template:
- *   - `right`: the shared rule (`createRightOf`), reported with the toolbar offer;
+ *   - `right`: the shared rule (`createRightOf`), reported with the action offer;
  *   - `allowed`: whether the list offers its create at all: only a known `true`.
  * D-9 (#2716): the project page used to offer on the `/me` level alone (`levelAllows ?? …`), so a level-decided caller
  * whose list answered `canCreate: false` (a workforce role ceiling the level does not show) was offered a create the POST
@@ -163,6 +162,18 @@ export function levelVerdictOf(
 export function listCreateRightOf(input: CreateRightInput): { right: CreateRight; allowed: boolean } {
   const right = createRightOf(input);
   return { right, allowed: right === true };
+}
+
+/**
+ * The right behind "Add task" (task 011): the event right (`createRightOf`: the list's `canCreate`, and the `/me` level
+ * where it decides) AND the list's own `canCreateTask` (the BFF's answer for the Task type, task 008). Only an explicit
+ * `true` from both is a yes: a list that says nothing about tasks (an older BFF, a failed read) is unknown, never "can",
+ * so the action stays hidden (hide, don't guess). `false` from either is a no; an unknown event right is unknown.
+ */
+export function createTaskRightOf(eventRight: CreateRight, listCanCreateTask: boolean | null | undefined): CreateRight {
+  if (eventRight === false) return false;
+  if (eventRight === null) return null;
+  return typeof listCanCreateTask === 'boolean' ? listCanCreateTask : null;
 }
 
 /** Strict `/me` label → level: anything else is not an answer (unlike `mapAccessLevelString`, which defaults to ViewOnly). */
@@ -195,18 +206,38 @@ export function decidingLevelOf(
   return mapAccessLevelString(entry?.accessLevel);
 }
 
+/** `/me` `records[].recordType` of each route root that has an entry there (task 008): matters and work assignments. */
+const RECORD_TYPE_OF_ROOT: Readonly<Record<string, string>> = {
+  matters: 'matter',
+  workassignments: 'workassignment',
+};
+
 /**
- * The caller's `/me` level for this record as an ANSWER, for the header's "Your access": a project, a caller WITHOUT
- * `writeAccessPerRecord` (whose level says only what they may see), and a recognised label. `undefined` for every other
- * record, every per-record caller, while `/me` is unknown and when the project has no entry (nothing is guessed).
+ * The caller's `/me` level for this record as an ANSWER, for the header's "Your access" (task 011): a project's `/me`
+ * `projects` entry, or a matter's / work assignment's `/me` `records` entry (task 008), with a recognised label.
+ * `undefined` for every other record (an invoice, a service request, a document: `/me` has no level for them), while
+ * `/me` is unknown, and when the record has no entry (nothing is guessed).
+ *
+ * DISPLAY ONLY (uac-r2 A2). A level decides a write only for a project caller without `writeAccessPerRecord`
+ * (`decidingLevelOf`); a matter's or work assignment's `records` level never does. For a `writeAccessPerRecord` caller
+ * the level is the composed READ view: `yourAccessOf` does not show it, `decidingLevelOf` answers `undefined`, and their
+ * create actions keep following the lists' `canCreate` / `canCreateTask`.
  */
 export function recordLevelOf(
   root: string | undefined,
   recordId: string,
   callerContext: ExternalUserContextResponse | null
 ): AccessLevel | undefined {
-  if (root !== 'projects' || !callerContext || callerContext.writeAccessPerRecord === true) return undefined;
-  const entry = callerContext.projects.find(p => p.projectId.toLowerCase() === recordId.toLowerCase());
+  if (!root || !callerContext) return undefined;
+  const wanted = recordId.toLowerCase();
+  if (root === 'projects') {
+    return levelOf(callerContext.projects.find(p => p.projectId.toLowerCase() === wanted)?.accessLevel);
+  }
+  const recordType = Object.prototype.hasOwnProperty.call(RECORD_TYPE_OF_ROOT, root)
+    ? RECORD_TYPE_OF_ROOT[root]
+    : undefined;
+  if (!recordType || !Array.isArray(callerContext.records)) return undefined;
+  const entry = callerContext.records.find(r => r.recordType === recordType && r.recordId.toLowerCase() === wanted);
   return levelOf(entry?.accessLevel);
 }
 
@@ -214,10 +245,10 @@ export function recordLevelOf(
 export interface RecordAccessFacts {
   /** `/me`, or null while it is unknown (not read, or its read failed). */
   callerContext: ExternalUserContextResponse | null;
-  /** The caller's `/me` level for this record as an answer (`recordLevelOf`); undefined when there is none. */
+  /** The caller's `/me` level for this record as an answer (`recordLevelOf`), to display; undefined when there is none. */
   level: AccessLevel | undefined;
   /**
-   * The level that gates Upload, Add to-do and Add event is a fail-safe GUESS, not an answer: a level-decided project
+   * The level that gates Upload, Add task and Add event is a fail-safe GUESS, not an answer: a level-decided project
    * caller whose `/me` has no (recognisable) entry for the project. `decidingLevelOf` then hides those actions as View
    * Only, but what the caller may do there is unknown, so nothing is said about it (FR-07: unknown shows nothing).
    */
@@ -236,7 +267,7 @@ export function recordAccessFactsOf(
 }
 
 /** The rights a project caller's `/me` level gates (the message thread is not one: it follows the thread alone). */
-const LEVEL_GATED_RIGHTS: readonly (RecordCreateActionId | RecordSectionRightId)[] = ['upload', 'addTodo', 'addEvent'];
+const LEVEL_GATED_RIGHTS: readonly (RecordCreateActionId | RecordSectionRightId)[] = ['upload', 'addTask', 'addEvent'];
 
 // ---------------------------------------------------------------------------
 // What the template knows: the rights the record's lists reported
@@ -245,23 +276,23 @@ const LEVEL_GATED_RIGHTS: readonly (RecordCreateActionId | RecordSectionRightId)
 export type RecordCreateRights = Readonly<Partial<Record<RecordCreateActionId | RecordSectionRightId, CreateRight>>>;
 
 /**
- * The rights the record's lists reported: with their toolbar offers (only the create actions this record's toolbar
- * lists; a list that has not reported yet is unknown), plus the rights sections reported without a toolbar action
- * (`sectionRights`, e.g. the invoice Files list's Upload).
+ * The rights the record's lists reported: with their action offers (only the create actions this record's config lists,
+ * in its toolbar or a section's header; a list that has not reported yet is unknown), plus the rights sections reported
+ * without an action of the template's (`sectionRights`, e.g. the invoice Files list's Upload).
  */
 export function createRightsOf(
-  toolbar: readonly RecordToolbarActionId[],
+  actionIds: readonly RecordToolbarActionId[],
   offers: Partial<Record<RecordToolbarActionId, RecordHostAction>>,
   sectionRights: Partial<Record<RecordSectionRightId, CreateRight>> = {}
 ): RecordCreateRights {
   const rights: Partial<Record<RecordCreateActionId | RecordSectionRightId, CreateRight>> = { ...sectionRights };
   for (const id of RECORD_CREATE_ACTIONS) {
-    if (toolbar.includes(id)) rights[id] = offers[id]?.right ?? null;
+    if (actionIds.includes(id)) rights[id] = offers[id]?.right ?? null;
   }
   return rights;
 }
 
-/** Whether the toolbar shows a create action: its list offers it AND reported the right as `true` (never a guess). */
+/** Whether a create action is shown: its list offers it AND reported the right as `true` (never a guess). */
 export function isCreateActionOffered(offer: RecordHostAction | undefined): boolean {
   return offer?.visible === true && offer.right === true;
 }
@@ -334,22 +365,17 @@ export function submitInvoiceRightOf(input: {
 // ---------------------------------------------------------------------------
 
 /**
- * The header's "Your access" value (FR-07), or `null` to show nothing: a project's `/me` level label for a level-decided
- * caller; otherwise "Can contribute" once any of the record's lists answered `canCreate: true`, and "Read only" once
- * every one of them answered and all said no. Unknown (`/me` not read, a list not loaded or failed, a project level that
- * is only a fail-safe guess) shows nothing.
+ * The header's "Your access" value (FR-07), or `null` to show nothing: the caller's `/me` level for this record, as the
+ * Manage Access label ("View Only" / "Collaborate" / "Full Access"; task 011, owner 2026-11-13). Nothing is inferred from
+ * the lists: a record `/me` has no level for (an invoice, a service request, a document, a matter or work assignment the
+ * BFF did not list), `/me` not read, or a project level that is only a fail-safe guess, shows nothing. So does a
+ * `writeAccessPerRecord` caller (review round 1): their level is the composed READ view, and "View Only" beside create
+ * actions that work would contradict itself. The lists' rights decide the actions, never this label.
  */
-export function yourAccessOf(
-  { callerContext, level, levelGuessed }: RecordAccessFacts,
-  rights: RecordCreateRights
-): string | null {
-  if (!callerContext || levelGuessed) return null;
-  if (level !== undefined) return RECORD_ACCESS_TEXT.level[level];
-  const answers = Object.values(rights);
-  if (answers.length === 0) return null;
-  if (answers.some(a => a === true)) return RECORD_ACCESS_TEXT.canContribute;
-  if (answers.every(a => a === false)) return RECORD_ACCESS_TEXT.readOnly;
-  return null;
+export function yourAccessOf({ callerContext, level, levelGuessed }: RecordAccessFacts): string | null {
+  if (!callerContext || levelGuessed || level === undefined) return null;
+  if (callerContext.writeAccessPerRecord === true) return null;
+  return RECORD_ACCESS_TEXT.level[level];
 }
 
 // ---------------------------------------------------------------------------
@@ -360,7 +386,8 @@ export function yourAccessOf(
  * The one line saying why a section is read-only (FR-07), or `null` when it is not, or not known to be. Only a section
  * that owns a create right has one (Documents, Files, Messages, Tasks & events). The line names a grant level only when
  * the deciding `/me` level is KNOWN to be View Only; every other "no" (a ceiling, a per-record caller, a record `/me`
- * has no level for) gets the neutral wording. A right decided by a guessed level (`levelGuessed`) is not known, so it
+ * has no level for) gets the neutral wording. (Task 011: a level decides only for a project caller without
+ * `writeAccessPerRecord`; a per-record caller's level is the read view, so it never triggers the grant wording.) A right decided by a guessed level (`levelGuessed`) is not known, so it
  * gets no line.
  */
 export function readOnlyNoteOf(
@@ -369,7 +396,13 @@ export function readOnlyNoteOf(
   facts: RecordAccessFacts
 ): string | null {
   if (!facts.callerContext) return null;
-  const lines = facts.level === AccessLevel.ViewOnly ? RECORD_ACCESS_TEXT.grantLines : RECORD_ACCESS_TEXT.neutralLines;
+  // The grant wording needs the level to be THE reason: a View Only level that decides (a caller without
+  // `writeAccessPerRecord`). For a per-record caller the label is only the read view (A2): neutral wording.
+  const levelDecides = facts.callerContext.writeAccessPerRecord !== true;
+  const lines =
+    facts.level === AccessLevel.ViewOnly && levelDecides
+      ? RECORD_ACCESS_TEXT.grantLines
+      : RECORD_ACCESS_TEXT.neutralLines;
   const known: RecordCreateRights = facts.levelGuessed
     ? Object.fromEntries(
         Object.entries(rights).filter(([id]) => !(LEVEL_GATED_RIGHTS as readonly string[]).includes(id))
@@ -382,14 +415,8 @@ export function readOnlyNoteOf(
       return known.filesUpload === false ? lines.files : null;
     case 'messages':
       return known.newMessage === false ? lines.messages : null;
-    case 'tasksEvents': {
-      const todos = known.addTodo === false;
-      const events = known.addEvent === false;
-      if (todos && events) return lines.tasksEvents;
-      if (todos) return lines.todos;
-      if (events) return lines.events;
-      return null;
-    }
+    case 'tasksEvents':
+      return known.addEvent === false ? lines.events : null;
     default:
       return null;
   }

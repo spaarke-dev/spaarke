@@ -173,6 +173,20 @@ export interface ExternalUserContextResponse {
     /** Access level label (e.g., "ViewOnly", "Collaborate", "FullAccess") */
     accessLevel: string;
   }>;
+  /**
+   * The caller's access level on each MATTER and WORK ASSIGNMENT they can read (R4 task 008, uac-r2 condition A). Same
+   * display strings as `projects`. For the header's "Your access" only: for a `writeAccessPerRecord` caller it is the
+   * composed READ view and never decides a write action. A record absent here has no level to show. Absent (a BFF that
+   * predates it) is "not said", never a level.
+   */
+  records?: Array<{
+    /** `"matter"` or `"workassignment"`. */
+    recordType: string;
+    /** The record's Dataverse id. */
+    recordId: string;
+    /** "ViewOnly", "Collaborate" or "FullAccess". */
+    accessLevel: string;
+  }>;
 }
 
 // Token acquisition is delegated to msal-auth.ts (acquireActiveBffToken — host-selected strategy)

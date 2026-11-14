@@ -46,7 +46,8 @@ export interface DecisionParameter {
   options?: DecisionOption[] | null;
   optionsSource?: string | null;
   /** Task 167 (D-193): the server's starting value (a Choice's option value), shown as a prefilled default and never a choice. Task 168
-   * (D-194): a Boolean's fixed default ("true": Assign Task's Send email notification starts ticked). */
+   * (D-194): a Boolean's fixed default ("true": Assign Task's Send email notification starts ticked). Task 192 (D-224): a Text or
+   * TextArea's starting value (the budget inquiry's standard Subject and Message); it takes the place of the client's generic template. */
   defaultValue?: string | null;
   /** Task 167 (D-193): the code of a Date parameter of the same step this one must not be earlier than (End date after Start date). */
   notBefore?: string | null;

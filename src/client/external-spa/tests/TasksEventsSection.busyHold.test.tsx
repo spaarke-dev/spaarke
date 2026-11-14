@@ -1,100 +1,97 @@
 /**
- * R4 task 004, fix round 1 (F4) - the Tasks & events section holds the record per list, not per section.
+ * R4 task 004 fix round 1 (F4), revised by tasks 009 and 011 - the Tasks & events section holds the record while a create
+ * in its list is in flight.
  *
- * `EventsCalendar` and `SmartTodo` each report a create in flight through `onBusyChange`, and the template keeps ONE busy
- * flag per section. If both lists passed it straight through, one list going idle (its create dialog unmounting, a list
- * remounting) would clear the flag while the other list's post was still in flight, releasing paging, Close and Refresh
- * early. The section therefore reports "busy" while EITHER list is busy.
+ * Task 011 (owner 2026-11-12): a Task is an event of type Task, so the section shows ONE list (`EventsCalendar`) in two
+ * groups, with two create dialogs (Add task, Add event). The section hands the template's `onBusyChange` to that list
+ * unchanged; the list reports "busy" while EITHER dialog is posting and never lets one going idle release the other's
+ * hold. That combining rule is `createBusyReporters` (exported by `EventsCalendar`), and its overlap cases are tested
+ * in `RecordTemplateAccess.test.tsx` ("createBusyReporters: the host is busy while EITHER dialog is posting"); one
+ * dialog's hold and release through the real list is tested next to it. This file pins the seam: what the section hands
+ * the list.
  *
- * What runs for real: `TasksEventsSection`. Substituted: the two lists, by stand-ins that expose the `onBusyChange` prop the
- * section hands them (the lists' own reporting is covered in `RecordTemplateChildDialogs`).
+ * What runs for real: `TasksEventsSection`. Substituted: `EventsCalendar`, by a stand-in that exposes the props the
+ * section hands it.
  */
 import * as React from 'react';
 import { describe, expect, it, vi } from 'vitest';
-import { act, render } from '@testing-library/react';
+import { act, render, screen } from '@testing-library/react';
 
 const lists = vi.hoisted(() => ({
   events: undefined as undefined | ((busy: boolean) => void),
-  todos: undefined as undefined | ((busy: boolean) => void),
+  props: undefined as undefined | Record<string, unknown>,
+  mounted: 0,
 }));
 
 vi.mock('../src/components/EventsCalendar', () => ({
-  EventsCalendar: (props: { onBusyChange?: (busy: boolean) => void }) => {
+  EventsCalendar: (props: { onBusyChange?: (busy: boolean) => void } & Record<string, unknown>) => {
     lists.events = props.onBusyChange;
-    return null;
-  },
-}));
-vi.mock('../src/components/SmartTodo', () => ({
-  SmartTodo: (props: { onBusyChange?: (busy: boolean) => void }) => {
-    lists.todos = props.onBusyChange;
-    return null;
+    lists.props = props;
+    lists.mounted += 1;
+    return <div data-testid="events-list-stand-in" />;
   },
 }));
 
 import { TasksEventsSection } from '../src/components/record/sections/TasksEventsSection';
 import type { RecordSectionContext } from '../src/components/record/recordTemplate.types';
 
-function renderSection(onBusyChange: (busy: boolean) => void): ReturnType<typeof render> {
+function renderSection(
+  onBusyChange: (busy: boolean) => void,
+  offerAction: RecordSectionContext['offerAction'] = () => undefined
+): ReturnType<typeof render> {
   const context = {
     detail: { entity: 'sprk_matter' },
     recordId: '00000000-0000-4000-8000-000000000001',
     caller: null,
+    callerContext: null,
     refreshSignal: 0,
     onBusyChange,
-    offerAction: () => undefined,
+    offerAction,
+    headerActions: [],
   } as unknown as RecordSectionContext;
   return render(<TasksEventsSection {...context} />);
 }
 
-describe('Tasks & events: one hold per list', () => {
-  it("one list going idle does not release the other list's in-flight hold", () => {
+describe('Tasks & events: the list holds the record', () => {
+  it("the list's create in flight holds the record until it settles", () => {
     const onBusyChange = vi.fn();
     renderSection(onBusyChange);
     expect(lists.events).toBeTypeOf('function');
-    expect(lists.todos).toBeTypeOf('function');
-
-    act(() => lists.todos!(true));
-    expect(onBusyChange).toHaveBeenLastCalledWith(true);
-
-    // The events list reports idle (its create dialog unmounting): the to-do post is still in flight.
-    act(() => lists.events!(false));
-    expect(onBusyChange).toHaveBeenLastCalledWith(true);
-    expect(onBusyChange).not.toHaveBeenCalledWith(false);
-
-    act(() => lists.todos!(false));
-    expect(onBusyChange).toHaveBeenLastCalledWith(false);
-  });
-
-  it('is symmetric: the to-do list going idle does not release an events post', () => {
-    const onBusyChange = vi.fn();
-    renderSection(onBusyChange);
 
     act(() => lists.events!(true));
-    act(() => lists.todos!(false));
     expect(onBusyChange).toHaveBeenLastCalledWith(true);
-    expect(onBusyChange).not.toHaveBeenCalledWith(false);
 
     act(() => lists.events!(false));
     expect(onBusyChange).toHaveBeenLastCalledWith(false);
   });
 
-  it('both lists busy: the hold lasts until the last one settles', () => {
-    const onBusyChange = vi.fn();
-    renderSection(onBusyChange);
-
-    act(() => lists.events!(true));
-    act(() => lists.todos!(true));
-    act(() => lists.events!(false));
-    expect(onBusyChange).toHaveBeenLastCalledWith(true);
-    act(() => lists.todos!(false));
-    expect(onBusyChange).toHaveBeenLastCalledWith(false);
+  it('renders one list, inside the Tasks & events card', () => {
+    lists.mounted = 0;
+    renderSection(vi.fn());
+    const card = screen.getByTestId('record-section-tasksEvents');
+    expect(card.querySelector('[data-testid="record-detail-events"]')).not.toBeNull();
+    expect(screen.getAllByTestId('events-list-stand-in')).toHaveLength(1);
   });
 
-  it('control: with no list busy the section reports idle, never busy', () => {
-    const onBusyChange = vi.fn();
-    renderSection(onBusyChange);
-    act(() => lists.events!(false));
-    act(() => lists.todos!(false));
-    expect(onBusyChange).not.toHaveBeenCalledWith(true);
+  it('hands the list one reporter per create action: addEvent and addTask, each its own', () => {
+    const reporters = new Map<string, () => void>();
+    const offerAction: RecordSectionContext['offerAction'] = id => {
+      const reporter = (): void => undefined;
+      reporters.set(id, reporter);
+      return reporter;
+    };
+    renderSection(vi.fn(), offerAction);
+
+    expect([...reporters.keys()].sort()).toEqual(['addEvent', 'addTask']);
+    expect(lists.props?.onCreateActionChange).toBe(reporters.get('addEvent'));
+    expect(lists.props?.onCreateTaskActionChange).toBe(reporters.get('addTask'));
+    expect(lists.props?.onCreateTaskActionChange).not.toBe(lists.props?.onCreateActionChange);
+  });
+
+  it('a record whose config lists no Add task gets no task reporter (the list then offers no task button of its own)', () => {
+    renderSection(vi.fn(), id => (id === 'addEvent' ? () => undefined : undefined));
+
+    expect(lists.props?.onCreateActionChange).toBeTypeOf('function');
+    expect(lists.props?.onCreateTaskActionChange).toBeUndefined();
   });
 });

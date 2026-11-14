@@ -493,6 +493,22 @@ public static class ChildRecordEndpoints
     };
 
     /// <summary>
+    /// #2799 (uac-r2): a locked invoice-family column the caller's update wrote, in this route's contract. Denied (no Write or
+    /// Append on the row, no AppendTo on a record it names, or either does not exist — one answer) is the route's 403; an
+    /// unanswered check is the invoice-family "could not be read" answer; nothing is written on either. Partly saved (K-1) is a
+    /// 500 with fixed text.
+    /// </summary>
+    internal static IResult LockedWriteRefused(InvoiceFamilyLockedWrite.CallerPatchKind kind, string entity) => kind switch
+    {
+        InvoiceFamilyLockedWrite.CallerPatchKind.Denied => Problem(StatusCodes.Status403Forbidden, DeniedCode,
+            $"The {Noun(entity)} was not saved: you do not have permission to change what it is filed under."),
+        InvoiceFamilyLockedWrite.CallerPatchKind.PartlySaved => Problem(StatusCodes.Status500InternalServerError,
+            InvoiceFamilyLockedWrite.LockedWritePartlySavedCode, InvoiceFamilyLockedWrite.PartlySavedMessage),
+        _ => Problem(StatusCodes.Status500InternalServerError, InvoiceFamilyCoreRecordGuard.ReadFailedCode,
+            $"The {Noun(entity)} was not saved: whether you may change what it is filed under could not be checked; nothing was written."),
+    };
+
+    /// <summary>
     /// A WhoAmI failure that means the caller has no Dataverse identity — Dataverse refusing them, no user context on the
     /// request, or no On-Behalf-Of token for them — the codes <c>SignalCoreRecordAccess</c> reads as unresolved (D-29).
     /// Throttling, a 5xx or a transport fault says nothing about who they are and stays their own error.
@@ -816,13 +832,17 @@ public static class ChildRecordEndpoints
 
         mapped = mapped with { Item = prepared.Item };
 
+        // #2799 (uac-r2): the application writer of a locked invoice-family column (checked as the caller first). Absent, a write
+        // of one is unanswered and nothing is written (fail closed); a write without one never uses it.
+        var lockedFields = httpContext.RequestServices?.GetService<IFieldMappingDataverseService>();
         OwnedChildWrite.RefileOutcome outcome;
         try
         {
             outcome = await OwnedChildWrite.RefileAsync(
                 user, ownership, entity, id, entitySet, primaryId, mapped.Item!, CallerObjectId(httpContext), ct, appOnlyEntities,
                 // fm task 054 piece 3b: the step that returns an unfiled Direct message to the Direct team.
-                httpContext.RequestServices?.GetService<Sprk.Bff.Api.Services.Communication.Access.DirectMessageOwnerStep>())
+                httpContext.RequestServices?.GetService<Sprk.Bff.Api.Services.Communication.Access.DirectMessageOwnerStep>(),
+                lockedFields, logger, httpContext.TraceIdentifier)
                 .ConfigureAwait(false);
         }
         catch (RecordOwnerUnsettledException)
@@ -836,10 +856,15 @@ public static class ChildRecordEndpoints
 
         if (outcome.NotARefile)
         {
-            // An update that changes nothing the row is filed under: the caller's own PATCH, authorized by Dataverse.
-            var patch = await user.PatchAsync($"{entitySet}({id:D})", mapped.Item!.JsonBody, ct).ConfigureAwait(false);
-            if (!patch.IsSuccess)
-                return CallerFailure(patch, entity);
+            // An update that changes nothing the row is filed under: the caller's own PATCH, authorized by Dataverse. #2799: a
+            // locked invoice-family column in it is checked as the caller and written as the app (a body without one: as before).
+            var patch = await InvoiceFamilyLockedWrite.PatchAsCallerAsync(
+                    user, lockedFields, entity, entitySet, id, mapped.Item!.JsonBody, logger, httpContext.TraceIdentifier, ct)
+                .ConfigureAwait(false);
+            if (patch.Kind == InvoiceFamilyLockedWrite.CallerPatchKind.ClientFailure)
+                return CallerFailure(patch.ClientFailure!, entity);
+            if (patch.Kind != InvoiceFamilyLockedWrite.CallerPatchKind.Written)
+                return LockedWriteRefused(patch.Kind, entity);
         }
         else if (!outcome.Written)
         {
@@ -854,6 +879,7 @@ public static class ChildRecordEndpoints
                     $"The {Noun(entity)} was not saved: {pairInvalid}"),
                 { ParentUnavailable: true } => ParentNotFound(entity),
                 { InvoiceFamilyRefusal: { } family } => InvoiceFamilyRefused(family, entity),
+                { LockedWrite: { } locked } => LockedWriteRefused(locked, entity),
                 { Denied: { } denied } => Problem(StatusCodes.Status403Forbidden, DeniedCode, denied),
                 { Forbidden: { } forbidden } => ProblemDetailsHelper.RecordOwnerRefused(forbidden, Noun(entity), httpContext.TraceIdentifier),
                 { OwnerRefusal: { } refusal } => ProblemDetailsHelper.RecordOwnerRefused(refusal, Noun(entity), httpContext.TraceIdentifier),

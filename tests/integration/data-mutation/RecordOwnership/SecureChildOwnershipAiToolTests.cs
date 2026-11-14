@@ -69,10 +69,37 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
     /// <summary>Task 037: called with every app-only create as it lands (before the route's post-create steps run).</summary>
     private Action<string, Guid, Dictionary<string, object?>>? _onAppCreate;
 
+    /// <summary>
+    /// #2799 (uac-r2): every application write of locked invoice-family columns (checked as the caller first), as sent: the
+    /// table, the row and the fields. Landed on the share world like the caller's PATCH, so the resolver reads the moved row.
+    /// </summary>
+    private readonly List<(string Table, Guid Id, Dictionary<string, object?> Fields)> _appLockedWrites = new();
+
+    /// <summary>#2799: the host's application writer (the route's request services; the chat tool's scope).</summary>
+    private IServiceProvider LockedWriteServices() =>
+        Microsoft.Extensions.DependencyInjection.ServiceCollectionContainerBuilderExtensions.BuildServiceProvider(
+            Microsoft.Extensions.DependencyInjection.ServiceCollectionServiceExtensions.AddSingleton(
+                new Microsoft.Extensions.DependencyInjection.ServiceCollection(), _appOnly.Object));
+
     public SecureChildOwnershipAiToolTests()
     {
         // #2143: a PATCH Dataverse accepted is on the row when the resolver reads it after the change.
         _user.OnPatch = _world.ApplyPatch;
+        // #2799 review 2 (R2-1): the caller's own state, read app-only before a locked column is written — enabled, Read-Write
+        // unless a test says (_callerState).
+        _appOnly
+            .Setup(a => a.RetrieveRecordFieldsAsync("systemuser", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .Returns(() => _callerState());
+        _appOnly
+            .Setup(a => a.UpdateExistingRecordFieldsAsync(
+                It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), null, It.IsAny<CancellationToken>()))
+            .Callback<string, Guid, Dictionary<string, object?>, Guid?, CancellationToken>((t, id, f, _, _) =>
+            {
+                _appLockedWrites.Add((t, id, new Dictionary<string, object?>(f)));
+                _world.ApplyPatch(
+                    $"{Sprk.Bff.Api.Services.Dataverse.InvoiceFamilyLockedWrite.EntitySets[t]}({id:D})", JsonSerializer.Serialize(f));
+            })
+            .Returns(Task.CompletedTask);
         _appOnly
             .Setup(a => a.UpdateRecordFieldsAsync(
                 It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<CancellationToken>(), null))
@@ -669,6 +696,8 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
         new DataverseUpdateRecordHandler(
                 _user, new Sprk.Bff.Api.Tests.Integration.DataMutation.CoreAncestorStamping.StampWorld().AfterWriteRestamp,
                 CreateLogger<DataverseUpdateRecordHandler>(), _world.Resolver(), Sprk.Bff.Api.Tests.TestInfrastructure.SecureRootFilingGateFixtures.NothingSecure(),
+                scopes: Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions
+                    .GetRequiredService<Microsoft.Extensions.DependencyInjection.IServiceScopeFactory>(LockedWriteServices()),
                 appOnlyEntities: AppEntities())
             .ExecuteChatAsync(
                 BuildChatInvocationContext(toolArgumentsJson: JsonSerializer.Serialize(new
