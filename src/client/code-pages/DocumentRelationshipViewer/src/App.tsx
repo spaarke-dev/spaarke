@@ -68,6 +68,7 @@ import {
   DocumentEmailWizard,
   type IDocumentEmailWizardItem,
 } from '@spaarke/ui-components/components/DocumentEmailWizard';
+import { createXrmEmailComposeHandlers } from '@spaarke/ui-components/components/EmailComposer';
 import type { IDataService } from '@spaarke/ui-components/types/serviceInterfaces';
 import { getXrm } from '@spaarke/ui-components/utils/xrmContext';
 
@@ -441,6 +442,13 @@ export const App: React.FC<AppProps> = ({ params, isDark = false, apiBaseUrl }) 
     ]);
     setEmailWizardOpen(true);
   }, [previewDocumentId, previewDocumentName]);
+
+  // Composer handlers for the Email Documents wizard (task 183, D-219): recipient side pane, record lookup, file upload,
+  // template picker, AI draft and the Spaarke record-link resolver. Built here, in the host, so the wizard never touches Xrm.
+  const emailComposeHandlers = useMemo(
+    () => createXrmEmailComposeHandlers({ authenticatedFetch, bffBaseUrl: apiBaseUrl }),
+    [apiBaseUrl]
+  );
 
   // IDataService adapter for the email wizard's recipient picker.
   // Code Pages don't have PCF's context.webAPI, so we reach the host's
@@ -826,7 +834,7 @@ export const App: React.FC<AppProps> = ({ params, isDark = false, apiBaseUrl }) 
 
       {/* Email Documents Wizard — launched from the FilePreviewDialog's mail icon.
           Step 1: confirm selection. Step 2: AI summary via "Summarize New File(s)".
-          Step 3: compose + send via BFF /api/communications/send. */}
+          Step 3: the shared EmailComposer; sent via BFF /api/communications/send. */}
       <DocumentEmailWizard
         open={emailWizardOpen}
         onClose={() => setEmailWizardOpen(false)}
@@ -834,6 +842,7 @@ export const App: React.FC<AppProps> = ({ params, isDark = false, apiBaseUrl }) 
         authenticatedFetch={authenticatedFetch}
         bffBaseUrl={apiBaseUrl}
         dataService={dataService}
+        emailComposeHandlers={emailComposeHandlers}
       />
     </div>
   );

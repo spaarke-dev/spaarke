@@ -34,6 +34,10 @@ jest.mock('@spaarke/ui-components/dist/services/AppInsightsService', () => ({
 }));
 jest.mock('@spaarke/ui-components/dist/components/FindSimilarViewer', () => ({ FindSimilarViewerDialog: () => null }));
 jest.mock('@spaarke/ui-components/dist/components/DocumentEmailWizard', () => ({ DocumentEmailWizard: () => null }));
+// The host builds the composer handlers for the email wizard (task 183); the composer itself is not under test here.
+jest.mock('@spaarke/ui-components/dist/components/EmailComposer', () => ({
+  createXrmEmailComposeHandlers: () => ({}),
+}));
 
 const mockResults = [{ documentId: 'doc-1', name: 'Agreement.docx', documentType: 'Contract' }];
 jest.mock('../hooks', () => ({
