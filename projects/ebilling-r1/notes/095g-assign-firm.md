@@ -358,7 +358,7 @@ uac-r2: "Go ahead and build."
 
 Branch `task/ebill-095g-assign-firm`. Built per the design, uac-r2 R1/R2 and the Q2/Q3 conditions. Deviations from the design text:
 
-- **Two operation keys, not one.** `ebilling.record.assign_firm` = Write and Append (an add or a replace, R1); `ebilling.record.remove_firm` = Write (a pure clear). The route declares ONE Record check, so Write and Append come from one caller snapshot.
+- **Two operation keys, not one.** `ebilling.record.assign_firm` = Read, Write and Append (an add or a replace, R1); `ebilling.record.remove_firm` = Read and Write (a pure clear). Read was added in the uac-r2 review (see below). The route declares ONE Record check, so the rights come from one caller snapshot.
 - **No `record_inactive`** (EB-D-233). An inactive Standard record is accepted; the 200 carries `recordActive: false` and the when-active notice.
 - **`notice` and `recordActive`** are added to the 200 body (R2, Q2).
 - **The type-code "shared constant"** is `LawFirmOrganizationType.Code` in C#. The seeding script states the same literal, and a test pins the two equal (a PowerShell script cannot import the C# constant).
@@ -395,6 +395,24 @@ Branch `task/ebill-095g-assign-firm`. Built per the design, uac-r2 R1/R2 and the
 - **F1, seeding script.** The type code's alternate key spans every type row, inactive ones included. When no active row carries the code, step 1 now also looks for INACTIVE rows that carry it. If one does, the script stops with an escalation (exit 2, nothing written), naming the row: an owner must reactivate it or clear its code. The generic error text no longer suggests a re-run fixes a failure. Test: `SeedingScript_EscalatesOnAnInactiveRowHoldingTheCode` (a source check, because the script is not run).
 - **Theory strengthening.** In the 32-combination theory, when the route admits an add to an inactive record, the same firm on the same flags with the record ACTIVE must now be granted. Before this, the inactive skip could hide a flag refusal the route had wrongly admitted.
 
+## uac-r2 review fixes and known limits (2026-11-14)
+
+uac-r2 reviewed 095g at `f1a53f306a`: the access gate holds, and passes with these fixes.
+
+- **Read on the record.** An add or replace now needs Read, Write and Append on the record; a clear needs Read and Write.
+  - Why: every answer describes the record. A refusal lists its firms by name, and 409 versus 200 on a clear tells whether a named firm is on it. So a caller who cannot read the record must learn nothing from it.
+  - Without Read the answer is the uniform 404, byte-identical to an unknown record, and nothing is written.
+  - Tests: `WithoutRead_IsUniform404_LikeAnUnknownRecord` (add, replace, a clear of a firm on the record and of one not on it). The controls are updated to Read and Write (and Append).
+- **Page bound on the list.** `page` above 200 is 400, decided after step 0 like the other query 400s, with no privilege call and no Dataverse request. 200 pages of 50 is far beyond any firm list. Tests: `List_PageAboveTheBound_Is400` (201 refused, 200 accepted) and `List_PageAboveTheBound_AfterStepZero`.
+- **Assertions.**
+  - `Clear_WithoutWrite_IsUniform404` asserts the reason code.
+  - `SecondMismatch_Is409` asserts that no access pass ran.
+  - `List_PrivilegeFault_Is503` asserts the error code.
+  - `FlagRefusals` gains a replace on a Secure record: 409 `record_secure`, the old firm stays, nothing is written or revoked.
+- **K3 (known limit): two 503 texts.** A 503 from the route and a 503 from the filter carry the same `code` with different `detail` text. The pane keys on the code, never on `detail` (stated in the contract below).
+- **K4 (known limit): grantor attribution.** The inline access pass reconciles the whole record, not only the firm the caller named. If the record holds a firm the caller did not name in this request (for example one left in a slot by an edit on the form), a grant the pass creates for it records this caller as grantor. Only the attribution is off: the access itself is what the record's slots call for, and the background access pass reaches the same state.
+- **TOCTOU (known limit).** On the one retry after a version mismatch, the route re-checks the record's own flags but does not re-read a parent's flags, the firm's state or the record's No Access list. Nothing leaks: the access pass applies all three itself and does not grant against them.
+
 ## Component justification (CLAUDE.md §11), per new surface
 
 | New surface | (1) Existing | (2) Why not extend | (3) Cost of doing nothing |
@@ -415,7 +433,7 @@ Branch `task/ebill-095g-assign-firm`. Built per the design, uac-r2 R1/R2 and the
 
 ## Contract for word-add-in-r1 (as built; supersedes section 7)
 
-- The client reads `errorCode ?? reasonCode`.
+- The client reads `errorCode ?? reasonCode`, and keys its message on that code, never on `detail`: one code can carry different `detail` texts (the route's 503 and the filter's 503 do).
 - Every refusal writes nothing.
 - Both routes are internal-only and behind the eBilling kill switch.
 
@@ -423,14 +441,14 @@ Branch `task/ebill-095g-assign-firm`. Built per the design, uac-r2 R1/R2 and the
 
 - **Query parameters.**
   - `search`: optional, at most 100 characters. It is a contains match on the firm name, and `%`, `_` and `[` match literally.
-  - `page`: 1 or more (default 1).
+  - `page`: 1-200 (default 1).
   - `pageSize`: 1-50 (default 25).
 - **200:**
   ```json
   { "items": [{ "firmId": "guid", "name": "string" }], "page": 1, "hasMore": false }
   ```
   Only active organizations of the Law Firm type, in the server's order (name, then id). The BFF does not re-sort a page.
-- **400 ValidationProblem:** a bad `search`, `page` or `pageSize`.
+- **400 ValidationProblem:** a bad `search`, `page` or `pageSize` (a `page` above 200 included). Nothing is asked of Dataverse.
 - **404 `sdap.access.deny.record_unavailable`** (uniform), for any of these:
   - an external caller;
   - a caller with no user row;
@@ -470,7 +488,7 @@ Branch `task/ebill-095g-assign-firm`. Built per the design, uac-r2 R1/R2 and the
 | Status, code | Text (`detail`) | Extra |
 |---|---|---|
 | 400 ValidationProblem | Neither `add` nor `remove`; `add == remove`; an empty id; an unknown `entityType` | `errors` |
-| 404 `sdap.access.deny.record_unavailable` | The pane's text: "This record or firm isn't available to you, or you can't change this record." One answer for all of: an external caller; no user row; an unknown record; no Write on the record (or, for an add, no Append); an unknown firm; no Read or no AppendTo on the firm | `reasonCode` |
+| 404 `sdap.access.deny.record_unavailable` | The pane's text: "This record or firm isn't available to you, or you can't change this record." One answer for all of: an external caller; no user row; an unknown record; no Read or no Write on the record (or, for an add or replace, no Append); an unknown firm; no Read or no AppendTo on the firm | `reasonCode` |
 | 409 `ebilling.firm_assign.record_restricted` | "This record is Restricted to internal users, so no firm can be given access to it." | |
 | 409 `ebilling.firm_assign.record_secure` | "This record is secure, so assigning a firm would give it no access. Use Manage Access to add named people." | |
 | 409 `ebilling.firm_assign.record_limited` | "This record is limited, so assigning a firm would give it no access. Use Manage Access to add named people." | |
@@ -481,7 +499,7 @@ Branch `task/ebill-095g-assign-firm`. Built per the design, uac-r2 R1/R2 and the
 | 409 `ebilling.firm_assign.firm_already_assigned` | "That firm is already assigned to this record." | |
 | 409 `ebilling.firm_assign.record_changed` | "The firms on this record changed. Check them and try again." | `assigned` |
 | 409 `ebilling.firm_assign.revoke_confirmation_required` | "Removing this firm takes away the access this assignment gave its people. Confirm to continue." The pane asks "Removing <firm> takes away the access this assignment gave its people. Continue?" and resends with `confirmRevoke` | `revokes`, `assigned` |
-| 503 `ebilling.submission.record_unavailable` | "Spaarke couldn't do this right now. Try again." A filter-level fault carries the filter's own detail, with the same code | |
+| 503 `ebilling.submission.record_unavailable` | "Spaarke couldn't do this right now. Try again." A filter-level fault carries the filter's own detail, with the same code; the pane shows its own text for the code and never `detail` (K3) | |
 | 503 `ebilling.disabled` | eBilling is off | |
 
-The restricted, secure and limited refusals apply only to an add, whatever the record's state. A clear is never refused for them.
+The restricted, secure and limited refusals apply only to an add or a replace, whatever the record's state. A clear is never refused for them.
