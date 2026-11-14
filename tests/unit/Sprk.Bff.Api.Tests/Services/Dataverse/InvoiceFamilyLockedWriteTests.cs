@@ -277,6 +277,63 @@ public class InvoiceFamilyLockedWriteTests
         rights.Asked.Should().BeEmpty();
     }
 
+    // ── Review 1 (F3): a key the guard does not read as the locked column is refused (fail closed) ──────────────────
+
+    [Theory]
+    [InlineData("_sprk_invoice_value")] // the read form of the lookup
+    [InlineData("sprk_invoice@foo")]    // any other annotation
+    [InlineData("sprk_invoice@odata.bind@odata.bind")]
+    public async Task LockedColumnInAKeyFormTheGuardDoesNotRead_IsRefused_NothingWrittenOrAsked(string key)
+    {
+        var (records, writes) = Records();
+        var rights = new Rights()
+            .On("sprk_billingevents", LineId, RowRights)
+            .On("sprk_invoices", InvoiceId, TargetRights);
+
+        var code = await Write(records, "sprk_billingevent", LineId,
+            new() { [key] = new EntityReference("sprk_invoice", InvoiceId), ["sprk_description"] = "d" }, Person, rights);
+
+        code.Should().Be(LockedWriteDeniedCode);
+        writes.Should().BeEmpty("neither the person's columns nor the locked one are written");
+        rights.Asked.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Caller_LockedColumnInAKeyFormTheGuardDoesNotRead_IsDenied_NothingWritten()
+    {
+        var person = new PersonClient().Rights(InvoiceId, "ReadAccess, WriteAccess, AppendAccess").Rights(MatterId, "AppendToAccess");
+        var (app, writes) = Records();
+
+        (await PatchAsCaller(person, app, "{\"_sprk_matter_value\":null,\"sprk_name\":\"n\"}")).Kind.Should().Be(CallerPatchKind.Denied);
+
+        person.Patches.Should().BeEmpty();
+        writes.Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// The forms the guard reads as the column (<see cref="InvoiceFamilyCoreRecordGuard.ColumnOfKey"/>): the logical name and
+    /// <c>{navigation}@odata.bind</c>. The guard compares both parts without regard to case (it lower-cases the column and
+    /// matches the suffix ignoring case), so a differently cased bind is the guard's column too and is checked, not refused here.
+    /// </summary>
+    [Theory]
+    [InlineData("sprk_invoice", false)]
+    [InlineData("sprk_Invoice@odata.bind", true)]
+    [InlineData("SPRK_Invoice@odata.bind", true)]
+    public async Task LockedColumnInAKeyFormTheGuardReads_IsChecked_AndWrittenByTheApplication(string key, bool bind)
+    {
+        var (records, writes) = Records();
+        var rights = new Rights()
+            .On("sprk_billingevents", LineId, RowRights)
+            .On("sprk_invoices", InvoiceId, TargetRights);
+        object value = bind ? $"/sprk_invoices({InvoiceId})" : new EntityReference("sprk_invoice", InvoiceId);
+
+        var code = await Write(records, "sprk_billingevent", LineId, new() { [key] = value }, Person, rights);
+
+        code.Should().BeNull();
+        writes.Should().ContainSingle().Which.As.Should().BeNull();
+        rights.Asked.Should().Equal(("sprk_billingevents", LineId), ("sprk_invoices", InvoiceId));
+    }
+
     // ── Must not fire: written, and by the right identity ──────────────────────────────────────────────────────────
 
     [Fact]

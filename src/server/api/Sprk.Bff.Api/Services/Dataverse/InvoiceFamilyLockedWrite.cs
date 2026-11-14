@@ -206,7 +206,10 @@ internal static class InvoiceFamilyLockedWrite
         var targets = new List<(string EntitySet, Guid Id)>();
         foreach (var (key, value) in locked)
         {
-            if (!columns.TryGetValue(SecureRootInheritance.NormalizeColumn(key), out var targetTable)
+            // #2799 review 1 (F3): a key is a locked column here only in a form the guard reads as that column (the logical name,
+            // or {navigation}@odata.bind; InvoiceFamilyCoreRecordGuard.ColumnOfKey). Split sets aside every key that NORMALIZES to
+            // one (_x_value, any @… suffix); one the guard did not read as that column was never decided by it, so it is refused.
+            if (!columns.TryGetValue(InvoiceFamilyCoreRecordGuard.ColumnOfKey(key), out var targetTable)
                 || !TryReadTarget(key, value, out var targetId)
                 || !EntitySets.TryGetValue(targetTable, out var targetSet))
             {
