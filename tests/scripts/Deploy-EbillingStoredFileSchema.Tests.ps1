@@ -559,3 +559,29 @@ Describe 'the script text (what it never does)' {
         $script:Text -match "throw \[EscalationException\]::new\(`"\`$Version does not exist" | Should Be $true
     }
 }
+
+# The module's request helper asks for strongly consistent reads: attribute metadata (IsSecured) is cached per server, and a plain read soon
+# after a change can come back stale. Invoke-RestMethod is mocked inside the module, so nothing leaves the machine.
+Describe 'EbillingSchema Invoke-Dv sends Consistency: Strong' {
+    Import-Module (Join-Path $repoRoot 'scripts/ebilling/EbillingSchema.psm1') -Force
+    $null = Initialize-EbillingSchema -EnvironmentUrl 'https://example.invalid' -SolutionUniqueName 'S'
+    Mock -ModuleName EbillingSchema Get-DataverseToken { 'test-token' }
+    Mock -ModuleName EbillingSchema Invoke-RestMethod { $global:EbSchemaSentHeaders = $Headers; return [pscustomobject]@{ IsSecured = $true } }
+    BeforeEach { $global:EbSchemaSentHeaders = $null }
+    # This file defines a stand-in Invoke-Dv of its own (above); the module's real one is run inside the module's scope.
+    function Invoke-ModuleDv([string]$Path, [hashtable]$ExtraHeaders = @{}) {
+        & (Get-Module EbillingSchema) { param($p, $h) Invoke-Dv -Path $p -ExtraHeaders $h } $Path $ExtraHeaders
+    }
+
+    It 'sends Consistency: Strong on a metadata read (must fire without the header)' {
+        $null = Invoke-ModuleDv "EntityDefinitions(LogicalName='sprk_invoice')/Attributes(LogicalName='sprk_totalamount')?`$select=IsSecured"
+        $global:EbSchemaSentHeaders['Consistency'] | Should Be 'Strong'
+    }
+    It 'keeps the other default headers and lets a caller header through (must not fire)' {
+        $null = Invoke-ModuleDv 'WhoAmI' @{ Prefer = 'return=representation' }
+        $global:EbSchemaSentHeaders['Authorization'] | Should Be 'Bearer test-token'
+        $global:EbSchemaSentHeaders['OData-Version'] | Should Be '4.0'
+        $global:EbSchemaSentHeaders['Prefer'] | Should Be 'return=representation'
+        $global:EbSchemaSentHeaders['Consistency'] | Should Be 'Strong'
+    }
+}
