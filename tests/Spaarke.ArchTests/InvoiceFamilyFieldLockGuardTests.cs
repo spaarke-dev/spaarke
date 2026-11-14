@@ -489,6 +489,143 @@ public class InvoiceFamilyFieldLockGuardTests
             .ToDictionary(k => k, splits.Contains);
     }
 
+    /// <summary>
+    /// #2799 review 1 (F2): each (outermost type, source member) that goes through the split, with the number of DIRECT
+    /// caller-identity write calls it also makes (<see cref="IsCallerIdentityWrite"/>: the caller's PATCH, an impersonable
+    /// field-dictionary update, the guard's primitive; counted per call site in IL, async state machines and closures folded
+    /// into their source member). The split clears the member only for the call that goes through it; these are its other
+    /// writes, each of which must be one that cannot carry a locked column.
+    /// </summary>
+    internal static IReadOnlyDictionary<(Type Type, string Method), int> DirectWritesInSplitMembers(IEnumerable<Type> types)
+    {
+        var references = IlCallScan.MethodReferences(types.Where(t => !IsExcluded(t)))
+            .Select(r => (Key: (IlCallScan.Outermost(r.Caller), CoreRecordPairUpdateCheckGuardTests.SourceMember(r.Caller, r.CallerMethod)), r.Target))
+            .ToList();
+        var splits = references.Where(r => IsTheSplit(r.Target)).Select(r => r.Key).ToHashSet();
+        return splits.ToDictionary(k => k, k => references.Count(r => r.Key == k && IsCallerIdentityWrite(r.Target)));
+    }
+
+    /// <summary>
+    /// #2799 review 1 (F2): the ratchet on a converted member's other writes. A member that goes through the split and is not
+    /// pinned is NEW (pin it, with the reason each direct write cannot carry a locked column); more direct writes than pinned is
+    /// NEW; fewer is STALE (lower the pin); a pin on a member that no longer goes through the split is STALE.
+    /// </summary>
+    internal static List<string> SplitMemberPinProblems(
+        IReadOnlyDictionary<(Type Type, string Method), int> counts,
+        IReadOnlyDictionary<(Type Type, string Method), (int Count, string Reason)> pins)
+    {
+        var problems = new List<string>();
+        foreach (var ((type, method), count) in counts.OrderBy(c => $"{c.Key.Type.FullName}.{c.Key.Method}", StringComparer.Ordinal))
+        {
+            var name = $"{type.FullName}.{method}";
+            if (!pins.TryGetValue((type, method), out var pin))
+                problems.Add($"NEW {name}: goes through InvoiceFamilyLockedWrite and makes {count} direct caller-identity write call(s); pin it with the reason each cannot carry a locked column.");
+            else if (count > pin.Count)
+                problems.Add($"NEW {name}: {count} direct caller-identity write calls, pinned {pin.Count}. A write beside the split must go through it, or be pinned with its reason.");
+            else if (count < pin.Count)
+                problems.Add($"STALE pin {name}: {count} direct caller-identity write calls, pinned {pin.Count}; lower the pin.");
+        }
+
+        foreach (var ((type, method), _) in pins)
+        {
+            if (!counts.ContainsKey((type, method)))
+                problems.Add($"STALE pin {type.FullName}.{method}: it no longer goes through InvoiceFamilyLockedWrite; remove the pin.");
+        }
+
+        return problems;
+    }
+
+    /// <summary>
+    /// #2799 review 1 (F2): every member that goes through the split, pinned to its count of DIRECT caller-identity write calls,
+    /// with the reason none of them can carry a locked invoice-family column.
+    /// </summary>
+    private static readonly IReadOnlyDictionary<(Type Type, string Method), (int Count, string Reason)> SplitMemberDirectWrites =
+        new Dictionary<(Type, string), (int, string)>
+        {
+            // C1-C3: one direct write each, on the branch where InvoiceFamilyCoreRecordGuard.IsUpdateOnlyTarget(table) is false.
+            // That predicate is CoreRecordLookups.ContainsKey(table), the same keys LockedColumns is derived from, so the table
+            // written there has no locked column; the family tables take the split.
+            [(typeof(Sprk.Bff.Api.Api.FieldMappings.FieldMappingEndpoints), "ApplyMappingsToChildRecordsAsync")] = (1,
+                "C1: Write()'s non-family branch, UpdateExistingRecordFieldsAsync as callerSystemUserId on a table that is not an invoice-family table (IsUpdateOnlyTarget false)."),
+            [(typeof(Sprk.Bff.Api.Services.Ai.Nodes.UpdateRecordActionCore), "UpdateAsync")] = (1,
+                "C2: Patch()'s non-family branch, UpdateExistingRecordFieldsAsync as input.ImpersonateSystemUserId on a table that is not an invoice-family table (IsUpdateOnlyTarget false)."),
+            [(typeof(Sprk.Bff.Api.Services.Dataverse.DataverseUpdateHandler), "PatchAsync")] = (1,
+                "C3: the non-family branch, UpdateExistingRecordFieldsAsync as impersonateSystemUserId on a table that is not an invoice-family table (IsUpdateOnlyTarget false)."),
+
+            // C4-C6: every caller PATCH goes through PatchAsCallerAsync, which keeps a body with no locked column as the person's
+            // own single PATCH; no direct caller write remains beside it.
+            [(typeof(Sprk.Bff.Api.Services.Dataverse.OwnedChildWrite), "RefileAsync")] = (0, "C4: the re-file's write callback is PatchAsCallerAsync only."),
+            [(typeof(Sprk.Bff.Api.Api.ChildRecordEndpoints), "UpdateAsync")] = (0, "C5: the ordinary update is PatchAsCallerAsync only."),
+            [(typeof(Sprk.Bff.Api.Services.Ai.Handlers.DataverseUpdateRecordHandler), "ExecuteChatAsync")] = (0,
+                "C6: the ordinary update is PatchAsCallerAsync only (the re-file goes through OwnedChildWrite.RefileAsync)."),
+        };
+
+    [Fact(DisplayName = "#2799 review 1: a member that goes through InvoiceFamilyLockedWrite makes no direct caller-identity write beyond its pinned, reasoned count")]
+    public void SplitMembers_DirectCallerWrites_AreRatcheted()
+    {
+        var counts = DirectWritesInSplitMembers(BffTypes.Value);
+        var problems = SplitMemberPinProblems(counts, SplitMemberDirectWrites);
+
+        // Non-vacuity: the converted writers (task note §4, C1-C6) are among the members counted.
+        foreach (var (type, method) in new[]
+                 {
+                     (typeof(Sprk.Bff.Api.Api.FieldMappings.FieldMappingEndpoints), "ApplyMappingsToChildRecordsAsync"),
+                     (typeof(Sprk.Bff.Api.Services.Ai.Nodes.UpdateRecordActionCore), "UpdateAsync"),
+                     (typeof(Sprk.Bff.Api.Services.Dataverse.DataverseUpdateHandler), "PatchAsync"),
+                     (typeof(Sprk.Bff.Api.Services.Dataverse.OwnedChildWrite), "RefileAsync"),
+                     (typeof(Sprk.Bff.Api.Api.ChildRecordEndpoints), "UpdateAsync"),
+                     (typeof(Sprk.Bff.Api.Services.Ai.Handlers.DataverseUpdateRecordHandler), "ExecuteChatAsync"),
+                 })
+        {
+            if (!counts.ContainsKey((type, method)))
+                problems.Add($"{type.FullName}.{method}: expected to be counted as going through InvoiceFamilyLockedWrite; the scan lost its signal.");
+        }
+
+        Assert.True(problems.Count == 0,
+            "A method that writes a locked invoice-family column through InvoiceFamilyLockedWrite is cleared by the caller-write guard "
+            + "as a whole, so its OTHER writes as the caller are pinned here (#2799 review 1). Counts seen: "
+            + string.Join("; ", counts.OrderBy(c => $"{c.Key.Type.Name}.{c.Key.Method}", StringComparer.Ordinal)
+                .Select(c => $"{c.Key.Type.Name}.{c.Key.Method}={c.Value}"))
+            + "\n" + string.Join("\n", problems));
+    }
+
+    [Fact(DisplayName = "#2799 review 1 control: a member that calls the split AND a new direct caller write is found (must fire); the split alone at its pin is not (must not fire)")]
+    public void SplitMemberRatchet_MustFireAndMustNotFire()
+    {
+        var counts = DirectWritesInSplitMembers(
+            new[] { typeof(InvoiceFamilyCallerWriteControlThroughTheSplit), typeof(InvoiceFamilyCallerWriteControlSplitPlusDirect) }
+                .SelectMany(IlCallScan.WithNested));
+        Assert.Equal(0, counts[(typeof(InvoiceFamilyCallerWriteControlThroughTheSplit), "Write")]);
+        Assert.Equal(1, counts[(typeof(InvoiceFamilyCallerWriteControlSplitPlusDirect), "Write")]);
+
+        // Both pinned at what they were before the direct write was added: the split alone passes, the added write is NEW.
+        var pins = new Dictionary<(Type, string), (int, string)>
+        {
+            [(typeof(InvoiceFamilyCallerWriteControlThroughTheSplit), "Write")] = (0, "r"),
+            [(typeof(InvoiceFamilyCallerWriteControlSplitPlusDirect), "Write")] = (0, "r"),
+        };
+        var problems = SplitMemberPinProblems(counts, pins);
+        Assert.Single(problems);
+        Assert.StartsWith($"NEW {typeof(InvoiceFamilyCallerWriteControlSplitPlusDirect).FullName}.Write:", problems[0], StringComparison.Ordinal);
+
+        // Unpinned: NEW; a pin above the count, or on a member that no longer splits: STALE.
+        Assert.Contains(SplitMemberPinProblems(counts, new Dictionary<(Type, string), (int, string)>
+        {
+            [(typeof(InvoiceFamilyCallerWriteControlSplitPlusDirect), "Write")] = (1, "r"),
+        }),
+            p => p.StartsWith($"NEW {typeof(InvoiceFamilyCallerWriteControlThroughTheSplit).FullName}.Write:", StringComparison.Ordinal));
+        Assert.Contains(SplitMemberPinProblems(counts, new Dictionary<(Type, string), (int, string)>(pins)
+        {
+            [(typeof(InvoiceFamilyCallerWriteControlSplitPlusDirect), "Write")] = (2, "r"),
+        }),
+            p => p.StartsWith("STALE pin", StringComparison.Ordinal));
+        Assert.Contains(SplitMemberPinProblems(counts, new Dictionary<(Type, string), (int, string)>(pins)
+        {
+            [(typeof(InvoiceFamilyCallerWriteControlPatchBypass), "Write")] = (1, "r"),
+        }),
+            p => p.StartsWith($"STALE pin {typeof(InvoiceFamilyCallerWriteControlPatchBypass).FullName}.Write: it no longer", StringComparison.Ordinal));
+    }
+
     [Fact(DisplayName = "#2799: every BFF caller-identity write (OBO PATCH, impersonable update, the guard's primitive) goes through InvoiceFamilyLockedWrite, or is listed")]
     public void EveryCallerIdentityWrite_GoesThroughTheSplit_OrIsListed()
     {
@@ -590,6 +727,20 @@ internal static class InvoiceFamilyCallerWriteControlThroughTheSplit
     internal static Task<InvoiceFamilyLockedWrite.CallerPatch> Write(
         IDataverseUserClient user, IFieldMappingDataverseService app, Guid invoiceId, string body, Microsoft.Extensions.Logging.ILogger logger) =>
         InvoiceFamilyLockedWrite.PatchAsCallerAsync(user, app, "sprk_invoice", "sprk_invoices", invoiceId, body, logger, traceId: null, CancellationToken.None);
+}
+
+/// <summary>
+/// MUST FIRE (review 1, F2): a member that writes through the split AND adds a direct PATCH as the caller beside it. The caller-write
+/// guard clears it as a whole (it splits); the per-member ratchet finds the added write.
+/// </summary>
+internal static class InvoiceFamilyCallerWriteControlSplitPlusDirect
+{
+    internal static async Task Write(
+        IDataverseUserClient user, IFieldMappingDataverseService app, Guid invoiceId, string body, Microsoft.Extensions.Logging.ILogger logger)
+    {
+        await InvoiceFamilyLockedWrite.PatchAsCallerAsync(user, app, "sprk_invoice", "sprk_invoices", invoiceId, body, logger, traceId: null, CancellationToken.None);
+        await user.PatchAsync($"sprk_invoices({invoiceId:D})", body, CancellationToken.None);
+    }
 }
 
 /// <summary>MUST NOT FIRE: a PatchAsync of another API (as the Graph SDK's) is not the caller's Dataverse PATCH.</summary>
