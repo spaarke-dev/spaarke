@@ -1121,11 +1121,14 @@ public static class InvoiceFamilyCoreRecordGuard
 
     private static bool IsBindKey(string key) => key.EndsWith(BindSuffix, StringComparison.OrdinalIgnoreCase);
 
-    private static string ColumnOfKey(string key) =>
+    /// <summary>The column a write key names, as this guard reads it: a trailing <c>@odata.bind</c> removed, trimmed, lower case.
+    /// #2799 review 1 (F3): <see cref="InvoiceFamilyLockedWrite"/> writes a locked column as the app only in a key form this
+    /// reads as that column, so the guard has decided on every locked column the app writes.</summary>
+    internal static string ColumnOfKey(string key) =>
         (IsBindKey(key) ? key[..^BindSuffix.Length] : key).Trim().ToLowerInvariant();
 
     /// <summary>The id in a Web API bind (<c>/sprk_matters(…)</c> or <c>sprk_matters(…)</c>).</summary>
-    private static bool TryParseBind(string bind, out Guid id)
+    internal static bool TryParseBind(string bind, out Guid id)
     {
         id = Guid.Empty;
         var open = bind.LastIndexOf('(');

@@ -1434,6 +1434,30 @@ and `.sprk_isdefaultthread`, and `sprk_communication.sprk_sentby`, `.sprk_direct
   environment until `Set-ThreadFlagFieldSecurity.ps1 -Verify` exits 0 there. While they are unset, no message is owned by
   the Direct team and nothing grants access from `sprk_sentby` / `sprk_directrecipient`.
 
+**Invoice-family links: field security on every environment** (unified-access-control-r2 #2799). The 24 lookups that file an
+invoice, invoice line, submission, approval, correction or external identifier under its matter, project or work assignment
+(and link it to its invoice) are written only by the BFF application user. The BFF checks each person-driven write AS THE
+PERSON and then writes these columns AS THE APPLICATION, so a user can no longer re-file a row through a form or the Web API
+and skip those checks. `scripts/Set-InvoiceFamilyFieldSecurity.ps1` secures them (the named entry point of
+`Set-DocumentPointerFieldSecurity.ps1 -Target InvoiceFamilyLinks`, with the same two BFF-managed profiles). Run it in this
+order on each environment; do not skip a step:
+1. **Deploy the BFF** build that writes the links as the application (#2799 chunks 1-3). Before it, locking would make every
+   person-driven write of these columns fail.
+2. **Redeploy every web resource the dry run (p4a) lists.** It scans the deployed code pages and form scripts for a write of a
+   locked column on a family table, and `-Apply` refuses (nothing written) while any is found. On dev (2026-11-13) it names
+   `sprk_creatematterwizard`, `sprk_spaarkeai` and `sprk_createinvoicewizard`, which are older than source.
+3. **Dry run:** `Set-InvoiceFamilyFieldSecurity.ps1 -EnvironmentUrl <org> -BffApplicationIds <ids>`. Writes nothing; every
+   precondition must be OK.
+4. **Apply, with the owner's go:** the same command plus `-BffWritesInvoiceFamilyLinksAsApp -Apply`. The switch is your
+   confirmation that step 1 is done; `-Apply` refuses without it.
+5. **Verify:** the same command with `-Verify` must exit 0 (non-zero names each gap).
+- **After every SpaarkeMaster import:** run `Set-InvoiceFamilyFieldSecurity.ps1 -Verify`.
+- **A new business unit:** its default team joins the reader profile through `Set-RecordCreatorPersonSchema.ps1 -Apply`; then
+  run `-Verify`.
+- **Known limit (K-1):** a write that sets a locked column and other columns is two requests. If the second fails, the other
+  columns stay saved and the caller gets an error (`invoice_family_locked_write_partly_saved`), never success.
+- Registry row: [DATAVERSE-WRITE-PATH-ARCHITECTURE.md](../architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md) I-24.
+
 **H7** sets the 7 per-customer env-var values (§6.4).
 
 **After H6 — record numbering (interim; required in EVERY environment).** Matters and Projects are numbered by

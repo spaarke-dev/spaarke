@@ -2286,6 +2286,14 @@ internal static class OwnedChildWrite
         public InvoiceFamilyCoreRecord? InvoiceFamilyRefusal { get; init; }
 
         /// <summary>
+        /// #2799 (uac-r2): the re-file's PATCH wrote a locked invoice-family column, and the check as the caller refused it
+        /// (<see cref="InvoiceFamilyLockedWrite.CallerPatchKind.Denied"/>), could not be answered
+        /// (<see cref="InvoiceFamilyLockedWrite.CallerPatchKind.Unavailable"/>) — nothing written — or only the other columns
+        /// were saved (<see cref="InvoiceFamilyLockedWrite.CallerPatchKind.PartlySaved"/>, K-1). No owner was assigned.
+        /// </summary>
+        public InvoiceFamilyLockedWrite.CallerPatchKind? LockedWrite { get; init; }
+
+        /// <summary>
         /// #2143 round 7 (F1): with <see cref="Written"/>, the person the re-file's F3 check acted for — what the writer hands the
         /// step after the re-file (<see cref="Sprk.Bff.Api.Services.Access.SecureChildReconciler.AfterRefileAsync(string, Guid, Func{Task{bool}}, Sprk.Bff.Api.Services.Access.RefileThreadStep, Sprk.Bff.Api.Services.Access.SecureRemovalCaller?, CancellationToken)"/>),
         /// so the thread that follows the filing moves on the same rights.
@@ -2297,6 +2305,13 @@ internal static class OwnedChildWrite
     private sealed class CallerWriteFailedException(DataverseUserResponse response) : Exception("The caller's update was refused.")
     {
         public DataverseUserResponse Response { get; } = response;
+    }
+
+    /// <summary>#2799: the locked-column write inside the re-file did not land whole — carried out so no owner is assigned.</summary>
+    private sealed class LockedWriteNotWrittenException(InvoiceFamilyLockedWrite.CallerPatchKind kind)
+        : Exception("The locked invoice-family columns were not written.")
+    {
+        public InvoiceFamilyLockedWrite.CallerPatchKind Kind { get; } = kind;
     }
 
     /// <summary>
@@ -2322,7 +2337,10 @@ internal static class OwnedChildWrite
         Guid? callerObjectId,
         CancellationToken ct,
         IGenericEntityService? appOnlyEntities = null,
-        Sprk.Bff.Api.Services.Communication.Access.DirectMessageOwnerStep? directOwner = null)
+        Sprk.Bff.Api.Services.Communication.Access.DirectMessageOwnerStep? directOwner = null,
+        IFieldMappingDataverseService? appOnlyFields = null,
+        ILogger? logger = null,
+        string? traceId = null)
     {
         // The core record pair is fixed after create on BFF update paths (RecordTableRule.FixedAfterCreateColumns): asked on the
         // item's shape alone, before any read or write, so the re-file core holds it for any table a caller passes. Nothing written.
@@ -2468,10 +2486,21 @@ internal static class OwnedChildWrite
                 async token =>
                 {
                     // PATCH carries If-Match: * (update-only), run AS THE CALLER — Dataverse authorizes the change itself.
-                    var response = await user.PatchAsync($"{entitySetName}({recordId:D})", item.JsonBody, token)
+                    // #2799 (uac-r2): a locked invoice-family column in it is checked AS THE CALLER and written AS THE APP
+                    // (appOnlyFields); a body without one is the caller's PATCH exactly as before.
+                    var written = await InvoiceFamilyLockedWrite.PatchAsCallerAsync(
+                            user, appOnlyFields, table, entitySetName, recordId, item.JsonBody,
+                            logger ?? Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance, traceId, token)
                         .ConfigureAwait(false);
-                    if (!response.IsSuccess)
-                        throw new CallerWriteFailedException(response);
+                    switch (written.Kind)
+                    {
+                        case InvoiceFamilyLockedWrite.CallerPatchKind.Written:
+                            return;
+                        case InvoiceFamilyLockedWrite.CallerPatchKind.ClientFailure:
+                            throw new CallerWriteFailedException(written.ClientFailure!);
+                        default:
+                            throw new LockedWriteNotWrittenException(written.Kind);
+                    }
                 },
                 ct).ConfigureAwait(false);
 
@@ -2496,6 +2525,11 @@ internal static class OwnedChildWrite
         {
             // Privilege-denied update surfaces the USER's own access error — never escalates; no owner was assigned.
             return new RefileOutcome { ClientFailure = failed.Response };
+        }
+        catch (LockedWriteNotWrittenException notWritten)
+        {
+            // #2799: refused or unanswered (nothing written), or partly saved (K-1, logged by the helper); no owner was assigned.
+            return new RefileOutcome { LockedWrite = notWritten.Kind };
         }
     }
 

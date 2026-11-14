@@ -214,7 +214,9 @@ public sealed partial class SecureChildOwnershipAiToolTests
         }
 
         reads.Should().NotContain(p => p.StartsWith("sprk_recordtype_refs?", StringComparison.Ordinal), "nothing is derived");
-        var body = BodyOf(_user.Patches.Should().ContainSingle().Subject.Body);
+        // #2799: the write sets only the locked core lookup, so it is the application's single write (checked as the caller).
+        _user.Patches.Should().BeEmpty();
+        var body = _appLockedWrites.Should().ContainSingle().Subject.Fields;
         body.Keys.Should().NotContain(ResolverColumns).And.NotContain("sprk_regardingrecordtype@odata.bind");
     }
 }

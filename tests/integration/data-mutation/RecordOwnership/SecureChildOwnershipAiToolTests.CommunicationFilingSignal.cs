@@ -384,7 +384,7 @@ public sealed partial class SecureChildOwnershipAiToolTests
 
     /// <summary>A caller context whose request services carry a live trigger and a classified communication, so any
     /// shared-core code that resolved them from the request (it must not) would enqueue.</summary>
-    private static HttpContext HttpContextWithSignalServices(IGenericEntityService entities, SignalEvaluationTrigger trigger)
+    private HttpContext HttpContextWithSignalServices(IGenericEntityService entities, SignalEvaluationTrigger trigger)
     {
         var services = new ServiceCollection();
         services.AddSingleton(entities);

@@ -311,12 +311,19 @@ internal sealed class UpdateRecordActionCore
             // checked that the row exists; a row deleted since must not be re-created by the upsert. Refused like the guard.
             if (InvoiceFamilyCoreRecordGuard.IsUpdateOnlyTarget(input.EntityLogicalName))
             {
-                if (await InvoiceFamilyCoreRecordGuard.UpdateExistingAsync(
+                // #2799 (uac-r2): on a person's run, a locked invoice-family column is checked AS THAT PERSON (the probe, naming
+                // them) and written AS THE APP; a run with no person, or a write with no locked column, keeps its single write.
+                using var lockedScope = input.ImpersonateSystemUserId is not null ? _scopeFactory.CreateScope() : null;
+                if (await InvoiceFamilyLockedWrite.UpdateExistingSplitAsync(
                         _fieldMappingService, input.EntityLogicalName, input.RecordId, updatePayload,
-                        input.ImpersonateSystemUserId, notFoundAsReadFailed: input.ImpersonateSystemUserId is not null, ct)
+                        input.ImpersonateSystemUserId, notFoundAsReadFailed: input.ImpersonateSystemUserId is not null,
+                        InvoiceFamilyLockedWrite.RightsOfPrincipal(
+                            lockedScope?.ServiceProvider.GetService<Sprk.Bff.Api.Infrastructure.ExternalAccess.CallerRecordAccessProbe>(),
+                            input.ImpersonateSystemUserId ?? Guid.Empty),
+                        _logger, ct)
                         .ConfigureAwait(false) is { } gone)
                 {
-                    throw InvoiceFamilyCoreRecordGuard.RefusalException(input.EntityLogicalName, gone);
+                    throw InvoiceFamilyLockedWrite.RefusalException(input.EntityLogicalName, gone);
                 }
 
                 return;

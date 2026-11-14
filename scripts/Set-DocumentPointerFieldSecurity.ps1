@@ -29,9 +29,14 @@
                                            INTERNAL business unit's default team and the BFF application users, and never
                                            by the External Collaborators unit's default team (task 191d), so a flagged
                                            external user can read a marker but never lower it (spike S1 finding F1).
+      -Target InvoiceFamilyLinks         — the invoice family's core-record lookups and invoice link (#2799): 24 columns on
+                                           six tables, the list in scripts/common/InvoiceFamilyLockedColumns.psd1 (pinned
+                                           both ways to the BFF's InvoiceFamilyLockedWrite.LockedColumns). Only the BFF
+                                           application user writes them: its caller paths check AS THE PERSON and write
+                                           them AS THE APP (#2799 chunks 1-3). The task-133 profiles, like the first three.
     Dry run by default; -Apply writes; -Verify checks. scripts/Set-ReportCatalogFieldSecurity.ps1,
-    scripts/Set-DocumentNarrowingFieldSecurity.ps1 and scripts/Set-AccessMarkerFieldSecurity.ps1 are the named entry
-    points for the second, third and fourth targets.
+    scripts/Set-DocumentNarrowingFieldSecurity.ps1, scripts/Set-AccessMarkerFieldSecurity.ps1 and
+    scripts/Set-InvoiceFamilyFieldSecurity.ps1 are the named entry points for the second to fifth targets.
 
 .DESCRIPTION
     WHY. The BFF acts AS THE APPLICATION on what these columns name: it downloads a document's bytes from the item the
@@ -99,6 +104,20 @@
            Restricted"). Dry run and -Verify report it as INFO: in the steady state the writer profile gives the read;
       (p11) no profile but the writer (and System Administrator) already grants create or update on a marker — the
            shared reader included — so securing a column never leaves a stray write in place.
+      InvoiceFamilyLinks only (#2799; task note projects/unified-access-control-r2/notes/task-2799-invoice-family-field-lock.md
+      §5): its (p4) is (p4a) EVIDENCE — no deployed JavaScript / HTML web resource writes a locked column ON A FAMILY TABLE
+      (Find-InvoiceFamilyWrite in scripts/common/Find-ClientInvoiceFamilyWrite.ps1, the detector the ArchTest
+      InvoiceFamilyFieldLockGuardTests also runs; TABLE-SCOPED, because the column names are ordinary columns of many other
+      tables; fed the live navigation property names of the 24 lookups); a payload it cannot read counts (fail closed). A
+      lookup whose navigation name is not its column name (ignoring case) is a FAIL too: the BFF writes a locked lookup only
+      through '{column}@odata.bind' (#2799 review 2). A
+      hit names the web resource still carrying an old bundle: rebuild and deploy it first. (p4b)
+      -BffWritesInvoiceFamilyLinksAsApp: the operator's confirmation that the BFF build with #2799 chunks 1-3 is deployed —
+      before it, every caller-identity update that sets a locked column (field-mapping push, playbook Update Record, output
+      mapping, child-record PATCH, the assistant's update tool) and every generic create that names one
+      (CallerWriteAuthorization) is refused once locked. Its (p5) is INFORMATIONAL: the three configuration tables drive
+      BFF writers (the field-mapping push, the email proposal apply, the AI topic persister) that write a locked column as
+      the application after the person's check, so a configuration row naming one is not a writer outside the BFF.
       sprk_isexternal is NEVER a target column (a masked flag reads blank, and blank is internal; task 114 decision 6):
       the script refuses to start if any target names it.
 
@@ -109,8 +128,8 @@
       (b) IMMEDIATELY grant the reader profile read=4, then the writer profile read=4 create=4 update=4 (retried while
           the platform propagates the secured state, 0x8004f508). If a grant fails, the column is REVERTED to unsecured
           and the run stops — a secured column with no reader permission reads EMPTY for every non-administrator;
-      (c) report any OTHER profile that can create or update the column (FAIL); list System Administrator holders
-          (full field access by platform rule, informational);
+      (c) report any OTHER profile that can create or update the column (FAIL); count System Administrator holders
+          (full field access by platform rule, informational; their names only with -ListSystemAdministrators);
       (d) publish the target's tables.
 
     LIVE ORDER (DocumentPointers): deploy the BFF that attaches files server-side → deploy the clients (code pages, PCFs,
@@ -125,6 +144,10 @@
     first creates the writer profile and adds its members, then (a)-(d)) → -Verify. After every later SpaarkeMaster
     import, run -Verify: the solution source does not carry IsSecured for these columns, so an import may clear it;
     -Apply again restores it.
+    LIVE ORDER (InvoiceFamilyLinks, #2799): deploy the BFF with #2799 chunks 1-3 → rebuild and deploy every web resource
+    (p4a) names (dev 2026-11-13: sprk_creatematterwizard, sprk_spaarkeai, sprk_createinvoicewizard, from 045g source) →
+    THIS SCRIPT -Target InvoiceFamilyLinks (dry run; every precondition OK) → owner approval →
+    -BffWritesInvoiceFamilyLinksAsApp -Apply → -Verify. Agents run the dry run and -Verify only.
 
 .PARAMETER EnvironmentUrl
     e.g. https://spaarkedev1.crm.dynamics.com
@@ -135,11 +158,12 @@
     hard-coded.
 
 .PARAMETER Target
-    DocumentPointers (default), ReportCatalog, DocumentNarrowingLinks or AccessMarkerColumns.
+    DocumentPointers (default), ReportCatalog, DocumentNarrowingLinks, AccessMarkerColumns or InvoiceFamilyLinks.
 
 .PARAMETER SolutionUniqueName
     The unmanaged solution carrying the profiles and the table. Default SpaarkeCore; SpaarkeMaster for
-    AccessMarkerColumns (the one solution that carries every marker table with all subcomponents).
+    AccessMarkerColumns and InvoiceFamilyLinks (the one solution that carries every marker / family table with all
+    subcomponents).
 
 .PARAMETER ExternalBusinessUnitName
     AccessMarkerColumns only: the External Collaborators business unit's name. Default: businessUnit.name in
@@ -157,11 +181,20 @@
 .PARAMETER BffWritesCatalogPointers
     ReportCatalog only: the operator's confirmation for (p4). Required with -Apply.
 
+.PARAMETER BffWritesInvoiceFamilyLinksAsApp
+    InvoiceFamilyLinks only: the operator's confirmation for its (p4b) — the BFF build with #2799 chunks 1-3 is deployed.
+    Required with -Apply.
+
 .PARAMETER Apply
     Write mode. Without it the script never writes.
 
 .PARAMETER Verify
     Read-only check with a pass/fail exit code (1 names each gap). Cannot be combined with -Apply.
+
+.PARAMETER ListSystemAdministrators
+    Every target: print the NAMES of the System Administrator role holders (users and teams) in the informational
+    section. Without it only their counts are printed (#2799 review 2: a run's output is shared in notes and tickets, and
+    names people; an operator who needs the list asks for it).
 
 .EXAMPLE
     .\Set-DocumentPointerFieldSecurity.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com `
@@ -181,6 +214,11 @@
         -BffApplicationIds 5967251e-171c-46fe-a6c2-ef843c90309d,1e40baad-e065-4aea-a8d4-4b7ab273458c -Verify
     Through its named entry point: scripts/Set-AccessMarkerFieldSecurity.ps1.
 
+.EXAMPLE
+    .\Set-DocumentPointerFieldSecurity.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com -Target InvoiceFamilyLinks `
+        -BffApplicationIds 5967251e-171c-46fe-a6c2-ef843c90309d,1e40baad-e065-4aea-a8d4-4b7ab273458c
+    Dry run. Through its named entry point: scripts/Set-InvoiceFamilyFieldSecurity.ps1.
+
 .NOTES
     unified-access-control-r2 task 166 r1 (#1105), generalised to the report catalog and given its evidence check in
     task 166 f1. Modelled line for line on task 150's scripts/Set-SecureFlagFieldSecurity.ps1. Auth: the operator's own
@@ -192,15 +230,17 @@
 param(
     [Parameter(Mandatory)][string]$EnvironmentUrl,
     [Parameter(Mandatory)][string[]]$BffApplicationIds,
-    [ValidateSet('DocumentPointers', 'ReportCatalog', 'DocumentNarrowingLinks', 'AccessMarkerColumns')][string]$Target = 'DocumentPointers',
+    [ValidateSet('DocumentPointers', 'ReportCatalog', 'DocumentNarrowingLinks', 'AccessMarkerColumns', 'InvoiceFamilyLinks')][string]$Target = 'DocumentPointers',
     [string]$SolutionUniqueName = 'SpaarkeCore',
     [string]$ExternalBusinessUnitName,
     [string]$ExternalCollaboratorConfigPath,
     [switch]$ClientNoLongerWritesPointers,
     [switch]$BffWritesCatalogPointers,
     [switch]$BffOmitsMarkersFromCallerCreates,
+    [switch]$BffWritesInvoiceFamilyLinksAsApp,
     [switch]$Apply,
-    [switch]$Verify
+    [switch]$Verify,
+    [switch]$ListSystemAdministrators
 )
 
 $ErrorActionPreference = 'Stop'
@@ -212,6 +252,10 @@ if ($Target -eq 'ReportCatalog' -and $ClientNoLongerWritesPointers) { throw '-Cl
 if ($Target -ne 'ReportCatalog' -and $BffWritesCatalogPointers) { throw '-BffWritesCatalogPointers applies to -Target ReportCatalog only.' }
 if ($Target -in 'DocumentNarrowingLinks', 'AccessMarkerColumns' -and $ClientNoLongerWritesPointers) { throw '-ClientNoLongerWritesPointers applies to -Target DocumentPointers only.' }
 if ($Target -ne 'AccessMarkerColumns' -and ($ExternalBusinessUnitName -or $ExternalCollaboratorConfigPath -or $BffOmitsMarkersFromCallerCreates)) { throw '-ExternalBusinessUnitName, -ExternalCollaboratorConfigPath and -BffOmitsMarkersFromCallerCreates apply to -Target AccessMarkerColumns only.' }
+if ($Target -ne 'InvoiceFamilyLinks' -and $BffWritesInvoiceFamilyLinksAsApp) { throw '-BffWritesInvoiceFamilyLinksAsApp applies to -Target InvoiceFamilyLinks only.' }
+if ($Target -eq 'InvoiceFamilyLinks' -and $ClientNoLongerWritesPointers) { throw '-ClientNoLongerWritesPointers applies to -Target DocumentPointers only.' }
+# #2799: the invoice-family list (scripts/common/InvoiceFamilyLockedColumns.psd1) and its TABLE-SCOPED client-write detector.
+. (Join-Path $PSScriptRoot 'common/Find-ClientInvoiceFamilyWrite.ps1')
 $BffApplicationIds = @($BffApplicationIds | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ })
 foreach ($id in $BffApplicationIds) { if (-not [Guid]::TryParse($id, [ref][Guid]::Empty)) { throw "-BffApplicationIds: '$id' is not a GUID." } }
 $Api = "$EnvironmentUrl/api/data/v9.2"
@@ -236,6 +280,13 @@ $Targets = @{
         WriterProfileName = 'Spaarke Access Marker Writers'
         WriterProfileId   = '60b9344e-f253-49cd-af1a-4be2cf52c3a1'
         WriterDescription = 'Read/Create/Update on the access markers ONLY: sprk_accesspermission on every table that carries it, sprk_communication.sprk_isinternalonly, sprk_communicationthread.sprk_privacystate. Members: every INTERNAL business unit default team (never the External Collaborators unit''s) and the BFF application user(s). unified-access-control-r2 task 191f, owner Q1 = a.'
+    }
+    # #2799: the invoice family's core-record lookups and invoice link, from THE ONE LIST (InvoiceFamilyLockedColumns.psd1,
+    # pinned both ways to the BFF's InvoiceFamilyLockedWrite.LockedColumns by InvoiceFamilyFieldLockGuardTests). The task-133
+    # profiles: every business unit's default team reads, the BFF application users alone write.
+    InvoiceFamilyLinks = @{
+        Pairs = @($InvoiceFamilyLockedColumns.Keys | Sort-Object | ForEach-Object { $t = $_; $InvoiceFamilyLockedColumns[$t].Columns | Sort-Object | ForEach-Object { "$t.$_" } })
+        What  = 'the invoice family''s core-record lookups and invoice links'
     }
 }
 # A column that must never be field-secured, in any target: a masked sprk_isexternal reads blank, and blank is internal
@@ -272,6 +323,8 @@ if ($IsMarkerTarget) {
         if (-not $ExternalBusinessUnitName) { throw "'$configPath' names no businessUnit.name." }
     }
 }
+# #2799: SpaarkeMaster (the source in src/dataverse/solutions) carries the family tables; (p6) checks it on the target.
+if ($Target -eq 'InvoiceFamilyLinks' -and -not $PSBoundParameters.ContainsKey('SolutionUniqueName')) { $SolutionUniqueName = 'SpaarkeMaster' }
 # Created (already secured) by scripts/Set-DocumentRelocationSchema.ps1 — this script grants their profiles. The item-id
 # copy sprk_graphitemidbound joined them in task 171 (owner round 72 item 1): sprk_graphitemid itself cannot be secured.
 $RelocationRecordColumns = @('sprk_relocationpending', 'sprk_relocatedversions', 'sprk_graphitemidbound')
@@ -501,7 +554,14 @@ elseif ($writer) {
 
 # (p5) no maker-authored configuration row writes a locked column.
 $configuredWriters = 0
-foreach ($ch in @(@{ T = 'sprk_fieldmappingrule'; C = 'sprk_targetfield' }, @{ T = 'sprk_aitopicregistry'; C = 'sprk_targetfield' }, @{ T = 'sprk_emailupdatefield'; C = 'sprk_targetfieldlogicalname' })) {
+if ($Target -eq 'InvoiceFamilyLinks') {
+    # #2799: the column names are ordinary columns of many other tables, so a name match here says nothing; and every writer
+    # these rows drive (the field-mapping push C1, the email proposal apply and the playbook Update Record C2, the AI topic
+    # persister) is a BFF path that writes a locked column AS THE APP after the person's check (task note §2.1/§4).
+    Report 'INFO' '(p5) configuration rows (field mapping, AI topic registry, email update field) drive BFF writers that write a locked invoice-family column as the app after the person''s check (#2799 chunk 3); not checked by name'
+}
+$configurationTables = if ($Target -eq 'InvoiceFamilyLinks') { @() } else { @(@{ T = 'sprk_fieldmappingrule'; C = 'sprk_targetfield' }, @{ T = 'sprk_aitopicregistry'; C = 'sprk_targetfield' }, @{ T = 'sprk_emailupdatefield'; C = 'sprk_targetfieldlogicalname' }) }
+foreach ($ch in $configurationTables) {
     $set = (Invoke-DvGet "EntityDefinitions(LogicalName='$($ch.T)')?`$select=EntitySetName").EntitySetName
     foreach ($column in $Columns) {
         foreach ($row in @((Invoke-DvGet "$set`?`$select=$($ch.T)id&`$filter=$($ch.C) eq '$column'").value)) {
@@ -510,7 +570,7 @@ foreach ($ch in @(@{ T = 'sprk_fieldmappingrule'; C = 'sprk_targetfield' }, @{ T
         }
     }
 }
-if ($configuredWriters -eq 0) { Report 'OK' "(p5) no field-mapping rule, AI topic-registry row or email update field targets the locked columns" }
+if ($configuredWriters -eq 0 -and $configurationTables.Count -gt 0) { Report 'OK' "(p5) no field-mapping rule, AI topic-registry row or email update field targets the locked columns" }
 
 # (p7) every column to lock exists.
 $missingColumns = 0
@@ -577,6 +637,47 @@ elseif ($Target -eq 'DocumentNarrowingLinks') {
     }
     if ($scanned -eq 0) { Report 'FAIL' '(p4) no web resource was read — the scan is wrong, and an empty scan proves nothing' }
     elseif ($hits -eq 0) { Report 'OK' "(p4) none of the $scanned deployed JavaScript / HTML web resources writes sprk_relatedcommunication or sprk_parentdocument" }
+}
+elseif ($Target -eq 'InvoiceFamilyLinks') {
+    # (p4a) EVIDENCE (#2799): no deployed JavaScript (3) / HTML (1) web resource writes a locked column ON A FAMILY TABLE.
+    # The detector is table-scoped and fails closed on a payload it cannot read; it is fed the live navigation names.
+    $navigationNames = @{}
+    foreach ($tableName in $TargetTables) {
+        $rels = @((Invoke-DvGet "EntityDefinitions(LogicalName='$tableName')/ManyToOneRelationships?`$select=ReferencingAttribute,ReferencingEntityNavigationPropertyName").value)
+        $navigationNames[$tableName] = @($rels | Where-Object { $_.ReferencingAttribute -in @($Pairs | Where-Object { $_.Table -eq $tableName } | ForEach-Object { $_.Column }) } |
+                ForEach-Object { $_.ReferencingEntityNavigationPropertyName } | Where-Object { $_ })
+        foreach ($p in @($Pairs | Where-Object { $_.Table -eq $tableName })) {
+            $nav = @($rels | Where-Object { $_.ReferencingAttribute -eq $p.Column } | ForEach-Object { $_.ReferencingEntityNavigationPropertyName })
+            if ($nav.Count -eq 0) { Report 'FAIL' "(p4a) no navigation property was read for $($p.Table).$($p.Column) — the scan could not know its @odata.bind name" }
+            elseif (@($nav | Where-Object { $_ -ne $p.Column -and $_.ToLowerInvariant() -ne $p.Column }).Count -gt 0) {
+                # #2799 review 2 (R2-2): the BFF recognises a locked bind only as '{column}@odata.bind' (any case;
+                # InvoiceFamilyCoreRecordGuard.ColumnOfKey), so a navigation name that is not the column's would carry no
+                # locked bind it checks and writes as the app: every such BFF write would break once locked.
+                Report 'FAIL' "(p4a) $($p.Table).$($p.Column) binds as '$($nav -join "', '")', not '$($p.Column)@odata.bind' — the BFF writes a locked lookup only through its column-named bind, so its writes of this column would break once locked"
+            }
+        }
+    }
+    $scanned = 0; $hits = 0
+    $next = "webresourceset?`$select=name,content,webresourcetype&`$filter=webresourcetype eq 1 or webresourcetype eq 3"
+    while ($next) {
+        $page = Invoke-DvGet $next @{ Prefer = 'odata.maxpagesize=25' }
+        foreach ($wr in @($page.value)) {
+            $scanned++
+            if (-not $wr.content) { continue }
+            $text = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($wr.content))
+            foreach ($w in (Find-InvoiceFamilyWrite -Text $text -NavigationNames $navigationNames)) {
+                $hits++
+                Report 'FAIL' "(p4a) web resource '$($wr.name)' WRITES $($w.Table) ($($w.Shape): $($w.Detail)) — once locked that write is refused; rebuild and deploy it first"
+            }
+        }
+        $next = $page.'@odata.nextLink'
+    }
+    if ($scanned -eq 0) { Report 'FAIL' '(p4a) no web resource was read — the scan is wrong, and an empty scan proves nothing' }
+    elseif ($hits -eq 0) { Report 'OK' "(p4a) none of the $scanned deployed JavaScript / HTML web resources writes a locked invoice-family column" }
+
+    if ($BffWritesInvoiceFamilyLinksAsApp) { Report 'OK' '(p4b) operator confirms the BFF build with #2799 chunks 1-3 (check as the person, write the locked columns as the app) is deployed' }
+    elseif ($Apply) { Report 'FAIL' '(p4b) -BffWritesInvoiceFamilyLinksAsApp not passed: an older BFF writes these columns as the caller (and refuses a create that names one), which the lock refuses' }
+    else { Report 'INFO' '(p4b) -BffWritesInvoiceFamilyLinksAsApp is required for -Apply' }
 }
 elseif ($Target -eq 'ReportCatalog') {
     if ($BffWritesCatalogPointers) { Report 'OK' '(p4) operator confirms the BFF build that stamps the catalog pointer app-only (task 166 f1) is deployed' }
@@ -668,6 +769,7 @@ function Write-MaskedRecovery([string]$Column, [string]$Cause) {
     $consequence = switch ($Target) {
         'DocumentNarrowingLinks' { 'users and forms then see no link; the narrowing itself reads app-only' }
         'AccessMarkerColumns' { 'a Restricted or internal-only record then LOOKS ordinary on forms, ribbons and grids; the BFF reads it as System Administrator' }
+        'InvoiceFamilyLinks' { 'invoice-family rows then show no matter, project, work assignment or invoice on forms, views and caller-identity reads' }
         default { 'files / reports stop opening' }
     }
     Write-Host "  Every non-administrator then reads $Column EMPTY ($consequence)." -ForegroundColor Red
@@ -741,11 +843,20 @@ foreach ($pairToLock in $Pairs) {
 }
 
 Write-Host "`nInformational: System Administrator role holders (full field access by platform rule)"
+# #2799 review 2 (R2-3): counts by default — a run's output is pasted into notes and tickets, and names would put people
+# there. -ListSystemAdministrators prints the names for an operator who needs them.
+$sysAdminUsers = [System.Collections.Generic.List[object]]::new()
+$sysAdminTeams = [System.Collections.Generic.List[object]]::new()
 foreach ($role in @((Invoke-DvGet "roles?`$select=roleid&`$filter=name eq 'System Administrator'").value)) {
-    foreach ($u in @((Invoke-DvGet "roles($($role.roleid))/systemuserroles_association?`$select=fullname,applicationid,isdisabled").value | Where-Object { -not $_.isdisabled })) {
-        Report 'INFO' ("user '{0}'{1}" -f $u.fullname, $(if ($u.applicationid) { ' (application user)' } else { '' }))
-    }
-    foreach ($tm in @((Invoke-DvGet "roles($($role.roleid))/teamroles_association?`$select=name").value)) { Report 'INFO' "TEAM '$($tm.name)' — every member" }
+    foreach ($u in @((Invoke-DvGet "roles($($role.roleid))/systemuserroles_association?`$select=fullname,applicationid,isdisabled").value | Where-Object { -not $_.isdisabled })) { $sysAdminUsers.Add($u) }
+    foreach ($tm in @((Invoke-DvGet "roles($($role.roleid))/teamroles_association?`$select=name").value)) { $sysAdminTeams.Add($tm) }
+}
+$sysAdminApps = @($sysAdminUsers | Where-Object { $_.applicationid }).Count
+Report 'INFO' ("{0} enabled user(s) ({1} application user(s)) and {2} team(s) hold System Administrator{3}" -f `
+        $sysAdminUsers.Count, $sysAdminApps, $sysAdminTeams.Count, $(if ($ListSystemAdministrators) { '' } else { ' — names not printed; pass -ListSystemAdministrators to list them' }))
+if ($ListSystemAdministrators) {
+    foreach ($u in $sysAdminUsers) { Report 'INFO' ("user '{0}'{1}" -f $u.fullname, $(if ($u.applicationid) { ' (application user)' } else { '' })) }
+    foreach ($tm in $sysAdminTeams) { Report 'INFO' "TEAM '$($tm.name)' — every member" }
 }
 
 # ── (d) PUBLISH ─────────────────────────────────────────────────────────────────────────────────────────────

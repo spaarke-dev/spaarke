@@ -25,12 +25,23 @@ public partial class InvoiceFamilyGenericUpdatePathTests
     ];
 
     /// <summary>The one payload sent for the row (the update-only write; the upsert on a path that still uses it).</summary>
-    private Dictionary<string, object?> SentPayload(string table, Guid id) =>
-        (Dictionary<string, object?>)_writes.Invocations
-            .Single(i => i.Method.Name is nameof(IFieldMappingDataverseService.UpdateRecordFieldsAsync)
-                             or nameof(IFieldMappingDataverseService.UpdateExistingRecordFieldsAsync)
-                         && (string)i.Arguments[0] == table && (Guid)i.Arguments[1] == id)
-            .Arguments[2];
+    /// <remarks>#2799: the ONE logical write of the row — on a person's run with a locked column, the person's write of the
+    /// other columns and the application's of the locked ones, merged (at most two requests).</remarks>
+    private Dictionary<string, object?> SentPayload(string table, Guid id)
+    {
+        var writes = _writes.Invocations
+            .Where(i => i.Method.Name is nameof(IFieldMappingDataverseService.UpdateRecordFieldsAsync)
+                            or nameof(IFieldMappingDataverseService.UpdateExistingRecordFieldsAsync)
+                        && (string)i.Arguments[0] == table && (Guid)i.Arguments[1] == id)
+            .Select(i => (Dictionary<string, object?>)i.Arguments[2])
+            .ToList();
+        writes.Should().NotBeEmpty().And.HaveCountLessThanOrEqualTo(2);
+        var merged = new Dictionary<string, object?>(StringComparer.Ordinal);
+        foreach (var fields in writes)
+            foreach (var (key, value) in fields)
+                merged.Add(key, value);
+        return merged;
+    }
 
     private static void ShouldCarryTheResolverFieldsOf(
         Dictionary<string, object?> payload, string navigation, string core, Guid id, string? name, string? number)

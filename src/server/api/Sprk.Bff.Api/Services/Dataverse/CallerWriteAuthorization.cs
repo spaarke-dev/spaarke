@@ -133,8 +133,12 @@ internal static class CallerWriteAuthorization
         // a BFF-managed pair (SecureRootInheritance.BffManagedPairTables) — it is secured so that ONLY this server writes it,
         // and what this server asks before writing it is the pair rule in (2) below (AppendTo AS THE CALLER on the record it
         // names), so the column security it would pass is the one that forces every write of it through here.
+        // #2799 (uac-r2): and a LOCKED invoice-family column (InvoiceFamilyLockedWrite.LockedColumnsOf) — secured so that only this
+        // server writes it — for the same reason: what this server asks before writing it is (2) (AppendTo AS THE CALLER on
+        // every record a lookup names) and (1) (the table's Create and Append), and the create is written app-only.
         var bffManaged = BffManagedPairColumnsOf(table);
-        var asked = item.Columns.Where(c => !bffManaged.Contains(c)).ToArray();
+        var locked = InvoiceFamilyLockedWrite.LockedColumnsOf(table);
+        var asked = item.Columns.Where(c => !bffManaged.Contains(c) && !locked.ContainsKey(c)).ToArray();
         var columnFilter = string.Join(" or ", asked.Select(c => $"LogicalName eq '{c}'"));
         if (asked.Length > 0 || item.Columns.Count == 0)
         {

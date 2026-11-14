@@ -2249,6 +2249,12 @@ public class RecordOwnerAssignmentCensusTests
                                      + "by the caller's own Dataverse rights (Assign included), as on any update. The pair, a project's only "
                                      + "filing, is not in that PATCH: the application writes it, version-conditioned (an "
                                      + "ExternalDocumentNarrowingGuard writer), so this PATCH files the project under nothing.",
+        ["InvoiceFamilyLockedWrite.cs"] = "#2799: PatchAsCallerAsync PATCHes, as the caller, the columns of an invoice-family row other than "
+                                          + "its locked lookups (LockedColumnsOf: the core record and invoice lookups, its filing), which the "
+                                          + "application writes after the caller's Write/Append/AppendTo checks; the owner is never written. "
+                                          + "It only splits the body its caller built: a re-file's is OwnedChildWrite.RefileAsync's (an "
+                                          + "UnscannedWriter, ReparentAsync re-derives the owner after it), and the ordinary updates of "
+                                          + "ChildRecordEndpoints and DataverseUpdateRecordHandler are PATCHes that file nothing.",
         ["DataverseSearchDataHandler.cs"] = "POSTs to the Dataverse search action (searchquery) — a READ; writes no row.",
         ["InquiryDispositionService.cs"] = "Ontology task 071 (D-111): the caller's own PATCHes of scalar columns only (the inquiry's "
                                            + "disposition and state, the reply's association status, the outcome To Do's state): no lookup "

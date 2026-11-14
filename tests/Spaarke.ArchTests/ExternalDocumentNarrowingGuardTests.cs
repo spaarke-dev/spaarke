@@ -1271,6 +1271,14 @@ public class ExternalDocumentNarrowingGuardTests
         ["Sprk.Bff.Api.Services.Dataverse.InvoiceFamilyCoreRecordGuard::UpdateExistingAsync"] =
             "The invoice family's update-only write primitive: it writes its caller's payload, so it is itself a recognised " +
             "generic update (GenericUpdateNames) and each of its callers is held to the refusal here.",
+        ["Sprk.Bff.Api.Services.Dataverse.InvoiceFamilyLockedWrite::UpdateExistingSplitAsync"] =
+            "#2799: the same primitive for a write that acts for a person (its locked columns written by the application after " +
+            "the person's checks): it writes its caller's payload, so it is itself a recognised generic update " +
+            "(GenericUpdateNames) and each of its callers is held to the refusal here.",
+        ["Sprk.Bff.Api.Services.Dataverse.InvoiceFamilyLockedWrite::PatchAsCallerAsync"] =
+            "#2799: its application write is only the locked invoice-family lookups (LockedColumnsOf(table): a family table's " +
+            "core record and invoice lookups, picked out of the body by name), update-only, after the caller's Write/Append/" +
+            "AppendTo checks; never sprk_document. Every other column goes in the caller's own PATCH.",
         ["Sprk.Bff.Api.Services.Dataverse.RecordOwnershipResolver::PutBackFilingAsync"] =
             "Rollback of this re-file's own failed write (#2143): writes back only the values this row held before the re-file " +
             "(`restore`, read from the row before the write), and only while the row is still filed as the re-file left it " +
@@ -1563,6 +1571,9 @@ public class ExternalDocumentNarrowingGuardTests
         // (DataverseUpdateHandler, the Update Record core and the field-mapping push write an invoice or line through it).
         [nameof(Sprk.Bff.Api.Services.Dataverse.InvoiceFamilyCoreRecordGuard.UpdateExistingAsync)] =
             typeof(Sprk.Bff.Api.Services.Dataverse.InvoiceFamilyCoreRecordGuard),
+        // #2799: its drop-in for a write that may act for a person; the same three paths will write through it.
+        [nameof(Sprk.Bff.Api.Services.Dataverse.InvoiceFamilyLockedWrite.UpdateExistingSplitAsync)] =
+            typeof(Sprk.Bff.Api.Services.Dataverse.InvoiceFamilyLockedWrite),
     };
 
     private static bool IsGenericUpdate(MethodBase method) =>
