@@ -16,7 +16,7 @@
     3. Read both back.
     4. Send uac-r2 the after-notice and tell word-add-in-r1 the seeding is done.
     5. Record the run in the 095g notes, in a "Dev seeding" section.
-- **Logged EB-D-238** (Decision Record for each per-record Procedure change) as task 084h 🔲. Next: draft the design and send it to ontology-r1 before building.
+- **Logged EB-D-238** (Decision Record for each per-record Procedure change) as task 084h 🔲. Next: draft the design and send it to ontology-r1 before building. Its review checks how the design uses the writer (task 142 contract C1-C3, C9): the subject is the core record; the two-wall refusal holds; the Decision Record is written only after the change lands, so a refused or failed write leaves none; a retry files no second record; a Decision Record that fails after a successful change is surfaced, never swallowed. ontology-r1 also reviews the 095f part 2 design before its build.
   - Log it as EB-D-238: a per-record Procedure change (assign/pin/exclude/change/remove, 089 writes) writes a Decision Record.
   - Then add a task row and send the design to ontology-r1 first, since it owns the Decision Record writers.
 - **095f part 2:** ontology-r1 wants the design first (EB-D-236 Decision Record note).
