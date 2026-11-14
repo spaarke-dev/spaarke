@@ -4,7 +4,7 @@
     <title>spaarke_show_decisions and app-only paging tool</title>
     <phase>B MCP host and tools</phase>
     <gate>after 015, 017, 018 and 021</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Tags include bff-api; new tool classes and tests (.cs, .ts)</rigor-reason>
     <model-tier>opus</model-tier>

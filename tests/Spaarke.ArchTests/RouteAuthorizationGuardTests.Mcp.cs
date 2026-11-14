@@ -60,7 +60,7 @@ public partial class RouteAuthorizationGuardTests
             + "tool runs). It takes no record id; each tool reads as the caller through the seam McpTools names."),
     };
 
-    // Tasks 022-024 add spaarke_show_decisions, spaarke_get_decision_plan, spaarke_search_decision_lookup and
+    // Tasks 022-024 add spaarke_show_decisions, spaarke_list_decision_page, spaarke_get_decision_plan, spaarke_search_decision_lookup and
     // spaarke_complete_decision, each with its entry here, in the diff that adds the tool.
     private static readonly IReadOnlyList<McpTool> McpTools = new[]
     {
@@ -77,6 +77,14 @@ public partial class RouteAuthorizationGuardTests
         new McpTool("SearchDecisionLookupTool", "", "IDecisionLookupSearch",
             "FR-07, app-only and read-only: the wizard's person, budget and firm search as the caller through IDecisionLookupSearch (the REST "
             + "lookup route's service); the plan names the table and scope. Bare [Authorize]: an A10 workforce user, like the REST Signals group."),
+        // ── task 022 ──
+        new McpTool("ShowDecisionsTool", "", "IDecisionCapability",
+            "spaarke_show_decisions (FR-03/FR-04, model-visible, read-only): the caller's Decide lane through ListDecideAsync and "
+            + "ListDecidePageAsync with IHttpContextAccessor.HttpContext's User; privileged rows reduced to a count before the model sees them."),
+        new McpTool("ListDecisionPageTool", "", "IDecisionCapability",
+            "spaarke_list_decision_page (FR-05, app-only, read-only): one page of the caller's Decide lane through ListDecidePageAsync "
+            + "with IHttpContextAccessor.HttpContext's User; the cursor is the only input."),
+        // ── end task 022 ──
     };
 
     private static readonly Regex McpToolClass = new(
