@@ -9,13 +9,18 @@
  * without any test noticing, so this scan fails the build when it does. Pattern: `.claude/patterns/ui/wizard-side-pane-lookup-and-email-compose.md`.
  *
  * What it checks, over the non-test sources under `components/Create*Wizard/` and `components/WizardFollowOns/`:
- *   1. `inline-lookup`  - the file renders the inline `LookupField` (`<LookupField`, or a JSX alias of that named import).
- *                         Comments are ignored; `<DataverseLookupField` is the sanctioned component and never matches.
- *   2. `email-step`     - the file imports a module path ending in `EmailStep` (`../EmailStep`, `../../EmailStep/index`, ...).
- *                         `DocumentEmailStep` and the composer wrappers do not match.
+ *   1. `inline-lookup`  - the file uses the inline `LookupField` as a value outside an import declaration: JSX (`<LookupField`,
+ *                         `<ns.LookupField`), an argument (`React.createElement(LookupField`), an assignment
+ *                         (`const L = LookupField`) or a re-export (`export { LookupField as X } from`), and the same for every
+ *                         name it is imported as. Comments and the text of strings are ignored (a string-aware walk, so a `//` or
+ *                         `/*` inside `"image/*"` hides nothing); `DataverseLookupField` is the sanctioned component and never matches.
+ *   2. `email-step`     - the file references a module whose path ends in `EmailStep`: after `from`, `import(`, `import '...'`,
+ *                         `require(` or `jest.mock(`. `DocumentEmailStep`, the composer wrappers and a bare `'EmailStep'` string
+ *                         (a step id) do not match.
  * and, over every non-test source in the package:
- *   3. `send-email-step` - exactly one module defines an export named `SendEmailStep` (the composer wrapper). The old step
- *                         shared the name, so a consumer importing `SendEmailStep` from the package got whichever won.
+ *   3. `send-email-step` - exactly one module defines or exports a symbol named `SendEmailStep` (the composer wrapper): an inline
+ *                         `export const|function|class`, `export { X as SendEmailStep }`, or a local declaration exported later by
+ *                         an export list or `export default`. A plain re-export of the same binding is not a second one.
  *
  * Ratchet: BASELINE lists the violations that exist today, each with its reason. A violation that is not listed fails; a listed
  * entry that no longer violates fails until it is removed from the list. It is empty: tasks 179-183 converted every field the
@@ -58,33 +63,149 @@ export function isGuardedWizardFile(file: string): boolean {
   return GUARDED_FOLDER.test(file) && SOURCE_FILE.test(file) && !TEST_FILE.test(file);
 }
 
-/** Drops block and line comments so prose that mentions `<LookupField` does not count. Strings are kept. */
+/**
+ * Walks `source` as code and returns it with every comment replaced by spaces (newlines kept). It is string-aware: a `//` or a
+ * `/*` inside a string, a template literal's text or a JSX attribute value (`accept="image/*"`) starts no comment. With
+ * `blankStrings` the text of each string is replaced by spaces too (quotes kept), so a string that merely mentions
+ * `<LookupField` never counts; `${...}` inside a template literal is code and is walked as code.
+ *
+ * Known limits (a source scan, not a parser): a regular-expression literal that contains a quote or `//`, and an apostrophe in
+ * JSX text, can open a bogus string; a quote string ends at the line end, so the damage stops at that line.
+ */
+function walkCode(
+  source: string,
+  start: number,
+  blankStrings: boolean,
+  untilCloseBrace: boolean
+): { text: string; end: number } {
+  let out = '';
+  let i = start;
+  let depth = 0;
+  const n = source.length;
+  const blank = (text: string): string => (blankStrings ? text.replace(/[^\n]/g, ' ') : text);
+  while (i < n) {
+    const c = source[i];
+    const d = source[i + 1];
+    if (c === '/' && d === '/') {
+      while (i < n && source[i] !== '\n') i++;
+    } else if (c === '/' && d === '*') {
+      const close = source.indexOf('*/', i + 2);
+      const stop = close === -1 ? n : close + 2;
+      out += source.slice(i, stop).replace(/[^\n]/g, ' ');
+      i = stop;
+    } else if (c === '"' || c === "'") {
+      let j = i + 1;
+      while (j < n && source[j] !== c && source[j] !== '\n') j += source[j] === '\\' ? 2 : 1;
+      const closed = j < n && source[j] === c;
+      out += c + blank(source.slice(i + 1, Math.min(j, n))) + (closed ? c : '');
+      i = closed ? j + 1 : Math.min(j, n);
+    } else if (c === '`') {
+      out += c;
+      i++;
+      while (i < n && source[i] !== '`') {
+        if (source[i] === '\\') {
+          out += blank(source.slice(i, i + 2));
+          i += 2;
+        } else if (source[i] === '$' && source[i + 1] === '{') {
+          const inner = walkCode(source, i + 2, blankStrings, true);
+          out += '${' + inner.text + '}';
+          i = inner.end;
+        } else {
+          out += blank(source[i]);
+          i++;
+        }
+      }
+      if (i < n) {
+        out += '`';
+        i++;
+      }
+    } else {
+      if (untilCloseBrace && c === '}' && depth === 0) return { text: out, end: i + 1 };
+      if (c === '{') depth++;
+      else if (c === '}') depth--;
+      out += c;
+      i++;
+    }
+  }
+  return { text: out, end: n };
+}
+
+/** Comments removed; string text kept (module specifiers stay visible). */
 export function stripComments(source: string): string {
-  return source.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/(^|[\s;{}()])\/\/[^\n]*/gm, '$1');
+  return walkCode(source, 0, false, false).text;
 }
 
-/** True when the file renders the inline `LookupField`, directly or through a named-import alias. */
-export function rendersInlineLookupField(source: string): boolean {
-  const code = stripComments(source);
-  if (/<LookupField(?![A-Za-z0-9_$])/.test(code)) return true;
-  // `import * as Lookups` then `<Lookups.LookupField`.
-  if (/<[A-Za-z_$][A-Za-z0-9_$]*\.LookupField(?![A-Za-z0-9_$])/.test(code)) return true;
-  // `import { LookupField as Foo }`: `\bLookupField` does not match inside `DataverseLookupField`.
-  const aliases = [...code.matchAll(/(?<![A-Za-z0-9_$])LookupField\s+as\s+([A-Za-z_$][A-Za-z0-9_$]*)/g)].map(m => m[1]);
-  return aliases.some(alias => new RegExp(`<${alias.replace(/\$/g, '\\$')}(?![A-Za-z0-9_$])`).test(code));
+/** Comments removed and string text blanked: only code remains. */
+export function codeOnly(source: string): string {
+  return walkCode(source, 0, true, false).text;
 }
 
-/** True when the file names a module path that ends in `EmailStep` (import, export-from, dynamic import, jest.mock, require). */
-export function importsEmailStep(source: string): boolean {
-  const code = stripComments(source);
-  return /['"][^'"\n]*(?<![A-Za-z0-9_$])EmailStep(?:\/[^'"\n]*)?['"]/.test(code);
-}
+const IDENT = '[A-Za-z_$][A-Za-z0-9_$]*';
+const NOT_IDENT_BEFORE = '(?<![A-Za-z0-9_$])';
+const NOT_IDENT_AFTER = '(?![A-Za-z0-9_$])';
+/** `import ... from '...'` (type-only too), possibly over several lines. Side-effect imports bind nothing. */
+const IMPORT_DECLARATION = /(?<![A-Za-z0-9_$.])import\s+(?:type\s+)?[^;'"`]*?\bfrom\s*(['"])[^'"\n]*\1\s*;?/g;
 
-/** True when the file defines (not merely re-exports) a symbol named `SendEmailStep`. */
-export function definesSendEmailStep(source: string): boolean {
-  return /export\s+(?:default\s+)?(?:const|let|var|function|class)\s+SendEmailStep(?![A-Za-z0-9_$])/.test(
-    stripComments(source)
+/**
+ * True when the file uses the inline `LookupField` as a value anywhere outside an import declaration: as JSX (`<LookupField`,
+ * `<ns.LookupField`), as an argument (`React.createElement(LookupField`), in an assignment (`const L = LookupField`), or in a
+ * re-export (`export { LookupField as X } from`), and the same for every name it is imported as (`import { LookupField as X }`).
+ * An import that is never used is not a rendering. `DataverseLookupField` and any other longer name never match.
+ */
+export function usesInlineLookupField(source: string): boolean {
+  const code = codeOnly(source);
+  const imports = code.match(IMPORT_DECLARATION) ?? [];
+  const rest = code.replace(IMPORT_DECLARATION, ' ');
+  const names = ['LookupField'];
+  for (const decl of imports) {
+    for (const m of decl.matchAll(new RegExp(String.raw`${NOT_IDENT_BEFORE}LookupField\s+as\s+(${IDENT})`, 'g')))
+      names.push(m[1]);
+  }
+  return names.some(name =>
+    new RegExp(String.raw`${NOT_IDENT_BEFORE}${name.replace(/\$/g, '\\$')}${NOT_IDENT_AFTER}`).test(rest)
   );
+}
+
+/** A module reference: after `from`, `import(`, `import '...'`, `require(` or a `jest.mock`-family call. */
+const MODULE_REFERENCE = new RegExp(
+  String.raw`(?:${NOT_IDENT_BEFORE}from|${NOT_IDENT_BEFORE}import\s*\(?|${NOT_IDENT_BEFORE}require\s*\(|${NOT_IDENT_BEFORE}jest\s*\.\s*(?:mock|doMock|unmock|requireActual|requireMock)\s*\()\s*['"][^'"\n]*${NOT_IDENT_BEFORE}EmailStep(?:/[^'"\n]*)?['"]`
+);
+
+/** True when the file references a module whose path ends in `EmailStep` (a bare `'EmailStep'` string, as a step id, is not one). */
+export function importsEmailStep(source: string): boolean {
+  return MODULE_REFERENCE.test(stripComments(source));
+}
+
+/**
+ * True when the file defines or exports a symbol named `SendEmailStep` of its own: an inline `export const|function|class`, an
+ * `export { X as SendEmailStep }`, or a local `SendEmailStep` that an export list or `export default` exports later. A plain
+ * re-export (`export { SendEmailStep } from './wrappers/SendEmailStep'`) is the same binding and does not count.
+ */
+export function definesSendEmailStep(source: string): boolean {
+  const code = codeOnly(source);
+  if (
+    new RegExp(
+      String.raw`export\s+(?:default\s+)?(?:const|let|var|function|class)\s+SendEmailStep${NOT_IDENT_AFTER}`
+    ).test(code)
+  ) {
+    return true;
+  }
+  if (
+    new RegExp(
+      String.raw`export\s*(?:type\s*)?\{[^}]*${NOT_IDENT_BEFORE}as\s+SendEmailStep${NOT_IDENT_AFTER}[^}]*\}`
+    ).test(code)
+  ) {
+    return true;
+  }
+  const declaredHere = new RegExp(
+    String.raw`${NOT_IDENT_BEFORE}(?:const|let|var|function|class)\s+SendEmailStep${NOT_IDENT_AFTER}`
+  ).test(code);
+  if (!declaredHere) return false;
+  const exportedByList = new RegExp(
+    String.raw`export\s*\{[^}]*${NOT_IDENT_BEFORE}SendEmailStep${NOT_IDENT_AFTER}(?!\s+as\b)[^}]*\}(?!\s*from\b)`
+  ).test(code);
+  const exportedByDefault = new RegExp(String.raw`export\s+default\s+SendEmailStep${NOT_IDENT_AFTER}`).test(code);
+  return exportedByList || exportedByDefault;
 }
 
 /** Rules 1 and 2 over the wizard folders, rule 3 over every file given. Sorted for a stable report. */
@@ -92,7 +213,7 @@ export function findViolations(files: readonly ISourceFile[]): IViolation[] {
   const found: IViolation[] = [];
   for (const f of files) {
     if (isGuardedWizardFile(f.file)) {
-      if (rendersInlineLookupField(f.source)) found.push({ rule: 'inline-lookup', file: f.file });
+      if (usesInlineLookupField(f.source)) found.push({ rule: 'inline-lookup', file: f.file });
       if (importsEmailStep(f.source)) found.push({ rule: 'email-step', file: f.file });
     }
   }
@@ -206,13 +327,88 @@ const a = <Lookups.LookupField label="x" />;`;
     });
 
     it.each([
+      [
+        'React.createElement(LookupField, ...)',
+        `import { LookupField } from '../LookupField';\nexport const S = () => React.createElement(LookupField, { label: 'x' });`,
+      ],
+      [
+        'an alias const',
+        `import { LookupField } from '../LookupField';\nconst Picker = LookupField;\nexport const S = () => <Picker />;`,
+      ],
+      ['a re-exported alias (export-from)', `export { LookupField as PersonPicker } from '../LookupField';`],
+      [
+        'an imported alias that is exported on',
+        `import { LookupField as Picker } from '../LookupField';\nexport { Picker };`,
+      ],
+      [
+        'an imported alias passed as a value',
+        `import { LookupField as Picker } from '../LookupField';\nexport const S = () => React.createElement(Picker, {});`,
+      ],
+      [
+        'an alias whose name holds a $',
+        `import { LookupField as $Picker } from '../LookupField';\nexport const S = () => <$Picker />;`,
+      ],
+      [
+        'a // inside a string before the tag on the same line',
+        `const a = (<><Foo placeholder="see http://x // not a comment" /><LookupField label="y" /></>);`,
+      ],
+      [
+        'a /* inside a string that would swallow the code up to the next */',
+        `const a = <input accept="image/*" />;\nconst b = <LookupField label="y" />;\n/** a later doc comment */\nexport const c = 1;`,
+      ],
+      [
+        'a /* inside a single-quoted string',
+        `const accept = 'image/*';\nconst b = <LookupField label="y" />;\n/* later */`,
+      ],
+      [
+        'an apostrophe in JSX text (a bogus string ends at the line end)',
+        `const a = <p>Don't pick here</p>;\nconst b = <LookupField label="y" />;`,
+      ],
+      ['code inside a template literal expression', 'const a = `${cond ? <LookupField label="y" /> : null}`;'],
+    ])('on the inline LookupField used as a value: %s', (_label, source) => {
+      expect(findViolations([{ file: step, source }])).toEqual([{ rule: 'inline-lookup', file: step }]);
+    });
+
+    it.each([
       ["import { SendEmailStep } from '../EmailStep';"],
       ["import { SendEmailStep } from '../../EmailStep/index';"],
       ["export { SendEmailStep } from '../EmailStep/SendEmailStep';"],
       ["const m = await import('../EmailStep');"],
       ["jest.mock('../../EmailStep/SendEmailStep', () => ({}));"],
+      ["const m = require('../EmailStep');"],
+      ["import '../EmailStep';"],
+      ["import type { ISendEmailStepProps } from '../../EmailStep/SendEmailStep';"],
     ])('on a seeded EmailStep import: %s', source => {
       expect(findViolations([{ file: step, source }])).toEqual([{ rule: 'email-step', file: step }]);
+    });
+
+    it.each([
+      ['an alias export', 'const Other = () => null;\nexport { Other as SendEmailStep };'],
+      ['an alias re-export', "export { Other as SendEmailStep } from './other';"],
+      [
+        'a function exported later through a list',
+        'function SendEmailStep() { return null; }\nexport { SendEmailStep };',
+      ],
+      [
+        'a const exported later through a list with other names',
+        'const SendEmailStep = () => null;\nexport { Foo, SendEmailStep, Bar };',
+      ],
+      [
+        'a function exported later by default',
+        'function SendEmailStep() { return null; }\nexport default SendEmailStep;',
+      ],
+    ])('on a second SendEmailStep export: %s', (_label, source) => {
+      const result = findViolations([
+        {
+          file: 'EmailComposer/wrappers/SendEmailStep.tsx',
+          source: 'export const SendEmailStep = forwardRef(() => null);',
+        },
+        { file: 'Other/Second.tsx', source },
+      ]);
+      expect(result).toEqual([
+        { rule: 'send-email-step', file: 'EmailComposer/wrappers/SendEmailStep.tsx' },
+        { rule: 'send-email-step', file: 'Other/Second.tsx' },
+      ]);
     });
 
     it('on two modules that both define SendEmailStep (both are named)', () => {
@@ -252,9 +448,57 @@ const a = <Lookups.DataverseLookupField entityType="contact" />;`;
       expect(findViolations([{ file: step, source }])).toEqual([]);
     });
 
+    it('on the word LookupField only inside a string, a template text or JSX attribute text', () => {
+      const source = [
+        "const hint = 'Use <LookupField> for people';",
+        'const t = `render <LookupField /> here`;',
+        'const a = <Hint text="<LookupField />" />;',
+        'const c = React.createElement(DataverseLookupField, {});',
+      ].join('\n');
+      expect(findViolations([{ file: step, source }])).toEqual([]);
+    });
+
+    it('on an import of LookupField that is never used as a value', () => {
+      const source = `import { LookupField, type ILookupFieldProps } from '../LookupField';\nexport type P = ILookupFieldProps;`;
+      expect(findViolations([{ file: step, source }])).toEqual([]);
+    });
+
+    it('on code that follows a // or /* held inside a string (the string does not start a comment)', () => {
+      const source = `const a = <input accept="image/*" placeholder="a // b" />;\nconst b = <DataverseLookupField entityType="contact" />;\n/* later */`;
+      expect(findViolations([{ file: step, source }])).toEqual([]);
+    });
+
     it('on an aliased DataverseLookupField', () => {
       const source = `import { DataverseLookupField as Pane } from '../LookupField';\nconst a = <Pane entityType="contact" />;`;
       expect(findViolations([{ file: step, source }])).toEqual([]);
+    });
+
+    it("on a bare 'EmailStep' string (a step id) that is not a module reference", () => {
+      const source = [
+        "const steps = [{ id: 'EmailStep', label: 'Email' }];",
+        'const current = "EmailStep";',
+        "export const isEmail = (id: string) => id === 'EmailStep';",
+      ].join('\n');
+      expect(findViolations([{ file: step, source }])).toEqual([]);
+    });
+
+    it('on a SendEmailStep that is declared but not exported, and on a re-export of the one binding', () => {
+      const result = findViolations([
+        {
+          file: 'EmailComposer/wrappers/SendEmailStep.tsx',
+          source: 'export const SendEmailStep = forwardRef(() => null);',
+        },
+        {
+          file: 'Other/Local.tsx',
+          source: 'function SendEmailStep() { return null; }\nexport const X = SendEmailStep;',
+        },
+        {
+          file: 'Other/Reexport.ts',
+          source:
+            "export { SendEmailStep as default } from '../EmailComposer';\nexport { SendEmailStep } from '../EmailComposer';",
+        },
+      ]);
+      expect(result).toEqual([]);
     });
 
     it('on the composer, DocumentEmailStep and a path that merely contains the letters EmailStep', () => {
@@ -292,6 +536,36 @@ const a = <Lookups.DataverseLookupField entityType="contact" />;`;
         { file: 'EmailComposer/index.ts', source: "export { SendEmailStep } from './wrappers/SendEmailStep';" },
       ]);
       expect(result).toEqual([]);
+    });
+  });
+
+  describe('the comment walk', () => {
+    it('keeps a // and a /* that sit inside strings, and drops real comments', () => {
+      const out = stripComments(`const a = "x // y"; // gone\nconst b = 'image/*'; /* gone */ const c = 1;`);
+      expect(out).toContain('"x // y"');
+      expect(out).toContain("'image/*'");
+      expect(out).not.toContain('gone');
+      expect(out).toContain('const c = 1;');
+    });
+
+    it('keeps the line count (a comment becomes spaces, newlines stay)', () => {
+      const source = 'a\n/* one\ntwo */\nb // x\nc';
+      expect(stripComments(source).split('\n')).toHaveLength(source.split('\n').length);
+    });
+
+    it('walks a template literal: text is a string, ${...} is code', () => {
+      const out = codeOnly('const t = `http://x ${a /* c */ + b} // y`; const z = 1;');
+      expect(out).not.toContain('http');
+      expect(out).toContain('a ');
+      expect(out).toContain('const z = 1;');
+    });
+
+    it('blanks string text but keeps the quotes', () => {
+      expect(codeOnly(`const a = "abc"; const b = 'd';`)).toBe(`const a = "   "; const b = ' ';`);
+    });
+
+    it('ends an unterminated quote string at the line end', () => {
+      expect(codeOnly("const a = <p>Don't</p>;\nconst b = 2;")).toContain('const b = 2;');
     });
   });
 
