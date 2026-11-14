@@ -366,6 +366,21 @@ Branch `task/ebill-095g-assign-firm`. Built per the design, uac-r2 R1/R2 and the
 - **The Law Firm type row** must be active, and the code must be on exactly one active row. Zero or two rows is the fail-closed 503 on both routes.
 - **A filter-level 503** (a step-0, rights or privilege fault) is the filter's existing fail-closed answer. Its detail text names invoice submissions; the code is the same `ebilling.submission.record_unavailable`, which is what the pane reads.
 
+## Review 1 fixes (2026-11-14)
+
+- **F1, re-check on retry.** On a row-version mismatch, an add now runs the step-2 eligibility check again before the second write. A record made Restricted (or Secure or Limited) between the check and the write is refused with its 409 code, and nothing is written. A clear is not re-checked, because a revoke is never blocked by flags. Tests: `Mismatch_RecordBecameRestricted_Is409` (must fire) and `Mismatch_RecordBecameRestricted_ClearIsApplied` (must not fire).
+- **K-class limit (known, accepted).** The retry runs only when this record's own version moves. A change to a PARENT's flags (a work assignment's or project's matter) does not move this row's version, so it does not trigger the re-check in that window. The add can then land on a record whose effective flags have just turned against it. No access follows from it: the inline access pass reads the effective flags itself and the materializer refuses the organization grant there. What remains is a slot value the route would have refused a moment later. It is visible on the record and is cleared like any other.
+- **F2, one record-rights helper.** `FinanceAuthorizationFilter.CallerRecordVerdictAsync` returns allowed, denied or faulted from the one caller snapshot. The filter's Record check (every mode) and `CallerHoldsRightsAsync` (the handlers' second-record checks) both use it. The fail-closed mode answers faulted with the 503; the other modes deny on it, as before. One behaviour tightens: an incomplete answer is never counted as held, even if it carried rights. The production source returns none on a fault, so nothing changes in practice. Test: `RecordRightsHelper_AFaultedAnswerIsNeverHeld`. The stale remark on `EvaluateCheckForCallerAsync` is rewritten.
+- **F2, one list order.** `GET /api/finance/firms` keeps the server's order (name, then id) and no longer re-sorts each page in memory, since another collation could reorder a page against its neighbours. Test: `List_KeepsTheServersOrder`, with a culture-aware server order that an ordinal sort would change. `List_ActiveLawFirms_Sorted_Paged` did not pin the re-sort and is unchanged. The fake now takes the server's collation as a setting.
+- **F4, R1 for a replace.** `{add, remove, confirmRevoke}` with Write only is the uniform 404 (the add needs Append), with a Write and Append control. Tests: `Replace_WithWriteOnly_IsUniform404` and `Replace_WithWriteAndAppend_IsApplied`.
+- **F4, old firm in both slots.**
+  - A replace on (A, A) gives (C, null).
+  - A clear on (A, A) gives (null, null).
+  - Each revokes A once.
+  - Tests: `Replace_FirmInBothSlots_LeavesNewAndEmpty`, `Clear_FirmInBothSlots_EmptiesBoth`.
+- **F1, seeding script.** The type code's alternate key spans every type row, inactive ones included. When no active row carries the code, step 1 now also looks for INACTIVE rows that carry it. If one does, the script stops with an escalation (exit 2, nothing written), naming the row: an owner must reactivate it or clear its code. The generic error text no longer suggests a re-run fixes a failure. Test: `SeedingScript_EscalatesOnAnInactiveRowHoldingTheCode` (a source check, because the script is not run).
+- **Theory strengthening.** In the 32-combination theory, when the route admits an add to an inactive record, the same firm on the same flags with the record ACTIVE must now be granted. Before this, the inactive skip could hide a flag refusal the route had wrongly admitted.
+
 ## Component justification (CLAUDE.md §11), per new surface
 
 | New surface | (1) Existing | (2) Why not extend | (3) Cost of doing nothing |
@@ -400,7 +415,7 @@ Branch `task/ebill-095g-assign-firm`. Built per the design, uac-r2 R1/R2 and the
   ```json
   { "items": [{ "firmId": "guid", "name": "string" }], "page": 1, "hasMore": false }
   ```
-  Only active organizations of the Law Firm type, sorted by name (case-insensitive), then by id.
+  Only active organizations of the Law Firm type, in the server's order (name, then id). The BFF does not re-sort a page.
 - **400 ValidationProblem:** a bad `search`, `page` or `pageSize`.
 - **404 `sdap.access.deny.record_unavailable`** (uniform), for any of these:
   - an external caller;
