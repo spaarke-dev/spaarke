@@ -4,7 +4,7 @@
  * is the REAL shared `InvoiceAttachmentMarking` (ebilling 118a), through the jest alias.
  */
 import { Profiler } from 'react';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { FluentProvider, webLightTheme } from '@fluentui/react-components';
 import { InvoiceView, INVOICE_UPLOAD_HINT, type InvoiceViewProps } from '../InvoiceView';
@@ -977,6 +977,11 @@ describe('InvoiceView — Correction from the prefill (ebilling 097e)', () => {
     replacedBy: null,
   };
 
+  /** A correction needs a note (ebilling 095f): the tests that submit one write it first. */
+  function writeCorrectionNote(note = 'The rate on line 3 was wrong.') {
+    fireEvent.change(screen.getByRole('textbox', { name: /Correction note/ }), { target: { value: note } });
+  }
+
   async function chooseCorrection() {
     await findRow('INV-4711.pdf');
     await userEvent.click(screen.getByRole('radio', { name: 'Existing invoice' }));
@@ -1005,6 +1010,7 @@ describe('InvoiceView — Correction from the prefill (ebilling 097e)', () => {
       expect(screen.queryByRole('textbox', { name: /Firm invoice number/ })).toBeNull();
       expect(loadFirms).not.toHaveBeenCalled();
 
+      writeCorrectionNote();
       await waitFor(() => expect(submitButton()).toBeEnabled());
       await userEvent.click(submitButton());
       await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
@@ -1144,6 +1150,7 @@ describe('InvoiceView — Correction from the prefill (ebilling 097e)', () => {
       );
       expect(await screen.findByTestId('invoice-correction-details')).toBeInTheDocument();
       // The correction is sent for the replacement, not the Superseded invoice.
+      writeCorrectionNote();
       await waitFor(() => expect(submitButton()).toBeEnabled());
       await userEvent.click(submitButton());
       await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
@@ -1239,6 +1246,7 @@ describe('InvoiceView — Correction from the prefill (ebilling 097e)', () => {
       const loadCorrectionPrefill = jest.fn(async (id: string) => ({ ...PREFILL, invoiceId: id }));
       renderView({ correctionAvailable: true, loadCorrectionPrefill, onSubmit });
       await chooseCorrection();
+      writeCorrectionNote();
       await waitFor(() => expect(submitButton()).toBeEnabled());
       await userEvent.click(submitButton());
       await userEvent.click(await screen.findByRole('button', { name: 'Retry' }));
@@ -1268,6 +1276,7 @@ describe('InvoiceView — Correction from the prefill (ebilling 097e)', () => {
       }));
       renderView({ correctionAvailable: true, loadCorrectionPrefill: jest.fn(async () => PREFILL), onSubmit });
       await chooseCorrection();
+      writeCorrectionNote();
       await waitFor(() => expect(submitButton()).toBeEnabled());
       await userEvent.click(submitButton());
       expect(await screen.findByText('The invoice could not be processed')).toBeInTheDocument();
@@ -1290,6 +1299,7 @@ describe('InvoiceView — Correction from the prefill (ebilling 097e)', () => {
       const onSubmit = jest.fn(async () => ({ kind: 'refused' as const, message: 'That firm is not linked.' }));
       renderView({ correctionAvailable: true, loadCorrectionPrefill: jest.fn(async () => PREFILL), onSubmit });
       await chooseCorrection();
+      writeCorrectionNote();
       await waitFor(() => expect(submitButton()).toBeEnabled());
       await userEvent.click(submitButton());
       expect(await screen.findByText('That firm is not linked.')).toBeInTheDocument();
@@ -1329,6 +1339,7 @@ describe('InvoiceView — Correction from the prefill (ebilling 097e)', () => {
       }));
       renderView({ correctionAvailable: true, loadCorrectionPrefill: jest.fn(async () => PREFILL), onSubmit });
       await chooseCorrection();
+      writeCorrectionNote();
       await waitFor(() => expect(submitButton()).toBeEnabled());
       await userEvent.click(submitButton());
       expect(await screen.findByText('The invoice was not submitted')).toBeInTheDocument();

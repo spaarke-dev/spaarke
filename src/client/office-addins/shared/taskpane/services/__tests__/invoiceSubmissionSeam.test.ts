@@ -357,6 +357,7 @@ describe('buildInvoiceSubmissionInput', () => {
       poNumber: ' PO-9 ',
       mode: 'Correction',
       invoiceId: '{CCCC}',
+      correctionNote: 'Wrong rate.',
     });
     expect(input.invoiceId).toBe('cccc');
     expect(input.poNumber).toBe('PO-9');
