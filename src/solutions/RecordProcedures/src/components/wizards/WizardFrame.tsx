@@ -53,6 +53,9 @@ export interface WizardNav {
   onNavigate: (dir: 'prev' | 'next') => void;
 }
 
+/** Said when Finish is reached with a plan that makes no call (it cannot be, since Confirm holds Finish off; this is the backstop). */
+export const EMPTY_PLAN_LINE = 'Nothing was saved: this change has nothing to send. Go back and choose again.';
+
 /** The step order of the shell, for the dynamic "New values" step. */
 const STEP_ORDER = ['review', 'mode', 'values', 'impact', 'confirm'];
 
@@ -261,6 +264,8 @@ export const WizardFrame: React.FC<WizardFrameProps> = props => {
     const p = live.current;
     // A read-only wizard has no Finish; should one ever be reached, it writes nothing.
     if (p.readOnly) throw new Error(READ_ONLY_LINE);
+    // A plan with no call is no change: never report it as a success (084d-5b review, F1).
+    if (p.plan.steps.length === 0) throw new Error(EMPTY_PLAN_LINE);
     saving.current = true;
     let run: PlanRun;
     try {
@@ -381,7 +386,7 @@ export const WizardFrame: React.FC<WizardFrameProps> = props => {
       id: 'confirm',
       label: 'Confirm',
       renderContent: () => <ConfirmStep rows={live.current.confirmRows} uncheckedClose={uncheckedCloseRef.current} />,
-      canAdvance: () => !staleRef.current,
+      canAdvance: () => !staleRef.current && live.current.plan.steps.length > 0,
     },
   ];
 

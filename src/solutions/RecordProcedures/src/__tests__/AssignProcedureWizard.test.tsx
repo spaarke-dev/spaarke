@@ -6,8 +6,10 @@
  */
 
 import '@testing-library/jest-dom';
+import * as fs from 'fs';
+import * as path from 'path';
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
-import { ASSIGN_NOT_LISTED_NOTE, LIST_TIMED_OUT_TEXT, OWN_ROW_TEXT, SEARCH_DEBOUNCE_MS, tooManyText } from '../components/wizards/AssignProcedureWizard';
+import { ASSIGN_NOT_LISTED_NOTE, GAP_FALLBACK_WARNING, LIST_TIMED_OUT_TEXT, OWN_ROW_TEXT, SEARCH_DEBOUNCE_MS, countText, tooManyText } from '../components/wizards/AssignProcedureWizard';
 import { MAX_REASON_CHARS, planAssign } from '../components/wizards/plan';
 import type { AssignableProcedureItem, RecordAssignableProceduresView, WritePermissions } from '../services/recordProceduresApi';
 import { FENWICK, MATTER, MATTER_ID, OKAFOR, TODAY, WRITE_ALL, matterProcedures, matterRules } from './fixtures';
@@ -386,5 +388,218 @@ describe('the list read that does not answer', () => {
     } finally {
       logged.mockRestore();
     }
+  });
+});
+
+// ── 084d-5b review ───────────────────────────────────────────────────────────
+
+const LIT_ONLY = assignableView({ q: 'Litig', procedures: [LITIGATION], notOffered: [] });
+/** The first read is "too many"; any search for "Litig" answers the one Procedure; any other text is too many again. */
+const searchAnswers = (c: { url: string }) => {
+  const q = new URL(c.url).searchParams.get('q');
+  return !q ? TOO_MANY : q === 'Litig' ? LIT_ONLY : TOO_MANY;
+};
+
+/** Opens the wizard on "too many", searches "Litig" and picks the Procedure. */
+async function openAndPickLitigation(): Promise<HTMLElement> {
+  const d = await openAssign();
+  await within(d).findByTestId('assign-too-many');
+  fireEvent.change(within(d).getByTestId('assign-search'), { target: { value: 'Litig' } });
+  await within(d).findByTestId('assign-list', {}, { timeout: SEARCH_DEBOUNCE_MS * 5 });
+  chooseRadio(d, /^Litigation billing instructions/);
+  return d;
+}
+
+describe('F1: Finish never reports success without a POST, and the choice survives a re-read of the list', () => {
+  it('a name search typed on Choose, then Next twice quickly: the pause is cancelled, nothing re-reads, and Finish posts once with the chosen Procedure', async () => {
+    const { writeCalls, assignableCalls } = renderHarness({ assignable: searchAnswers, writes: respond({ assign: () => createdBody({ procedureId: 'p-lit' }) }) });
+    const d = await openAndPickLitigation();
+    expect(assignableCalls).toHaveLength(2);
+
+    // The user widens the text, then moves on before the pause ends.
+    fireEvent.change(within(d).getByTestId('assign-search'), { target: { value: 'Liti' } });
+    fireEvent.click(next(d));
+    await within(d).findByTestId('mode-step');
+    fireEvent.click(next(d));
+    await within(d).findByTestId('impact-step');
+    // Wait well past the pause: the timer must not fire now.
+    await act(async () => {
+      await new Promise(resolve => setTimeout(resolve, SEARCH_DEBOUNCE_MS * 2));
+    });
+    expect(assignableCalls).toHaveLength(2);
+
+    await waitFor(() => expect(next(d)).toBeEnabled());
+    fireEvent.click(next(d));
+    const confirm = await within(d).findByTestId('confirm-step');
+    expect(confirm).toHaveTextContent('Litigation billing instructions');
+    fireEvent.click(button(d, 'Assign Procedure'));
+    await within(d).findByTestId('success-body');
+
+    const posts = writeCalls.filter(c => c.route === 'assign');
+    expect(posts).toHaveLength(1);
+    expect(posts[0].body).toEqual({ procedureId: 'p-lit', mode: 'FollowLatest' });
+  });
+
+  it('a read still in flight when the user leaves Choose is abandoned, its late answer is ignored, and the one POST still carries the chosen Procedure', async () => {
+    const pending: Array<(v: unknown) => void> = [];
+    const { writeCalls, assignableCalls, mock } = renderHarness({
+      assignable: c => {
+        const q = new URL(c.url).searchParams.get('q');
+        if (!q) return TOO_MANY;
+        if (q === 'Litig') return LIT_ONLY;
+        return new Promise(resolve => pending.push(resolve));
+      },
+      writes: respond({ assign: () => createdBody({ procedureId: 'p-lit' }) }),
+    });
+    const d = await openAndPickLitigation();
+    fireEvent.change(within(d).getByTestId('assign-search'), { target: { value: 'Liti' } });
+    await waitFor(() => expect(pending).toHaveLength(1), { timeout: SEARCH_DEBOUNCE_MS * 5 });
+    expect(assignableCalls).toHaveLength(3);
+    // The list is being re-read (no options are shown), and the user goes on with the Procedure they picked.
+    expect(next(d)).toBeEnabled();
+    fireEvent.click(next(d));
+    await within(d).findByTestId('mode-step');
+    const signalOf = (i: number) => (mock.mock.calls.filter(c => String(c[0]).includes('/assignable'))[i][1] as RequestInit).signal as AbortSignal;
+    await waitFor(() => expect(signalOf(2).aborted).toBe(true));
+
+    // The abandoned read answers late: nothing changes.
+    await act(async () => pending[0](TOO_MANY));
+    expect(within(d).getByTestId('mode-step')).toBeInTheDocument();
+    fireEvent.click(next(d));
+    await within(d).findByTestId('impact-step');
+    await waitFor(() => expect(next(d)).toBeEnabled());
+    fireEvent.click(next(d));
+    await within(d).findByTestId('confirm-step');
+    fireEvent.click(button(d, 'Assign Procedure'));
+    await within(d).findByTestId('success-body');
+    expect(writeCalls.filter(c => c.route === 'assign').map(c => c.body)).toEqual([{ procedureId: 'p-lit', mode: 'FollowLatest' }]);
+  });
+
+  it('Back to Choose after a read was cut short asks again, and the pick is still checked when the list returns', async () => {
+    const { assignableCalls } = renderHarness({
+      assignable: c => {
+        const q = new URL(c.url).searchParams.get('q');
+        if (q === 'Liti') return new Promise(() => undefined);
+        return !q ? TOO_MANY : q === 'Litig' ? LIT_ONLY : TOO_MANY;
+      },
+    });
+    const d = await openAndPickLitigation();
+    fireEvent.change(within(d).getByTestId('assign-search'), { target: { value: 'Liti' } });
+    await waitFor(() => expect(assignableCalls).toHaveLength(3), { timeout: SEARCH_DEBOUNCE_MS * 5 });
+    fireEvent.click(next(d));
+    await within(d).findByTestId('mode-step');
+    fireEvent.click(button(d, 'Back'));
+    await within(d).findByTestId('assign-choose-step');
+    // The cut-short read for "Liti" is asked again (it never answers here); nothing else is asked.
+    await waitFor(() => expect(assignableCalls).toHaveLength(4));
+    expect(new URL(assignableCalls[3].url).searchParams.get('q')).toBe('Liti');
+  });
+
+  it('a Pin with its version and reason survives a re-read of the list that offers the same Procedure again', async () => {
+    const { writeCalls, assignableCalls } = renderHarness({
+      assignable: searchAnswers,
+      writes: respond({ procedure: () => versions, assign: () => createdBody({ mode: 'Pinned' }) }),
+    });
+    const d = await openAndPickLitigation();
+    fireEvent.click(next(d));
+    await within(d).findByTestId('mode-step');
+    chooseRadio(d, /^Pin a version/);
+    fireEvent.click(await within(d).findByRole('combobox', { hidden: true }));
+    fireEvent.click(await screen.findByRole('option', { name: /^v1/, hidden: true }));
+    typeReason(d, 'Grandfathered rates');
+    expect(next(d)).toBeEnabled();
+
+    // Back to Choose; the user changes the text (the list is re-read: too many, so no options), then types "Litig" again (the same
+    // Procedure is offered again).
+    fireEvent.click(button(d, 'Back'));
+    await within(d).findByTestId('assign-choose-step');
+    fireEvent.change(within(d).getByTestId('assign-search'), { target: { value: 'Lit' } });
+    await waitFor(() => expect(assignableCalls).toHaveLength(3), { timeout: SEARCH_DEBOUNCE_MS * 5 });
+    await within(d).findByTestId('assign-too-many');
+    fireEvent.change(within(d).getByTestId('assign-search'), { target: { value: 'Litig' } });
+    await waitFor(() => expect(assignableCalls).toHaveLength(4), { timeout: SEARCH_DEBOUNCE_MS * 5 });
+    await within(d).findByTestId('assign-list', {}, { timeout: SEARCH_DEBOUNCE_MS * 5 });
+    expect(radio(d, /^Litigation billing instructions/)).toBeChecked();
+
+    fireEvent.click(next(d));
+    await within(d).findByTestId('mode-step');
+    expect(radio(d, /^Pin a version/)).toBeChecked();
+    expect(within(d).getByLabelText(/^Reason/)).toHaveValue('Grandfathered rates');
+    expect(within(d).getByRole('combobox', { hidden: true })).toHaveValue('v1 · from 1 Jan 2025 to 1 Jan 2026');
+    fireEvent.click(next(d));
+    await within(d).findByTestId('impact-step');
+    await waitFor(() => expect(next(d)).toBeEnabled());
+    fireEvent.click(next(d));
+    await within(d).findByTestId('confirm-step');
+    fireEvent.click(button(d, 'Assign Procedure'));
+    await within(d).findByTestId('success-body');
+    expect(writeCalls.filter(c => c.route === 'assign').map(c => c.body)).toEqual([
+      { procedureId: 'p-lit', mode: 'Pinned', pinnedVersionId: 'lit-v1', reason: 'Grandfathered rates' },
+    ]);
+  });
+
+  it('picking a different Procedure starts "On this record" afresh', async () => {
+    renderHarness({ assignable: () => assignableView(), writes: respond({ procedure: () => versions }) });
+    const d = await openAssign();
+    await choose(d);
+    chooseRadio(d, /^Litigation billing instructions/);
+    fireEvent.click(next(d));
+    await within(d).findByTestId('mode-step');
+    chooseRadio(d, /^Pin a version/);
+    typeReason(d, 'Grandfathered rates');
+    fireEvent.click(button(d, 'Back'));
+    await choose(d);
+    chooseRadio(d, /^Expert witness policy/);
+    fireEvent.click(next(d));
+    await within(d).findByTestId('mode-step');
+    expect(radio(d, /^Follow latest/)).toBeChecked();
+  });
+});
+
+describe('F1 (accessibility): the live region carries the status lines only, and a Gap warning describes its option', () => {
+  it('the RadioGroup is not inside an aria-live element; the count is inside one', async () => {
+    renderHarness({ assignable: () => assignableView() });
+    const d = await openAssign();
+    await choose(d);
+    const group = within(d).getByRole('radiogroup', { hidden: true });
+    expect(group.closest('[aria-live]')).toBeNull();
+    for (const r of within(d).getAllByRole('radio', { hidden: true })) expect(r.closest('[aria-live]')).toBeNull();
+    const count = within(d).getByTestId('assign-count');
+    expect(count).toHaveTextContent(countText(2));
+    expect(count.closest('[aria-live]')).toBe(within(d).getByTestId('assign-status'));
+    expect(countText(1)).toBe('1 Procedure can be assigned.');
+  });
+
+  it('the loading, refused, too-many and empty lines are inside the live region', async () => {
+    renderHarness({ assignable: () => assignableView({ procedures: [], notOffered: [] }) });
+    const d = await openAssign();
+    expect(within(d).getByTestId('assign-status')).toBeInTheDocument();
+    const empty = await within(d).findByTestId('assign-empty');
+    expect(empty.closest('[aria-live]')).toBe(within(d).getByTestId('assign-status'));
+  });
+
+  it('the Gap radio input\'s aria-describedby resolves to the warning text; an in-force option has none', async () => {
+    renderHarness({ assignable: () => assignableView() });
+    const d = await openAssign();
+    await choose(d);
+    const gapInput = radio(d, /^Expert witness policy/);
+    const id = gapInput.getAttribute('aria-describedby');
+    expect(id).toBeTruthy();
+    const target = document.getElementById(id!);
+    expect(target).not.toBeNull();
+    expect(target).toHaveTextContent(GAP_WARNING);
+    expect(target).toHaveTextContent('Its last version ended on 30 Jun 2026.');
+    expect(radio(d, /^Litigation billing instructions/)).not.toHaveAttribute('aria-describedby');
+  });
+});
+
+describe('K1: the client\'s fallback Gap warning is the server\'s GapWarning', () => {
+  it('equals the constant in RecordProcedureReadService.cs', () => {
+    const repo = path.resolve(__dirname, '../../../../..');
+    const source = fs.readFileSync(path.join(repo, 'src/server/api/Sprk.Bff.Api/Services/Finance/Procedures/RecordProcedureReadService.cs'), 'utf8');
+    const m = /const string GapWarning\s*=\s*"((?:[^"\\]|\\.)*)"\s*;/.exec(source);
+    expect(m).not.toBeNull();
+    expect(GAP_FALLBACK_WARNING).toBe(m![1]);
+    expect(GAP_FALLBACK_WARNING).toBe(GAP_WARNING);
   });
 });

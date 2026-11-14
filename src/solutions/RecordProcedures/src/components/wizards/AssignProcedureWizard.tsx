@@ -35,7 +35,8 @@ import {
   type RecordProceduresApi,
   type VersionView,
 } from '../../services/recordProceduresApi';
-import { CODE_ABANDONED, CODE_TIMED_OUT, failureText, type OverridesApi, type WriteFailure } from '../../services/overridesApi';
+import { failureText, type OverridesApi, type WriteFailure } from '../../services/overridesApi';
+import { CODE_ABANDONED, CODE_TIMED_OUT } from '../../services/readRace';
 import type { DryRunApi } from '../../services/dryRunApi';
 import { recordWords, shortDate, versionLabel } from '../../services/model';
 import { MAX_REASON_CHARS, planAssign, type AssignChoice } from './plan';
@@ -108,6 +109,11 @@ export function gapWarningOf(item: AssignableProcedureItem): string | null {
   return item.statusIfAssigned === 'Gap' ? GAP_FALLBACK_WARNING : null;
 }
 
+/** The result count, said politely after a read. */
+export const countText = (n: number): string => (n === 1 ? '1 Procedure can be assigned.' : `${n} Procedures can be assigned.`);
+
+const gapTextId = (procedureId: string): string => `assign-gap-text-${procedureId}`;
+
 const notOfferedText = (n: NotOfferedProcedure): string => (n.reason === 'OwnRow' ? OWN_ROW_TEXT : n.reason);
 
 /** The assignable list: being read, read, or refused (the panel's words, no list). */
@@ -126,6 +132,15 @@ interface Form {
 
 const NOT_OFFERED_PREFIX = 'not-offered:';
 const EMPTY_FORM: Form = { choice: 'follow', versionId: '', reason: '' };
+
+/** Tells the wizard whether its Choose step is on screen: the shell renders only the current step, so a step that unmounted has been left. */
+const StepPresence: React.FC<{ onPresent: (present: boolean) => void; children: React.ReactNode }> = ({ onPresent, children }) => {
+  React.useEffect(() => {
+    onPresent(true);
+    return () => onPresent(false);
+  }, [onPresent]);
+  return <>{children}</>;
+};
 
 export const AssignProcedureWizard: React.FC<AssignProcedureWizardProps> = ({ core, recordId, record, query, listsApi, api, dryRunApi, onChanged, onClose }) => {
   const s = useWizardStyles();
@@ -169,9 +184,22 @@ export const AssignProcedureWizard: React.FC<AssignProcedureWizardProps> = ({ co
   );
 
   // ── The name search, re-asked after a pause ──────────────────────────────
+  // Only while the user is on Choose (084d-5b review): once they leave it, the pending pause is cancelled and the read in flight is
+  // abandoned, so no late answer can reach the wizard under Impact or Confirm. Coming back asks again for whatever was left undone.
   const [search, setSearch] = React.useState('');
   const searchKey = nameSearchOf(search);
+  const [onChoose, setOnChoose] = React.useState(true);
   React.useEffect(() => {
+    if (!onChoose) {
+      if (inFlight.current) {
+        // A read cut short leaves no answer: ask for it again when the user returns.
+        inFlight.current.abort();
+        inFlight.current = null;
+        seq.current += 1;
+        lastAsked.current = undefined;
+      }
+      return;
+    }
     if (lastAsked.current === undefined) {
       ask(searchKey);
       return;
@@ -179,24 +207,26 @@ export const AssignProcedureWizard: React.FC<AssignProcedureWizardProps> = ({ co
     if (lastAsked.current === searchKey) return;
     const timer = setTimeout(() => ask(searchKey), SEARCH_DEBOUNCE_MS);
     return () => clearTimeout(timer);
-  }, [searchKey, ask]);
+  }, [searchKey, ask, onChoose]);
 
   // The search box appears once the list said "too many", and stays while the user narrows it.
   const [searchShown, setSearchShown] = React.useState(false);
   if (!searchShown && list.state === 'ready' && list.value.tooMany) setSearchShown(true);
 
   // ── The choice ───────────────────────────────────────────────────────────
-  const [chosenId, setChosenId] = React.useState<string | null>(null);
+  // The chosen Procedure is a snapshot taken when the user picks it (084d-5b review, F1): a re-read of the list (a search that landed late, a
+  // retry) never changes it, so the plan and the form cannot be lost under the user. Only picking a different Procedure resets the form.
+  const [chosen, setChosen] = React.useState<AssignableProcedureItem | null>(null);
   const offered = list.state === 'ready' ? (list.value.procedures ?? []) : [];
-  const chosen = chosenId ? offered.find(p => p.id === chosenId) : undefined;
 
   const [form, setForm] = React.useState<Form>(EMPTY_FORM);
-  const [formOf, setFormOf] = React.useState<string | null>(null);
-  if (formOf !== (chosen?.id ?? null)) {
-    // Another Procedure was chosen: its "On this record" starts afresh.
-    setFormOf(chosen?.id ?? null);
+  const pick = (id: string) => {
+    if (chosen?.id === id) return;
+    const picked = offered.find(p => p.id === id);
+    if (!picked) return;
+    setChosen(picked);
     setForm(EMPTY_FORM);
-  }
+  };
   const set = (patch: Partial<Form>) => setForm(f => ({ ...f, ...patch }));
 
   // ── The Pin picker's versions (task 081's read), asked for when Pin is the selected choice ──
@@ -241,7 +271,8 @@ export const AssignProcedureWizard: React.FC<AssignProcedureWizardProps> = ({ co
           <Input value={search} maxLength={MAX_NAME_SEARCH_CHARS} onChange={(_, d) => setSearch(d.value)} data-testid="assign-search" />
         </Field>
       )}
-      <div aria-live="polite" aria-busy={list.state === 'loading'} className={s.step}>
+      {/* The live region holds the status lines only (loading, failed, too many, empty, the count): never the options. */}
+      <div aria-live="polite" aria-busy={list.state === 'loading'} className={s.step} data-testid="assign-status">
         {list.state === 'loading' && <Spinner size="tiny" label="Reading the Procedures you can assign…" data-testid="assign-loading" />}
         {failureWords && (
           <MessageBar intent="warning" layout="multiline" data-testid="assign-failed">
@@ -261,73 +292,83 @@ export const AssignProcedureWizard: React.FC<AssignProcedureWizardProps> = ({ co
             <MessageBarBody>{tooManyText(ready.bound)}</MessageBarBody>
           </MessageBar>
         )}
-        {ready && !ready.tooMany && (
-          <div className={s.stack} data-testid="assign-list">
-            <Caption1 className={s.muted} data-testid="assign-label">
-              {ready.label}
-            </Caption1>
-            {offered.length === 0 && notOffered.length === 0 ? (
-              <Text data-testid="assign-empty">
-                {ready.q ? `No Procedure whose name contains "${ready.q}" can be assigned here.` : 'No Procedure can be assigned to this record for this firm and date.'}
-              </Text>
-            ) : (
-              <RadioGroup
-                aria-label="Procedure"
-                value={chosen?.id ?? ''}
-                onChange={(_, d) => {
-                  // A Procedure that is not offered cannot be chosen, however the event arrived.
-                  if (d.value.startsWith(NOT_OFFERED_PREFIX)) return;
-                  setChosenId(d.value);
-                }}
-                className={s.choice}
-              >
-                {offered.map(p => {
-                  const badge = statusIfAssignedBadge(p);
-                  const warning = gapWarningOf(p);
-                  return (
-                    <div key={p.id} data-testid={`assign-item-${p.id}`}>
-                      <Radio
-                        value={p.id}
-                        label={
-                          <span className={s.stack}>
-                            <Text weight="semibold">{p.name}</Text>
-                            <Caption1 className={s.muted}>{itemDetails(p)}</Caption1>
-                            <span className={s.change}>
-                              <StatusBadge label={badge.label} tone={badge.tone} />
-                              <Caption1>{itemVersion(p.versionInForce)}</Caption1>
-                            </span>
-                          </span>
-                        }
-                      />
-                      {warning && (
-                        <div className={s.choiceBody}>
-                          <MessageBar intent="warning" layout="multiline" data-testid={`assign-gap-${p.id}`}>
-                            <MessageBarBody>{warning}</MessageBarBody>
-                          </MessageBar>
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-                {notOffered.map(n => (
-                  <div key={n.id} data-testid={`assign-not-offered-${n.id}`}>
+        {ready && !ready.tooMany && offered.length === 0 && notOffered.length === 0 && (
+          <Text data-testid="assign-empty">
+            {ready.q ? `No Procedure whose name contains "${ready.q}" can be assigned here.` : 'No Procedure can be assigned to this record for this firm and date.'}
+          </Text>
+        )}
+        {ready && !ready.tooMany && offered.length > 0 && (
+          <Caption1 className={s.muted} data-testid="assign-count">
+            {countText(offered.length)}
+          </Caption1>
+        )}
+      </div>
+      {ready && !ready.tooMany && (
+        <div className={s.stack} data-testid="assign-list">
+          <Caption1 className={s.muted} data-testid="assign-label">
+            {ready.label}
+          </Caption1>
+          {(offered.length > 0 || notOffered.length > 0) && (
+            <RadioGroup
+              aria-label="Procedure"
+              value={chosen?.id ?? ''}
+              onChange={(_, d) => {
+                // A Procedure that is not offered cannot be chosen, however the event arrived.
+                if (d.value.startsWith(NOT_OFFERED_PREFIX)) return;
+                pick(d.value);
+              }}
+              className={s.choice}
+            >
+              {offered.map(p => {
+                const badge = statusIfAssignedBadge(p);
+                const warning = gapWarningOf(p);
+                return (
+                  <div key={p.id} data-testid={`assign-item-${p.id}`}>
                     <Radio
-                      value={`${NOT_OFFERED_PREFIX}${n.id}`}
-                      disabled
+                      value={p.id}
+                      // The warning is the Radio's description (its primary slot is the input, which takes the attribute).
+                      aria-describedby={warning ? gapTextId(p.id) : undefined}
                       label={
                         <span className={s.stack}>
-                          <Text>{n.name ?? 'A Procedure'}</Text>
-                          <Caption1 className={s.muted}>{notOfferedText(n)}</Caption1>
+                          <Text weight="semibold">{p.name}</Text>
+                          <Caption1 className={s.muted}>{itemDetails(p)}</Caption1>
+                          <span className={s.change}>
+                            <StatusBadge label={badge.label} tone={badge.tone} />
+                            <Caption1>{itemVersion(p.versionInForce)}</Caption1>
+                          </span>
                         </span>
                       }
                     />
+                    {warning && (
+                      <div className={s.choiceBody}>
+                        <MessageBar intent="warning" layout="multiline" data-testid={`assign-gap-${p.id}`}>
+                          <MessageBarBody>
+                            <span id={gapTextId(p.id)}>{warning}</span>
+                          </MessageBarBody>
+                        </MessageBar>
+                      </div>
+                    )}
                   </div>
-                ))}
-              </RadioGroup>
-            )}
-          </div>
-        )}
-      </div>
+                );
+              })}
+              {notOffered.map(n => (
+                <div key={n.id} data-testid={`assign-not-offered-${n.id}`}>
+                  <Radio
+                    value={`${NOT_OFFERED_PREFIX}${n.id}`}
+                    disabled
+                    label={
+                      <span className={s.stack}>
+                        <Text>{n.name ?? 'A Procedure'}</Text>
+                        <Caption1 className={s.muted}>{notOfferedText(n)}</Caption1>
+                      </span>
+                    }
+                  />
+                </div>
+              ))}
+            </RadioGroup>
+          )}
+        </div>
+      )}
       <Caption1 className={s.muted} data-testid="assign-not-listed-note">
         {ASSIGN_NOT_LISTED_NOTE}
       </Caption1>
@@ -414,7 +455,7 @@ export const AssignProcedureWizard: React.FC<AssignProcedureWizardProps> = ({ co
       recordId={recordId}
       readOnly={false}
       reviewLabel="Procedure"
-      reviewStep={chooseStep}
+      reviewStep={<StepPresence onPresent={setOnChoose}>{chooseStep}</StepPresence>}
       reviewCanAdvance={!!chosen}
       modeStep={modeStep}
       canChoose={plan.steps.length > 0}

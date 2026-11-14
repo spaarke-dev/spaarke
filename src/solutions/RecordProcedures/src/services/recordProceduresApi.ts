@@ -25,7 +25,7 @@
  */
 
 import { isApiError, isAuthFailure, problemOf, type AuthenticatedFetchFn } from '@spaarke/auth';
-import { ABANDONED_FAILURE, READ_TIMEOUT_MS, TIMED_OUT_FAILURE, raceTimeout } from './overridesApi';
+import { ABANDONED_FAILURE, READ_TIMEOUT_MS, TIMED_OUT_FAILURE, raceTimeout } from './readRace';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Wire types (task 084's JSON). Enum-like members are strings; a value this page does not know is rendered, never dropped.
