@@ -209,8 +209,8 @@ function Test-DecisionsWidgetEmbedded {
 
     $dll = Join-Path $PublishDir "Sprk.Bff.Api.dll"
     if (-not (Test-Path $dll)) { return $false }
-    # Latin1 maps every byte to one char, so a byte search for the ASCII/UTF-8 resource name is a plain substring search.
-    $text = [System.Text.Encoding]::Latin1.GetString([System.IO.File]::ReadAllBytes($dll))
+    # Latin1 (code page 28591; the ::Latin1 property is null in Windows PowerShell 5.1) maps every byte to one char, so a byte search for the ASCII/UTF-8 resource name is a plain substring search.
+    $text = [System.Text.Encoding]::GetEncoding(28591).GetString([System.IO.File]::ReadAllBytes($dll))
     return $text.Contains("Sprk.Bff.Api.Widgets.decisions.html")
 }
 

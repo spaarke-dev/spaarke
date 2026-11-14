@@ -111,7 +111,7 @@ public partial class RouteAuthorizationGuardTests
         // Task 030 review F5: once a non-null collection exists, adding to it is the same bypass.
         + @"|\b(?:Prompt|Resource)Collection\s*(?:\?\?=|!?\s*(?:\?\s*)?\.\s*(?:Add|TryAdd|Insert|AddRange)\b)"
         // A resource or prompt built by hand: sanctioned only inside a widget resource class (McpSdkBypassIn).
-        + @"|\bMcpServer(?:Resource|Prompt)\s*\.\s*Create\s*\(",
+        + @"|\bMcpServer(?:Resource|Prompt)\s*\.\s*Create\s*(?:<[^;{}()]*>)?\s*\(",
         RegexOptions.Compiled);
 
     /// <summary>
@@ -867,6 +867,7 @@ public partial class RouteAuthorizationGuardTests
                      "serverOptions.PromptCollection.Add(prompt);",
                      "var r = McpServerResource.Create(Read, new McpServerResourceCreateOptions());",
                      "var p = McpServerPrompt.Create(() => \"x\");",
+                     "var g = McpServerResource.Create<FakeResourceType>(new McpServerResourceCreateOptions());",
                  })
         {
             Fires(Scan("Infrastructure/DI/Bad.cs", bypass), "bypasses McpToolCatalog");
