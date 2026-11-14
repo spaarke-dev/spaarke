@@ -4,7 +4,7 @@
     <title>spaarke_get_decision_plan and lookup search tools</title>
     <phase>B MCP host and tools</phase>
     <gate>after 016, 017 and 021</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Tags include bff-api; new tool classes (.cs)</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -119,7 +119,7 @@
     <criterion testable="true">Test scope: cover the stated contract plus the edge cases named in these criteria; anything beyond that needs a one-line justification in the task notes.</criterion>
   </acceptance-criteria>
 
-  <notes>The wizard (032) calls these through its ResponseFetchFn shim; keep the structured shapes identical to the REST JSON so the shim can wrap them in a Response unchanged.</notes>
+  <notes>Completed 2026-11-13; details in notes/task-023-notes.md. rework: none task 023. The wizard (032) calls these through its ResponseFetchFn shim; keep the structured shapes identical to the REST JSON so the shim can wrap them in a Response unchanged.</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
