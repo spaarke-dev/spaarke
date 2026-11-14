@@ -10,6 +10,35 @@
 
 ## Open (in priority order)
 
+### DEF-001 — Copilot widget Decide lane: "done today" not supplied (no v1 tool returns closed-today)
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | next-round |
+| **Filed** | 2026-11-14 |
+| **Source** | Task 031 adversarial review (F4); spec FR-13 (spec.md:232) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2832 |
+
+**Description**
+
+FR-13 asks the widget's category cards for count, oldest age and "done today". Task 031 built the lane, but no v1 MCP tool returns the items closed today, so `DecideLane.tsx` renders the line only when a value is given and nothing supplies one (the widget does not fake it). Failure mode: the Copilot widget's cards lack the progress line the Console shows.
+
+**Entry-points**
+
+- `src/client/widgets/spaarke-decisions/src/lane/DecideLane.tsx` (`doneToday`)
+- `src/server/api/Sprk.Bff.Api/Api/Mcp/LegalOperations/Decisions/ShowDecisionsTool.cs` (where a `closedToday` count could go)
+
+**Suggested fix**
+
+Owner decides: (a) `closedToday` per category on `spaarke_show_decisions` (Services/Signals read, ontology review); (b) a separate app-only tool; (c) drop it from v1 and amend FR-13.
+
+**Estimated effort**: (a) about half a day plus ontology review; (c) a spec edit.
+**Blockers**: owner decision.
+**Related**: tasks 022, 031.
+
+---
+
 ### ISS-001 — April 2026 Copilot agent code: an unregistered handler, two services nothing resolves, and a package the csproj calls "USED"
 
 | Field | Value |
