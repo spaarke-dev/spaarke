@@ -8,9 +8,9 @@
 | Field | Value |
 |-------|-------|
 | **Task** | 018: redeploy plus owner E2E retest of the rework (008–011 ✅, merged) |
-| **Step** | Waiting for uac-r2's "BFF live". Then run the owner-approved dev SPA deploy |
-| **Status** | #2818 merged into master as `bd43110169` (2026-11-14 06:45Z). uac-r2 is deploying from that SHA (five 045f client parts, then the BFF swap on its owner's go, then the 30-minute gate, then "BFF live" sent to us). |
-| **Next Action** | On "BFF live": dispatch `.github/workflows/deploy-external-spa.yml` (workflow_dispatch, environment dev, ref master). The owner approved this on 2026-11-13. Rollback: build `b083d62183` from a temporary tag (dispatch takes a branch or tag, not a SHA). Verify the deploy, give the owner the retest list below, and tell uac-r2 when the E2E is done. |
+| **Step** | BFF and SPA are live on dev. Waiting on the owner E2E retest (list below) |
+| **Status** | Dev BFF `0173e1486e` (master `bd43110169` + mcp spike, live ~12:44Z, uac-r2 gate passed). Dev SPA from run 43598875136 (master `2747977f47`, the same SPA inputs as `bd43110169`), live 13:19Z. The live bundle has the new strings and no "Can contribute" or "To Do". |
+| **Next Action** | Collect the owner retest results and fix anything found. Record them in `notes/task-018-notes.md`, then complete task 018. Tell uac-r2 when the E2E is done. SPA rollback: the previous dev build `2ef4a17915`, dispatched from a temporary tag. |
 
 ## Done after merge
 - The merge SHA was sent to ebilling-r1 (for their 095 notes) and acknowledged to uac-r2.
@@ -25,11 +25,12 @@
 - Tasks / Events split, Add task, and Add event without the type select.
 - Documents columns and tooltips.
 - Unfinished E2E items in `notes/task-018-notes.md`, plus the CMRCL-788888 Submit invoice icon.
-- ebilling 095e: invoice names become "{firm} - {number}" once it reaches dev.
+- ebilling 095e: invoice names become "{firm} - {number}". Merged as #2822 (`7da54c00a3`), AFTER the current BFF build `bd43110169`, so it is not in this deploy; it reaches dev with uac-r2's next BFF deploy. Old invoice names this round are expected.
+- SPA inputs: master `7da54c00a3` vs `bd43110169` show no diff under `src/client/external-spa` or `src/client/shared`, so a master SPA build equals the reviewed rework.
 
 ## Live state
-- **Dev BFF:** the swap to `bd43110169` plus the spike is in progress (uac-r2). Until then the SPA hides Add task and shows no Task/Event split or matter/WA labels.
-- **Dev SPA:** master `2ef4a17915` build, from before the rework.
+- **Dev BFF:** `0173e1486e` = master `bd43110169` + mcp spike (uac-r2).
+- **Dev SPA:** master `2747977f47` build (run 43598875136, 2026-11-14 13:19Z). Previous build: `2ef4a17915`.
 - **Never deploy the BFF directly.** uac-r2 orchestrates the BFF deploy, and the owner gives the go per SHA.
 
 ## Open items / issues
