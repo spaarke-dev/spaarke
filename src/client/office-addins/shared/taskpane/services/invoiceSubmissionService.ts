@@ -657,8 +657,21 @@ export const LAW_FIRM_SEARCH_MAX = 100;
 export const LAW_FIRMS_ROUTE = '/api/finance/firms';
 
 /**
+ * The search as it goes on the wire: trimmed, at most {@link LAW_FIRM_SEARCH_MAX} CODE POINTS (the server's bound is on
+ * characters; cutting UTF-16 units could split a surrogate pair, and `encodeURIComponent` throws a URIError on a lone
+ * surrogate), and with any lone surrogate dropped, so encoding it can never throw.
+ */
+function boundedSearch(raw: string): string {
+  const wellFormed = Array.from(raw.trim()).filter(ch => {
+    const unit = ch.charCodeAt(0);
+    return ch.length === 2 || unit < 0xd800 || unit > 0xdfff;
+  });
+  return wellFormed.slice(0, LAW_FIRM_SEARCH_MAX).join('').trim();
+}
+
+/**
  * One page of the active law firms a record can be given (ebilling 095g `GET /api/finance/firms`, internal callers
- * only). `search` is trimmed and at most 100 characters, and left out when blank. The page is read tolerantly: rows
+ * only). `search` is trimmed and at most 100 characters (code points), and left out when blank. The page is read tolerantly: rows
  * without an id and name are dropped, `hasMore` is true only when the server says `true`. Any failure THROWS with the
  * pane's sentence for the code (never the server's `detail`); a 503 is never an empty list.
  */
@@ -668,14 +681,15 @@ export async function listLawFirms(
   signal?: AbortSignal
 ): Promise<LawFirmPage> {
   const page = args.page ?? 1;
-  const search = (args.search ?? '').trim().slice(0, LAW_FIRM_SEARCH_MAX).trim();
-  const query = [
-    ...(search ? [`search=${encodeURIComponent(search)}`] : []),
-    `page=${page}`,
-    `pageSize=${args.pageSize ?? LAW_FIRM_PAGE_SIZE}`,
-  ].join('&');
   let response: Response;
   try {
+    // Built inside the try: nothing here may throw out of this function as anything but its own sentence.
+    const search = boundedSearch(args.search ?? '');
+    const query = [
+      ...(search ? [`search=${encodeURIComponent(search)}`] : []),
+      `page=${page}`,
+      `pageSize=${args.pageSize ?? LAW_FIRM_PAGE_SIZE}`,
+    ].join('&');
     const token = await config.getAccessToken();
     response = await authenticatedJsonFetch(
       `${config.apiBaseUrl}${LAW_FIRMS_ROUTE}?${query}`,

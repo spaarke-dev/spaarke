@@ -315,6 +315,12 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
   const [addedFirmNotice, setAddedFirmNotice] = useState<string | null>(null);
   /** A firm just added whose list had to be reloaded: the reload selects it once it is listed. */
   const selectAfterReloadRef = useRef<string | null>(null);
+  /** An add-a-firm request is in flight (reported by the panel): nothing that would unmount the panel may run. */
+  const [addingFirm, setAddingFirm] = useState(false);
+  /** The panel closed by itself (added, Cancel, Close): focus goes to the notice, else the entry button. */
+  const focusAfterAddFirmRef = useRef(false);
+  const addFirmEntryRef = useRef<HTMLButtonElement | null>(null);
+  const addFirmNoticeRef = useRef<HTMLDivElement | null>(null);
   /** The running submission's abort controller; aborted when the view unmounts. */
   const abortRef = useRef<AbortController | null>(null);
   const onBusyChangeRef = useRef(onBusyChange);
@@ -499,24 +505,42 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
     setAddFirmOpen(false);
     setAddedFirmNotice(null);
     selectAfterReloadRef.current = null;
+    focusAfterAddFirmRef.current = false;
   }, [coreRecordId]);
+
+  // The panel (and the button that opened it) went away: put focus back where the user was. The notice, when there is
+  // one; else the entry button. Tried on every render until the target exists (the entry button waits for the firm list).
+  useEffect(() => {
+    if (!focusAfterAddFirmRef.current || addFirmOpen) return;
+    const target = addFirmNoticeRef.current ?? addFirmEntryRef.current;
+    if (!target) return;
+    focusAfterAddFirmRef.current = false;
+    target.focus();
+  });
 
   // A firm was added to the record from the panel (095g): the firm is on the record, so show the list that includes it
   // and choose it. The server's `firms` is the §8 body after the write; when it is null (the read faulted after a
   // successful write) the existing reload fetches it, and selects the firm once listed.
   const handleFirmAdded = (result: Extract<AddFirmOutcome, { kind: 'added' }>, firm: InvoiceFirmOption): void => {
     if (result.firms) {
+      const answered = result.firms;
       firmRequestRef.current += 1; // an older list request must not replace this one
-      setFirms({ status: 'ready', firms: result.firms });
-      const listed = result.firms.find(f => sameRecordId(f.firmId, firm.firmId));
-      if (listed) setFirmId(listed.firmId);
+      // This answer IS the reload: a marker left by an earlier answer without `firms` must not select a firm later.
+      selectAfterReloadRef.current = null;
+      setFirms({ status: 'ready', firms: answered });
+      const listed = answered.find(f => sameRecordId(f.firmId, firm.firmId));
+      // The added firm is chosen; else the current choice stays only if the record still lists it, else none is chosen
+      // (a firm that is not on the record must not stay selected, or Submit could send it).
+      setFirmId(current =>
+        listed ? listed.firmId : current && answered.some(f => sameRecordId(f.firmId, current)) ? current : ''
+      );
     } else {
       selectAfterReloadRef.current = firm.firmId;
       setFirmsReload(n => n + 1);
     }
     // A pending access pass is said by the panel itself (with its Retry); anything else is the server's own sentence.
     const notice =
-      result.accessState === 'pending' ? null : (result.notice ?? `${firm.name} was added to this record.`);
+      result.accessState === 'pending' ? null : (result.notice ?? `${firm.name} is on this record.`);
     setAddedFirmNotice(notice);
     if (notice) announce(notice);
   };
@@ -667,7 +691,9 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
     (correction === null || correctionNoteCheck === null) &&
     markingCheck.ok &&
     overBudget.length === 0 &&
-    !locked;
+    !locked &&
+    // An add-a-firm request in flight: Submit would lock the form and unmount the panel, dropping the answer.
+    !addingFirm;
 
   const runAttempt = async (input: InvoiceSubmissionInput, actionId: string): Promise<void> => {
     if (!onSubmit) return;
@@ -774,6 +800,7 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
       lastAttemptRef.current = null;
       setAddFirmOpen(false);
       setAddedFirmNotice(null);
+      selectAfterReloadRef.current = null;
       setMode('new');
       setCorrectionChosen(false);
       userPickedRef.current = false;
@@ -1152,7 +1179,16 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
     return (
       <>
         {addedFirmNotice && (
-          <MessageBar intent="success" layout="multiline" role="status" data-testid="invoice-add-firm-notice">
+          <MessageBar
+            ref={el => {
+              addFirmNoticeRef.current = el;
+            }}
+            tabIndex={-1}
+            intent="success"
+            layout="multiline"
+            role="status"
+            data-testid="invoice-add-firm-notice"
+          >
             <MessageBarBody>{addedFirmNotice}</MessageBarBody>
           </MessageBar>
         )}
@@ -1162,6 +1198,9 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
               appearance="transparent"
               size="small"
               icon={<AddRegular />}
+              ref={el => {
+                addFirmEntryRef.current = el;
+              }}
               disabled={locked}
               onClick={() => {
                 setAddedFirmNotice(null);
@@ -1179,7 +1218,11 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
             listLawFirms={listLawFirms}
             addFirmToRecord={addFirmToRecord}
             onAdded={handleFirmAdded}
-            onClose={() => setAddFirmOpen(false)}
+            onClose={() => {
+              focusAfterAddFirmRef.current = true;
+              setAddFirmOpen(false);
+            }}
+            onBusyChange={setAddingFirm}
             announce={announce}
             openInSpaarke={renderOpenInSpaarke(
               coreRecord.logicalName || LOGICAL_NAME_BY_CORE_TYPE[coreRecord.entityType],
@@ -1470,7 +1513,7 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
             layout="horizontal"
             value={mode}
             onChange={(_, data) => setMode(data.value as InvoiceMode)}
-            disabled={choicesLocked}
+            disabled={choicesLocked || addingFirm}
             aria-label="Invoice"
           >
             <Radio value="new" label="New invoice" />

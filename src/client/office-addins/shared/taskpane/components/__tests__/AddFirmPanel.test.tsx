@@ -79,12 +79,13 @@ function setup(over: Partial<AddFirmPanelProps> = {}) {
     announce: jest.fn(),
     ...over,
   };
-  render(
+  const { unmount } = render(
     <FluentProvider theme={webLightTheme}>
       <AddFirmPanel {...props} />
     </FluentProvider>
   );
   return {
+    unmount,
     props,
     listLawFirms: props.listLawFirms as jest.Mock,
     addFirmToRecord: props.addFirmToRecord as jest.Mock,
@@ -93,6 +94,11 @@ function setup(over: Partial<AddFirmPanelProps> = {}) {
     announce: props.announce as jest.Mock,
   };
 }
+
+/** The elements that say, in words, that a firm's people have (or are given) access NOW. */
+const CLAIMS_ACCESS_NOW = /gives .* access|have access|has access/i;
+const visibleAccessClaims = (): HTMLElement[] =>
+  screen.queryAllByText(CLAIMS_ACCESS_NOW).filter(el => !el.closest('[aria-live]'));
 
 const confirmButton = () => screen.getByRole('button', { name: 'Add firm' });
 async function chooseFirm(name: string) {
@@ -202,9 +208,25 @@ describe('AddFirmPanel — choosing and adding', () => {
       expect(screen.queryByTestId('add-firm-access-notice')).not.toBeInTheDocument();
       await chooseFirm('Firm 2');
       expect(screen.getByTestId('add-firm-access-notice')).toHaveTextContent(
-        "Adding Firm 2 gives that firm's people access to this record."
+        "Adding Firm 2 can give that firm's people access to this record. Spaarke will say what it did."
       );
       expect(screen.getByTestId('add-firm-access-notice')).not.toHaveTextContent(/now|already/i);
+    },
+    TIMEOUT
+  );
+
+  it(
+    'F1: the notice promises nothing (no visible element says the firm gives, has or will have access), before or after choosing',
+    async () => {
+      setup();
+      await screen.findByRole('option', { name: 'Firm 1' });
+      expect(visibleAccessClaims()).toHaveLength(0);
+      await chooseFirm('Firm 1');
+      // The one sentence the pane may say: "can give ... Spaarke will say what it did."
+      expect(screen.getByTestId('add-firm-access-notice')).toHaveTextContent(
+        /^Adding Firm 1 can give that firm's people access to this record\. Spaarke will say what it did\.$/
+      );
+      expect(visibleAccessClaims()).toHaveLength(0);
     },
     TIMEOUT
   );
@@ -214,7 +236,7 @@ describe('AddFirmPanel — choosing and adding', () => {
     async () => {
       setup();
       await screen.findByRole('option', { name: 'Firm 1' });
-      screen.getByRole('listbox').focus();
+      act(() => screen.getByRole('listbox').focus());
       await userEvent.keyboard('{ArrowDown}');
       await userEvent.keyboard('{Enter}');
       await waitFor(() => expect(screen.getByTestId('add-firm-access-notice')).toHaveTextContent('Adding Firm'));
@@ -398,6 +420,113 @@ describe('AddFirmPanel — the access pass is still pending', () => {
       expect(await screen.findByTestId('add-firm-refusal')).toHaveTextContent("Spaarke couldn't do this right now.");
       expect(screen.getByRole('button', { name: 'Retry' })).toBeEnabled();
       expect(onClose).not.toHaveBeenCalled();
+    },
+    TIMEOUT
+  );
+});
+
+describe('AddFirmPanel — focus', () => {
+  it(
+    'a11y: opening the panel puts focus on its search box (the entry button that opened it is gone)',
+    async () => {
+      setup();
+      await screen.findByRole('option', { name: 'Firm 1' });
+      expect(screen.getByLabelText('Search law firms')).toHaveFocus();
+    },
+    TIMEOUT
+  );
+
+  it(
+    'a11y: the pending view puts focus on Retry, and a refused Retry puts it back on Retry',
+    async () => {
+      const addFirmToRecord = jest
+        .fn()
+        .mockResolvedValueOnce(added({ accessState: 'pending', notice: null }))
+        .mockResolvedValueOnce({
+          kind: 'refused',
+          status: 503,
+          code: 'ebilling.submission.record_unavailable',
+          message: "Spaarke couldn't do this right now. Try again.",
+        });
+      setup({ addFirmToRecord });
+      await chooseFirm('Firm 1');
+      await userEvent.click(confirmButton());
+      await screen.findByTestId('add-firm-pending');
+      await waitFor(() => expect(screen.getByRole('button', { name: 'Retry' })).toHaveFocus());
+      await userEvent.click(screen.getByRole('button', { name: 'Retry' }));
+      await screen.findByTestId('add-firm-refusal');
+      await waitFor(() => expect(screen.getByRole('button', { name: 'Retry' })).toHaveFocus());
+    },
+    TIMEOUT
+  );
+});
+
+describe('AddFirmPanel — an add in flight (K2) and stale answers (F3)', () => {
+  it(
+    'K2: reports busy while the add is in flight, and not busy once it ends (and when the panel goes away)',
+    async () => {
+      let resolve: (outcome: AddFirmOutcome) => void = () => undefined;
+      const addFirmToRecord = jest.fn(() => new Promise<AddFirmOutcome>(r => (resolve = r)));
+      const onBusyChange = jest.fn();
+      setup({ addFirmToRecord, onBusyChange });
+      await screen.findByRole('option', { name: 'Firm 1' });
+      expect(onBusyChange).not.toHaveBeenCalledWith(true);
+      await chooseFirm('Firm 1');
+      await userEvent.click(confirmButton());
+      await waitFor(() => expect(onBusyChange).toHaveBeenLastCalledWith(true));
+      await act(async () => resolve(added({ accessState: 'pending', notice: null })));
+      await waitFor(() => expect(onBusyChange).toHaveBeenLastCalledWith(false));
+    },
+    TIMEOUT
+  );
+
+  it(
+    'F3: when the panel goes away while the add is in flight, the late answer is dropped (no onAdded, no onClose) and busy ends',
+    async () => {
+      let resolve: (outcome: AddFirmOutcome) => void = () => undefined;
+      const addFirmToRecord = jest.fn(() => new Promise<AddFirmOutcome>(r => (resolve = r)));
+      const onBusyChange = jest.fn();
+      const { unmount, onAdded, onClose } = setup({ addFirmToRecord, onBusyChange });
+      await chooseFirm('Firm 1');
+      await userEvent.click(confirmButton());
+      await waitFor(() => expect(onBusyChange).toHaveBeenLastCalledWith(true));
+      unmount();
+      expect(onBusyChange).toHaveBeenLastCalledWith(false);
+      await act(async () => resolve(added()));
+      expect(onAdded).not.toHaveBeenCalled();
+      expect(onClose).not.toHaveBeenCalled();
+    },
+    TIMEOUT
+  );
+
+  it(
+    'F3: type search A, then B; B page 1 resolves first and A page 1 LAST: only B results show',
+    async () => {
+      const waiting = new Map<string, (page: LawFirmPage) => void>();
+      const listLawFirms = jest.fn(
+        (args: { search?: string; page?: number }) =>
+          new Promise<LawFirmPage>(resolve => {
+            waiting.set(args.search ?? '', resolve);
+          })
+      );
+      setup({ listLawFirms });
+      await waitFor(() => expect(waiting.has('')).toBe(true));
+      await act(async () => waiting.get('')!({ items: [firm(1)], page: 1, hasMore: false }));
+      await screen.findByRole('option', { name: 'Firm 1' });
+
+      const search = screen.getByLabelText('Search law firms');
+      fireEvent.change(search, { target: { value: 'A' } });
+      await waitFor(() => expect(waiting.has('A')).toBe(true), { timeout: ADD_FIRM_SEARCH_DEBOUNCE_MS * 5 });
+      fireEvent.change(search, { target: { value: 'B' } });
+      await waitFor(() => expect(waiting.has('B')).toBe(true), { timeout: ADD_FIRM_SEARCH_DEBOUNCE_MS * 5 });
+
+      await act(async () => waiting.get('B')!({ items: [firm(20)], page: 1, hasMore: false }));
+      expect(await screen.findByRole('option', { name: 'Firm 20' })).toBeInTheDocument();
+      // A answers last, after B: it belongs to a search that is gone.
+      await act(async () => waiting.get('A')!({ items: [firm(10)], page: 1, hasMore: false }));
+      expect(screen.getByRole('option', { name: 'Firm 20' })).toBeInTheDocument();
+      expect(screen.queryByRole('option', { name: 'Firm 10' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('option', { name: 'Firm 1' })).not.toBeInTheDocument();
     },
     TIMEOUT
   );

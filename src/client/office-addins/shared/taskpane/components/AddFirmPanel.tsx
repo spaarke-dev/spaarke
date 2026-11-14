@@ -50,6 +50,12 @@ export interface AddFirmPanelProps {
   onAdded: (result: Extract<AddFirmOutcome, { kind: 'added' }>, firm: InvoiceFirmOption) => void;
   /** Cancel, or done: the panel closes. */
   onClose: () => void;
+  /**
+   * True while an add request is in flight, false again when it ends (and when the panel goes away). The view uses it
+   * to hold back whatever would unmount the panel mid-request (Submit, the New / Existing switch), which would drop the
+   * answer silently.
+   */
+  onBusyChange?: (busy: boolean) => void;
   /** The view's own `announce` (this component renders no live region of its own). */
   announce: (message: string, mode?: AnnounceMode) => void;
   /** Rendered with the "two firms are already assigned" refusal: the view's "Open in Spaarke" link for the record. */
@@ -66,9 +72,13 @@ export const NO_LAW_FIRMS_MESSAGE = 'No law firms match.';
 /** The 200 with a pending access pass (the contract's own sentence). */
 export const FIRM_ACCESS_PENDING_MESSAGE = 'Saved. Spaarke is still updating who can see this record.';
 
-/** The access notice shown once a firm is chosen, before anything is sent. It never says they have access yet. */
+/**
+ * The access notice shown once a firm is chosen, before anything is sent. The pane cannot know what the access pass
+ * will do (an inactive record gets nothing until it is active again; the pass may decide not to grant), so it only says
+ * what adding CAN do. The definite statement is the server's own `notice`, shown after the add.
+ */
 export function describeAddFirmNotice(firmName: string): string {
-  return `Adding ${firmName} gives that firm's people access to this record.`;
+  return `Adding ${firmName} can give that firm's people access to this record. Spaarke will say what it did.`;
 }
 
 // Recreated locally per `.claude/patterns/ui/thin-scrollbar.md`, as `FindResultsList` does (the add-in does not take
@@ -118,6 +128,7 @@ export const AddFirmPanel: React.FC<AddFirmPanelProps> = ({
   addFirmToRecord,
   onAdded,
   onClose,
+  onBusyChange,
   announce,
   openInSpaarke,
 }) => {
@@ -142,6 +153,28 @@ export const AddFirmPanel: React.FC<AddFirmPanelProps> = ({
   const inFlightRef = useRef(false);
   const sendingRef = useRef(false);
   const mountedRef = useRef(true);
+  // Focus (a11y): the panel opens on its search box (the entry button that opened it is gone), and the pending view
+  // opens on Retry. Callback refs, as `RelatedToPicker` does (Fluent v9's ref typing here resolves to `Ref<never>`).
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
+  const retryButtonRef = useRef<HTMLButtonElement | null>(null);
+  const onBusyChangeRef = useRef(onBusyChange);
+  onBusyChangeRef.current = onBusyChange;
+  useEffect(() => {
+    searchInputRef.current?.focus();
+  }, []);
+  useEffect(() => {
+    onBusyChangeRef.current?.(sending);
+  }, [sending]);
+  useEffect(
+    () => () => {
+      onBusyChangeRef.current?.(false);
+    },
+    []
+  );
+  // The pending view appears (and again after a refused Retry, which disables the button while it runs): land on Retry.
+  useEffect(() => {
+    if (pendingFirm && !sending) retryButtonRef.current?.focus();
+  }, [pendingFirm, sending]);
   useEffect(() => {
     mountedRef.current = true;
     return () => {
@@ -290,6 +323,9 @@ export const AddFirmPanel: React.FC<AddFirmPanelProps> = ({
             <Button
               appearance="outline"
               size="small"
+              ref={el => {
+                retryButtonRef.current = el;
+              }}
               disabled={sending}
               onClick={() => void send(pendingFirm)}
               data-testid="add-firm-pending-retry"
@@ -317,6 +353,9 @@ export const AddFirmPanel: React.FC<AddFirmPanelProps> = ({
     <div className={styles.panel} role="group" aria-label="Add a firm to this record" data-testid="add-firm-panel">
       <Field label="Search law firms">
         <SearchBox
+          ref={el => {
+            searchInputRef.current = el;
+          }}
           value={searchText}
           onChange={(_, data) => setSearchText(data.value)}
           placeholder="Firm name"

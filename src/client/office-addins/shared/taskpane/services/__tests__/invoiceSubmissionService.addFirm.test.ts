@@ -46,6 +46,33 @@ describe('listLawFirms (GET /api/finance/firms)', () => {
     expect(result).toEqual({ items: [{ firmId: 'f1', name: 'Ravenscroft & Vance' }], page: 2, hasMore: true });
   });
 
+  it('caps the search at 100 CODE POINTS, so a surrogate pair is never cut and nothing throws (K4)', async () => {
+    mockFetch.mockResolvedValue(res(200, { items: [], page: 1, hasMore: false }));
+    // 150 characters, every one an emoji (two UTF-16 units each): 300 units, 150 code points.
+    const emoji = '\u{1F600}';
+    const search = emoji.repeat(150);
+    expect(search.length).toBe(300);
+    await expect(listLawFirms({ search }, config)).resolves.toEqual({ items: [], page: 1, hasMore: false });
+    const url = new URL(mockFetch.mock.calls[0]![0] as string);
+    const sent = url.searchParams.get('search')!;
+    expect(Array.from(sent)).toHaveLength(LAW_FIRM_SEARCH_MAX);
+    expect(sent).toBe(emoji.repeat(100));
+    // A mix: the cut falls after the 100th code point, on a pair boundary.
+    mockFetch.mockClear();
+    await listLawFirms({ search: 'a'.repeat(99) + emoji + emoji }, config);
+    const mixed = new URL(mockFetch.mock.calls[0]![0] as string).searchParams.get('search')!;
+    expect(mixed).toBe('a'.repeat(99) + emoji);
+  });
+
+  it('a lone surrogate in the search is dropped; the request is still sent (encodeURIComponent would throw on it)', async () => {
+    mockFetch.mockResolvedValue(res(200, { items: [], page: 1, hasMore: false }));
+    await expect(listLawFirms({ search: 'ab\uD83D' }, config)).resolves.toBeDefined();
+    expect(mockFetch.mock.calls[0]![0]).toBe(`${BASE}/api/finance/firms?search=ab&page=1&pageSize=25`);
+    mockFetch.mockClear();
+    await expect(listLawFirms({ search: '\uDE00cd' }, config)).resolves.toBeDefined();
+    expect(mockFetch.mock.calls[0]![0]).toBe(`${BASE}/api/finance/firms?search=cd&page=1&pageSize=25`);
+  });
+
   it('omits search when blank, and caps it at 100 characters', async () => {
     mockFetch.mockResolvedValue(res(200, { items: [], page: 1, hasMore: false }));
     await listLawFirms({ search: '   ' }, config);
@@ -76,9 +103,8 @@ describe('listLawFirms (GET /api/finance/firms)', () => {
     mockFetch.mockResolvedValue(
       res(404, { errorCode: 'sdap.access.deny.record_unavailable', detail: 'internal text' })
     );
-    await expect(listLawFirms({}, config)).rejects.toThrow(
-      "This record or firm isn't available to you, or you can't change this record."
-    );
+    // The list's uniform 404 is about listing, not about a record or a firm.
+    await expect(listLawFirms({}, config)).rejects.toThrow("You can't list law firms in Spaarke.");
     mockFetch.mockResolvedValue(res(503, { errorCode: 'ebilling.submission.record_unavailable', detail: 'x' }));
     await expect(listLawFirms({}, config)).rejects.toThrow("Spaarke couldn't do this right now. Try again.");
     mockFetch.mockResolvedValue(res(503, { errorCode: 'ebilling.disabled' }));
@@ -178,7 +204,7 @@ describe('addFirmToRecord (POST /api/finance/core-records/{entityType}/{entityId
       'ebilling.firm_assign.record_restricted',
       'This record is Restricted to internal users, so no firm can be given access to it.',
     ],
-    [409, 'ebilling.firm_assign.slots_full', 'Two firms are already assigned. Replace one of them.'],
+    [409, 'ebilling.firm_assign.slots_full', 'Two firms are already assigned. Replace one of them in Spaarke.'],
     [409, 'ebilling.firm_assign.firm_already_assigned', 'That firm is already assigned to this record.'],
     [503, 'ebilling.submission.record_unavailable', "Spaarke couldn't do this right now. Try again."],
     [503, 'ebilling.disabled', 'Invoice submission is turned off in Spaarke.'],
@@ -218,18 +244,35 @@ describe('addFirmToRecord (POST /api/finance/core-records/{entityType}/{entityId
     expect(route.kind === 'refused' && route.message).toBe("Spaarke couldn't do this right now. Try again.");
   });
 
-  it('a 400, a 404 with no code, and an unknown code all show the generic sentence', async () => {
+  it('a 400, a 404 with no code, and an unknown 4xx code all show the generic sentence', async () => {
     mockFetch.mockResolvedValueOnce(
       res(400, { title: 'One or more validation errors occurred.', errors: { add: ['x'] } })
     );
     mockFetch.mockResolvedValueOnce(res(404, undefined));
     mockFetch.mockResolvedValueOnce(res(409, { errorCode: 'ebilling.firm_assign.something_new', detail: 'new' }));
-    mockFetch.mockResolvedValueOnce(res(500, { errorCode: 'constructor' }));
-    for (const status of [400, 404, 409, 500]) {
+    for (const status of [400, 404, 409]) {
       const outcome = await addFirmToRecord(target, FIRM_ID, config);
       expect(outcome).toMatchObject({ kind: 'refused', status, message: FIRM_ASSIGN_GENERIC_MESSAGE });
     }
     expect(FIRM_ASSIGN_GENERIC_MESSAGE).toBe("Spaarke couldn't add the firm right now. Nothing was changed.");
+  });
+
+  it('a 5xx with no code, or one this build does not know, says it could not confirm (never "Nothing was changed")', async () => {
+    const unconfirmed = "Spaarke couldn't confirm the firm was added. Try again; adding the same firm again is safe.";
+    mockFetch.mockResolvedValueOnce(res(500, undefined));
+    mockFetch.mockResolvedValueOnce(res(502, { title: 'Bad gateway' }));
+    mockFetch.mockResolvedValueOnce(res(500, { errorCode: 'constructor' }));
+    mockFetch.mockResolvedValueOnce(res(503, { errorCode: 'ebilling.something_new' }));
+    for (const status of [500, 502, 500, 503]) {
+      const outcome = await addFirmToRecord(target, FIRM_ID, config);
+      expect(outcome).toMatchObject({ kind: 'refused', status, message: unconfirmed });
+    }
+    // A 503 with the contract's own code keeps the contract sentence.
+    mockFetch.mockResolvedValueOnce(res(503, { errorCode: 'ebilling.submission.record_unavailable' }));
+    expect(await addFirmToRecord(target, FIRM_ID, config)).toMatchObject({
+      status: 503,
+      message: "Spaarke couldn't do this right now. Try again.",
+    });
   });
 
   it('with no answer at all, says the firm may not have been added', async () => {
