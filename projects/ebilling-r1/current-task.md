@@ -9,14 +9,14 @@
 - **#2830 (095g) is OPEN**, work → master, head d825808b7d, not bound.
   - uac-r2 APPROVED the merged head; ontology-r1's light check found nothing ontology-owned.
   - CI was not yet checked. Merging needs the owner's go.
-- **IN PROGRESS: the live dev write.** Owner, typed here: "Yes run script and leave Spaarke untyped". The uac-r2 before-notice is SENT, and the `-WhatIf` dry run was OK: it would set LAWFIRM on 'Law Firm' 11aad4fa-8f96-f111-b8db-0022482fb5a7.
+- **DONE: the live dev write** (09:35Z). LAWFIRM is set on the type row and Morrison Foerster is typed Law Firm, both read back. uac-r2 got notices before and after; word-add-in-r1 was told. Recorded in the 095g notes, "Dev seeding".
   - **Next:**
     1. Run `pwsh -NoProfile -File scripts/ebilling/Set-EbillingLawFirmTypeCode.ps1` for real.
     2. Set `sprk_organization` 67577f8c-4301-f111-8407-7ced8d1dc988 (Morrison Foerster LLP), `sprk_organizationtype` → 11aad4fa-8f96-f111-b8db-0022482fb5a7. Leave Spaarke Inc and the other untyped org alone.
     3. Read both back.
     4. Send uac-r2 the after-notice and tell word-add-in-r1 the seeding is done.
     5. Record the run in the 095g notes, in a "Dev seeding" section.
-- **New owner decision, NOT yet logged:** "Yes create decision record for procedure changes" (ontology-r1's K4).
+- **Logged EB-D-238** (Decision Record for each per-record Procedure change) as task 084h 🔲. Next: draft the design and send it to ontology-r1 before building.
   - Log it as EB-D-238: a per-record Procedure change (assign/pin/exclude/change/remove, 089 writes) writes a Decision Record.
   - Then add a task row and send the design to ontology-r1 first, since it owns the Decision Record writers.
 - **095f part 2:** ontology-r1 wants the design first (EB-D-236 Decision Record note).
