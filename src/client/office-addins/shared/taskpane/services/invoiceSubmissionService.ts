@@ -10,7 +10,10 @@
  * - §3 `GET statusUrl` until the status is final — {@link pollSubmission};
  * - §8 `GET /api/finance/core-records/{entityType}/{entityId}/firms` — {@link loadInvoiceFirms};
  * - §11 `GET /api/finance/invoice-submissions?internetMessageId=` — {@link loadPreviousSubmission} (ebilling 095a);
- * - §5, §6 and §9 codes → user text in `utils/invoiceSubmissionMessages.ts`.
+ * - §5, §6 and §9 codes → user text in `utils/invoiceSubmissionMessages.ts`;
+ * - ebilling 095g (`projects/ebilling-r1/notes/095g-assign-firm.md`, "Contract for word-add-in-r1 (as built)"):
+ *   `GET /api/finance/firms` — {@link listLawFirms}; `POST /api/finance/core-records/{entityType}/{entityId}/firms` —
+ *   {@link addFirmToRecord} (the add alone; the pane never removes a firm).
  *
  * The request's `email` is EXACTLY `/office/save`'s: built by the ribbon Quick Save's `buildEmailSaveRequest` (only its
  * `email` is taken — the contract refuses a nested SaveRequest) over the pane's own `captureEmailContent`. No second
@@ -33,6 +36,9 @@ import {
   EMAIL_UNIDENTIFIABLE_CODE,
   FILING_KEPT_DETAIL,
   describeAcceptedOutcome,
+  describeFirmAssignRefusal,
+  FIRM_ASSIGN_GENERIC_MESSAGE,
+  FIRM_LIST_GENERIC_MESSAGE,
   isRetryableSubmissionRefusal,
   PERMANENT_SUBMISSION_CODES,
   type InvoiceMessageContext,
@@ -49,10 +55,13 @@ import {
 import { buildEmailSaveRequest, type OfficeSaveRequestBody, type QuickSaveEmailContext } from './quickSaveHelpers';
 import {
   INVOICE_CORE_RECORD_TYPES,
+  type AddFirmOutcome,
   type InvoiceCoreRecordType,
   type InvoiceCorrectionPrefill,
   type InvoiceFiledUnder,
   type InvoiceFirmOption,
+  type LawFirmPage,
+  type ListLawFirmsArgs,
   type InvoicePreviousSubmission,
   type InvoiceSubmissionInput,
   type FollowPreviousSubmission,
@@ -629,6 +638,130 @@ export async function loadInvoiceFirms(
         !!row && typeof row.firmId === 'string' && typeof row.name === 'string'
     )
     .map(row => ({ firmId: row.firmId, name: row.name }));
+}
+
+/** Firm rows (`{ firmId, name }`) read tolerantly: a row without a string id and name is dropped. */
+function readFirmRows(value: unknown): InvoiceFirmOption[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter(
+      (row): row is { firmId: string; name: string } =>
+        !!row && typeof row.firmId === 'string' && typeof row.name === 'string'
+    )
+    .map(row => ({ firmId: row.firmId, name: row.name }));
+}
+
+/** ebilling 095g: the page size the law-firm list asks for (the route allows 1-50), and the search bound. */
+export const LAW_FIRM_PAGE_SIZE = 25;
+export const LAW_FIRM_SEARCH_MAX = 100;
+export const LAW_FIRMS_ROUTE = '/api/finance/firms';
+
+/**
+ * One page of the active law firms a record can be given (ebilling 095g `GET /api/finance/firms`, internal callers
+ * only). `search` is trimmed and at most 100 characters, and left out when blank. The page is read tolerantly: rows
+ * without an id and name are dropped, `hasMore` is true only when the server says `true`. Any failure THROWS with the
+ * pane's sentence for the code (never the server's `detail`); a 503 is never an empty list.
+ */
+export async function listLawFirms(
+  args: ListLawFirmsArgs,
+  config: InvoiceServiceConfig,
+  signal?: AbortSignal
+): Promise<LawFirmPage> {
+  const page = args.page ?? 1;
+  const search = (args.search ?? '').trim().slice(0, LAW_FIRM_SEARCH_MAX).trim();
+  const query = [
+    ...(search ? [`search=${encodeURIComponent(search)}`] : []),
+    `page=${page}`,
+    `pageSize=${args.pageSize ?? LAW_FIRM_PAGE_SIZE}`,
+  ].join('&');
+  let response: Response;
+  try {
+    const token = await config.getAccessToken();
+    response = await authenticatedJsonFetch(
+      `${config.apiBaseUrl}${LAW_FIRMS_ROUTE}?${query}`,
+      { method: 'GET', headers: { 'Content-Type': 'application/json' }, ...(signal ? { signal } : {}) },
+      token,
+      { getRetryToken: config.getAccessToken }
+    );
+  } catch (err) {
+    if (signal?.aborted) throw err;
+    throw new Error("Couldn't reach Spaarke to list the law firms. Check your connection and try again.");
+  }
+  const json = await readJson(response);
+  if (!response.ok) {
+    throw new Error(
+      describeFirmAssignRefusal({ status: response.status, code: problemCode(response.status, json) }, 'list')
+    );
+  }
+  if (!json || !Array.isArray(json.items)) throw new Error(FIRM_LIST_GENERIC_MESSAGE);
+  return {
+    items: readFirmRows(json.items),
+    page: typeof json.page === 'number' ? json.page : page,
+    hasMore: json.hasMore === true,
+  };
+}
+
+/**
+ * Adds one firm to a core record (ebilling 095g `POST /api/finance/core-records/{entityType}/{entityId}/firms`). The
+ * body is exactly `{ "add": "<guid>" }`: the pane NEVER sends `remove` or `confirmRevoke`, so it can never take a firm,
+ * or a firm's access, away. Both ids are canonicalized (ADR-044); an id that cleans to nothing is refused here and
+ * nothing is sent.
+ *
+ * The 200 is read tolerantly (`changed`, `firms` — null when the server could not read the list back —, `access.state`,
+ * `recordActive`, `notice`), and `changed: false` (the firm was already there) is a success too. A refusal is keyed on
+ * `errorCode ?? reasonCode` ONLY, never on `detail`. No answer at all is a refusal whose sentence says the firm may not
+ * have been added: sending the same request again is safe (a repeat changes nothing).
+ */
+export async function addFirmToRecord(
+  target: InvoiceSubmissionTarget,
+  firmId: string,
+  config: InvoiceServiceConfig
+): Promise<AddFirmOutcome> {
+  const add = cleanGuid(firmId);
+  const recordId = cleanGuid(target.entityId);
+  if (!add || !recordId) return { kind: 'refused', status: 0, code: undefined, message: FIRM_ASSIGN_GENERIC_MESSAGE };
+
+  let response: Response;
+  try {
+    const token = await config.getAccessToken();
+    response = await authenticatedJsonFetch(
+      `${config.apiBaseUrl}/api/finance/core-records/${encodeURIComponent(target.entityType)}/${encodeURIComponent(
+        recordId
+      )}/firms`,
+      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ add }) },
+      token,
+      { getRetryToken: config.getAccessToken }
+    );
+  } catch {
+    return {
+      kind: 'refused',
+      status: 0,
+      code: undefined,
+      message: "Couldn't reach Spaarke, so the firm may not have been added. Check your connection and try again.",
+    };
+  }
+
+  const json = await readJson(response);
+  if (!response.ok) {
+    const code = problemCode(response.status, json);
+    return {
+      kind: 'refused',
+      status: response.status,
+      code,
+      message: describeFirmAssignRefusal({ status: response.status, code }),
+    };
+  }
+  const access = json?.access && typeof json.access === 'object' ? (json.access as Record<string, unknown>) : null;
+  const notice = stringOrUndefined(json?.notice)?.trim();
+  return {
+    kind: 'added',
+    // A 200 without the field is a write that happened: only an explicit `false` says it was a repeat.
+    changed: json?.changed !== false,
+    firms: Array.isArray(json?.firms) ? readFirmRows(json.firms) : null,
+    accessState: access?.state === 'pending' ? 'pending' : 'applied',
+    recordActive: json?.recordActive !== false,
+    notice: notice ? notice : null,
+  };
 }
 
 const UNREADABLE_PREFILL_MESSAGE = "Spaarke's answer about this invoice couldn't be read. Try again.";

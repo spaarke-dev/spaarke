@@ -16,11 +16,12 @@ import {
   makeStyles,
   tokens,
 } from '@fluentui/react-components';
-import { OpenRegular, ReceiptRegular } from '@fluentui/react-icons';
+import { AddRegular, OpenRegular, ReceiptRegular } from '@fluentui/react-icons';
 import type { IHostAdapter } from '@shared/adapters';
 import type { EntitySearchResult, EntityType } from '../../hooks/useEntitySearch';
 import { useAnnounce } from '../../hooks/useAnnounce';
 import { RelatedToPicker } from '../RelatedToPicker';
+import { AddFirmPanel } from '../AddFirmPanel';
 import { searchOfficeEntities } from '../../services/officeEntitySearch';
 import { fetchRelatedCandidates, type RelatedCandidate } from '../../services/communicationSuggestionsService';
 import {
@@ -51,6 +52,9 @@ import {
   type InvoiceListedAttachment,
   type InvoiceMarkingValue,
   type InvoiceSubmitHandler,
+  type AddFirmOutcome,
+  type AddFirmToRecord,
+  type ListLawFirms,
   type LoadCorrectionPrefill,
   type LoadInvoiceFirms,
   type LoadPreviousSubmission,
@@ -125,6 +129,13 @@ export interface InvoiceViewProps {
   onSubmit?: InvoiceSubmitHandler;
   /** The firms linked to the chosen core record (contract 095 §8). Absent → none can be listed. */
   loadFirms?: LoadInvoiceFirms;
+  /**
+   * The active law firms a record can be given (ebilling 095g). With {@link addFirmToRecord}, a New invoice's Firm field
+   * offers "Add a firm to this record". Absent (either one) → no such entry point.
+   */
+  listLawFirms?: ListLawFirms;
+  /** Adds one firm to the chosen record (ebilling 095g; the add alone: the pane never removes a firm). */
+  addFirmToRecord?: AddFirmToRecord;
   /** Whether "Submit a corrected invoice" can be used (the server refuses corrections until ebilling 097). */
   correctionAvailable?: boolean;
   /**
@@ -261,6 +272,8 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
   getAccessToken,
   onSubmit,
   loadFirms,
+  listLawFirms,
+  addFirmToRecord,
   correctionAvailable = false,
   loadCorrectionPrefill,
   onBusyChange,
@@ -296,6 +309,12 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
   const [formKey, setFormKey] = useState(0);
   const lastAttemptRef = useRef<{ input: InvoiceSubmissionInput; actionId: string } | null>(null);
   const firmRequestRef = useRef(0);
+  /** The add-a-firm panel (095g) is open under the Firm field. */
+  const [addFirmOpen, setAddFirmOpen] = useState(false);
+  /** The server's notice (or ours) for the firm just added; shown under the Firm field until the record changes. */
+  const [addedFirmNotice, setAddedFirmNotice] = useState<string | null>(null);
+  /** A firm just added whose list had to be reloaded: the reload selects it once it is listed. */
+  const selectAfterReloadRef = useRef<string | null>(null);
   /** The running submission's abort controller; aborted when the view unmounts. */
   const abortRef = useRef<AbortController | null>(null);
   const onBusyChangeRef = useRef(onBusyChange);
@@ -456,8 +475,13 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
       list => {
         if (request !== firmRequestRef.current) return;
         setFirms({ status: 'ready', firms: list });
+        // A firm just added from the pane (its answer carried no list, so this reload fetched it): choose it.
+        const added = selectAfterReloadRef.current;
+        selectAfterReloadRef.current = null;
+        const addedFirm = added ? list.find(f => sameRecordId(f.firmId, added)) : undefined;
         // One firm linked to the record: it is the only possible answer.
-        if (list.length === 1) setFirmId(list[0]!.firmId);
+        if (addedFirm) setFirmId(addedFirm.firmId);
+        else if (list.length === 1) setFirmId(list[0]!.firmId);
       },
       (err: unknown) => {
         if (request !== firmRequestRef.current) return;
@@ -468,6 +492,34 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
       }
     );
   }, [coreRecord, loadFirms, firmsReload, firmsKey]);
+
+  // The add-a-firm panel and its notice belong to the record they were for.
+  const coreRecordId = coreRecord?.id ?? null;
+  useEffect(() => {
+    setAddFirmOpen(false);
+    setAddedFirmNotice(null);
+    selectAfterReloadRef.current = null;
+  }, [coreRecordId]);
+
+  // A firm was added to the record from the panel (095g): the firm is on the record, so show the list that includes it
+  // and choose it. The server's `firms` is the §8 body after the write; when it is null (the read faulted after a
+  // successful write) the existing reload fetches it, and selects the firm once listed.
+  const handleFirmAdded = (result: Extract<AddFirmOutcome, { kind: 'added' }>, firm: InvoiceFirmOption): void => {
+    if (result.firms) {
+      firmRequestRef.current += 1; // an older list request must not replace this one
+      setFirms({ status: 'ready', firms: result.firms });
+      const listed = result.firms.find(f => sameRecordId(f.firmId, firm.firmId));
+      if (listed) setFirmId(listed.firmId);
+    } else {
+      selectAfterReloadRef.current = firm.firmId;
+      setFirmsReload(n => n + 1);
+    }
+    // A pending access pass is said by the panel itself (with its Retry); anything else is the server's own sentence.
+    const notice =
+      result.accessState === 'pending' ? null : (result.notice ?? `${firm.name} was added to this record.`);
+    setAddedFirmNotice(notice);
+    if (notice) announce(notice);
+  };
 
   // A correction of the chosen invoice: read what it must keep and whether it can be made (§10). A newer choice
   // supersedes an older request.
@@ -720,6 +772,8 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
   const handleDone = (): void => {
     if (outcome?.kind === 'success') {
       lastAttemptRef.current = null;
+      setAddFirmOpen(false);
+      setAddedFirmNotice(null);
       setMode('new');
       setCorrectionChosen(false);
       userPickedRef.current = false;
@@ -997,7 +1051,7 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
     );
   };
 
-  const renderFirmField = () => {
+  const renderFirmFieldBody = () => {
     if (firms.status === 'none') {
       return (
         <Field label="Firm" required hint="Choose the matter, project or work assignment first.">
@@ -1085,6 +1139,65 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
       </Field>
     );
   };
+
+  /**
+   * "Add a firm to this record" (task 134 slice C, ebilling 095g): New invoice only (a correction keeps the invoice's own
+   * firm and never renders this field). The entry point shows once the record's firms are listed; the panel, once open,
+   * stays mounted through the reload its own answer can ask for.
+   */
+  const renderAddFirm = () => {
+    if (!listLawFirms || !addFirmToRecord || !coreRecord || !isCoreRecordType(coreRecord.entityType)) return null;
+    const target = { entityType: coreRecord.entityType, entityId: coreRecord.id };
+    const listedCount = firms.status === 'ready' && firmsFor === firmsKey ? firms.firms.length : null;
+    return (
+      <>
+        {addedFirmNotice && (
+          <MessageBar intent="success" layout="multiline" role="status" data-testid="invoice-add-firm-notice">
+            <MessageBarBody>{addedFirmNotice}</MessageBarBody>
+          </MessageBar>
+        )}
+        {listedCount !== null && !addFirmOpen && (
+          <div>
+            <Button
+              appearance="transparent"
+              size="small"
+              icon={<AddRegular />}
+              disabled={locked}
+              onClick={() => {
+                setAddedFirmNotice(null);
+                setAddFirmOpen(true);
+              }}
+              data-testid="invoice-add-firm"
+            >
+              {listedCount === 0 ? 'Add a firm to this record' : 'Add another firm'}
+            </Button>
+          </div>
+        )}
+        {addFirmOpen && !locked && (
+          <AddFirmPanel
+            target={target}
+            listLawFirms={listLawFirms}
+            addFirmToRecord={addFirmToRecord}
+            onAdded={handleFirmAdded}
+            onClose={() => setAddFirmOpen(false)}
+            announce={announce}
+            openInSpaarke={renderOpenInSpaarke(
+              coreRecord.logicalName || LOGICAL_NAME_BY_CORE_TYPE[coreRecord.entityType],
+              coreRecord.id,
+              'invoice-add-firm-open'
+            )}
+          />
+        )}
+      </>
+    );
+  };
+
+  const renderFirmField = () => (
+    <>
+      {renderFirmFieldBody()}
+      {renderAddFirm()}
+    </>
+  );
 
   // A correction keeps the original invoice's firm, record and number: shown, not editable (§10).
   const renderCorrectionDetails = (c: InvoiceCorrectionPrefill) => (
