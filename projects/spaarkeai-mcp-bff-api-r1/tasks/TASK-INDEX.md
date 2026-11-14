@@ -24,12 +24,12 @@
 | 018 | FR-04 privilege derivation from communications (option A widened) | A | ✅ [done] | 015 | Group D | opus / high | FULL |
 | 020 | MCP module, packages and /mcp/{area} host | B | ✅ [done] | 003, 017 | Group D | sonnet / high | FULL |
 | 021 | A10 auth on /mcp, tool policies and route guard | B | ✅ [done] | 020 | Group E (alone) | opus / high | FULL |
-| 022 | spaarke_show_decisions and app-only paging tool | B | 🔲 [open] | 015, 017, 018 (hard), 021 | Group F | opus / high | FULL |
-| 023 | spaarke_get_decision_plan and lookup search tools | B | 🔲 [open] | 016, 017, 021 | Group F | sonnet / high | FULL |
-| 024 | spaarke_complete_decision app-only write tool | B | 🔲 [open] | 014, 017, 021 | Group F | sonnet / high | FULL |
+| 022 | spaarke_show_decisions and app-only paging tool | B | ✅ [done] | 015, 017, 018 (hard), 021 | Group F | opus / high | FULL |
+| 023 | spaarke_get_decision_plan and lookup search tools | B | ✅ [done] | 016, 017, 021 | Group F | sonnet / high | FULL |
+| 024 | spaarke_complete_decision app-only write tool | B | ✅ [done] | 014, 017, 021 | Group F | sonnet / high | FULL |
 | 010 | MCP caller-path verification (option C) | B | 🔲 [open] | 020, 021, 023, 024 | Group G | opus / high | FULL |
 | 025 | MCP conformance in CI and NFR measurements | B | 🔲 [open] | 010, 022, 023, 024 | Group H | sonnet / high | FULL |
-| 030 | Widget scaffold, BFF embedding and CI size gate | C | 🔲 [open] | 003, 021 | Group F | sonnet / high | FULL |
+| 030 | Widget scaffold, BFF embedding and CI size gate | C | ✅ [done] | 003, 021 | Group F | sonnet / high | FULL |
 | 031 | Widget Decide lane over MCP shims | C | 🔲 [open] | 022, 030 | Group G | sonnet / high | FULL |
 | 032 | Widget Decision wizard over MCP shims | C | 🔲 [open] | 023, 024, 031 | Group H | sonnet / xhigh | FULL |
 | 040 | Plugin package and spaarke-decisions skill | D | 🔲 [open] | 003, 030 | Group G | sonnet / high | STANDARD |
