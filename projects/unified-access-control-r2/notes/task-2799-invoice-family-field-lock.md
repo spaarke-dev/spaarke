@@ -121,5 +121,31 @@ exemption #1616 made for the project pair applies in the same way: chunk 3 must 
 record it names (Dataverse's rule; the precedent is `ProjectMatterFiling` step 4: Write|Append on the project, AppendTo on
 the matter). The brief's "AppendTo on the row" is read as this.
 
-**Known limit (same as `ProjectMatterFiling`):** a mixed write is two requests. If the app write fails after the person's
-write of the other columns succeeded, those columns stay written; the answer says nothing locked was written.
+**Known limit:** see K-1 in §4 (a mixed write is two requests).
+
+## 4. The wiring (chunk 3)
+
+Every caller-identity writer in §2.1 now checks AS THE PERSON and writes the locked columns AS THE APP. A write that sets
+no locked column, and a run with no person (C2/C3 app-only), keeps its single write and identity, unchanged.
+
+| # | Where | How | Refusals |
+|---|---|---|---|
+| C1 | `FieldMappingEndpoints.ApplyMappingsToChildRecordsAsync` (`Write()`) | `UpdateExistingSplitAsync`, `RightsOfPrincipal(probe, callerSystemUserId)` (the probe the push already resolves) | per-row "Not written: …" with the guard's code-only text; partly saved → `PartlySavedMessage` |
+| C2 | `UpdateRecordActionCore.Patch()` | same; the probe from a scope when the run has a person | `RecordOwnerUnresolvedException` (the seam's typed failure), like the guard's other codes |
+| C3 | `DataverseUpdateHandler.PatchAsync` | same; an optional `CallerRecordAccessProbe` ctor parameter | `RecordOwnerUnresolvedException`, like the guard's other codes |
+| C4 | `OwnedChildWrite.RefileAsync` (the write callback) | `PatchAsCallerAsync`, `RightsOfCaller` (RetrievePrincipalAccess under the caller's token) | `RefileOutcome.LockedWrite` → the route / tool maps it (C5 / C6 below) |
+| C5 | `ChildRecordEndpoints.UpdateAsync` | `PatchAsCallerAsync`; the app writer from the request services | denied → 403 `DeniedCode`; unavailable → 500 `invoice_family_read_failed` (the path's existing unavailable answer); partly saved → 500 `invoice_family_locked_write_partly_saved` |
+| C6 | `DataverseUpdateRecordHandler` (ordinary and re-file) | `PatchAsCallerAsync`; the app writer from a scope | denied → `AccessDenied`; unavailable → `invoice_family_read_failed`; partly saved → `ServiceError` with `PartlySavedMessage` |
+| C7 | `CallerWriteAuthorization.NoFieldSecuredColumnAsync` | the locked columns (`LockedColumnsOf`) are not asked as field-secured, like the #1616 pair; (1) and (2) still ask Create/Append and AppendTo AS THE CALLER, and the create stays one app-only write | unchanged (a secured column that is not locked is still refused) |
+
+An unknown record answers exactly as one the person may not use (NFR-01): Dataverse's 403 and 404 are both `Denied`.
+On the OBO paths a failed WhoAmI keeps the path's existing client-failure answer.
+
+### K-1 — a mixed write is two requests (known limit)
+
+A write that sets locked and other columns is two requests: the other columns as the person (their own privileges and
+field security apply), then the locked columns as the app. If the second fails after the first landed, the other
+columns stay saved. The answer is never success: each path returns its error answer with fixed text saying the change
+was only partly saved (`invoice_family_locked_write_partly_saved`; no exception text), and a Warning is logged with the
+table, the record id and the TraceId. Covered by `InvoiceFamilyLockedWriteTests` (helper), `InvoiceFamilyGenericUpdatePathTests`
+(C1-C3) and `SecureChildOwnershipAiToolTests` (C4-C6). Same shape as `ProjectMatterFiling`'s `OtherColumnsSaved`.
