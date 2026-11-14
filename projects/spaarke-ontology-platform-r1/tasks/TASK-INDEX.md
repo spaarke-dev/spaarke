@@ -270,6 +270,7 @@ Contract: `git show origin/work/unified-access-control-r2:projects/unified-acces
 | ✅ [done] 188 | [Remaining composer hosts: templates, AI, attachment upload (ComposeWorkspace, TrackingFieldTrio, CommunicationPage, CommunicationActions)](188-remaining-composer-hosts-templates-ai.poml) | FULL | sonnet/high | 186 | — | From the 186 inventory; Daily Briefing out, Office add-in = task 189 after coordination (**D-220**) · **Done** 2026-11-13: [#2812](https://github.com/spaarke-dev/spaarke/pull/2812) merged `cfa97d718b` (Opus review: no F; stale PCF bundles rebuilt). Dev check waits for 185 |
 | ✅ [done] 190 | [Send budget inquiry sends Cc and Bcc end to end; the "not sent" warning goes away on that step](190-budget-inquiry-cc-bcc.poml) | FULL | sonnet/high | none | — | D-222 |
 | ✅ [done] 191 | [A decision whose inquiry send failed can be finished from the item: retry sends only the unfinished step, no duplicates, no HTTP 500](191-decision-failed-send-recovery.poml) | FULL | **opus**/high | none | — | D-222 |
+| 🔲 [open] 192 | [Send budget inquiry opens with a standard default subject and message](192-budget-inquiry-default-text.poml) | FULL | sonnet/high | none | — | **D-224** (owner 2026-11-14, wording approved); no templates or AI on the decision step; rewords stale D-96 comments (EB-D-231) |
 
 ### Phase 5 — The worklist surface
 

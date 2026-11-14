@@ -1,0 +1,100 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="192" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>Send budget inquiry opens with a standard default subject and message (D-224)</title>
+    <phase>11 UAT (budget inquiry follow-up, D-224)</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Tags include bff-api; modifies .cs and possibly .tsx code files.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Adds two starting values through the existing DefaultSource mechanism (task 167, D-193), reading as the caller; it adds no new endpoint or write.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>No file overlap with 183/184 (wizard composer hosts, EmailStep retirement).</parallel-reason>
+    <deps>none</deps>
+    <tags>bff-api, ontology</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+  <prompt>The Send budget inquiry step pre-fills To only (task 160); Subject and Message start empty. The owner decided (D-224, notes/decisions.md, 2026-11-14) that the email opens with standard default text the user can edit, with no template picker or AI draft of its own. The owner approved the wording below on 2026-11-14.</prompt>
+  <role>SPAARKE platform developer. Follow the ADRs strictly. Expert in ASP.NET Core minimal APIs, the ontology decision plan route and DecisionParameterSources.</role>
+  <goal>For send-budget-inquiry only, the plan read returns a default `subject` and `body` built from the Signal's core matter and the caller. The DecisionWizard's email step shows them as the starting Subject and Message. send-reminder and every other action are unchanged.</goal>
+  <owner-approved-wording>
+Subject: Budget inquiry: {matter number} {matter name}
+
+Body (plain text, line breaks kept):
+Hello,
+
+We received notice of a fee or scope change on {matter name} ({matter number}). The matter's budget has not been revised to reflect it.
+
+Please send us a revised budget estimate, or confirm that the change does not affect the current budget.
+
+Thank you,
+{sender name}
+  </owner-approved-wording>
+  <context>
+    <background>
+- DecisionActionCatalog.cs:160-165: `MessageParameters` (to/subject/body) is shared by send-budget-inquiry (:170) and send-reminder. Defaults must be declared on send-budget-inquiry's own subject/body parameters, not on the shared array.
+- DecisionParameterSources.cs:62-74 holds the source names, for example `MatterCurrencyDefault`. Its `ForPlanAsync` builds `DecisionParameterFacts.DefaultsBySource`.
+- DecisionPlanEndpoints.cs:~306 sends `DefaultsBySource[p.DefaultSource]`, falling back to `p.DefaultValue`. :226 is the task-160 To pre-fill, read as the caller and never failing the read.
+- Client: DecisionWizard/steps/EmailMessageFields.tsx takes starting values from the step values (task 190: "starting Cc/Bcc come from the step values"). Confirm that the subject/body defaults reach the composer, and that a multi-line plain-text default keeps its line breaks (PlainText, as the pattern requires).
+- {matter number} and {matter name}: the core matter's number and name columns. Use the columns the existing inquiry code already reads; grep BudgetInquiryExecutor.cs / InquiryRecordFacts.cs for the matter name and number reads, and reuse them. Do not add a new read path.
+- {sender name}: the calling user's full name.
+- Opportunistic, named here: reword two stale D-96 comments that still describe a detach/move/re-attach the BFF now refuses (field-mapping-r1 045g, EB-D-231 refuses every BFF invoice move and line detach). They are at Services/Signals/SignalReadService.cs:~1673 (the "D-96's detach sequence writes it through the generic paths" sentence) and Services/Signals/Actions/DecisionRouteCores.cs:~103 (the "every invoice core-lookup move on this path" comment). Change comments only; no code change.
+    </background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Signals/Actions/DecisionActionCatalog.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Signals/Actions/DecisionParameterSources.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Signals/SignalReadService.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Signals/Actions/DecisionRouteCores.cs</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/DecisionWizard/steps/EmailMessageFields.tsx</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Api/Signals/DecisionPlanEndpoints.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Signals/Actions/BudgetInquiryExecutor.cs</file>
+    </relevant-files>
+  </context>
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>.claude/patterns/ui/wizard-side-pane-lookup-and-email-compose.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/decisions.md</file>
+      <file>projects/spaarke-ontology-platform-r1/CLAUDE.md</file>
+    </files>
+  </knowledge>
+  <constraints>
+    <constraint source="CLAUDE.md §10">Every change this task makes to Sprk.Bff.Api follows .claude/constraints/bff-extensions.md. It adds no new endpoint, DI registration or package. Measure the publish-size delta against a fresh master build and record it in the task notes.</constraint>
+    <constraint source="CLAUDE.md §11">The new default sources extend DecisionParameterSources. There is no new service or resolver class.</constraint>
+    <constraint source="ADR-028 / D-15">The matter and the caller's name are read as the caller (the same access as the task-160 To pre-fill). Never use app-only reads for these defaults.</constraint>
+    <constraint source="project">Building the defaults never fails the plan read. If the matter cannot be read, subject and body have no default and stay empty, as today. If the caller's name cannot be read, the closing line is "Thank you," with no name. Log at Warning without matter or person names.</constraint>
+    <constraint source="D-224">No template picker and no AI draft are added to the decision step. Do not pass onListEmailTemplates / onDraftWithAi / onRenderEmailTemplate to the EmailComposer in EmailMessageFields. The step stays compose-only with refuseFetch.</constraint>
+    <constraint source="project">The wording is exactly the owner-approved text above (placeholders filled). Do not rephrase it.</constraint>
+  </constraints>
+  <steps mode="directional">
+    <step order="1">Read the existing matter name/number reads used by the inquiry and the task-167 DefaultSource path end to end (catalog → ForPlanAsync → plan endpoint → client step values → EmailMessageFields).</step>
+    <step order="2">Add two source names (subject default, body default) to DecisionParameterSources and resolve them in ForPlanAsync for a matter core only, as the caller.</step>
+    <step order="3">Declare send-budget-inquiry's own subject and body parameters with those DefaultSource values. Leave the shared MessageParameters for send-reminder unchanged.</step>
+    <step order="4">Confirm that the client shows the defaults as starting Subject/Message with line breaks kept. Fix EmailMessageFields only if it does not.</step>
+    <step order="5">Reword the two stale D-96 comments.</step>
+    <step order="6">Write tests, then run task-execute Step 9.5.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion testable="true">The plan read for a send-budget-inquiry on a matter Signal returns subject = "Budget inquiry: {number} {name}" and body = the approved text with the matter name, number and caller's full name filled in.</criterion>
+    <criterion testable="true">send-reminder's subject and body have no default (unchanged).</criterion>
+    <criterion testable="true">If the matter read fails or is denied, subject and body have no default and the plan read still succeeds (200).</criterion>
+    <criterion testable="true">If the caller's name cannot be read, the body ends "Thank you," with no name line, and the plan read still succeeds.</criterion>
+    <criterion testable="true">A Signal whose core is not a matter gets no subject/body default.</criterion>
+    <criterion testable="true">The wizard's email step opens with the default Subject and Message, with line breaks kept. A user's edit is committed instead of the default. An untouched default is committed as plain text with its line breaks.</criterion>
+    <criterion testable="true">EmailMessageFields passes no template or AI handlers (existing tests unchanged; add one assertion).</criterion>
+    <criterion testable="true">The two D-96 comments no longer describe a BFF detach/move/re-attach as possible. The diff for those two files changes comments only.</criterion>
+    <criterion testable="true">Scoped `dotnet test` (filter on the touched Signals test classes only) passes, `dotnet build` of the BFF is clean, and the DecisionWizard jest suites pass. The publish-size delta is recorded.</criterion>
+    <criterion testable="true">Test scope: cover the stated contract plus the edge cases named above. Anything beyond needs a one-line justification in the task notes.</criterion>
+  </acceptance-criteria>
+  <escalation>
+    <trigger>If the inquiry code has no existing read of the matter's name and number and a new Dataverse read path is needed, STOP and report options (root CLAUDE.md §6).</trigger>
+  </escalation>
+  <execution>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist. Work in a fresh worktree from origin/master; PR to master.</protocol>
+  </execution>
+</task>
