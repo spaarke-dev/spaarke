@@ -176,6 +176,43 @@ public sealed class CoreRecordFirmEndpointContractTests
         host.World.Entities.Invocations.Should().BeEmpty();
     }
 
+    [Fact(DisplayName = "095g list (uac-r2 review): page above the bound is 400 with no privilege call and no Dataverse request; the bound itself is accepted")]
+    public async Task List_PageAboveTheBound_Is400()
+    {
+        CoreRecordFirmAssignmentService.PageMax.Should().Be(200);
+
+        await using var over = await Host.StartAsync();
+        over.GrantEverything();
+        var refused = await over.ListRawAsync("page=201");
+
+        refused.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        (await refused.Content.ReadAsStringAsync()).Should().Contain("page must be between 1 and 200");
+        over.Probe.Calls.Should().BeEmpty();
+        over.World.Entities.Invocations.Should().BeEmpty("no Dataverse request is sent");
+
+        await using var at = await Host.StartAsync();
+        at.GrantEverything();
+        var accepted = await at.ListRawAsync("page=200");
+
+        accepted.StatusCode.Should().Be(HttpStatusCode.OK);
+        var json = await Json(accepted);
+        json["page"]!.GetValue<int>().Should().Be(200);
+        json["items"]!.AsArray().Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "095g list (uac-r2 review): the page bound runs after step 0, as the other query 400s do - an external caller is the uniform 404")]
+    public async Task List_PageAboveTheBound_AfterStepZero()
+    {
+        await using var host = await Host.StartAsync();
+        host.GrantEverything();
+        host.StepZero.Kind = StepZeroCallerKind.FlagTrue;
+
+        var response = await host.ListRawAsync("page=201");
+
+        await host.StepZero.AssertRefusedAsync(response, StepZeroCallerKind.FlagTrue, uniformNotFound: true);
+        host.World.Entities.Invocations.Should().BeEmpty();
+    }
+
     [Fact(DisplayName = "095g list: a search over 100 characters is 400")]
     public async Task List_LongSearch_Is400()
     {

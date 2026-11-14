@@ -147,9 +147,10 @@ public static class CoreRecordFirmEndpoints
             errors["search"] = new[] { $"search must be at most {CoreRecordFirmAssignmentService.SearchMaxLength} characters." };
         }
 
-        if (query.ContainsKey("page") && (!int.TryParse(query["page"].ToString(), out var page) || page < 1))
+        if (query.ContainsKey("page")
+            && (!int.TryParse(query["page"].ToString(), out var page) || page < 1 || page > CoreRecordFirmAssignmentService.PageMax))
         {
-            errors["page"] = new[] { "page must be 1 or more." };
+            errors["page"] = new[] { $"page must be between 1 and {CoreRecordFirmAssignmentService.PageMax}." };
         }
 
         if (query.ContainsKey("pageSize")

@@ -243,6 +243,12 @@ public sealed class CoreRecordFirmAssignmentService
     /// <summary>The largest page the list returns.</summary>
     public const int PageSizeMax = 50;
 
+    /// <summary>
+    /// The highest page number the list accepts (uac-r2 review of 095g): 200 pages of 50 is 10,000 firms, far beyond any firm list, and a
+    /// bound keeps a caller from asking Dataverse to page arbitrarily deep.
+    /// </summary>
+    public const int PageMax = 200;
+
     private static readonly string[] SlotColumns = [Slot1Column, Slot2Column];
 
     private readonly IGenericEntityService _entities;
