@@ -1674,6 +1674,14 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
         invoice[InvoiceReviewService.InvInvoiceNumber] = snapshot.FirmInvoiceNumber;
         invoice[InvoiceReviewService.InvTrackingNumber] = snapshot.TrackingNumber;
 
+        // Task 095f (EB-D-225): a from-email Correction's note, in this same create. Only a submission that names the one it replaces carries
+        // one, and only a note that passes the column's rule is written (never truncated). A New invoice and every other channel never name the
+        // column, so an environment that has not added it yet still persists them (a Correction there fails closed in this create).
+        if (snapshot.ResubmissionOfSubmissionId is not null && InvoiceCorrectionNote.Check(outcome.CorrectionNote).Value is { } correctionNote)
+        {
+            invoice[InvoiceCorrectionNote.Column] = correctionNote;
+        }
+
         // Task 095c-3: no firm, no lookup (never the empty id, never a placeholder): the invoice is created with no firm and held FirmMissing.
         if (snapshot.FirmId is { } firmId)
         {

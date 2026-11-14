@@ -2221,15 +2221,22 @@ public class InvoiceSubmissionService
             SubmissionId = submissionId,
         };
 
-    internal static JobContract BuildJob(Guid jobId, Guid submissionId, string? correlationId) => new()
+    internal static JobContract BuildJob(Guid jobId, Guid submissionId, string? correlationId, string? correctionNote = null) => new()
     {
         JobId = jobId,
         JobType = JobType,
         SubjectId = submissionId.ToString(),
         CorrelationId = correlationId ?? string.Empty,
         IdempotencyKey = submissionId.ToString(),
-        Payload = JsonSerializer.SerializeToDocument(new { submissionId }, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase }),
+        // Task 095f (EB-D-225): a from-email Correction's note rides the payload (the submission row has no column for it); every other job's
+        // payload is exactly what it was.
+        Payload = JsonSerializer.SerializeToDocument(
+            new InvoiceSubmissionJobPayload(submissionId, string.IsNullOrWhiteSpace(correctionNote) ? null : correctionNote),
+            new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase, DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull }),
     };
+
+    /// <summary>The processing job's payload as written (<see cref="BuildJob"/>); the handler reads it as <c>InvoiceSubmissionProcessingPayload</c>.</summary>
+    private sealed record InvoiceSubmissionJobPayload(Guid SubmissionId, string? CorrectionNote);
 
     /// <summary>
     /// The display name of the uploaded PDF (<c>sprk_storedfile.sprk_name</c>): the tracking number when given (the job, which writes the

@@ -9,6 +9,7 @@ using Sprk.Bff.Api.Infrastructure.Authentication;
 using Sprk.Bff.Api.Infrastructure.Errors;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Models.Office;
+using Sprk.Bff.Api.Services.Finance;
 using Sprk.Bff.Api.Services.Finance.Submission;
 using Sprk.Bff.Api.Services.Office;
 
@@ -25,6 +26,10 @@ public sealed record FromEmailSubmissionRequest
     public string? PoNumber { get; init; }
     public string? Mode { get; init; }
     public Guid? InvoiceId { get; init; }
+
+    /// <summary>Task 095f (EB-D-225): why the invoice is corrected. Required for <c>Correction</c> (the service refuses a missing or blank
+    /// one), not sent for <c>New</c> (400 field error).</summary>
+    public string? CorrectionNote { get; init; }
 }
 
 /// <summary>The core record the submission (and the <c>.eml</c>) is filed to. <c>displayName</c> is ignored.</summary>
@@ -256,6 +261,29 @@ internal static class InvoiceSubmissionFromEmailHttp
                 errors["mode"] = new[] { "mode must be New or Correction." };
                 break;
         }
+
+        // Task 095f (EB-D-225): the correction note. Strict, like invoiceId: a New submission has nothing to correct, so a note on it is refused
+        // (null or absent is the only New shape). A Correction's note is checked for length and control characters here, so an invalid one
+        // is a body-shape 400 before anything is read; a MISSING or blank one is the coded 400 correction_note_required (the service).
+        if (request.Mode == FromEmailModes.New)
+        {
+            if (request.CorrectionNote is not null)
+            {
+                errors["correctionNote"] = new[] { "correctionNote is not sent for mode New." };
+            }
+        }
+        else if (request.Mode == FromEmailModes.Correction)
+        {
+            switch (InvoiceCorrectionNote.Check(request.CorrectionNote).Refusal)
+            {
+                case InvoiceCorrectionNote.Refusal.TooLong:
+                    errors["correctionNote"] = new[] { $"correctionNote may be at most {InvoiceCorrectionNote.MaxLength} characters." };
+                    break;
+                case InvoiceCorrectionNote.Refusal.ControlCharacter:
+                    errors["correctionNote"] = new[] { "correctionNote may not contain control characters other than a line break or a tab." };
+                    break;
+            }
+        }
     }
 
     /// <summary>The validated request (call only when <see cref="Validate"/> found nothing).</summary>
@@ -273,6 +301,7 @@ internal static class InvoiceSubmissionFromEmailHttp
             PoNumber = request.PoNumber,
             Mode = request.Mode!,
             InvoiceId = request.InvoiceId,
+            CorrectionNote = InvoiceCorrectionNote.Check(request.CorrectionNote).Value,
         };
     }
 

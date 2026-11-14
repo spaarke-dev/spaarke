@@ -853,10 +853,10 @@ public sealed class SubmitInvoiceFromEmailOperationTests
         var submissionId = FromEmailSubmissionKey.SubmissionIdFor(K, 1);
         var jobId = FromEmailSubmissionKey.JobIdFor(K, 1);
 
-        (await Build().RequeueAsync(submissionId, jobId, "trace", CancellationToken.None)).Should().BeTrue();
+        (await Build().RequeueAsync(submissionId, jobId, "trace", null, CancellationToken.None)).Should().BeTrue();
         H.JobsSent.Should().ContainSingle().Which.JobId.Should().Be(jobId);
 
         H.JobFailure = new InvalidOperationException("queue down");
-        (await Build().RequeueAsync(submissionId, jobId, "trace", CancellationToken.None)).Should().BeFalse();
+        (await Build().RequeueAsync(submissionId, jobId, "trace", null, CancellationToken.None)).Should().BeFalse();
     }
 }

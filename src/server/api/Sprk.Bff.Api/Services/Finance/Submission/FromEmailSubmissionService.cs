@@ -223,6 +223,16 @@ internal sealed class FromEmailSubmissionService
             return noFirmRefusal;
         }
 
+        // ── 6c. EB-D-225 (task 095f): a Correction must say why. A missing or blank note is 400 correction_note_required. Like 6b it sits AFTER
+        //        the replay of K (an accepted Correction's retry is answered as a replay) and before the communication read and the save, so a
+        //        refusal has written and filed nothing. A New request carries no note (the body check refuses one). ──
+        if (input.Mode == FromEmailModes.Correction && string.IsNullOrWhiteSpace(input.CorrectionNote))
+        {
+            _logger.LogInformation("From-email Correction with no note refused before any write (400)");
+            return FromEmailSubmissionOutcome.Refused(StatusCodes.Status400BadRequest, FromEmailSubmissionErrors.CorrectionNoteRequired,
+                "A correction needs a note saying why the invoice is corrected.");
+        }
+
         // ── 7. The communication, if the email was already captured, must not be filed under another core record (409) ──
         Guid? knownCommunication;
         try
@@ -292,6 +302,7 @@ internal sealed class FromEmailSubmissionService
             Mode = input.Mode,
             InvoiceId = input.InvoiceId,
             ResubmissionOf = resubmissionOf,
+            CorrectionNote = input.Mode == FromEmailModes.Correction ? input.CorrectionNote : null,
             CallerSystemUserId = callerId,
             CallerObjectId = Guid.TryParse(CallerResolution.ResolveObjectId(http.User), out var oid) ? oid : null,
             CorrelationId = http.TraceIdentifier,
@@ -531,7 +542,8 @@ internal sealed class FromEmailSubmissionService
 
         var jobId = FromEmailSubmissionKey.JobIdFor(k, generation);
         if (status == InvoiceSubmissionStatus.Received
-            && !await _operation.RequeueAsync(row.Id, jobId, http.TraceIdentifier, CancellationToken.None))
+            && !await _operation.RequeueAsync(
+                row.Id, jobId, http.TraceIdentifier, input.Mode == FromEmailModes.Correction ? input.CorrectionNote : null, CancellationToken.None))
         {
             return NotQueued();
         }

@@ -290,7 +290,7 @@ internal class SubmitInvoiceFromEmailOperation : ISubmitInvoiceFromEmail
         // ── 7. The job ──
         try
         {
-            await _jobs.SubmitJobAsync(InvoiceSubmissionService.BuildJob(input.JobId, submissionId, input.CorrelationId), write);
+            await _jobs.SubmitJobAsync(InvoiceSubmissionService.BuildJob(input.JobId, submissionId, input.CorrelationId, input.CorrectionNote), write);
         }
         catch (Exception ex)
         {
@@ -305,11 +305,11 @@ internal class SubmitInvoiceFromEmailOperation : ISubmitInvoiceFromEmail
     }
 
     /// <inheritdoc />
-    public async Task<bool> RequeueAsync(Guid submissionId, Guid jobId, string? correlationId, CancellationToken ct)
+    public async Task<bool> RequeueAsync(Guid submissionId, Guid jobId, string? correlationId, string? correctionNote, CancellationToken ct)
     {
         try
         {
-            await _jobs.SubmitJobAsync(InvoiceSubmissionService.BuildJob(jobId, submissionId, correlationId), CancellationToken.None);
+            await _jobs.SubmitJobAsync(InvoiceSubmissionService.BuildJob(jobId, submissionId, correlationId, correctionNote), CancellationToken.None);
             return true;
         }
         catch (Exception ex)
@@ -402,6 +402,8 @@ internal class SubmitInvoiceFromEmailOperation : ISubmitInvoiceFromEmail
             || !(input.Mode == FromEmailModes.New && input.InvoiceId is null && input.ResubmissionOf is null
                 || input.Mode == FromEmailModes.Correction && input.InvoiceId is { } invoiceId && invoiceId != Guid.Empty
                     && input.ResubmissionOf is { } target && InvoiceBlockedHold.IsOwnSubmission(invoiceId, target))
+            // Task 095f: only a Correction carries a note, and it is the route's already-checked text (never over the column's length).
+            || input.CorrectionNote is not null && (input.Mode != FromEmailModes.Correction || input.CorrectionNote.Length > InvoiceCorrectionNote.MaxLength)
             // Review round 5 (pass-2 F4-2): the route's body shape and 095's own checks refuse these first, with the contract's answers.
             // EB-D-223 (task 095e): a submission names a firm; the service refuses a null one first, so this is defence in depth.
             || input.FirmId is null || input.FirmId == Guid.Empty || input.CoreRecord is null || input.CoreRecord.RecordId == Guid.Empty

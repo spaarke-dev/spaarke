@@ -42,8 +42,9 @@ internal interface ISubmitInvoiceFromEmail
     /// <summary>Submits the resolved source. Never throws for a refusal.</summary>
     Task<FromEmailSubmitResult> SubmitAsync(FromEmailSubmitInput input, CancellationToken ct);
 
-    /// <summary>Re-queues the job of a submission that is still Received (a replay, contract section 5). False when the queue refused it.</summary>
-    Task<bool> RequeueAsync(Guid submissionId, Guid jobId, string? correlationId, CancellationToken ct);
+    /// <summary>Re-queues the job of a submission that is still Received (a replay, contract section 5). False when the queue refused it.
+    /// <paramref name="correctionNote"/> (task 095f) is the retried request's own note, the job's payload carries it as the first job's did.</summary>
+    Task<bool> RequeueAsync(Guid submissionId, Guid jobId, string? correlationId, string? correctionNote, CancellationToken ct);
 
     /// <summary>
     /// What an earlier attempt recorded about its source, for the replay (contract section 5): the source <c>.eml</c> (the 202's
@@ -115,6 +116,12 @@ internal sealed record FromEmailSubmitInput
     /// <see cref="InvoiceSubmissionService.ResubmissionOfColumn"/>. Null for New.
     /// </summary>
     public Guid? ResubmissionOf { get; init; }
+
+    /// <summary>
+    /// Task 095f (EB-D-225): a Correction's note, already trimmed and checked (<see cref="InvoiceCorrectionNote.Check"/>); null for New. It rides
+    /// the queued job's payload (the submission row has no column for it) and the persister writes it on the NEW invoice in its create.
+    /// </summary>
+    public string? CorrectionNote { get; init; }
 
     /// <summary>The caller's systemuser (the submission's creator person, OP-5).</summary>
     public required Guid CallerSystemUserId { get; init; }
