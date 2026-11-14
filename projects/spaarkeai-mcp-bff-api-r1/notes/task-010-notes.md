@@ -30,7 +30,7 @@
 |---|---|---|---|
 | 1 | Accessor context = middleware's instance; provider = RequestServices | pass | `Test1_InsideATool_...` |
 | 2 | Real client over MCP succeeds as the caller | pass | `Test2_TheRealDataverseUserClient_...`: userId is the caller's systemuserid. The wire saw exactly one `GET /api/data/v9.2/WhoAmI()` with the opaque test bearer. The tool asked twice, and the per-request memo answered the second. A second MCP request adds exactly one more wire call. No assertion was minted. |
-| 3 | No bearer / no HttpContext → UserContextRequired; zero wire calls; no app-only | pass | `Test2_Negative_AnAuthenticatedMcpCallerWithNoBearerToken_...`: isError, `DATAVERSE_USER_CONTEXT_REQUIRED`, wire empty, 0 assertion mints. `Test2_Negative_TheClientWithNoHttpContext_...`: same outcome, with the accessor null outside a request. "No app-only" is proven by 0 mints: every CCA token, app-only or OBO, starts with an assertion from the provider. |
+| 3 | No bearer / no HttpContext → UserContextRequired; zero wire calls; no app-only | pass | `Test2_Negative_AnAuthenticatedMcpCallerWithNoBearerToken_...`: isError, `DATAVERSE_USER_CONTEXT_REQUIRED`, wire empty, 0 assertion mints. `Test2_Negative_TheClientWithNoHttpContext_...`: same outcome, with the accessor null outside a request. "No app-only" was first shown by 0 mints, which was too weak: a cached app token is served with no assertion mint. Now (2026-11-14 fix round F1) the rig's app-only cache holds a distinct app token, so a fallback would succeed offline; the proof is the empty Dataverse wire (see "Review fix round 2"). |
 | 4 | One commit over MCP: WhoAmIs == 1, every rights question asked | pass | `Mcp010_Test3_...`: CallerQuestions > 1, `WhoAmIs == 1`, `RightsAsked == RightsQuestions > 0`, only the caller is asked about. |
 | 5 | Plan stamp over MCP satisfies a later MCP commit; negative refusal writes nothing | pass | `Mcp010_Test4_APlanRead...`: Recorded with step warning `reclosed_after_system_resolution`, so the stamp was read. `Mcp010_Test4_Negative_...`: `signal_not_open`, no writes, no records. |
 | 6 | Stateless == true, PerSessionExecutionContext == false; seeding proof recorded | pass, **with a finding** | Both test 5 cases pass. The seeding proof (below) shows test 5 goes red; test 1 does **not**. |
@@ -49,7 +49,7 @@ I mutated `McpCallerPathHost` temporarily, then restored it (hash-checked; nothi
 | B. `Stateless = false` + `PerSessionExecutionContext = true` | fails (HTTP 400: no session without `initialize`) | fails ("Stateless … found False") | 2 (wire cases) fail the same way |
 
 **Finding for the owner.** The POML's premise that PerSessionExecutionContext=true makes test 1 fail is false in stateless mode, and so is the `<cost-of-doing-nothing>` claim that a flip "would null the accessor".
-- In stateless mode each request carries its own short-lived session. The context that session captures is the request's own, so the accessor still resolves the request's `HttpContext`. This is my reading of the observed result; I did not decompile the SDK to confirm it.
+- In stateless mode each request carries its own short-lived session. The context that session captures is the request's own, so the accessor still resolves the request's `HttpContext`. The SDK source confirms it: `StreamableHttpHandler.cs:551` and `:629` are the flag's only two reads, both on the stateful path (`notes/decisions.md`, 2026-11-14 entry; supersedes this run's "reading of the observed result").
 - The guard against the flip is therefore test 5's pin, not test 1. Test 1 guards the actual property: same instance, RequestServices.
 - A stateful flip is caught by both.
 - I left the tests as they are: test 1 asserts true behaviour and cannot be made to fail on a setting that does not change it. I also rewrote test 5's `because` text so it does not overstate.
@@ -123,5 +123,38 @@ Other seeds: miss test (cache seeded for B instead of A) red at "caller B has no
 **Hygiene.** The OBO cache seed keeps one `DateTimeOffset.UtcNow` read: fixed values were tried (expires_on 2038 or 2100, cached_at 2026 or 2099) and MSAL then ignored the entry (OBO exchange failed), so it needs the system clock; a one-line comment says so. `MiddlewareRequestServices` is now set before `next`.
 
 **Counts.** `McpCallerPathTests` + `Mcp010_*`: 12 passed (was 9: 6 in `McpCallerPathTests` + 3 commit; this round added 3 in `McpCallerPathTests`: the two-callers test, the cache-miss test, and the static-schema pin split out of the real-host test). `--filter "Mcp|T170_|CallerWhoAmIMemo"` on `Sprk.Bff.Api.Tests`: 185 passed, 1 skipped, 0 failed. BFF build: 0 warnings. `check-changed-cs-format.sh origin/master`: clean.
+
+## Review fix round 2 (2026-11-14, peer review by uac-r2: F1, F2, K1-K4)
+
+Files: `McpCallerPathTests.cs` and this note. Production code unchanged (`DataverseUserClient.cs` hash `b247e26012` before and after every seeded fault; `git status` shows only the test file and this note).
+
+**F1, the no-app-only-fallback proof was vacuous.** `FailEveryMintFromNow()` refused every mint, so a fallback to `AcquireTokenForClient` would also have failed and the wire would have stayed empty.
+- The rig now seeds MSAL's APP token cache (`DataverseRig.SeedAppOnlyAccessToken`, `AppOnlyDataverseToken`) with a distinct token for the Dataverse scope, on every Dataverse test including the two negatives that had no client before (no bearer, no HttpContext). A fallback would succeed offline and send that token.
+- `Wire.Requests.Should().BeEmpty()` is now the first assertion of the second-caller test, and the mint check is `Mints == mintsBefore + 1`. The negatives compare against `mintsBefore` taken after seeding: `GetClientAsync` itself mints once when it selects the credential, so "0 mints" no longer holds once a client exists.
+- `DataverseRig.StartAsync` became `Create` + `SeedCachesAsync(host.Services)`: the credential provider and the client are now registered in the host's DI, so both get the host's loggers (F2).
+
+**F2, "nothing logged or forwarded" (FR-02 check 4) was untested.**
+- `McpCallerPathHost` captures logs at Trace with the shared `DecisionToolsTestHost.CapturingLoggerProvider` (`host.Logs`); both clients take `ILogger<T>` from the service provider; `DataverseWire` records every request and content header and the body (`WireRequest`).
+- `AssertNothingLeaked` (end of the positive real-client test): the MCP bearer (whole token, payload, signature) and the caller's oid are in no log message or state value and in no outbound header, path or body; the OBO access token is in no log message or state value. Search strings are live: the Dataverse token is on the wire's Authorization header, the tool saw the oid, the bearer is a three-part JWT whose hash keys the OBO cache hit, and the logs contain the client's Debug "memo" line and the credential provider's own entries (so Trace and Debug are captured).
+- Limit: the capture records message and state, not the `Exception` object, so a token inside an exception's text is not seen.
+
+**Seeded faults** (production file edited temporarily, restored from a copy, hash-checked `b247e26012493e826d2053942815676874b85230` after each batch):
+
+| Seeded fault in `DataverseUserClient` | Test | Result |
+|---|---|---|
+| App-only fallback in the `MsalException` catch (`AcquireTokenForClient` for the Dataverse scope) | `Test2_Negative_ASecondCaller...` | red at `Wire.Requests` empty: found `GET /api/data/v9.2/WhoAmI()` with `Bearer test-APP-ONLY-dataverse-token-010` (earlier, with the mint check first, it was red at the mint count: 3 instead of 2; before the app cache was seeded it was red only at the `isError` check, never at the wire) |
+| `LogDebug` of the caller's bearer | `Test2_TheRealDataverseUserClient...` | red at "nothing of the caller's MCP bearer or oid is logged" |
+| `LogDebug` of the OBO access token | same | red at "the OBO access token is not logged" |
+| `LogDebug` of the caller's oid | same | red at the logs check (first attempt used `FindFirst("oid")`, which is null after JwtBearer claim mapping, so it logged nothing and stayed green: a bad seed, not a hole; fixed to the mapped claim type) |
+| Extra outbound header `X-Seeded-Caller` = the caller's bearer | same | red at "no outbound header, path or body forwards the caller's bearer or oid" |
+| Extra outbound header = the caller's oid | same | red at the same assertion |
+
+**Known limits accepted by the reviewer.**
+- K1: tests 1-4 run on a host composed from `AddMcpModule` + `MapMcpEndpoints`, not `Program`. The reviewer checked `UseSpaarkeMiddleware`: nothing replaces `RequestServices` or breaks the context flow; test 5 and `McpAuthTests` cover DI and schemes.
+- K2: the decision tools' own app-only reads (`SignalCoreRecordAccess`) are not observed here.
+- K3: no negative for another caller's plan read satisfying a commit (the stamp is keyed by oid; outside FR-02).
+- K4: two stale lines in this note fixed (the AC 3 "every CCA token starts with an assertion" row, and "did not decompile the SDK", superseded by the `decisions.md` 2026-11-14 entry citing `StreamableHttpHandler.cs:551` and `:629`).
+
+**Counts.** `McpCallerPathTests`: 9 passed. `Sprk.Bff.Api.Tests --filter "Mcp|T170_|CallerWhoAmIMemo"`: 185 passed, 1 skipped, 0 failed. BFF build: 0 warnings, 0 errors. `check-changed-cs-format.sh origin/master`: clean (after `dotnet format whitespace` on the test file, which converts LF to CRLF).
 
 rework: none task 010

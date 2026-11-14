@@ -18,7 +18,9 @@
 // (McpCallerPathHost below, the task-020 host shape; NOT the BFF Program, except test 5's second case), the REAL DataverseUserClient and OrderedCredentialClientProvider (MSAL). Only the
 // wire is replaced: Dataverse by a hand-written HttpMessageHandler, the OBO exchange by an MSAL token cache seeded with one access token
 // for the hash of the MCP request's own bearer token (MSAL's own OBO cache lookup, so a different caller token misses), and the BFF's
-// managed-identity assertion by a counting stub. Tokens are opaque test strings (ADR-028; nothing real is asserted on or logged).
+// managed-identity assertion by a counting stub; the MSAL app-only (client-credentials) cache holds a distinct app token, so an app-only fallback would
+// succeed offline and show on the wire. The wire records every header and the body; the host captures logs at Trace (test 2 asserts nothing of the
+// caller is logged or forwarded). Tokens are opaque test strings (ADR-028).
 
 using System.Collections.Concurrent;
 using System.Net;
@@ -43,7 +45,6 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Microsoft.Identity.Client;
 using Microsoft.IdentityModel.Tokens;
@@ -70,6 +71,9 @@ public sealed class McpCallerPathTests
 
     /// <summary>The Dataverse access token the seeded MSAL cache holds for the caller's assertion: an opaque test string.</summary>
     private const string CallerDataverseToken = "test-dataverse-token-for-caller-010";
+
+    /// <summary>The Dataverse access token the seeded MSAL APP cache (client credentials) holds: what an app-only fallback would send. Opaque test string.</summary>
+    private const string AppOnlyDataverseToken = "test-APP-ONLY-dataverse-token-010";
 
     // ---- test 1: the tool runs inside the request ---------------------------------------------------------------------------
 
@@ -133,8 +137,9 @@ public sealed class McpCallerPathTests
     public async Task Test2_TheRealDataverseUserClient_InATool_AsksWhoAmIAsTheCaller_OncePerMcpRequest()
     {
         var token = McpTestHost.MintToken(CallerOid);
-        var rig = await DataverseRig.StartAsync(seedTokenFor: token);
+        var rig = DataverseRig.Create(seedTokenFor: token);
         await using var host = await McpCallerPathHost.StartAsync([typeof(DataverseWhoAmIProbeTool)], rig.Register);
+        await rig.SeedCachesAsync(host.Services);
         var mintsBefore = rig.Assertions.Mints;
 
         var first = await host.CallToolAsync(DataverseWhoAmIProbeTool.ToolName, new { }, token);
@@ -153,28 +158,69 @@ public sealed class McpCallerPathTests
         await host.CallToolAsync(DataverseWhoAmIProbeTool.ToolName, new { }, token);
 
         rig.Wire.Requests.Should().HaveCount(2, "a new MCP request is a new HttpContext: the memo never carries an answer across requests");
+
+        AssertNothingLeaked(host, rig, token);
+    }
+
+    /// <summary>
+    /// FR-02 check 4: the caller's MCP bearer token and oid are not logged and not forwarded; the OBO (Dataverse) access token is not logged.
+    /// Each search string is proven live first (it really reached the process), so an empty result means absence, not a dead search.
+    /// </summary>
+    private static void AssertNothingLeaked(McpCallerPathHost host, DataverseRig rig, string bearer)
+    {
+        var oid = CallerOid.ToString("D");
+
+        // Live strings. The bearer reached the client: the OBO cache is keyed by the hash of THIS bearer, and the Dataverse call carries the
+        // token that entry holds (so the Dataverse token is real on the wire too). The oid is on the request's principal inside the tool.
+        rig.Wire.Requests.Should().OnlyContain(r => r.Authorization == "Bearer " + CallerDataverseToken, "the Dataverse token is live: it is what the wire carried");
+        host.Recorder.ToolUserOid.Should().Be(oid, "the oid is live: the tool's request carried this caller");
+        var bearerParts = bearer.Split('.');
+        bearerParts.Should().HaveCount(3, "the bearer is a JWT: its payload and signature are searched separately");
+        string[] callerSecrets = [bearer, bearerParts[1], bearerParts[2], oid];
+
+        // The logs are live: Trace is captured (the memo's Debug line is there) from both real clients.
+        var logs = host.Logs.Entries.ToList();
+        logs.Should().Contain(e => e.Category.EndsWith(nameof(DataverseUserClient), StringComparison.Ordinal) && e.Message.Contains("memo", StringComparison.Ordinal),
+            "the DataverseUserClient's Debug line is captured, so a Debug log of the assertion would be too");
+        logs.Should().Contain(e => e.Category.EndsWith(nameof(OrderedCredentialClientProvider), StringComparison.Ordinal),
+            "the credential provider's own log is captured");
+        var logText = logs.SelectMany(e => new[] { e.Message }.Concat(e.State.Select(s => s.Key + "=" + s.Value))).ToList();
+
+        foreach (var secret in callerSecrets)
+        {
+            logText.Where(t => t.Contains(secret, StringComparison.Ordinal)).Should().BeEmpty("nothing of the caller's MCP bearer or oid is logged");
+            rig.Wire.Requests.Should().OnlyContain(
+                r => r.Everything.All(part => !part.Contains(secret, StringComparison.Ordinal)),
+                "no outbound header, path or body forwards the caller's bearer or oid (Dataverse gets its own OBO token)");
+        }
+
+        logText.Where(t => t.Contains(CallerDataverseToken, StringComparison.Ordinal)).Should().BeEmpty("the OBO access token is not logged");
     }
 
     [Fact]
     public async Task Test2_Negative_AnAuthenticatedMcpCallerWithNoBearerToken_IsUserContextRequired_AndNothingIsSentOrMinted()
     {
-        var rig = await DataverseRig.StartAsync(seedTokenFor: null);
+        var rig = DataverseRig.Create(seedTokenFor: null); // the app-only cache is seeded all the same: an app-only fallback would succeed and reach the wire
         await using var host = await McpCallerPathHost.StartAsync([typeof(DataverseWhoAmIProbeTool)], rig.Register, headerlessCaller: true);
+        await rig.SeedCachesAsync(host.Services);
+        var mintsBefore = rig.Assertions.Mints; // selecting the credential for the cached client mints once; the tool call must add none
 
         var result = await host.CallToolAsync(DataverseWhoAmIProbeTool.ToolName, new { }, token: null);
 
         result.GetProperty("isError").GetBoolean().Should().BeTrue();
         result.GetProperty("structuredContent").GetProperty("reasonCode").GetString().Should().Be(DataverseUserClientErrorCodes.UserContextRequired);
         host.Recorder.ToolUserOid.Should().Be(CallerOid.ToString("D"), "the A10 filter admitted an authenticated caller: only the bearer token was missing");
-        rig.Wire.Requests.Should().BeEmpty("no Dataverse call is sent without the caller's token");
-        rig.Assertions.Mints.Should().Be(0, "the BFF's own credential is never used: there is no app-only fallback");
+        rig.Wire.Requests.Should().BeEmpty("no Dataverse call is sent without the caller's token, and none with the seeded app-only token: there is no app-only fallback");
+        rig.Assertions.Mints.Should().Be(mintsBefore, "the BFF's own credential is never used");
     }
 
     [Fact]
     public async Task Test2_Negative_TheClientWithNoHttpContext_IsUserContextRequired_AndNothingIsSentOrMinted()
     {
-        var rig = await DataverseRig.StartAsync(seedTokenFor: null);
+        var rig = DataverseRig.Create(seedTokenFor: null);
         await using var host = await McpCallerPathHost.StartAsync([typeof(DataverseWhoAmIProbeTool)], rig.Register);
+        await rig.SeedCachesAsync(host.Services);
+        var mintsBefore = rig.Assertions.Mints; // selecting the credential for the cached client mints once; the call must add none
 
         // Outside any request (this test's own flow): the accessor is null.
         host.Services.GetRequiredService<IHttpContextAccessor>().HttpContext.Should().BeNull();
@@ -182,8 +228,8 @@ public sealed class McpCallerPathTests
 
         response.IsSuccess.Should().BeFalse();
         response.ErrorCode.Should().Be(DataverseUserClientErrorCodes.UserContextRequired);
-        rig.Wire.Requests.Should().BeEmpty();
-        rig.Assertions.Mints.Should().Be(0, "no credential is used: there is no app-only fallback");
+        rig.Wire.Requests.Should().BeEmpty("no call is sent, with the caller's token or the seeded app-only one: there is no app-only fallback");
+        rig.Assertions.Mints.Should().Be(mintsBefore, "no credential is used");
     }
 
     [Fact]
@@ -191,18 +237,22 @@ public sealed class McpCallerPathTests
     {
         var tokenA = McpTestHost.MintToken(CallerOid);
         var tokenB = McpTestHost.MintToken(SecondCallerOid);
-        var rig = await DataverseRig.StartAsync(seedTokenFor: tokenA); // the OBO cache holds caller A's exchange only
+        // The OBO cache holds caller A's exchange only. The app-only (client-credentials) cache holds a distinct app token, so an app-only
+        // fallback after B's failed exchange WOULD succeed offline and show up on the wire: the empty-wire check below can fire.
+        var rig = DataverseRig.Create(seedTokenFor: tokenA);
         await using var host = await McpCallerPathHost.StartAsync([typeof(DataverseWhoAmIProbeTool)], rig.Register);
+        await rig.SeedCachesAsync(host.Services);
         var mintsBefore = rig.Assertions.Mints;
         rig.Assertions.FailEveryMintFromNow(); // caller B's cache miss must not reach Entra: any mint attempt is refused offline
 
         var b = await host.CallToolAsync(DataverseWhoAmIProbeTool.ToolName, new { }, tokenB);
 
+        // The wire first: it is the invariant (no Dataverse call without an OBO token), whatever else a regression would also change.
+        rig.Wire.Requests.Should().BeEmpty("no Dataverse call is sent: not with caller A's token, and not with the seeded app-only token (no app-only fallback)");
+        rig.Assertions.Mints.Should().Be(mintsBefore + 1, "B's lookup missed the cache and tried exactly one exchange; that attempt was refused");
         (b.TryGetProperty("isError", out var bIsError) && bIsError.GetBoolean()).Should().BeTrue(
             "caller B has no OBO exchange: MSAL's cache is keyed by the assertion, not served from A's entry; " + b.GetRawText());
         b.GetProperty("structuredContent").GetProperty("reasonCode").GetString().Should().Be(DataverseUserClientErrorCodes.OboExchangeFailed);
-        rig.Assertions.Mints.Should().BeGreaterThan(mintsBefore, "B's lookup missed the cache and tried to exchange; that attempt was refused");
-        rig.Wire.Requests.Should().BeEmpty("no Dataverse call is sent, and above all none with caller A's token");
 
         var a = await host.CallToolAsync(DataverseWhoAmIProbeTool.ToolName, new { }, tokenA);
 
@@ -291,46 +341,90 @@ public sealed class McpCallerPathTests
     /// <summary>The REAL <see cref="DataverseUserClient"/> and <see cref="OrderedCredentialClientProvider"/> with only the wire replaced.</summary>
     private sealed class DataverseRig
     {
-        private DataverseRig(OrderedCredentialClientProvider provider, CountingAssertions assertions)
-        {
-            Provider = provider;
-            Assertions = assertions;
-        }
+        private readonly string? _seedTokenFor;
 
-        public OrderedCredentialClientProvider Provider { get; }
+        private DataverseRig(string? seedTokenFor) => _seedTokenFor = seedTokenFor;
 
-        public CountingAssertions Assertions { get; }
+        public CountingAssertions Assertions { get; } = new();
 
         public DataverseWire Wire { get; } = new();
 
-        /// <param name="seedTokenFor">The MCP bearer token whose OBO exchange MSAL answers from its cache; null seeds nothing and builds no client.</param>
-        public static async Task<DataverseRig> StartAsync(string? seedTokenFor)
+        /// <param name="seedTokenFor">The MCP bearer token whose OBO exchange MSAL answers from its cache; null seeds no OBO entry.
+        /// The app-only (client-credentials) cache is always seeded with <see cref="AppOnlyDataverseToken"/>.</param>
+        public static DataverseRig Create(string? seedTokenFor) => new(seedTokenFor);
+
+        /// <summary>Registers the REAL credential provider and the REAL <see cref="DataverseUserClient"/>, both with the host's own loggers (so the host's capture sees them).</summary>
+        public void Register(IServiceCollection services)
         {
-            var assertions = new CountingAssertions();
-            var provider = new OrderedCredentialClientProvider(
+            services.AddSingleton(sp => new OrderedCredentialClientProvider(
                 Options.Create(new CredentialSelectionOptions { Order = new List<string> { nameof(CredentialKind.ManagedIdentityFederated) } }),
                 new ConfigurationBuilder().Build(),
-                NullLogger<OrderedCredentialClientProvider>.Instance,
-                assertions);
-
-            if (seedTokenFor is not null)
-            {
-                // The SAME client instance DataverseUserClient will get (the provider caches it per tenant, client and credential).
-                var client = await provider.GetClientAsync(McpTestHost.TenantId, McpTestHost.BffClientId);
-                SeedOboAccessToken(client, seedTokenFor);
-            }
-
-            return new DataverseRig(provider, assertions);
-        }
-
-        public void Register(IServiceCollection services) =>
+                sp.GetRequiredService<ILogger<OrderedCredentialClientProvider>>(),
+                Assertions));
             services.AddSingleton<IDataverseUserClient>(sp => new DataverseUserClient(
                 new HttpClient(Wire),
                 Options.Create(new DataverseOptions { EnvironmentUrl = DataverseUrl }),
                 sp.GetRequiredService<IConfiguration>(),
                 sp.GetRequiredService<IHttpContextAccessor>(),
-                NullLogger<DataverseUserClient>.Instance,
-                Provider));
+                sp.GetRequiredService<ILogger<DataverseUserClient>>(),
+                sp.GetRequiredService<OrderedCredentialClientProvider>()));
+        }
+
+        /// <summary>Seeds MSAL's caches on the SAME client instance DataverseUserClient will get (the provider caches it per tenant, client and credential).</summary>
+        public async Task SeedCachesAsync(IServiceProvider services)
+        {
+            var client = await services.GetRequiredService<OrderedCredentialClientProvider>().GetClientAsync(McpTestHost.TenantId, McpTestHost.BffClientId);
+            SeedAppOnlyAccessToken(client);
+            if (_seedTokenFor is not null)
+            {
+                SeedOboAccessToken(client, _seedTokenFor);
+            }
+        }
+
+        /// <summary>
+        /// One app-only access token (client credentials, no user) in MSAL's APP token cache for the Dataverse scope. Nothing in the production
+        /// path asks for it; if a regression added an app-only fallback (AcquireTokenForClient), it would succeed offline from here and the
+        /// request would appear on the wire carrying <see cref="AppOnlyDataverseToken"/>.
+        /// </summary>
+        private static void SeedAppOnlyAccessToken(IConfidentialClientApplication client)
+        {
+            // Same clock rule as the OBO seed below.
+            var now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+            var expires = (now + 3600).ToString(System.Globalization.CultureInfo.InvariantCulture);
+            var cache = new JsonObject
+            {
+                ["AccessToken"] = new JsonObject
+                {
+                    ["seed-app"] = new JsonObject
+                    {
+                        ["home_account_id"] = string.Empty,
+                        ["environment"] = "login.microsoftonline.com",
+                        ["client_id"] = McpTestHost.BffClientId,
+                        ["credential_type"] = "AccessToken",
+                        ["realm"] = McpTestHost.TenantId,
+                        ["target"] = $"{DataverseUrl}/.default",
+                        ["secret"] = AppOnlyDataverseToken,
+                        ["cached_at"] = now.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                        ["expires_on"] = expires,
+                        ["extended_expires_on"] = expires,
+                        ["token_type"] = "Bearer",
+                    },
+                },
+                ["Account"] = new JsonObject(),
+                ["IdToken"] = new JsonObject(),
+                ["RefreshToken"] = new JsonObject(),
+                ["AppMetadata"] = new JsonObject(),
+            };
+            var serialized = Encoding.UTF8.GetBytes(cache.ToJsonString());
+            var seeded = 0;
+            client.AppTokenCache.SetBeforeAccess(args =>
+            {
+                if (Interlocked.Exchange(ref seeded, 1) == 0)
+                {
+                    args.TokenCache.DeserializeMsalV3(serialized, shouldClearExistingCache: false);
+                }
+            });
+        }
 
         /// <summary>
         /// One OBO access token in MSAL's user token cache, keyed by the hash of <paramref name="userAssertion"/>: the entry MSAL itself
@@ -402,14 +496,25 @@ public sealed class McpCallerPathTests
         }
     }
 
-    /// <summary>Dataverse's Web API on the wire (hand-written; ADR-038 bans a mocked handler): records each request, answers WhoAmI.</summary>
+    /// <summary>One outbound Dataverse request as it left the process: method, path, Authorization, EVERY header (request and content) and the body.</summary>
+    private sealed record WireRequest(string Method, string Path, string? Authorization, IReadOnlyList<KeyValuePair<string, string>> Headers, string Body)
+    {
+        /// <summary>Every place a value could ride out: the path (query included), each header as "name: value", and the body.</summary>
+        public IEnumerable<string> Everything => Headers.Select(h => h.Key + ": " + h.Value).Append(Path).Append(Body);
+    }
+
+    /// <summary>Dataverse's Web API on the wire (hand-written; ADR-038 bans a mocked handler): records each request in full, answers WhoAmI.</summary>
     private sealed class DataverseWire : HttpMessageHandler
     {
-        public ConcurrentQueue<(string Method, string Path, string? Authorization)> Requests { get; } = new();
+        public ConcurrentQueue<WireRequest> Requests { get; } = new();
 
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
-            Requests.Enqueue((request.Method.Method, request.RequestUri!.PathAndQuery, request.Headers.Authorization?.ToString()));
+            var headers = request.Headers.Concat(request.Content?.Headers ?? Enumerable.Empty<KeyValuePair<string, IEnumerable<string>>>())
+                .Select(h => new KeyValuePair<string, string>(h.Key, string.Join(",", h.Value)))
+                .ToList();
+            var requestBody = request.Content is null ? string.Empty : await request.Content.ReadAsStringAsync(cancellationToken);
+            Requests.Enqueue(new WireRequest(request.Method.Method, request.RequestUri!.PathAndQuery, request.Headers.Authorization?.ToString(), headers, requestBody));
             if (request.RequestUri.AbsolutePath == "/api/data/v9.2/WhoAmI()")
             {
                 var body = JsonSerializer.Serialize(new
@@ -418,10 +523,10 @@ public sealed class McpCallerPathTests
                     UserId = CallerSystemUserId.ToString("D"),
                     OrganizationId = "01000000-0000-4000-8000-0000000000c1",
                 });
-                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(body, Encoding.UTF8, "application/json") });
+                return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(body, Encoding.UTF8, "application/json") };
             }
 
-            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound));
+            return new HttpResponseMessage(HttpStatusCode.NotFound);
         }
     }
 }
@@ -441,14 +546,18 @@ internal sealed class McpCallerPathHost : IAsyncDisposable
     private readonly WebApplication _app;
     private readonly HttpClient _client;
 
-    private McpCallerPathHost(WebApplication app, HttpClient client, CallerPathRecorder recorder)
+    private McpCallerPathHost(WebApplication app, HttpClient client, CallerPathRecorder recorder, DecisionToolsTestHost.CapturingLoggerProvider logs)
     {
         _app = app;
         _client = client;
         Recorder = recorder;
+        Logs = logs;
     }
 
     public CallerPathRecorder Recorder { get; }
+
+    /// <summary>Every log entry the host's logging wrote, at Trace (the shared capture of <see cref="DecisionToolsTestHost"/>).</summary>
+    public DecisionToolsTestHost.CapturingLoggerProvider Logs { get; }
 
     public IServiceProvider Services => _app.Services;
 
@@ -457,7 +566,10 @@ internal sealed class McpCallerPathHost : IAsyncDisposable
     {
         var builder = WebApplication.CreateBuilder();
         builder.WebHost.UseKestrel(kestrel => kestrel.Listen(IPAddress.Loopback, 0));
+        var logs = new DecisionToolsTestHost.CapturingLoggerProvider();
         builder.Logging.ClearProviders();
+        builder.Logging.SetMinimumLevel(Microsoft.Extensions.Logging.LogLevel.Trace);
+        builder.Logging.AddProvider(logs);
         builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
         {
             ["Mcp:Enabled"] = "true",
@@ -502,7 +614,7 @@ internal sealed class McpCallerPathHost : IAsyncDisposable
         await app.StartAsync();
 
         var address = app.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()!.Addresses.First();
-        return new McpCallerPathHost(app, new HttpClient { BaseAddress = new Uri(address) }, recorder);
+        return new McpCallerPathHost(app, new HttpClient { BaseAddress = new Uri(address) }, recorder, logs);
     }
 
     public async ValueTask DisposeAsync()
