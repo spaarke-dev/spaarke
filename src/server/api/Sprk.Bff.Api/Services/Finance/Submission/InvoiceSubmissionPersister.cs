@@ -602,6 +602,13 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
         var correlation = Cap(correlationId ?? current.GetAttributeValue<string>(SubmissionCorrelationId));
         var lines = BuildLines(outcome, invoiceId, core, resolverFields, owner, correlation);
         FillInvoice(invoice, outcome, resolverFields, owner, correlation);
+        if (outcome.Submission.ResubmissionOfSubmissionId is not null && InvoiceCorrectionNote.Check(outcome.CorrectionNote).Value is null)
+        {
+            // Task 095f review F2: a Correction with no usable note (a payload queued before the note existed). It still persists.
+            _logger.LogWarning("Invoice submission {SubmissionId}: a Correction (it replaces another submission) carries no correction note; the invoice is saved without one",
+                submissionId);
+        }
+
         if (submitter is { } creator)
         {
             RecordCreatorPerson.Stamp(invoice, creator);

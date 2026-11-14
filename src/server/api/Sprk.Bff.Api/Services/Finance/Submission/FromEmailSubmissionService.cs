@@ -540,6 +540,15 @@ internal sealed class FromEmailSubmissionService
             return NotQueued();
         }
 
+        // Task 095f review F2: a still-Received Correction is re-queued, so its job must carry a note. A retry with no note would re-queue a job
+        // the persister saves with no note; refuse it (400) and write nothing. Replays of any other status are unchanged.
+        if (status == InvoiceSubmissionStatus.Received && input.Mode == FromEmailModes.Correction && string.IsNullOrWhiteSpace(input.CorrectionNote))
+        {
+            _logger.LogInformation("From-email submission {SubmissionId}: a retry of a Received Correction carries no note; refused (400), not re-queued", row.Id);
+            return FromEmailSubmissionOutcome.Refused(StatusCodes.Status400BadRequest, FromEmailSubmissionErrors.CorrectionNoteRequired,
+                "A correction needs a note saying why the invoice is corrected.");
+        }
+
         var jobId = FromEmailSubmissionKey.JobIdFor(k, generation);
         if (status == InvoiceSubmissionStatus.Received
             && !await _operation.RequeueAsync(

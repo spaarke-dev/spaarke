@@ -424,22 +424,51 @@ public class FromEmailSubmissionServiceTests
         world.Operation.Submits.Should().ContainSingle().Which.CorrectionNote.Should().BeNull();
     }
 
-    [Fact(DisplayName = "095f (replay, must-not-fire): a retry of an accepted Correction is answered from the attempt even when it carries no note (the replay precedes the note rule), and a still-Received attempt is re-queued with the retry's own note")]
-    public async Task Correction_Replay_PrecedesTheNoteRule_AndRequeuesWithTheRetrysNote()
+    [Fact(DisplayName = "095f (replay, review F2, must-not-fire): a retry of a still-Received Correction with a note is answered from the attempt and re-queued with its own note")]
+    public async Task Correction_Replay_OfReceived_WithANote_RequeuesWithThatNote()
     {
         var (world, probe) = CorrectionWorld();
-        var k = W.K(Correction());
-        var row = world.AddAttempt(k, 1, InvoiceSubmissionStatus.Received, number: CorrectionSeed.Number);
+        var row = world.AddAttempt(W.K(Correction()), 1, InvoiceSubmissionStatus.Received, number: CorrectionSeed.Number);
 
-        var withNote = await RunCorrection(world, probe);
-        var withoutNote = await RunCorrection(world, probe, Correction() with { CorrectionNote = null });
+        var outcome = await RunCorrection(world, probe);
 
-        withNote.Receipt.Should().NotBeNull();
-        withoutNote.Receipt.Should().NotBeNull("the replay is answered before the note is required");
+        outcome.Receipt.Should().NotBeNull();
+        outcome.Receipt!.SubmissionId.Should().Be(row.Id);
         world.Operation.Submits.Should().BeEmpty("a replay creates no attempt");
-        world.Operation.Requeues.Should().HaveCount(2);
-        world.Operation.RequeueNotes.Should().Equal(CorrectionNoteText, null);
-        row.Id.Should().Be(withNote.Receipt!.SubmissionId);
+        world.Operation.Requeues.Should().ContainSingle();
+        world.Operation.RequeueNotes.Should().Equal(CorrectionNoteText);
+    }
+
+    [Theory(DisplayName = "095f (replay, review F2, seed-proof): a retry of a still-Received Correction with no note, or a blank one, is 400 correction_note_required; nothing is re-queued or written")]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("  \t ")]
+    public async Task Correction_Replay_OfReceived_WithNoNote_Is400_AndIsNotRequeued(string? note)
+    {
+        var (world, probe) = CorrectionWorld();
+        world.AddAttempt(W.K(Correction()), 1, InvoiceSubmissionStatus.Received, number: CorrectionSeed.Number);
+
+        var outcome = await RunCorrection(world, probe, Correction() with { CorrectionNote = note });
+
+        (outcome.Status, outcome.ErrorCode).Should().Be((400, "ebilling.submission.correction_note_required"));
+        outcome.Receipt.Should().BeNull();
+        RefusedBeforeAnyWrite(world);
+    }
+
+    [Theory(DisplayName = "095f (replay, review F2, must-not-fire): a retry with no note of a Correction that is no longer Received is answered from the attempt as before, with no re-queue")]
+    [InlineData(InvoiceSubmissionStatus.Processing)]
+    [InlineData(InvoiceSubmissionStatus.Accepted)]
+    public async Task Correction_Replay_OfNonReceived_WithNoNote_IsAnsweredAsBefore(InvoiceSubmissionStatus status)
+    {
+        var (world, probe) = CorrectionWorld();
+        var row = world.AddAttempt(W.K(Correction()), 1, status, number: CorrectionSeed.Number);
+
+        var outcome = await RunCorrection(world, probe, Correction() with { CorrectionNote = null });
+
+        outcome.Receipt.Should().NotBeNull("the replay is answered from the attempt");
+        outcome.Receipt!.SubmissionId.Should().Be(row.Id);
+        world.Operation.Submits.Should().BeEmpty();
+        world.Operation.Requeues.Should().BeEmpty();
     }
 
     [Fact(DisplayName = "095f: the note is not part of K, so the same email with another note is the same submission")]

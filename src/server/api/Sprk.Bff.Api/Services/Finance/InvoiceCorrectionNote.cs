@@ -8,18 +8,27 @@ namespace Sprk.Bff.Api.Services.Finance;
 /// </summary>
 /// <remarks>
 /// <para><b>Length.</b> 2000 characters, the length of every reason a reviewer already types (reject, return, line decision, adjustment,
-/// override). The column itself is not in solution source yet (the owner added it in dev); the deploy task's export confirms its maximum
-/// length, and this constant must not exceed it.</para>
+/// override), taken from <see cref="InvoiceLineDecisionService.ReasonMaxLength"/> so the limit has one source. The column (Memo, maximum length
+/// 4000) is created by <c>scripts/ebilling/Deploy-EbillingInvoiceCorrectionNoteColumn.ps1</c>; this constant must not exceed the column's length.</para>
 /// <para><b>Text rule.</b> Trimmed; empty after trimming means no note. Control characters other than newline, carriage return (the second
 /// half of a Windows newline) and tab are refused, never stripped, and a note over the length is refused, never truncated.</para>
+/// </remarks>
+/// <remarks>
+/// <para><b>Component justification (CLAUDE.md section 11).</b>
+/// (1) Existing: the reasons of the line decision, adjustment, add-line and assign-firm services share <see cref="InvoiceLineDecisionService.ReasonMaxLength"/>
+/// but each validates its own text and none writes <c>sprk_correctionnote</c>; nothing else owns that column.
+/// (2) Extension: EB-D-225 names two writers (from-email and Invoice Review) for one column, so the column name and the text rule must live in
+/// one neutral place; putting them on either writer's service would make the other depend on it.
+/// (3) Cost of doing nothing: the two writers would each carry their own length and control-character rule and drift, so the same note would be
+/// accepted by one writer and refused (or truncated) by the other.</para>
 /// </remarks>
 public static class InvoiceCorrectionNote
 {
     /// <summary>The <c>sprk_invoice</c> column.</summary>
     public const string Column = "sprk_correctionnote";
 
-    /// <summary>The most characters a note may have, after trimming.</summary>
-    public const int MaxLength = 2000;
+    /// <summary>The most characters a note may have, after trimming: the one reason limit every reviewer text shares (2000).</summary>
+    public const int MaxLength = InvoiceLineDecisionService.ReasonMaxLength;
 
     /// <summary>Why a note was refused (the checks run in this order).</summary>
     public enum Refusal
