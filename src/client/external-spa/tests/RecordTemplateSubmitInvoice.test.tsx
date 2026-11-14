@@ -475,7 +475,7 @@ function installWizard(over: { records?: unknown; firms?: unknown } = {}): void 
       records: [{ kind: 'matter', recordId: MATTER.id, name: 'Matter name', number: 'NUM-1' }, OTHER_MATTER],
     }
   );
-  h.listInvoiceFirms.mockResolvedValue(over.firms ?? [FIRM_A]);
+  h.listInvoiceFirms.mockResolvedValue('firms' in over ? over.firms : [FIRM_A]);
   h.submitInvoice.mockResolvedValue({ submissionId: SUBMISSION_ID, trackingNumber: 'TRK-1' });
   h.getInvoiceSubmission.mockResolvedValue({
     submissionId: SUBMISSION_ID,
@@ -496,14 +496,23 @@ interface Opened {
   onClose: ReturnType<typeof vi.fn>;
 }
 
-/** Open the matter, click Submit invoice in the Invoices header, and wait for the child dialog. */
-async function openWizard(): Promise<Opened> {
-  install({ me: meOf({ firms: [FIRM_A] }), firmRecords: { [FIRM_A.firmId]: listing('matters', MATTER.id) } });
+/**
+ * Open the matter, click Submit invoice in the Invoices header, and wait for the child dialog. The button is decided by the
+ * firm-records answer that lists the matter; `wizardAnswer` is what the same firm answers when the wizard asks afterwards
+ * (the wizard's check reads afresh), to test a record the button offered but the wizard's check does not.
+ */
+async function openWizard(opts: { wizardAnswer?: FirmAnswer } = {}): Promise<Opened> {
+  const net: Net = {
+    me: meOf({ firms: [FIRM_A] }),
+    firmRecords: { [FIRM_A.firmId]: listing('matters', MATTER.id) },
+  };
+  install(net);
   const onClose = vi.fn();
   const dialog = await openRecord({ onClose });
   await waitFor(() => expect(submitButton(dialog)).not.toBeNull(), SLOW);
   // tabster's aria-hidden pass over the record settles first (project gotcha, D-8 #2704).
   await settle(350);
+  if (opts.wizardAnswer !== undefined) net.firmRecords[FIRM_A.firmId] = opts.wizardAnswer;
   const button = submitButton(dialog)!;
   button.focus(); // a real click focuses the button; fireEvent.click does not
   fireEvent.click(button);
@@ -541,8 +550,10 @@ describe('Submit invoice: the click opens a modal over the record', () => {
       // The record is behind it, still open and untouched; nothing navigated or closed.
       expect(document.body.contains(dialog)).toBe(true);
       expect(onClose).not.toHaveBeenCalled();
-      // The wizard asked for the records of the caller's firm (a single-firm caller), to check this one is among them.
-      expect(h.listInvoiceCoreRecords).toHaveBeenCalledWith({ firmId: FIRM_A.firmId });
+      // The wizard asked for the records of the caller's firm (a single-firm caller), to check this one is among them: from
+      // the firm-records answer (the button's own source), not the capped core list.
+      expect(firmRecordReads().length).toBeGreaterThanOrEqual(2);
+      expect(h.listInvoiceCoreRecords).not.toHaveBeenCalled();
     },
     SLOW
   );
@@ -565,13 +576,70 @@ describe('Submit invoice: the click opens a modal over the record', () => {
   it(
     'a record the firm does not offer: the fixed message, no picker, and submit is never called',
     async () => {
-      installWizard({ records: { records: [OTHER_MATTER] } });
-      const { child } = await openWizard();
+      installWizard();
+      const { child } = await openWizard({ wizardAnswer: listing('matters', OTHER_MATTER.recordId) });
 
       expect(await within(child).findByTestId('locked-record-missing', undefined, { timeout: 20000 })).toBeTruthy();
       expect(within(child).queryByRole('radio')).toBeNull();
       expect(fileInputOf(child)).toBeNull();
       expect(h.submitInvoice).not.toHaveBeenCalled();
+    },
+    SLOW
+  );
+
+  it(
+    'a record beyond the 200-row core list but in the firm records goes on (the check reads the firm records, not the capped list)',
+    async () => {
+      // The capped core list is truncated and lacks the matter; were it consulted, the wizard would say "only part of your list".
+      installWizard({ records: { records: [OTHER_MATTER], truncated: true } });
+      const { child } = await openWizard();
+
+      await waitFor(() => expect(fileInputOf(child)).not.toBeNull(), SLOW);
+      expect(within(child).queryByTestId('records-truncated')).toBeNull();
+      expect(within(child).queryByTestId('locked-record-missing')).toBeNull();
+      expect(h.listInvoiceCoreRecords).not.toHaveBeenCalled();
+    },
+    SLOW
+  );
+
+  it.each([
+    ['truncated', { matters: [], truncated: true }, 'records-truncated'],
+    ['partial', { matters: [], partial: true }, 'records-partial'],
+  ] as const)(
+    'a %s firm-records answer that lacks the record shows the read message with Retry, never the fixed message',
+    async (_label, answer, testId) => {
+      installWizard();
+      const { child } = await openWizard({ wizardAnswer: answer });
+
+      expect(await within(child).findByTestId(testId, undefined, { timeout: 20000 })).toBeTruthy();
+      expect(within(child).getByRole('button', { name: /^retry$/i })).toBeTruthy();
+      expect(within(child).queryByTestId('locked-record-missing')).toBeNull();
+      expect(fileInputOf(child)).toBeNull();
+      expect(h.submitInvoice).not.toHaveBeenCalled();
+    },
+    SLOW
+  );
+
+  it(
+    'a truncated answer that LISTS the record is enough (it is offered)',
+    async () => {
+      installWizard();
+      const { child } = await openWizard({ wizardAnswer: { matters: [MATTER.id], truncated: true, partial: true } });
+      await waitFor(() => expect(fileInputOf(child)).not.toBeNull(), SLOW);
+      expect(within(child).queryByTestId('records-truncated')).toBeNull();
+    },
+    SLOW
+  );
+
+  it(
+    'no firm known (the firm list is unknown): falls back to the core list, with no firmId',
+    async () => {
+      installWizard({ firms: null });
+      const { child } = await openWizard();
+      await waitFor(() => expect(h.listInvoiceCoreRecords).toHaveBeenCalledTimes(1), SLOW);
+      expect(h.listInvoiceCoreRecords).toHaveBeenCalledWith({});
+      // The core list offers the matter, so the wizard goes on.
+      await waitFor(() => expect(fileInputOf(child)).not.toBeNull(), SLOW);
     },
     SLOW
   );

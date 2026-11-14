@@ -390,6 +390,42 @@ describe('InvoiceSubmissionWizard — refusals do not advance the flow', () => {
   });
 });
 
+describe('InvoiceSubmissionWizard — the title-bar close while a submit is pending (ebilling review fix F2)', () => {
+  it('is ignored while the request is in flight, shows the refusal that follows, and works once it settled', async () => {
+    let refuse!: (error: unknown) => void;
+    const submit = jest.fn().mockReturnValue(new Promise((_resolve, reject) => (refuse = reject)));
+    const utils = mount({}, { submit });
+    await toDetails(utils);
+    fireEvent.change(screen.getByLabelText(/Firm invoice number/i), { target: { value: 'INV-9' } });
+    fireEvent.click(submitButton());
+    await waitFor(() => expect(submit).toHaveBeenCalledTimes(1));
+
+    // The shell's own x (title bar): nothing closes while the request is out.
+    fireEvent.click(screen.getByRole('button', { name: /^close$/i }));
+    expect(utils.onClose).not.toHaveBeenCalled();
+
+    await act(async () =>
+      refuse(new InvoiceSubmissionError({ statusCode: 403, errorCode: 'ebilling.submission.firm_forbidden' }))
+    );
+    expect(await screen.findByText(/not allowed to submit invoices for this firm/i)).toBeInTheDocument();
+    expect(utils.onClose).not.toHaveBeenCalled();
+
+    // Settled: the x closes again.
+    fireEvent.click(screen.getByRole('button', { name: /^close$/i }));
+    expect(utils.onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('must-not-fire: the success screen keeps the raw onClose (Done and the x close it)', async () => {
+    const utils = mount();
+    await toDetails(utils);
+    fireEvent.change(screen.getByLabelText(/Firm invoice number/i), { target: { value: 'INV-9' } });
+    fireEvent.click(submitButton());
+    expect(await screen.findByText('Invoice received')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /^done$/i }));
+    expect(utils.onClose).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe('InvoiceSubmissionWizard — Choose firm step (owner, 2026-10-17: add a firm step)', () => {
   const ALPHA = { firmId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', name: 'Alpha LLP' };
   const BETA = { firmId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', name: 'Beta & Co' };

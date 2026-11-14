@@ -279,8 +279,10 @@ describe('the invoice page under the shell: invoiceRecord is not the record deep
       expect(within(child).getByText('Step 1 of 2')).toBeTruthy();
       expect(within(child).queryByRole('radio')).toBeNull();
       expect(within(child).queryByText('Choose the record this invoice is for')).toBeNull();
-      // The check read the firm's records (the real transport): the project list and the matter list.
-      expect(matterListReads().length).toBeGreaterThan(0);
+      // The check read the firm's records (the real transport, the button's own source): once for the button, once for the
+      // wizard's per-firm check; not the capped core lists (no matter list read).
+      expect(calls.filter(c => c.url.includes('/invoice-submissions/firm-records')).length).toBeGreaterThanOrEqual(2);
+      expect(matterListReads()).toHaveLength(0);
 
       // Cancel closes only the wizard: the record view is still open.
       fireEvent.click(within(child).getByRole('button', { name: /^cancel$/i }));

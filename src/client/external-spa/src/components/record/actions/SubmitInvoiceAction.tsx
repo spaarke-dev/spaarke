@@ -27,6 +27,14 @@
  * `SprkModal` is the one dialog (one focus trap, one close button) and its × goes to the wizard's `onClose`. The wizard is
  * mounted only while the dialog is open, so every opening starts clean. Focus returns to the control that opened it.
  *
+ * THE RECORD CHECK (review 2, F1). The wizard asks `loadRecords` per firm whether the locked record can take an invoice. The
+ * host answers from the SAME source that decides the button, the firm-records read (`readInvoiceFirmRecords`: uncapped), not
+ * from `listInvoiceCoreRecords`, which caps each kind at 200 rows: a record beyond that cap would show "only part of your
+ * list could be read" forever. The answer is `[lockedRecord]` when the firm's list names it (kind and id, id without regard
+ * to case), else `[]`, carrying the answer's own `truncated` / `partial` flags, so the wizard shows the fixed message only
+ * for a complete answer. With no firm in the query (the firms are unknown) it falls back to `listInvoiceCoreRecords`. Every
+ * call reads afresh (Retry must be able to recover).
+ *
  * IN FLIGHT (review 1). While a submission request is in flight the dialog cannot be closed: × (and Cancel) are ignored, and
  * the action reports busy (`onBusyChange`) so the record behind it is held too. Closing then would hide a refusal (a 4xx or
  * 5xx) the wizard is about to show; the wizard shows it and the user closes the dialog afterwards.
@@ -38,7 +46,12 @@
 import * as React from 'react';
 import { makeStyles } from '@fluentui/react-components';
 import { InvoiceSubmissionWizard } from '@spaarke/ui-components/components/InvoiceSubmission';
-import type { InvoiceCoreRecordOption } from '@spaarke/ui-components/components/InvoiceSubmission';
+import type {
+  InvoiceCoreRecordKind,
+  InvoiceCoreRecordList,
+  InvoiceCoreRecordOption,
+  InvoiceRecordQuery,
+} from '@spaarke/ui-components/components/InvoiceSubmission';
 import { SprkModal } from '@spaarke/ui-components/components/SprkModal';
 import {
   getInvoiceSubmission,
@@ -60,6 +73,12 @@ const useStyles = makeStyles({
     minHeight: 0,
   },
 });
+
+const FIRM_RECORD_LIST_OF_KIND: Readonly<Record<InvoiceCoreRecordKind, 'matters' | 'projects' | 'workAssignments'>> = {
+  matter: 'matters',
+  project: 'projects',
+  workassignment: 'workAssignments',
+};
 
 /** Each opening's firm-records reads, by firm id (see READS above). */
 const readsByOpening = new WeakMap<ExternalUserContextResponse, Map<string, Promise<FirmRecordsRead>>>();
@@ -132,6 +151,24 @@ export const SubmitInvoiceAction: React.FC<RecordActionHostContext> = ({
     };
   }, [kind, recordId, record, config.nameAttribute, config.titleNumberAttribute, config.label]);
 
+  // The wizard's per-firm record check (see THE RECORD CHECK above).
+  const loadRecords = React.useCallback(
+    async (query: InvoiceRecordQuery): Promise<InvoiceCoreRecordList> => {
+      if (!query.firmId || !lockedRecord) return listInvoiceCoreRecords(query);
+      const answer = await readInvoiceFirmRecords(query.firmId);
+      const wanted = lockedRecord.recordId.toLowerCase();
+      const listed = (answer[FIRM_RECORD_LIST_OF_KIND[lockedRecord.kind]] ?? []).some(
+        id => id.toLowerCase() === wanted
+      );
+      return {
+        records: listed ? [lockedRecord] : [],
+        truncated: answer.truncated === true,
+        partial: answer.partial === true,
+      };
+    },
+    [lockedRecord]
+  );
+
   // Set by `onSubmitted`, consumed by the next close (see REFRESH above). `isOpen` lets a late `onSubmitted` (after the
   // dialog was closed mid-flight) refresh immediately.
   const submitted = React.useRef(false);
@@ -198,7 +235,7 @@ export const SubmitInvoiceAction: React.FC<RecordActionHostContext> = ({
           title="Submit invoice"
           doneLabel="Done"
           lockedRecord={lockedRecord}
-          loadRecords={listInvoiceCoreRecords}
+          loadRecords={loadRecords}
           loadFirms={listInvoiceFirms}
           submit={trackedSubmit}
           getStatus={getInvoiceSubmission}

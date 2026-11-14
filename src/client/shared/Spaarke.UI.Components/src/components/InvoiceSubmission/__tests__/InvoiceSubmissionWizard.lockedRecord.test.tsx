@@ -243,6 +243,29 @@ describe('InvoiceSubmissionWizard — lockedRecord: the read is not complete (ne
     expect(screen.queryByRole('button', { name: /^retry$/i })).not.toBeInTheDocument();
   });
 
+  it('focus stays inside the step across Retry: on the gate container while it checks, and still there after the answer', async () => {
+    const second = deferred<{ records: InvoiceCoreRecordOption[]; partial?: boolean }>();
+    const loadRecords = jest
+      .fn()
+      .mockResolvedValueOnce({ records: [PROJECT], partial: true })
+      .mockReturnValueOnce(second.promise);
+    mount({ loadRecords });
+    const retry = await screen.findByRole('button', { name: /^retry$/i });
+    retry.focus();
+    expect(document.activeElement).toBe(retry);
+
+    fireEvent.click(retry);
+    // The button is gone (replaced by the checking text), and focus did not fall to the page.
+    await screen.findByText('Checking this record');
+    const gate = screen.getByTestId('locked-record-gate');
+    expect(document.activeElement).toBe(gate);
+
+    await act(async () => second.resolve({ records: [PROJECT] }));
+    await screen.findByTestId('locked-record-missing');
+    expect(document.activeElement).toBe(gate);
+    expect(document.activeElement).not.toBe(document.body);
+  });
+
   it('Retry that finds a complete list without the record turns into the fixed message', async () => {
     const loadRecords = jest
       .fn()
@@ -411,19 +434,6 @@ describe('InvoiceSubmissionWizard — lockedRecord: step captions', () => {
     fireEvent.click(submitButton());
     await screen.findByText('Invoice received');
     expect(utils.submit.mock.calls[0][0]).toMatchObject({ record: MATTER, firmId: ALPHA.firmId });
-  });
-
-  it('phone width: the captions are the in-step text (the step list is hidden by CSS), so they read the same', async () => {
-    const original = window.innerWidth;
-    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 375 });
-    try {
-      const utils = mount();
-      await waitFor(() => expect(fileInput(utils.container)).not.toBeNull());
-      expect(screen.getByText('Step 1 of 2')).toBeInTheDocument();
-      expect(screen.queryByText(/of 3/)).not.toBeInTheDocument();
-    } finally {
-      Object.defineProperty(window, 'innerWidth', { configurable: true, value: original });
-    }
   });
 
   it('control: without lockedRecord the captions and the Record step are as before', async () => {

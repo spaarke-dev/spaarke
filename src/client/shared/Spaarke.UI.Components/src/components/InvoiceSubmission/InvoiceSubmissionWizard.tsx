@@ -101,6 +101,10 @@ const useStyles = makeStyles({
   caption: {
     color: tokens.colorNeutralForeground3,
   },
+  // The locked-record gate's persistent container: it keeps keyboard focus when Retry's button is replaced by the checking text.
+  lockedGate: {
+    outlineStyle: 'none',
+  },
   recordList: {
     maxHeight: '260px',
     overflowY: 'auto',
@@ -303,6 +307,9 @@ export const InvoiceSubmissionWizard: React.FC<InvoiceSubmissionWizardProps> = (
   const [recordsFirmKey, setRecordsFirmKey] = React.useState<string | null>(null);
   // Bumped by the locked-record Retry button to ask the host for the records again.
   const [recordsReload, setRecordsReload] = React.useState(0);
+  // The container the locked-record gate renders in: always mounted in locked mode, so focus has somewhere to stay when the
+  // Retry button it was on is replaced by the "Checking this record" text.
+  const lockedGateRef = React.useRef<HTMLDivElement | null>(null);
 
   const loadRecordsRef = React.useRef(loadRecords);
   loadRecordsRef.current = loadRecords;
@@ -338,7 +345,10 @@ export const InvoiceSubmissionWizard: React.FC<InvoiceSubmissionWizardProps> = (
   }, [open, firmsKnown, needsFirmStep, recordFirmId, recordsReload]);
 
   // ── Locked record (the host fixed the record: no Record step) ───────────
-  // The check is derived, never stored, so it cannot go stale: it reads only an answer that belongs to the current firm.
+  // The check is derived, never stored. `recordsFirmKey` (the firm the held answer was read for) is DEFENCE IN DEPTH: the
+  // records effect already clears the held answer when the firm changes, so no test can tell its guard in `answerIsCurrent`
+  // from that reset (a mutation removing it is unobservable). It stays so a later change to the effect cannot let an older
+  // firm's list count.
   //   loading     — the firm is not chosen yet, or its records have not arrived;
   //   ok          — the firm's list offers the locked record (kind + id), complete or not;
   //   missing     — a COMPLETE list (neither truncated nor partial) lacks it: the record cannot take invoices for this firm;
@@ -396,6 +406,12 @@ export const InvoiceSubmissionWizard: React.FC<InvoiceSubmissionWizardProps> = (
   const firmInvoiceNumberTrimmed = firmInvoiceNumber.trim();
 
   // ── Finish: submit, then mount the Processing / Result screen ───────────
+  // True while the submit request is in flight. WizardShell's own close (its title-bar x) is ignored then, so a refusal that
+  // is about to be shown is not lost to a close; the success screen's Done keeps the raw `onClose`.
+  const submittingRef = React.useRef(false);
+  const handleShellClose = React.useCallback((): void => {
+    if (!submittingRef.current) onClose();
+  }, [onClose]);
   const handleFinish = React.useCallback(async (): Promise<IWizardSuccessConfig | void> => {
     if (!chosenRecord || !file || !firmInvoiceNumberTrimmed) return;
     // A caller with several firms must have chosen one: never submit without it (the server would answer firm_required).
@@ -403,6 +419,7 @@ export const InvoiceSubmissionWizard: React.FC<InvoiceSubmissionWizardProps> = (
 
     setNotice(null);
     let accepted: InvoiceSubmissionAccepted;
+    submittingRef.current = true;
     try {
       accepted = await submit({
         record: chosenRecord,
@@ -422,6 +439,8 @@ export const InvoiceSubmissionWizard: React.FC<InvoiceSubmissionWizardProps> = (
       }
       // WizardShell shows a thrown message above the step and stays on it: the flow does not advance.
       throw new Error(message);
+    } finally {
+      submittingRef.current = false;
     }
     onSubmitted?.(accepted);
 
@@ -599,7 +618,13 @@ export const InvoiceSubmissionWizard: React.FC<InvoiceSubmissionWizardProps> = (
     // 'unreadable': today's read messages (the failure text, or the partial / truncated note), with a Retry.
     const retry = (
       <MessageBarActions>
-        <Button size="small" onClick={() => setRecordsReload(n => n + 1)}>
+        <Button
+          size="small"
+          onClick={() => {
+            lockedGateRef.current?.focus();
+            setRecordsReload(n => n + 1);
+          }}
+        >
           Retry
         </Button>
       </MessageBarActions>
@@ -647,9 +672,12 @@ export const InvoiceSubmissionWizard: React.FC<InvoiceSubmissionWizardProps> = (
             <MessageBarBody>{notice}</MessageBarBody>
           </MessageBar>
         )}
-        {lockedCheck !== null && lockedCheck !== 'ok' ? (
-          renderLockedGate()
-        ) : (
+        {lockedRecord && (
+          <div ref={lockedGateRef} tabIndex={-1} className={styles.lockedGate} data-testid="locked-record-gate">
+            {lockedCheck !== null && lockedCheck !== 'ok' ? renderLockedGate() : null}
+          </div>
+        )}
+        {(lockedCheck === null || lockedCheck === 'ok') && (
           <>
             <Text size={400} weight="semibold">
               Upload the invoice PDF
@@ -737,7 +765,7 @@ export const InvoiceSubmissionWizard: React.FC<InvoiceSubmissionWizardProps> = (
         hideTitle={hideTitle}
         title={title}
         steps={steps}
-        onClose={onClose}
+        onClose={handleShellClose}
         onFinish={handleFinish}
         finishLabel="Submit invoice"
         finishingLabel="Submitting..."
