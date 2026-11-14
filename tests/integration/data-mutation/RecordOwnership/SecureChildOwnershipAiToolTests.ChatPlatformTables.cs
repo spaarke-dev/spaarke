@@ -1,7 +1,9 @@
 using FluentAssertions;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
+using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.RecordCreation;
+using Sprk.Bff.Api.Tests.AccessControl.IdentityBinding;
 using Sprk.Bff.Api.Tests.TestInfrastructure;
 using Xunit;
 using Directory = Sprk.Bff.Api.Tests.TestInfrastructure.OwnershipDirectory;
@@ -58,9 +60,11 @@ public sealed partial class SecureChildOwnershipAiToolTests
     private void ChatPlatformCallerMayCreate() =>
         _user.Held.UnionWith(["prvCreatecontact", "prvAppendcontact", "prvCreateaccount", "prvAppendaccount"]);
 
-    private Task<RecordCreationOutcome> ThroughTheService(string table, DataverseWriteItemMapper.MappedItem item) =>
+    private Task<RecordCreationOutcome> ThroughTheService(
+        string table, DataverseWriteItemMapper.MappedItem item, ContactIdentityBinder? contactOwner = null) =>
         RouteRecordCreation
-            .Over(_world.Resolver(), _appOnly.Object, Restamper(), Shares(), SecureRootFilingGateFixtures.NothingSecure())
+            .Over(_world.Resolver(customerContactOwner: contactOwner), _appOnly.Object, Restamper(), Shares(),
+                SecureRootFilingGateFixtures.NothingSecure())
             .CreateAsync(
                 new RecordCreationRequest(table, new RecordCreationPayload.Mapped(item)),
                 RecordCreationPrincipal.ForCaller(_user, CallerOid), CancellationToken.None);
@@ -79,7 +83,6 @@ public sealed partial class SecureChildOwnershipAiToolTests
             "task regarding a matter" =>
                 $"{owner}; regardingobjectid_sprk_matter@odata.bind=/sprk_matters({OrdinaryMatter:D}); subject=Call the firm",
             "task regarding nothing" => $"{owner}; subject=Call the firm",
-            "contact" => $"firstname=Ada; lastname=Lovelace; {owner}",
             "account" => $"name=Babbage & Co; {owner}",
             _ => throw new ArgumentOutOfRangeException(nameof(shape)),
         };
@@ -93,7 +96,6 @@ public sealed partial class SecureChildOwnershipAiToolTests
     [Theory]
     [InlineData("task regarding a matter")]
     [InlineData("task regarding nothing")]
-    [InlineData("contact")]
     [InlineData("account")]
     public async Task AChatPlatformTable_ThroughTheService_GetsTheOwnerAndRowTheOwnedCreateGives(string shape)
     {
@@ -111,6 +113,156 @@ public sealed partial class SecureChildOwnershipAiToolTests
         Owner(viaService).Should().Be(Directory.ChildTeam,
             "option b: the registry entry keeps the owned create's owner, the resolver's team");
         Written(viaService).Should().Be(OwnedCreateWrote(shape), "the service writes the row the owned create wrote");
+    }
+
+    // ── Task 052b (owner decision 2026-11-08): a chat contact takes the customer business unit's default Owner team ──────
+
+    /// <summary>A binder over this environment whose customer business unit has exactly one default Owner team (or none).</summary>
+    private static ContactIdentityBinder CustomerContactOwner(bool oneDefaultTeam)
+    {
+        var store = new InMemoryContactIdentityStore();
+        if (oneDefaultTeam)
+            store.DefaultTeams[CustomerContactOwnerTests.CustomerBu] = [CustomerContactOwnerTests.CustomerTeam];
+        return IdentityBindingTestKit.OwnerAwareBinder(store, CustomerContactOwnerTests.CustomerBu);
+    }
+
+    [Fact]
+    public async Task AChatContact_IsOwnedByTheCustomerUnitsDefaultTeam()
+    {
+        ChatPlatformCallerMayCreate();
+        _world.WithTeam(CustomerContactOwnerTests.CustomerTeam, CustomerContactOwnerTests.CustomerBu, isDefault: true, teamType: 0);
+
+        var created = await ThroughTheService("contact", ChatContact(), CustomerContactOwner(oneDefaultTeam: true));
+
+        created.Succeeded.Should().BeTrue(created.Refusal?.Detail);
+        var (table, _, fields) = _appCreates.Should().ContainSingle().Subject;
+        table.Should().Be("contact");
+        Owner(fields).Should().Be(CustomerContactOwnerTests.CustomerTeam, "the customer business unit's default Owner team");
+        Written(fields).Should().Be(
+            $"firstname=Ada; lastname=Lovelace; ownerid@odata.bind=/teams({CustomerContactOwnerTests.CustomerTeam:D})",
+            "nothing is mapped onto a contact; only the owner is added");
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task AChatContact_WhoseCustomerTeamCannotBeResolved_IsRefused_AndNothingIsCreated(bool lookupComposed)
+    {
+        ChatPlatformCallerMayCreate();
+
+        var created = await ThroughTheService(
+            "contact", ChatContact(), lookupComposed ? CustomerContactOwner(oneDefaultTeam: false) : null);
+
+        created.Succeeded.Should().BeFalse();
+        created.Refusal!.Code.Should().Be(RecordOwnerRefusal.CustomerContactTeamUnresolved);
+        _appCreates.Should().BeEmpty("never created with the caller's team in its place");
+        _user.Posts.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task AChatContact_WhoseCustomerTeamCannotBeRead_IsRefusedAsUnavailable_AndNothingIsCreated()
+    {
+        ChatPlatformCallerMayCreate();
+        var store = new InMemoryContactIdentityStore { FailTeamLookup = true };
+        store.DefaultTeams[CustomerContactOwnerTests.CustomerBu] = [CustomerContactOwnerTests.CustomerTeam];
+
+        var created = await ThroughTheService(
+            "contact", ChatContact(), IdentityBindingTestKit.OwnerAwareBinder(store, CustomerContactOwnerTests.CustomerBu));
+
+        created.Succeeded.Should().BeFalse();
+        created.Refusal!.Kind.Should().Be(RecordCreationRefusalKind.Unavailable, "a fault is retryable, never a configuration refusal");
+        _appCreates.Should().BeEmpty();
+    }
+
+    // UAC-r2 condition 1: each refusal reaches the chat as the tool's plain error (its stable code and a sentence), never a
+    // thrown fault the host turns into a 500.
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task AChatContactRefusal_ReachesTheUserAsAPlainMessage_NeverABareFault(bool lookupFails)
+    {
+        ChatPlatformCallerMayCreate();
+        var store = new InMemoryContactIdentityStore { FailTeamLookup = lookupFails };
+        store.DefaultTeams[CustomerContactOwnerTests.CustomerBu] = lookupFails ? [CustomerContactOwnerTests.CustomerTeam] : [];
+
+        var created = await ThroughTheService(
+            "contact", ChatContact(), IdentityBindingTestKit.OwnerAwareBinder(store, CustomerContactOwnerTests.CustomerBu));
+
+        var refusal = created.Refusal!;
+        var code = Sprk.Bff.Api.Services.Ai.Handlers.DataverseCreateRecordHandler.RefusalErrorCode(refusal);
+        var text = Sprk.Bff.Api.Services.Ai.Handlers.DataverseCreateRecordHandler.RefusalText(refusal, "contact", "corr-052b");
+        text.Should().StartWith("The record ", "a plain sentence the chat shows");
+        text.Should().NotContain("Exception").And.NotContain("InvalidOperation").And.NotContain(" at Sprk.");
+        if (lookupFails)
+        {
+            refusal.Kind.Should().Be(RecordCreationRefusalKind.Unavailable);
+            code.Should().Be(Sprk.Bff.Api.Services.Ai.ToolErrorCodes.InternalError, "a fault keeps the tool's fault code");
+            text.Should().NotContain("CustomerBusinessUnitId", "a fault is not blamed on the configuration");
+        }
+        else
+        {
+            code.Should().Be(RecordOwnerRefusal.CustomerContactTeamUnresolved, "the resolver's own stable code");
+            text.Should().Contain("owner could not be decided");
+        }
+
+        _appCreates.Should().BeEmpty();
+    }
+
+    // ── Review F1-b: the secure decision comes first for a chat contact filed under an invoice ──────────────────────
+
+    private static DataverseWriteItemMapper.MappedItem ChatContactUnder(Guid invoice) =>
+        new($$"""{"firstname":"Ada","lastname":"Lovelace","sprk_Invoice@odata.bind":"/sprk_invoices({{invoice:D}})"}""",
+            ["firstname", "lastname", "sprk_invoice"])
+        {
+            Lookups = [new("sprk_invoice", "sprk_invoice", "sprk_invoices", invoice)],
+        };
+
+    [Fact]
+    public async Task AChatContactUnderASecureInvoice_IsRefusedAsTheSecureFilingRefusal_AsToday()
+    {
+        ChatPlatformCallerMayCreate();
+        CustomerContactOwnerTests.WithTheInvoices(_world);
+
+        var created = await ThroughTheService(
+            "contact", ChatContactUnder(CustomerContactOwnerTests.SecureInvoice), CustomerContactOwner(oneDefaultTeam: true));
+
+        created.Succeeded.Should().BeFalse("never owned by the customer team out of the invoice's isolation");
+        created.Refusal!.Kind.Should().Be(RecordCreationRefusalKind.OwnerUnresolved);
+        created.Refusal.OwnerDecision!.IsSecureOwner.Should().BeTrue("the resolver named the Secure team, as it does today");
+        _appCreates.Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData(CustomerContactOwnerTests.SecureUnitParent.OwnedByTheSecureTeam_FlagUnset)]
+    [InlineData(CustomerContactOwnerTests.SecureUnitParent.OwnedByTheSecureUnitsDefaultTeam)]
+    [InlineData(CustomerContactOwnerTests.SecureUnitParent.OwnedByAnotherSecureUnitTeam)]
+    public async Task AChatContactUnderAParentSecureByOwnership_IsNeverOwnedByTheCustomerTeam(
+        CustomerContactOwnerTests.SecureUnitParent kind)
+    {
+        // UAC-r2 pin: the parent is secure by ownership only (its sprk_issecure unset); the contact stays in isolation.
+        ChatPlatformCallerMayCreate();
+        var invoice = CustomerContactOwnerTests.InvoiceInTheSecureUnit(_world, kind);
+
+        var created = await ThroughTheService("contact", ChatContactUnder(invoice), CustomerContactOwner(oneDefaultTeam: true));
+
+        created.Succeeded.Should().BeFalse("never owned by the customer team out of the invoice's isolation");
+        created.Refusal!.Kind.Should().Be(RecordCreationRefusalKind.OwnerUnresolved);
+        created.Refusal.OwnerDecision!.IsSecureOwner.Should().BeTrue("the resolver named the Secure team");
+        created.Refusal.OwnerDecision.OwningTeamId.Should().NotBe(CustomerContactOwnerTests.CustomerTeam);
+        _appCreates.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task AChatContactUnderAnOrdinaryInvoice_IsOwnedByTheCustomerTeam()
+    {
+        ChatPlatformCallerMayCreate();
+        CustomerContactOwnerTests.WithTheInvoices(_world);
+
+        var created = await ThroughTheService(
+            "contact", ChatContactUnder(CustomerContactOwnerTests.OrdinaryInvoice), CustomerContactOwner(oneDefaultTeam: true));
+
+        created.Succeeded.Should().BeTrue(created.Refusal?.Detail);
+        Owner(_appCreates.Should().ContainSingle().Subject.Fields).Should().Be(CustomerContactOwnerTests.CustomerTeam);
     }
 
     [Fact]

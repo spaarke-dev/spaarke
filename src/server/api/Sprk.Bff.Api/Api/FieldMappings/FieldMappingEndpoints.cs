@@ -1485,7 +1485,8 @@ public static class FieldMappingEndpoints
 
                     // Task 045b (owner rulings Q4, Q7): the push never writes the pair, but a lookup it moves or clears takes the
                     // pair that repeated it along (the update planner, with the push's own app-only reader), before the checks
-                    // below and the write. It adds no check. A failed read fails THIS child (RecordOwnerUnresolvedException, below).
+                    // below and the write. The planner adds no check; the same call decides a sent regarding record URL (task 045f),
+                    // which the push never maps. A failed read fails THIS child (RecordOwnerUnresolvedException, below).
                     // The push derives display values as the caller (CallerDisplayReader): a record the caller cannot read has
                     // its display columns cleared; any other failed read fails this child.
                     updatePayload = await Sprk.Bff.Api.Services.Dataverse.OwnedChildWrite.KeepRegardingPairWholeAppOnlyAsync(
@@ -1493,6 +1494,31 @@ public static class FieldMappingEndpoints
                         lookupsAreMapped: true,
                         displayRecord: Sprk.Bff.Api.Services.Dataverse.OwnedChildWrite.CallerDisplayReader(
                             callerQuery, appOnlyEntities, callerSystemUserId));
+
+                    // Task 045d (owner ruling Q8 (a); owner, 2026-11-12, option (b)): an invoice-family child whose own core
+                    // lookup this push sets takes the resolver fields of the record it will name, in this same child write (after
+                    // the pair planner so they win). The stored row and the catalog are read app-only; the name and number as
+                    // the caller, as the planner reads display values here (a record the caller cannot read has them cleared).
+                    // They are the server's, never copied from the source, so they are added after the source gate and the
+                    // access-column scrub above, and are no access column. A derive that cannot be done fails THIS child as
+                    // the guard above does: its code only.
+                    var familyFields = await Sprk.Bff.Api.Services.Dataverse.OwnedChildWrite.KeepInvoiceFamilyResolverFieldsAppOnlyAsync(
+                        appOnlyEntities, targetEntity, childRecordId, updatePayload, "FIELD-MAPPING-PUSH",
+                        Sprk.Bff.Api.Services.Dataverse.OwnedChildWrite.CallerDisplayReader(
+                            callerQuery, appOnlyEntities, callerSystemUserId),
+                        logger, ct);
+                    if (familyFields.RefusalCode is { } derivedCode)
+                    {
+                        failed++;
+                        errors.Add(new PushFieldMappingsError
+                        {
+                            RecordId = childRecordId,
+                            Error = $"Not written: {Sprk.Bff.Api.Services.Dataverse.InvoiceFamilyCoreRecordGuard.CodeOnlyRefusalMessage(derivedCode)}"
+                        });
+                        continue;
+                    }
+
+                    updatePayload = familyFields.Payload;
 
                     // Task 158 (owner round 6): a work assignment or project this push files under a matter or project —
                     // whether that record is secure must be readable, or this record is not written (fail closed; a

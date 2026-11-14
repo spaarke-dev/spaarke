@@ -264,7 +264,7 @@ Two-write rule: every entry here has a GitHub issue, and every issue has an entr
 | **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2701 |
 | **Class** | K, follow-up |
 | **Failure** | Rule: a strict Direct pair thread, or a thread holding a message with `sprk_directrecipient` set, stays typed Direct and is never anchored to a record. Since 054b, filing enforces this going forward (`ThreadResolver` rule 2, EventId 5413); it does not look back. Follow-up: a one-time per-environment check, before the `DirectMessage:*` settings are set, that no such thread is Record-Anchored, with an owner-approved dry-run / `-Apply` / `-Verify` correction if any is found (a script, or a phase of `Migrate-DirectMessagesToOwnerTeam.ps1`). Nothing with outbound Direct pair routing is deployed yet, so the expected count is zero |
-| **Status** | Open |
+| **Status** | Open for other environments. **dev (spaarkedev1), 2026-11-13: PASS**: a read-only check found no message with `sprk_directrecipient` set in a Record-Anchored thread (0 such messages in all), and no Record-Anchored thread shaped as a strict pair (0 of 66 user-owned; owner a systemuser and the only share row another systemuser with Read). The check is a one-time query; making it a reusable script (or a `-Verify` phase) for other environments is still to do. |
 ## DI-027 — Apply the Restricted source rule to Repair and the field-mapping push (task 022c)
 
 | Field | Value |
@@ -273,4 +273,22 @@ Two-write rule: every entry here has a GitHub issue, and every issue has an entr
 | **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2738 |
 | **Class** | F1, follow-up task 022c (unified-access-control-r2, round 90: fixed promptly, right after 022b merges) |
 | **Failure** | Rule: values mapped from a source whose `sprk_accesspermission` is Restricted, or cannot be read, are written only into a row that is Restricted. 022b applies it to the create. Repair mode (`RecordCreationService.Repair.cs`) and the field-mapping push (`FieldMappingPushSourceGate`) apply the secure copy gate; 022c applies the same Restricted predicate there. |
-| **Status** | Fixed on the work branch by task 022c (merge 74556c46df, 2026-11-12; UAC-r2 PASS). #2738 closes when it reaches master. |
+| **Status** | Fixed on the work branch by task 022c (merge 74556c46df, 2026-11-12; UAC-r2 PASS). On master via #2768 (d8b53ec0c3); #2738 closed. |
+## DI-028 — `ExternalAccess:CustomerBusinessUnitId` is required, and names the customer's business unit
+
+| Field | Value |
+|---|---|
+| **Found** | 2026-11-12, task 052b; unified-access-control-r2 condition 4 |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2771 |
+| **Class** | K, deployment dependency (customer-provisioning-orchestration-r1 and the deployment guide) |
+| **Failure** | Rule: a chat-created contact, and a contact the repair pass re-owns, is owned by the default team of the unit in `ExternalAccess:CustomerBusinessUnitId`. The setting is required where those run (unset: the chat create is refused with `record_owner_customer_contact_team_unresolved`, and the pass skips the contact table) and names the customer's business unit, never the Secure Record unit. Add it to the deployment guide and the provisioning flow. |
+| **Status** | Open |
+## DI-029 — Invoice family: the regarding pair agrees with the row's core lookup on every update path
+
+| Field | Value |
+|---|---|
+| **Found** | 2026-11-13, task 045d adversarial review (outside the task's scope) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2772 |
+| **Class** | Follow-up; owner decision (touches FR-23); ebilling-r1 and this project |
+| **Failure** | Rule: on every invoice-family table, a row's regarding pair and its five resolver fields agree with its core lookup, and a write's pair agrees with the stored or written core lookup. Options: (a) refuse a disagreeing pair (ebilling-r1's view), (b) always derive the pair from the core lookup. Scope once decided: six tables × child-record update, chat tool, `UpdateRecordActionCore`, `DataverseUpdateHandler`, push. |
+| **Status** | Owner decided 2026-11-13: (a) refuse (decisions.md). Work: task 045e, after 045d merges. |

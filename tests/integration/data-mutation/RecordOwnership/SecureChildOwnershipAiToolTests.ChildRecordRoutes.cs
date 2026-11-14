@@ -732,7 +732,7 @@ public sealed partial class SecureChildOwnershipAiToolTests
             ["sprk_RegardingProject@odata.bind"] = null,
             ["sprk_regardingrecordid"] = OrdinaryMatter.ToString("D"),
             ["sprk_regardingrecordname"] = "Smith v. Jones",
-            ["sprk_regardingrecordurl"] = "/main.aspx?etn=sprk_matter",
+            ["sprk_regardingrecordurl"] = $"/main.aspx?pagetype=entityrecord&etn=sprk_matter&id={OrdinaryMatter:D}",
         });
 
         Status(result).Should().Be(StatusCodes.Status204NoContent, Detail(result));

@@ -748,6 +748,10 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
             ["sprk_communicationthread"] = "sprk_communicationthreads",
             // Field mapping task 017 (item 8): an invoice-family table filed by the regarding trio.
             ["sprk_invoicesubmission"] = "sprk_invoicesubmissions",
+            // Field mapping task 045e: the other invoice-family tables the chat update tool writes.
+            ["sprk_invoiceapproval"] = "sprk_invoiceapprovals",
+            ["sprk_externalidentifier"] = "sprk_externalidentifiers",
+            ["sprk_invoicecorrection"] = "sprk_invoicecorrections",
             // Field mapping task 017 (item 9): the budget inquiry's service request.
             ["sprk_servicerequest"] = "sprk_servicerequests",
             // Field mapping task 017 (2d-3): an Owned-path table with no registry entry (the chat create refuses it).
@@ -892,6 +896,8 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
                 // ebilling-r1 task 012: the invoice's work-assignment filing and the invoice it supersedes (a peer reference).
                 ("sprk_regardingworkassignment", "sprk_workassignment", "sprk_RegardingWorkAssignment"),
                 ("sprk_supersedesinvoice", "sprk_invoice", "sprk_SupersedesInvoice"),
+                // Task 045d: the pair type (SpaarkeMaster sprk_RecordType_Ref.xml: the invoice's navigation property is lower-case).
+                ("sprk_regardingrecordtype", "sprk_recordtype_ref", "sprk_regardingrecordtype"),
             },
             ["sprk_reportcard"] = new[]
             {
@@ -924,6 +930,30 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
                 ("sprk_matter", "sprk_matter", "sprk_Matter"),
                 ("sprk_project", "sprk_project", "sprk_Project"),
             },
+            // Field mapping task 045e: the other invoice-family tables' regarding trio and pair type (and the external identifier's
+            // invoice, D-68), as the submission's below.
+            ["sprk_invoiceapproval"] = new[]
+            {
+                ("sprk_regardingmatter", "sprk_matter", "sprk_RegardingMatter"),
+                ("sprk_regardingproject", "sprk_project", "sprk_RegardingProject"),
+                ("sprk_regardingworkassignment", "sprk_workassignment", "sprk_RegardingWorkAssignment"),
+                ("sprk_regardingrecordtype", "sprk_recordtype_ref", "sprk_RegardingRecordType"),
+            },
+            ["sprk_externalidentifier"] = new[]
+            {
+                ("sprk_regardingmatter", "sprk_matter", "sprk_RegardingMatter"),
+                ("sprk_regardingproject", "sprk_project", "sprk_RegardingProject"),
+                ("sprk_regardingworkassignment", "sprk_workassignment", "sprk_RegardingWorkAssignment"),
+                ("sprk_regardinginvoice", "sprk_invoice", "sprk_RegardingInvoice"),
+                ("sprk_regardingrecordtype", "sprk_recordtype_ref", "sprk_RegardingRecordType"),
+            },
+            ["sprk_invoicecorrection"] = new[]
+            {
+                ("sprk_regardingmatter", "sprk_matter", "sprk_RegardingMatter"),
+                ("sprk_regardingproject", "sprk_project", "sprk_RegardingProject"),
+                ("sprk_regardingworkassignment", "sprk_workassignment", "sprk_RegardingWorkAssignment"),
+                ("sprk_regardingrecordtype", "sprk_recordtype_ref", "sprk_RegardingRecordType"),
+            },
             // Field mapping task 017 (item 8): the invoice submission's core lookups are the regarding trio
             // (InvoiceFamilyCoreRecordGuard.CoreRecordLookups).
             ["sprk_invoicesubmission"] = new[]
@@ -931,6 +961,8 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
                 ("sprk_regardingmatter", "sprk_matter", "sprk_RegardingMatter"),
                 ("sprk_regardingproject", "sprk_project", "sprk_RegardingProject"),
                 ("sprk_regardingworkassignment", "sprk_workassignment", "sprk_RegardingWorkAssignment"),
+                // Task 045d: the pair type (SpaarkeMaster sprk_RecordType_Ref.xml).
+                ("sprk_regardingrecordtype", "sprk_recordtype_ref", "sprk_RegardingRecordType"),
             },
             // Field mapping task 017 (item 9): the budget inquiry's service request (BudgetInquiryExecutor.BuildBody's binds).
             ["sprk_servicerequest"] = new[]
@@ -946,7 +978,11 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
                 // ebilling-r1 task 012: the line's work-assignment filing, and its invoice (never its core record, D-75).
                 ("sprk_regardingworkassignment", "sprk_workassignment", "sprk_RegardingWorkAssignment"),
                 ("sprk_invoice", "sprk_invoice", "sprk_Invoice"),
+                // Task 045d: the pair type (SpaarkeMaster sprk_RecordType_Ref.xml).
+                ("sprk_regardingrecordtype", "sprk_recordtype_ref", "sprk_RegardingRecordType"),
             },
+            // fm task 052b: a contact may be filed under an invoice (an ownership parent, docs/data-model/oob-customizations.yaml).
+            ["contact"] = new[] { ("sprk_invoice", "sprk_invoice", "sprk_Invoice") },
             // A polymorphic lookup: one navigation property per target table (task 147 r1c-v1: a clear goes through one).
             ["task"] = new[]
             {
@@ -1231,6 +1267,20 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
         [GeneratedRegex(@"businessunitid eq (?<candidate>[0-9a-fA-F-]{36}) and Microsoft\.Dynamics\.CRM\.UnderOrEqual\(PropertyName='businessunitid',PropertyValue='(?<ancestor>[0-9a-fA-F-]{36})'\)")]
         private static partial Regex UnderOrEqual();
 
+        // Task 045d: the catalog read by table name ("$filter=sprk_recordlogicalname eq 'X' and statecode eq 0").
+        [GeneratedRegex(@"sprk_recordlogicalname eq '(?<t>[a-z0-9_]+)'")]
+        private static partial Regex CatalogNamed();
+
+        /// <summary>Task 045d: a fixed catalog row id per table, for a table the test did not put in <see cref="RecordTypes"/>.</summary>
+        internal static Guid CatalogTypeIdOf(string table) =>
+            new(System.Security.Cryptography.MD5.HashData(System.Text.Encoding.UTF8.GetBytes("catalog:" + table)));
+
+        /// <summary>Task 045d: the core tables whose name and number the derive reads.</summary>
+        private static readonly HashSet<string> CoreDisplayTables = new(StringComparer.Ordinal)
+        {
+            "sprk_matter", "sprk_project", "sprk_workassignment", "sprk_invoice",
+        };
+
         public Task<DataverseUserResponse> GetAsync(string relativePath, CancellationToken cancellationToken) =>
             Task.FromResult(Get(Uri.UnescapeDataString(relativePath)));
 
@@ -1391,6 +1441,35 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
                 });
             }
 
+            // Task 045d: the record-type catalog read by table name, as the caller ("sprk_recordtype_refs?$select=…&$filter=
+            // sprk_recordlogicalname eq 'X' and statecode eq 0&$top=1"): the row RecordTypes names for X, else a fixed id per
+            // table, with the table's number column ({table}number, as the live catalog names it for the four core tables).
+            if (path.StartsWith("sprk_recordtype_refs?", StringComparison.Ordinal))
+            {
+                var catalogQuery = CatalogNamed().Match(path);
+                if (!catalogQuery.Success)
+                    return DataverseUserResponse.Fail(400, DataverseUserClientErrorCodes.BadRequest, "Unscripted catalog query.");
+                var catalogTable = catalogQuery.Groups["t"].Value;
+                var typeId = RecordTypes.FirstOrDefault(kv => kv.Value == catalogTable).Key;
+                if (typeId == Guid.Empty)
+                {
+                    typeId = CatalogTypeIdOf(catalogTable);
+                    RecordTypes.TryAdd(typeId, catalogTable); // the same row then names its table when read by id
+                }
+
+                return Ok(new
+                {
+                    value = new[]
+                    {
+                        new
+                        {
+                            sprk_recordtype_refid = typeId.ToString("D"),
+                            sprk_regardingrecordnumberfield = catalogTable + "number",
+                        },
+                    },
+                });
+            }
+
             // Task 049 fix round 2: the caller's team memberships ("systemusers(me)/teammembership_association?…").
             if (path.Contains("/teammembership_association", StringComparison.Ordinal))
                 return Ok(new { value = TeamMemberships.Select(t => new { teamid = t.ToString("D") }) });
@@ -1427,6 +1506,16 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
                 var selected = path[(selectAt + "$select=".Length)..].Split('&')[0].Split(',');
                 foreach (var column in selected.Where(c => c.StartsWith('_') && c.EndsWith("_value", StringComparison.Ordinal)))
                     rowBody.TryAdd(column, null);
+
+                // Task 045d: a core record has a name and a number (the derive's read), unless the test scripts its own.
+                if (TableOf(path) is { } readTable && CoreDisplayTables.Contains(readTable))
+                {
+                    foreach (var column in selected.Where(c =>
+                                 c == Spaarke.Dataverse.RegardingRecordType.GetPrimaryNameField(readTable) || c == readTable + "number"))
+                    {
+                        rowBody.TryAdd(column, column.EndsWith("number", StringComparison.Ordinal) ? $"N-{rowId.ToString("N")[..6]}" : $"Record {rowId.ToString("N")[..6]}");
+                    }
+                }
             }
 
             return Ok(rowBody);

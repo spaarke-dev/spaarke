@@ -112,12 +112,15 @@ public sealed partial class RecordCreationServicePipelineSeamTests
                     {
                         _journal.Add("prewrite");
                         asked.Add(row);
-                        return decide(row, ct);
+                        return OfAsync(decide(row, ct));
                     }),
             ],
         };
         _tableRules = t => t == "sprk_event" ? rule : RecordTableRules.Find(t);
         return asked;
+
+        // Task 045d: the rule's refusal (or none) as the pre-write result; a fault or a cancellation propagates unchanged.
+        static async Task<PreWriteResult> OfAsync(Task<PreWriteRefusal?> refusal) => PreWriteResult.Of(await refusal.ConfigureAwait(false));
     }
 
     // =====================================================================================
