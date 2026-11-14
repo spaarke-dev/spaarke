@@ -22,8 +22,8 @@ export { CreateRecordStep } from './CreateRecordStep';
 // maps a 012 hand-off seed onto the wizard's initial form values.
 export { mapMatterHandoffSeed } from './handoffSeedMapping';
 
-// Task 024 -- matter-specific step components
-export { AssignCounselStep } from './AssignCounselStep';
+// NOTE: AssignCounselStep (task 024) was retired by ontology task 184: no consumer, inline lookups. Assign Work is the
+// shared WizardFollowOns AssignWorkFollowOnStep.
 // NOTE: The local NextStepsStep.tsx + SendEmailStep.tsx were duplicate copies of
 // the shared Next-Steps / email flow. CreateMatterWizard renders its follow-on
 // cards through CreateRecordWizard (now backed by the shared WizardFollowOns
@@ -61,10 +61,6 @@ export type {
   IAiPrefillResponse,
   FormAction,
 } from './formTypes';
-
-// Types -- Step 3 follow-on (matter-specific only; shared follow-on types
-// live in CreateRecordWizard/index.ts)
-export type { IAssignCounselStepProps } from './AssignCounselStep';
 
 // Types -- service result
 export type {

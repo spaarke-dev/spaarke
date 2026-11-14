@@ -40,7 +40,7 @@ import { sendComposedEmail } from '../EmailComposer/composeOnlySend';
 import type { IComposedEmail } from '../EmailComposer/composeOnlySend';
 
 // ---------------------------------------------------------------------------
-// Contact type (used by AssignCounselStep search results)
+// Contact type (used by contact search results)
 // ---------------------------------------------------------------------------
 
 /**
@@ -457,7 +457,7 @@ export class MatterService {
 }
 
 // ---------------------------------------------------------------------------
-// Contact search helper (for AssignCounselStep and lookup fields)
+// Contact search helper (for lookup fields)
 // ---------------------------------------------------------------------------
 
 /**
@@ -574,7 +574,7 @@ export async function searchPracticeAreas(dataService: IDataService, nameFilter:
 }
 
 // ---------------------------------------------------------------------------
-// AI draft summary helper (for DraftSummaryStep)
+// AI draft summary helper (used by CreateRecordStep; the DraftSummaryStep it was written for was retired by ontology task 184)
 // ---------------------------------------------------------------------------
 
 export interface IAiDraftSummaryResponse {
