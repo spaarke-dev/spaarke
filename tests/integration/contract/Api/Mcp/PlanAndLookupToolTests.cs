@@ -213,8 +213,17 @@ public sealed class PlanAndLookupToolTests
                 : new Dictionary<string, object> { ["signalId"] = SignalId, ["parameterCode"] = parameterCode, ["query"] = "Ac" });
 
         IsError(result).Should().BeTrue();
-        result.GetProperty("structuredContent").GetProperty("reasonCode").GetString().Should().Be("ontology.decision.invalid_parameter");
-        result.GetProperty("structuredContent").TryGetProperty("candidates", out _).Should().BeFalse();
+        var error = result.GetProperty("structuredContent");
+        error.GetProperty("reasonCode").GetString().Should().Be("ontology.decision.invalid_parameter");
+        error.TryGetProperty("candidates", out _).Should().BeFalse();
+
+        // The message is the lookup's own (the REST lookup route's detail for the same inputs), not the commit route's text for the same code.
+        var restPath = $"/api/v1/signals/{SignalId:D}/lookup?" + (parameterCode is null ? string.Empty : $"parameterCode={parameterCode}&") + "query=Ac";
+        var (restStatus, restProblem) = await host.RestProblemAsync(restPath);
+        restStatus.Should().Be(HttpStatusCode.UnprocessableEntity);
+        error.GetProperty("message").GetString().Should().Be(restProblem["detail"]!.GetValue<string>());
+        error.GetProperty("message").GetString().Should().Contain("This parameter cannot be searched for this item").And.Contain("at most 100 characters of search text");
+        error.GetProperty("status").GetInt32().Should().Be((int)restStatus);
         host.World.Paths.Should().BeEmpty("nothing is searched for a parameter the plan does not offer");
     }
 
@@ -272,6 +281,54 @@ public sealed class PlanAndLookupToolTests
         search.VerifyNoOtherCalls();
         signedIn.User.Identities.Should().ContainSingle(i => i.IsAuthenticated, "the control: a signed-in context is not refused by the same guard");
         PlanAndLookupToolSupport.HasCaller(signedIn).Should().BeTrue();
+    }
+
+    // ---- error body (status + support reference) ---------------------------------------------------------------------
+
+    [Fact]
+    public async Task Plan_ARefusal_CarriesTheRestStatusAndTheRequestsCorrelationId_BesideTheReasonCodeAndMessage()
+    {
+        await using var host = await PlanAndLookupHost.StartAsync(matterReadable: false);
+        var (restStatus, restProblem) = await host.RestProblemAsync($"/api/v1/signals/{SignalId:D}/decision-plan");
+
+        var result = await host.CallAsync("spaarke_get_decision_plan", new { signalId = SignalId });
+
+        IsError(result).Should().BeTrue();
+        var error = result.GetProperty("structuredContent");
+        error.EnumerateObject().Select(p => p.Name).Should().Equal("reasonCode", "message", "status", "correlationId");
+        error.GetProperty("status").GetInt32().Should().Be((int)restStatus, "the status the REST route answers for the same failure");
+        error.GetProperty("correlationId").GetString().Should().NotBeNullOrWhiteSpace();
+        restProblem["correlationId"]!.GetValue<string>().Should().NotBeNullOrWhiteSpace("the REST reference this one mirrors is the request's TraceIdentifier");
+    }
+
+    // ---- telemetry (NFR-05) ------------------------------------------------------------------------------------------
+
+    [Fact]
+    public async Task PlanAndLookup_EachCallLogsOneLine_WithToolOutcomeRowsLatencyAndCorrelation_AndNoArgumentOrRecordText()
+    {
+        await using var host = await PlanAndLookupHost.StartAsync(BudgetPlan);
+
+        await host.CallAsync("spaarke_get_decision_plan", new { signalId = SignalId });
+        await host.CallAsync("spaarke_search_decision_lookup", new { signalId = SignalId, parameterCode = "budget", query = "Out" });
+        await host.CallAsync("spaarke_search_decision_lookup", new { signalId = SignalId, parameterCode = "contactid", query = "SecretQueryText" });
+
+        var lines = host.Logs.Entries
+            .Where(e => e.Category.EndsWith("." + nameof(GetDecisionPlanTool), StringComparison.Ordinal)
+                        || e.Category.EndsWith("." + nameof(SearchDecisionLookupTool), StringComparison.Ordinal))
+            .ToList();
+        lines.Select(e => ((string)e.State["ToolName"]!, (string)e.State["Outcome"]!, (int)e.State["RowCount"]!)).Should().Equal(
+            ("spaarke_get_decision_plan", "ok", 1),
+            ("spaarke_search_decision_lookup", "ok", 1),
+            ("spaarke_search_decision_lookup", "ontology.decision.invalid_parameter", 0));
+        lines.Should().AllSatisfy(e =>
+        {
+            ((long)e.State["ElapsedMs"]!).Should().BeGreaterThanOrEqualTo(0);
+            ((string?)e.State["CorrelationId"]).Should().NotBeNullOrWhiteSpace();
+        });
+
+        // No argument value, query text, record text or id in anything these tools logged.
+        var logged = string.Join("\n", lines.Select(e => e.Message + " " + string.Join(" ", e.State.Values)));
+        logged.Should().NotContain("SecretQueryText").And.NotContain("budget").And.NotContain(SignalId.ToString()).And.NotContain("Acme v. Roadrunner");
     }
 
     // ---- result size (NFR-02) --------------------------------------------------------------------------------------
@@ -425,13 +482,16 @@ internal sealed class PlanAndLookupHost : IAsyncDisposable
     private readonly HttpClient _client;
     private readonly string _token;
 
-    private PlanAndLookupHost(WebApplication app, HttpClient client, StampStore stamps, PlanAndLookupScript script, DecisionLookupWorld world)
+    private PlanAndLookupHost(
+        WebApplication app, HttpClient client, StampStore stamps, PlanAndLookupScript script, DecisionLookupWorld world,
+        DecisionToolsTestHost.CapturingLoggerProvider logs)
     {
         _app = app;
         _client = client;
         Stamps = stamps;
         Script = script;
         World = world;
+        Logs = logs;
         _token = McpTestHost.MintToken(Guid.Parse("66666666-7777-4888-9999-aaaaaaaaaaaa"));
     }
 
@@ -440,6 +500,8 @@ internal sealed class PlanAndLookupHost : IAsyncDisposable
     public PlanAndLookupScript Script { get; }
 
     public DecisionLookupWorld World { get; }
+
+    public DecisionToolsTestHost.CapturingLoggerProvider Logs { get; }
 
     public static async Task<PlanAndLookupHost> StartAsync(string plan = DecisionCapabilityFixtures.ApproveVariancePlan, bool matterReadable = true)
     {
@@ -451,7 +513,9 @@ internal sealed class PlanAndLookupHost : IAsyncDisposable
 
         var builder = WebApplication.CreateBuilder();
         builder.WebHost.UseKestrel(kestrel => kestrel.Listen(IPAddress.Loopback, 0));
+        var logs = new DecisionToolsTestHost.CapturingLoggerProvider();
         builder.Logging.ClearProviders();
+        builder.Logging.AddProvider(logs);
         builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
         {
             ["Mcp:Enabled"] = "true",
@@ -460,6 +524,7 @@ internal sealed class PlanAndLookupHost : IAsyncDisposable
         });
 
         builder.Services.AddHttpContextAccessor();
+        builder.Services.AddSingleton(TimeProvider.System);
         builder.Services
             .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
             .AddJwtBearer(options => options.TokenValidationParameters = new TokenValidationParameters
@@ -494,7 +559,7 @@ internal sealed class PlanAndLookupHost : IAsyncDisposable
         await app.StartAsync();
 
         var address = app.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()!.Addresses.First();
-        return new PlanAndLookupHost(app, new HttpClient { BaseAddress = new Uri(address) }, stamps, script, world);
+        return new PlanAndLookupHost(app, new HttpClient { BaseAddress = new Uri(address) }, stamps, script, world, logs);
     }
 
     /// <summary>A Decide-lane row with the longest sentence and the heaviest evidence the row carries (NFR-02).</summary>

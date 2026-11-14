@@ -48,6 +48,8 @@ public sealed partial class DecisionCommitServiceTests
     {
         var services = new ServiceCollection()
             .AddHttpContextAccessor()
+            .AddLogging()
+            .AddSingleton(TimeProvider.System) // the handler binds TimeProvider and ILogger<T> as services, as the production host provides them
             .AddSingleton<IDecisionCapability>(CapabilityOver(new Rig()))
             .AddAuthorization()
             .BuildServiceProvider();

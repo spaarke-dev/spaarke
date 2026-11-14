@@ -19,6 +19,7 @@ using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 using FluentAssertions;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
@@ -355,6 +356,8 @@ public sealed class McpAuthTests
         // Fix round 1: the enforced metadata must equal the tool class's own [Authorize], with an allow-listed policy.
         ToolShapes.HelperClassHandler, ToolShapes.MetadataOverride, ToolShapes.AnonymityMetadata,
         nameof(ToolShapes.UnlistedPolicyTool), nameof(ToolShapes.MethodLevelAuthorizeTool),
+        // O-14: a tool that is not read-only must be app-only (_meta.ui.visibility exactly ["app"]): none, model+app, model and empty all refuse.
+        ToolShapes.WriteNoVisibility, ToolShapes.WriteModelAndApp, ToolShapes.WriteModelOnly, ToolShapes.WriteEmptyVisibility,
     };
 
     [Theory]
@@ -371,6 +374,7 @@ public sealed class McpAuthTests
     [Theory]
     [InlineData(nameof(ToolShapes.Sanctioned))]
     [InlineData(nameof(ToolShapes.AdminTool))]
+    [InlineData(ToolShapes.WriteAppOnly)]
     public void ValidateTool_AuthorizedReadOnlyTitledTool_IsAccepted(string shape)
     {
         var (tool, definition) = ToolShapes.Build(shape);
@@ -432,6 +436,11 @@ public sealed class McpAuthTests
         public const string HelperClassHandler = nameof(HelperClassHandler);
         public const string MetadataOverride = nameof(MetadataOverride);
         public const string AnonymityMetadata = nameof(AnonymityMetadata);
+        public const string WriteNoVisibility = nameof(WriteNoVisibility);
+        public const string WriteModelAndApp = nameof(WriteModelAndApp);
+        public const string WriteModelOnly = nameof(WriteModelOnly);
+        public const string WriteEmptyVisibility = nameof(WriteEmptyVisibility);
+        public const string WriteAppOnly = nameof(WriteAppOnly);
 
         public static (McpServerTool Tool, Type Definition) Build(string shape) => shape switch
         {
@@ -446,11 +455,26 @@ public sealed class McpAuthTests
             HelperClassHandler => (Make(BareAuthorizeHelper.Run, shape), typeof(AdminTool)),
             MetadataOverride => (Make(AdminTool.Run, shape, metadata: [new AuthorizeAttribute()]), typeof(AdminTool)),
             AnonymityMetadata => (Make(Sanctioned.Run, shape, metadata: [new AuthorizeAttribute(), new AllowAnonymousAttribute()]), typeof(Sanctioned)),
+            WriteNoVisibility => (Make(Sanctioned.Run, shape, readOnly: false), typeof(Sanctioned)),
+            WriteModelAndApp => (Make(Sanctioned.Run, shape, readOnly: false, visibility: ["model", "app"]), typeof(Sanctioned)),
+            WriteModelOnly => (Make(Sanctioned.Run, shape, readOnly: false, visibility: ["model"]), typeof(Sanctioned)),
+            WriteEmptyVisibility => (Make(Sanctioned.Run, shape, readOnly: false, visibility: []), typeof(Sanctioned)),
+            WriteAppOnly => (Make(Sanctioned.Run, shape, readOnly: false, visibility: ["app"]), typeof(Sanctioned)),
             _ => (Make(Sanctioned.Run, shape), typeof(Sanctioned)),
         };
 
-        private static McpServerTool Make(Func<string> run, string name, bool? readOnly = true, string? title = "A title", object[]? metadata = null) =>
-            McpServerTool.Create(run, new McpServerToolCreateOptions { Name = name, Title = title, ReadOnly = readOnly, Metadata = metadata });
+        private static McpServerTool Make(
+            Func<string> run, string name, bool? readOnly = true, string? title = "A title", object[]? metadata = null, string[]? visibility = null) =>
+            McpServerTool.Create(
+                run,
+                new McpServerToolCreateOptions
+                {
+                    Name = name,
+                    Title = title,
+                    ReadOnly = readOnly,
+                    Metadata = metadata,
+                    Meta = visibility is null ? null : new JsonObject { ["ui"] = new JsonObject { ["visibility"] = new JsonArray(visibility.Select(v => (JsonNode)JsonValue.Create(v)!).ToArray()) } },
+                });
 
         [Authorize(Policy = "SystemAdmin")]
         public static class AdminTool
@@ -903,7 +927,7 @@ internal sealed class McpA10PlanProbeTool : McpToolDefinition
     {
         var result = await capability.GetPlanAsync(accessor.HttpContext, DecisionCapabilityFixtures.SignalId, cancellationToken);
         return DecisionResultMapper.ToToolError(result) is { } error
-            ? McpToolResults.FromError(error)
+            ? McpToolResults.FromError(error, accessor.HttpContext?.TraceIdentifier)
             : new CallToolResult { Content = [new TextContentBlock { Text = "plan" }] };
     }
 }

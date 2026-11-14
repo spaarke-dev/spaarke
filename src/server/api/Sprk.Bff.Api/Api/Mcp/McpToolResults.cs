@@ -19,11 +19,14 @@ public static class McpToolResults
 
     /// <summary>
     /// <c>content</c> is the error's <see cref="DecisionToolError.Message"/> as text (how to fix the call; it never carries record
-    /// text, ADR-015). <c>structuredContent</c> is <c>{ reasonCode, message }</c> plus <c>partial</c> for a failed commit (the D-17 facts:
-    /// which writes landed and whether a retry resumes), so the REST route's <c>reasonCode</c> vocabulary is the MCP one. The
-    /// error's HTTP <see cref="DecisionToolError.Status"/> is information for the host and is not repeated in the result.
+    /// text, ADR-015). <c>structuredContent</c> is <c>{ reasonCode, message, status, correlationId?, partial? }</c>: the REST route's
+    /// <c>reasonCode</c> vocabulary, the HTTP <see cref="DecisionToolError.Status"/> the REST route answers for the same failure (the
+    /// widget's failure display reads it), <paramref name="correlationId"/> as the support reference (the request's
+    /// <c>TraceIdentifier</c>, the value the REST ProblemDetails carry as <c>correlationId</c>; absent when there is no request context),
+    /// and <c>partial</c> for a failed commit (the D-17 facts: which writes landed and whether a retry resumes). Neither is a transport
+    /// status: the JSON-RPC and HTTP answer is still a successful tool result.
     /// </summary>
-    public static CallToolResult FromError(DecisionToolError error)
+    public static CallToolResult FromError(DecisionToolError error, string? correlationId)
     {
         ArgumentNullException.ThrowIfNull(error);
 
@@ -32,9 +35,9 @@ public static class McpToolResults
             IsError = true,
             Content = [new TextContentBlock { Text = error.Message }],
             StructuredContent = JsonSerializer.SerializeToElement(
-                new ErrorBody(error.ReasonCode, error.Message, error.Partial), Json),
+                new ErrorBody(error.ReasonCode, error.Message, error.Status, correlationId, error.Partial), Json),
         };
     }
 
-    private sealed record ErrorBody(string ReasonCode, string Message, DecisionToolPartial? Partial);
+    private sealed record ErrorBody(string ReasonCode, string Message, int Status, string? CorrelationId, DecisionToolPartial? Partial);
 }

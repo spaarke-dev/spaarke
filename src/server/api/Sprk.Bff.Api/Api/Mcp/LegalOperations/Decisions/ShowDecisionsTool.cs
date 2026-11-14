@@ -119,7 +119,7 @@ internal sealed class ShowDecisionsTool : McpToolDefinition
         var rows = 0;
         try
         {
-            var result = await RunAsync(request, http, decisions, dataverse.Value.EnvironmentUrl, cancellationToken);
+            var result = await RunAsync(request.Params?.Arguments, http, decisions, dataverse.Value.EnvironmentUrl, cancellationToken);
             rows = result.Rows;
             outcome = DecisionToolCall.OutcomeOf(result.Result);
             return result.Result;
@@ -130,14 +130,14 @@ internal sealed class ShowDecisionsTool : McpToolDefinition
         }
     }
 
-    private static async Task<(CallToolResult Result, int Rows)> RunAsync(
-        RequestContext<CallToolRequestParams> request,
+    internal static async Task<(CallToolResult Result, int Rows)> RunAsync(
+        IDictionary<string, JsonElement>? arguments,
         HttpContext? http,
         IDecisionCapability decisions,
         string? environmentUrl,
         CancellationToken cancellationToken)
     {
-        if (!DecisionToolCall.TryReadSingleArgument(request, Name, CategoryArgument, out var argument, out var argumentError))
+        if (!DecisionToolCall.TryReadSingleArgument(arguments, Name, CategoryArgument, http?.TraceIdentifier, out var argument, out var argumentError))
         {
             return (argumentError!, 0);
         }
@@ -149,7 +149,7 @@ internal sealed class ShowDecisionsTool : McpToolDefinition
             if (value.ValueKind != JsonValueKind.String || !DecideLaneCategories.Keys.Contains(value.GetString(), StringComparer.Ordinal))
             {
                 return (DecisionToolCall.InvalidArgument(
-                    $"'{CategoryArgument}' must be one of: {string.Join(", ", DecideLaneCategories.Keys)}. Leave it out to show all categories."), 0);
+                    $"'{CategoryArgument}' must be one of: {string.Join(", ", DecideLaneCategories.Keys)}. Leave it out to show all categories.", http?.TraceIdentifier), 0);
             }
 
             category = value.GetString()!;
@@ -159,21 +159,21 @@ internal sealed class ShowDecisionsTool : McpToolDefinition
         // (Null checks are written == / != here, not as patterns: the MCP guard's AI-internal-type scan reads the keyword as a type name.)
         if (http == null || !DecisionCapability.HasSignedInCaller(http.User))
         {
-            return (McpToolResults.FromError(DecisionResultMapper.ToToolError(DecidePageResult.UserContextRequired)!), 0);
+            return (McpToolResults.FromError(DecisionResultMapper.ToToolError(DecidePageResult.UserContextRequired)!, http?.TraceIdentifier), 0);
         }
 
         var lane = await decisions.ListDecideAsync(http.User, cancellationToken);
         var laneError = DecisionResultMapper.ToToolError(lane);
         if (laneError != null)
         {
-            return (McpToolResults.FromError(laneError), 0);
+            return (McpToolResults.FromError(laneError, http?.TraceIdentifier), 0);
         }
 
         var page = await decisions.ListDecidePageAsync(http.User, null, cancellationToken);
         var pageError = DecisionResultMapper.ToToolError(page);
         if (pageError != null)
         {
-            return (McpToolResults.FromError(pageError), 0);
+            return (McpToolResults.FromError(pageError, http?.TraceIdentifier), 0);
         }
 
         var cards = DecideLaneCategories.Partition(
@@ -192,7 +192,10 @@ internal sealed class ShowDecisionsTool : McpToolDefinition
             visible,
             cores,
             page.Items.Count,
-            new PrivilegedCount(privileged, DecisionsTextSummary.PrivilegedLine(privileged)),
+            new PrivilegedCount(
+                privileged,
+                DecisionsTextSummary.PrivilegedLine(privileged, page.Items.Count, page.NextCursor != null),
+                DecisionsTextSummary.PrivilegedScope(page.NextCursor != null)),
             page.NextCursor,
             baseUrl);
         return (DecisionToolCall.Success(text, structured), page.Items.Count);
@@ -216,5 +219,5 @@ internal sealed record ShowDecisionsContent(
     string? NextCursor,
     string? ConsoleBaseUrl);
 
-/// <summary>The FR-04 reduction of page 1: how many items were taken out, and the line that stands for them.</summary>
-internal sealed record PrivilegedCount(int Count, string Text);
+/// <summary>The FR-04 reduction of page 1: how many items were taken out, the line that stands for them, and its <c>scope</c> ('firstPage' when the lane continues after page 1, so the lane may hold more; 'lane' when page 1 is the whole lane).</summary>
+internal sealed record PrivilegedCount(int Count, string Text, string Scope);

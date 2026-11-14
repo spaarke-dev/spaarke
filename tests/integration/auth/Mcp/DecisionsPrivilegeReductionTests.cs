@@ -45,10 +45,77 @@ public sealed class DecisionsPrivilegeReductionTests
         structured.GetProperty("cores").EnumerateObject().Select(c => Guid.Parse(c.Name))
             .Should().NotContain(seed.PrivilegedMatterId, "a matter only privileged rows sit in is not named");
 
-        var line = $"{DecideLaneSeed.PrivilegedOnPageOne} privileged items — open to review";
+        // The lane continues after page 1, so the count is page 1's and says so (a later page may hold more).
+        var line = $"{DecideLaneSeed.PrivilegedOnPageOne} privileged items among the first 50 — more of the lane may be privileged; open to review";
+        structured.GetProperty("privileged").GetProperty("scope").GetString().Should().Be("firstPage");
         structured.GetProperty("privileged").GetProperty("count").GetInt32().Should().Be(DecideLaneSeed.PrivilegedOnPageOne);
         structured.GetProperty("privileged").GetProperty("text").GetString().Should().Be(line);
         Text(result).Should().Contain(line);
+    }
+
+    [Fact]
+    public async Task ShowDecisions_APrivilegedItemPastPageOne_IsNotCounted_SoTheLineAndScopeSayTheCountIsTheFirstPages()
+    {
+        // One more privileged item at Console row 145. Page 1 (rows 1-50) cannot see it, so its count stays 13 and must not read as the lane's.
+        var seed = DecideLaneSeed.Build(latePrivileged: true);
+        seed.Privileged.Should().HaveCount(DecideLaneSeed.PrivilegedOnPageOne + 1);
+        await using var host = await DecisionToolsTestHost.StartAsync(new DecideLaneDouble(seed));
+
+        var result = await host.CallAsync(ShowDecisionsTool.Name, null, Token);
+
+        var privileged = result.GetProperty("structuredContent").GetProperty("privileged");
+        privileged.GetProperty("count").GetInt32().Should().Be(DecideLaneSeed.PrivilegedOnPageOne);
+        privileged.GetProperty("scope").GetString().Should().Be("firstPage");
+        privileged.GetProperty("text").GetString().Should().Be(
+            "13 privileged items among the first 50 — more of the lane may be privileged; open to review");
+        Text(result).Should().Contain("13 privileged items among the first 50 — more of the lane may be privileged; open to review");
+        result.GetRawText().Should().NotContain(DecideLaneSeed.Marker, "FR-04: still no privileged detail");
+    }
+
+    [Fact]
+    public async Task ShowDecisions_WithNoPrivilegedItemOnPageOne_ButMorePages_StillSaysSo_SinceALaterPageMayHoldSome()
+    {
+        // Only the late item is flagged: page 1 holds none, and the line must still appear because the lane continues.
+        var seed = DecideLaneSeed.Build(latePrivileged: true);
+        var lateOnly = seed.Groups[3].Items[DecideLaneSeed.LatePrivilegedIndexInC].SignalId;
+        await using var host = await DecisionToolsTestHost.StartAsync(new DecideLaneDouble(seed with { Privileged = new HashSet<Guid> { lateOnly } }));
+
+        var result = await host.CallAsync(ShowDecisionsTool.Name, null, Token);
+
+        var privileged = result.GetProperty("structuredContent").GetProperty("privileged");
+        privileged.GetProperty("count").GetInt32().Should().Be(0);
+        privileged.GetProperty("scope").GetString().Should().Be("firstPage");
+        privileged.GetProperty("text").GetString().Should().Be(
+            "0 privileged items among the first 50 — more of the lane may be privileged; open to review");
+        Text(result).Should().Contain("0 privileged items among the first 50 — more of the lane may be privileged; open to review");
+    }
+
+    [Fact]
+    public async Task ShowDecisions_WhenPageOneIsTheWholeLane_TheCountIsTheLanes_WithTheUnqualifiedLine_AndNoLineWhenNoneArePrivileged()
+    {
+        var seed = DecideLaneSeed.Build();
+
+        // The lane is matter P only (10 items, all privileged): one page, no cursor.
+        await using (var host = await DecisionToolsTestHost.StartAsync(new DecideLaneDouble(seed with { Groups = [seed.Groups[0]] })))
+        {
+            var result = await host.CallAsync(ShowDecisionsTool.Name, null, Token);
+
+            result.GetProperty("structuredContent").TryGetProperty("nextCursor", out _).Should().BeFalse();
+            var privileged = result.GetProperty("structuredContent").GetProperty("privileged");
+            privileged.GetProperty("scope").GetString().Should().Be("lane");
+            privileged.GetProperty("text").GetString().Should().Be("10 privileged items — open to review");
+            Text(result).Should().Contain("10 privileged items — open to review").And.NotContain("among the first");
+        }
+
+        // The lane is the first 20 items of matter B: one page, nothing privileged, so no line at all.
+        var b = seed.Groups[2] with { Items = seed.Groups[2].Items.Take(20).ToList() };
+        await using (var host = await DecisionToolsTestHost.StartAsync(new DecideLaneDouble(seed with { Groups = [b] })))
+        {
+            var result = await host.CallAsync(ShowDecisionsTool.Name, null, Token);
+
+            result.GetProperty("structuredContent").GetProperty("privileged").GetProperty("scope").GetString().Should().Be("lane");
+            Text(result).Should().NotContain("privileged items", "a whole lane with none privileged needs no line");
+        }
     }
 
     [Fact]

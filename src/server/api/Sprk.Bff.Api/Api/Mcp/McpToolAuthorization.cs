@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using System.Text.Json.Nodes;
 using Microsoft.AspNetCore.Authorization;
 using ModelContextProtocol.Server;
 using Sprk.Bff.Api.Infrastructure.Authentication;
@@ -160,7 +161,7 @@ public static class McpToolAuthorization
     /// Throws <see cref="InvalidOperationException"/> when <paramref name="tool"/> (built by <paramref name="definition"/>) breaks
     /// the per-tool rule: no <c>[Authorize]</c> on the tool class; enforced <c>[Authorize]</c> metadata that differs from the
     /// class's own; anonymity metadata; a policy outside <see cref="AllowedToolPolicies"/>; an authentication scheme named on the
-    /// attribute; no explicit <c>ReadOnly</c>; or no title. Called by <see cref="McpToolCatalog"/> for every tool at startup.
+    /// attribute; no explicit <c>ReadOnly</c>; no title; or a tool that is not read-only and is not app-only (O-14). Called by <see cref="McpToolCatalog"/> for every tool at startup.
     /// </summary>
     public static void ValidateTool(McpServerTool tool, Type definition)
     {
@@ -217,7 +218,23 @@ public static class McpToolAuthorization
         {
             throw new InvalidOperationException($"{where} has no title (FR-03).");
         }
+
+        // O-14: no model-callable write tool in v1. A tool that is not read-only must be app-only: _meta.ui.visibility is exactly
+        // ["app"]. A missing, empty or wider list (a tool with no visibility is model-visible by default) refuses startup.
+        if (tool.ProtocolTool.Annotations?.ReadOnlyHint == false && !IsAppOnly(tool.ProtocolTool.Meta))
+        {
+            throw new InvalidOperationException(
+                $"{where} is not read-only, so it must be app-only: set _meta.ui.visibility to exactly [\"app\"] (O-14: no model-callable write tool).");
+        }
     }
+
+    private static bool IsAppOnly(JsonObject? meta) =>
+        meta?["ui"] is JsonObject ui
+        && ui["visibility"] is JsonArray visibility
+        && visibility.Count == 1
+        && visibility[0] is JsonValue only
+        && only.TryGetValue<string>(out var audience)
+        && string.Equals(audience, "app", StringComparison.Ordinal);
 
     private static bool IsAnonymityMetadata(object metadata) => metadata.GetType().GetInterface(AnonymityMetadataInterface) is not null;
 

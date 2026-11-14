@@ -39,7 +39,7 @@ internal sealed class GetDecisionPlanTool : McpToolDefinition
 
     public override McpServerTool Create(IServiceProvider services) =>
         McpServerTool.Create(
-            RunAsync,
+            HandleAsync,
             new McpServerToolCreateOptions
             {
                 Services = services,
@@ -55,8 +55,21 @@ internal sealed class GetDecisionPlanTool : McpToolDefinition
                     + "or recording a decision (use spaarke_complete_decision). Called by the Spaarke decisions widget, not by the model.",
             });
 
-    internal static async Task<CallToolResult> RunAsync(
+    /// <summary>The handler the SDK binds: <see cref="RunAsync"/> inside the one per-call telemetry line (NFR-05; rows: 1 when the plan was returned, else 0).</summary>
+    internal static Task<CallToolResult> HandleAsync(
         [Description("The id (GUID) of the Work Item to open, from the Decide lane.")] Guid signalId,
+        IHttpContextAccessor accessor,
+        IDecisionCapability decisions,
+        TimeProvider time,
+        ILogger<GetDecisionPlanTool> logger,
+        CancellationToken cancellationToken) =>
+        DecisionToolCall.LogAroundAsync(
+            logger, time, ToolName, accessor.HttpContext,
+            () => RunAsync(signalId, accessor, decisions, cancellationToken),
+            result => result.IsError == true ? 0 : 1);
+
+    internal static async Task<CallToolResult> RunAsync(
+        Guid signalId,
         IHttpContextAccessor accessor,
         IDecisionCapability decisions,
         CancellationToken cancellationToken)
@@ -64,7 +77,7 @@ internal sealed class GetDecisionPlanTool : McpToolDefinition
         var http = accessor.HttpContext;
         if (!PlanAndLookupToolSupport.HasCaller(http))
         {
-            return McpToolResults.FromError(DecisionResultMapper.ToToolError(DecisionPlanReadResult.UserContextRequired)!);
+            return McpToolResults.FromError(DecisionResultMapper.ToToolError(DecisionPlanReadResult.UserContextRequired)!, http?.TraceIdentifier);
         }
 
         // The plan first: a refusal (not readable by the caller, plan does not resolve, access unavailable) is the REST route's answer and
@@ -73,7 +86,7 @@ internal sealed class GetDecisionPlanTool : McpToolDefinition
         var planError = DecisionResultMapper.ToToolError(plan);
         if (planError != null)
         {
-            return McpToolResults.FromError(planError);
+            return McpToolResults.FromError(planError, http!.TraceIdentifier);
         }
 
         var suppression = await decisions.GetSuppressionAsync(http, signalId, cancellationToken);

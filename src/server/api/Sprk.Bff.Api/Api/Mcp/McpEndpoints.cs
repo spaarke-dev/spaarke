@@ -1,5 +1,7 @@
 using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Options;
+using Sprk.Bff.Api.Api.Mcp.LegalOperations;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.DI;
 
@@ -44,6 +46,13 @@ public static class McpEndpoints
         // every tool, so a tool that breaks the per-tool rule stops startup. Switched off, it is the null catalog (validates nothing).
         _ = app.Services.GetRequiredService<McpToolCatalog>();
 
+        // One startup warning when the server is on but this build carries no widget (a local or CI build that skipped the widget build):
+        // tools/call still works, but resources/read answers an error and Copilot shows no decisions widget.
+        WarnIfWidgetMissing(
+            app.Services.GetRequiredService<ILoggerFactory>().CreateLogger(typeof(McpEndpoints).FullName!),
+            app.Services.GetRequiredService<IOptions<McpOptions>>().Value.Enabled,
+            DecisionsWidgetResource.IsEmbedded);
+
         // The policy name is a literal on purpose: the health-probe policy guard (RouteAuthorizationGuardTests) reads only string literals.
         // Keep it equal to RateLimitingModule.McpPolicyName.
         app.MapMcp(LegalOperationsRoute)
@@ -54,6 +63,18 @@ public static class McpEndpoints
             .WithMetadata(new McpAreaMetadata(LegalOperationsArea))
             .AddEndpointFilter(DisableResponseBufferingAsync)
             .RequireMcpEnabled();
+    }
+
+    /// <summary>One Warning when the server is enabled but this build embeds no widget (<paramref name="embedded"/> false); nothing otherwise.</summary>
+    internal static void WarnIfWidgetMissing(ILogger logger, bool enabled, bool embedded)
+    {
+        if (enabled && !embedded)
+        {
+            logger.LogWarning(
+                "Mcp:Enabled is true but the decisions widget is not embedded in this build ({Resource}); resources/read will fail and hosts will show no widget. "
+                + "Build src/client/widgets/spaarke-decisions before publishing the BFF.",
+                DecisionsWidgetResource.Uri);
+        }
     }
 
     // Same call WorkspaceMatterEndpoints.cs:196-200 makes for its streamed response: the transport may answer with an SSE stream.

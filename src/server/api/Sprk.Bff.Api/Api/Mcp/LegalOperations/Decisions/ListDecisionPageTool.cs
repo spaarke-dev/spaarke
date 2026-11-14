@@ -100,7 +100,7 @@ internal sealed class ListDecisionPageTool : McpToolDefinition
         var rows = 0;
         try
         {
-            var result = await RunAsync(request, http, decisions, cancellationToken);
+            var result = await RunAsync(request.Params?.Arguments, http, decisions, cancellationToken);
             rows = result.Rows;
             outcome = DecisionToolCall.OutcomeOf(result.Result);
             return result.Result;
@@ -111,31 +111,33 @@ internal sealed class ListDecisionPageTool : McpToolDefinition
         }
     }
 
-    private static async Task<(CallToolResult Result, int Rows)> RunAsync(
-        RequestContext<CallToolRequestParams> request, HttpContext? http, IDecisionCapability decisions, CancellationToken cancellationToken)
+    internal static async Task<(CallToolResult Result, int Rows)> RunAsync(
+        IDictionary<string, JsonElement>? arguments, HttpContext? http, IDecisionCapability decisions, CancellationToken cancellationToken)
     {
-        if (!DecisionToolCall.TryReadSingleArgument(request, Name, CursorArgument, out var argument, out var argumentError))
+        if (!DecisionToolCall.TryReadSingleArgument(arguments, Name, CursorArgument, http?.TraceIdentifier, out var argument, out var argumentError))
         {
             return (argumentError!, 0);
         }
 
-        // A cursor that is not a string cannot be one this server wrote: the same answer as one that does not decode.
-        // (Null checks are written == / != here, not as patterns: the MCP guard's AI-internal-type scan reads the keyword as a type name.)
-        if (argument.HasValue && argument.Value.ValueKind != JsonValueKind.String)
+        // A cursor that is not a string, or is empty or blank, cannot be one this server wrote ("no cursor" is the argument left out or
+        // null): the same answer as one that does not decode. (The capability itself treats "" as page 1, so the tool must refuse it
+        // before the call.) Null checks are written == / != here, not as patterns: the MCP guard's AI-internal-type scan reads the keyword as a type name.
+        if (argument.HasValue
+            && (argument.Value.ValueKind != JsonValueKind.String || string.IsNullOrWhiteSpace(argument.Value.GetString())))
         {
-            return (McpToolResults.FromError(DecisionResultMapper.ToToolError(DecidePageResult.CursorInvalid)!), 0);
+            return (McpToolResults.FromError(DecisionResultMapper.ToToolError(DecidePageResult.CursorInvalid)!, http?.TraceIdentifier), 0);
         }
 
         if (http == null || !DecisionCapability.HasSignedInCaller(http.User))
         {
-            return (McpToolResults.FromError(DecisionResultMapper.ToToolError(DecidePageResult.UserContextRequired)!), 0);
+            return (McpToolResults.FromError(DecisionResultMapper.ToToolError(DecidePageResult.UserContextRequired)!, http?.TraceIdentifier), 0);
         }
 
         var page = await decisions.ListDecidePageAsync(http.User, argument?.GetString(), cancellationToken);
         var pageError = DecisionResultMapper.ToToolError(page);
         if (pageError != null)
         {
-            return (McpToolResults.FromError(pageError), 0);
+            return (McpToolResults.FromError(pageError, http?.TraceIdentifier), 0);
         }
 
         var text = page.NextCursor == null

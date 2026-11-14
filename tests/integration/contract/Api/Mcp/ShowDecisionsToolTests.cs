@@ -7,11 +7,14 @@
 // capability's own reads, ordering and privilege derivation (tasks 015 and 018, DecideLanePagingTests); the category partition's parity
 // with the Console (DecideLaneCategoriesParityTests and laneCountFilters.parity.test.ts, one shared fixture).
 
+using System.Security.Claims;
 using System.Text;
 using System.Text.Json;
 using FluentAssertions;
+using Microsoft.AspNetCore.Http;
 using Sprk.Bff.Api.Api.Mcp.LegalOperations.Decisions;
 using Sprk.Bff.Api.Api.Signals;
+using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Services.Signals;
 using Xunit;
 
@@ -123,6 +126,63 @@ public sealed class ShowDecisionsToolTests
 
         lane.LaneReads.Should().Be(0);
         lane.PageReads.Should().Be(0);
+    }
+
+    // ---- the caller (FR-10) --------------------------------------------------------------------------------------------------------------
+
+    [Fact]
+    public async Task BothTools_ReadAsTheRequestsCaller_HandingTheCapabilityThePrincipalOfTheRequestsToken()
+    {
+        var oid = Guid.Parse("0220cccc-0000-4000-8000-000000000022");
+        var lane = new DecideLaneDouble(DecideLaneSeed.Build());
+        await using var host = await DecisionToolsTestHost.StartAsync(lane);
+        var token = DecisionToolsTestHost.MintToken(oid);
+
+        await host.CallAsync(ShowDecisionsTool.Name, null, token);
+        await host.CallAsync(ListDecisionPageTool.Name, null, token);
+
+        lane.Users.Should().HaveCount(3, "show reads the lane and page 1; the paging tool reads one page");
+        lane.Users.Should().AllSatisfy(user =>
+        {
+            user.Should().NotBeNull();
+            user!.Identity!.IsAuthenticated.Should().BeTrue();
+            var claim = user.FindFirst("oid") ?? user.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier");
+            claim!.Value.Should().Be(oid.ToString(), "the capability reads as the request's own caller, not a service identity");
+        });
+    }
+
+    [Fact]
+    public async Task BothTools_WithNoContextOrAnUnauthenticatedPrincipal_AreUserContextRequired_AndCallNoCapabilityMember()
+    {
+        var lane = new DecideLaneDouble(DecideLaneSeed.Build());
+        var anonymous = new DefaultHttpContext { User = new ClaimsPrincipal(new ClaimsIdentity()) };
+        var signedIn = new DefaultHttpContext
+        {
+            User = new ClaimsPrincipal(new ClaimsIdentity([new Claim("oid", Guid.NewGuid().ToString())], authenticationType: "test")),
+        };
+
+        foreach (HttpContext? http in new[] { null, anonymous })
+        {
+            var show = await ShowDecisionsTool.RunAsync(null, http, lane, DecisionToolsTestHost.EnvironmentUrl, CancellationToken.None);
+            var page = await ListDecisionPageTool.RunAsync(null, http, lane, CancellationToken.None);
+
+            foreach (var result in new[] { show.Result, page.Result })
+            {
+                result.IsError.Should().BeTrue();
+                var body = result.StructuredContent!.Value;
+                body.GetProperty("reasonCode").GetString().Should().Be(DataverseUserClientErrorCodes.UserContextRequired);
+                body.GetProperty("status").GetInt32().Should().Be(401);
+            }
+        }
+
+        lane.LaneReads.Should().Be(0);
+        lane.PageReads.Should().Be(0);
+        lane.Users.Should().BeEmpty("no principal was ever handed to the capability, so nothing fell back to an app-only read");
+
+        // The control: a signed-in context is not refused by the same guard.
+        var ok = await ListDecisionPageTool.RunAsync(null, signedIn, lane, CancellationToken.None);
+        ok.Result.IsError.Should().NotBe(true);
+        lane.Users.Should().ContainSingle().Which.Should().BeSameAs(signedIn.User);
     }
 
     // ---- counts and the text (FR-03, FR-14) -----------------------------------------------------------------------------------------------
@@ -247,6 +307,7 @@ public sealed class ShowDecisionsToolTests
     [Theory]
     [InlineData("\"not-a-cursor\"")]
     [InlineData("\"\"")]
+    [InlineData("\"   \"")]
     [InlineData("42")]
     public async Task ThePagingTool_AMalformedCursor_IsAnIsErrorResult_CursorInvalid(string cursorJson)
     {
@@ -325,7 +386,9 @@ public sealed class ShowDecisionsToolTests
     {
         result.GetProperty("isError").GetBoolean().Should().BeTrue("a read failure is a tool result, not a transport error");
         var error = result.GetProperty("structuredContent");
-        error.EnumerateObject().Select(p => p.Name).Should().BeEquivalentTo(["reasonCode", "message"], "the error only: no items, no counts");
+        error.EnumerateObject().Select(p => p.Name).Should().Equal(["reasonCode", "message", "status", "correlationId"], "the error only: no items, no counts");
+        error.GetProperty("status").GetInt32().Should().Be(503, "the status the worklist route answers");
+        error.GetProperty("correlationId").GetString().Should().NotBeNullOrWhiteSpace();
         error.GetProperty("reasonCode").GetString().Should().Be(SignalReadEndpoints.WorklistUnavailableReasonCode);
         result.GetRawText().Should().NotContain(internalReason, "the worklist route's 503 hides the internal reason; so does the tool");
         result.GetRawText().Should().NotContain("Subject ").And.NotContain("Alpha matter");

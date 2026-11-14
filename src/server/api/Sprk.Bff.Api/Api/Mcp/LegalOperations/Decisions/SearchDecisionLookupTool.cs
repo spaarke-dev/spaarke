@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Text.Json;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using ModelContextProtocol.Protocol;
@@ -33,7 +34,7 @@ internal sealed class SearchDecisionLookupTool : McpToolDefinition
 
     public override McpServerTool Create(IServiceProvider services) =>
         McpServerTool.Create(
-            RunAsync,
+            HandleAsync,
             new McpServerToolCreateOptions
             {
                 Services = services,
@@ -49,25 +50,44 @@ internal sealed class SearchDecisionLookupTool : McpToolDefinition
                     + "(use spaarke_complete_decision). Called by the Spaarke decisions widget, not by the model.",
             });
 
-    internal static async Task<CallToolResult> RunAsync(
+    /// <summary>The handler the SDK binds: <see cref="RunAsync"/> inside the one per-call telemetry line (NFR-05; rows: the candidate count).</summary>
+    internal static Task<CallToolResult> HandleAsync(
         [Description("The id (GUID) of the Work Item whose decision plan names the parameter.")] Guid signalId,
         IHttpContextAccessor accessor,
         IDecisionLookupSearch search,
+        TimeProvider time,
+        ILogger<SearchDecisionLookupTool> logger,
         CancellationToken cancellationToken,
         [Description("The code of a person or lookup parameter of an action in the item's decision plan.")] string? parameterCode = null,
-        [Description("The text typed so far; at most 100 characters.")] string? query = null)
+        [Description("The text typed so far; at most 100 characters.")] string? query = null) =>
+        DecisionToolCall.LogAroundAsync(
+            logger, time, ToolName, accessor.HttpContext,
+            () => RunAsync(signalId, accessor, search, cancellationToken, parameterCode, query),
+            result => result.StructuredContent is { ValueKind: JsonValueKind.Object } body
+                      && body.TryGetProperty("candidates", out var candidates)
+                      && candidates.ValueKind == JsonValueKind.Array
+                ? candidates.GetArrayLength()
+                : 0);
+
+    internal static async Task<CallToolResult> RunAsync(
+        Guid signalId,
+        IHttpContextAccessor accessor,
+        IDecisionLookupSearch search,
+        CancellationToken cancellationToken,
+        string? parameterCode = null,
+        string? query = null)
     {
         var http = accessor.HttpContext;
         if (!PlanAndLookupToolSupport.HasCaller(http))
         {
-            return McpToolResults.FromError(DecisionResultMapper.ToToolError(DecisionLookupResult.UserContextRequired)!);
+            return McpToolResults.FromError(DecisionResultMapper.ToToolError(DecisionLookupResult.UserContextRequired)!, http?.TraceIdentifier);
         }
 
         var result = await search.SearchAsync(http, signalId, parameterCode, query, cancellationToken);
         var error = DecisionResultMapper.ToToolError(result);
         if (error != null)
         {
-            return McpToolResults.FromError(error);
+            return McpToolResults.FromError(error, http!.TraceIdentifier);
         }
 
         // The REST body unchanged; the summary is a count only (ADR-015).

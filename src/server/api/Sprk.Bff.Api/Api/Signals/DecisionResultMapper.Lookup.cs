@@ -38,7 +38,8 @@ public static partial class DecisionResultMapper
             DecisionLookupOutcome.UserContextRequired => ToToolError(UserContextRequiredProblem),
             DecisionLookupOutcome.NotAllowed => ToToolError(result.Access),
             DecisionLookupOutcome.Refused => ToToolError(PlanRefusedProblem),
-            DecisionLookupOutcome.InvalidParameter => ToToolError(LookupInvalidParameterProblem),
+            // The lookup's own text (the REST route's detail: fixed, no record text), not the commit route's message for the same code.
+            DecisionLookupOutcome.InvalidParameter => ToToolError(LookupInvalidParameterProblem) with { Message = LookupInvalidParameterProblem.Detail },
             _ => ToToolError(AccessUnavailableProblem),
         };
 }

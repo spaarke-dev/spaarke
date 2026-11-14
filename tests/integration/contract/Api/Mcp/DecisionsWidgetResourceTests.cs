@@ -136,4 +136,25 @@ public sealed class DecisionsWidgetResourceTests
         using var reader = new StreamReader(stream);
         return reader.ReadToEnd();
     }
+
+    // ---- the startup warning when the build embeds no widget ---------------------------------------------------------------
+
+    [Theory]
+    [InlineData(true, false, 1)]  // enabled, no widget in this build: one Warning naming the fix
+    [InlineData(true, true, 0)]   // enabled, widget embedded: nothing
+    [InlineData(false, false, 0)] // switched off: nothing (the route answers 503 anyway)
+    public void WarnIfWidgetMissing_LogsOneWarningNamingTheFix_OnlyWhenEnabledAndTheWidgetIsNotEmbedded(bool enabled, bool embedded, int warnings)
+    {
+        var logs = new DecisionToolsTestHost.CapturingLoggerProvider();
+
+        McpEndpoints.WarnIfWidgetMissing(logs.CreateLogger("test"), enabled, embedded);
+
+        var entries = logs.Entries.ToList();
+        entries.Should().HaveCount(warnings);
+        foreach (var entry in entries)
+        {
+            entry.Level.Should().Be(Microsoft.Extensions.Logging.LogLevel.Warning);
+            entry.Message.Should().Contain("Build src/client/widgets/spaarke-decisions before publishing").And.Contain(WidgetUri);
+        }
+    }
 }

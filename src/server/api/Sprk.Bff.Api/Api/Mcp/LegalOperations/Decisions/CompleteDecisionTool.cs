@@ -48,7 +48,7 @@ public sealed class CompleteDecisionTool : McpToolDefinition
 
     public override McpServerTool Create(IServiceProvider services) =>
         McpServerTool.Create(
-            CompleteAsync,
+            HandleAsync,
             new McpServerToolCreateOptions
             {
                 Services = services,
@@ -69,6 +69,21 @@ public sealed class CompleteDecisionTool : McpToolDefinition
             });
 
     /// <summary>
+    /// The handler the SDK binds: <see cref="CompleteAsync"/> inside the one per-call telemetry line (NFR-05; rows 0). The line carries
+    /// the tool, outcome or reason code, latency and correlation id only: no signal id, review, token or claim.
+    /// </summary>
+    internal static Task<CallToolResult> HandleAsync(
+        Guid signalId,
+        DecisionReview review,
+        IHttpContextAccessor accessor,
+        IDecisionCapability decisions,
+        TimeProvider time,
+        ILogger<CompleteDecisionTool> logger,
+        CancellationToken ct) =>
+        DecisionToolCall.LogAroundAsync(
+            logger, time, ToolName, accessor.HttpContext, () => CompleteAsync(signalId, review, accessor, decisions, ct), _ => 0);
+
+    /// <summary>
     /// One call. <paramref name="decisions"/> and <paramref name="accessor"/> are resolved from the request's own service provider on every
     /// call (the tool holds no state); <paramref name="review"/> is bound exactly as the REST route binds its body.
     /// </summary>
@@ -84,7 +99,7 @@ public sealed class CompleteDecisionTool : McpToolDefinition
         var error = DecisionResultMapper.ToToolError(result);
         if (error != null)
         {
-            return McpToolResults.FromError(error);
+            return McpToolResults.FromError(error, accessor.HttpContext?.TraceIdentifier);
         }
 
         return new CallToolResult

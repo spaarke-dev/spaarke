@@ -217,6 +217,9 @@ internal sealed class DecideLaneDouble : IDecisionCapability
     /// <summary>When set, <see cref="ListDecidePageAsync"/> answers it.</summary>
     public DecidePageResult? PageFailure { get; set; }
 
+    /// <summary>The principal each capability read was handed, in call order (null when a call passed none).</summary>
+    public ConcurrentQueue<ClaimsPrincipal?> Users { get; } = new();
+
     public int LaneReads => Volatile.Read(ref _laneReads);
 
     public int PageReads => Volatile.Read(ref _pageReads);
@@ -224,6 +227,7 @@ internal sealed class DecideLaneDouble : IDecisionCapability
     public Task<SignalReadResult> ListDecideAsync(ClaimsPrincipal? user, CancellationToken ct, WorklistSet set = WorklistSet.Lanes)
     {
         Interlocked.Increment(ref _laneReads);
+        Users.Enqueue(user);
         return Task.FromResult(LaneFailure ?? new SignalReadResult(
             SignalReadOutcome.Ok,
             new WorklistResponse("lanes", [new WorklistLaneGroups("Decide", Groups.ToList()), new WorklistLaneGroups("Do", DoLane)])));
@@ -232,13 +236,14 @@ internal sealed class DecideLaneDouble : IDecisionCapability
     public Task<DecidePageResult> ListDecidePageAsync(ClaimsPrincipal? user, string? cursor, CancellationToken ct)
     {
         Interlocked.Increment(ref _pageReads);
+        Users.Enqueue(user);
         if (PageFailure is not null)
         {
             return Task.FromResult(PageFailure);
         }
 
         DecideCursor? after = null;
-        if (cursor is not null)
+        if (!string.IsNullOrEmpty(cursor)) // the capability's own rule (DecisionCapability.ListDecidePageAsync): "" is page 1
         {
             if (!DecideCursor.TryDecode(cursor, out var decoded))
             {
@@ -289,7 +294,11 @@ internal sealed record DecideLaneSeed(
 
     private static readonly string?[] WorkTypeCycle = [null, "askOutsideCounsel", "approveOrRebudget", "chaseReply", null];
 
-    public static DecideLaneSeed Build()
+    /// <summary>The one extra privileged item <see cref="Build"/> adds past page 1 (Charlie matter, item 10: Console row 145).</summary>
+    public const int LatePrivilegedIndexInC = 10;
+
+    /// <param name="latePrivileged">Also flags item <see cref="LatePrivilegedIndexInC"/> of C (a row past page 1; privilege is derived per page, so the first page cannot count it).</param>
+    public static DecideLaneSeed Build(bool latePrivileged = false)
     {
         var start = DateTimeOffset.Parse("2026-09-01T00:00:00Z", System.Globalization.CultureInfo.InvariantCulture);
         var extras = new Dictionary<Guid, WorklistItemExtras>();
@@ -344,7 +353,7 @@ internal sealed record DecideLaneSeed(
         var p = Group("P", $"{Marker} privileged matter", $"{Marker}-NUM", 10, _ => true);
         var a = Group("A", "Alpha matter", "MAT-0001", 60, n => n is 2 or 5 or 7);
         var b = Group("B", "Bravo matter", "MAT-0002", 65, _ => false);
-        var c = Group("C", "Charlie matter", "MAT-0003", 65, _ => false);
+        var c = Group("C", "Charlie matter", "MAT-0003", 65, n => latePrivileged && n == LatePrivilegedIndexInC);
 
         var doRow = new WorklistItemRow(
             Guid.NewGuid(), "Do", "Active", "Do title", "Do subject", "Do reason", "chaseReply", "late", start, null, null, null);

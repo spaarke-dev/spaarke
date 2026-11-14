@@ -39,12 +39,10 @@ internal static class DecisionToolCall
     /// <c>additionalProperties: false</c>; this is what makes it true, so an invented argument is refused with a fix, never ignored.
     /// </summary>
     public static bool TryReadSingleArgument(
-        RequestContext<CallToolRequestParams> request, string toolName, string name, out JsonElement? value, out CallToolResult? error)
+        IDictionary<string, JsonElement>? arguments, string toolName, string name, string? correlationId, out JsonElement? value, out CallToolResult? error)
     {
-        ArgumentNullException.ThrowIfNull(request);
         value = null;
         error = null;
-        var arguments = request.Params?.Arguments;
         if (arguments is null)
         {
             return true;
@@ -52,7 +50,7 @@ internal static class DecisionToolCall
 
         if (arguments.Keys.Any(k => !string.Equals(k, name, StringComparison.Ordinal)))
         {
-            error = InvalidArgument($"{toolName} takes one optional argument, '{name}', and nothing else. Send the call again with only '{name}', or with no arguments.");
+            error = InvalidArgument($"{toolName} takes one optional argument, '{name}', and nothing else. Send the call again with only '{name}', or with no arguments.", correlationId);
             return false;
         }
 
@@ -66,11 +64,10 @@ internal static class DecisionToolCall
 
     /// <summary>An argument error: the decision slice's <c>ontology.decision.invalid_parameter</c> (400) with a fix-the-call message of
     /// fixed text (it names the argument and its valid values only; never record text).</summary>
-    public static CallToolResult InvalidArgument(string message) =>
-        McpToolResults.FromError(DecisionResultMapper.ToToolError(DecisionCommitReasons.InvalidParameter, StatusCodes.Status400BadRequest) with
-        {
-            Message = message,
-        });
+    public static CallToolResult InvalidArgument(string message, string? correlationId) =>
+        McpToolResults.FromError(
+            DecisionResultMapper.ToToolError(DecisionCommitReasons.InvalidParameter, StatusCodes.Status400BadRequest) with { Message = message },
+            correlationId);
 
     /// <summary>A successful result: <paramref name="text"/> as <c>content</c>, <paramref name="structured"/> as <c>structuredContent</c>.</summary>
     public static CallToolResult Success(string text, object structured) =>
@@ -97,4 +94,28 @@ internal static class DecisionToolCall
         logger.LogInformation(
             "MCP tool {ToolName} completed: outcome {Outcome}, {RowCount} rows, {ElapsedMs} ms, correlation {CorrelationId}.",
             toolName, outcome, rowCount, (long)elapsed.TotalMilliseconds, correlationId);
+
+    /// <summary>
+    /// Runs <paramref name="run"/> and writes the one telemetry line in <c>finally</c> (so a thrown exception is logged as
+    /// <see cref="Exception"/> and rethrown): the wrapper the plan, lookup and complete tools share. <paramref name="rows"/> reads the
+    /// row count from the result (a count only, never the rows).
+    /// </summary>
+    public static async Task<CallToolResult> LogAroundAsync(
+        ILogger logger, TimeProvider time, string toolName, HttpContext? http, Func<Task<CallToolResult>> run, Func<CallToolResult, int> rows)
+    {
+        var started = time.GetTimestamp();
+        var outcome = Exception;
+        var rowCount = 0;
+        try
+        {
+            var result = await run();
+            outcome = OutcomeOf(result);
+            rowCount = rows(result);
+            return result;
+        }
+        finally
+        {
+            LogCompleted(logger, toolName, outcome, rowCount, time.GetElapsedTime(started), http?.TraceIdentifier);
+        }
+    }
 }

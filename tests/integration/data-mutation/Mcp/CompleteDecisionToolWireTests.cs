@@ -116,6 +116,59 @@ public sealed class CompleteDecisionToolWireTests
         result.GetRawText().Should().NotContain("Acme v. Beta", "ADR-015: no record text in the result");
     }
 
+    [Fact]
+    public async Task ToolsCall_AFailedCommit_IsAnIsErrorResult_WithTheRestStatus_ACorrelationId_AndThePartialFacts()
+    {
+        var failed = new DecisionCommitResult
+        {
+            Status = DecisionCommitStatus.Failed,
+            ReasonCode = DecisionCommitReasons.StepFailed,
+            ReviewId = ReviewId,
+            FailedStep = 3,
+            Landed = [new DecisionCommitRef("sprk_budgetrevision", RecordId)],
+            Resumable = true,
+            Detail = "Acme v. Beta record text that must not be echoed",
+        };
+        await using var host = await WireHost.StartAsync(_ => failed);
+
+        var result = await host.RpcAsync("tools/call", new { name = "spaarke_complete_decision", arguments = new { signalId = SignalId, review = ReviewBody } });
+
+        result.GetProperty("isError").GetBoolean().Should().BeTrue();
+        var error = result.GetProperty("structuredContent");
+        error.EnumerateObject().Select(p => p.Name).Should().Equal("reasonCode", "message", "status", "correlationId", "partial");
+        error.GetProperty("reasonCode").GetString().Should().Be(DecisionCommitReasons.StepFailed);
+        error.GetProperty("status").GetInt32().Should().Be(StatusCodes.Status500InternalServerError, "the status the REST route answers for the same failure");
+        error.GetProperty("correlationId").GetString().Should().Be(
+            host.Capability.ReceivedTraceId, "the support reference is the request's TraceIdentifier, the value REST ProblemDetails carry as correlationId");
+        error.GetProperty("partial").GetProperty("failedStep").GetInt32().Should().Be(3);
+        error.GetProperty("partial").GetProperty("resumable").GetBoolean().Should().BeTrue();
+        error.GetProperty("partial").GetProperty("landed")[0].GetProperty("entity").GetString().Should().Be("sprk_budgetrevision");
+        result.GetRawText().Should().NotContain("Acme v. Beta");
+    }
+
+    [Fact]
+    public async Task ToolsCall_LogsOneTelemetryLinePerCall_WithToolOutcomeLatencyAndCorrelation_AndNoSignalReviewOrText()
+    {
+        var refused = new DecisionCommitResult { Status = DecisionCommitStatus.Conflict, ReasonCode = DecisionCommitReasons.DecidedInInvoiceReview, ReviewId = ReviewId };
+        var calls = 0;
+        await using var host = await WireHost.StartAsync(_ => ++calls == 1 ? DecisionCapabilityRecorded() : refused);
+
+        await host.RpcAsync("tools/call", new { name = "spaarke_complete_decision", arguments = new { signalId = SignalId, review = ReviewBody } });
+        await host.RpcAsync("tools/call", new { name = "spaarke_complete_decision", arguments = new { signalId = SignalId, review = ReviewBody } });
+
+        var lines = host.Logs.Entries.Where(e => e.Category.EndsWith("." + nameof(CompleteDecisionTool), StringComparison.Ordinal)).ToList();
+        lines.Select(e => ((string)e.State["ToolName"]!, (string)e.State["Outcome"]!, (int)e.State["RowCount"]!)).Should().Equal(
+            ("spaarke_complete_decision", "ok", 0),
+            ("spaarke_complete_decision", DecisionCommitReasons.DecidedInInvoiceReview, 0));
+        lines.Should().AllSatisfy(e =>
+        {
+            ((long)e.State["ElapsedMs"]!).Should().BeGreaterThanOrEqualTo(0);
+            ((string?)e.State["CorrelationId"]).Should().NotBeNullOrWhiteSpace();
+        });
+        var logged = string.Join("\n", lines.Select(e => e.Message + " " + string.Join(" ", e.State.Values)));
+        logged.Should().NotContain(SignalId.ToString()).And.NotContain(ReviewId.ToString()).And.NotContain("The firm agreed").And.NotContain("approve-variance");
+    }
+
     private static DecisionCommitResult DecisionCapabilityRecorded() => new()
     {
         Status = DecisionCommitStatus.Recorded,
@@ -135,10 +188,13 @@ public sealed class CompleteDecisionToolWireTests
 
         public HttpContext? ReceivedContext { get; private set; }
 
+        public string? ReceivedTraceId { get; private set; }
+
         public Task<DecisionCommitResult> CommitAsync(HttpContext? http, Guid signalId, DecisionReview review, CancellationToken ct)
         {
             Calls++;
             ReceivedContext = http;
+            ReceivedTraceId = http?.TraceIdentifier;
             SignalId = signalId;
             Review = review;
             return Task.FromResult(script(review));
@@ -161,15 +217,20 @@ public sealed class CompleteDecisionToolWireTests
         private readonly HttpClient _client;
         private readonly Func<HttpContext?> _middlewareContext;
 
-        private WireHost(WebApplication app, HttpClient client, ScriptedCapability capability, Func<HttpContext?> middlewareContext)
+        private WireHost(
+            WebApplication app, HttpClient client, ScriptedCapability capability, Func<HttpContext?> middlewareContext,
+            DecisionToolsTestHost.CapturingLoggerProvider logs)
         {
             _app = app;
             _client = client;
             Capability = capability;
             _middlewareContext = middlewareContext;
+            Logs = logs;
         }
 
         public ScriptedCapability Capability { get; }
+
+        public DecisionToolsTestHost.CapturingLoggerProvider Logs { get; }
 
         public HttpContext? MiddlewareContext => _middlewareContext();
 
@@ -177,7 +238,9 @@ public sealed class CompleteDecisionToolWireTests
         {
             var builder = WebApplication.CreateBuilder();
             builder.WebHost.UseKestrel(kestrel => kestrel.Listen(IPAddress.Loopback, 0));
+            var logs = new DecisionToolsTestHost.CapturingLoggerProvider();
             builder.Logging.ClearProviders();
+            builder.Logging.AddProvider(logs);
             builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
             {
                 ["Mcp:Enabled"] = "true",
@@ -188,6 +251,7 @@ public sealed class CompleteDecisionToolWireTests
             var capability = new ScriptedCapability(script);
             builder.Services.AddHttpContextAccessor();
             builder.Services.AddSingleton<IDecisionCapability>(capability);
+            builder.Services.AddSingleton(TimeProvider.System);
             builder.Services
                 .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
                 .AddJwtBearer(options => options.TokenValidationParameters = new TokenValidationParameters
@@ -214,7 +278,7 @@ public sealed class CompleteDecisionToolWireTests
             await app.StartAsync();
 
             var address = app.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()!.Addresses.First();
-            return new WireHost(app, new HttpClient { BaseAddress = new Uri(address) }, capability, () => middlewareContext);
+            return new WireHost(app, new HttpClient { BaseAddress = new Uri(address) }, capability, () => middlewareContext, logs);
         }
 
         public async ValueTask DisposeAsync()

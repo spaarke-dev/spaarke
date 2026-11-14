@@ -44,7 +44,21 @@ internal static class DecisionsTextSummary
     public const int TopItems = 5;
 
     /// <summary>The one line a privileged Work Item is reduced to (FR-04, ADR-015), with the count of such items.</summary>
-    public static string PrivilegedLine(int count) => $"{count.ToString(CultureInfo.InvariantCulture)} privileged items — open to review";
+    public static string PrivilegedLine(int count, int pageItemCount, bool morePages) =>
+        morePages
+            ? $"{count.ToString(CultureInfo.InvariantCulture)} privileged items among the first {pageItemCount.ToString(CultureInfo.InvariantCulture)}"
+              + " — more of the lane may be privileged; open to review"
+            : $"{count.ToString(CultureInfo.InvariantCulture)} privileged items — open to review";
+
+    /// <summary><c>structuredContent.privileged.scope</c> when the lane ends on page 1: the count covers the whole lane.</summary>
+    public const string PrivilegedScopeLane = "lane";
+
+    /// <summary><c>structuredContent.privileged.scope</c> when the lane continues after page 1: the count covers page 1 only (privilege
+    /// is derived per page, task 018), so the lane may hold more.</summary>
+    public const string PrivilegedScopeFirstPage = "firstPage";
+
+    /// <summary>The scope of the privileged count for a lane that does (<paramref name="morePages"/>) or does not continue after page 1.</summary>
+    public static string PrivilegedScope(bool morePages) => morePages ? PrivilegedScopeFirstPage : PrivilegedScopeLane;
 
     /// <summary>
     /// The base the links are built on: <paramref name="environmentUrl"/> (<c>Dataverse:EnvironmentUrl</c>) without a trailing slash, when it
@@ -161,9 +175,10 @@ internal static class DecisionsTextSummary
                 .AppendLine(" items in Console order that can be listed here is in this category.");
         }
 
-        if (input.PrivilegedOnPage > 0)
+        // Page-scoped: when the lane continues, the line says so and appears even for 0 (a later page may hold privileged items).
+        if (input.PrivilegedOnPage > 0 || input.MorePages)
         {
-            text.AppendLine(PrivilegedLine(input.PrivilegedOnPage));
+            text.AppendLine(PrivilegedLine(input.PrivilegedOnPage, input.PageItemCount, input.MorePages));
         }
 
         if (console is not null)
