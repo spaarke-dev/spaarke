@@ -23,7 +23,7 @@ namespace Spaarke.ArchTests;
 /// <see cref="InvoiceFamilyLockedWrite.EntitySets"/>, both ways.</para>
 /// <para><b>One detector, two runners.</b> The client guard runs THE SCRIPT'S detector through pwsh (no C# copy to drift):
 /// the same file the lock's precondition (p4a) runs over every deployed web resource.</para>
-/// <para><b>Caller identity.</b> The caller-identity write APIs are the caller's own PATCH (<see cref="IDataverseUserClient.PatchAsync(string, string, CancellationToken)"/>,
+/// <para><b>Caller identity.</b> The caller-identity write APIs are the caller's own PATCH or POST (<see cref="IDataverseUserClient.PatchAsync(string, string, CancellationToken)"/>, <see cref="IDataverseUserClient.PostAsync(string, string, CancellationToken)"/>: an OBO create or <c>$batch</c>, review 2 R2-4;
 /// OBO), the field-dictionary updates of <see cref="IFieldMappingDataverseService"/> (which take an impersonated
 /// <c>systemuserid</c>, <c>MSCRMCallerID</c>) and <see cref="InvoiceFamilyCoreRecordGuard.UpdateExistingAsync"/> (its
 /// impersonating write primitive). The scan reuses <see cref="CoreRecordPairUpdateCheckGuardTests"/>' machinery (its
@@ -441,18 +441,36 @@ public class InvoiceFamilyFieldLockGuardTests
             "Writes a sprk_communication's association columns; not a family table."),
         (typeof(Sprk.Bff.Api.Services.Signals.Actions.InquiryDispositionService), "RecordDispositionAsync",
             "Writes a sprk_servicerequest's disposition columns; not a family table."),
+
+        // Review 2 (R2-4): the caller's own POST (OBO create, a $batch, or a non-write action), where it cannot reach a family table.
+        (typeof(Sprk.Bff.Api.Services.Ai.Handlers.DataverseCreateRecordHandler), "ExecuteChatAsync",
+            "The chat create tool's run-as-user POST is reached only after every invoice-family table is refused (sprk_invoice by IsInvoiceCreate; sprk_invoicesubmission, sprk_invoiceapproval, sprk_invoicecorrection, sprk_externalidentifier by ServerWrittenInvoiceFamilyTables; sprk_billingevent by IsCreatedOnlyByItsWriter / GenericCreateOnlyRefused); a locked column exists only on those tables."),
+        (typeof(Sprk.Bff.Api.Services.Ai.Handlers.DataverseSearchDataHandler), "ExecuteChatAsync",
+            "POSTs /api/search/v2.0/query: a Dataverse search request, a read; it writes no row."),
+        (typeof(Sprk.Bff.Api.Services.Ai.Handlers.EmailDraftToolHandler), "ExecuteDraftAsync",
+            "Creates a sprk_communication draft (CommunicationTable, fixed); not a family table."),
+        (typeof(Sprk.Bff.Api.Api.Reporting.ReportingEndpoints), "CreateReport",
+            "Creates a sprk_reports row (CatalogCollectionApiPath, fixed); not a family table."),
+        (typeof(Sprk.Bff.Api.Services.Ontology.OntologyAdminAuthoringService), "PublishVersionAsync",
+            "Creates a sprk_policyversions row (VersionEntitySet, fixed); not a family table."),
+        (typeof(Sprk.Bff.Api.Services.Ontology.OntologyAdminClassificationService), "CreateAsync",
+            "Creates a sprk_triagecategories row (CategorySet, fixed); not a family table."),
     };
 
     private static readonly Lazy<IReadOnlyList<Type>> BffTypes = new(() => typeof(Program).Assembly.GetTypes());
 
-    /// <summary>A caller-identity write API: the caller's PATCH, an impersonable field-dictionary update, or the guard's primitive.</summary>
+    /// <summary>
+    /// A caller-identity write API: the caller's PATCH or POST (an OBO create, or a <c>$batch</c> whose change sets carry PATCHes
+    /// and POSTs; review 2 R2-4), an impersonable field-dictionary update, or the guard's primitive.
+    /// </summary>
     private static bool IsCallerIdentityWrite(MethodBase target)
     {
         var declaring = target.DeclaringType;
         if (declaring is null)
             return false;
 
-        return (target.Name == nameof(IDataverseUserClient.PatchAsync) && typeof(IDataverseUserClient).IsAssignableFrom(declaring))
+        return (target.Name is nameof(IDataverseUserClient.PatchAsync) or nameof(IDataverseUserClient.PostAsync)
+                && typeof(IDataverseUserClient).IsAssignableFrom(declaring))
                || (target.Name is nameof(IFieldMappingDataverseService.UpdateRecordFieldsAsync)
                        or nameof(IFieldMappingDataverseService.UpdateExistingRecordFieldsAsync)
                    && typeof(IFieldMappingDataverseService).IsAssignableFrom(declaring))
@@ -626,7 +644,7 @@ public class InvoiceFamilyFieldLockGuardTests
             p => p.StartsWith($"STALE pin {typeof(InvoiceFamilyCallerWriteControlPatchBypass).FullName}.Write: it no longer", StringComparison.Ordinal));
     }
 
-    [Fact(DisplayName = "#2799: every BFF caller-identity write (OBO PATCH, impersonable update, the guard's primitive) goes through InvoiceFamilyLockedWrite, or is listed")]
+    [Fact(DisplayName = "#2799: every BFF caller-identity write (OBO PATCH or POST, impersonable update, the guard's primitive) goes through InvoiceFamilyLockedWrite, or is listed")]
     public void EveryCallerIdentityWrite_GoesThroughTheSplit_OrIsListed()
     {
         var methods = ClassifyCallerWrites(BffTypes.Value);
@@ -663,20 +681,20 @@ public class InvoiceFamilyFieldLockGuardTests
 
         Assert.True(problems.Count == 0,
             "Once the invoice-family links are field-secured, only the BFF application user may write them (#2799). A BFF method that "
-            + "writes as the caller (IDataverseUserClient.PatchAsync, an IFieldMappingDataverseService update that may impersonate, "
+            + "writes as the caller (IDataverseUserClient.PatchAsync or PostAsync, an IFieldMappingDataverseService update that may impersonate, "
             + "InvoiceFamilyCoreRecordGuard.UpdateExistingAsync) goes through InvoiceFamilyLockedWrite.UpdateExistingSplitAsync / "
             + "PatchAsCallerAsync (check as the person, write the locked columns as the app), or is listed in CannotCarryALockedColumn "
             + "with the reason its table or columns are fixed:\n" + string.Join("\n", problems));
     }
 
-    [Fact(DisplayName = "#2799 control: a caller PATCH, an impersonated update and a direct guard write of a family table that bypass the split are found (must fire); through the split, or another API, are not (must not fire)")]
+    [Fact(DisplayName = "#2799 control: a caller PATCH or POST, an impersonated update and a direct guard write of a family table that bypass the split are found (must fire); through the split, or another API, are not (must not fire)")]
     public void CallerWriteDetector_MustFireAndMustNotFire()
     {
         var fixtures = new[]
         {
             typeof(InvoiceFamilyCallerWriteControlPatchBypass), typeof(InvoiceFamilyCallerWriteControlImpersonatedBypass),
             typeof(InvoiceFamilyCallerWriteControlGuardBypass), typeof(InvoiceFamilyCallerWriteControlThroughTheSplit),
-            typeof(InvoiceFamilyCallerWriteControlOtherPatchApi),
+            typeof(InvoiceFamilyCallerWriteControlOtherPatchApi), typeof(InvoiceFamilyCallerWriteControlPostBypass),
         };
         var methods = ClassifyCallerWrites(fixtures.SelectMany(IlCallScan.WithNested));
 
@@ -686,6 +704,8 @@ public class InvoiceFamilyFieldLockGuardTests
                 $"{nameof(InvoiceFamilyCallerWriteControlGuardBypass)}.Write",
                 $"{nameof(InvoiceFamilyCallerWriteControlImpersonatedBypass)}.Write",
                 $"{nameof(InvoiceFamilyCallerWriteControlPatchBypass)}.Write",
+                $"{nameof(InvoiceFamilyCallerWriteControlPostBypass)}.Write",
+                $"{nameof(InvoiceFamilyCallerWriteControlPostBypass)}.WriteBatch",
             },
             methods.Where(m => !m.Value).Select(m => $"{m.Key.Type.Name}.{m.Key.Method}").Order(StringComparer.Ordinal).ToArray());
 
@@ -705,6 +725,20 @@ internal static class InvoiceFamilyCallerWriteControlPatchBypass
 {
     internal static Task<DataverseUserResponse> Write(IDataverseUserClient user, Guid invoiceId, Guid matterId) =>
         user.PatchAsync($"sprk_invoices({invoiceId:D})", $"{{\"sprk_Matter@odata.bind\":\"/sprk_matters({matterId:D})\"}}", CancellationToken.None);
+}
+
+/// <summary>
+/// MUST FIRE (review 2, R2-4): the caller's own POST — an OBO create of a billing event naming its invoice, and a <c>$batch</c>
+/// carrying a PATCH of an invoice's matter — with no split.
+/// </summary>
+internal static class InvoiceFamilyCallerWriteControlPostBypass
+{
+    internal static Task<DataverseUserResponse> Write(IDataverseUserClient user, Guid invoiceId) =>
+        user.PostAsync("/api/data/v9.2/sprk_billingevents", $"{{\"sprk_Invoice@odata.bind\":\"/sprk_invoices({invoiceId:D})\"}}",
+            preferRepresentation: true, CancellationToken.None);
+
+    internal static Task<DataverseUserResponse> WriteBatch(IDataverseUserClient user, string batchBody) =>
+        user.PostAsync("/api/data/v9.2/$batch", batchBody, CancellationToken.None);
 }
 
 /// <summary>MUST FIRE: an impersonated field-dictionary update of an invoice's matter, with no split.</summary>
