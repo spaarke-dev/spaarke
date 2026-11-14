@@ -38,6 +38,8 @@ BeforeAll {
             WebResources = @($WebResources)
             # Review 2: a column's navigation property name when it is not the column's own ('table.column' -> name).
             NavNames = @{}
+            # A metadata cache that has not caught up: a read WITHOUT 'Consistency: Strong' sees IsSecured = false.
+            StaleMetadata = $false
             # Review 2: the System Administrator role's holders (enabled users, application users, teams).
             SysAdminUsers = @(
                 [pscustomobject]@{ fullname = 'Alice Admin'; applicationid = $null; isdisabled = $false }
@@ -152,7 +154,8 @@ Describe 'Set-InvoiceFamilyFieldSecurity.ps1 (mocked Dataverse)' {
             if ($u -match "/EntityDefinitions\(LogicalName='([^']+)'\)/Attributes\(LogicalName='([^']+)'\)(\?\`$select=(\w+))?$") {
                 $key = "$($Matches[1]).$($Matches[2])"
                 if ($key -notin $w.Pairs) { throw "Test: no such column $key" }
-                if ($Matches[4] -eq 'IsSecured') { return [pscustomobject]@{ IsSecured = $w.Secured[$key] } }
+                $strong = $Headers -and $Headers['Consistency'] -eq 'Strong'
+                if ($Matches[4] -eq 'IsSecured') { return [pscustomobject]@{ IsSecured = ($w.Secured[$key] -and ($strong -or -not $w.StaleMetadata)) } }
                 if ($Matches[4] -eq 'LogicalName') { return [pscustomobject]@{ LogicalName = $Matches[2] } }
                 return [pscustomobject]@{ '@odata.type' = '#Microsoft.Dynamics.CRM.LookupAttributeMetadata'; LogicalName = $Matches[2]; IsSecured = $w.Secured[$key] }
             }
@@ -244,6 +247,23 @@ Describe 'Set-InvoiceFamilyFieldSecurity.ps1 (mocked Dataverse)' {
             $r.Error | Should -BeNullOrEmpty
             $r.Output | Should -Match 'PASS: '
             $r.ExitCode | Should -Be 0
+        }
+
+        It 'passes on a locked environment whose metadata cache is stale, because every read asks for strong consistency' {
+            Reset-World 'Locked' -WebResources @($script:EventWrite)
+            $global:InvoiceFamilyLockTestWorld.StaleMetadata = $true
+            $r = Invoke-Script @{ Verify = $true }
+            $r.Output | Should -Not -Match 'NOT field-secured'
+            $r.ExitCode | Should -Be 0
+        }
+
+        It 'still fails on a stale cache when a column really is unsecured' {
+            Reset-World 'Locked'
+            $global:InvoiceFamilyLockTestWorld.StaleMetadata = $true
+            $global:InvoiceFamilyLockTestWorld.Secured['sprk_invoice.sprk_matter'] = $false
+            $r = Invoke-Script @{ Verify = $true }
+            $r.ExitCode | Should -Be 1
+            $r.Output | Should -Match 'MISSING\s+sprk_invoice\.sprk_matter is NOT field-secured'
         }
 
         It 'fails when a business unit default team does not hold the reader profile' {
