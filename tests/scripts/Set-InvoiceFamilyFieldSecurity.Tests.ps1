@@ -36,6 +36,8 @@ BeforeAll {
             Writes = [System.Collections.Generic.List[string]]::new()
             PublishXml = $null
             WebResources = @($WebResources)
+            # Review 2: a column's navigation property name when it is not the column's own ('table.column' -> name).
+            NavNames = @{}
         }
         foreach ($p in $script:Pairs) {
             $world.Secured[$p] = $locked
@@ -132,7 +134,9 @@ Describe 'Set-InvoiceFamilyFieldSecurity.ps1 (mocked Dataverse)' {
             if ($u -match "/EntityDefinitions\(LogicalName='([^']+)'\)/ManyToOneRelationships\?") {
                 $t = $Matches[1]
                 return @{ value = @($w.Pairs | Where-Object { $_ -like "$t.*" } | ForEach-Object {
-                            $c = ($_ -split '\.')[1]; [pscustomobject]@{ ReferencingAttribute = $c; ReferencingEntityNavigationPropertyName = $c } }) }
+                            $c = ($_ -split '\.')[1]
+                            $nav = if ($w.NavNames.ContainsKey($_)) { $w.NavNames[$_] } else { $c }
+                            [pscustomobject]@{ ReferencingAttribute = $c; ReferencingEntityNavigationPropertyName = $nav } }) }
             }
             if ($u -match "/EntityDefinitions\(LogicalName='([^']+)'\)/Attributes\(LogicalName='([^']+)'\)(\?\`$select=(\w+))?$") {
                 $key = "$($Matches[1]).$($Matches[2])"
@@ -237,6 +241,39 @@ Describe 'Set-InvoiceFamilyFieldSecurity.ps1 (mocked Dataverse)' {
             $r = Invoke-Script @{ Verify = $true }
             $r.ExitCode | Should -Be 1
             $r.Output | Should -Match "FAIL\s+\(p2\) default team 'Unit 1' \(BU 'Unit 1'\) is NOT on the reader profile"
+        }
+    }
+
+    Context '(p4a) navigation names (review 2, R2-2)' {
+        It 'FAILS, and -Apply refuses with nothing written, when a locked lookup binds under a name that is not its column (must fire)' {
+            Reset-World 'Before' -WebResources @('var x = 1;')
+            $global:InvoiceFamilyLockTestWorld.NavNames['sprk_invoice.sprk_matter'] = 'sprk_MatterRecord'
+            $global:InvoiceFamilyLockTestWorld.AllowWrites = $true
+            $r = Invoke-Script @{ Apply = $true; BffWritesInvoiceFamilyLinksAsApp = $true }
+            $r.ExitCode | Should -Be 1
+            $r.Output | Should -Match "FAIL\s+\(p4a\) sprk_invoice\.sprk_matter binds as 'sprk_MatterRecord', not 'sprk_matter@odata\.bind'"
+            $r.Output | Should -Match 'REFUSED: -Apply needs every precondition to pass'
+            $global:InvoiceFamilyLockTestWorld.Writes.Count | Should -Be 0
+        }
+
+        It 'FAILS -Verify on the same environment' {
+            Reset-World 'Locked' -WebResources @('var x = 1;')
+            $global:InvoiceFamilyLockTestWorld.NavNames['sprk_billingevent.sprk_invoice'] = 'sprk_InvoiceLink'
+            $r = Invoke-Script @{ Verify = $true }
+            $r.ExitCode | Should -Be 1
+            $r.Output | Should -Match "FAIL\s+\(p4a\) sprk_billingevent\.sprk_invoice binds as 'sprk_InvoiceLink'"
+        }
+
+        It 'does not fire when the navigation name is the column name in another case (the BFF reads binds without regard to case)' {
+            Reset-World 'Locked' -WebResources @('var x = 1;')
+            foreach ($p in $script:Pairs) {
+                $column = ($p -split '\.')[1]
+                $global:InvoiceFamilyLockTestWorld.NavNames[$p] = 'sprk_' + (Get-Culture).TextInfo.ToTitleCase($column.Substring(5))
+            }
+            $r = Invoke-Script @{ Verify = $true }
+            $r.Output | Should -Not -Match '\(p4a\) \S+ binds as'
+            $r.Output | Should -Match 'PASS: '
+            $r.ExitCode | Should -Be 0
         }
     }
 }

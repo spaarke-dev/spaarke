@@ -109,6 +109,8 @@
       (Find-InvoiceFamilyWrite in scripts/common/Find-ClientInvoiceFamilyWrite.ps1, the detector the ArchTest
       InvoiceFamilyFieldLockGuardTests also runs; TABLE-SCOPED, because the column names are ordinary columns of many other
       tables; fed the live navigation property names of the 24 lookups); a payload it cannot read counts (fail closed). A
+      lookup whose navigation name is not its column name (ignoring case) is a FAIL too: the BFF writes a locked lookup only
+      through '{column}@odata.bind' (#2799 review 2). A
       hit names the web resource still carrying an old bundle: rebuild and deploy it first. (p4b)
       -BffWritesInvoiceFamilyLinksAsApp: the operator's confirmation that the BFF build with #2799 chunks 1-3 is deployed —
       before it, every caller-identity update that sets a locked column (field-mapping push, playbook Update Record, output
@@ -641,7 +643,12 @@ elseif ($Target -eq 'InvoiceFamilyLinks') {
         foreach ($p in @($Pairs | Where-Object { $_.Table -eq $tableName })) {
             $nav = @($rels | Where-Object { $_.ReferencingAttribute -eq $p.Column } | ForEach-Object { $_.ReferencingEntityNavigationPropertyName })
             if ($nav.Count -eq 0) { Report 'FAIL' "(p4a) no navigation property was read for $($p.Table).$($p.Column) — the scan could not know its @odata.bind name" }
-            elseif (@($nav | Where-Object { $_ -ne $p.Column -and $_.ToLowerInvariant() -ne $p.Column }).Count -gt 0) { Report 'INFO' "(p4a) $($p.Table).$($p.Column) binds as '$($nav -join "', '")' — scanned for too" }
+            elseif (@($nav | Where-Object { $_ -ne $p.Column -and $_.ToLowerInvariant() -ne $p.Column }).Count -gt 0) {
+                # #2799 review 2 (R2-2): the BFF recognises a locked bind only as '{column}@odata.bind' (any case;
+                # InvoiceFamilyCoreRecordGuard.ColumnOfKey), so a navigation name that is not the column's would carry no
+                # locked bind it checks and writes as the app: every such BFF write would break once locked.
+                Report 'FAIL' "(p4a) $($p.Table).$($p.Column) binds as '$($nav -join "', '")', not '$($p.Column)@odata.bind' — the BFF writes a locked lookup only through its column-named bind, so its writes of this column would break once locked"
+            }
         }
     }
     $scanned = 0; $hits = 0
