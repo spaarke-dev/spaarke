@@ -4,7 +4,7 @@
     <title>Send Email follow-on uses the shared EmailComposer with From, Cc/Bcc, attachments, templates and AI drafting (F-R4-3, D-219)</title>
     <phase>12 Create-wizard lookups and composer (UAT round 4)</phase>
     <gate>after 179 (shares CreateRecordWizard.tsx)</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies shared client code (.ts/.tsx) used by several wizards.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -124,6 +124,7 @@
     <criterion testable="true">All existing tests in the touched folders pass unchanged unless a criterion above names the change; tsc clean; no new ESLint errors in touched files.</criterion>
   </acceptance-criteria>
   <notes>Rewritten 2026-11-12 for D-219 (full composer parity). Source: projects/spaarke-ontology-platform-r1/notes/create-wizard-lookup-composer-review.md (Fable review 2026-11-12) and UAT round 4 findings F-R4-2 / F-R4-3 (notes/uat-v4-log.md).</notes>
+  <completion>Done 2026-11-14: PR #2821 merged to master (13a30da6d9). Independent review F1 Summarize toggle line breaks, F1 send-failure wording (unconfirmed = may have been sent), F2 silent skip without BFF; all fixed. Known limits: orphaned uploads DI-154 #2813; CreateMatterWizardWidget unreachable; Finish-send tests only Matter/Project/WA/Create Analysis. Notes: notes/task-182-notes.md. rework: fix-round-2 task 182</completion>
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
     <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist. Work in a fresh worktree from origin/master; PR to master.</protocol>
