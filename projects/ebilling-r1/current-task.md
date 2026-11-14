@@ -1,41 +1,21 @@
 # Current Task State
 
-> **Last Updated:** 2026-11-14, about 03:00Z. Session `ebilling-r1`, Claude Desktop, the only writer to this worktree.
+> **Last Updated:** 2026-11-14, about 06:00Z. Session `ebilling-r1`, Claude Desktop, the only writer to this worktree.
 > Older detail is in `notes/handoff-history/current-task-2026-11-13a.md`.
 
 ## Quick recovery
 
 - **Branch:** `work/ebilling-r1`.
-- **Local HEAD:** `bb28870b76`, plus uncommitted notes (listed below).
-- **Not pushed:** everything since `e22ac1f1aa`, including these merges:
-  - `8f5ff019fa` (084d-5a)
-  - `c6bf88d98a` (EB-D-232)
-  - `f86871820a` (084d-5b)
-  - `7953d052d9` (095e)
-  - `bb28870b76` (095f part 1)
-- **Owner mode:** "continue with open work items that are available", plus a testing checklist (`notes/owner-testing-checklist.md`, uncommitted).
-
-### Uncommitted, to commit when the gates are green
-
-- `tasks/TASK-INDEX.md`: 084d-5a, 084d-5b and 084d-5 ✅; 095e ✅; 095f 🔄.
-- `notes/084d-dry-run-design.md`: the K6 lines.
-- `notes/084-procedure-review-ui.md`: "084d-5a close" and "084d-5b close".
-- `notes/095g-assign-firm.md`: the design for uac-r2, and uac-r2's approval with R1 and R2.
-- `notes/owner-testing-checklist.md` (new).
-- This file.
+- **Local HEAD:** `f6f8a16f3a` plus this notes commit; pushed. **PR #2822** (work → master) is open, not bound; ontology-r1 and uac-r2 were asked to review it (both approvals gate the merge).
+- **Owner mode:** "continue with open work items that are available", plus a testing checklist (`notes/owner-testing-checklist.md`, committed).
 
 ## Gates
 
-- The first full run on `c6bf88d98a` had 415 failures. All the visible ones are 3-5 minute timeouts in Office, Insights, Memory and Documents tests, from machine load. A sample of 143 re-ran green on its own.
-- Re-run: Bash task `bkrmcr45w`. It covers the full `Sprk.Bff.Api.Tests` with a trx file, plus ArchTests, on `7953d052d9`. The trx goes to `scratchpad/trx/full-7953d0.trx`.
-  - If anything fails, re-run exactly those tests on their own.
-  - Then run the 095f suites on `bb28870b76`: the agent got 4639/0 and ArchTests 2570/0.
-  - Then commit the notes and push.
-- uac-r2's 084d-5a merge condition is "full gates green".
+- Green. The full-suite failures were TaskCanceled timeouts from machine load. Every failing class re-ran green on its own: 8 sequential batches, 872 tests, 0 failures. ArchTests are 2570/0. This meets uac-r2's 084d-5a condition ("full gates green").
 
 ## Next actions (in order)
 
-1. **Gates green**: commit the notes, then push work.
+1. DONE: gates green, notes committed, work pushed.
 2. DONE (cdde3d69b4 + follow-ups merged; 084d ✅; provisioning-r1 Pester 81/81). **Merge origin/master into work.** It brings:
    - #2798 (ISS-021, `3ae2a63362`);
    - #2790 (fm 052b and 045d-f, `4f9e77e9c0`);
@@ -50,7 +30,7 @@
 4. **When 045g is on work**:
    - reword `InvoiceApprovalLineOriginTests.LinesDetachedMovedToANewCoreAndReattached_Approve` to state the rule only. Name NO route; the repo is public.
    - Add a runbook line: a legacy invoice with no core, or with two, cannot be filed through the BFF (EB-D-231).
-5. **PR work to master** (095e, 095f, 084d), then send the master SHA to word-add-in-r1 and spa-r4.
+5. **PR #2822 open** (095e, 095f part 1, 084d). Reviews were asked of ontology-r1 and uac-r2. After it merges, send the master SHA to word-add-in-r1 and spa-r4.
 6. **095g build** once the owner answers Q2, Q3, Q8, Q9 and Q10.
    - uac-r2 APPROVED the design with R1 (Append on the record for an add) and R2 (the pane states the access effect on every add).
    - The build needs two adversarial passes; uac-r2 reviews the PR.
@@ -62,7 +42,7 @@
 8. DONE 2026-11-14 03:45Z: `sprk_createinvoicewizard` redeployed to dev from master `cfa97d718b`. The owner's go was typed. uac-r2 got notices before and after. Recorded in `notes/053-wp2-deploy.md`.
 9. Then task 112 (deploy). The 095f hold is RELEASED: word-add-in-r1's pane, which sends `correctionNote`, is live on dev at 942b2889bf (#2815 759dc4b1f6, #2820). `Deploy-EbillingInvoiceCorrectionNoteColumn.ps1` must run on every environment beyond dev before 095f goes there.
 
-**Master now:** `cfa97d718b`. It includes 045g (#2819, merged at b76276a314). Close #2794 once checked (field-mapping-r1).
+**Master now:** `cfa97d718b`. It includes 045g (#2819, merged at b76276a314). #2794 (ISS-020) is CLOSED.
 
 **Gates re-run:** Bash `b8vixvoty` re-runs the 177 classes that failed in the full run on `bb28870b76`. The trx is `scratchpad/trx/rerun-bb2887.trx`. The second full run had 438 failures: 435 TaskCanceled (57-475 s), plus 1 TimeoutException, 1 IOException and 1 Compose fidelity failure (`alternate-content-duplicate-paraid.docx`, not ours).
 

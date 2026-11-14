@@ -43,7 +43,7 @@ The resolver treats `statecode` != 0 as not applicable, through the same path as
 
 | Field | Value |
 |---|---|
-| **Status** | In progress. Decided by the owner (EB-D-231, 2026-11-13). Built by field-mapping-r1 as task 045g (branch task/fm-045g, after PR #2790), with line detach also refused; ebilling-r1 reviews before merge. |
+| **Status** | Done. Decided by the owner (EB-D-231, 2026-11-13). Built by field-mapping-r1 as task 045g (#2819, merged to master at b76276a314), with line detach also refused; ebilling-r1 reviewed it (round 4 PASS). The operator note for legacy invoices is in `notes/153-wp6-deploy.md`. |
 | **Urgency** | now |
 | **Filed** | 2026-11-13 |
 | **Source** | Owner question 2 (follow-on from #2772 / ISS-017); owner chose return-and-resubmit |
