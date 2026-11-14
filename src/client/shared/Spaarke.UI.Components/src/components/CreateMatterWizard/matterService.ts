@@ -40,7 +40,7 @@ import { sendComposedEmail } from '../EmailComposer/composeOnlySend';
 import type { IComposedEmail } from '../EmailComposer/composeOnlySend';
 
 // ---------------------------------------------------------------------------
-// Contact type (used by AssignCounselStep search results)
+// Contact type (used by contact search results)
 // ---------------------------------------------------------------------------
 
 /**
@@ -376,9 +376,9 @@ export class MatterService {
             uploadResult.errors.map(e => e.fileName).join(', ')
         );
       }
-    } else if (uploadedFiles.length > 0 && !this._containerId) {
-      warnings.push('File upload skipped -- no SPE container configured. Files can be added later.');
     }
+    // There is no "upload skipped, no SPE container" branch: since task 076 the upload does not depend on `_containerId`,
+    // so a caller with files always reaches the upload above (the old `else if` was unreachable).
 
     // -- Step 3: Follow-on actions --
     if (followOnActions.assignCounsel) {
@@ -457,7 +457,7 @@ export class MatterService {
 }
 
 // ---------------------------------------------------------------------------
-// Contact search helper (for AssignCounselStep and lookup fields)
+// Contact search helper (for lookup fields)
 // ---------------------------------------------------------------------------
 
 /**
@@ -574,7 +574,7 @@ export async function searchPracticeAreas(dataService: IDataService, nameFilter:
 }
 
 // ---------------------------------------------------------------------------
-// AI draft summary helper (for DraftSummaryStep)
+// AI draft summary helper (used by CreateRecordStep; the DraftSummaryStep it was written for was retired by ontology task 184)
 // ---------------------------------------------------------------------------
 
 export interface IAiDraftSummaryResponse {

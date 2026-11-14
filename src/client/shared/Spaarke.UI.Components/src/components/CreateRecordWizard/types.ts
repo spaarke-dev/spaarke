@@ -108,22 +108,6 @@ export interface IAssociateToStepConfig {
 export type FollowOnActionId = 'assign-counsel' | 'create-event' | 'send-email' | (string & {});
 
 // ---------------------------------------------------------------------------
-// Recipient item (used by Draft Summary and Send Email)
-// ---------------------------------------------------------------------------
-
-/** A recipient entry in the DraftSummary distribute-to / CC fields. */
-export interface IRecipientItem {
-  /** Unique key for deduplication (contact GUID or freeform email). */
-  key: string;
-  /** Display name shown in the chip. */
-  displayName: string;
-  /** Email address (extracted from contact or freeform entry). */
-  email: string;
-  /** Whether this was manually entered (true) or from contact lookup (false). */
-  isManual?: boolean;
-}
-
-// ---------------------------------------------------------------------------
 // Entity-specific step configuration
 // ---------------------------------------------------------------------------
 
@@ -503,7 +487,7 @@ export interface ICreateRecordWizardProps {
 }
 
 // ---------------------------------------------------------------------------
-// Search callback type (used by AssignResources and DraftSummary)
+// Search callback type (the wizard config's contact / organization / user / matter-type / practice-area searches)
 // ---------------------------------------------------------------------------
 
 /** Standard search callback signature for lookup fields. */

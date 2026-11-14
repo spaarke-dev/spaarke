@@ -1023,6 +1023,14 @@ jobs:
         working-directory: src/client/shared/Spaarke.UI.Components
         run: npx jest --ci src/utils/__tests__/pcfBundleReactRuntime.guard.test.ts
 
+      # Added 2026-11-14 by ontology task 184. A source scan of the shared library's wizard folders (no build, no network): no
+      # step under components/Create*Wizard/ or components/WizardFollowOns/ renders the inline LookupField or imports the retired
+      # EmailStep, and exactly one module defines SendEmailStep (owner UAT round 4, F-R4-2 / F-R4-3). Same install, same job,
+      # about two seconds more; it runs on any src/client/** change, which is where a wizard step lives.
+      - name: Wizard lookup / email pattern guard (side-pane lookup and shared composer only)
+        working-directory: src/client/shared/Spaarke.UI.Components
+        run: npx jest --ci src/__tests__/wizardLookupPatternGuard.test.ts
+
   # ──────────────────────────────────────────────────────────────────────────
   # Job 7 — format-changed-cs (BLOCKING)
   #

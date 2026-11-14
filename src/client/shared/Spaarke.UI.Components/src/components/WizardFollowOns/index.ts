@@ -10,8 +10,8 @@
  *
  * `DraftSummaryFollowOnStep` (+ its internal `RecipientField` and the
  * `IRecipientItem` type) was DELETED 2026-10-03 (reuse audit C-26): never
- * mounted by any wizard. CreateMatterWizard's draft-summary step is its own
- * `CreateMatterWizard/DraftSummaryStep.tsx`.
+ * mounted by any wizard. CreateMatterWizard's own `DraftSummaryStep.tsx` (also unmounted) was
+ * retired by ontology task 184.
  */
 
 // Config contract + canonical maps
