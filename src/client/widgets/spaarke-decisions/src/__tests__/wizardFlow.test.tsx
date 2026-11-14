@@ -535,9 +535,35 @@ describe('the display chain (O-5)', () => {
     mount(host);
     await openItem(1);
     fireEvent.click(lines().find(l => l.getAttribute('data-signal-id') === guid('5', 2))!);
-    expect(await screen.findByTestId('wizard-notice')).toHaveTextContent('Finish or close the open decision');
+    expect(await screen.findByTestId('decide-lane-notice')).toHaveTextContent('Finish or close the open decision');
     expect(within(screen.getByTestId('wizard-detail')).getByTestId('step-found')).toBeInTheDocument();
     expect(host.callsTo(PLAN_TOOL)).toHaveLength(1);
+  });
+
+  it('a review step taken while a decision is open is refused, and the review keeps naming the item in front of the user', async () => {
+    const host = wizardHost(items(PLANS.reviseBudget), { displayMode: 'inline' });
+    mount(host);
+    await screen.findByTestId('decide-lane');
+    fireEvent.click(screen.getByTestId('lane-start-Decide'));
+    await screen.findByTestId('step-found');
+    expect(screen.getByTestId('decide-review-position')).toHaveTextContent('1 of 3');
+
+    fireEvent.click(screen.getByTestId('decide-review-next'));
+
+    expect(await screen.findByTestId('decide-lane-notice')).toHaveTextContent('Finish or close the open decision');
+    expect(screen.getByTestId('decide-review-position')).toHaveTextContent('1 of 3');
+    expect(host.callsTo(PLAN_TOOL)).toHaveLength(1);
+  });
+
+  it('once the open decision is closed, the next one opens', async () => {
+    const host = wizardHost(items(PLANS.reviseBudget), { displayMode: 'inline' });
+    mount(host);
+    await openItem(1);
+    fireEvent.click(button('Close'));
+    await waitFor(() => expect(screen.queryByTestId('step-found')).toBeNull());
+    fireEvent.click(lines().find(l => l.getAttribute('data-signal-id') === guid('5', 2))!);
+    await screen.findByTestId('step-found');
+    expect(host.callsTo(PLAN_TOOL).map(c => c.args.signalId)).toEqual([guid('5', 1), guid('5', 2)]);
   });
 });
 

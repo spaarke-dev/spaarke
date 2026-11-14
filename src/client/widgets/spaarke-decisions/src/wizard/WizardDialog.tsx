@@ -35,7 +35,7 @@ import { DecisionWizardHost } from '@spaarke/ui-components/components/DecisionWi
 import { launchDecisionWizard } from '@spaarke/ui-components/components/DecisionWizard/decisionWizardLauncher';
 import type { WorklistData } from '@spaarke/ui-components/components/Worklist/worklistService';
 import { buildConsoleLinkOut } from '../lane/billingLinkOut';
-import type { OpenWizardEvent } from '../lane/DecideLane';
+import { WIZARD_OPEN_NOTICE, type OpenWizardEvent } from '../lane/DecideLane';
 import { useMcpHost } from '../mcp/mcpHostContext';
 import { createLookupTypeAhead } from './lookupTypeAhead';
 import { createWizardBridge } from './wizardFetch';
@@ -56,6 +56,8 @@ export interface WizardDialogProps {
   consoleBaseUrl?: string | null;
   /** A decision was recorded: the Work Item has left the lane, which the host reads again. */
   onRecorded: () => void;
+  /** True while a decision is open (from the moment a request is taken until the wizard closes), false after: the lane asks it before opening another. */
+  onActiveChange?: (active: boolean) => void;
   /** The master: the Decide lane. It stays mounted, and in place, whatever the wizard shows. */
   children: React.ReactNode;
 }
@@ -96,7 +98,14 @@ class WizardBoundary extends React.Component<{ onError: () => void; children: Re
   }
 }
 
-export function WizardDialog({ request, getLane, consoleBaseUrl, onRecorded, children }: WizardDialogProps) {
+export function WizardDialog({
+  request,
+  getLane,
+  consoleBaseUrl,
+  onRecorded,
+  onActiveChange,
+  children,
+}: WizardDialogProps) {
   const styles = useStyles();
   const { callTool, openLink, requestDisplayMode, hostContext } = useMcpHost();
 
@@ -120,18 +129,32 @@ export function WizardDialog({ request, getLane, consoleBaseUrl, onRecorded, chi
     };
   }, []);
 
-  const latest = React.useRef({ getLane, onRecorded, requestDisplayMode, hostContext, typeAhead, bridge });
-  latest.current = { getLane, onRecorded, requestDisplayMode, hostContext, typeAhead, bridge };
+  const latest = React.useRef({
+    getLane,
+    onRecorded,
+    onActiveChange,
+    requestDisplayMode,
+    hostContext,
+    typeAhead,
+    bridge,
+  });
+  latest.current = { getLane, onRecorded, onActiveChange, requestDisplayMode, hostContext, typeAhead, bridge };
+
+  /** Takes or releases the one open decision, and tells the lane. */
+  const setActive = React.useCallback((next: typeof active.current) => {
+    active.current = next;
+    latest.current.onActiveChange?.(next !== null);
+  }, []);
 
   const finish = React.useCallback(() => {
     const was = active.current;
-    active.current = null;
+    setActive(null);
     latest.current.typeAhead.cancel();
     setLinkFailed(false);
     setPlace(prev => ({ place: 'idle', launch: prev.launch }));
     // The wizard asked for the room; the lane goes back to where it was.
     if (was?.fullscreen) void latest.current.requestDisplayMode('inline');
-  }, []);
+  }, [setActive]);
 
   const moveTo = React.useCallback((next: Place) => {
     launchCount.current += 1;
@@ -145,7 +168,7 @@ export function WizardDialog({ request, getLane, consoleBaseUrl, onRecorded, chi
 
     if (active.current) {
       // One wizard at a time: never replace one with unrecorded choices in it.
-      setNotice('Finish or close the open decision before opening another.');
+      setNotice(WIZARD_OPEN_NOTICE);
       return;
     }
     setNotice(null);
@@ -155,7 +178,7 @@ export function WizardDialog({ request, getLane, consoleBaseUrl, onRecorded, chi
       return;
     }
     const opening = { event: request.event, lane, fullscreen: false };
-    active.current = opening;
+    setActive(opening);
 
     void (async () => {
       // Step 1: the dialog, and ask for the room. A host that lists its modes and leaves fullscreen out is not asked.
@@ -171,7 +194,7 @@ export function WizardDialog({ request, getLane, consoleBaseUrl, onRecorded, chi
       else if (window.innerWidth >= MIN_DETAIL_WIDTH) moveTo('detail');
       else moveTo('link');
     })();
-  }, [request, moveTo]);
+  }, [request, moveTo, setActive]);
 
   // Launch the wizard in the place chosen. The host is mounted for that place before this runs (children's effects run first).
   React.useEffect(() => {
@@ -193,8 +216,11 @@ export function WizardDialog({ request, getLane, consoleBaseUrl, onRecorded, chi
         // A launch the display chain has moved past (the dialog failed and master-detail took over) is not this wizard closing.
         if (unmounted.current || launchCount.current !== mine) return;
         if (result.opened) finish();
-        else if (result.reason === 'busy') setNotice('Finish or close the open decision before opening another.');
-        else moveTo(place.place === 'dialog' ? 'detail' : 'link');
+        else if (result.reason === 'busy') {
+          // The shared host has a wizard open that this one did not open: nothing of ours is open, so release the place it was given.
+          finish();
+          setNotice(WIZARD_OPEN_NOTICE);
+        } else moveTo(place.place === 'dialog' ? 'detail' : 'link');
       },
       () => {
         if (unmounted.current || launchCount.current !== mine) return;

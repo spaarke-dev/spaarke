@@ -58,6 +58,12 @@ function Shell({ onOpenWizard }: { onOpenWizard?: (event: OpenWizardEvent) => vo
     [onOpenWizard]
   );
   const onRecorded = React.useCallback(() => setReloadToken(n => n + 1), []);
+  // One decision at a time: while one is open the lane refuses to open another (and leaves its review where it was).
+  const wizardOpen = React.useRef(false);
+  const onActiveChange = React.useCallback((active: boolean) => {
+    wizardOpen.current = active;
+  }, []);
+  const canOpenWizard = React.useCallback(() => !wizardOpen.current, []);
   const consoleBaseUrl = consoleBaseUrlOf(toolResult);
 
   return (
@@ -67,7 +73,13 @@ function Shell({ onOpenWizard }: { onOpenWizard?: (event: OpenWizardEvent) => vo
           The widget could not connect to the host.
         </Text>
       ) : isConnected ? (
-        <WizardDialog request={request} getLane={getLane} consoleBaseUrl={consoleBaseUrl} onRecorded={onRecorded}>
+        <WizardDialog
+          request={request}
+          getLane={getLane}
+          consoleBaseUrl={consoleBaseUrl}
+          onRecorded={onRecorded}
+          onActiveChange={onActiveChange}
+        >
           <DecideLane
             service={service}
             consoleBaseUrl={consoleBaseUrl}
@@ -75,6 +87,7 @@ function Shell({ onOpenWizard }: { onOpenWizard?: (event: OpenWizardEvent) => vo
             onOpenWizard={openWizard}
             reloadToken={reloadToken}
             onData={onData}
+            canOpenWizard={canOpenWizard}
           />
         </WizardDialog>
       ) : (

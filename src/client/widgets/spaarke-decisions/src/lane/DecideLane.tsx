@@ -82,7 +82,16 @@ export interface DecideLaneProps {
   reloadToken?: number;
   /** The lane as last read (`null` while it loads or after a failed read), so the wizard can open on the lane as the user saw it. */
   onData?: (data: WorklistData | null) => void;
+  /**
+   * Asked before a row is opened or a review step is taken (task 032): false when a decision is already open (one at a time, and the
+   * open one is never replaced). The lane then says so and leaves the review where it was, so its "n of N" never names an item that
+   * is not the one in front of the user. Absent: always allowed.
+   */
+  canOpenWizard?: () => boolean;
 }
+
+/** What the lane says when a row is opened, or a review step taken, while a decision is already open. */
+export const WIZARD_OPEN_NOTICE = 'Finish or close the open decision before opening another.';
 
 /** A notice and its number: the same words twice are two announcements (`key={id}` makes the second a new alert). */
 interface Notice {
@@ -155,6 +164,7 @@ export const DecideLane: React.FC<DecideLaneProps> = ({
   today: todayProp,
   reloadToken,
   onData,
+  canOpenWizard,
 }) => {
   const styles = useStyles();
   const [load, setLoad] = React.useState<LoadState>({ status: 'loading' });
@@ -264,11 +274,19 @@ export const DecideLane: React.FC<DecideLaneProps> = ({
     setNotice(null);
   };
 
+  /** True when a decision may be opened now. When one is already open the lane says so and moves nothing (not the review either). */
+  const mayOpenWizard = (): boolean => {
+    if (!canOpenWizard || canOpenWizard()) return true;
+    showNotice(WIZARD_OPEN_NOTICE);
+    return false;
+  };
+
   const openItem = (event: OpenItemEvent) => {
     // A billing row has no decide action; the panel's line is replaced for it, and this is the second guard.
     if (billingIds.has(event.itemId)) return;
     const index = reviewable.indexOf(event.itemId);
     if (index < 0) return;
+    if (!mayOpenWizard()) return;
     setNotice(null);
     // While a review is under way the label follows the row that was opened, so "n of N" always names the item in front of the user.
     if (review) setReview({ ids: reviewable, index });
@@ -276,6 +294,7 @@ export const DecideLane: React.FC<DecideLaneProps> = ({
   };
 
   const startReview = () => {
+    if (!mayOpenWizard()) return;
     setNotice(null);
     if (reviewable.length === 0) {
       setReview(null);
@@ -290,6 +309,7 @@ export const DecideLane: React.FC<DecideLaneProps> = ({
     if (!review) return;
     const index = Math.min(review.ids.length - 1, Math.max(0, review.index + delta));
     if (index === review.index) return;
+    if (!mayOpenWizard()) return;
     setReview({ ids: review.ids, index });
     raise(review.ids, index, coreOf(review.ids[index]));
   };

@@ -78,6 +78,7 @@ function mount(overrides: Partial<Setup> = {}) {
   const requestDisplayMode = jest.fn(async () => setup.displayMode);
   const openLink = jest.fn(async () => setup.openLinkResult);
   const onRecorded = jest.fn();
+  const onActiveChange = jest.fn();
   const connection: McpHostConnection = {
     ...DISCONNECTED,
     isConnected: true,
@@ -93,6 +94,7 @@ function mount(overrides: Partial<Setup> = {}) {
         getLane={() => setup.lane}
         consoleBaseUrl={setup.consoleBaseUrl}
         onRecorded={onRecorded}
+        onActiveChange={onActiveChange}
       >
         <div data-testid="the-lane">lane</div>
       </WizardDialog>
@@ -106,6 +108,7 @@ function mount(overrides: Partial<Setup> = {}) {
     requestDisplayMode,
     openLink,
     onRecorded,
+    onActiveChange,
   };
 }
 
@@ -257,11 +260,32 @@ describe('one wizard at a time, and closing', () => {
     expect(place()).toBe('dialog');
   });
 
-  it('a launch the shared host calls busy says so and opens nothing', async () => {
+  it('a launch the shared host calls busy says so, opens nothing and releases the place it was given', async () => {
     stand.answer = 'busy';
     const view = mount();
     view.open(request(1));
     expect(await screen.findByTestId('wizard-notice')).toHaveTextContent('Finish or close the open decision');
+    await waitFor(() => expect(place()).toBe('idle'));
+    expect(view.onActiveChange).toHaveBeenLastCalledWith(false);
+    expect(view.requestDisplayMode).toHaveBeenLastCalledWith('inline');
+  });
+
+  it('tells the lane when a decision is open and when it is not, so the lane can refuse another', async () => {
+    const view = mount();
+    expect(view.onActiveChange).not.toHaveBeenCalled();
+    view.open(request(1));
+    await waitFor(() => expect(view.onActiveChange).toHaveBeenLastCalledWith(true));
+    await waitFor(() => expect(stand.launches).toHaveLength(1));
+    await act(async () => stand.close?.());
+    await waitFor(() => expect(view.onActiveChange).toHaveBeenLastCalledWith(false));
+    expect(view.onActiveChange.mock.calls.map(c => c[0])).toEqual([true, false]);
+  });
+
+  it('an item that is not in the lane never marks a decision as open', async () => {
+    const view = mount();
+    view.open(request(1, 'sig-gone'));
+    await screen.findByTestId('wizard-notice');
+    expect(view.onActiveChange).not.toHaveBeenCalled();
   });
 
   it('the wizard closing returns the frame to inline, and the next request opens again', async () => {

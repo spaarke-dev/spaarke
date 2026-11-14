@@ -16,7 +16,7 @@ import {
   type WorklistData,
   type WorklistService,
 } from '@spaarke/ui-components/components/Worklist/worklistService';
-import { DecideLane, type DecideLaneProps } from '../lane/DecideLane';
+import { DecideLane, WIZARD_OPEN_NOTICE, type DecideLaneProps } from '../lane/DecideLane';
 import { createDecideLaneFetch } from '../lane/decideLaneFetch';
 import type { CallServerTool } from '../mcp/mcpFetch';
 import {
@@ -282,5 +282,56 @@ describe('(d) a new service is a new read: the card filter goes back to All', ()
 
     expect(card('All')).toHaveAttribute('aria-pressed', 'true');
     expect(lineIds()).toHaveLength(4); // every non-billing item; the billing item is a Finding row
+  });
+});
+
+describe('one decision at a time (canOpenWizard)', () => {
+  const row1 = () => within(lane()).getAllByTestId('issue-line')[0];
+
+  it('while a decision is open a row is not opened, the lane says why, and nothing is raised', async () => {
+    const onOpenWizard = jest.fn();
+    mountLane(fiveItems(), { onOpenWizard, canOpenWizard: () => false });
+    await ready();
+    fireEvent.click(row1());
+    expect(await screen.findByTestId('decide-lane-notice')).toHaveTextContent(WIZARD_OPEN_NOTICE);
+    expect(onOpenWizard).not.toHaveBeenCalled();
+  });
+
+  it('a review step is refused too, and the review keeps naming the item that is in front of the user', async () => {
+    const onOpenWizard = jest.fn();
+    let open = true;
+    mountLane(fiveItems(), { onOpenWizard, canOpenWizard: () => !open });
+    await ready();
+    open = false;
+    fireEvent.click(screen.getByTestId('lane-start-Decide'));
+    expect(screen.getByTestId('decide-review-position')).toHaveTextContent('1 of 4');
+    expect(onOpenWizard).toHaveBeenCalledTimes(1);
+
+    open = true; // the wizard opened for item 1 is still open
+    fireEvent.click(screen.getByTestId('decide-review-next'));
+    expect(await screen.findByTestId('decide-lane-notice')).toHaveTextContent(WIZARD_OPEN_NOTICE);
+    expect(screen.getByTestId('decide-review-position')).toHaveTextContent('1 of 4');
+    expect(onOpenWizard).toHaveBeenCalledTimes(1);
+
+    open = false; // closed: the step now goes through
+    fireEvent.click(screen.getByTestId('decide-review-next'));
+    expect(screen.getByTestId('decide-review-position')).toHaveTextContent('2 of 4');
+    expect(onOpenWizard).toHaveBeenCalledTimes(2);
+  });
+
+  it('Start review is refused while one is open, and a lane that is never told is always allowed', async () => {
+    const onOpenWizard = jest.fn();
+    const first = mountLane(fiveItems(), { onOpenWizard, canOpenWizard: () => false });
+    await ready();
+    fireEvent.click(screen.getByTestId('lane-start-Decide'));
+    expect(await screen.findByTestId('decide-lane-notice')).toHaveTextContent(WIZARD_OPEN_NOTICE);
+    expect(screen.queryByTestId('decide-review-bar')).toBeNull();
+    expect(onOpenWizard).not.toHaveBeenCalled();
+    first.view.unmount();
+
+    mountLane(fiveItems(), { onOpenWizard });
+    await ready();
+    fireEvent.click(row1());
+    expect(onOpenWizard).toHaveBeenCalledTimes(1);
   });
 });
