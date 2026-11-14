@@ -7,7 +7,7 @@
   "scripts": {
     "dev": "vite",
     "typecheck": "tsc --noEmit",
-    "build": "tsc --noEmit && vite build && node scripts/check-bundle-size.mjs",
+    "build": "tsc --noEmit && vite build && node scripts/check-bundle-size.mjs && jest --ci src/__tests__/widgetSurface.test.ts",
     "check:size": "node scripts/check-bundle-size.mjs",
     "test": "jest"
   },

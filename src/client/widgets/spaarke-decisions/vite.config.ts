@@ -48,6 +48,8 @@ export default defineConfig({
       '@': path.resolve(__dirname, './src'),
       '@spaarke/ui-components': sharedUiSrc,
       '@fluentui/react-components': path.resolve(__dirname, 'node_modules/@fluentui/react-components'),
+      // Reached only through the type graph today (EntityCreationService); aliased so a future runtime import resolves.
+      '@spaarke/sdap-client': path.resolve(__dirname, '../../shared/Spaarke.SdapClient/src/index.ts'),
     },
     // One React for the widget and the shared source (react-versioning constraint).
     dedupe: ['react', 'react-dom'],

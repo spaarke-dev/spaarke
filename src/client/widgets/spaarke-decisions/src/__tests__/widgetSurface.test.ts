@@ -91,7 +91,9 @@ describe('widget source surface', () => {
     expect(files.filter(f => STORAGE.test(code(f))).map(label)).toEqual([]);
   });
 
-  const built = existsSync(BUILT) ? it : it.skip; // dist/ exists after `npm run build`; the size gate test follows the same rule
+  // dist/ exists after `npm run build`. The build script runs this file as its last step (npm_lifecycle_event=build), and
+  // there a missing dist/ fails instead of skipping, so the scan cannot pass vacuously in CI's build-only jobs.
+  const built = existsSync(BUILT) || process.env.npm_lifecycle_event === 'build' ? it : it.skip;
   built('the built page uses browser storage for the lane open/closed state only (useLaneOpen), nothing else', () => {
     const html = readFileSync(BUILT, 'utf8');
     expect(html).toContain(LANE_OPEN_KEY); // the one allowed use is really there (the guard is looking at the right file)
