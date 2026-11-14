@@ -124,7 +124,8 @@ public sealed class RecordProcedureDryRunParityContractTests
                     var set = Filler(0xf2, n);
                     rig.World.Add(ProcedureEntity.Entity, procedure,
                         (ProcedureEntity.AreaColumn, Option(RuleDomains.PolicyDomainBilling)), (ProcedureEntity.StatusColumn, Option(ProcedureEntity.StatusActive)),
-                        (ProcedureEntity.NameColumn, $"Filler {n}"), (ProcedureEntity.AppliesToColumn, Option((int)ProcedureAppliesTo.AllRecords)));
+                        (ProcedureEntity.NameColumn, $"Filler {n}"), (ProcedureEntity.AppliesToColumn, Option((int)ProcedureAppliesTo.AllRecords)),
+                        ("statecode", Option(0))); // a stored row has one: the resolver's Procedure read asks for active rows (PR #2798)
                     rig.World.Add(ProcedureEntity.VersionEntity, Filler(0xf3, n),
                         (ProcedureEntity.VersionProcedureColumn, Ref(ProcedureEntity.Entity, procedure)), (ProcedureEntity.VersionNumberColumn, 1),
                         (ProcedureEntity.VersionStatusColumn, Option(ProcedureEntity.VersionStatusActive)),
@@ -455,6 +456,91 @@ public sealed class RecordProcedureDryRunParityContractTests
                 $"(b) {kind}: the version image's parent (the record rule) is in a chunk before the last");
         }
     }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // EB-D-232 / ISS-021: a Procedure deactivated in Dataverse (Status Active, statecode not Active)
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    public static TheoryData<string, string> DeactivatedProcedureCases()
+    {
+        var data = new TheoryData<string, string>();
+        foreach (var kind in new[] { "assign-follow", "assign-pin", "exclude-procedure", "change" })
+            foreach (var record in Records)
+                data.Add(kind, record.Table);
+        return data;
+    }
+
+    [Theory(DisplayName = "EB-D-232 parity: for a Procedure deactivated in Dataverse (Status Active), assign, pin and exclude are refused alike by the dry run and the write (409 assignment.procedure_inactive), a rule change is not in force in both (409 assignment.rule_not_in_force), the dry run writes nothing, and the resolver's lists carry none of its rules")]
+    [MemberData(nameof(DeactivatedProcedureCases))]
+    public async Task ADeactivatedProcedure_IsRefusedAlikeByTheDryRunAndTheWrite_AndContributesNoRules(string kind, string table)
+    {
+        var w = new RecordProcedureWriteRig();
+        var rig = w.Rig;
+        var record = IdOf(table);
+
+        // A Procedure that applies to every record, with one rule: the resolver-side control. It shows in the lists while active.
+        var everywhere = rig.Simple("DEACT-ALL");
+        var before = await ReadListsAsync(w, table, Mar15, []);
+        before.Rules.Should().Contain("DEACT-ALL", "must-not-fire control: an active Procedure's rule is in force and shows in the record's rules");
+        before.Procedures.Should().Contain("Procedure DEACT-ALL");
+
+        ProcedureDryRunRequest request;
+        Func<ProcedureAssignmentService, Task<(int Status, string? Code)>> write;
+        string expectedCode;
+        Guid deactivated;
+        switch (kind)
+        {
+            case "assign-follow":
+            case "assign-pin":
+            case "exclude-procedure":
+                {
+                    var s = rig.Simple("DEACT-" + kind, kind == "assign-follow" ? ProcedureAppliesTo.AssignedRecordsOnly : ProcedureAppliesTo.AllRecords);
+                    deactivated = s.Procedure;
+                    var body = kind switch
+                    {
+                        "assign-follow" => new ProcedureAssignmentRequest(s.Procedure, "FollowLatest", null, null),
+                        "assign-pin" => new ProcedureAssignmentRequest(s.Procedure, "Pinned", s.Version, "Grandfathered"),
+                        _ => new ProcedureAssignmentRequest(s.Procedure, "Excluded", null, "Not for this record"),
+                    };
+                    request = new(ProcedureDryRunRequest.KindAssign, Assign: body);
+                    write = async p => Outcome(await p.AssignProcedureAsync(table, record, body, CallerObjectId, Ct));
+                    expectedCode = ProcedureAssignmentService.CodeProcedureInactive;
+                    break;
+                }
+
+            default:
+                {
+                    var c = rig.Changeable("DEACT-CHG");
+                    deactivated = c.Procedure;
+                    var body = Change(c.Rule, "Rate agreed for this record");
+                    request = new(ProcedureDryRunRequest.KindChangeRule, ChangeRule: body);
+                    write = async p => Outcome(await p.ChangeRuleAsync(table, record, body, CallerObjectId, Token, Ct));
+                    expectedCode = "assignment.rule_not_in_force";
+                    break;
+                }
+        }
+
+        // The Procedure is deactivated in Dataverse while its Status still says Active.
+        rig.World.Set(ProcedureEntity.Entity, everywhere.Procedure, "statecode", Option(1));
+        rig.World.Set(ProcedureEntity.Entity, deactivated, "statecode", Option(1));
+
+        var world = w.Snapshot();
+        var dry = await w.Rig.Service.DryRunAsync(w.Planner, table, record, request, null, Mar15, Token, Ct);
+        w.Snapshot().Should().Be(world, "a dry run writes nothing");
+        var written = await write(w.Writer);
+
+        dry.Status.Should().Be(RecordProcedureReadStatus.PlanRefused);
+        (dry.Refusal!.StatusCode, dry.Refusal.ErrorCode).Should().Be((409, expectedCode));
+        written.Should().Be((409, expectedCode), "the write refuses with the dry run's own status and code");
+        w.Snapshot().Should().Be(world, "the refused write wrote nothing");
+
+        // Resolver side: neither deactivated Procedure contributes a rule, and nothing of it is listed.
+        var after = await ReadListsAsync(w, table, Mar15, []);
+        after.Rules.Should().NotContain("DEACT-ALL").And.NotContain("DEACT-CHG");
+        after.Procedures.Should().NotContain("Procedure DEACT-ALL");
+    }
+
+    private static (int Status, string? Code) Outcome<T>(RuleSetOutcome<T> outcome) where T : class => (outcome.StatusCode, outcome.ErrorCode);
 
     public static TheoryData<string, string> AppendedOnceCases()
     {

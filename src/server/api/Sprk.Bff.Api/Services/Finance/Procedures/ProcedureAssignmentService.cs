@@ -473,7 +473,7 @@ public class ProcedureAssignmentService
         // EB-D-232 (ISS-021): a Procedure deactivated in Dataverse (statecode not Active) is refused whatever its Status says, on the same path as
         // Retired. The resolver skips it (`is not (null or StateActive)`, PR #2798), so a row for it would never apply. A missing statecode reads
         // as Active, as the resolver does.
-        if (procedure.GetAttributeValue<OptionSetValue>("statecode")?.Value is not (null or InvoiceStatusCodes.StateActive))
+        if (procedure.GetAttributeValue<OptionSetValue>("statecode")?.Value is not (null or ProcedureEntity.StateActive))
         {
             return Refused<T>(StatusCodes.Status409Conflict, CodeProcedureInactive, "A deactivated Procedure cannot be assigned, pinned or excluded.");
         }
@@ -1689,7 +1689,7 @@ public class ProcedureAssignmentService
                 NoLock = true,
             };
             query.Criteria.AddCondition(ProcedureEntity.StatusColumn, ConditionOperator.Equal, ProcedureEntity.StatusActive);
-            query.Criteria.AddCondition("statecode", ConditionOperator.Equal, 0);
+            query.Criteria.AddCondition("statecode", ConditionOperator.Equal, ProcedureEntity.StateActive);
             query.Criteria.AddCondition(ProcedureEntity.AreaColumn, ConditionOperator.Equal, RuleDomains.PolicyDomainBilling);
             // The resolver's O-20 firm condition (FirmConditionHolds): no Firm, or the list's firm.
             var firm = new FilterExpression(LogicalOperator.Or);
@@ -2224,7 +2224,7 @@ public class ProcedureAssignmentService
         {
             var owner = await LoadByIdAsync(entities, ProcedureEntity.Entity, owningProcedureId, new[] { ProcedureEntity.StatusColumn, "statecode" }, ct);
             procedureEnded = owner?.GetAttributeValue<OptionSetValue>(ProcedureEntity.StatusColumn)?.Value == ProcedureEntity.StatusRetired
-                || owner?.GetAttributeValue<OptionSetValue>("statecode")?.Value is not (null or InvoiceStatusCodes.StateActive);
+                || owner?.GetAttributeValue<OptionSetValue>("statecode")?.Value is not (null or ProcedureEntity.StateActive);
         }
 
         var code = policy.GetAttributeValue<string>("sprk_policycode") ?? policyId.ToString();

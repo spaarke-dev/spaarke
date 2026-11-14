@@ -68,6 +68,9 @@ internal class WriteRefusingEntityService : IGenericEntityService
     public Task<IReadOnlyDictionary<string, ColumnMetadata>> GetColumnMetadataAsync(string entityLogicalName, CancellationToken ct = default) =>
         _inner.GetColumnMetadataAsync(entityLogicalName, ct);
 
+    public Task<IReadOnlyList<AssignCascadeRelationship>> GetAssignCascadesAsync(string entityLogicalName, CancellationToken ct = default) =>
+        _inner.GetAssignCascadesAsync(entityLogicalName, ct);
+
     public Task<string> GetCollectionNavigationAsync(string parentEntityLogicalName, string relationshipSchemaName, CancellationToken ct = default) =>
         _inner.GetCollectionNavigationAsync(parentEntityLogicalName, relationshipSchemaName, ct);
 
