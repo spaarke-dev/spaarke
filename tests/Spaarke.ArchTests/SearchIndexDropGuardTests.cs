@@ -42,6 +42,9 @@ public class SearchIndexDropGuardTests
             "Writes a sprk_communication draft; that table is not search-indexed.",
         ["src/server/api/Sprk.Bff.Api/Services/Dataverse/InvoiceFamilyCoreRecordGuard.cs"] =
             "Every caller drops first (FieldMappingEndpoints push, UpdateRecordActionCore, DataverseUpdateHandler).",
+        ["src/server/api/Sprk.Bff.Api/Services/Dataverse/InvoiceFamilyLockedWrite.cs"] =
+            "#2799: splits a body its caller has already dropped the index from (the three above, ChildRecordEndpoints, " +
+            "DataverseUpdateRecordHandler, OwnedChildWrite's re-file); it adds no column.",
         ["src/server/api/Sprk.Bff.Api/Services/Finance/FinanceRollupService.cs"] =
             "Writes server-computed roll-up columns on the parent; a fixed column set.",
         ["src/server/api/Sprk.Bff.Api/Services/Finance/InvoiceTotalsService.cs"] =
