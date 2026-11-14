@@ -805,3 +805,13 @@ Task 168, owner questions Q1 and Q2 (asked 2026-10-28, explained in detail 2026-
 - **Finding:** every email send goes through the standard Graph policy, which re-sends `sendMail` up to 3 times on 5xx/408 (`GraphHttpMessageHandler.cs:116-119`), so after a 502/503/timeout nobody can tell whether the email went out (DI-153, #2779).
 - **Decision ("Ask the user"):** (1) fix #2779 in task 191: sends use `NoTransientRetryOption` (429 only) and the send error says NotSent or Unknown; (2) a NotSent failure retries automatically, reusing the service request; (3) for Unknown the item says the email may have been sent and to check Sent Items, and offers "Send again" or "Record without sending". No duplicate is ever sent without a person choosing it.
 - **Rejected:** checking Sent Items automatically (lag; lookup broken, #2774); treating 5xx as not sent (duplicate risk to the outside firm); shipping only the safe part.
+
+## D-224 — Budget inquiry email: standard default text; no template picker or AI of its own (owner, 2026-11-14, asked directly after task 188's review)
+
+- **Finding:** the decision wizard's email step (`DecisionWizard/steps/EmailMessageFields.tsx`) passes no template or AI handlers and refuses network fetches by design. Only To is pre-filled (task 160, `DecisionPlanEndpoints.cs:226`). Subject and Message start empty (`DecisionActionCatalog.cs` `MessageParameters`, no default).
+- **Decision:**
+  - The Budget inquiry email opens with a **standard default subject and message**, which the user can edit.
+  - It gets **no template picker** unless the shared EmailComposer shows one anyway, and **no AI draft**.
+  - The step stays compose-only, as built in tasks 160 and 190.
+- **Follow-up:** task 192 adds the default through the plan route's `DefaultSource` mechanism (task 167, D-193). The owner confirms the wording before execution.
+- **Rejected:** wiring templates and AI into the decision step. The owner said they are not needed here, and the step blocks fetches on purpose.
