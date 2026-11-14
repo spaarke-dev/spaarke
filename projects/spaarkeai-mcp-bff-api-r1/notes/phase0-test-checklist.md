@@ -65,7 +65,7 @@ Run as the **licensed non-admin test user** (`demo@…`) unless a step says "own
 
 ## Batch D — owner-only remainder (2026-11-14)
 
-Everything the test user could run is recorded in `phase0-results.md` (Chat, Cowork, Word, Outlook). What is left needs the owner: an admin step, a persistent change to the test user, or the owner's memory. Dev BFF `0173e1486e` (2026-11-14 ~12:44Z, master `bd43110169` + spike `d7369fecf1`) still carries the spike; uac-r2 pings before any swap.
+Everything the test user could run is recorded in `phase0-results.md` (Chat, Cowork, Word, Outlook). What is left needs the owner: an admin step, a persistent change to the test user, or the owner's memory. Dev BFF `5a9b687a0b` (2026-11-14 ~15:19Z, master `2747977f47` + spike `d7369fecf1`) still carries the spike; uac-r2 pings before any swap.
 
 | # | Who / where | Steps | Record |
 |---|---|---|---|
