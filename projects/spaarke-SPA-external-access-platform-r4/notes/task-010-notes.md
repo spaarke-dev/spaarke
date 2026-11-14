@@ -86,3 +86,65 @@ The shared DataGrid already lets a host add its own commands: command bar config
 **F3.** `recordsFirmKey` kept as defence in depth, with a comment saying a mutation removing its guard is unobservable (the records effect already clears the held answer on a firm change) and that no test is claimed to cover it; the earlier note that the firm-change tests cover "2c" through it is withdrawn: they cover the behaviour, not that guard. The "phone width" test is deleted (it asserted the same caption as the no-firm test; jsdom cannot see the CSS).
 
 **F4 (focus after Retry).** The locked-record gate now renders in an always-mounted container (`tabIndex=-1`, testid `locked-record-gate`, outline off); the Retry click focuses it before the button is replaced by "Checking this record", so focus stays inside the step through the check and its answer (it does not fall to `body`). Test: focus is on the container while checking and after the answer; fails without the focus call. Side effect: in locked mode an empty container adds one flex gap of space when there is nothing to show; not browser-checked.
+
+## ebilling-r1 re-check (2026-11-13): PASS on 9b10699efe
+
+ebilling-r1 re-checked the fix lines and found nothing new:
+- **F1:** both reads use the same uncapped source; the record matches on kind plus a case-insensitive id; `truncated`/`partial` pass through; with no firm, falling back to the capped list is acceptable.
+- **F2:** `submittingRef` is cleared before `onSubmitted`.
+- **F3, F4:** OK.
+
+**Merge.** Allowed on our gates. Send ebilling-r1 the master merge SHA when it lands; they record it against their task 095 notes.
+
+**Open.** Part 3 (the Invoices grid toolbar command) is still waiting on the owner's choice.
+
+## Part 3 — grid host command (2026-11-13, sonnet/high): BUILT, owner approved option A
+
+Owner approved (2026-11-13, on behalf of the dataset-grid owners, who have no active session) a small generic additive DataGrid option for host-supplied toolbar commands. This replaces the earlier "dataset-grid owners: not needed" gate note above (the existing mechanism could not add a command without a live config edit).
+
+### Prop API as built
+- `DataGrid` prop `hostCommands?: ReadonlyArray<DataGridHostCommand>`, threaded DataGrid -> `CommandBar` (`hostCommands` prop on `CommandBarProps` too).
+- `DataGridHostCommand` = `{ id: string; label: string; icon?: React.ReactElement; onInvoke: () => void | Promise<void>; disabled?: boolean }`. Exported from `components/DataGrid/index.ts` (and so from the components barrel). Defined in `commandBar/CommandBar.tsx`.
+- Generic: no entity names, no Xrm, no data access. Absent or `[]`: `buildEffectiveItems` returns today's list untouched.
+
+### Placement and collision rules (fixed, documented in the type's JSDoc and in the architecture doc)
+- Host commands come FIRST in the effective list, in the order supplied; then the ordinary `inlineLimit` rule (the grid mounts the bar with `inlineLimit={3}`; the rest go to the `...` menu).
+- A host `id` equal to a configured or built-in item's `id` REPLACES that item (host behaviour wins; never two buttons for one id). Duplicate host ids: first wins.
+- Subtle buttons only (the "no primary CTA" convention in CommandBar.tsx is kept; the doc does not let hosts override it). The widget's old button was `primary`; the new one is subtle, like every grid command.
+- `onCommandInvoke` fires first as an observer; no built-in handler runs; a throwing `onInvoke` is logged, not rethrown. `disabled` honoured.
+
+### Files
+- Shared lib: `DataGrid/commandBar/CommandBar.tsx` (type, prop, merge in `buildEffectiveItems`, invoke/disabled/icon branches), `DataGrid/DataGrid.tsx` (prop + pass-through; no `props.x` access, the external-host guard's count is unchanged), `DataGrid/index.ts` (type export).
+- Tests (new): `DataGrid/commandBar/__tests__/CommandBar.hostCommands.test.tsx` (12), `DataGrid/__tests__/DataGrid.hostCommands.test.tsx` (2).
+- Docs: `docs/architecture/SPAARKE-DATAGRID-FRAMEWORK-ARCHITECTURE.md` new "Host commands" subsection after "Host filters".
+- SPA: `src/widgets/GridWidgetBody.tsx` (`createGridWidgetBody` now returns `ComponentType<GridWidgetBodyProps>`; optional `hostCommands` forwarded to `<ExternalDataGrid>`; types `GridHostCommands` / `GridWidgetBodyProps` read off the wrapper's props, so no import of the shared grid), `src/widgets/InvoicesWidget.tsx` (standalone button, its styles and the `Button` import removed; a memoised `hostCommands` of one command `submit-invoice` / "Submit invoice" / `AddRegular`, only when `canSubmit` = `onNavigate` present and `me.firms` non-empty; invoking calls `onNavigate(INVOICE_SUBMIT_PATH)` as before). `tests/InvoiceSubmitPage.test.tsx` (grid stub now renders the host commands it is handed inside the grid element; tests updated).
+- `ExternalDataGrid.tsx` NOT touched (its text is pinned by `ExternalSpaGridViewSelectorGuardTests`; its `Omit<DataGridProps,'showViewSelector'>` picks the new prop up).
+- Not touched: `components/record/**`, `recordAccess.ts`, EventsCalendar, TasksEventsSection, ProjectPage (task 011), BFF, `.claude/`.
+
+### Gating
+Unchanged: shown only with `onNavigate` and a non-empty `/me` `firms`. Convenience only; the server refuses a no-firm submission (EB-D-223). Still one `/me` read on mount, no list read.
+
+### Verification
+- Shared lib Jest: `src/components/DataGrid` + `InvoiceSubmission` + `RecordCommandBar`: 20 suites, 249 passed. New tests against the old CommandBar/DataGrid: 11 failed, 3 passed (the 3 are the absent-prop controls). Shared lib `tsc --noEmit`: clean; eslint 0 errors on the changed files; Prettier clean.
+- SPA: `npm run typecheck` clean, `npm run lint` clean, `npx vitest run` 56 files, 1626 tests, all pass (one `DocumentUploadPage.externalUpload` test failed once while a dotnet build ran at the same time, passed alone: 25/25; unrelated). The widget "toolbar command" test fails against the old `InvoicesWidget` (standalone button outside the grid); the "no command when firms null/absent/empty/failed /me, no onNavigate" tests are controls.
+- Arch guard `dotnet test --filter ExternalSpaGridViewSelectorGuard` (Spaarke.ArchTests): passed (DataGrid.tsx pins unchanged).
+- Not verified: real-browser look of the toolbar (inline order with the live grid config's built-ins, icon size next to the 20px built-in icons); jsdom only. Live config `showDefaultCommands` for the Invoices grid not re-read.
+
+### Other DataGrid consumers checked (additive optional prop; no change needed)
+`src/solutions/{EventsPage,LegalWorkspace (matters/projects/documents/invoices/workAssignments registrations),RuleReview,SpeAdminApp,sprk_communicationspage,sprk_invoicespage,sprk_kpiassessmentspage}`, `src/client/pcf/SemanticSearchControl`, `src/client/shared/{Spaarke.AI.Widgets,Spaarke.Communication.Components,Spaarke.Events.Components}`: none pass `hostCommands`; the bar is built exactly as before for them. Other `createGridWidgetBody` callers (Documents, Matters, Projects, ServiceRequests widgets, registry) are unchanged: the returned type is assignable to `WidgetBodyComponent`.
+
+### For ebilling-r1 / dataset-grid owners (FYI diff review)
+`git diff` on `DataGrid/commandBar/CommandBar.tsx` and `DataGrid/DataGrid.tsx`; points: the replace-on-collision rule, host-first placement, `hostCommand` carried on an internal `EffectiveItem` (the config schema `CommandBarItem` is unchanged).
+
+## Part 3 review round (2026-11-13, sonnet)
+
+Scoped review of part 3 found two items; both fixed in the working tree (uncommitted).
+
+**F2: the `GridWidgetBody` -> `<ExternalDataGrid hostCommands>` forward was untested** (`InvoiceSubmitPage.test` mocks `createGridWidgetBody` wholesale). New `tests/GridWidgetBody.hostCommands.test.tsx` (2 tests) renders the REAL `createGridWidgetBody(id)` with `../src/widgets/ExternalDataGrid` mocked (RecordTemplateSections pattern): the mocked grid receives the same `hostCommands` array when passed (and the config id and a row-open callback), and none when not passed (control). Fail-before: deleting the `hostCommands={hostCommands}` line fails the forward test (1 failed, 1 passed).
+
+**K1 decided: a host command never replaces a configured or built-in item** (supersedes the "replace on collision" rule written in the Part 3 section above; a built-in such as `delete-selected` would lose its confirm + selection gating). `CommandBar.tsx` `buildEffectiveItems`: a host command whose `id` equals a configured item's id, or ANY built-in action id (`refresh`, `delete-selected`, `create-form`, `export-excel`, `edit-columns`, `edit-filters`, whether or not that built-in is shown, so a host cannot impersonate a hidden one either), is SKIPPED (not rendered) and `console.warn` names the id. Duplicate host ids: first wins (kept). Placement (host first) unchanged. JSDoc (`DataGridHostCommand`, `DataGrid.hostCommands`) and the "Host commands" section of `docs/architecture/SPAARKE-DATAGRID-FRAMEWORK-ARCHITECTURE.md` updated.
+- Tests (`CommandBar.hostCommands.test.tsx`, now 14): configured-id collision keeps the configured item, which still runs, host skipped, warn names the id; built-in `refresh` collision keeps Refresh, which still calls the grid refresh; collision with a HIDDEN built-in (`delete-selected` with delete off) is skipped; a colliding command does not hide a valid one beside it, and a no-collision bar does not warn; duplicate ids first wins. The 4 collision tests fail against the previous replace-on-collision `CommandBar` (4 failed, 36 passed).
+
+### Results
+- Shared lib `npx jest src/components/DataGrid`: 13 suites, 124 passed (was 122). `tsc --noEmit` clean; eslint 0 errors; Prettier clean on the changed files.
+- SPA: `npm run typecheck` clean, `npm run lint` clean, `npx vitest run` 57 files, 1628 tests, all pass (no load timeouts this run). Arch guard (`ExternalSpaGridViewSelectorGuard`) passed on the round-1 DataGrid.tsx; this round changed only a comment there.

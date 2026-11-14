@@ -105,6 +105,39 @@ const DEFAULT_INLINE_LIMIT = 2;
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
+ * A command supplied by the HOST of the grid (not by the `sprk_gridconfiguration` record). The host
+ * owns what the command does; the grid only places and renders it. Generic by design: no entity
+ * names, no Xrm, no data access.
+ *
+ * Placement (fixed rule): host commands come FIRST in the effective item list, in the order
+ * supplied, ahead of the configured and built-in items. They then follow the ordinary `inlineLimit`
+ * rule: the first `inlineLimit` items are inline buttons, the rest are in the `...` overflow menu.
+ * So a host command is inline unless the host supplies more of them than the limit.
+ *
+ * Collisions: a host command NEVER replaces a configured or built-in item (a built-in such as
+ * `delete-selected` carries its own confirmation and selection gating, which a host must not bypass).
+ * A host command whose `id` equals the `id` of a configured item, or of ANY built-in action
+ * (`refresh`, `delete-selected`, `create-form`, `export-excel`, `edit-columns`, `edit-filters`, whether
+ * or not it is shown), is SKIPPED (not rendered) and a `console.warn` names the id. Choose an id of
+ * your own. Among host commands with the same `id`, the first wins.
+ *
+ * Appearance: like every item in this bar, a host command is a subtle button; there is no primary
+ * call-to-action here (see `renderInlineButton`).
+ */
+export interface DataGridHostCommand {
+  /** Stable, unique command id. Passed to `onCommandInvoke` and used as the React key. */
+  id: string;
+  /** Visible label (also the accessible name and tooltip). */
+  label: string;
+  /** Optional icon element (for example a Fluent icon). Absent: text only. */
+  icon?: React.ReactElement;
+  /** Invoked when the user activates the command. An error it throws is logged, not rethrown. */
+  onInvoke: () => void | Promise<void>;
+  /** Render the command disabled. Default false. */
+  disabled?: boolean;
+}
+
+/**
  * Props for {@link CommandBar}.
  *
  * The grid passes `entityName`, `selectedIds`, `records`, `columns`, `currentView`,
@@ -115,6 +148,12 @@ const DEFAULT_INLINE_LIMIT = 2;
 export interface CommandBarProps {
   /** Resolved `commandBar` slice from the grid configuration. */
   config: CommandBarConfig;
+  /**
+   * Optional commands the HOST adds to the bar (see {@link DataGridHostCommand} for placement and
+   * collision rules). Absent or empty: the bar is exactly what the configuration and built-ins give.
+   * Pass a referentially stable array (`useMemo`) so the item list is not rebuilt every render.
+   */
+  hostCommands?: ReadonlyArray<DataGridHostCommand>;
   /** Logical name of the entity (`'sprk_event'`, `'account'`). */
   entityName: string;
   /** Currently-selected primary id values. */
@@ -269,7 +308,46 @@ function makeDefaultItem(action: CommandBarAction): CommandBarItem {
   };
 }
 
-function buildEffectiveItems(config: CommandBarConfig): CommandBarItem[] {
+/** A bar item: a configured/built-in item, or a host command carried alongside its schema-shaped item. */
+type EffectiveItem = CommandBarItem & { hostCommand?: DataGridHostCommand };
+
+function buildEffectiveItems(
+  config: CommandBarConfig,
+  hostCommands?: ReadonlyArray<DataGridHostCommand>
+): EffectiveItem[] {
+  const configured = buildConfiguredItems(config);
+  if (!hostCommands || hostCommands.length === 0) return configured;
+
+  // Host commands first, de-duplicated by id (first wins). A host id that collides with a configured item or any
+  // built-in id is skipped, never allowed to replace it (built-ins carry their own confirmation + selection gating).
+  const reserved = new Set<string>([...ALL_DEFAULT_ACTIONS, ...configured.map(it => it.id)]);
+  const hostItems: EffectiveItem[] = [];
+  const hostIds = new Set<string>();
+  for (const hc of hostCommands) {
+    if (reserved.has(hc.id)) {
+      // eslint-disable-next-line no-console
+      console.warn(
+        `[CommandBar] Host command "${hc.id}" skipped: its id is already a configured or built-in command id. ` +
+          'Use an id of your own; a host command never replaces an existing command.'
+      );
+      continue;
+    }
+    if (hostIds.has(hc.id)) continue;
+    hostIds.add(hc.id);
+    hostItems.push({
+      id: hc.id,
+      label: hc.label,
+      icon: '',
+      action: 'custom',
+      appearance: 'subtle',
+      requiresSelection: false,
+      hostCommand: hc,
+    });
+  }
+  return [...hostItems, ...configured];
+}
+
+function buildConfiguredItems(config: CommandBarConfig): CommandBarItem[] {
   const explicitItems: CommandBarItem[] = [...(config.primary ?? []), ...(config.secondary ?? [])];
 
   // Determine which built-ins to add — by default ON, except `edit-columns` (off in R1).
@@ -310,6 +388,7 @@ function buildEffectiveItems(config: CommandBarConfig): CommandBarItem[] {
 export const CommandBar: React.FC<CommandBarProps> = props => {
   const {
     config,
+    hostCommands,
     entityName,
     selectedIds,
     records,
@@ -331,7 +410,7 @@ export const CommandBar: React.FC<CommandBarProps> = props => {
   const [isDeleting, setIsDeleting] = React.useState<boolean>(false);
 
   // ── Build effective item list (defaults + configjson + showDefaultCommands) ─
-  const effectiveItems = React.useMemo(() => buildEffectiveItems(config), [config]);
+  const effectiveItems = React.useMemo(() => buildEffectiveItems(config, hostCommands), [config, hostCommands]);
 
   // ── Partition: first inlineLimit go inline, rest go in the overflow menu ─
   // Clamp the limit so 0 / negative / too-large all behave intuitively.
@@ -376,10 +455,21 @@ export const CommandBar: React.FC<CommandBarProps> = props => {
 
   // ── Invocation flow — bulk delete short-circuits to Dialog ─────────────
   const invokeItem = React.useCallback(
-    async (item: CommandBarItem) => {
+    async (item: EffectiveItem) => {
       // Fire the host hook FIRST so observers see every click, including ones the
       // Dialog will then intercept.
       onCommandInvoke?.(item.id, selectedIds);
+
+      // Host-supplied command: the host owns the behaviour; nothing else runs.
+      if (item.hostCommand) {
+        try {
+          await item.hostCommand.onInvoke();
+        } catch (err) {
+          // eslint-disable-next-line no-console
+          console.error(`[CommandBar] Host command "${item.id}" threw:`, err);
+        }
+        return;
+      }
 
       // `create-form` override: when the host supplies `onCreateNew`, route New
       // there and SUPPRESS the default OOB create-form handler entirely (the
@@ -425,7 +515,8 @@ export const CommandBar: React.FC<CommandBarProps> = props => {
 
   // ── Compute whether a given item is disabled based on selection requirement ─
   const isDisabled = React.useCallback(
-    (item: CommandBarItem): boolean => {
+    (item: EffectiveItem): boolean => {
+      if (item.hostCommand?.disabled) return true;
       if (item.requiresSelection === 'single') {
         return selectedIds.length !== 1;
       }
@@ -438,8 +529,8 @@ export const CommandBar: React.FC<CommandBarProps> = props => {
   );
 
   // ── Render a single inline subtle button (icon + Text label) ───────────
-  const renderInlineButton = (item: CommandBarItem): React.ReactNode => {
-    const icon = resolveIcon(item.icon);
+  const renderInlineButton = (item: EffectiveItem): React.ReactNode => {
+    const icon = item.hostCommand ? item.hostCommand.icon : resolveIcon(item.icon);
     const disabled = isDisabled(item);
     // OOB pattern: every inline button is subtle. We intentionally ignore
     // `item.appearance` here — primary blue CTA buttons are NOT part of the
@@ -492,7 +583,7 @@ export const CommandBar: React.FC<CommandBarProps> = props => {
               {overflowItems.map(item => (
                 <MenuItem
                   key={item.id}
-                  icon={resolveIcon(item.icon)}
+                  icon={item.hostCommand ? item.hostCommand.icon : resolveIcon(item.icon)}
                   disabled={isDisabled(item)}
                   onClick={() => {
                     void invokeItem(item);

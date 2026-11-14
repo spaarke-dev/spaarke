@@ -26,9 +26,20 @@ vi.mock('@azure/msal-react', () => ({
   useMsal: () => ({ instance: { loginRedirect: vi.fn(async () => undefined) }, accounts: [], inProgress: 'none' }),
 }));
 
-// The Invoices widget test needs the widget, not the shared grid behind it.
+// The Invoices widget test needs the widget, not the shared grid behind it. The stub stands in for the grid's
+// `hostCommands` slot: every host command it is handed is rendered as a button INSIDE the grid element, the way the
+// real grid puts it in its own toolbar, so a button outside the grid is a standalone one.
 vi.mock('../src/widgets/GridWidgetBody', () => ({
-  createGridWidgetBody: () => () => React.createElement('div', { 'data-testid': 'invoices-grid' }, 'grid'),
+  createGridWidgetBody:
+    () => (props: { hostCommands?: ReadonlyArray<{ id: string; label: string; onInvoke: () => void }> }) =>
+      React.createElement(
+        'div',
+        { 'data-testid': 'invoices-grid' },
+        'grid',
+        ...(props.hostCommands ?? []).map(c =>
+          React.createElement('button', { key: c.id, 'data-command-id': c.id, onClick: () => c.onInvoke() }, c.label)
+        )
+      ),
 }));
 
 const SLOW = { timeout: 60000 };
@@ -1007,12 +1018,15 @@ describe('Invoices widget — Submit invoice entry (FR-18, FR-45)', () => {
   }
 
   it(
-    'shows the action when eBilling answers, and the action opens the submission page',
+    'offers Submit invoice as a grid toolbar command when eBilling answers, and the command opens the submission page',
     async () => {
       const { InvoicesWidgetBody } = await load();
       renderWidget(InvoicesWidgetBody);
       const action = await screen.findByRole('button', { name: /submit invoice/i }, SLOW);
-      expect(screen.getByTestId('invoices-grid')).toBeTruthy();
+      // It is the grid's own command (handed through `hostCommands`), not a button beside the grid.
+      expect(screen.getByTestId('invoices-grid').contains(action)).toBe(true);
+      expect(action.getAttribute('data-command-id')).toBe('submit-invoice');
+      expect(screen.getAllByRole('button', { name: /submit invoice/i })).toHaveLength(1);
       fireEvent.click(action);
       expect(await screen.findByText('submit page')).toBeTruthy();
     },
@@ -1039,7 +1053,7 @@ describe('Invoices widget — Submit invoice entry (FR-18, FR-45)', () => {
     ['no firm (empty: a systemuser, a deactivated contact)', meWith([])],
     ['a /me that fails', () => problem(500, 'boom')],
   ])(
-    'hides the action for %s (the grid stays)',
+    'hands the grid no command for %s (the grid stays)',
     async (_name, me) => {
       script.me = me;
       const { InvoicesWidgetBody } = await load();

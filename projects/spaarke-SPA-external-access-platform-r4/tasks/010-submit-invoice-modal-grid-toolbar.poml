@@ -4,7 +4,7 @@
     <title>Submit invoice as a modal over the record (record fixed) in the Invoices section; Submit invoice in the Invoices grid toolbar (owner E2E rework)</title>
     <phase>1 Record template and actions (post-E2E rework)</phase>
     <gate>ebilling-r1 agreement on the wizard hosting contract (sent 2026-11-13); dataset-grid owners' agreement on a DataGrid custom-command slot</gate>
-    <status>open</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>.tsx in the SPA and the shared library</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -53,6 +53,8 @@
     <criterion testable="true">The page path still works (existing InvoiceSubmitPage tests pass).</criterion>
   </acceptance-criteria>
 
+  <notes>Parts 1-2: shared InvoiceSubmissionWizard lockedRecord (+ hideTitle, locked firm_required notice, in-flight close guard, firm-records check past the 200 cap); SPA child SprkModal over the record from the Invoices section (WA: header, no Invoices section). Part 3 (owner option A): generic additive DataGrid hostCommands (never replace configured/built-in ids), InvoicesWidget Submit invoice as a grid toolbar command. Reviews: 1 adversarial pass + scoped part-3 pass; ebilling-r1 PASS (with changes, re-checked). Detail: notes/task-010-notes.md.
+rework: fix-round-2 task 010</notes>
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
   </execution>

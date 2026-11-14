@@ -105,7 +105,7 @@ export type { BoolFilterChipProps, BoolFilterValue } from './chips/BoolFilterChi
 // `CommandBar` exported by components/PageChrome/. The internal name in
 // commandBar/CommandBar.tsx stays `CommandBar` — deep imports still work.
 export { CommandBar as DataGridCommandBar } from './commandBar/CommandBar';
-export type { CommandBarProps as DataGridCommandBarProps } from './commandBar/CommandBar';
+export type { CommandBarProps as DataGridCommandBarProps, DataGridHostCommand } from './commandBar/CommandBar';
 
 export {
   defaultCreateFormHandler,
