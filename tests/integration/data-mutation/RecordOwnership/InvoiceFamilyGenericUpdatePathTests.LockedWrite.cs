@@ -132,6 +132,8 @@ public partial class InvoiceFamilyGenericUpdatePathTests
         var outcome = await RunLocked(path, RenameOnly, playbookActsAs: Caller);
 
         outcome.Code.Should().Be(InvoiceFamilyLockedWrite.LockedWriteDeniedCode);
+        // Review 2 (R2-5): plain words — the person may not change the invoice links — with the code kept.
+        outcome.Message.Should().Contain(InvoiceFamilyLockedWrite.LockedWriteDeniedMessage).And.NotContain("core-record rule");
         NoGuid(outcome);
         NothingWritten();
     }
@@ -157,6 +159,7 @@ public partial class InvoiceFamilyGenericUpdatePathTests
         var outcome = await RunLocked(path, RenameOnly, playbookActsAs: Caller);
 
         outcome.Code.Should().Be(InvoiceFamilyCoreRecordGuard.ReadFailedCode);
+        outcome.Message.Should().Contain(InvoiceFamilyCoreRecordGuard.CodeOnlyRefusalMessage(InvoiceFamilyCoreRecordGuard.ReadFailedCode));
         NothingWritten();
     }
 

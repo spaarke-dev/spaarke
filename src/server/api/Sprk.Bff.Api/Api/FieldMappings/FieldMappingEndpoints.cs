@@ -1707,7 +1707,7 @@ public static class FieldMappingEndpoints
                             RecordId = childRecordId,
                             Error = goneCode == Sprk.Bff.Api.Services.Dataverse.InvoiceFamilyLockedWrite.LockedWritePartlySavedCode
                                 ? Sprk.Bff.Api.Services.Dataverse.InvoiceFamilyLockedWrite.PartlySavedMessage
-                                : $"Not written: {Sprk.Bff.Api.Services.Dataverse.InvoiceFamilyCoreRecordGuard.CodeOnlyRefusalMessage(goneCode)}"
+                                : $"Not written: {Sprk.Bff.Api.Services.Dataverse.InvoiceFamilyLockedWrite.RefusalMessage(goneCode)}"
                         });
                         continue;
                     }

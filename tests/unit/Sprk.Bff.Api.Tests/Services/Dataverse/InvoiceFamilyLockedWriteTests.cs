@@ -674,8 +674,20 @@ public class InvoiceFamilyLockedWriteTests
     [Fact]
     public void RefusalException_ForAGuardCode_IsTheGuardsCodeOnlyRefusal()
     {
-        RefusalException("sprk_invoice", LockedWriteDeniedCode).Message
-            .Should().Be(InvoiceFamilyCoreRecordGuard.CodeOnlyRefusalMessage(LockedWriteDeniedCode));
+        RefusalException("sprk_invoice", InvoiceFamilyCoreRecordGuard.ReadFailedCode).Message
+            .Should().Be(InvoiceFamilyCoreRecordGuard.CodeOnlyRefusalMessage(InvoiceFamilyCoreRecordGuard.ReadFailedCode));
+    }
+
+    [Fact]
+    public void RefusalException_Denied_SaysThePersonMayNotChangeTheInvoiceLinks_KeepsTheCode()
+    {
+        var refused = RefusalException("sprk_invoice", LockedWriteDeniedCode);
+
+        refused.RefusalCode.Should().Be(LockedWriteDeniedCode);
+        refused.Message.Should().Be(
+            "You do not have permission to change this record's invoice links (the matter, project, work assignment or invoice it "
+            + "is filed under); nothing was written (invoice_family_locked_write_denied).");
+        refused.Message.Should().NotContain("core-record rule");
     }
 
     // ── Review 2 (R2-1): the person's own state — enabled, an access mode that writes ─────────────────────────────────────

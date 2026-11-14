@@ -42,6 +42,15 @@ internal static class InvoiceFamilyLockedWrite
     public const string LockedWriteDeniedCode = "invoice_family_locked_write_denied";
 
     /// <summary>
+    /// The fixed answer for <see cref="LockedWriteDeniedCode"/> on the generic update paths (C1-C3; review 2 R2-5): says plainly that
+    /// the person may not change the invoice links. The same text for every denial — a missing right, a record that does not exist,
+    /// a disabled user — so an unknown id reads exactly as one they may not use (NFR-01). Names no record.
+    /// </summary>
+    public const string LockedWriteDeniedMessage =
+        "You do not have permission to change this record's invoice links (the matter, project, work assignment or invoice it "
+        + "is filed under); nothing was written (" + LockedWriteDeniedCode + ").";
+
+    /// <summary>
     /// The error code when a mixed write was only partly saved: the other columns were written as the person, then the
     /// application's write of the locked columns failed (decision 3 of the #2799 chunk-3 brief, K-1 in the task notes). Never
     /// success; logged at Warning with the record and the trace id.
@@ -426,14 +435,22 @@ internal static class InvoiceFamilyLockedWrite
     }
 
     /// <summary>
-    /// The generic update paths' refusal on their existing "throw" contract: <see cref="PartlySavedMessage"/> for
-    /// <see cref="LockedWritePartlySavedCode"/>, otherwise the guard's code-only refusal
-    /// (<see cref="InvoiceFamilyCoreRecordGuard.RefusalException"/>).
+    /// The generic update paths' fixed text for a refusal code: <see cref="PartlySavedMessage"/>, <see cref="LockedWriteDeniedMessage"/>,
+    /// otherwise the guard's code-only refusal (<see cref="InvoiceFamilyCoreRecordGuard.CodeOnlyRefusalMessage"/>; an unanswered
+    /// check keeps <see cref="InvoiceFamilyCoreRecordGuard.ReadFailedCode"/>'s).
+    /// </summary>
+    internal static string RefusalMessage(string refusalCode) => refusalCode switch
+    {
+        LockedWritePartlySavedCode => PartlySavedMessage,
+        LockedWriteDeniedCode => LockedWriteDeniedMessage,
+        _ => InvoiceFamilyCoreRecordGuard.CodeOnlyRefusalMessage(refusalCode),
+    };
+
+    /// <summary>
+    /// The generic update paths' refusal on their existing "throw" contract, with <see cref="RefusalMessage"/>'s text.
     /// </summary>
     internal static RecordOwnerUnresolvedException RefusalException(string entityLogicalName, string refusalCode) =>
-        refusalCode == LockedWritePartlySavedCode
-            ? new RecordOwnerUnresolvedException(entityLogicalName, refusalCode, PartlySavedMessage)
-            : InvoiceFamilyCoreRecordGuard.RefusalException(entityLogicalName, refusalCode);
+        new(entityLogicalName, refusalCode, RefusalMessage(refusalCode));
 
     private static void LogPartlySaved(ILogger logger, string table, Guid recordId, string? traceId, Exception? fault) =>
         logger.LogWarning(
