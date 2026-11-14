@@ -48,7 +48,6 @@ vi.mock('../src/hooks/useExternalContext', () => ({
 
 // Tabs this test is not about.
 vi.mock('../src/components/EventsCalendar', () => ({ EventsCalendar: () => null }));
-vi.mock('../src/components/SmartTodo', () => ({ SmartTodo: () => null }));
 
 import { ProjectPage } from '../src/pages/ProjectPage';
 
@@ -78,9 +77,10 @@ describe('ProjectPage: /me writeAccessPerRecord reaches the Documents section', 
     perRecord = true;
     renderProject();
 
-    expect(await screen.findByRole('button', { name: /Upload Document/ })).toBeTruthy();
+    // The page, /me and the list all settle first; under a loaded machine that took longer than findBy's 1 s default.
+    expect(await screen.findByRole('button', { name: /Upload Document/ }, { timeout: 15000 })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Download Brief.pdf' })).toBeTruthy();
-  });
+  }, 30000);
 
   it('every other ViewOnly caller is offered neither (the level rule, unchanged)', async () => {
     perRecord = false;

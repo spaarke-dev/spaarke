@@ -3,14 +3,7 @@
  * Provides realistic sample data so UI can be developed without a live BFF or auth.
  */
 
-import type {
-  ODataProject,
-  ODataDocument,
-  ODataEvent,
-  ODataTodo,
-  ODataContact,
-  ODataOrganization,
-} from '../api/web-api-client';
+import type { ODataProject, ODataDocument, ODataEvent, ODataContact, ODataOrganization } from '../api/web-api-client';
 import type { ExternalUserContextResponse } from '../auth/bff-client';
 
 export const MOCK_USER: ExternalUserContextResponse = {
@@ -19,6 +12,11 @@ export const MOCK_USER: ExternalUserContextResponse = {
   projects: [
     { projectId: 'mock-project-001', accessLevel: 'Collaborate' },
     { projectId: 'mock-project-002', accessLevel: 'ViewOnly' },
+  ],
+  // R4 task 008: matters and work assignments, with the levels Manage Access shows.
+  records: [
+    { recordType: 'matter', recordId: 'mock-matter-001', accessLevel: 'Collaborate' },
+    { recordType: 'workassignment', recordId: 'mock-wa-001', accessLevel: 'ViewOnly' },
   ],
 };
 
@@ -98,6 +96,15 @@ export const MOCK_EVENTS: Record<string, ODataEvent[]> = {
       createdon: '2026-01-10T09:00:00Z',
     },
     {
+      sprk_eventid: 'evt-006',
+      sprk_name: 'Send comments on draft SPA',
+      sprk_duedate: '2026-04-01',
+      sprk_status: 659490001, // Open (statuscode)
+      _sprk_regardingproject_value: 'mock-project-001',
+      createdon: '2026-01-12T09:00:00Z',
+      isTask: true, // an event of type Task (R4 task 008)
+    },
+    {
       sprk_eventid: 'evt-004',
       sprk_name: 'Regulatory approval — EU filing',
       sprk_duedate: '2026-05-01',
@@ -116,53 +123,6 @@ export const MOCK_EVENTS: Record<string, ODataEvent[]> = {
       createdon: '2026-02-01T09:00:00Z',
     },
   ],
-};
-
-/**
- * Mock `sprk_todo` records returned by the BFF route
- * `GET /api/v1/external/projects/{id}/todos` (NEW in R3 task 007).
- *
- * Status values (FR-24): 1=Open / 659490001=In Progress / 2=Completed / 659490002=Dismissed.
- * Two former mock event-todos (evt-002 + evt-003) are reborn here as first-class to-dos.
- */
-export const MOCK_TODOS: Record<string, ODataTodo[]> = {
-  'mock-project-001': [
-    {
-      sprk_todoid: 'todo-001',
-      sprk_name: 'Review SPA redline from counterparty',
-      sprk_notes: 'Mark up changes against base draft and circulate to deal team.',
-      sprk_duedate: '2026-03-28',
-      sprk_priorityscore: 75,
-      sprk_effortscore: 40,
-      sprk_todocolumn: 100000000, // Today
-      sprk_todopinned: false,
-      statecode: 0, // Active
-      statuscode: 1, // Open
-      createdon: '2026-03-15T09:00:00Z',
-      _sprk_regardingproject_value: 'mock-project-001',
-      sprk_regardingrecordid: 'mock-project-001',
-      sprk_regardingrecordname: 'Acme Corp Acquisition',
-      sprk_regardingrecordurl: '/main.aspx?pagetype=entityrecord&etn=sprk_project&id=mock-project-001',
-    },
-    {
-      sprk_todoid: 'todo-002',
-      sprk_name: 'Provide tax structuring comments',
-      sprk_notes: null,
-      sprk_duedate: '2026-04-02',
-      sprk_priorityscore: 50,
-      sprk_effortscore: 25,
-      sprk_todocolumn: 100000001, // Tomorrow
-      sprk_todopinned: false,
-      statecode: 0,
-      statuscode: 659490001, // In Progress
-      createdon: '2026-03-18T09:00:00Z',
-      _sprk_regardingproject_value: 'mock-project-001',
-      sprk_regardingrecordid: 'mock-project-001',
-      sprk_regardingrecordname: 'Acme Corp Acquisition',
-      sprk_regardingrecordurl: '/main.aspx?pagetype=entityrecord&etn=sprk_project&id=mock-project-001',
-    },
-  ],
-  'mock-project-002': [],
 };
 
 export const MOCK_CONTACTS: Record<string, ODataContact[]> = {

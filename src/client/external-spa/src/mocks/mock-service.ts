@@ -3,15 +3,7 @@
  * Intercepts bffApiCall requests and returns mock data from mock-data.ts.
  */
 
-import {
-  MOCK_USER,
-  MOCK_PROJECTS,
-  MOCK_DOCUMENTS,
-  MOCK_EVENTS,
-  MOCK_TODOS,
-  MOCK_CONTACTS,
-  MOCK_ORGANIZATIONS,
-} from './mock-data';
+import { MOCK_USER, MOCK_PROJECTS, MOCK_DOCUMENTS, MOCK_EVENTS, MOCK_CONTACTS, MOCK_ORGANIZATIONS } from './mock-data';
 import { ApiError } from '../types';
 
 /** The grants the mock user issued this session (task 140's contact-side Grant Access). */
@@ -105,13 +97,12 @@ export function getMockResponse<T>(path: string, options: RequestInit = {}): Pro
   // the mock has no matter or work assignment rows, so those answer an empty list)
   const eventsByRoot = path.match(/^\/api\/v1\/external\/(?:projects|matters|workassignments)\/([^/]+)\/events/);
   if (method === 'GET' && eventsByRoot) {
-    return delay(collection(MOCK_EVENTS[eventsByRoot[1]] ?? []) as unknown as T);
-  }
-
-  // GET /api/v1/external/{projects|matters|workassignments}/:id/todos (project: R3 task 007; the others: task 057)
-  const todosByRoot = path.match(/^\/api\/v1\/external\/(?:projects|matters|workassignments)\/([^/]+)\/todos/);
-  if (method === 'GET' && todosByRoot) {
-    return delay(collection(MOCK_TODOS[todosByRoot[1]] ?? []) as unknown as T);
+    // `canCreateTask` is on the event lists only (R4 task 008).
+    return delay({
+      ...collection(MOCK_EVENTS[eventsByRoot[1]] ?? []),
+      canCreate: true,
+      canCreateTask: true,
+    } as unknown as T);
   }
 
   // GET /api/v1/external/projects/:id/contacts
@@ -126,8 +117,8 @@ export function getMockResponse<T>(path: string, options: RequestInit = {}): Pro
     return delay(collection(MOCK_ORGANIZATIONS[orgsByProject[1]] ?? []) as unknown as T);
   }
 
-  // POST /api/v1/external/projects/:id/events (create event)
-  const createEvent = path.match(/^\/api\/v1\/external\/projects\/([^/]+)\/events$/);
+  // POST /api/v1/external/{projects|matters|workassignments}/:id/events (create event; `eventType: "task"` = a Task)
+  const createEvent = path.match(/^\/api\/v1\/external\/(?:projects|matters|workassignments)\/([^/]+)\/events$/);
   if (method === 'POST' && createEvent) {
     const body = options.body ? JSON.parse(options.body as string) : {};
     const newEvent = {
@@ -137,42 +128,9 @@ export function getMockResponse<T>(path: string, options: RequestInit = {}): Pro
       sprk_status: body.sprk_status ?? 659490001, // Open (statuscode) — the BFF default
       _sprk_regardingproject_value: createEvent[1], // sprk_event's project lookup (it has no sprk_projectid)
       createdon: new Date().toISOString(),
+      isTask: body.eventType === 'task', // the BFF's flag (task 008); an untyped event is not a task
     };
     return delay(newEvent as unknown as T, 600);
-  }
-
-  // POST /api/v1/external/projects/:id/todos (create to-do — NEW, R3 task 007)
-  const createTodo = path.match(/^\/api\/v1\/external\/projects\/([^/]+)\/todos$/);
-  if (method === 'POST' && createTodo) {
-    const body = options.body ? JSON.parse(options.body as string) : {};
-    const projectId = createTodo[1];
-    // BFF would populate resolver fields server-side; mock the same shape.
-    const mockProject = MOCK_PROJECTS.find(p => p.sprk_projectid === projectId);
-    const projectName = mockProject?.sprk_name ?? 'Unknown Project';
-    const newTodo = {
-      sprk_todoid: `todo-mock-${Date.now()}`,
-      sprk_name: body.sprk_name ?? 'New Task',
-      sprk_notes: body.sprk_notes ?? null,
-      sprk_duedate: body.sprk_duedate ?? null,
-      sprk_priorityscore: body.sprk_priorityscore ?? 50,
-      sprk_effortscore: body.sprk_effortscore ?? 50,
-      sprk_todocolumn: body.sprk_todocolumn ?? 100000000,
-      sprk_todopinned: body.sprk_todopinned ?? false,
-      statecode: 0, // Active
-      statuscode: 1, // Open
-      createdon: new Date().toISOString(),
-      _sprk_regardingproject_value: projectId,
-      sprk_regardingrecordid: projectId,
-      sprk_regardingrecordname: projectName,
-      sprk_regardingrecordurl: `/main.aspx?pagetype=entityrecord&etn=sprk_project&id=${projectId}`,
-    };
-    return delay(newTodo as unknown as T, 600);
-  }
-
-  // PATCH /api/v1/external/todos/:id (update to-do — NEW, R3 task 007)
-  const updateTodoPath = path.match(/^\/api\/v1\/external\/todos\/([^/]+)$/);
-  if (method === 'PATCH' && updateTodoPath) {
-    return delay(undefined as unknown as T, 300);
   }
 
   // POST /api/v1/external/servicerequests (Legal Front Door intake, r3 task 052): echo a created id.

@@ -7,9 +7,9 @@
  */
 import * as React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import { FluentProvider, webLightTheme } from '@fluentui/react-components';
-import { AccessLevel, ApiError } from '../src/types';
+import { AccessLevel } from '../src/types';
 
 const { bffApiCall } = vi.hoisted(() => ({ bffApiCall: vi.fn() }));
 
@@ -18,7 +18,6 @@ vi.mock('../src/auth/bff-client', async () => {
   return { ...actual, bffApiCall, bffApiBlob: vi.fn() };
 });
 
-import { SmartTodo } from '../src/components/SmartTodo';
 import { EventsCalendar } from '../src/components/EventsCalendar';
 import { DocumentLibrary } from '../src/components/DocumentLibrary';
 
@@ -37,7 +36,6 @@ function inFluent(node: React.ReactElement): ReturnType<typeof render> {
 }
 
 const DOC = { sprk_documentid: 'd-036', sprk_name: 'Brief.pdf', createdon: '2026-10-01T00:00:00Z' };
-const OPEN_TODO = { sprk_todoid: 't-036', sprk_name: 'Review brief', statuscode: 1 };
 
 async function settled(): Promise<void> {
   await waitFor(() => expect(bffApiCall).toHaveBeenCalled());
@@ -46,48 +44,6 @@ async function settled(): Promise<void> {
 
 beforeEach(() => {
   bffApiCall.mockReset();
-});
-
-describe('per-record write access: SmartTodo "Add Task"', () => {
-  it('a ViewOnly-level caller is offered Add Task when the list says canCreate', async () => {
-    answerLists(true);
-    inFluent(<SmartTodo projectId={PROJECT} accessLevel={AccessLevel.ViewOnly} writeAccessPerRecord />);
-
-    expect(await screen.findByRole('button', { name: 'Create new task' })).toBeTruthy();
-  });
-
-  it('a Collaborate-level caller is NOT offered Add Task when the list says canCreate=false', async () => {
-    answerLists(false);
-    inFluent(<SmartTodo projectId={PROJECT} accessLevel={AccessLevel.Collaborate} writeAccessPerRecord />);
-    await settled();
-
-    expect(screen.queryByRole('button', { name: 'Create new task' })).toBeNull();
-  });
-
-  it('a missing canCreate is "cannot" (fail closed)', async () => {
-    answerLists(undefined);
-    inFluent(<SmartTodo projectId={PROJECT} accessLevel={AccessLevel.FullAccess} writeAccessPerRecord />);
-    await settled();
-
-    expect(screen.queryByRole('button', { name: 'Create new task' })).toBeNull();
-  });
-
-  // R4 D-9 (#2716): every other caller needs the level AND the list. This test used to pin "the level, whatever a list
-  // says" (a Collaborate caller offered Add Task over canCreate=false), the gap that let a role-ceiling 403 through.
-  it('every other caller is NOT offered Add Task when the list says canCreate=false, even at Collaborate (D-9)', async () => {
-    answerLists(false);
-    inFluent(<SmartTodo projectId={PROJECT} accessLevel={AccessLevel.Collaborate} />);
-    await settled();
-
-    expect(screen.queryByRole('button', { name: 'Create new task' })).toBeNull();
-  });
-
-  it('every other caller follows the level where the list sent no canCreate (the kept exception)', async () => {
-    answerLists(undefined);
-    inFluent(<SmartTodo projectId={PROJECT} accessLevel={AccessLevel.Collaborate} />);
-
-    expect(await screen.findByRole('button', { name: 'Create new task' })).toBeTruthy();
-  });
 });
 
 describe('per-record write access: EventsCalendar "Create Event"', () => {
@@ -246,94 +202,5 @@ describe('per-record write access: DocumentLibrary download and version history 
     await screen.findByText('Brief.pdf');
 
     expect(screen.queryByRole('button', { name: 'Download Brief.pdf' })).toBeNull();
-  });
-});
-
-describe('per-record write access: SmartTodo status toggle (fix round 2, F1)', () => {
-  /** The project to-do list answers one open to-do; a PATCH answers `patch` (a thrown error refuses it). */
-  function answerTodos(patch: () => unknown): void {
-    bffApiCall.mockImplementation(async (_path: string, options?: RequestInit) => {
-      if (options?.method === 'PATCH') return patch();
-      return { value: [OPEN_TODO], canCreate: false };
-    });
-  }
-
-  it('a ViewOnly-level per-record caller is offered the toggle on a project to-do, and PATCH decides', async () => {
-    answerTodos(() => undefined);
-    inFluent(<SmartTodo projectId={PROJECT} accessLevel={AccessLevel.ViewOnly} writeAccessPerRecord />);
-
-    fireEvent.click(await screen.findByRole('button', { name: 'Mark task complete' }));
-
-    await waitFor(() =>
-      expect(bffApiCall).toHaveBeenCalledWith(
-        '/api/v1/external/todos/t-036',
-        expect.objectContaining({ method: 'PATCH', body: JSON.stringify({ statuscode: 2 }) })
-      )
-    );
-    expect(await screen.findByRole('button', { name: 'Mark task incomplete' })).toBeTruthy();
-  });
-
-  it('a 403 reverts the toggle and says so plainly, never the server body', async () => {
-    answerTodos(() => {
-      throw new ApiError(403, JSON.stringify({ status: 403, detail: 'internal: WriteAccess missing on sprk_todo' }));
-    });
-    inFluent(<SmartTodo projectId={PROJECT} accessLevel={AccessLevel.ViewOnly} writeAccessPerRecord />);
-
-    fireEvent.click(await screen.findByRole('button', { name: 'Mark task complete' }));
-
-    expect(await screen.findByText('You do not have permission to change this task.')).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Mark task complete' })).toBeTruthy();
-    expect(screen.queryByText(/WriteAccess missing/)).toBeNull();
-  });
-
-  it('every other caller keeps the level rule: a ViewOnly contact is not offered the toggle (unchanged)', async () => {
-    answerTodos(() => undefined);
-    inFluent(<SmartTodo projectId={PROJECT} accessLevel={AccessLevel.ViewOnly} />);
-    await screen.findByText('Review brief');
-
-    expect(screen.queryByRole('button', { name: 'Mark task complete' })).toBeNull();
-  });
-
-  // The failure text changed for EVERY caller in fix round 2 (re-check F4): a contact's refusal used to show the raw body.
-  it('a Collaborate contact refused by PATCH sees the same plain message, never the server body', async () => {
-    answerTodos(() => {
-      throw new ApiError(403, JSON.stringify({ status: 403, detail: 'internal: grant does not cover sprk_todo' }));
-    });
-    inFluent(<SmartTodo projectId={PROJECT} accessLevel={AccessLevel.Collaborate} />);
-
-    fireEvent.click(await screen.findByRole('button', { name: 'Mark task complete' }));
-
-    expect(await screen.findByText('You do not have permission to change this task.')).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Mark task complete' })).toBeTruthy();
-    expect(screen.queryByText(/grant does not cover/)).toBeNull();
-  });
-
-  it('any other failure shows the ProblemDetails detail, else a fixed fallback, never the raw body', async () => {
-    answerTodos(() => {
-      throw new ApiError(503, JSON.stringify({ status: 503, detail: 'Dataverse is temporarily unavailable.' }));
-    });
-    const first = inFluent(<SmartTodo projectId={PROJECT} accessLevel={AccessLevel.Collaborate} />);
-    fireEvent.click(await screen.findByRole('button', { name: 'Mark task complete' }));
-    expect(await screen.findByText('Dataverse is temporarily unavailable.')).toBeTruthy();
-    first.unmount();
-
-    answerTodos(() => {
-      throw new TypeError('Failed to fetch');
-    });
-    inFluent(<SmartTodo projectId={PROJECT} accessLevel={AccessLevel.Collaborate} />);
-    fireEvent.click(await screen.findByRole('button', { name: 'Mark task complete' }));
-    expect(await screen.findByText('The task status could not be updated just now.')).toBeTruthy();
-    expect(screen.queryByText(/Failed to fetch/)).toBeNull();
-  });
-
-  // R4 task 006 (FR-06): a matter has no `/me` level, so its host passes none (the ViewOnly it used to receive was the
-  // hard-code task 006 removed). No list or row says whether the caller may PATCH a matter's to-do, so the toggle is not
-  // offered there, for a per-record caller too.
-  it('a matter to-do list offers no status toggle to a per-record caller: nothing says they may PATCH (task 006)', async () => {
-    answerTodos(() => undefined);
-    inFluent(<SmartTodo projectId="m-036" root="matters" writeAccessPerRecord />);
-    await screen.findByText('Review brief');
-
-    expect(screen.queryByRole('button', { name: 'Mark task complete' })).toBeNull();
   });
 });

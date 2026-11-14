@@ -1651,7 +1651,11 @@ public sealed class ExternalTodoScopeTests : IClassFixture<ExternalTodoScopeTest
         var json = await ListJsonAsync(client, $"/api/v1/external/{segment}/{rootId}/events");
 
         json.GetProperty("canCreate").GetBoolean().Should().Be(expected);
-        _fixture.Probe.AppOnlyCalls.Should().ContainSingle("one probe, for the record in hand");
+        // R4 task 008 review round 1: when canCreate is true the list also asks the Task event-type row (canCreateTask) — one
+        // more probe, not about the root; the root is still asked once.
+        _fixture.Probe.AppOnlyCalls.Where(c => c.RecordId != Spaarke.Dataverse.EventTypeRef.Task)
+            .Should().ContainSingle("one probe, for the record in hand");
+        _fixture.Probe.AppOnlyCalls.Count(c => c.RecordId == Spaarke.Dataverse.EventTypeRef.Task).Should().Be(expected ? 1 : 0);
 
         var create = await client.PostAsJsonAsync($"/api/v1/external/{segment}/{rootId}/events", new { sprk_name = "Kickoff" });
         create.StatusCode.Should().Be(expected ? HttpStatusCode.Created : HttpStatusCode.Forbidden,

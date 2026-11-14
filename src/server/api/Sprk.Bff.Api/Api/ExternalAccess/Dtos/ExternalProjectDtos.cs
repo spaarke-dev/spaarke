@@ -38,6 +38,18 @@ public sealed class ExternalCollectionResponse<T>
     [JsonPropertyName("canCreate")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public bool? CanCreate { get; init; }
+
+    /// <summary>
+    /// The event lists of a project, matter or work assignment only (spaarke-SPA-external-access-platform-r4 task 008 review
+    /// round 1, FR-07): whether the create route would admit an event with <c>eventType: "task"</c> here. It is
+    /// <see cref="CanCreate"/> AND, for a caller whose access Dataverse decides, AppendTo on the Task row of
+    /// <c>sprk_eventtype_ref</c>, asked through the same check the create route makes (uac-r2 B1). For a contact it equals
+    /// <see cref="CanCreate"/> (the closed set is the authorization). An unanswered Dataverse question is <c>false</c>.
+    /// Omitted (<c>null</c>) on every other list. A UI affordance only: the route still decides every create.
+    /// </summary>
+    [JsonPropertyName("canCreateTask")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? CanCreateTask { get; init; }
 }
 
 // ---------------------------------------------------------------------------
@@ -456,6 +468,14 @@ public sealed class ExternalEventDto
     public string? SprkCreatedbycontactValue { get; init; }
 
     /// <summary>
+    /// spaarke-SPA-external-access-platform-r4 task 008 (uac-r2 review 2026-11-13, condition C): <see langword="true"/> only
+    /// when the event's <c>sprk_eventtype_ref</c> is the Task row (<c>Spaarke.Dataverse.EventTypeRef.Task</c>). The lookup is
+    /// read and compared server-side; its id and name never reach the wire — only this boolean.
+    /// </summary>
+    [JsonPropertyName("isTask")]
+    public bool IsTask { get; init; }
+
+    /// <summary>
     /// ebilling-r1 task 130-0 fix round 1: the invoices this row links to (<c>InvoiceLinks</c>), so the route can hide a row whose
     /// invoice the caller may not see. Server-side only: internal and <see cref="JsonIgnoreAttribute"/>, never on the wire.
     /// Task 130-0 fix round 2 (K1): null means the links were not read, and the route hides the row (fail closed by type); a row with
@@ -480,6 +500,15 @@ public sealed class CreateExternalEventRequest
     /// omitted ⇒ Open. Any other value is refused with 400.</summary>
     [JsonPropertyName("sprk_status")]
     public int? SprkStatus { get; init; }
+
+    /// <summary>
+    /// spaarke-SPA-external-access-platform-r4 task 008 (uac-r2 review 2026-11-13, condition B): the event's type, from a CLOSED
+    /// set — only <c>"task"</c> (<see cref="Sprk.Bff.Api.Infrastructure.ExternalAccess.ExternalDataService.TaskEventType"/>),
+    /// which binds the Task row of <c>sprk_eventtype_ref</c>. Omitted (or null) creates the event with no type, exactly as
+    /// before. Any other value is refused with 400 <c>sdap.event.type_not_allowed</c> and nothing is created.
+    /// </summary>
+    [JsonPropertyName("eventType")]
+    public string? EventType { get; init; }
 }
 
 // ---------------------------------------------------------------------------

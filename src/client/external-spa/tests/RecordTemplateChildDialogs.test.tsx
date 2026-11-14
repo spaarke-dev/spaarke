@@ -1,15 +1,17 @@
 /**
  * R4 task 004 (FR-03, NFR-02) — the record's child dialogs are SprkModal presets mounted INSIDE the parent record modal.
  *
- * What runs for real: `RecordTemplateModal` and its real sections (Documents, Messages), the toolbar (`RecordCommandBar`),
+ * What runs for real: `RecordTemplateModal` and its real sections (Documents, Messages), the record header
+ * (`RecordCommandBar`) and the section headers (`HeaderToolbar`),
  * `DocumentLibrary` / `RecordMessages` with their new dialogs, the canonical `SprkModal` shell and presets, and Fluent's
  * own dialog + tabster focus management. What is substituted: the network seam (`bffApiCall`) and jsdom's missing layout
  * (see `installLayout`).
  *
- * The record under test is a SERVICE REQUEST opened by its requester: its toolbar offers Upload and New message (form
- * dialogs) and Delete request (a confirm dialog), all reachable today. Add to-do and Add event are not in a service
- * request's toolbar, so those two dialogs are proven through the lists' own `onCreateActionChange` seam (the last describe
- * block); task 006's `RecordTemplateAccess.test.tsx` drives them from a matter's and a work assignment's toolbar.
+ * The record under test is a SERVICE REQUEST opened by its requester: Upload (in the Documents section's header since
+ * task 009) and New message (in the Messages section's header) open form dialogs, and Delete request (in the record
+ * header) a confirm dialog, all reachable today. Add event is not on a service request, so its dialog is proven through
+ * the list's own `onCreateActionChange` seam (the last describe block); task 006's `RecordTemplateAccess.test.tsx` drives
+ * it from a matter's and a work assignment's Tasks & events section.
  *
  * THE FOCUS / ESC CONTRACT, and how each assertion can fail:
  *   - Tab wraps inside the child (last -> first, Shift+Tab first -> last). Control: the same probe against a non-blocking
@@ -20,7 +22,8 @@
  *   - Esc follows the modal standard (MODAL-DESIGN-SYSTEM / ADR-050, owner decision 2026-11-11): FormModal (`explicit`) and
  *     ConfirmModal (`alert`) ignore it, so with a child open Esc leaves BOTH the child and the record open and a typed
  *     value intact (focus asserted inside the child first, so the key really is pressed there). Cancel then closes the
- *     child with focus back on the invoking toolbar button, and a later Esc closes the record. This fails if the child
+ *     child with focus back on the invoking header button (a section's, or the record header's), and a later Esc closes
+ *     the record. This fails if the child
  *     closes on Esc, if the Esc also reaches the parent, or if focus is left on the page body (or not inside the record).
  *   - A child's accessibility is asserted: once the parent's ~250 ms aria-hidden pass has run, the open child is not inside
  *     an aria-hidden subtree.
@@ -46,7 +49,6 @@ vi.mock('../src/auth/bff-client', async () => {
 
 import { ApiError, AccessLevel } from '../src/types';
 import { EventsCalendar } from '../src/components/EventsCalendar';
-import { SmartTodo } from '../src/components/SmartTodo';
 import { RecordTemplateModal } from '../src/components/record/RecordTemplateModal';
 import { RECORD_TEMPLATES } from '../src/components/record/recordTemplates';
 import { renderRecordSection } from '../src/components/record/sections';
@@ -191,7 +193,7 @@ async function openRecord(onClose: () => void = vi.fn()): Promise<HTMLElement> {
   return dialog;
 }
 
-/** Focuses a toolbar button (as a keyboard user would), activates it, and returns the dialog it opened. */
+/** Focuses a header button (as a keyboard user would), activates it, and returns the dialog it opened. */
 async function openChild(
   toolbarName: string,
   dialogName: string
@@ -244,6 +246,22 @@ async function tabWrapsInside(dialog: HTMLElement): Promise<boolean> {
   return inside(afterTab) && inside(afterShiftTab) && afterTab === firstReal && afterShiftTab === lastReal;
 }
 
+/**
+ * Task 009: where a header button sits - in the header of the named section (a create action), or in the record header
+ * (`RecordCommandBar`) - and never in the other place.
+ */
+function expectActionIn(parent: HTMLElement, button: HTMLElement, place: 'record' | 'documents' | 'messages'): void {
+  const recordHeader = within(parent).getByTestId('record-command-bar');
+  const section = button.closest('[data-testid^="record-section-"]');
+  if (place === 'record') {
+    expect(recordHeader.contains(button)).toBe(true);
+    expect(section).toBeNull();
+  } else {
+    expect(section?.getAttribute('data-testid')).toBe(`record-section-${place}`);
+    expect(recordHeader.contains(button)).toBe(false);
+  }
+}
+
 /** Cancel is in the first (left) footer slot, and the primary action in the second. */
 function expectCancelLeft(dialog: HTMLElement, primaryName: string): void {
   const cancel = within(dialog).getByRole('button', { name: 'Cancel' });
@@ -274,19 +292,20 @@ function expectRecordOpen(parent: HTMLElement, onClose: ReturnType<typeof vi.fn>
 }
 
 // ---------------------------------------------------------------------------
-// Form dialogs opened from the toolbar (Upload, New message)
+// Form dialogs opened from a section header (Upload, New message)
 // ---------------------------------------------------------------------------
 
 describe('Upload: a FormModal inside the record modal', () => {
   it(
-    'is offered by the toolbar and not by the list; opens with Cancel on the left; the section is its React ancestor',
+    'is offered in the Documents header and not by the list; opens with Cancel on the left; the section is its React ancestor',
     async () => {
       installNet({ documents: [doc(1, 'Mine.pdf')], messages: [] });
       const parent = await openRecord();
       await within(parent).findByText('Mine.pdf');
 
-      // One entry point: the toolbar's Upload, not the list's own "Upload Document" button.
-      expect(await screen.findByRole('button', { name: 'Upload documents' })).toBeTruthy();
+      // One entry point: the Documents section's Upload (task 009), not the record header's and not the list's own
+      // "Upload Document" button.
+      expectActionIn(parent, await screen.findByRole('button', { name: 'Upload documents' }), 'documents');
       expect(screen.queryByRole('button', { name: /Upload Document/ })).toBeNull();
 
       const { child } = await openChild('Upload documents', 'Upload Document');
@@ -463,6 +482,7 @@ describe('New message: a FormModal inside the record modal', () => {
       // No second entry point: the thread draws no compose box of its own.
       expect(within(parent).queryByRole('textbox', { name: 'Write a message' })).toBeNull();
 
+      expectActionIn(parent, await within(parent).findByRole('button', { name: 'New message' }), 'messages');
       const { button, child } = await openChild('New message', 'New message');
       expectCancelLeft(child, 'Send');
       const box = within(child).getByRole('textbox', { name: 'Write a message' });
@@ -696,7 +716,7 @@ describe('focus return when the control that opened a dialog is gone', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Confirm dialog opened from the toolbar (Delete request)
+// Confirm dialog opened from the record header (Delete request)
 // ---------------------------------------------------------------------------
 
 describe('Delete request: a ConfirmModal inside the record modal', () => {
@@ -706,6 +726,8 @@ describe('Delete request: a ConfirmModal inside the record modal', () => {
       installNet({ documents: [], messages: [] });
       const onClose = vi.fn();
       const parent = await openRecord(onClose);
+      // Not a create action: it stays in the record header (task 009).
+      expectActionIn(parent, await within(parent).findByRole('button', { name: 'Delete request' }), 'record');
       const { button, child } = await openChild('Delete request', 'Delete service request');
 
       expectCancelLeft(child, 'Delete');
@@ -812,10 +834,10 @@ describe('the focus and ancestry probes can fail', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Add event and Add to-do: the lists' dialogs (reached through the lists' own seam)
+// Add event: the list's dialog (reached through the list's own seam)
 // ---------------------------------------------------------------------------
 
-describe('Add event / Add to-do: the lists offer the toolbar action and render a FormModal', () => {
+describe('Add event: the list offers the section action and renders a FormModal', () => {
   const PROJECT = guid(101);
 
   async function offered(
@@ -898,65 +920,6 @@ describe('Add event / Add to-do: the lists offer the toolbar action and render a
       ));
       await screen.findByText('No events yet');
       expect(offer()?.visible).toBe(false);
-    },
-    SLOW
-  );
-
-  it(
-    'SmartTodo: no own button; the action is offered; the dialog has Cancel left and posts the same payload',
-    async () => {
-      h.bffApiCall.mockImplementation(async (path: string, options?: RequestInit) => {
-        if (options?.method === 'POST') return { sprk_todoid: guid(701), sprk_name: 'Call client', statuscode: 1 };
-        if (/\/todos$/.test(path)) return { value: [] };
-        throw new Error(`unexpected BFF call ${path}`);
-      });
-      const { offer } = await offered(report => (
-        <SmartTodo projectId={PROJECT} accessLevel={AccessLevel.Collaborate} onCreateActionChange={report} />
-      ));
-      await waitFor(() => expect(offer()?.visible).toBe(true));
-      expect(screen.queryByRole('button', { name: /Create new task/ })).toBeNull();
-
-      act(() => offer()!.onClick());
-      const dialog = await screen.findByRole('dialog', { name: 'Create Task' });
-      expectCancelLeft(dialog, 'Create Task');
-      fireEvent.change(within(dialog).getByPlaceholderText('Enter task title...'), {
-        target: { value: 'Call client' },
-      });
-      fireEvent.click(within(dialog).getByRole('button', { name: 'Create Task' }));
-
-      await waitFor(() => {
-        const post = callsOf('POST', /\/todos$/)[0];
-        expect(JSON.parse(String((post?.[1] as RequestInit).body))).toMatchObject({
-          sprk_name: 'Call client',
-          sprk_priorityscore: 50,
-        });
-      });
-      expect(await screen.findByText('Call client')).toBeTruthy();
-      await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Create Task' })).toBeNull());
-    },
-    SLOW
-  );
-
-  it(
-    'SmartTodo: a failed create keeps the dialog open with the existing error text',
-    async () => {
-      h.bffApiCall.mockImplementation(async (path: string, options?: RequestInit) => {
-        if (options?.method === 'POST') throw new Error('Server said no');
-        if (/\/todos$/.test(path)) return { value: [] };
-        throw new Error(`unexpected BFF call ${path}`);
-      });
-      const { offer } = await offered(report => (
-        <SmartTodo projectId={PROJECT} accessLevel={AccessLevel.Collaborate} onCreateActionChange={report} />
-      ));
-      await waitFor(() => expect(offer()?.visible).toBe(true));
-      act(() => offer()!.onClick());
-      const dialog = await screen.findByRole('dialog', { name: 'Create Task' });
-      fireEvent.change(within(dialog).getByPlaceholderText('Enter task title...'), {
-        target: { value: 'Call client' },
-      });
-      fireEvent.click(within(dialog).getByRole('button', { name: 'Create Task' }));
-      expect(await within(dialog).findByText('Server said no')).toBeTruthy();
-      expect(screen.getByRole('dialog', { name: 'Create Task' })).toBeTruthy();
     },
     SLOW
   );

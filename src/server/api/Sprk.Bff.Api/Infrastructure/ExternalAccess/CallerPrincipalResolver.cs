@@ -226,6 +226,36 @@ public sealed class CallerPrincipal
     public IEnumerable<CallerProjectAccess> ReadableProjects =>
         ProjectAccess.Where(p => p.Rights.HasFlag(AccessRights.Read));
 
+    /// <summary>
+    /// The matters and work assignments the caller may READ, each with its DISPLAY level — what /me lists as
+    /// <c>records</c> beside <see cref="ReadableProjects"/> (spaarke-SPA-external-access-platform-r4 task 008; uac-r2 review
+    /// 2026-11-13, condition A).
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Source.</b> The principal's own <see cref="MatterAccess"/> / <see cref="WorkAssignmentAccess"/>, filtered to
+    /// Read — the same derived view as <see cref="AccessibleMatterIds"/> / <see cref="AccessibleWorkAssignmentIds"/>, and the
+    /// same dictionaries <see cref="GetMatterRights"/> / <see cref="GetWorkAssignmentRights"/> (and so the read routes'
+    /// <c>RightsForRoot</c>) read. A level is therefore emitted only for a record the read routes admit, and it is exactly
+    /// <see cref="ExternalAccessLevels.ToDisplayLevel"/> of the rights they decide on. A None key (or any entry without Read)
+    /// is not listed; a vetoed record is not in the map at all. No new read.</para>
+    /// <para>⚠️ <b>Display only.</b> For a <see cref="DataverseConfirmsWrites"/> caller the level is the composed READ view
+    /// (as for projects); every action stays server-checked.</para>
+    /// </remarks>
+    public IEnumerable<(ExternalGrantRootType RootType, Guid RecordId, ExternalAccessLevel Level)> ReadableRecordLevels =>
+        DisplayLevelsOf(ExternalGrantRootType.Matter, MatterAccess)
+            .Concat(DisplayLevelsOf(ExternalGrantRootType.WorkAssignment, WorkAssignmentAccess));
+
+    private static IEnumerable<(ExternalGrantRootType RootType, Guid RecordId, ExternalAccessLevel Level)> DisplayLevelsOf(
+        ExternalGrantRootType rootType, IReadOnlyDictionary<Guid, AccessRights> rights)
+    {
+        foreach (var (recordId, recordRights) in rights)
+        {
+            // Read first (task 136's view rule); ToDisplayLevel then cannot be null (Read alone is ViewOnly).
+            if (recordRights.HasFlag(AccessRights.Read) && ExternalAccessLevels.ToDisplayLevel(recordRights) is { } level)
+                yield return (rootType, recordId, level);
+        }
+    }
+
     /// <summary>All project ids the caller can READ (for list construction).</summary>
     public IEnumerable<Guid> GetAccessibleProjectIds() => ReadableProjects.Select(p => p.ProjectId);
 

@@ -22,6 +22,7 @@ import {
 import { PersonAdd20Regular, CheckmarkCircle20Regular, Dismiss20Regular } from '@fluentui/react-icons';
 import { grantAccessAsContact, problemMessage, type ContactGrantResponse } from '../auth/bff-client';
 import { AccessLevel } from '../types';
+import { ACCESS_LEVEL_LABELS } from './record/recordAccess';
 import { canInvite, grantableLevels } from '../hooks/useAccessLevel';
 
 // ---------------------------------------------------------------------------
@@ -74,16 +75,8 @@ function validateEmail(value: string): string | null {
 }
 
 export function accessLevelLabel(level: AccessLevel | number | null | undefined): string {
-  switch (level) {
-    case AccessLevel.ViewOnly:
-      return 'View Only';
-    case AccessLevel.Collaborate:
-      return 'Collaborate';
-    case AccessLevel.FullAccess:
-      return 'Full Access';
-    default:
-      return 'Unknown';
-  }
+  // The SPA's one label map (task 011, D-11).
+  return (level != null ? ACCESS_LEVEL_LABELS[level as AccessLevel] : undefined) ?? 'Unknown';
 }
 
 // ---------------------------------------------------------------------------

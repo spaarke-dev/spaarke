@@ -1,15 +1,20 @@
 /**
  * RECORD_TEMPLATES — the per-type record template configs (spaarke-SPA-external-access-platform-r4 task 003, FR-01).
  *
- * Left, right and toolbar are the spec FR-01 table, exactly:
+ * Left and right are the spec FR-01 table. The actions are FR-01's, placed per the owner's E2E directive (2026-11-12,
+ * task 009): each create action lives in its own section's header; the header toolbar keeps the record-level actions.
  *
- * | Type             | Left (66%)                       | Right (34%)              | Toolbar                                                                  |
- * |------------------|----------------------------------|--------------------------|--------------------------------------------------------------------------|
- * | Matter, Project  | Information, Documents, Invoices | Messages, Tasks & events | Refresh, Upload, New message, Add to-do, Add event, Submit invoice, Copy link |
- * | Work assignment  | Information, Documents           | Messages, Tasks & events | same as Matter                                                           |
- * | Invoice          | Information, Files               | Messages                 | Refresh, New message, Copy link                                          |
- * | Service request  | Information, Documents           | Messages                 | Refresh, Upload, New message, Copy link, Delete request                  |
- * | Document         | Information, Preview             | —                        | Refresh, Download, Copy link                                             |
+ * | Type             | Left (66%)                       | Right (34%)              | Toolbar                                  | Section actions                                           |
+ * |------------------|----------------------------------|--------------------------|------------------------------------------|-----------------------------------------------------------|
+ * | Matter, Project  | Information, Documents, Invoices | Messages, Tasks & events | Refresh, Copy link                       | Documents: Upload; Invoices: Submit invoice; Messages: New message; Tasks & events: Add task, Add event |
+ * | Work assignment  | Information, Documents           | Messages, Tasks & events | Refresh, Submit invoice, Copy link       | Documents: Upload; Messages: New message; Tasks & events: Add task, Add event |
+ * | Invoice          | Information, Files               | Messages                 | Refresh, Copy link                       | Messages: New message (Files keeps its own Upload)        |
+ * | Service request  | Information, Documents           | Messages                 | Refresh, Copy link, Delete request       | Documents: Upload; Messages: New message                  |
+ * | Document         | Information, Preview             | —                        | Refresh, Download, Copy link             | —                                                         |
+ *
+ * Submit invoice (task 010, owner 2026-11-12) sits in the Invoices section's header (`sectionActions.invoices`) and opens
+ * as a modal over the record. A Work assignment has no Invoices section (`sprk_invoice` has no work-assignment lookup), so it
+ * keeps the action in the header toolbar; the action host and the modal are the same either way.
  *
  * HEADER FACTS come only from the entity's existing read fields (`RECORD_DETAIL_ENTITIES`), so they add no column and no
  * read. The prototype's other facts have no data source today and are left out (POML escalation 2, FR-18 / task 031 owns
@@ -20,16 +25,22 @@
 import { EMPTY_VALUE, formatDetailValue, type DetailRecord } from '../detail/RecordDetailFields';
 import type { RecordTemplateConfig, RecordToolbarActionId } from './recordTemplate.types';
 
-/** Matter, Project and Work assignment offer the same toolbar (FR-01). */
-const ROOT_TOOLBAR: readonly RecordToolbarActionId[] = [
-  'refresh',
-  'upload',
-  'newMessage',
-  'addTodo',
-  'addEvent',
-  'submitInvoice',
-  'copyLink',
-];
+/**
+ * Matter, Project and Work assignment offer the same section actions (FR-01, task 009) and the same Submit invoice (task
+ * 010). A Matter and a Project show Submit invoice in their Invoices section; a Work assignment has no such section, so
+ * its toolbar lists it.
+ */
+const ROOT_SECTION_ACTIONS: NonNullable<RecordTemplateConfig['sectionActions']> = {
+  documents: ['upload'],
+  messages: ['newMessage'],
+  tasksEvents: ['addTask', 'addEvent'],
+};
+const INVOICING_ROOT_TOOLBAR: readonly RecordToolbarActionId[] = ['refresh', 'copyLink'];
+const INVOICING_ROOT_SECTION_ACTIONS: NonNullable<RecordTemplateConfig['sectionActions']> = {
+  ...ROOT_SECTION_ACTIONS,
+  invoices: ['submitInvoice'],
+};
+const WORK_ASSIGNMENT_TOOLBAR: readonly RecordToolbarActionId[] = ['refresh', 'submitInvoice', 'copyLink'];
 
 export const RECORD_TEMPLATES: Readonly<Record<string, RecordTemplateConfig>> = {
   sprk_project: {
@@ -43,7 +54,8 @@ export const RECORD_TEMPLATES: Readonly<Record<string, RecordTemplateConfig>> = 
     ],
     left: ['information', 'documents', 'invoices'],
     right: ['messages', 'tasksEvents'],
-    toolbar: ROOT_TOOLBAR,
+    toolbar: INVOICING_ROOT_TOOLBAR,
+    sectionActions: INVOICING_ROOT_SECTION_ACTIONS,
   },
   sprk_matter: {
     entity: 'sprk_matter',
@@ -53,7 +65,8 @@ export const RECORD_TEMPLATES: Readonly<Record<string, RecordTemplateConfig>> = 
     headerFacts: [{ attribute: 'statuscode', label: 'Status' }],
     left: ['information', 'documents', 'invoices'],
     right: ['messages', 'tasksEvents'],
-    toolbar: ROOT_TOOLBAR,
+    toolbar: INVOICING_ROOT_TOOLBAR,
+    sectionActions: INVOICING_ROOT_SECTION_ACTIONS,
   },
   sprk_workassignment: {
     entity: 'sprk_workassignment',
@@ -67,7 +80,8 @@ export const RECORD_TEMPLATES: Readonly<Record<string, RecordTemplateConfig>> = 
     ],
     left: ['information', 'documents'],
     right: ['messages', 'tasksEvents'],
-    toolbar: ROOT_TOOLBAR,
+    toolbar: WORK_ASSIGNMENT_TOOLBAR,
+    sectionActions: ROOT_SECTION_ACTIONS,
   },
   sprk_invoice: {
     entity: 'sprk_invoice',
@@ -81,7 +95,8 @@ export const RECORD_TEMPLATES: Readonly<Record<string, RecordTemplateConfig>> = 
     ],
     left: ['information', 'files'],
     right: ['messages'],
-    toolbar: ['refresh', 'newMessage', 'copyLink'],
+    toolbar: ['refresh', 'copyLink'],
+    sectionActions: { messages: ['newMessage'] },
   },
   sprk_servicerequest: {
     entity: 'sprk_servicerequest',
@@ -96,7 +111,8 @@ export const RECORD_TEMPLATES: Readonly<Record<string, RecordTemplateConfig>> = 
     left: ['information', 'documents'],
     right: ['messages'],
     // `delete` is "Delete request", shown to the requester only (task 005/006 wire it; R3 `ServiceRequestActions`).
-    toolbar: ['refresh', 'upload', 'newMessage', 'copyLink', 'delete'],
+    toolbar: ['refresh', 'copyLink', 'delete'],
+    sectionActions: { documents: ['upload'], messages: ['newMessage'] },
   },
   sprk_document: {
     entity: 'sprk_document',
@@ -114,15 +130,21 @@ export const RECORD_TEMPLATES: Readonly<Record<string, RecordTemplateConfig>> = 
   },
 };
 
+/** Every action id a config lists: its toolbar's, then its sections' (task 009). */
+export function recordActionIdsOf(config: RecordTemplateConfig): RecordToolbarActionId[] {
+  const sectionIds = Object.values(config.sectionActions ?? {}).flatMap(ids => [...(ids ?? [])]);
+  return [...config.toolbar, ...sectionIds];
+}
+
 /**
- * The visible label and the tooltip (= accessible name) of each toolbar action. The tooltip contains the label (WCAG 2.5.3
+ * The visible label and the tooltip (= accessible name) of each record action (toolbar or section header). The tooltip contains the label (WCAG 2.5.3
  * label in name). Keyed by action id, never by entity.
  */
 export const RECORD_ACTION_TEXT: Readonly<Record<RecordToolbarActionId, { label: string; tooltip: string }>> = {
   refresh: { label: 'Refresh', tooltip: 'Refresh' },
   upload: { label: 'Upload', tooltip: 'Upload documents' },
   newMessage: { label: 'New message', tooltip: 'New message' },
-  addTodo: { label: 'Add to-do', tooltip: 'Add to-do' },
+  addTask: { label: 'Add task', tooltip: 'Add task' },
   addEvent: { label: 'Add event', tooltip: 'Add event' },
   submitInvoice: { label: 'Submit invoice', tooltip: 'Submit invoice' },
   copyLink: { label: 'Copy link', tooltip: 'Copy link' },

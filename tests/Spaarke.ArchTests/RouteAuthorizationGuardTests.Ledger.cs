@@ -3402,7 +3402,8 @@ public partial class RouteAuthorizationGuardTests
             + "no other principal's record is read."),
         Permanent("GET /api/v1/external/me", PermanentBasis.CallerScopedOnly, "167",
             "The resolved caller principal's own access context: ExternalUserContextEndpoint.HandleAsync (the mapped handler) returns "
-            + "Handle's answer (ExternalUserContextEndpoint.cs:46, :75 — caller.ReadableProjects) plus the caller's own firms "
+            + "Handle's answer (ExternalUserContextEndpoint.cs:46, :75 — caller.ReadableProjects; :86 — caller.ReadableRecordLevels, the "
+            + "caller's own MatterAccess / WorkAssignmentAccess filtered to Read, r4 task 008) plus the caller's own firms "
             + "(ExternalInvoiceSubmissionAuthorizationFilter.ReadCallerFirmsAsync: the caller contact's memberships only, id and name). "
             + "Takes no id."),
         Permanent("GET /api/v1/external/me/entitlements", PermanentBasis.CallerScopedOnly, "167",

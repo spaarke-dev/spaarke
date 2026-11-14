@@ -1,5 +1,5 @@
 /**
- * DeleteOwn — the one confirm-then-delete flow shared by the documents, to-do and event lists
+ * DeleteOwn — the one confirm-then-delete flow shared by the documents and event lists
  * (spaarke-SPA-external-access-platform-r3 task 054, FR-26).
  *
  *   const del = useDeleteOwn({ noun: 'document', remove: item => deleteOwnDocument(item.id), onRemoved: ... });

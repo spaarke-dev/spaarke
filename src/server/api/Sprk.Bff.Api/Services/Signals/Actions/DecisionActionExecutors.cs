@@ -214,11 +214,12 @@ internal static class DecisionExec
     internal const string TodoSet = "sprk_todos";
     internal const string WorkAssignmentSet = "sprk_workassignments";
     internal const string ContactSet = "contacts";
-    internal const string EventTypeRefSet = "sprk_eventtype_refs";
+    internal const string EventTypeRefSet = EventTypeRef.EntitySet;
 
-    /// <summary>The Task row of <c>sprk_eventtype_ref</c> (task 159, D-178): reference data shared across environments, verified on
-    /// spaarkedev1 2026-10-22. The ONE copy inside Signals (the AI nodes and the workspace carry their own private ones).</summary>
-    internal const string TaskEventTypeId = "124f5fc9-98ff-f011-8406-7c1e525abd8b";
+    /// <summary>The Task row of <c>sprk_eventtype_ref</c> (task 159, D-178). Since spaarke-SPA-external-access-platform-r4 task
+    /// 008 (uac-r2 review B) this is <see cref="EventTypeRef.TaskId"/>, the ONE definition Signals and the external event create
+    /// and lists share; no second literal.</summary>
+    internal const string TaskEventTypeId = EventTypeRef.TaskId;
 
     /// <summary>The longest name a row takes from the first line of a free-text description (<c>sprk_name</c> / <c>sprk_eventname</c>).</summary>
     private const int NameMaxLength = 200;
