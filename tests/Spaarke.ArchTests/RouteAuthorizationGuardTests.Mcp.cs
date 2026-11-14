@@ -102,6 +102,88 @@ public partial class RouteAuthorizationGuardTests
         + @"|\b(?:Prompt|Resource)Collection\s*=(?!=)",
         RegexOptions.Compiled);
 
+    /// <summary>
+    /// The ONE sanctioned resource registration (task 030, FR-12): in <c>Infrastructure/DI/McpModule.cs</c> only,
+    /// <c>ResourceCollection = new McpServerResourceCollection { XWidgetResource.Instance, ... };</c>, anchored at the bypass match.
+    /// Each item must also pass <see cref="McpWidgetResourceProblem"/>: a widget page is static HTML with no data, so it needs no
+    /// per-tool rule — but only while it stays that shape.
+    /// </summary>
+    private static readonly Regex McpWidgetResourceCollection = new(
+        @"\GResourceCollection\s*=\s*new\s+McpServerResourceCollection\s*\{\s*"
+        + @"(?<items>[A-Za-z_]\w*WidgetResource\s*\.\s*Instance(?:\s*,\s*[A-Za-z_]\w*WidgetResource\s*\.\s*Instance)*)\s*,?\s*\}\s*;",
+        RegexOptions.Compiled);
+
+    /// <summary>
+    /// Null when <paramref name="name"/> is a sanctioned widget resource: a <c>static class</c> under <c>Api/Mcp/</c> whose only
+    /// <c>McpServerResource.Create</c> takes its own parameterless <c>Read</c> method, and which names no request, caller or service
+    /// (so the page it serves cannot carry caller data). Otherwise the reason it is not.
+    /// </summary>
+    private static string? McpWidgetResourceProblem(IReadOnlyList<SourceUnit> bffUnits, string name)
+    {
+        var hits = bffUnits.SelectMany(u => u.Types.Where(t => t.Name == name).Select(t => (Unit: u, Type: t))).ToList();
+        if (hits.Count != 1)
+        {
+            return $"{name} is declared {hits.Count} times in the BFF (expected once)";
+        }
+
+        var (unit, type) = hits[0];
+        var body = unit.Code[type.BodyStart..type.BodyEnd];
+        if (!unit.Path.StartsWith("Api/Mcp/", StringComparison.Ordinal))
+        {
+            return $"{name} is not under Api/Mcp/";
+        }
+
+        if (!Regex.IsMatch(unit.Code, @"\bstatic\s+(?:\w+\s+)*class\s+" + Regex.Escape(name) + @"\b"))
+        {
+            return $"{name} is not a static class";
+        }
+
+        var creates = McpServerResourceCreateCall.Matches(body);
+        if (creates.Count != 1 || !Regex.IsMatch(body[(creates[0].Index + creates[0].Length)..], @"^\s*Read\s*,"))
+        {
+            return $"{name} must build exactly one McpServerResource.Create(Read, ...)";
+        }
+
+        var reads = unit.Methods.Where(m => m.Name == "Read" && m.NameIndex > type.BodyStart && m.NameIndex < type.BodyEnd).ToList();
+        if (reads.Count != 1 || reads[0].Params.Count != 0)
+        {
+            return $"{name}.Read must be one parameterless method (a parameter is how the SDK injects the request, caller or services)";
+        }
+
+        foreach (var token in new[] { "HttpContext", "IHttpContextAccessor", "IServiceProvider", "RequestServices", "GetService", "GetRequiredService", "ClaimsPrincipal", "RequestContext" })
+        {
+            if (ContainsToken(body, token))
+            {
+                return $"{name} names {token}; a widget resource serves a static page and reads nothing as anyone";
+            }
+        }
+
+        return null;
+    }
+
+    private static readonly Regex McpServerResourceCreateCall = new(@"\bMcpServerResource\s*\.\s*Create\s*\(", RegexOptions.Compiled);
+
+    /// <summary>The first SDK bypass in <paramref name="unit"/> that is not the sanctioned widget collection, with its reason.</summary>
+    private static (Match Match, string? Why)? McpSdkBypassIn(SourceUnit unit, IReadOnlyList<SourceUnit> bffUnits)
+    {
+        foreach (Match sdk in McpSdkToolRegistration.Matches(unit.Code))
+        {
+            var widget = unit.Path == "Infrastructure/DI/McpModule.cs" ? McpWidgetResourceCollection.Match(unit.Code, sdk.Index) : Match.Empty;
+            if (!widget.Success)
+            {
+                return (sdk, null);
+            }
+
+            var items = Regex.Matches(widget.Groups["items"].Value, @"(?<name>[A-Za-z_]\w*WidgetResource)\s*\.\s*Instance").Select(i => i.Groups["name"].Value);
+            if (items.Select(n => McpWidgetResourceProblem(bffUnits, n)).FirstOrDefault(p => p is not null) is { } problem)
+            {
+                return (sdk, problem);
+            }
+        }
+
+        return null;
+    }
+
     /// <summary>A tool class carrying the area attribute, in either spelling (an alias is caught by <see cref="McpToolReflectionViolations"/>).</summary>
     private static readonly Regex McpAreaAttributeUse = new(@"\bMcpArea(?:Attribute)?\s*\(", RegexOptions.Compiled);
 
@@ -126,12 +208,23 @@ public partial class RouteAuthorizationGuardTests
         return constants;
     }
 
-    /// <summary>The simple names of every type declared under the BFF's <c>Services/Ai/**</c>, <c>PublicContracts</c> excepted (ADR-013).</summary>
+    /// <summary>
+    /// The simple names of every type declared under the BFF's <c>Services/Ai/**</c>, <c>PublicContracts</c> excepted (ADR-013).
+    /// C# keywords are dropped: the shared scanner's type header reads a local named <c>record</c> followed by a keyword
+    /// (<c>if (record is null)</c>, <c>record with { }</c>) as a declaration named <c>is</c> / <c>with</c>, and every tool body that
+    /// wrote <c>x is null</c> then "used an AI-internal type" (task 023/024 finding F2, 2026-11-14). No type can be named a reserved
+    /// keyword, and no Services/Ai type is named a contextual one, so nothing real is lost.
+    /// </summary>
     private static IReadOnlySet<string> AiInternalTypeNames(IEnumerable<SourceUnit> bffUnits) =>
         bffUnits.Where(u => u.Path.StartsWith("Services/Ai/", StringComparison.Ordinal)
                             && !u.Path.StartsWith("Services/Ai/PublicContracts/", StringComparison.Ordinal))
             .SelectMany(u => u.Types.Select(t => t.Name))
+            .Where(n => !IsCSharpKeyword(n))
             .ToHashSet(StringComparer.Ordinal);
+
+    private static bool IsCSharpKeyword(string name) =>
+        Microsoft.CodeAnalysis.CSharp.SyntaxFacts.GetKeywordKind(name) != Microsoft.CodeAnalysis.CSharp.SyntaxKind.None
+        || Microsoft.CodeAnalysis.CSharp.SyntaxFacts.GetContextualKeywordKind(name) != Microsoft.CodeAnalysis.CSharp.SyntaxKind.None;
 
     /// <summary>
     /// Every violation of the MCP tool rule over <paramref name="bffUnits"/> (paths relative to the BFF root). The names of the tool
@@ -146,11 +239,14 @@ public partial class RouteAuthorizationGuardTests
 
         foreach (var unit in bffUnits)
         {
-            if (McpSdkToolRegistration.Match(unit.Code) is { Success: true } sdk)
+            if (McpSdkBypassIn(unit, bffUnits) is { } bypass)
             {
-                violations.Add($"{unit.Path}:{unit.LineOf(sdk.Index)}: an SDK tool, prompt or resource registration ([McpServerTool], WithTools/WithPrompts/"
+                violations.Add($"{unit.Path}:{unit.LineOf(bypass.Match.Index)}: an SDK tool, prompt or resource registration ([McpServerTool], WithTools/WithPrompts/"
                                + "WithResources, With*Handler, server Handlers) bypasses McpToolCatalog and its per-tool rule; build the tool as an "
-                               + "[McpArea] McpToolDefinition instead.");
+                               + "[McpArea] McpToolDefinition instead"
+                               + (bypass.Why is null
+                                   ? ". (A static widget page may be registered only as McpModule's ResourceCollection of XWidgetResource.Instance items.)"
+                                   : $"; it is not a sanctioned widget resource: {bypass.Why}."));
             }
 
             foreach (Match m in McpToolClass.Matches(unit.Code))
@@ -654,6 +750,21 @@ public partial class RouteAuthorizationGuardTests
         Assert.Empty(McpToolFixtureViolations(McpToolFixture(area + "[Authorize]", parameters: "IDecisionCapability capability, IAiSummaryFacade summary"),
             extra: new[] { aiUnit, publicContract }));
 
+        // F2 (2026-11-14): a Services/Ai local named `record` before `is` / `with` must not make `is` / `with` an AI-internal type,
+        // so a tool body using `x is null` or `x with { }` passes. The keyword-bearing unit is seeded; the real type in it still fires.
+        var recordLocal = new SourceUnit("Services/Ai/Chat/RecordLocalHolder.cs",
+            "namespace X;\npublic sealed class RecordLocalHolder\n{\n    public static bool Run(object? record)\n    {\n"
+            + "        var ok = record is { } r;\n        var copy = record with { };\n        return ok;\n    }\n}\n");
+        Assert.Contains(recordLocal.Types, t => t.Name == "is");   // the scanner's misread this guards against is really seeded
+        Assert.DoesNotContain("is", AiInternalTypeNames(new[] { recordLocal }));
+        Assert.DoesNotContain("with", AiInternalTypeNames(new[] { recordLocal }));
+        Assert.Contains("RecordLocalHolder", AiInternalTypeNames(new[] { recordLocal }));
+        Assert.Empty(McpToolFixtureViolations(
+            McpToolFixture(area + "[Authorize]").Replace("=> \"x\";", "=> capability is null ? \"x\" : \"y\";", StringComparison.Ordinal),
+            extra: new[] { recordLocal }));
+        Fires(McpToolFixtureViolations(McpToolFixture(area + "[Authorize]", parameters: "IDecisionCapability capability, RecordLocalHolder h"),
+            extra: new[] { recordLocal }), "uses RecordLocalHolder, an AI-internal type");
+
         // MUST FIRE, one cause each.
         Fires(McpToolFixtureViolations(McpToolFixture(area)), "needs exactly one [Authorize]");
         Fires(McpToolFixtureViolations(McpToolFixture(area + "[Authorize]\n[AllowAnonymous]")), "[AllowAnonymous]");
@@ -731,15 +842,45 @@ public partial class RouteAuthorizationGuardTests
             Fires(Scan("Infrastructure/DI/Bad.cs", bypass), "bypasses McpToolCatalog");
         }
 
-        // MUST NOT FIRE: the real McpModule (WithHttpTransport, AddAuthorizationFilters, ConfigureSessionOptions, ToolCollection),
-        // the catalog and the endpoints.
+        // MUST NOT FIRE: the real McpModule (WithHttpTransport, AddAuthorizationFilters, ConfigureSessionOptions, ToolCollection, and
+        // task 030's ResourceCollection of the real DecisionsWidgetResource), the catalog, the endpoints and the widget class itself.
+        const string widgetPath = "Api/Mcp/LegalOperations/DecisionsWidgetResource.cs";
+        var widgetUnit = new SourceUnit(widgetPath, ReadRepoFile("src/server/api/Sprk.Bff.Api/" + widgetPath)!);
         foreach (var path in new[] { "Infrastructure/DI/McpModule.cs", "Api/Mcp/McpToolCatalog.cs", "Api/Mcp/McpEndpoints.cs", "Api/Mcp/McpToolAuthorization.cs" })
         {
             var source = ReadRepoFile("src/server/api/Sprk.Bff.Api/" + path)!;
-            Assert.Empty(Scan(path, source));
+            Assert.Empty(McpToolViolations(new[] { new SourceUnit(path, source), widgetUnit }, Array.Empty<McpTool>(), new HashSet<string>()));
         }
 
         Assert.Contains("ConfigureSessionOptions", ReadRepoFile("src/server/api/Sprk.Bff.Api/Infrastructure/DI/McpModule.cs")!, StringComparison.Ordinal);
+        Assert.Contains("ResourceCollection = new McpServerResourceCollection { DecisionsWidgetResource.Instance }",
+            ReadRepoFile("src/server/api/Sprk.Bff.Api/Infrastructure/DI/McpModule.cs")!, StringComparison.Ordinal);
+
+        // Task 030 widget exception (2026-11-14). Sanctioned: McpModule, a static Api/Mcp class, one Create(Read, ...), Read().
+        const string module = "o.ResourceCollection = new McpServerResourceCollection { FakeWidgetResource.Instance };";
+        static string Widget(string modifiers = "public static", string read = "private static string Read() => \"<html/>\";",
+            string create = "McpServerResource.Create(Read, new McpServerResourceCreateOptions { UriTemplate = \"ui://x\" })") =>
+            "namespace X;\n" + modifiers + " class FakeWidgetResource\n{\n    public static McpServerResource Instance { get; } = " + create + ";\n\n    "
+            + read + "\n}\n";
+        List<string> WithWidget(string modulePath, string moduleSource, string widgetSource, string path = "Api/Mcp/LegalOperations/FakeWidgetResource.cs") =>
+            McpToolViolations(new[] { new SourceUnit(modulePath, moduleSource), new SourceUnit(path, widgetSource) }, Array.Empty<McpTool>(), new HashSet<string>());
+
+        Assert.Empty(WithWidget("Infrastructure/DI/McpModule.cs", module, Widget()));
+
+        // MUST FIRE: each way out of the static-page shape.
+        Fires(WithWidget("Infrastructure/DI/OtherModule.cs", module, Widget()), "bypasses McpToolCatalog");
+        Fires(WithWidget("Infrastructure/DI/McpModule.cs", "o.ResourceCollection = resources;", Widget()), "bypasses McpToolCatalog");
+        Fires(WithWidget("Infrastructure/DI/McpModule.cs",
+            "o.ResourceCollection = new McpServerResourceCollection { FakeWidgetResource.Instance, OtherResource.Instance };", Widget()), "bypasses McpToolCatalog");
+        Fires(WithWidget("Infrastructure/DI/McpModule.cs", module, Widget(modifiers: "public sealed")), "is not a static class");
+        Fires(WithWidget("Infrastructure/DI/McpModule.cs", module, Widget(), path: "Services/Widgets/FakeWidgetResource.cs"), "is not under Api/Mcp/");
+        Fires(WithWidget("Infrastructure/DI/McpModule.cs", module,
+            Widget(read: "private static string Read(RequestContext<ReadResourceRequestParams> request) => \"<html/>\";")), "must be one parameterless method");
+        Fires(WithWidget("Infrastructure/DI/McpModule.cs", module,
+            Widget(create: "McpServerResource.Create((IServiceProvider sp) => \"x\", new McpServerResourceCreateOptions())")), "exactly one McpServerResource.Create(Read");
+        Fires(WithWidget("Infrastructure/DI/McpModule.cs", module,
+            Widget(read: "private static string Read() => Accessor.HttpContext!.User.Identity!.Name!;")), "names HttpContext");
+        Fires(WithWidget("Infrastructure/DI/McpModule.cs", module, "namespace X;\npublic static class SomethingElse { }\n"), "declared 0 times");
     }
 
     // ── reflection fixtures (compiled into THIS assembly, which no catalog or BFF scan reads) ──────────────────────
