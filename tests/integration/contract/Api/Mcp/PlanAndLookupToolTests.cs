@@ -250,7 +250,7 @@ public sealed class PlanAndLookupToolTests
     [Fact]
     public async Task WithoutACaller_BothToolsAreAnIsErrorUserContextRequired_AndCallNothing()
     {
-        var script = new CallerScript();
+        var script = new PlanAndLookupAccessors();
         var capability = new Mock<IDecisionCapability>(MockBehavior.Strict);
         var search = new Mock<IDecisionLookupSearch>(MockBehavior.Strict);
         var anonymous = new DefaultHttpContext { User = new ClaimsPrincipal(new ClaimsIdentity()) };
@@ -363,7 +363,7 @@ internal sealed class PlanAndLookupScript
 }
 
 /// <summary>The real capability for the plan (access, resolution, stamp); the worklist and suppression reads are the script's.</summary>
-internal sealed class ScriptedDecisionCapability(DecisionCapability real, IHttpContextAccessor accessor, PlanAndLookupScript script) : IDecisionCapability
+internal sealed class PlanAndLookupCapability(DecisionCapability real, IHttpContextAccessor accessor, PlanAndLookupScript script) : IDecisionCapability
 {
     public Task<DecisionPlanReadResult> GetPlanAsync(HttpContext? http, Guid signalId, CancellationToken ct)
     {
@@ -391,7 +391,7 @@ internal sealed class ScriptedDecisionCapability(DecisionCapability real, IHttpC
 }
 
 /// <summary>The real lookup search, recording the context it was handed.</summary>
-internal sealed class RecordingLookupSearch(DecisionLookupSearch real, IHttpContextAccessor accessor, PlanAndLookupScript script) : IDecisionLookupSearch
+internal sealed class PlanAndLookupSearch(DecisionLookupSearch real, IHttpContextAccessor accessor, PlanAndLookupScript script) : IDecisionLookupSearch
 {
     public Task<DecisionLookupResult> SearchAsync(HttpContext? http, Guid signalId, string? parameterCode, string? query, CancellationToken ct)
     {
@@ -401,7 +401,7 @@ internal sealed class RecordingLookupSearch(DecisionLookupSearch real, IHttpCont
 }
 
 /// <summary>An <see cref="IHttpContextAccessor"/> holding a chosen context, for calling a tool's handler directly.</summary>
-internal sealed class CallerScript
+internal sealed class PlanAndLookupAccessors
 {
     public IHttpContextAccessor Accessor(HttpContext? context) => new Holder { HttpContext = context };
 
@@ -479,10 +479,10 @@ internal sealed class PlanAndLookupHost : IAsyncDisposable
         builder.Services.AddSingleton(plans);
         builder.Services.AddSingleton(users.Object);
         builder.Services.AddScoped<IDecisionCapability>(sp =>
-            new ScriptedDecisionCapability(sp.GetRequiredService<DecisionCapability>(), sp.GetRequiredService<IHttpContextAccessor>(), script));
+            new PlanAndLookupCapability(sp.GetRequiredService<DecisionCapability>(), sp.GetRequiredService<IHttpContextAccessor>(), script));
         builder.Services.AddSingleton(new DecisionLookupSearch(access, plans, users.Object, NullLogger<DecisionLookupSearch>.Instance));
         builder.Services.AddScoped<IDecisionLookupSearch>(sp =>
-            new RecordingLookupSearch(sp.GetRequiredService<DecisionLookupSearch>(), sp.GetRequiredService<IHttpContextAccessor>(), script));
+            new PlanAndLookupSearch(sp.GetRequiredService<DecisionLookupSearch>(), sp.GetRequiredService<IHttpContextAccessor>(), script));
 
         var app = builder.Build();
         app.UseAuthentication();

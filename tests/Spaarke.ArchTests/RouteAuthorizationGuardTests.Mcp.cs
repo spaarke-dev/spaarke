@@ -60,7 +60,7 @@ public partial class RouteAuthorizationGuardTests
             + "tool runs). It takes no record id; each tool reads as the caller through the seam McpTools names."),
     };
 
-    // No production tool yet: tasks 022-024 add spaarke_show_decisions, spaarke_get_decision_plan, spaarke_search_decision_lookup and
+    // Tasks 022-024 add spaarke_show_decisions, spaarke_get_decision_plan, spaarke_search_decision_lookup and
     // spaarke_complete_decision, each with its entry here, in the diff that adds the tool.
     private static readonly IReadOnlyList<McpTool> McpTools = new[]
     {
