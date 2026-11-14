@@ -1413,7 +1413,11 @@ public class FinanceEndpointsAuthorizationContractTests
         /// <summary>The rights granted on a record (None when none were).</summary>
         public AccessRights RightsOf(string set, Guid id) => _rights.TryGetValue((set, id), out var rights) ? rights : AccessRights.None;
 
-        /// <summary>Dataverse gave no answer for this record: rights None with <see cref="AccessSnapshot.Faulted"/> true (an unknown, not a denial).</summary>
+        /// <summary>
+        /// Dataverse gave no full answer for this record (<see cref="AccessSnapshot.Faulted"/> true: an unknown, not a denial), in the
+        /// shapes the production source emits: a degraded Read when the record is readable (rights granted here include Read), otherwise
+        /// None. Any other granted right is NOT returned on a fault.
+        /// </summary>
         public void Fault(string set, Guid id) => _faulted.Add((set, id));
 
         public Task<AccessSnapshot> GetUserAccessAsync(
@@ -1438,12 +1442,14 @@ public class FinanceEndpointsAuthorizationContractTests
                 return Task.FromException<AccessSnapshot>(ThrowOnEveryCall);
             }
 
+            var granted = _rights.TryGetValue((set, id), out var rights) ? rights : AccessRights.None;
+            var faulted = _faulted.Contains((set, id));
             return Task.FromResult(new AccessSnapshot
             {
                 UserId = userId,
                 ResourceId = id.ToString(),
-                AccessRights = _rights.TryGetValue((set, id), out var rights) ? rights : AccessRights.None,
-                Faulted = _faulted.Contains((set, id)),
+                AccessRights = faulted ? granted & AccessRights.Read : granted,
+                Faulted = faulted,
             });
         }
     }
