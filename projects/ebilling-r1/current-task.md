@@ -34,7 +34,7 @@
    - Do NOT push to the work branch while uac-r2 reviews; commit locally only.
    - Asked ontology-r1 which test was its 1/2990 failure (it needed a file that isn't in the repo); fix or file that.
    - K4: should a per-record Procedure override file a Decision Record? This goes to the owner.
-   - Merging needs uac-r2's pass plus the owner's go. After the merge, send the master SHA to word-add-in-r1 and spa-r4.
+   - uac-r2 APPROVED (CI green on 293d87de72, 47 pass). The merge waits ONLY on the owner's go. On 2026-11-14 the PR was CLEAN against master bd43110169. After the merge: tell uac-r2 (it folds the change into its next dev BFF deploy), and send the master SHA to word-add-in-r1 and spa-r4.
 6. **095g build.** The owner answered every question (EB-D-233..235; 095g notes, "Owner answers").
    - Q2 changed to ALLOW an inactive record. uac-r2 was asked whether its approval still holds; wait for that answer before building.
    - Q3: organization type "Law Firm", matched by `sprk_organizationtypecode`, which is empty on dev and has to be seeded (a live write). Two firms assigned on dev have no type.
@@ -64,7 +64,7 @@
 - **field-mapping-r1:**
   - 045g round 4 PASS.
   - #2790 is merged to master; #2819 (045g) is open.
-- **spa-r4:** task 010 review PASS-with-changes; its fix 9b10699efe re-checked PASS. Owes us its master merge SHA.
+- **spa-r4:** task 010 review PASS-with-changes; fix 9b10699efe re-checked PASS. #2818 merged to master as bd43110169 (2026-11-14 06:45Z); its dev SPA deploy follows uac-r2's BFF deploy.
 - **word-add-in-r1:**
   - It has the 095e and 095f contracts; the pane follows, using a top-level `firmName`.
   - Owed: the master SHA.
