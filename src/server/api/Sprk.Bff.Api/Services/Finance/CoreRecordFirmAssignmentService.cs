@@ -296,15 +296,13 @@ public sealed class CoreRecordFirmAssignmentService
                     OrganizationNameColumn, ConditionOperator.Like, "%" + RecordContainerResolver.EscapeForLike(search.Trim()) + "%");
             }
 
+            // The ONE order of the list is the server's (name, then id), so pages join without a gap or a repeat. It is never re-sorted
+            // here: an in-memory sort with another collation would reorder each page on its own (review 1, F2).
             query.AddOrder(OrganizationNameColumn, OrderType.Ascending);
             query.AddOrder(OrganizationIdColumn, OrderType.Ascending);
 
             var result = await _entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
-            var items = result.Entities
-                .Select(e => new FirmRef(e.Id, NameOf(e)))
-                .OrderBy(f => f.Name, StringComparer.OrdinalIgnoreCase)
-                .ThenBy(f => f.FirmId)
-                .ToList();
+            var items = result.Entities.Select(e => new FirmRef(e.Id, NameOf(e))).ToList();
             return new FirmListResult(new FirmListResponse(items, page, result.MoreRecords));
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)

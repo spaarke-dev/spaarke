@@ -1120,6 +1120,21 @@ public sealed class CoreRecordFirmEndpointContractTests
         host.Probe.Calls.Should().HaveCount(3).And.OnlyContain(c => c.Privilege == CoreRecordFirmEndpoints.ReadOrganizationPrivilege && c.HasToken);
     }
 
+    [Fact(DisplayName = "095g list (review 1 F2): the list keeps the server's order; it is never re-sorted with another collation")]
+    public async Task List_KeepsTheServersOrder()
+    {
+        await using var host = await Host.StartAsync();
+        host.GrantEverything();
+        host.World.ServerCollation = StringComparer.Create(System.Globalization.CultureInfo.InvariantCulture, ignoreCase: true);
+        host.World.Firm(Guid.Parse("095f0000-0000-4000-8000-000000000a01"), "Étude Law");
+        host.World.Firm(Guid.Parse("095f0000-0000-4000-8000-000000000a02"), "Zeta Law");
+
+        var all = Names(await Json(await host.ListAsync("")));
+
+        // A culture-aware collation puts the accented E with the other E's; an ordinal one puts it after Z.
+        all.Should().Equal("Étude Law", "Firm A", "Firm B", "Firm C", "Zeta Law");
+    }
+
     [Fact(DisplayName = "095g list: the search escapes %, _ and [ so they match literally")]
     public async Task List_SearchEscapesWildcards()
     {
@@ -1339,6 +1354,9 @@ public sealed class CoreRecordFirmEndpointContractTests
 
         public HashSet<string> FaultQueriesOf { get; } = new();
 
+        /// <summary>The collation the server orders names with (Dataverse's is culture-aware, not ordinal).</summary>
+        public StringComparer ServerCollation { get; set; } = StringComparer.OrdinalIgnoreCase;
+
         public CoreRecordFirmAssignmentService Service() => new(
             Entities.Object, Harness.Participations, Harness.AccessibleRecords, Harness.Materializer,
             NullLogger<CoreRecordFirmAssignmentService>.Instance);
@@ -1553,7 +1571,7 @@ public sealed class CoreRecordFirmEndpointContractTests
             if (query.Orders.Count > 0)
             {
                 matched = matched
-                    .OrderBy(r => r.GetAttributeValue<string>(CoreRecordFirmAssignmentService.OrganizationNameColumn), StringComparer.OrdinalIgnoreCase)
+                    .OrderBy(r => r.GetAttributeValue<string>(CoreRecordFirmAssignmentService.OrganizationNameColumn), ServerCollation)
                     .ThenBy(r => r.Id)
                     .ToList();
             }
