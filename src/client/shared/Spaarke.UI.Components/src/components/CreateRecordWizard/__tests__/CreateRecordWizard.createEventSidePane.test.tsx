@@ -139,6 +139,50 @@ describe('CreateRecordWizard — Create Event follow-on side pane (config.naviga
     });
   });
 
+  it('reopening the wizard starts with Assigned To empty (fix round 2: the last assignee is not carried over)', async () => {
+    const nav = createMockNavigationService();
+    nav.openLookup.mockImplementation(async opts =>
+      opts.entityType === 'contact' ? [{ ...CONTACT, entityType: 'contact' }] : []
+    );
+    const onFinish = jest.fn(async (_ctx: IFinishContext) => ({
+      title: 'done',
+      body: <div>ok</div>,
+      actions: <div />,
+    }));
+    const config = buildConfig(onFinish, nav);
+    const element = (open: boolean) => (
+      <CreateRecordWizard open={open} onClose={jest.fn()} webApi={noopWebApi} config={config} />
+    );
+    const { rerender } = renderWithProviders(element(true));
+    await goToCreateEvent();
+    fireEvent.click(screen.getByRole('button', { name: 'Select Assigned To' }));
+    await screen.findByRole('button', { name: 'Clear Assigned To' });
+    await act(async () => {
+      await new Promise(resolve => setTimeout(resolve, 0));
+    });
+
+    rerender(element(false));
+    rerender(element(true));
+    // Fluent leaves the reopened dialog's ancestors aria-hidden in jsdom, so these queries pass hidden: true.
+    // The shell keeps the Create Event step label in its stepper across a reopen, so the card text is no longer
+    // unique: pick the card by its checkbox role (the same query the Back/Next case uses).
+    fireEvent.click(screen.getByRole('button', { name: 'Next', hidden: true }));
+    fireEvent.click(await screen.findByRole('checkbox', { name: /Create Event/i, hidden: true }));
+    fireEvent.click(screen.getByRole('button', { name: 'Next', hidden: true }));
+    await screen.findByText(/Enter details for the event/);
+
+    expect(screen.getByRole('button', { name: 'Select Assigned To', hidden: true })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Clear Assigned To', hidden: true })).not.toBeInTheDocument();
+    fireEvent.change(screen.getByPlaceholderText('Enter event name'), { target: { value: 'Second event' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Finish', hidden: true }));
+    await waitFor(() => expect(onFinish).toHaveBeenCalledTimes(1));
+    expect(onFinish.mock.calls[0][0].followOn).toMatchObject({
+      createEventName: 'Second event',
+      createEventAssignedToId: '',
+      createEventAssignedToName: '',
+    });
+  });
+
   it('with no assignee picked, followOn carries empty Assigned To values', async () => {
     const onFinish = jest.fn(async (_ctx: IFinishContext) => ({
       title: 'done',

@@ -265,6 +265,8 @@ export const CreateRecordWizard: React.FC<ICreateRecordWizardProps> = ({
       setCreateEventDueDate('');
       setCreateEventPriority(100000001);
       setCreateEventDescription('');
+      setCreateEventAssignedToId('');
+      setCreateEventAssignedToName('');
       setEmailTo('');
       setEmailSubject('');
       setEmailBody('');
