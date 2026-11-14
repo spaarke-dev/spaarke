@@ -4,15 +4,18 @@
 // (DataverseUserClient, CallerWhoAmIMemo, the decision services) serves an MCP caller exactly as it serves a REST caller:
 //   test 1 — inside a tool, IHttpContextAccessor.HttpContext is the request's own instance and the tool's IServiceProvider is that
 //            request's RequestServices;
+//            and with two callers' requests in flight at once, each tool call sees its own caller (oid), its own HttpContext and its own
+//            RequestServices, never the other request's;
 //   test 2 — the REAL DataverseUserClient, called from a tool over the MCP route, asks WhoAmI as the caller (OBO from the MCP request's
-//            own bearer token) and remembers the answer for that request only; with no bearer token, or with no HttpContext, it answers
-//            UserContextRequired before any credential is used or any Dataverse call is sent;
+//            own bearer token) and remembers the answer for that request only; with no bearer token, with no HttpContext, or with a
+//            caller whose token the OBO cache does not hold, it fails closed before any Dataverse call is sent;
 //   test 5 — the transport is pinned: Stateless, PerSessionExecutionContext false, on the test host and on the real BFF host, whose
-//            production DI also binds every caller-path parameter of every legal-operations tool as a service, never a tool argument.
+//            production DI also binds every caller-path parameter of the inferred-schema legal-operations tools as a service, never a
+//            tool argument (the two static-schema tools are an explicit schema pin only).
 // Tests 3 and 4 (the commit) are in tests/integration/data-mutation/Mcp/McpCommitCallerPathTests.cs.
 //
 // WHAT RUNS: the PRODUCTION AddMcpModule / MapMcpEndpoints / RateLimitingModule and the A10 token filter on a real Kestrel listener
-// (McpCallerPathHost below, the task-020 host shape), the REAL DataverseUserClient and OrderedCredentialClientProvider (MSAL). Only the
+// (McpCallerPathHost below, the task-020 host shape; NOT the BFF Program, except test 5's second case), the REAL DataverseUserClient and OrderedCredentialClientProvider (MSAL). Only the
 // wire is replaced: Dataverse by a hand-written HttpMessageHandler, the OBO exchange by an MSAL token cache seeded with one access token
 // for the hash of the MCP request's own bearer token (MSAL's own OBO cache lookup, so a different caller token misses), and the BFF's
 // managed-identity assertion by a counting stub. Tokens are opaque test strings (ADR-028; nothing real is asserted on or logged).
@@ -34,6 +37,7 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.AspNetCore.Hosting.Server.Features;
+using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -61,6 +65,7 @@ public sealed class McpCallerPathTests
 {
     private static readonly Guid CallerOid = Guid.Parse("01000000-0000-4000-8000-000000000001");
     private static readonly Guid CallerSystemUserId = Guid.Parse("01000000-0000-4000-8000-000000000002");
+    private static readonly Guid SecondCallerOid = Guid.Parse("01000000-0000-4000-8000-0000000000a2");
     private const string DataverseUrl = "https://caller-path-010.crm.dynamics.com";
 
     /// <summary>The Dataverse access token the seeded MSAL cache holds for the caller's assertion: an opaque test string.</summary>
@@ -88,6 +93,38 @@ public sealed class McpCallerPathTests
             "the SDK resolves a tool's services from the request's own RequestServices (ScopeRequests off), so scoped services are the request's");
         ReferenceEquals(seen.ToolAccessorRequestServices, seen.MiddlewareRequestServices).Should().BeTrue();
         seen.ToolUserOid.Should().Be(CallerOid.ToString("D"), "the context carries the authenticated MCP caller");
+    }
+
+    [Fact]
+    public async Task Test1_TwoCallersInFlightAtOnce_EachToolCallSeesItsOwnCallerItsOwnHttpContextAndItsOwnRequestServices()
+    {
+        await using var host = await McpCallerPathHost.StartAsync([typeof(CallerPathProbeTool)]);
+        host.Recorder.RequireOverlap(callers: 2); // each tool call waits (inside the tool) until the other caller's call is also running
+        var markerA = Guid.NewGuid().ToString("N");
+        var markerB = Guid.NewGuid().ToString("N");
+
+        var results = await Task.WhenAll(
+            host.CallToolAsync(CallerPathProbeTool.ToolName, new { marker = markerA }, McpTestHost.MintToken(CallerOid), markerA),
+            host.CallToolAsync(CallerPathProbeTool.ToolName, new { marker = markerB }, McpTestHost.MintToken(SecondCallerOid), markerB));
+
+        AssertCallSawItsOwnRequest(host.Recorder, results[0], markerA, CallerOid);
+        AssertCallSawItsOwnRequest(host.Recorder, results[1], markerB, SecondCallerOid);
+        ReferenceEquals(host.Recorder.RequestsByMarker[markerA].Context, host.Recorder.RequestsByMarker[markerB].Context).Should().BeFalse(
+            "two requests in flight at once are two HttpContexts");
+    }
+
+    private static void AssertCallSawItsOwnRequest(CallerPathRecorder recorder, JsonElement result, string marker, Guid oid)
+    {
+        (result.TryGetProperty("isError", out var isError) && isError.GetBoolean()).Should().BeFalse(result.GetRawText());
+        var seen = result.GetProperty("structuredContent");
+        seen.GetProperty("oid").GetString().Should().Be(oid.ToString("D"), "the tool's own result carries the caller of ITS request, not the other caller");
+        seen.GetProperty("headerMarker").GetString().Should().Be(marker, "the accessor's context carried the request header of the request that made this call");
+        seen.GetProperty("toolServicesAreRequestServices").GetBoolean().Should().BeTrue(
+            "the tool's IServiceProvider is the RequestServices of the HttpContext the accessor holds");
+        var request = recorder.RequestsByMarker[marker];
+        var tool = recorder.ToolsByMarker[marker];
+        ReferenceEquals(tool.Context, request.Context).Should().BeTrue("the accessor held this request's own HttpContext instance");
+        ReferenceEquals(tool.Services, request.RequestServices).Should().BeTrue("the tool's provider is this request's own RequestServices");
     }
 
     // ---- test 2: the real DataverseUserClient over the MCP route ------------------------------------------------------------
@@ -149,28 +186,55 @@ public sealed class McpCallerPathTests
         rig.Assertions.Mints.Should().Be(0, "no credential is used: there is no app-only fallback");
     }
 
+    [Fact]
+    public async Task Test2_Negative_ASecondCallerWhoseTokenTheOboCacheDoesNotHold_FailsClosed_AndNothingIsSentToDataverse()
+    {
+        var tokenA = McpTestHost.MintToken(CallerOid);
+        var tokenB = McpTestHost.MintToken(SecondCallerOid);
+        var rig = await DataverseRig.StartAsync(seedTokenFor: tokenA); // the OBO cache holds caller A's exchange only
+        await using var host = await McpCallerPathHost.StartAsync([typeof(DataverseWhoAmIProbeTool)], rig.Register);
+        var mintsBefore = rig.Assertions.Mints;
+        rig.Assertions.FailEveryMintFromNow(); // caller B's cache miss must not reach Entra: any mint attempt is refused offline
+
+        var b = await host.CallToolAsync(DataverseWhoAmIProbeTool.ToolName, new { }, tokenB);
+
+        (b.TryGetProperty("isError", out var bIsError) && bIsError.GetBoolean()).Should().BeTrue(
+            "caller B has no OBO exchange: MSAL's cache is keyed by the assertion, not served from A's entry; " + b.GetRawText());
+        b.GetProperty("structuredContent").GetProperty("reasonCode").GetString().Should().Be(DataverseUserClientErrorCodes.OboExchangeFailed);
+        rig.Assertions.Mints.Should().BeGreaterThan(mintsBefore, "B's lookup missed the cache and tried to exchange; that attempt was refused");
+        rig.Wire.Requests.Should().BeEmpty("no Dataverse call is sent, and above all none with caller A's token");
+
+        var a = await host.CallToolAsync(DataverseWhoAmIProbeTool.ToolName, new { }, tokenA);
+
+        (a.TryGetProperty("isError", out var isError) && isError.GetBoolean()).Should().BeFalse(a.GetRawText());
+        rig.Wire.Requests.Should().ContainSingle("only caller A's own call reached Dataverse").Which.Authorization.Should().Be("Bearer " + CallerDataverseToken);
+    }
+
     // ---- test 5: the transport pin ------------------------------------------------------------------------------------------
 
     [Fact]
-    public async Task Test5_TheMcpTransport_IsStateless_WithPerRequestExecutionContext()
+    public async Task Test5_TheMcpTransport_IsStateless_AndTheExecutionContextFlagStaysOff()
     {
         await using var host = await McpCallerPathHost.StartAsync([typeof(CallerPathProbeTool)]);
 
         var transport = host.Services.GetRequiredService<IOptions<HttpServerTransportOptions>>().Value;
 
-        transport.Stateless.Should().BeTrue("ADR-001: no session store, no affinity");
+        transport.Stateless.Should().BeTrue(
+            "this is the real guard (ADR-001: no session store, no affinity): in stateless mode every request carries its own short-lived server " +
+            "context, so a tool runs on the request's own execution context and IHttpContextAccessor.HttpContext is the request's");
         transport.SessionMode.Should().Be(HttpServerSessionMode.Stateless);
 #pragma warning disable MCP9006 // Pinning the value is this test's purpose (FR-10); the SDK marks the setting obsolete, not the read.
         transport.PerSessionExecutionContext.Should().BeFalse(
-            "true runs tools on the session's execution context, where the SDK documents IHttpContextAccessor as unsupported (FR-10); " +
-            "in stateless mode test 1 still passes with it on (task-010 notes), so this pin is the guard");
+            "inert today: SDK 2.3.1 reads the flag only in its stateful branch, so in stateless mode test 1 passes with it on (task-010 notes); " +
+            "pinned only so a future switch to a stateful transport does not silently put tools on the session's execution context, " +
+            "where the SDK documents IHttpContextAccessor as unsupported (FR-10)");
 #pragma warning restore MCP9006
     }
 
     [Fact]
-    public void Test5_TheRealBffHost_PinsTheTransport_AndBindsEveryCallerPathParameterAsAService()
+    public void Test5_TheRealBffHost_PinsTheTransport_AndBindsEveryCallerPathParameterOfTheInferredSchemaToolsAsAService()
     {
-        using var factory = new CustomWebAppFactory().WithWebHostBuilder(builder => builder.UseSetting("Mcp:Enabled", "true"));
+        using var factory = RealBffHost();
 
         var transport = factory.Services.GetRequiredService<IOptions<HttpServerTransportOptions>>().Value;
         transport.Stateless.Should().BeTrue();
@@ -180,21 +244,47 @@ public sealed class McpCallerPathTests
 
         // The production assembly scan over the production DI: a caller-path parameter (IHttpContextAccessor, IDecisionCapability, ...)
         // that the real host did not register would be published as a tool ARGUMENT, so the caller path would not be the request's.
-        var tools = factory.Services.GetRequiredService<McpToolCatalog>().ToolsFor(McpEndpoints.LegalOperationsArea)
-            .ToDictionary(t => t.ProtocolTool.Name, t => t.ProtocolTool.InputSchema);
-        var arguments = tools.ToDictionary(
-            t => t.Key,
-            t => t.Value.TryGetProperty("properties", out var properties) ? properties.EnumerateObject().Select(p => p.Name).Order(StringComparer.Ordinal).ToArray() : []);
+        // This only holds for tools whose input schema the SDK INFERS from the handler's parameters (the three below); the two other
+        // legal-operations tools state a static schema (see the pin test next to this one), which says nothing about DI binding.
+        var arguments = RealHostToolArguments(factory);
 
-        arguments.Should().BeEquivalentTo(new Dictionary<string, string[]>
+        arguments.Where(t => InferredSchemaTools.Contains(t.Key)).ToDictionary(t => t.Key, t => t.Value).Should().BeEquivalentTo(new Dictionary<string, string[]>
         {
-            ["spaarke_show_decisions"] = ["category"],
-            ["spaarke_list_decision_page"] = ["cursor"],
             ["spaarke_get_decision_plan"] = ["signalId"],
             ["spaarke_search_decision_lookup"] = ["parameterCode", "query", "signalId"],
             ["spaarke_complete_decision"] = ["review", "signalId"],
         }, options => options.WithStrictOrdering());
     }
+
+    [Fact]
+    public void Test5_TheRealBffHost_TheTwoStaticSchemaTools_PublishExactlyTheirPinnedArguments_ASchemaPinNotAnInjectionProof()
+    {
+        // ShowDecisionsTool and ListDecisionPageTool overwrite ProtocolTool.InputSchema with a static schema, so these rows would stay
+        // green even if one of their services were not registered. They are pinned as the published contract (FR-03: the closed category
+        // enum, the cursor), nothing more.
+        using var factory = RealBffHost();
+
+        var arguments = RealHostToolArguments(factory);
+
+        arguments.Where(t => !InferredSchemaTools.Contains(t.Key)).ToDictionary(t => t.Key, t => t.Value).Should().BeEquivalentTo(new Dictionary<string, string[]>
+        {
+            ["spaarke_show_decisions"] = ["category"],
+            ["spaarke_list_decision_page"] = ["cursor"],
+        }, options => options.WithStrictOrdering());
+    }
+
+    private static readonly HashSet<string> InferredSchemaTools = ["spaarke_get_decision_plan", "spaarke_search_decision_lookup", "spaarke_complete_decision"];
+
+    private static WebApplicationFactory<Program> RealBffHost() =>
+        new CustomWebAppFactory().WithWebHostBuilder(builder => builder.UseSetting("Mcp:Enabled", "true"));
+
+    private static Dictionary<string, string[]> RealHostToolArguments(WebApplicationFactory<Program> factory) =>
+        factory.Services.GetRequiredService<McpToolCatalog>().ToolsFor(McpEndpoints.LegalOperationsArea)
+            .ToDictionary(
+                t => t.ProtocolTool.Name,
+                t => t.ProtocolTool.InputSchema.TryGetProperty("properties", out var properties)
+                    ? properties.EnumerateObject().Select(p => p.Name).Order(StringComparer.Ordinal).ToArray()
+                    : []);
 
     // ---- the Dataverse side of test 2 ---------------------------------------------------------------------------------------
 
@@ -249,8 +339,10 @@ public sealed class McpCallerPathTests
         /// </summary>
         private static void SeedOboAccessToken(IConfidentialClientApplication client, string userAssertion)
         {
+            // MSAL judges the entry against the real system clock and rejects fixed far-future or past values here (tried: expires_on 2038 and 2100, cached_at 2026 and 2099: OBO exchange failed), so this one read of the system clock stays.
             var now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
             var expires = (now + 3600).ToString(System.Globalization.CultureInfo.InvariantCulture);
+            var cachedAt = now.ToString(System.Globalization.CultureInfo.InvariantCulture);
             var home = $"{CallerOid:D}.{McpTestHost.TenantId}";
             var cache = new JsonObject
             {
@@ -265,7 +357,7 @@ public sealed class McpCallerPathTests
                         ["realm"] = McpTestHost.TenantId,
                         ["target"] = $"{DataverseUrl}/.default",
                         ["secret"] = CallerDataverseToken,
-                        ["cached_at"] = now.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                        ["cached_at"] = cachedAt,
                         ["expires_on"] = expires,
                         ["extended_expires_on"] = expires,
                         ["token_type"] = "Bearer",
@@ -294,13 +386,19 @@ public sealed class McpCallerPathTests
     private sealed class CountingAssertions : IClientAssertionProvider
     {
         private int _mints;
+        private int _refuse;
 
         public int Mints => Volatile.Read(ref _mints);
+
+        /// <summary>From now on every mint is counted and then refused, so an OBO cache miss stays offline (it would otherwise go to Entra).</summary>
+        public void FailEveryMintFromNow() => Volatile.Write(ref _refuse, 1);
 
         public Task<string> GetAssertionAsync(CancellationToken cancellationToken = default)
         {
             Interlocked.Increment(ref _mints);
-            return Task.FromResult("test-client-assertion-010");
+            return Volatile.Read(ref _refuse) == 1
+                ? throw new MsalClientException("test_mint_refused", "Test: the assertion provider refuses every mint, so no token request can leave the process.")
+                : Task.FromResult("test-client-assertion-010");
         }
     }
 
@@ -393,8 +491,9 @@ internal sealed class McpCallerPathHost : IAsyncDisposable
         {
             recorder.MiddlewareContext = context;
             recorder.MiddlewareTraceIdentifier = context.TraceIdentifier;
+            recorder.MiddlewareRequestServices = context.RequestServices; // this request's scope: already set when the first middleware runs
+            recorder.RecordRequest(context);
             await next(context);
-            recorder.MiddlewareRequestServices = context.RequestServices; // still this request's, read before it ends
         });
         app.UseAuthentication();
         app.UseAuthorization();
@@ -415,10 +514,11 @@ internal sealed class McpCallerPathHost : IAsyncDisposable
 
     /// <summary>One <c>tools/call</c> on <c>/mcp/legal-operations</c>; returns the JSON-RPC <c>result</c> (an isError result included).</summary>
     /// <param name="token">The bearer token; null sends no Authorization header.</param>
-    public Task<JsonElement> CallToolAsync(string tool, object arguments, string? token) =>
-        RpcAsync("tools/call", new { name = tool, arguments }, token);
+    /// <param name="marker">When set, sent as the <see cref="CallerPathRecorder.MarkerHeader"/> request header, so the middleware and the tool can each record this request under it.</param>
+    public Task<JsonElement> CallToolAsync(string tool, object arguments, string? token, string? marker = null) =>
+        RpcAsync("tools/call", new { name = tool, arguments }, token, marker);
 
-    public async Task<JsonElement> RpcAsync(string method, object parameters, string? token)
+    public async Task<JsonElement> RpcAsync(string method, object parameters, string? token, string? marker = null)
     {
         using var request = new HttpRequestMessage(HttpMethod.Post, McpEndpoints.LegalOperationsRoute)
         {
@@ -429,6 +529,11 @@ internal sealed class McpCallerPathHost : IAsyncDisposable
         if (token is not null)
         {
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        }
+
+        if (marker is not null)
+        {
+            request.Headers.Add(CallerPathRecorder.MarkerHeader, marker);
         }
 
         using var response = await _client.SendAsync(request);
@@ -506,7 +611,61 @@ internal sealed class CallerPathRecorder
         ToolTraceIdentifier = http?.TraceIdentifier;
         ToolServices = services;
         ToolAccessorRequestServices = http?.RequestServices;
-        ToolUserOid = http?.User.FindFirst("oid")?.Value ?? http?.User.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value;
+        ToolUserOid = OidOf(http);
+    }
+
+    // ---- several callers at once: what each request and each tool call saw, keyed by the request's marker -------------------------
+
+    /// <summary>Request header a test sets (via <c>CallToolAsync(..., marker)</c>) to tell its concurrent requests apart.</summary>
+    public const string MarkerHeader = "X-Probe-Marker";
+
+    /// <summary>What the first middleware saw of each marked request: its HttpContext and RequestServices.</summary>
+    public ConcurrentDictionary<string, (HttpContext Context, IServiceProvider RequestServices)> RequestsByMarker { get; } = new();
+
+    /// <summary>What each marked tool call saw: the accessor's HttpContext and the tool's own IServiceProvider (keyed by the call's own <c>marker</c> ARGUMENT).</summary>
+    public ConcurrentDictionary<string, (HttpContext? Context, IServiceProvider Services)> ToolsByMarker { get; } = new();
+
+    private TaskCompletionSource? _overlap;
+    private int _overlapCallers;
+    private int _overlapArrived;
+
+    public static string? OidOf(HttpContext? http) =>
+        http?.User.FindFirst("oid")?.Value ?? http?.User.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value;
+
+    public void RecordRequest(HttpContext context)
+    {
+        var marker = context.Request.Headers[MarkerHeader].ToString();
+        if (marker.Length > 0)
+        {
+            RequestsByMarker[marker] = (context, context.RequestServices);
+        }
+    }
+
+    /// <summary>Makes each probe tool call wait, inside the tool, until <paramref name="callers"/> calls are running at once.</summary>
+    public void RequireOverlap(int callers)
+    {
+        _overlapCallers = callers;
+        Volatile.Write(ref _overlapArrived, 0);
+        _overlap = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+    }
+
+    /// <summary>No-op unless <see cref="RequireOverlap"/> was set. Fails (rather than hangs) if the other caller's call never arrives.</summary>
+    public async Task WaitForOverlapAsync(CancellationToken cancellationToken)
+    {
+        var gate = _overlap;
+        if (gate is null)
+        {
+            return;
+        }
+
+        if (Interlocked.Increment(ref _overlapArrived) >= _overlapCallers)
+        {
+            gate.TrySetResult();
+        }
+
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(TimeSpan.FromSeconds(20));
+        await gate.Task.WaitAsync(timeout.Token);
     }
 }
 
@@ -523,13 +682,37 @@ internal sealed class CallerPathProbeTool : McpToolDefinition
 
     public override McpServerTool Create(IServiceProvider services) =>
         McpServerTool.Create(
-            Run,
+            RunAsync,
             new McpServerToolCreateOptions { Services = services, Name = ToolName, Title = "Probe caller path", ReadOnly = true });
 
-    private static string Run(IHttpContextAccessor accessor, IServiceProvider services)
+    private static async Task<CallToolResult> RunAsync(
+        IHttpContextAccessor accessor, IServiceProvider services, CancellationToken cancellationToken, string? marker = null)
     {
-        services.GetService<CallerPathRecorder>()?.RecordTool(accessor, services);
-        return "recorded";
+        var recorder = services.GetService<CallerPathRecorder>();
+        recorder?.RecordTool(accessor, services);
+        if (recorder is not null)
+        {
+            await recorder.WaitForOverlapAsync(cancellationToken); // with two callers in flight, read the accessor again once the other call is running
+        }
+
+        // The tool states what IT saw, in its own result: the caller, the request header of the request the accessor holds, and whether its
+        // provider is that request's RequestServices. A test compares these to the caller and marker the request was made with.
+        var http = accessor.HttpContext;
+        if (recorder is not null && marker is not null && http is not null)
+        {
+            recorder.ToolsByMarker[marker] = (http, services);
+        }
+
+        return new CallToolResult
+        {
+            Content = [new TextContentBlock { Text = "recorded" }],
+            StructuredContent = JsonSerializer.SerializeToElement(new
+            {
+                oid = CallerPathRecorder.OidOf(http),
+                headerMarker = http?.Request.Headers[CallerPathRecorder.MarkerHeader].ToString(),
+                toolServicesAreRequestServices = http is not null && ReferenceEquals(http.RequestServices, services),
+            }),
+        };
     }
 }
 

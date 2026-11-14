@@ -94,4 +94,34 @@ One false alarm during the run: after the hash-checked restore, a re-run showed 
 - **Format.** `dotnet format whitespace --verify-no-changes` on both new files is clean (it fixed LF to CRLF). `check-changed-cs-format.sh origin/master` passes.
 - **Findings.** None classed F1–F4. The seeding-proof premise is a spec or POML wording issue, not a code defect, and is raised above for the owner. No defer issue was filed.
 
+## Review fix round (2026-11-14, after two adversarial reviews)
+
+Files: `McpCallerPathTests.cs`, `McpCommitCallerPathTests.cs`, a comment in `McpModule.cs`, this note, `notes/decisions.md`, project `CLAUDE.md` §2. Nothing else under `src/` changed.
+
+**Scope of the host (reviewer K4).** Tests 1-4 run on a host composed from the production `AddMcpModule` and `MapMcpEndpoints` (task-020 host shape), not the BFF `Program`. Only test 5's second and third cases build the BFF host, so the caller path is proven on production module code and not on `Program`'s full pipeline (other middleware, the FallbackPolicy).
+
+**F3, no second caller.** New `Test1_TwoCallersInFlightAtOnce_...`: two callers (different oids and tokens), each tool call waits inside the tool until the other is running (`CallerPathRecorder.RequireOverlap`, a barrier that fails after 20 s instead of hanging), then reads the accessor. The probe tool returns the oid, the request-header marker and "my provider is the accessor context's RequestServices" in its own result. Per request, the test asserts the tool's accessor context and provider are `ReferenceEquals` to the middleware's for the same marker, and that the two requests' contexts differ. New `Test2_Negative_ASecondCaller...`: the MSAL cache holds caller A only; caller B gets `DATAVERSE_OBO_EXCHANGE_FAILED` with an empty Dataverse wire; the assertion stub counts the mint attempt (proving a cache miss) and refuses it, so the miss stays offline; caller A then still succeeds with its own token.
+
+**F3, seeding proof for test 1.** The host was temporarily seeded (env switch `MCP010_SEED`, removed again; hash-checked restore) and `Test1_*` was run:
+
+| Seeded fault | Single-caller test 1 | Two-callers test | Red at |
+|---|---|---|---|
+| `ScopeRequests = true` set in `ConfigureSessionOptions` (a `PostConfigure` of the transport options) | red | red | `ReferenceEquals(ToolServices, MiddlewareRequestServices)` / `toolServicesAreRequestServices` is false |
+| `RunSessionHandler` starting `server.RunAsync` under `ExecutionContext.SuppressFlow()` (in `Task.Run`) | red | red | `ToolAccessorContext` null / `oid` null |
+| `IHttpContextAccessor` replaced by "last request's context wins" | green (one request) | red | `oid` is the other caller's (`...a2` for caller A) |
+
+All three failed at an assertion, none at an HTTP 400 from the RPC helper: the probe tool returns normally when the accessor is null or the provider differs, and the helper only throws for a transport or JSON-RPC error. The third row is what makes the second caller necessary: a one-caller test cannot see a leak.
+
+Other seeds: miss test (cache seeded for B instead of A) red at "caller B has no OBO exchange" (B got an answer); real-host inferred-schema test (a temporary unregistered `IFormatProvider` parameter on `GetDecisionPlanTool.HandleAsync`, reverted, hash-checked) red at `{"seedExtra","signalId"}` instead of `signalId`; static-schema pin (expected `cursorX`) red at the value; T170 `sprk_confirmedby` assertion (expected a different guid) red at the value (a seeded WhoAmI of another user fails earlier, at the refused commit).
+
+**F3, schema test vacuous for two tools.** `ShowDecisionsTool` and `ListDecisionPageTool` overwrite `ProtocolTool.InputSchema` with a static schema, so their rows could not show a missing service. Chose the cheaper sound option: the real-host test is narrowed to the three inferred-schema tools (`get_decision_plan`, `search_decision_lookup`, `complete_decision`) in its name and comment, and the other two rows moved to a separate test named and commented as a schema pin ("not an injection proof"). A real-host `tools/call` for each of the two was not added: it needs a Dataverse and capability rig on the real host for little gain, since both tools have their own tool tests (`ShowDecisionsToolTests`, `DecisionToolsTestHost`).
+
+**K, PerSessionExecutionContext is inert in stateless mode.** SDK 2.3.1 reads it only in the stateful branch (mutation A above). Test 5's `because` now names Stateless as the guard and the flag as pinned only against a future stateful switch (test renamed `Test5_TheMcpTransport_IsStateless_AndTheExecutionContextFlagStaysOff`). Comment in `McpModule.cs`, project `CLAUDE.md` §2 and `notes/decisions.md` corrected. The earlier line in this note, "the guard against the flip is test 5's pin", is superseded: the flag flip is not a fault in stateless mode.
+
+**K, T170 parity.** `sprk_confirmedby == Caller` restored in `Mcp010_Test3_*`. `WhoAmIs == 1` counts the probe's wire (`WireCountingProbe`); the user client is a mock in that rig, so, as in T170, it does not prove how many times a real `DataverseUserClient` hit Dataverse (test 2 proves that on the real client).
+
+**Hygiene.** The OBO cache seed keeps one `DateTimeOffset.UtcNow` read: fixed values were tried (expires_on 2038 or 2100, cached_at 2026 or 2099) and MSAL then ignored the entry (OBO exchange failed), so it needs the system clock; a one-line comment says so. `MiddlewareRequestServices` is now set before `next`.
+
+**Counts.** `McpCallerPathTests` + `Mcp010_*`: 12 passed (was 9: 6 in `McpCallerPathTests` + 3 commit; this round added 3 in `McpCallerPathTests`: the two-callers test, the cache-miss test, and the static-schema pin split out of the real-host test). `--filter "Mcp|T170_|CallerWhoAmIMemo"` on `Sprk.Bff.Api.Tests`: 185 passed, 1 skipped, 0 failed. BFF build: 0 warnings. `check-changed-cs-format.sh origin/master`: clean.
+
 rework: none task 010

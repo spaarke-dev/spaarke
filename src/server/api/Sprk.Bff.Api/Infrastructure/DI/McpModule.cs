@@ -14,8 +14,10 @@ namespace Sprk.Bff.Api.Infrastructure.DI;
 /// <remarks>
 /// <para><b>Stateless, no affinity.</b> No session store, no <c>Mcp-Session-Id</c>, no GET/DELETE/SSE routes (ADR-001, ADR-052): every
 /// request builds its own server context, and the SDK runs <c>ConfigureSessionOptions</c> on every request in that mode, which is
-/// where the route's tool set is chosen. <c>PerSessionExecutionContext</c> is left at its default (<c>false</c>; setting it is obsolete in stateless mode) so tools run on the request's
-/// execution context and <c>IHttpContextAccessor.HttpContext</c> is populated (task 010 pins both).</para>
+/// where the route's tool set is chosen. Stateless is what keeps <c>IHttpContextAccessor.HttpContext</c> populated: each request's tools
+/// run on that request's own execution context (task 010 pins it, with two callers in flight at once). <c>PerSessionExecutionContext</c>
+/// is left at its default (<c>false</c>; setting it is obsolete in stateless mode) and is inert here, because SDK 2.3.1 reads it only in
+/// its stateful branch; task 010 pins it only so that a future switch to a stateful transport cannot silently turn it on.</para>
 /// <para><b>Kill switch (ADR-032, P3).</b> The SDK services and the route are registered and mapped in both states, so toggling the
 /// flag cannot leave a dependency missing. <c>Mcp:Enabled</c> false (the default) swaps the real <see cref="McpToolCatalog"/> for
 /// <see cref="NullMcpToolCatalog"/>, which makes the route's <see cref="McpEnabledFilter"/> answer 503 before any tool runs and

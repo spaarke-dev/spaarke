@@ -41,6 +41,8 @@ public sealed partial class DecisionCommitServiceTests
         IsError(result).Should().BeFalse(result.GetRawText());
         result.GetProperty("structuredContent").GetProperty("status").GetInt32().Should().Be((int)DecisionCommitStatus.Recorded);
         rig.Records.Should().ContainSingle();
+        rig.Record.GetAttributeValue<Microsoft.Xrm.Sdk.EntityReference>("sprk_confirmedby").Id.Should().Be(Caller,
+            "the remembered answer is the caller's own systemuserid (T170's assertion, here over the MCP route)");
         probe.CallerQuestions.Should().BeGreaterThan(1, "the commit asks the probe about the caller more than once");
         probe.WhoAmIs.Should().Be(1, "who the caller is is asked once per MCP request: the memo finds the request through IHttpContextAccessor");
         probe.RightsAsked.Should().BeGreaterThan(0).And.Be(probe.RightsQuestions, "every rights question still reaches Dataverse (FR-51)");
