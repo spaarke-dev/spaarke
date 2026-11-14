@@ -636,6 +636,36 @@ public sealed partial class InvoiceAssignFirmServiceTests
         w.Applied!.Requests.Count(r => r is UpdateRequest { Target.LogicalName: "sprk_invoice" }).Should().Be(1, "one invoice update: name, firm and number together");
     }
 
+    [Fact(DisplayName = "095e review F1 (EB-D-226, seed-proof): Set firm also stores the new invoice name in the findings (invoiceName), so a re-run, a correction and the after-steps read the firm's name, not the issuer's")]
+    public async Task SetFirm_StoresTheNewInvoiceName_InTheFindings()
+    {
+        var w = new World();
+        w.Submission[InvoiceSubmissionPersister.SubmissionFindingsJson] =
+            """{"trackingNumber":"INV-7.3","invoiceName":"Issuer On The PDF Ltd - INV-7","pipelineFindings":[{"code":"firm_missing"}],"keep":1}""";
+
+        await w.Assign();
+
+        FindingsOf(w.Applied!)["invoiceName"]!.GetValue<string>().Should().Be("Hartwell and Co LLP - INV-7");
+        Update(w.Applied!, "sprk_invoice", InvoiceId).Target.GetAttributeValue<string>("sprk_name").Should().Be("Hartwell and Co LLP - INV-7", "the row and the stored name agree");
+    }
+
+    [Fact(DisplayName = "095e review F1 (EB-D-226, seed-proof): the invoice-level Signal plan entries take the new name as their subject; a line's entry keeps its own; the stored decision's hashed rename counts are unchanged")]
+    public async Task SetFirm_InvoiceLevelPlanEntries_TakeTheNewName_LineEntriesDoNot()
+    {
+        var w = new World();
+        w.Submission[InvoiceSubmissionPersister.SubmissionFindingsJson] =
+            """{"trackingNumber":"INV-7.3","invoiceName":"Issuer On The PDF Ltd - INV-7","pipelineFindings":[{"code":"firm_missing"}],"signalPlan":[{"policyCode":"P","subjectEntity":"sprk_invoice","subjectName":"Issuer On The PDF Ltd - INV-7"},{"policyCode":"P","subjectEntity":"sprk_billingevent","subjectName":"INV-7.3 #1"}]}""";
+
+        await w.Assign();
+
+        var plan = FindingsOf(w.Applied!)["signalPlan"]!.AsArray().OfType<JsonObject>().ToList();
+        plan[0]["subjectName"]!.GetValue<string>().Should().Be("Hartwell and Co LLP - INV-7");
+        plan[1]["subjectName"]!.GetValue<string>().Should().Be("INV-7.3 #1", "a line's entry is not the invoice's");
+        var stored = AssignFirmStoredDecision.Read(FindingsOf(w.Applied!))!;
+        InvoiceAssignFirmService.RenamedCounts(stored.Renamed, stored.FirmSetLines).Keys.Should()
+            .BeEquivalentTo(["firmSetLines", "lines", "approval", "storedFiles", "findings"], "the invoice is not a count: the counts are hashed (K2)");
+    }
+
     [Fact(DisplayName = "095e (EB-D-226): the invoice name does not depend on the allocator's attempt number (every retry of the apply builds the same name)")]
     public async Task SetFirm_TheInvoiceName_IsTheSameForEveryAttempt()
     {

@@ -1,8 +1,8 @@
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
-using Microsoft.Extensions.DependencyInjection;
 using Moq;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
@@ -400,6 +400,8 @@ public class FromEmailSubmissionServiceTests
         RefusedBeforeAnyWrite(world);
         world.Intake.Entities.Verify(e => e.RetrieveAsync("sprk_organization", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()),
             Times.Never(), "there is no firm to read");
+        world.Communications.Verify(c => c.GetCommunicationByInternetMessageIdAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Never(), "the refusal comes before the email's communication is read");
         world.Intake.Allocator.Verify(a => a.NumbersSubmissionsWithoutFirmAsync(It.IsAny<CancellationToken>()), Times.Never(),
             "the refusal no longer depends on the tracking-scope phase");
     }

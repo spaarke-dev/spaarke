@@ -1157,6 +1157,22 @@ public sealed class InvoiceAssignFirmService
             var findings = (JsonObject)Findings.DeepClone();
             findings[FindingsTrackingNumberMember] = number;
             findings[StoredDecisionMember] = stored.ToJson();
+
+            // EB-D-226 fix (095e review F1): the stored invoice name follows the row's, in the same write. A re-run, a correction and the
+            // after-steps all read it from here, so a stale issuer-based name would come back. The invoice-level Signal plan entries carry
+            // that name as their subject (the re-run rebuilds them from it; the replay and the reconciler read them as stored), so they follow.
+            // Not recorded in the stored decision's rename counts (they are hashed).
+            if (InvoiceNameTo is { } storedInvoiceName)
+            {
+                findings["invoiceName"] = storedInvoiceName;
+                foreach (var entry in (findings["signalPlan"] as JsonArray ?? []).OfType<JsonObject>()
+                    .Where(e => e["subjectEntity"] is JsonValue entity && entity.TryGetValue<string>(out var entityName)
+                        && string.Equals(entityName, FinanceBaseValues.InvoiceEntity, StringComparison.Ordinal)))
+                {
+                    entry["subjectName"] = storedInvoiceName;
+                }
+            }
+
             var json = findings.ToJsonString();
 
             // 082c-2 (ontology D-205 writer 3), fix round 3 (ontology F1): the review detail is recomputed from the holds that REMAIN after this

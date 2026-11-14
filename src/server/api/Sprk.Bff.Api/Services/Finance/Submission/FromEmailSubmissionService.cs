@@ -385,7 +385,8 @@ internal sealed class FromEmailSubmissionService
     /// refusal has written and filed nothing.
     /// </summary>
     private FromEmailSubmissionOutcome? CheckNoFirm()
-    {        _logger.LogInformation("From-email submission with no firm refused before any write (400)");
+    {
+        _logger.LogInformation("From-email submission with no firm refused before any write (400)");
         return FromEmailSubmissionOutcome.Refused(StatusCodes.Status400BadRequest, InvoiceSubmissionErrors.FirmInvalid, "A firm is required.");
     }
 
