@@ -1,4 +1,6 @@
+using System.Diagnostics;
 using System.Security.Claims;
+using Sprk.Bff.Api.Infrastructure.Logging;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.PublicContracts;
 using Sprk.Bff.Api.Services.Jobs;
@@ -81,13 +83,45 @@ internal sealed class ComposeProfileDispatcher
         // plain object with no request-tied lifetime, so retaining the reference across the response is safe.
         var user = httpContext.User;
         var correlationId = httpContext.TraceIdentifier;
+        var requestActivity = Activity.Current;
 
         // Fire-and-forget: detach from the request scope AND the request CancellationToken (constraint #3).
         // The task is unobserved by design; RunAsync owns its own try/catch so nothing faults the
         // finalizer thread. The discard makes the intent explicit to reviewers + analyzers.
-        _ = Task.Run(() => RunAsync(documentId, authorizationHeader, user, correlationId));
+        _ = StartDetached(() => RunAsync(documentId, authorizationHeader, user, correlationId, requestActivity));
 
         return ProfileDispatched();
+    }
+
+    /// <summary>
+    /// Starts <paramref name="work"/> on the thread pool WITHOUT flowing the caller's
+    /// <see cref="ExecutionContext"/> (#2620).
+    ///
+    /// <para><b>Why flow is suppressed.</b> <see cref="RunAsync"/> assigns
+    /// <see cref="IHttpContextAccessor.HttpContext"/>. <c>HttpContextAccessor</c> keeps the context in a
+    /// static <c>AsyncLocal</c> holder object, and its setter first nulls the context in the holder
+    /// currently flowed in — with a flowed context, that is the ORIGINATING request's holder — before
+    /// installing a new one. A plain <c>Task.Run</c> therefore cleared the save / load / refresh-profile
+    /// request's <c>HttpContext</c> while that request was still running, so anything after the dispatch
+    /// that reads the accessor (e.g. <c>DataverseUserClient</c> → DATAVERSE_USER_CONTEXT_REQUIRED) saw
+    /// null. With flow suppressed the detached work starts with no AsyncLocals, and its assignment
+    /// installs a holder in its own flow only.</para>
+    ///
+    /// <para>Suppressing flow also drops the request's trace parent and audit log scope;
+    /// <see cref="RunAsync"/> re-establishes both explicitly.</para>
+    /// </summary>
+    private static Task StartDetached(Func<Task> work)
+    {
+        // SuppressFlow throws when flow is already suppressed — then Task.Run already does not flow it.
+        if (ExecutionContext.IsFlowSuppressed())
+        {
+            return Task.Run(work);
+        }
+
+        using (ExecutionContext.SuppressFlow())
+        {
+            return Task.Run(work);
+        }
     }
 
     /// <summary>
@@ -100,11 +134,25 @@ internal sealed class ComposeProfileDispatcher
         Guid documentId,
         string authorizationHeader,
         ClaimsPrincipal? user,
-        string correlationId)
+        string correlationId,
+        Activity? requestActivity)
     {
         // Constraint #3: use the app-shutdown token, NOT the (already-completed) request token. A profile
         // in flight when the host stops is cut off cleanly; otherwise it runs to completion.
         var ct = _appLifetime?.ApplicationStopping ?? CancellationToken.None;
+
+        // #2620: this runs with ExecutionContext flow suppressed (StartDetached), so re-establish what the
+        // request flow used to supply. The trace parent keeps the profile's telemetry correlated with the
+        // request — best-effort: Activity.Current rejects an already-stopped activity, which only happens if
+        // the request finished before this task started. The audit scope is AuditEnrichmentMiddleware's
+        // own (oid / appid / obo / tenantId / correlationId), rebuilt from the captured caller.
+        if (requestActivity is { IsStopped: false })
+        {
+            Activity.Current = requestActivity;
+        }
+
+        var auditScope = AuditEnrichmentMiddleware.BuildAuditScope(user, correlationId);
+        using var auditLogScope = auditScope is null ? null : _logger.BeginScope(auditScope);
 
         try
         {
@@ -127,6 +175,8 @@ internal sealed class ComposeProfileDispatcher
 
             // Keep AnalysisDocumentLoader's IHttpContextAccessor-based tenant-cache scoping coherent
             // (else it degrades to the documented "system" sentinel — acceptable, but this is tidier).
+            // Safe ONLY because this flow was started with ExecutionContext flow suppressed: the setter
+            // nulls the holder currently flowed in, which must never be the originating request's (#2620).
             var accessor = scope.ServiceProvider.GetService<IHttpContextAccessor>();
             if (accessor is not null)
             {
