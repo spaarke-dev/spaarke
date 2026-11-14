@@ -18,8 +18,9 @@ namespace Sprk.Bff.Api.Api.Finance;
 /// carry the internal-only, law-firm-only list or the slot rules, eligibility refusal and revoke confirmation without changing what it is
 /// for. (3) Cost of doing nothing: the pane cannot offer an unlinked firm or save one, so EB-D-224 cannot be built.</para>
 /// <para><b>Authorization</b>, as the caller and fail closed. Step 0 on the group (an external or row-less caller gets the uniform 404 with
-/// zero rights calls). The list asks the caller's Read privilege on <c>sprk_organization</c>; the assign asks Write on the record (a clear)
-/// or Write and Append (an add or replace, uac-r2 R1), from one caller snapshot, then the caller's Read and AppendTo on the firm. Both run
+/// zero rights calls). The list asks the caller's Read privilege on <c>sprk_organization</c>; the assign asks Read and Write on the record
+/// (a clear) or Read, Write and Append (an add or replace, uac-r2 R1), from one caller snapshot, then the caller's Read and AppendTo on the
+/// firm. Both run
 /// the filter in <see cref="FinanceDenial.UniformNotFoundFailClosed"/>: a denial is the uniform 404, a rights fault is 503. The eBilling
 /// kill switch follows the filter.</para>
 /// </remarks>
@@ -93,8 +94,9 @@ public static class CoreRecordFirmEndpoints
     }
 
     /// <summary>
-    /// The assign: the entity type and the body shape (400), then ONE Record check on the route record as the caller - Write and Append for
-    /// an add or replace (<c>ebilling.record.assign_firm</c>, uac-r2 R1), Write for a pure clear (<c>ebilling.record.remove_firm</c>).
+    /// The assign: the entity type and the body shape (400), then ONE Record check on the route record as the caller - Read, Write and
+    /// Append for an add or replace (<c>ebilling.record.assign_firm</c>, uac-r2 R1), Read and Write for a pure clear
+    /// (<c>ebilling.record.remove_firm</c>). Read because every answer describes the record's firms.
     /// </summary>
     internal static FinanceAuthorizationTargets ResolveAssignTargets(EndpointFilterInvocationContext context)
     {
@@ -116,7 +118,7 @@ public static class CoreRecordFirmEndpoints
             return FinanceAuthorizationTargets.Authorize(); // no check: the filter denies
         }
 
-        // One check, so Write and Append come from ONE caller snapshot (uac-r2 R1).
+        // One check, so Read, Write and Append come from ONE caller snapshot (uac-r2 R1).
         return FinanceAuthorizationTargets.Authorize(request!.Add is not null
             ? new FinanceAuthorizationCheck
             {

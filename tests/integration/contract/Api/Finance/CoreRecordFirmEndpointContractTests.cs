@@ -228,12 +228,12 @@ public sealed class CoreRecordFirmEndpointContractTests
         host.ShouldHaveDoneNothing();
     }
 
-    [Fact(DisplayName = "095g uac-r2 R1 control: the same add with Write and Append is applied (must not fire)")]
+    [Fact(DisplayName = "095g uac-r2 R1 control: the same add with Read, Write and Append is applied (must not fire)")]
     public async Task Add_WithWriteAndAppend_IsApplied()
     {
         await using var host = await Host.StartAsync();
         host.GrantEverything();
-        host.Access.Grant(MatterSet, MatterId, AccessRights.Write | AccessRights.Append);
+        host.Access.Grant(MatterSet, MatterId, AccessRights.Read | AccessRights.Write | AccessRights.Append);
 
         var response = await host.AssignAsync(new { add = FirmA });
 
@@ -241,18 +241,57 @@ public sealed class CoreRecordFirmEndpointContractTests
         host.World.Writes.Should().ContainSingle();
     }
 
-    [Fact(DisplayName = "095g uac-r2 R1: a pure clear needs Write only (Append is not asked of a clear)")]
+    [Fact(DisplayName = "095g uac-r2 R1: a pure clear needs Read and Write only (Append is not asked of a clear)")]
     public async Task Clear_NeedsWriteOnly()
     {
         await using var host = await Host.StartAsync();
         host.GrantEverything();
         host.World.Matter(MatterId, slot1: FirmA);
-        host.Access.Grant(MatterSet, MatterId, AccessRights.Write);
+        host.Access.Grant(MatterSet, MatterId, AccessRights.Read | AccessRights.Write);
 
         var response = await host.AssignAsync(new { remove = FirmA, confirmRevoke = FirmA });
 
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         host.World.SlotsOf(MatterId).Should().Be((null, null));
+    }
+
+    public static IEnumerable<object[]> WithoutReadBodies() => new[]
+    {
+        // Without Read every answer would describe the record: its firms by name, and (for a clear) whether the named firm is on it.
+        new object[] { "add, Write and Append", AccessRights.Write | AccessRights.Append | AccessRights.AppendTo, "add" },
+        new object[] { "replace, Write and Append", AccessRights.Write | AccessRights.Append | AccessRights.AppendTo, "replace" },
+        new object[] { "clear, Write", AccessRights.Write | AccessRights.Append | AccessRights.AppendTo, "clear-on" },
+        new object[] { "clear of a firm not on the record, Write", AccessRights.Write | AccessRights.Append | AccessRights.AppendTo, "clear-off" },
+    };
+
+    [Theory(DisplayName = "095g uac-r2 review: without Read on the record an add, replace or clear is the uniform 404, byte-identical to an unknown record, nothing written (must fire)")]
+    [MemberData(nameof(WithoutReadBodies))]
+    public async Task WithoutRead_IsUniform404_LikeAnUnknownRecord(string name, AccessRights rights, string body)
+    {
+        object Body() => body switch
+        {
+            "add" => new { add = FirmC },
+            "replace" => new { add = FirmC, remove = FirmA, confirmRevoke = FirmA },
+            "clear-on" => new { remove = FirmA, confirmRevoke = FirmA },
+            _ => new { remove = FirmB, confirmRevoke = FirmB },
+        };
+
+        await using var refused = await Host.StartAsync();
+        refused.GrantEverything();
+        refused.World.Matter(MatterId, slot1: FirmA);
+        refused.Access.Grant(MatterSet, MatterId, rights);
+        var denied = await refused.AssignAsync(Body());
+
+        await using var unknown = await Host.StartAsync();
+        unknown.GrantEverything();
+        var absent = await unknown.AssignAsync(Body(), recordId: Guid.Parse("095f0000-0000-4000-8000-0000000009fe"));
+
+        denied.StatusCode.Should().Be(HttpStatusCode.NotFound, name);
+        (await ReasonCode(denied)).Should().Be(Uniform404);
+        absent.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        (await StableBody(denied)).Should().Be(await StableBody(absent), "a caller without Read learns nothing the unknown record does not tell");
+        refused.ShouldHaveDoneNothing();
+        refused.World.SlotsOf(MatterId).Should().Be((FirmA, null));
     }
 
     [Fact(DisplayName = "095g uac-r2 R1 (review 1 F4): a replace {add, remove, confirmRevoke} with Write only is the uniform 404 - the add in it needs Append (must fire)")]
@@ -1369,12 +1408,14 @@ public sealed class CoreRecordFirmEndpointContractTests
         patch.Should().BeGreaterThan(lookup.Index + escalation.Index, "the check comes before the write");
     }
 
-    [Fact(DisplayName = "095g: the two operation keys - an add needs Write and Append, a clear Write only")]
+    [Fact(DisplayName = "095g: the two operation keys - an add needs Read, Write and Append, a clear Read and Write")]
     public void OperationKeys_StateR1()
     {
         OperationAccessPolicy.HasRequiredRights(AccessRights.Write, "ebilling.record.assign_firm").Should().BeFalse();
-        OperationAccessPolicy.HasRequiredRights(AccessRights.Write | AccessRights.Append, "ebilling.record.assign_firm").Should().BeTrue();
-        OperationAccessPolicy.HasRequiredRights(AccessRights.Write, "ebilling.record.remove_firm").Should().BeTrue();
+        OperationAccessPolicy.HasRequiredRights(AccessRights.Write | AccessRights.Append, "ebilling.record.assign_firm").Should().BeFalse("Read is asked too");
+        OperationAccessPolicy.HasRequiredRights(AccessRights.Read | AccessRights.Write | AccessRights.Append, "ebilling.record.assign_firm").Should().BeTrue();
+        OperationAccessPolicy.HasRequiredRights(AccessRights.Write, "ebilling.record.remove_firm").Should().BeFalse("Read is asked too");
+        OperationAccessPolicy.HasRequiredRights(AccessRights.Read | AccessRights.Write, "ebilling.record.remove_firm").Should().BeTrue();
         OperationAccessPolicy.HasRequiredRights(AccessRights.Read | AccessRights.Append, "ebilling.record.remove_firm").Should().BeFalse();
     }
 
