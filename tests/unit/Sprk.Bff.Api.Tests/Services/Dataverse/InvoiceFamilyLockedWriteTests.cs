@@ -454,6 +454,61 @@ public class InvoiceFamilyLockedWriteTests
         writes.Should().Equal(new Guid?[] { null });
     }
 
+    // ── Review 1 (F1): once the person's write landed, the request cannot cancel the application's ─────────────────────
+
+    /// <summary>
+    /// A recorder that cancels <paramref name="request"/> when the person's write lands, and whose application write fails as a
+    /// real client would when its token is cancelled.
+    /// </summary>
+    private static (Mock<IFieldMappingDataverseService> Records, List<Guid?> Writes) CancelledAfterThePersonsWrite(CancellationTokenSource request)
+    {
+        var writes = new List<Guid?>();
+        var records = new Mock<IFieldMappingDataverseService>(MockBehavior.Strict);
+        records.Setup(r => r.UpdateExistingRecordFieldsAsync(
+                It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .Returns<string, Guid, Dictionary<string, object?>, Guid?, CancellationToken>((_, _, _, asWho, ct) =>
+            {
+                ct.ThrowIfCancellationRequested();
+                writes.Add(asWho);
+                if (asWho is not null)
+                    request.Cancel(); // the client goes away once the person's write has landed
+                return Task.CompletedTask;
+            });
+        return (records, writes);
+    }
+
+    [Fact]
+    public async Task MixedWrite_RequestCancelledAfterThePersonsWrite_TheApplicationsWriteStillRuns()
+    {
+        using var request = new CancellationTokenSource();
+        var (records, writes) = CancelledAfterThePersonsWrite(request);
+        var rights = new Rights().On("sprk_invoices", InvoiceId, RowRights).On("sprk_matters", MatterId, TargetRights);
+
+        var code = await InvoiceFamilyLockedWrite.UpdateExistingSplitAsync(
+            records.Object, "sprk_invoice", InvoiceId,
+            new() { ["sprk_matter"] = new EntityReference("sprk_matter", MatterId), ["sprk_name"] = "n" },
+            Person, notFoundAsReadFailed: true, rights.Question, NullLogger.Instance, request.Token);
+
+        code.Should().BeNull("the person's write landed, so the locked columns are written whatever the request does");
+        writes.Should().Equal(Person, null);
+    }
+
+    [Fact]
+    public async Task Caller_RequestCancelledAfterThePersonsPatch_TheApplicationsWriteStillRuns()
+    {
+        using var request = new CancellationTokenSource();
+        var person = new PersonClient { OnPatch = request.Cancel }
+            .Rights(InvoiceId, "ReadAccess, WriteAccess, AppendAccess").Rights(MatterId, "AppendToAccess");
+        var (app, writes) = CancelledAfterThePersonsWrite(request);
+
+        var answer = await PatchAsCallerAsync(person, app.Object, "sprk_invoice", "sprk_invoices", InvoiceId, LockedAndOtherBody,
+            new CapturingLogger(), "trace-1", request.Token);
+
+        answer.Kind.Should().Be(CallerPatchKind.Written);
+        person.Patches.Should().ContainSingle();
+        writes.Should().Equal(new Guid?[] { null });
+    }
+
     [Fact]
     public void RefusalException_ForAGuardCode_IsTheGuardsCodeOnlyRefusal()
     {
@@ -495,9 +550,13 @@ public class InvoiceFamilyLockedWriteTests
             return Task.FromResult(answer.Value ?? DataverseUserResponse.Fail(404, "NotFound", "not found"));
         }
 
+        /// <summary>Run after each PATCH is recorded (review 1: the client goes away once it has landed).</summary>
+        public Action? OnPatch { get; init; }
+
         public Task<DataverseUserResponse> PatchAsync(string relativePath, string jsonBody, CancellationToken cancellationToken)
         {
             Patches.Add((relativePath, jsonBody));
+            OnPatch?.Invoke();
             return Task.FromResult(PatchAnswer);
         }
 

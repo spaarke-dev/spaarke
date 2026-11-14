@@ -298,11 +298,14 @@ internal static class InvoiceFamilyLockedWrite
             return gone;
         }
 
-        // The person's write landed: from here a failure is "partly saved", never success (K-1).
+        // The person's write landed: from here a failure is "partly saved", never success (K-1). #2799 review 1 (F1): the
+        // application's write is not the request's to cancel (a client disconnect or a playbook timeout would otherwise leave the
+        // other columns written and the locked ones not) — CancellationToken.None, as the after-write steps of every update path.
         try
         {
             if (await InvoiceFamilyCoreRecordGuard.UpdateExistingAsync(
-                        records, entityLogicalName, recordId, locked, impersonateSystemUserId: null, notFoundAsReadFailed, ct)
+                        records, entityLogicalName, recordId, locked, impersonateSystemUserId: null, notFoundAsReadFailed,
+                        CancellationToken.None)
                     .ConfigureAwait(false) is null)
             {
                 return null;
@@ -448,7 +451,10 @@ internal static class InvoiceFamilyLockedWrite
 
         try
         {
-            await appOnly.UpdateExistingRecordFieldsAsync(table, recordId, locked, impersonateSystemUserId: null, ct).ConfigureAwait(false);
+            // #2799 review 1 (F1): once the person's PATCH landed, the application's write is not the request's to cancel.
+            await appOnly.UpdateExistingRecordFieldsAsync(
+                    table, recordId, locked, impersonateSystemUserId: null, restBody is null ? ct : CancellationToken.None)
+                .ConfigureAwait(false);
             return CallerPatch.Written;
         }
         catch (Exception ex) when (restBody is not null)
