@@ -568,11 +568,7 @@ internal static class InvoiceSubmissionFromEmailHttp
             return FirmsUnavailable();
         }
 
-        return Results.Ok(named
-            .OrderBy(f => f.Name, StringComparer.OrdinalIgnoreCase)
-            .ThenBy(f => f.FirmId)
-            .Select(f => new CoreRecordFirm(f.FirmId, f.Name))
-            .ToList());
+        return Results.Ok(CoreRecordFirm.Ordered(named));
     }
 
     // ═══════════════════════════════════════════════════════════════════════════

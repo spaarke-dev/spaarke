@@ -396,6 +396,7 @@ public static class EndpointMappingExtensions
         app.MapCodeSetMappingEndpoints(); // ebilling-r1 task 048 (FR-22)
         app.MapSubmissionOverrideEndpoints(); // ebilling-r1 task 105 (FR-19, FR-37)
         app.MapInvoiceApprovalEndpoints(); // ebilling-r1 task 103 (FR-35, FR-11)
+        app.MapCoreRecordFirmEndpoints(); // ebilling-r1 task 095g (EB-D-224: assign a firm from the Outlook pane)
         app.MapInvoiceRejectReturnEndpoints(); // ebilling-r1 task 104 (FR-36)
         app.MapApExportEndpoints(); // ebilling-r1 task 150 (FR-41, EB-D-178)
         app.MapRecordProcedureEndpoints(); // ebilling-r1 task 084 (EB-D-218)
