@@ -313,26 +313,72 @@ public sealed class CoreRecordFirmEndpointContractTests
         host.ShouldHaveDoneNothing();
     }
 
-    [Fact(DisplayName = "095g review 1 F2: the one record-rights helper never counts an incomplete answer as held, even one carrying rights, in every mode")]
-    public async Task RecordRightsHelper_AFaultedAnswerIsNeverHeld()
+    public static IEnumerable<object[]> RecordRightsHelperCases() => new[]
+    {
+        // Held wins, faulted or not: a degraded Read still answers a Read operation (the request gets the rights it always did).
+        new object[] { "Read, complete, Read op", AccessRights.Read, false, "finance.read", FinanceCheckVerdict.Allowed },
+        new object[] { "Read, FAULTED (degraded), Read op", AccessRights.Read, true, "finance.read", FinanceCheckVerdict.Allowed },
+        new object[] { "all rights, complete, add op", AccessRights.Read | AccessRights.Write | AccessRights.Append, false, "ebilling.record.assign_firm", FinanceCheckVerdict.Allowed },
+
+        // Not held and faulted: Faulted (a degraded Read never satisfies Write and Append).
+        new object[] { "Read, FAULTED (degraded), add op", AccessRights.Read, true, "ebilling.record.assign_firm", FinanceCheckVerdict.Faulted },
+        new object[] { "no Read, FAULTED (None), Read op", AccessRights.AppendTo, true, "finance.read", FinanceCheckVerdict.Faulted },
+
+        // Not held and complete: Denied.
+        new object[] { "Read, complete, add op", AccessRights.Read, false, "ebilling.record.assign_firm", FinanceCheckVerdict.Denied },
+        new object[] { "None, complete, Read op", AccessRights.None, false, "finance.read", FinanceCheckVerdict.Denied },
+    };
+
+    [Theory(DisplayName = "095g review 2: the one record-rights helper - held wins whatever Faulted says; not held and faulted is Faulted; otherwise Denied")]
+    [MemberData(nameof(RecordRightsHelperCases))]
+    public async Task RecordRightsHelper_HeldWins_ThenFaulted_ThenDenied(
+        string name, AccessRights granted, bool faulted, string operation, FinanceCheckVerdict expected)
     {
         var source = new FinAuth.RecordingAccessDataSource();
         var authorization = new AuthorizationService(source, Array.Empty<IAuthorizationRule>(), NullLogger<AuthorizationService>.Instance);
-        const string operation = "ebilling.record.assign_firm";
-        source.Grant(MatterSet, MatterId, AccessRights.Read | AccessRights.Write | AccessRights.Append | AccessRights.AppendTo);
+        source.Grant(MatterSet, MatterId, granted);
+        if (faulted)
+        {
+            source.Fault(MatterSet, MatterId); // the production shapes: Read when readable, else None
+        }
 
-        // Control: the complete answer with the rights is held.
-        (await FinanceAuthorizationFilter.CallerRecordVerdictAsync(authorization, "user", MatterSet, MatterId, operation, "token", CancellationToken.None))
-            .Should().Be(FinanceCheckVerdict.Allowed);
-        (await FinanceAuthorizationFilter.CallerHoldsRightsAsync(authorization, "user", MatterSet, MatterId, operation, "token", CancellationToken.None))
-            .Should().BeTrue();
+        var verdict = await FinanceAuthorizationFilter.CallerRecordVerdictAsync(
+            authorization, "user", MatterSet, MatterId, operation, "token", CancellationToken.None);
+        var holds = await FinanceAuthorizationFilter.CallerHoldsRightsAsync(
+            authorization, "user", MatterSet, MatterId, operation, "token", CancellationToken.None);
 
-        source.Fault(MatterSet, MatterId);
+        verdict.Should().Be(expected, name);
+        holds.Should().Be(expected == FinanceCheckVerdict.Allowed, "the handlers' check and the filter's check give one answer: " + name);
+    }
 
-        (await FinanceAuthorizationFilter.CallerRecordVerdictAsync(authorization, "user", MatterSet, MatterId, operation, "token", CancellationToken.None))
-            .Should().Be(FinanceCheckVerdict.Faulted);
-        (await FinanceAuthorizationFilter.CallerHoldsRightsAsync(authorization, "user", MatterSet, MatterId, operation, "token", CancellationToken.None))
-            .Should().BeFalse("the handlers' check and the filter's check give one answer on a fault");
+    [Fact(DisplayName = "095g review 2: an add given a degraded Read on a faulted answer is 503, never the uniform 404, and nothing is read")]
+    public async Task Add_GivenADegradedReadOnAFault_Is503()
+    {
+        await using var host = await Host.StartAsync();
+        host.GrantEverything();
+        host.Access.Grant(MatterSet, MatterId, AccessRights.Read); // readable, so the fault answers a degraded Read
+        host.Access.Fault(MatterSet, MatterId);
+
+        var response = await host.AssignAsync(new { add = FirmA });
+
+        response.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable);
+        (await ErrorCode(response)).Should().Be(Unavailable);
+        host.ShouldHaveDoneNothing();
+    }
+
+    [Fact(DisplayName = "095g review 2: the firm list asks no record rights, so a faulted record answer does not reach it; its table-privilege check decides (fail-closed mode)")]
+    public async Task List_IsNotDecidedByARecordFault()
+    {
+        await using var host = await Host.StartAsync();
+        host.GrantEverything();
+        host.Access.Fault(MatterSet, MatterId);
+        host.Access.Fault(FirmSet, FirmA);
+
+        var response = await host.ListAsync("");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        host.Access.Calls.Should().NotContain(c => c.Path == FinAuth.AccessPath.Record, "the list declares a table-privilege check only");
+        host.Probe.Calls.Should().ContainSingle().Which.Privilege.Should().Be(CoreRecordFirmEndpoints.ReadOrganizationPrivilege);
     }
 
     [Fact(DisplayName = "095g N1-N4, N11, N12: every uniform 404 has the same status and the same bytes")]

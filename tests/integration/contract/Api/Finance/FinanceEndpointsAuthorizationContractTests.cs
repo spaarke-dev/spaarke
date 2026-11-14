@@ -318,6 +318,23 @@ public class FinanceEndpointsAuthorizationContractTests
         (await response.Content.ReadAsStringAsync()).Should().Contain("An error occurred while recalculating financial fields");
     }
 
+    [Theory(DisplayName = "095g review 2 (uniform-404 mode): a degraded Read on a faulted answer reaches the handler; no rights on a faulted answer is the uniform 404, as before")]
+    [InlineData("finance-matter-recalculate", Matters, AccessRights.Read, HttpStatusCode.InternalServerError)]
+    [InlineData("finance-project-recalculate", Projects, AccessRights.Read, HttpStatusCode.InternalServerError)]
+    [InlineData("finance-matter-recalculate", Matters, AccessRights.AppendTo, HttpStatusCode.NotFound)]
+    public async Task Recalculate_FaultedAnswer_DecidedByTheRightsItCarries(string route, string expectedSet, AccessRights granted, HttpStatusCode expected)
+    {
+        await using var host = await FinanceAuthHost.StartAsync();
+        var parentId = Guid.NewGuid();
+        host.Access.Grant(expectedSet, parentId, granted);
+        host.Access.Fault(expectedSet, parentId);
+
+        var response = await host.SendAsync(BuildRequest(route, parentId));
+
+        // 500 is the handler's own (see Recalculate_FinanceReader_ReachesTheRollupHandler): the filter let the request through.
+        response.StatusCode.Should().Be(expected);
+    }
+
     [Theory]
     [MemberData(nameof(RecalculateRoutes))]
     public async Task Recalculate_AuthenticatedButNoBearerToken_Returns404WithoutAskingDataverse(string route, string expectedSet)
@@ -398,6 +415,37 @@ public class FinanceEndpointsAuthorizationContractTests
         response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
         await ShouldCarryReasonCode(response, "sdap.access.deny.insufficient_rights");
         host.Access.Calls.Should().ContainSingle().Which.Set.Should().Be(Matters);
+        host.VerifyNoServiceWasInvoked();
+    }
+
+    [Fact(DisplayName = "095g review 2 (must not fire): a Read-only route given a DEGRADED Read on a faulted answer is allowed - the request gets the rights it always did")]
+    public async Task Summary_DegradedReadOnAFault_Gets200()
+    {
+        await using var host = await FinanceAuthHost.StartAsync();
+        var matterId = Guid.NewGuid();
+        host.Access.Grant(Matters, matterId, AccessRights.Read); // readable: the source's fallback answers Read, marked faulted
+        host.Access.Fault(Matters, matterId);
+        host.Summary.Setup(s => s.GetSummaryAsync(matterId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new FinanceSummaryDto { MatterId = matterId, CurrentSpend = 10m });
+
+        var response = await host.SendAsync(BuildRequest("summary", matterId));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        host.Access.Calls.Should().ContainSingle().Which.Should().Be(new AccessCall(AccessPath.Record, Matters, matterId, HasToken: true));
+    }
+
+    [Fact(DisplayName = "095g review 2 control (must fire): the same route given NO rights on a faulted answer is refused as before (403 insufficient_rights)")]
+    public async Task Summary_NoRightsOnAFault_Gets403()
+    {
+        await using var host = await FinanceAuthHost.StartAsync();
+        var matterId = Guid.NewGuid();
+        host.Access.Grant(Matters, matterId, AccessRights.AppendTo); // not readable: the fallback answers None, marked faulted
+        host.Access.Fault(Matters, matterId);
+
+        var response = await host.SendAsync(BuildRequest("summary", matterId));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        await ShouldCarryReasonCode(response, "sdap.access.deny.insufficient_rights");
         host.VerifyNoServiceWasInvoked();
     }
 

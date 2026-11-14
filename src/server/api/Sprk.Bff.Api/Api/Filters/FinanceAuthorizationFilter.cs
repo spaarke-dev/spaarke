@@ -193,7 +193,7 @@ public enum FinanceDenial
     /// systemuser row, no Read), and the route's 503 (<c>ebilling.submission.record_unavailable</c>, the submission read fault) for
     /// EVERY system-failure outcome: a step-0 flag or lookup read fault, a table-privilege read that has no complete answer
     /// (<see cref="CallerPrivilegeAnswer.Faulted"/>), a record-rights answer Dataverse did not complete (<see cref="AccessSnapshot.Faulted"/>,
-    /// task 095g), a target declaration or check that threw, a missing probe or caller resolver.
+    /// task 095g) whose rights do not hold the operation, a target declaration or check that threw, a missing probe or caller resolver.
     /// For a route whose 404 means "no match" (<c>GET /api/finance/invoice-submissions?internetMessageId=</c>, ebilling-r1 task 095a
     /// review F1, uac-r2 binding): it must NEVER answer the no-match 404 when it could not decide. Opt-in: every other route keeps
     /// <see cref="UniformNotFound"/> or <see cref="Forbidden"/>, where a fault is denied as before.
@@ -568,7 +568,8 @@ public class FinanceAuthorizationFilter : IEndpointFilter
     /// (<see cref="AuthorizationService.GetCallerRecordAccessAsync"/>) against <paramref name="operation"/>'s required rights. The ONE
     /// definition of it: the filter's Record check and a handler that must put a SECOND record to the caller (the correction prefill's
     /// replacement invoice, ebilling-r1 task 097e) both call it, so the two cannot differ. A thrown fault propagates; the filter denies on it,
-    /// a handler decides what its own fault means. An answer Dataverse did not complete is never held (<see cref="CallerRecordVerdictAsync"/>).
+    /// a handler decides what its own fault means. The answer is held exactly when the snapshot's rights satisfy the operation, faulted or
+    /// not: a degraded answer that still carries the rights is held (<see cref="CallerRecordVerdictAsync"/>).
     /// </summary>
     internal static async Task<bool> CallerHoldsRightsAsync(
         AuthorizationService authorizationService, string userId, string entitySetName, Guid recordId, string operation, string? callerToken,
@@ -577,22 +578,25 @@ public class FinanceAuthorizationFilter : IEndpointFilter
             .ConfigureAwait(false) == FinanceCheckVerdict.Allowed;
 
     /// <summary>
-    /// The Record path's decision with the fault told apart (ebilling-r1 task 095g review 1): <see cref="FinanceCheckVerdict.Faulted"/> when the
-    /// rights answer was not complete (<see cref="AccessSnapshot.Faulted"/>), otherwise <see cref="FinanceCheckVerdict.Allowed"/> or
-    /// <see cref="FinanceCheckVerdict.Denied"/> by <paramref name="operation"/>'s required rights. The one question and the one allow rule:
-    /// <see cref="CallerHoldsRightsAsync"/> and the filter's Record check (in every mode) both go through it.
+    /// The Record path's decision with the fault told apart (ebilling-r1 task 095g, reviews 1 and 2). The rights decide first:
+    /// <see cref="FinanceCheckVerdict.Allowed"/> when the snapshot's rights satisfy <paramref name="operation"/>, WHATEVER
+    /// <see cref="AccessSnapshot.Faulted"/> says. The source can return a degraded but genuine answer marked faulted (Read, when the full
+    /// rights question went unanswered and the record is still readable), and a request it satisfies gets exactly the rights it always did.
+    /// Only an answer that is not held is split: <see cref="FinanceCheckVerdict.Faulted"/> when the snapshot is faulted, otherwise
+    /// <see cref="FinanceCheckVerdict.Denied"/>. The one question and the one allow rule: <see cref="CallerHoldsRightsAsync"/> and the
+    /// filter's Record check (in every mode) both go through it.
     /// </summary>
     internal static async Task<FinanceCheckVerdict> CallerRecordVerdictAsync(
         AuthorizationService authorizationService, string userId, string entitySetName, Guid recordId, string operation, string? callerToken,
         CancellationToken ct)
     {
         var snapshot = await authorizationService.GetCallerRecordAccessAsync(userId, entitySetName, recordId, callerToken, ct).ConfigureAwait(false);
-        if (snapshot.Faulted)
+        if (OperationAccessPolicy.HasRequiredRights(snapshot.AccessRights, operation))
         {
-            return FinanceCheckVerdict.Faulted;
+            return FinanceCheckVerdict.Allowed;
         }
 
-        return OperationAccessPolicy.HasRequiredRights(snapshot.AccessRights, operation) ? FinanceCheckVerdict.Allowed : FinanceCheckVerdict.Denied;
+        return snapshot.Faulted ? FinanceCheckVerdict.Faulted : FinanceCheckVerdict.Denied;
     }
 
     /// <summary>
@@ -607,12 +611,14 @@ public class FinanceAuthorizationFilter : IEndpointFilter
     /// Never throws except on a cancelled request: no caller, a missing service, a check that threw or a system failure is
     /// <see cref="FinanceCheckVerdict.Faulted"/>, logged at Warning.
     /// <para><b>A record-rights answer Dataverse did not complete</b> (084g fix round 1, review A2). The production rights source does not
-    /// throw on a fault: it returns a snapshot with no rights and <see cref="AccessSnapshot.Faulted"/> set. <see cref="CallerRecordVerdictAsync"/>
-    /// reports it as <see cref="FinanceCheckVerdict.Faulted"/>; the filter denies on it in the uniform-404 and 403 modes and answers it as a system
-    /// failure in this mode (task 095g), so here it is <see cref="FinanceCheckVerdict.Faulted"/>. The evaluator also runs on an
-    /// <see cref="AuthorizationService"/> over the same registered <see cref="IAccessDataSource"/>, seen through a decorator that only notes
-    /// whether a snapshot came back faulted, so a faulted answer on the Document path is told apart too. Every question and answer is the
-    /// registered source's own, so the record decision is still <see cref="CallerRecordVerdictAsync"/>'s.</para>
+    /// throw on a fault: it returns a snapshot with <see cref="AccessSnapshot.Faulted"/> set, carrying no rights or a degraded Read.
+    /// <see cref="CallerRecordVerdictAsync"/> reports a faulted answer that does not satisfy the operation as
+    /// <see cref="FinanceCheckVerdict.Faulted"/>; the filter denies on it in the uniform-404 and 403 modes and answers it as a system failure
+    /// in this mode (task 095g). The evaluator also runs on an <see cref="AuthorizationService"/> over the same registered
+    /// <see cref="IAccessDataSource"/>, seen through a decorator that only notes whether a snapshot came back faulted, so ANY faulted answer
+    /// (one the degraded rights satisfy included, and one on the Document path) is <see cref="FinanceCheckVerdict.Faulted"/> here: this
+    /// evaluator reports permissions, and a degraded answer cannot say which the caller holds. Every question and answer is the registered
+    /// source's own, so the record decision is still <see cref="CallerRecordVerdictAsync"/>'s.</para>
     /// </summary>
     internal static async Task<FinanceCheckVerdict> EvaluateCheckForCallerAsync(
         HttpContext httpContext, FinanceAuthorizationCheck check, ILogger? logger, CancellationToken ct)
@@ -751,8 +757,9 @@ public class FinanceAuthorizationFilter : IEndpointFilter
                     {
                         FinanceCheckVerdict.Allowed => null,
 
-                        // ebilling-r1 task 095g (design 3e): in the fail-closed mode an answer Dataverse did not complete is the route's 503,
-                        // never the uniform 404. Every other mode denies on it, as before.
+                        // ebilling-r1 task 095g (design 3e): in the fail-closed mode an answer Dataverse did not complete, and that does not
+                        // hold the operation's rights, is the route's 503, never the uniform 404. Every other mode refuses it exactly as before
+                        // (a degraded answer that holds the rights was Allowed above, in every mode).
                         FinanceCheckVerdict.Faulted when _denial == FinanceDenial.UniformNotFoundFailClosed => SystemFailureReasonCode,
                         _ => InsufficientRightsReasonCode,
                     };
