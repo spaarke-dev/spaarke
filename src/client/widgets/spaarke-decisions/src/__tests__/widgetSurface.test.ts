@@ -45,8 +45,8 @@ const escapeRegExp = (text: string) => text.replace(/[$()*+.?[\\\]^{|}]/g, '\\$&
 
 /** What remains of the built source after the allowed lane-open reads and writes are removed; empty means no other storage use. */
 function unallowedStorageUse(built: string): string[] {
-  const keyVars = [...built.matchAll(/(?:const|let|var)\s+([\w$]+)\s*=\s*["']spaarke\.worklist\.laneOpen["']/g)].map(m =>
-    escapeRegExp(m[1])
+  const keyVars = [...built.matchAll(/(?:const|let|var)\s+([\w$]+)\s*=\s*["']spaarke\.worklist\.laneOpen["']/g)].map(
+    m => escapeRegExp(m[1])
   );
   let rest = built;
   for (const key of keyVars) {
@@ -75,6 +75,10 @@ describe('widget source surface', () => {
         'lane/DecideLane.tsx',
         'lane/decideLaneFetch.ts',
         'lane/billingLinkOut.ts',
+        'wizard/WizardDialog.tsx',
+        'wizard/wizardFetch.ts',
+        'wizard/wizardItems.ts',
+        'wizard/lookupTypeAhead.ts',
       ])
     );
   });

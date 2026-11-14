@@ -1,15 +1,18 @@
 /**
- * The widget shell: a FluentProvider whose theme is the host's (ADR-021), around the Decide lane (task 031). The Decision wizard lands in
- * task 032, which passes `onOpenWizard`. Fluent v9 semantic tokens only; no colour is written here.
+ * The widget shell: a FluentProvider whose theme is the host's (ADR-021), around the Decide lane (task 031) and the Decision wizard
+ * (task 032). The lane raises `onOpenWizard` for a row or a review step; the shell numbers the request and hands it to `WizardDialog`, which
+ * shows the shared wizard in the frame (dialog, then master-detail, then a link to the Console). A recorded decision makes the lane read
+ * itself again in place, so the row leaves it and the count drops. Fluent v9 semantic tokens only; no colour is written here.
  */
 import * as React from 'react';
 import { FluentProvider, Spinner, Text, makeStyles, tokens } from '@fluentui/react-components';
-import { createWorklistService } from '@spaarke/ui-components/components/Worklist/worklistService';
+import { createWorklistService, type WorklistData } from '@spaarke/ui-components/components/Worklist/worklistService';
 import { DecideLane, type OpenWizardEvent } from './lane/DecideLane';
 import { consoleBaseUrlOf } from './lane/billingLinkOut';
 import { createDecideLaneFetch } from './lane/decideLaneFetch';
 import { useMcpHost } from './mcp/mcpHostContext';
 import { hostThemeName, themeFromHostContext } from './theme/hostTheme';
+import { WizardDialog, type WizardRequest } from './wizard/WizardDialog';
 
 const useStyles = makeStyles({
   root: {
@@ -36,6 +39,27 @@ function Shell({ onOpenWizard }: { onOpenWizard?: (event: OpenWizardEvent) => vo
     [callTool]
   );
 
+  // The wizard opens on the lane as the user saw it (the lane reports each read), and a recorded decision reads the lane again.
+  const lane = React.useRef<WorklistData | null>(null);
+  const getLane = React.useCallback(() => lane.current, []);
+  const onData = React.useCallback((data: WorklistData | null) => {
+    lane.current = data;
+  }, []);
+  const [request, setRequest] = React.useState<WizardRequest | null>(null);
+  const requests = React.useRef(0);
+  const [reloadToken, setReloadToken] = React.useState(0);
+
+  const openWizard = React.useCallback(
+    (event: OpenWizardEvent) => {
+      onOpenWizard?.(event);
+      requests.current += 1;
+      setRequest({ event, seq: requests.current });
+    },
+    [onOpenWizard]
+  );
+  const onRecorded = React.useCallback(() => setReloadToken(n => n + 1), []);
+  const consoleBaseUrl = consoleBaseUrlOf(toolResult);
+
   return (
     <main className={styles.root} aria-label="Spaarke decisions">
       {error ? (
@@ -43,12 +67,16 @@ function Shell({ onOpenWizard }: { onOpenWizard?: (event: OpenWizardEvent) => vo
           The widget could not connect to the host.
         </Text>
       ) : isConnected ? (
-        <DecideLane
-          service={service}
-          consoleBaseUrl={consoleBaseUrlOf(toolResult)}
-          openLink={openLink}
-          onOpenWizard={onOpenWizard}
-        />
+        <WizardDialog request={request} getLane={getLane} consoleBaseUrl={consoleBaseUrl} onRecorded={onRecorded}>
+          <DecideLane
+            service={service}
+            consoleBaseUrl={consoleBaseUrl}
+            openLink={openLink}
+            onOpenWizard={openWizard}
+            reloadToken={reloadToken}
+            onData={onData}
+          />
+        </WizardDialog>
       ) : (
         <Spinner size="tiny" label="Connecting to the host" labelPosition="after" />
       )}

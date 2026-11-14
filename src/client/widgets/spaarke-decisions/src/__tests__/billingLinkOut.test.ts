@@ -6,7 +6,12 @@
  * (`DecisionsTextSummary.InvoiceReviewLink`): `data` URL-encoded once more inside the URL.
  */
 import { buildInvoiceReviewLaunch } from '@spaarke/ui-components/components/Worklist/openInvoiceReview';
-import { buildBillingLinkOut, consoleBaseUrlOf, normalizeConsoleBaseUrl } from '../lane/billingLinkOut';
+import {
+  buildBillingLinkOut,
+  buildConsoleLinkOut,
+  consoleBaseUrlOf,
+  normalizeConsoleBaseUrl,
+} from '../lane/billingLinkOut';
 
 const BASE = 'https://org.crm.dynamics.com';
 const INVOICE = '11111111-2222-3333-4444-555555555555';
@@ -108,5 +113,36 @@ describe('normalizeConsoleBaseUrl and consoleBaseUrlOf', () => {
     for (const result of [null, undefined, 'x', 7, {}, { consoleBaseUrl: 5 }, { consoleBaseUrl: 'http://x.test' }]) {
       expect(consoleBaseUrlOf(result)).toBeNull();
     }
+  });
+});
+
+describe('buildConsoleLinkOut (task 032: the last display fallback)', () => {
+  it("links to the Console web resource on the server's base, with no data parameter (the Console has no link to one item)", () => {
+    const { url, webresourceName, data } = parts(buildConsoleLinkOut(BASE)!);
+    expect(url.origin).toBe(BASE);
+    expect(url.pathname).toBe('/main.aspx');
+    expect(url.searchParams.get('pagetype')).toBe('webresource');
+    expect(webresourceName).toBe('sprk_spaarkeai');
+    expect(data).toBeNull();
+  });
+
+  it("is the text link the server's own fallback summary uses", () => {
+    expect(buildConsoleLinkOut(`${BASE}/`)).toBe(
+      `${BASE}/main.aspx?pagetype=webresource&webresourceName=sprk_spaarkeai`
+    );
+  });
+
+  it.each([
+    [null],
+    [undefined],
+    [''],
+    ['  '],
+    ['http://org.crm.dynamics.com'],
+    ['https://u:p@org.crm.dynamics.com'],
+    ['https://org.crm.dynamics.com/?x=1'],
+    ['javascript:alert(1)'],
+    ['not a url'],
+  ])('has no link for the base %p (the widget never guesses a host)', base => {
+    expect(buildConsoleLinkOut(base)).toBeNull();
   });
 });
