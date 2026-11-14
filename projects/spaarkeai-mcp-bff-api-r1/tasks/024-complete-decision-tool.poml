@@ -4,7 +4,7 @@
     <title>spaarke_complete_decision app-only write tool</title>
     <phase>B MCP host and tools</phase>
     <gate>after 014, 017 and 021</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Tags include bff-api; new tool class and data-mutation tests (.cs)</rigor-reason>
     <model-tier>sonnet</model-tier>
