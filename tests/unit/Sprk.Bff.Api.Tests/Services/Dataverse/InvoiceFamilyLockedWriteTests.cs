@@ -56,13 +56,37 @@ public class InvoiceFamilyLockedWriteTests
     private static (Mock<IFieldMappingDataverseService> Records, List<(Dictionary<string, object?> Fields, Guid? As)> Writes) Records()
     {
         var writes = new List<(Dictionary<string, object?>, Guid?)>();
-        var records = new Mock<IFieldMappingDataverseService>(MockBehavior.Strict);
+        var records = PersonIs(new Mock<IFieldMappingDataverseService>(MockBehavior.Strict), EnabledReadWrite);
         records.Setup(r => r.UpdateExistingRecordFieldsAsync(
                 It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
             .Callback<string, Guid, Dictionary<string, object?>, Guid?, CancellationToken>((_, _, fields, asWho, _) =>
                 writes.Add((new Dictionary<string, object?>(fields), asWho)))
             .Returns(Task.CompletedTask);
         return (records, writes);
+    }
+
+    /// <summary>Review 2 (R2-1): the person's own <c>systemuser</c> row as the app-only read answers it — enabled, Read-Write.</summary>
+    private static Dictionary<string, object?> EnabledReadWrite => new() { ["isdisabled"] = false, ["accessmode"] = 0L };
+
+    /// <summary>Every <c>systemuser</c> state read the check made (the id named).</summary>
+    private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<Mock<IFieldMappingDataverseService>, List<Guid>> StateReads = new();
+
+    /// <summary>
+    /// Review 2 (R2-1): the app-only read of the person's state (<c>systemusers({id})?$select=isdisabled,accessmode</c>) answers
+    /// <paramref name="row"/> (an empty row: no such user, as the read answers a 404), or fails as <paramref name="fault"/>.
+    /// </summary>
+    private static Mock<IFieldMappingDataverseService> PersonIs(
+        Mock<IFieldMappingDataverseService> records, Dictionary<string, object?> row, Exception? fault = null)
+    {
+        var reads = StateReads.GetOrCreateValue(records);
+        records.Setup(r => r.RetrieveRecordFieldsAsync("systemuser", It.IsAny<Guid>(),
+                It.Is<string[]>(c => c.SequenceEqual(PersonStateColumns)), It.IsAny<CancellationToken>()))
+            .Returns<string, Guid, string[], CancellationToken>((_, id, _, _) =>
+            {
+                reads.Add(id);
+                return fault is null ? Task.FromResult(new Dictionary<string, object?>(row)) : Task.FromException<Dictionary<string, object?>>(fault);
+            });
+        return records;
     }
 
     private static Task<string?> Write(
@@ -418,7 +442,7 @@ public class InvoiceFamilyLockedWriteTests
     [Fact]
     public async Task PersonsOwnWriteFindsTheRowGone_NothingLockedWritten()
     {
-        var records = new Mock<IFieldMappingDataverseService>(MockBehavior.Strict);
+        var records = PersonIs(new Mock<IFieldMappingDataverseService>(MockBehavior.Strict), EnabledReadWrite);
         records.Setup(r => r.UpdateExistingRecordFieldsAsync("sprk_invoice", InvoiceId, It.IsAny<Dictionary<string, object?>>(), Person, It.IsAny<CancellationToken>()))
             .ThrowsAsync(new KeyNotFoundException());
         var rights = new Rights()
@@ -442,7 +466,8 @@ public class InvoiceFamilyLockedWriteTests
         var (locked, _) = SplitBody("sprk_externalidentifier",
             $"{{\"sprk_RegardingInvoice@odata.bind\":\"/sprk_invoices({InvoiceId})\",\"sprk_value\":\"v\"}}");
 
-        (await CheckPersonMayWriteAsync("sprk_externalidentifier", LineId, locked, rights.Question, CancellationToken.None))
+        (await CheckPersonMayWriteAsync("sprk_externalidentifier", LineId, locked, _ => Task.FromResult(LockedWriteCheck.Allowed),
+                rights.Question, CancellationToken.None))
             .Should().Be(LockedWriteCheck.Allowed);
         rights.Asked.Should().Equal(("sprk_externalidentifiers", LineId), ("sprk_invoices", InvoiceId));
     }
@@ -466,7 +491,7 @@ public class InvoiceFamilyLockedWriteTests
     private static (Mock<IFieldMappingDataverseService> Records, List<Guid?> Writes) AppWriteFails(Exception fault)
     {
         var writes = new List<Guid?>();
-        var records = new Mock<IFieldMappingDataverseService>(MockBehavior.Strict);
+        var records = PersonIs(new Mock<IFieldMappingDataverseService>(MockBehavior.Strict), EnabledReadWrite);
         records.Setup(r => r.UpdateExistingRecordFieldsAsync(
                 It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
             .Returns<string, Guid, Dictionary<string, object?>, Guid?, CancellationToken>((_, _, _, asWho, _) =>
@@ -600,7 +625,7 @@ public class InvoiceFamilyLockedWriteTests
     private static (Mock<IFieldMappingDataverseService> Records, List<Guid?> Writes) CancelledAfterThePersonsWrite(CancellationTokenSource request)
     {
         var writes = new List<Guid?>();
-        var records = new Mock<IFieldMappingDataverseService>(MockBehavior.Strict);
+        var records = PersonIs(new Mock<IFieldMappingDataverseService>(MockBehavior.Strict), EnabledReadWrite);
         records.Setup(r => r.UpdateExistingRecordFieldsAsync(
                 It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
             .Returns<string, Guid, Dictionary<string, object?>, Guid?, CancellationToken>((_, _, _, asWho, ct) =>
@@ -651,6 +676,170 @@ public class InvoiceFamilyLockedWriteTests
     {
         RefusalException("sprk_invoice", LockedWriteDeniedCode).Message
             .Should().Be(InvoiceFamilyCoreRecordGuard.CodeOnlyRefusalMessage(LockedWriteDeniedCode));
+    }
+
+    // ── Review 2 (R2-1): the person's own state — enabled, an access mode that writes ─────────────────────────────────────
+
+    private static Rights AllAllowed() =>
+        new Rights().On("sprk_invoices", InvoiceId, RowRights).On("sprk_matters", MatterId, TargetRights);
+
+    private static Dictionary<string, object?> LockedOnly => new() { ["sprk_matter"] = new EntityReference("sprk_matter", MatterId) };
+
+    [Fact]
+    public async Task PersonState_Disabled_IsDenied_NothingWrittenOrAsked()
+    {
+        var (records, writes) = Records();
+        PersonIs(records, new() { ["isdisabled"] = true, ["accessmode"] = 0L });
+        var rights = AllAllowed();
+
+        (await Write(records, "sprk_invoice", InvoiceId, LockedOnly, Person, rights)).Should().Be(LockedWriteDeniedCode);
+
+        writes.Should().BeEmpty();
+        rights.Asked.Should().BeEmpty("the person's state is asked first");
+        StateReads.GetOrCreateValue(records).Should().Equal(Person);
+    }
+
+    [Theory]
+    [InlineData(1L)] // Administrative
+    [InlineData(2L)] // Read
+    [InlineData(3L)] // Support User
+    [InlineData(5L)] // Delegated Admin
+    public async Task PersonState_AnAccessModeThatDoesNotWrite_IsDenied_NothingWritten(long accessMode)
+    {
+        var (records, writes) = Records();
+        PersonIs(records, new() { ["isdisabled"] = false, ["accessmode"] = accessMode });
+
+        (await Write(records, "sprk_invoice", InvoiceId, LockedOnly, Person, AllAllowed())).Should().Be(LockedWriteDeniedCode);
+
+        writes.Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData(0L)] // Read-Write
+    [InlineData(4L)] // Non-interactive
+    public async Task PersonState_EnabledWithAWritingAccessMode_IsAllowed_AskedOncePerWrite(long accessMode)
+    {
+        var (records, writes) = Records();
+        PersonIs(records, new() { ["isdisabled"] = false, ["accessmode"] = accessMode });
+        var rights = new Rights().On("sprk_invoices", InvoiceId, RowRights)
+            .On("sprk_matters", MatterId, TargetRights).On("sprk_invoices", OtherInvoiceId, TargetRights);
+
+        // Two locked columns, one write: the state is read once.
+        (await Write(records, "sprk_invoice", InvoiceId,
+                new() { ["sprk_matter"] = new EntityReference("sprk_matter", MatterId), ["sprk_supersedesinvoice"] = new EntityReference("sprk_invoice", OtherInvoiceId) },
+                Person, rights))
+            .Should().BeNull();
+
+        writes.Should().ContainSingle().Which.As.Should().BeNull();
+        StateReads.GetOrCreateValue(records).Should().Equal(Person);
+    }
+
+    [Fact]
+    public async Task PersonState_NoSuchUser_IsDenied_ByteIdenticalToAnUnknownRecord()
+    {
+        var (missingUser, missingUserWrites) = Records();
+        PersonIs(missingUser, new()); // the app-only read answers no columns for a 404
+        var (unknownRecord, unknownRecordWrites) = Records();
+        var unknownRights = new Rights().On("sprk_invoices", InvoiceId, RowRights); // UnknownId: no rights (404)
+        var unknownFields = new Dictionary<string, object?> { ["sprk_matter"] = new EntityReference("sprk_matter", UnknownId) };
+
+        var a = await Write(missingUser, "sprk_invoice", InvoiceId, LockedOnly, Person, AllAllowed());
+        var b = await Write(unknownRecord, "sprk_invoice", InvoiceId, unknownFields, Person, unknownRights);
+
+        a.Should().Be(b).And.Be(LockedWriteDeniedCode);
+        RefusalException("sprk_invoice", a!).Message.Should().Be(RefusalException("sprk_invoice", b!).Message);
+        missingUserWrites.Should().BeEmpty();
+        unknownRecordWrites.Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData(null, 0L)]      // isdisabled unreadable
+    [InlineData(false, null)]   // accessmode unreadable
+    [InlineData("false", 0L)]   // not a boolean
+    public async Task PersonState_AnUnreadableValue_IsDenied(object? isDisabled, object? accessMode)
+    {
+        var (records, writes) = Records();
+        PersonIs(records, new() { ["isdisabled"] = isDisabled, ["accessmode"] = accessMode });
+
+        (await Write(records, "sprk_invoice", InvoiceId, LockedOnly, Person, AllAllowed())).Should().Be(LockedWriteDeniedCode);
+        writes.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task PersonState_ReadFaults_IsUnavailable_NothingWrittenOrAsked()
+    {
+        var (records, writes) = Records();
+        PersonIs(records, EnabledReadWrite, new HttpRequestException("503 at 10.0.0.9"));
+        var rights = AllAllowed();
+        var logger = new CapturingLogger();
+
+        var code = await InvoiceFamilyLockedWrite.UpdateExistingSplitAsync(
+            records.Object, "sprk_invoice", InvoiceId, LockedOnly, Person, notFoundAsReadFailed: true, rights.Question, logger,
+            CancellationToken.None);
+
+        code.Should().Be(InvoiceFamilyCoreRecordGuard.ReadFailedCode);
+        writes.Should().BeEmpty();
+        rights.Asked.Should().BeEmpty();
+        logger.Entries.Should().ContainSingle(e => e.Level == Microsoft.Extensions.Logging.LogLevel.Warning)
+            .Which.Message.Should().NotContain("10.0.0.9");
+    }
+
+    [Fact]
+    public async Task PersonState_NotAskedWithoutALockedColumn_OrOnAnApplicationRun()
+    {
+        var (records, writes) = Records();
+        PersonIs(records, new() { ["isdisabled"] = true, ["accessmode"] = 0L });
+
+        (await Write(records, "sprk_invoice", InvoiceId, new() { ["sprk_name"] = "n" }, Person, AllAllowed())).Should().BeNull();
+        (await Write(records, "sprk_invoice", InvoiceId, LockedOnly, asPerson: null, AllAllowed())).Should().BeNull();
+
+        writes.Select(w => w.As).Should().Equal(Person, null);
+        StateReads.GetOrCreateValue(records).Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData(true, 0L, false)]
+    [InlineData(false, 2L, false)]
+    [InlineData(false, 1L, false)]
+    [InlineData(false, 0L, true)]
+    [InlineData(false, 4L, true)]
+    public async Task Caller_PersonState_DecidesBeforeTheRights(bool disabled, long accessMode, bool allowed)
+    {
+        var person = new PersonClient().Rights(InvoiceId, "ReadAccess, WriteAccess, AppendAccess").Rights(MatterId, "AppendToAccess");
+        var (app, writes) = Records();
+        PersonIs(app, new() { ["isdisabled"] = disabled, ["accessmode"] = accessMode });
+
+        (await PatchAsCaller(person, app, LockedAndOtherBody)).Kind.Should().Be(allowed ? CallerPatchKind.Written : CallerPatchKind.Denied);
+
+        StateReads.GetOrCreateValue(app).Should().Equal(Person);
+        if (!allowed)
+        {
+            person.Patches.Should().BeEmpty();
+            person.AccessAsked.Should().Be(0);
+            writes.Should().BeEmpty();
+        }
+    }
+
+    [Fact]
+    public async Task Caller_PersonState_NoSuchUser_IsDenied_AsAnUnknownRecord_ReadFault_IsUnavailable()
+    {
+        var person = new PersonClient().Rights(InvoiceId, "ReadAccess, WriteAccess, AppendAccess").Rights(MatterId, "AppendToAccess");
+        var (missing, missingWrites) = Records();
+        PersonIs(missing, new());
+        var unknown = new PersonClient().Rights(InvoiceId, "ReadAccess, WriteAccess, AppendAccess"); // UnknownId: 404
+        var (app, _) = Records();
+
+        var a = await PatchAsCaller(person, missing, LockedAndOtherBody);
+        var b = await PatchAsCaller(unknown, app, $"{{\"sprk_Matter@odata.bind\":\"/sprk_matters({UnknownId})\",\"sprk_name\":\"n\"}}");
+        a.Should().Be(b);
+        a.Kind.Should().Be(CallerPatchKind.Denied);
+        missingWrites.Should().BeEmpty();
+
+        var (faulting, faultingWrites) = Records();
+        PersonIs(faulting, EnabledReadWrite, new HttpRequestException("boom"));
+        (await PatchAsCaller(person, faulting, LockedAndOtherBody)).Kind.Should().Be(CallerPatchKind.Unavailable);
+        faultingWrites.Should().BeEmpty();
+        person.Patches.Should().BeEmpty();
     }
 
     // ── The OBO paths: RightsOfCaller and PatchAsCallerAsync ─────────────────────────────────────────────────────────

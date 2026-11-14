@@ -129,6 +129,71 @@ internal static class InvoiceFamilyLockedWrite
             : (entitySet, recordId, ct) => probe.GetPrincipalRightsAppOnlyOrUnknownAsync(systemUserId, entitySet, recordId, ct);
 
     /// <summary>
+    /// The person's own state, asked once per write before any rights question (review 2, R2-1):
+    /// <see cref="LockedWriteCheck.Allowed"/> only for an enabled user whose access mode writes. The rights questions alone
+    /// do not cover it — <c>RetrievePrincipalAccess</c> answers from roles, teams and shares, and when only locked columns are
+    /// written nothing goes out as the person, so a disabled user, or one whose access mode does not write, would otherwise get
+    /// an application write that their own write would have been refused.
+    /// </summary>
+    internal delegate Task<LockedWriteCheck> PersonStateQuestion(CancellationToken ct);
+
+    /// <summary><c>systemuser.accessmode</c> values that write as a person: 0 Read-Write and 4 Non-interactive. Every other
+    /// mode (1 Administrative, 2 Read, 3 Support User, 5 Delegated Admin, anything new) is refused.</summary>
+    internal static readonly IReadOnlySet<long> WritingAccessModes = new HashSet<long> { 0, 4 };
+
+    /// <summary>The <c>systemuser</c> columns <see cref="PersonStateOf"/> reads.</summary>
+    internal static readonly string[] PersonStateColumns = ["isdisabled", "accessmode"];
+
+    /// <summary>
+    /// <see cref="PersonStateQuestion"/> for <paramref name="systemUserId"/>, read APP-ONLY through the existing record read
+    /// (<see cref="IFieldMappingDataverseService.RetrieveRecordFieldsAsync"/>: <c>systemusers({id})?$select=isdisabled,accessmode</c>;
+    /// no impersonation, so a disabled user cannot fault it). Allowed only when <c>isdisabled</c> is <c>false</c> and
+    /// <c>accessmode</c> is in <see cref="WritingAccessModes"/>. A row that does not exist (the read answers no columns), an
+    /// unreadable value and <see cref="Guid.Empty"/> are <see cref="LockedWriteCheck.Denied"/> — the one answer, as an unknown
+    /// record (NFR-01). A fault is <see cref="LockedWriteCheck.Unavailable"/>; only the caller's own cancellation is rethrown.
+    /// </summary>
+    internal static PersonStateQuestion PersonStateOf(IFieldMappingDataverseService appOnly, Guid systemUserId, ILogger logger)
+    {
+        ArgumentNullException.ThrowIfNull(appOnly);
+        ArgumentNullException.ThrowIfNull(logger);
+        return async ct =>
+        {
+            if (systemUserId == Guid.Empty)
+                return LockedWriteCheck.Denied;
+
+            Dictionary<string, object?>? row;
+            try
+            {
+                row = await appOnly.RetrieveRecordFieldsAsync("systemuser", systemUserId, PersonStateColumns, ct).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(
+                    "[INVOICE-FAMILY-LOCK] The state of systemuser {SystemUserId} could not be read ({Fault}); unanswered, nothing written.",
+                    systemUserId, ex.GetType().Name);
+                return LockedWriteCheck.Unavailable;
+            }
+
+            var enabled = row is not null && row.TryGetValue("isdisabled", out var disabled) && disabled is false;
+            var mode = row is not null && row.TryGetValue("accessmode", out var value)
+                ? value switch { long l => l, int i => i, _ => (long?)null }
+                : null;
+            if (enabled && mode is { } m && WritingAccessModes.Contains(m))
+                return LockedWriteCheck.Allowed;
+
+            logger.LogInformation(
+                "[INVOICE-FAMILY-LOCK] systemuser {SystemUserId} may not write the locked columns (found={Found}, enabled={Enabled}, "
+                + "accessmode={AccessMode}); denied, nothing written.",
+                systemUserId, row is { Count: > 0 }, enabled, mode);
+            return LockedWriteCheck.Denied;
+        };
+    }
+
+    /// <summary>
     /// Splits a write into its locked columns and the rest. A <c>{navigation}@odata.bind</c> key counts as its column; keys
     /// and values are kept as given. Outside the family everything is "rest".
     /// </summary>
@@ -186,18 +251,21 @@ internal static class InvoiceFamilyLockedWrite
 
     /// <summary>
     /// AS THE PERSON (<paramref name="rightsOf"/>): whether they could write <paramref name="locked"/> on
-    /// <paramref name="table"/>(<paramref name="recordId"/>) themselves — Write on the row (and Append when a lookup is set to a
-    /// record), then AppendTo on every record a locked lookup now names, in the columns' order. The first answer that is not
+    /// <paramref name="table"/>(<paramref name="recordId"/>) themselves — their own state first (<paramref name="personState"/>,
+    /// asked once: enabled, an access mode that writes; review 2 R2-1), then Write on the row (and Append when a lookup is set to
+    /// a record), then AppendTo on every record a locked lookup now names, in the columns' order. The first answer that is not
     /// "yes" decides. Nothing is written. No locked column: <see cref="LockedWriteCheck.Allowed"/>, nothing asked.
     /// </summary>
     internal static async Task<LockedWriteCheck> CheckPersonMayWriteAsync(
         string table,
         Guid recordId,
         IReadOnlyDictionary<string, object?> locked,
+        PersonStateQuestion personState,
         RightsQuestion rightsOf,
         CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(locked);
+        ArgumentNullException.ThrowIfNull(personState);
         ArgumentNullException.ThrowIfNull(rightsOf);
         if (locked.Count == 0)
             return LockedWriteCheck.Allowed;
@@ -223,8 +291,14 @@ internal static class InvoiceFamilyLockedWrite
                 targets.Add((targetSet, id));
         }
 
+        // Review 2 (R2-1): the person themselves, once per write — a disabled user, or one whose access mode does not write, is
+        // refused before any rights question (those answer from roles and shares, not from the user's own state).
+        var state = await personState(ct).ConfigureAwait(false);
+        if (state != LockedWriteCheck.Allowed)
+            return state;
+
         var needed = targets.Count > 0 ? AccessRights.Write | AccessRights.Append : AccessRights.Write;
-        var onRow = await rightsOf(rowSet, recordId, ct).ConfigureAwait(false);
+        var onRow =await rightsOf(rowSet, recordId, ct).ConfigureAwait(false);
         if (onRow is not { } rowRights)
             return LockedWriteCheck.Unavailable;
         if ((rowRights & needed) != needed)
@@ -290,7 +364,9 @@ internal static class InvoiceFamilyLockedWrite
                 .ConfigureAwait(false);
         }
 
-        switch (await CheckPersonMayWriteAsync(entityLogicalName, recordId, locked, rightsOf, ct).ConfigureAwait(false))
+        switch (await CheckPersonMayWriteAsync(
+                        entityLogicalName, recordId, locked, PersonStateOf(records, impersonateSystemUserId.Value, logger), rightsOf, ct)
+                    .ConfigureAwait(false))
         {
             case LockedWriteCheck.Unavailable:
                 return InvoiceFamilyCoreRecordGuard.ReadFailedCode;
@@ -462,7 +538,9 @@ internal static class InvoiceFamilyLockedWrite
         if (me.Failure is { } whoAmIFailure)
             return new CallerPatch(CallerPatchKind.ClientFailure, whoAmIFailure);
 
-        switch (await CheckPersonMayWriteAsync(table, recordId, locked, RightsOfCaller(user, me.SystemUserId), ct).ConfigureAwait(false))
+        switch (await CheckPersonMayWriteAsync(
+                        table, recordId, locked, PersonStateOf(appOnly, me.SystemUserId, logger), RightsOfCaller(user, me.SystemUserId), ct)
+                    .ConfigureAwait(false))
         {
             case LockedWriteCheck.Unavailable:
                 return new CallerPatch(CallerPatchKind.Unavailable);

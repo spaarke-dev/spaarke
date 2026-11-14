@@ -85,6 +85,11 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
     {
         // #2143: a PATCH Dataverse accepted is on the row when the resolver reads it after the change.
         _user.OnPatch = _world.ApplyPatch;
+        // #2799 review 2 (R2-1): the caller's own state, read app-only before a locked column is written — enabled, Read-Write
+        // unless a test says (_callerState).
+        _appOnly
+            .Setup(a => a.RetrieveRecordFieldsAsync("systemuser", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .Returns(() => _callerState());
         _appOnly
             .Setup(a => a.UpdateExistingRecordFieldsAsync(
                 It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), null, It.IsAny<CancellationToken>()))

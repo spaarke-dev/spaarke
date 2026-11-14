@@ -45,6 +45,25 @@ public partial class InvoiceFamilyGenericUpdatePathTests
         return probe.Object;
     }
 
+    /// <summary>
+    /// #2799 review 2 (R2-1): the person's <c>systemuser</c> row as the app-only state read answers it — enabled, Read-Write
+    /// unless a test says. <see cref="_personStateReads"/> journals the id each read named.
+    /// </summary>
+    private Func<Task<Dictionary<string, object?>>> _personState =
+        () => Task.FromResult(new Dictionary<string, object?> { ["isdisabled"] = false, ["accessmode"] = 0L });
+
+    private readonly List<Guid> _personStateReads = [];
+
+    public InvoiceFamilyGenericUpdatePathTests()
+    {
+        _writes.Setup(w => w.RetrieveRecordFieldsAsync("systemuser", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .Returns((string _, Guid id, string[] _, CancellationToken _) =>
+            {
+                _personStateReads.Add(id);
+                return _personState();
+            });
+    }
+
     private const string LockedTable = "sprk_invoiceapproval";
 
     /// <summary>The row's own core lookup, re-named to the matter it already names (the guard allows it; nothing is derived).</summary>
@@ -152,6 +171,77 @@ public partial class InvoiceFamilyGenericUpdatePathTests
 
         unknown.Should().Be(forbidden);
         unknown.Code.Should().Be(InvoiceFamilyLockedWrite.LockedWriteDeniedCode);
+        NothingWritten();
+    }
+
+    // ── Review 2 (R2-1): the person's own state ──────────────────────────────────────────────────────────────────────────
+
+    public static TheoryData<GenericPath, bool, long> EveryGenericPathWithAStateThatDoesNotWrite()
+    {
+        var data = new TheoryData<GenericPath, bool, long>();
+        foreach (var path in Enum.GetValues<GenericPath>())
+        {
+            data.Add(path, true, 0L);  // disabled
+            data.Add(path, false, 2L); // Read
+            data.Add(path, false, 1L); // Administrative
+        }
+
+        return data;
+    }
+
+    [Theory]
+    [MemberData(nameof(EveryGenericPathWithAStateThatDoesNotWrite))]
+    public async Task Locked_APersonWhoseStateDoesNotWrite_IsRefused_NothingWrittenOrAsked(GenericPath path, bool disabled, long accessMode)
+    {
+        _personState = () => Task.FromResult(new Dictionary<string, object?> { ["isdisabled"] = disabled, ["accessmode"] = accessMode });
+
+        var outcome = await RunLocked(path, RenameOnly, playbookActsAs: Caller);
+
+        outcome.Code.Should().Be(InvoiceFamilyLockedWrite.LockedWriteDeniedCode);
+        NoGuid(outcome);
+        NothingWritten();
+        _lockedAsked.Should().BeEmpty("the person's state is asked before any rights question");
+        _personStateReads.Should().Equal(Caller);
+    }
+
+    [Theory]
+    [MemberData(nameof(EveryGenericPath))]
+    public async Task Locked_ANonInteractivePerson_IsAllowed_StateAskedOnce(GenericPath path)
+    {
+        _personState = () => Task.FromResult(new Dictionary<string, object?> { ["isdisabled"] = false, ["accessmode"] = 4L });
+
+        var outcome = await RunLocked(path, RenameOnly, playbookActsAs: Caller);
+
+        outcome.Code.Should().BeNull(outcome.Message);
+        LockedColumnsWrittenOnlyByTheApp(LockedTable, FamilyRow);
+        _personStateReads.Should().Equal(Caller);
+    }
+
+    [Theory]
+    [MemberData(nameof(EveryGenericPath))]
+    public async Task Locked_APersonWithNoSystemUserRow_AnswersExactlyAsAnUnknownCoreRecord(GenericPath path)
+    {
+        _personState = () => Task.FromResult(new Dictionary<string, object?>()); // the app-only read's 404: no columns
+        var missing = await RunLocked(path, RenameOnly, playbookActsAs: Caller);
+        _personState = () => Task.FromResult(new Dictionary<string, object?> { ["isdisabled"] = false, ["accessmode"] = 0L });
+        _lockedRights = (set, _) => set == "sprk_matters" ? AccessRights.None : AllRights; // RetrievePrincipalAccess's 404
+        var unknown = await RunLocked(path, RenameOnly, playbookActsAs: Caller);
+
+        missing.Should().Be(unknown);
+        missing.Code.Should().Be(InvoiceFamilyLockedWrite.LockedWriteDeniedCode);
+        NothingWritten();
+    }
+
+    [Theory]
+    [MemberData(nameof(EveryGenericPath))]
+    public async Task Locked_ThePersonsStateCannotBeRead_IsReadFailed_NothingWritten(GenericPath path)
+    {
+        _personState = () => Task.FromException<Dictionary<string, object?>>(new HttpRequestException("503 at 10.0.0.9"));
+
+        var outcome = await RunLocked(path, RenameOnly, playbookActsAs: Caller);
+
+        outcome.Code.Should().Be(InvoiceFamilyCoreRecordGuard.ReadFailedCode);
+        (outcome.Message ?? string.Empty).Should().NotContain("10.0.0.9");
         NothingWritten();
     }
 

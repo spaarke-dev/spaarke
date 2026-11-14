@@ -24,6 +24,10 @@ public sealed partial class SecureChildOwnershipAiToolTests
 {
     private static readonly string LockedPartlySavedDetail = InvoiceFamilyLockedWrite.PartlySavedMessage;
 
+    /// <summary>#2799 review 2 (R2-1): the caller's <c>systemuser</c> row as the app-only state read answers it.</summary>
+    private Func<Task<Dictionary<string, object?>>> _callerState =
+        () => Task.FromResult(new Dictionary<string, object?> { ["isdisabled"] = false, ["accessmode"] = 0L });
+
     /// <summary>An invoice under the ordinary matter, and the invoice it may supersede (same matter), as the caller reads them.</summary>
     private void TwoInvoicesUnderTheOrdinaryMatter()
     {
@@ -224,6 +228,68 @@ public sealed partial class SecureChildOwnershipAiToolTests
                 break;
         }
 
+        NothingLockedOrOtherWritten();
+    }
+
+    [Theory(DisplayName = "#2799 review 2 C4-C6 (must fire): a disabled caller, or one whose access mode does not write, is refused with the path's denial, nothing written")]
+    [InlineData("route ordinary", true, 0L)]
+    [InlineData("tool ordinary", true, 0L)]
+    [InlineData("route re-file", false, 2L)]
+    [InlineData("tool re-file", false, 1L)]
+    public async Task Locked_CallerStateDoesNotWrite_IsDenied(string path, bool disabled, long accessMode)
+    {
+        TwoInvoicesUnderTheOrdinaryMatter();
+        _callerState = () => Task.FromResult(new Dictionary<string, object?> { ["isdisabled"] = disabled, ["accessmode"] = accessMode });
+
+        switch (path)
+        {
+            case "route ordinary":
+            case "route re-file":
+                var route = path == "route ordinary" ? await RouteSupersedes() : await RouteRefile();
+                Status(route).Should().Be(StatusCodes.Status403Forbidden);
+                ReasonCode(route).Should().Be(ChildRecordEndpoints.DeniedCode);
+                break;
+            default:
+                var tool = path == "tool ordinary" ? await ToolSupersedes() : await ToolRefile();
+                tool.Success.Should().BeFalse();
+                tool.ErrorCode.Should().Be(DataverseUserClientErrorCodes.AccessDenied);
+                break;
+        }
+
+        NothingLockedOrOtherWritten();
+    }
+
+    [Fact(DisplayName = "#2799 review 2 C5 (must not fire): a Non-interactive (4) caller's allowed update splits as before")]
+    public async Task Locked_NonInteractiveCaller_IsAllowed()
+    {
+        TwoInvoicesUnderTheOrdinaryMatter();
+        _callerState = () => Task.FromResult(new Dictionary<string, object?> { ["isdisabled"] = false, ["accessmode"] = 4L });
+
+        var result = await RouteSupersedes();
+
+        Status(result).Should().Be(StatusCodes.Status204NoContent, Detail(result));
+        _appLockedWrites.Should().ContainSingle();
+    }
+
+    [Fact(DisplayName = "#2799 review 2 C5 (must fire): a caller with no systemuser row answers byte-for-byte as an unknown id; a read fault is could-not-be-read")]
+    public async Task Locked_CallerRowMissing_IsDenied_ReadFault_IsUnavailable()
+    {
+        TwoInvoicesUnderTheOrdinaryMatter();
+        _callerState = () => Task.FromResult(new Dictionary<string, object?>()); // the app-only read answers a 404 with no columns
+        var missing = await RouteSupersedes();
+        _callerState = () => Task.FromResult(new Dictionary<string, object?> { ["isdisabled"] = false, ["accessmode"] = 0L });
+        _user.TableRights["sprk_invoices"] = "ReadAccess,AppendAccess,AppendToAccess"; // the locked-column check's own denial
+        var denied = await RouteSupersedes();
+
+        ProblemOf(missing).Should().Be(ProblemOf(denied));
+        Status(missing).Should().Be(StatusCodes.Status403Forbidden);
+        NothingLockedOrOtherWritten();
+
+        _user.TableRights.Remove("sprk_invoices");
+        _callerState = () => Task.FromException<Dictionary<string, object?>>(new HttpRequestException("503 at 10.0.0.9"));
+        var fault = await RouteSupersedes();
+        Status(fault).Should().Be(StatusCodes.Status500InternalServerError);
+        ReasonCode(fault).Should().Be(InvoiceFamilyCoreRecordGuard.ReadFailedCode);
         NothingLockedOrOtherWritten();
     }
 
