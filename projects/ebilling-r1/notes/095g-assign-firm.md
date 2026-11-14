@@ -1,6 +1,6 @@
 # 095g: Assign a firm from the Outlook pane (EB-D-224)
 
-Status: design drafted 2026-11-13 (section "Design for uac-r2 review" below), sent to uac-r2; no code. Order: after 095e and 095f. A design note goes to uac-r2 before any code; uac-r2 reviews before merge; two adversarial passes.
+Status: built 2026-11-14 on `task/ebill-095g-assign-firm` (section "Build" at the end; its contract supersedes section 7). Design drafted 2026-11-13 and approved by uac-r2 with R1/R2 and the Q2/Q3 conditions. Order: after 095e and 095f. A design note goes to uac-r2 before any code; uac-r2 reviews before merge; two adversarial passes.
 
 ## What
 
@@ -351,3 +351,108 @@ R1, R2 and the Limited / Secure / Restricted / No Access refusals stand, whateve
 uac-r2: "Go ahead and build."
 
 **Test-file note (ontology-r1, #2822 review):** `BillingCodePatternTests` reads `src/solutions/RuleReview/src/services/ruleTypes.ts`. That file is tracked; the review's 1/2990 failure came from a partial export. Not a defect.
+
+---
+
+# Build (2026-11-14)
+
+Branch `task/ebill-095g-assign-firm`. Built per the design, uac-r2 R1/R2 and the Q2/Q3 conditions. Deviations from the design text:
+
+- **Two operation keys, not one.** `ebilling.record.assign_firm` = Write and Append (an add or a replace, R1); `ebilling.record.remove_firm` = Write (a pure clear). The route declares ONE Record check, so Write and Append come from one caller snapshot.
+- **No `record_inactive`** (EB-D-233). An inactive Standard record is accepted; the 200 carries `recordActive: false` and the when-active notice.
+- **`notice` and `recordActive`** are added to the 200 body (R2, Q2).
+- **The type-code "shared constant"** is `LawFirmOrganizationType.Code` in C#. The seeding script states the same literal, and a test pins the two equal (a PowerShell script cannot import the C# constant).
+- **A replace whose old firm sits in both slots** (possible through other writers) puts the new firm in the first slot and clears the other, so the replaced firm leaves the record.
+- **The Law Firm type row** must be active, and the code must be on exactly one active row. Zero or two rows is the fail-closed 503 on both routes.
+- **A filter-level 503** (a step-0, rights or privilege fault) is the filter's existing fail-closed answer. Its detail text names invoice submissions; the code is the same `ebilling.submission.record_unavailable`, which is what the pane reads.
+
+## Component justification (CLAUDE.md §11), per new surface
+
+| New surface | (1) Existing | (2) Why not extend | (3) Cost of doing nothing |
+|---|---|---|---|
+| `GET /api/finance/firms` | Office entity search; the §8 GET (linked firms only); the external `/me` firms | Office search reads as the caller, with no organization type and no step 0. The §8 GET lists only firms already linked. `/me` lists the external caller's own firms | The pane cannot offer a firm that is not yet linked, so EB-D-224 cannot be built |
+| `POST /api/finance/core-records/{entityType}/{entityId}/firms` | The model-driven form; the generic update tools; the assigned-access sync route | None of them carries the slot rules, the eligibility refusal, the law-firm rule or the revoke confirmation. The sync route takes no input | The pane cannot assign a firm, and uac-r2 condition 4 (one server-side writer) is unmet |
+| `CoreRecordFirmAssignmentService` (scoped, `FinanceModule`) | `InvoiceAssignFirmService` (an invoice's firm); `AssignedAccessMaterializer` (access, not slots) | Extending either one would give it a second job and make it a second owner of the slots | The POST has no writer, and the slot rules would sit in the endpoint |
+| Keys `ebilling.record.assign_firm` / `ebilling.record.remove_firm` | `ebilling.invoice.assign_firm`; `ebilling.record.override` | Those name other acts and other rights | Deny logs and the ledger would name the wrong act, and R1's Append could not be stated |
+| `UniformNotFoundFailClosed` Record branch (design 3e) | The same mode (Privilege path only) | It is the extension | A rights fault on the record would be the uniform 404, not the 503 condition 3 requires |
+| `AssignedAccessMaterializer.OrganizationGrantSkipReason` | The materializer's inline organization rule | It is an extraction | The route and the materializer would hold two copies of one rule |
+| `ReadActiveFirmNamesAsync` (static overload), `CoreRecordFirm.Ordered` | The §8 GET's own read and sort | They are extractions, so the POST's `firms` is the §8 GET body | A second copy of the read and of the order |
+| `scripts/ebilling/Set-EbillingLawFirmTypeCode.ps1` | The other `scripts/ebilling` data scripts | They set other rows | No repeatable, checked way to set the code, so both routes stay 503 |
+
+- **Placement:** the BFF, because this is a pane request that runs the BFF-owned materializer inline.
+- No package, no background work, no new column.
+- **DI:** one `AddScoped<CoreRecordFirmAssignmentService>()`.
+- **Endpoints:** one `MapCoreRecordFirmEndpoints()`.
+
+## Contract for word-add-in-r1 (as built; supersedes section 7)
+
+- The client reads `errorCode ?? reasonCode`.
+- Every refusal writes nothing.
+- Both routes are internal-only and behind the eBilling kill switch.
+
+### `GET /api/finance/firms?search=&page=1&pageSize=25`
+
+- **Query parameters.**
+  - `search`: optional, at most 100 characters. It is a contains match on the firm name, and `%`, `_` and `[` match literally.
+  - `page`: 1 or more (default 1).
+  - `pageSize`: 1-50 (default 25).
+- **200:**
+  ```json
+  { "items": [{ "firmId": "guid", "name": "string" }], "page": 1, "hasMore": false }
+  ```
+  Only active organizations of the Law Firm type, sorted by name (case-insensitive), then by id.
+- **400 ValidationProblem:** a bad `search`, `page` or `pageSize`.
+- **404 `sdap.access.deny.record_unavailable`** (uniform), for any of these:
+  - an external caller;
+  - a caller with no user row;
+  - a caller with no Read on organizations.
+- **503 `ebilling.submission.record_unavailable`:** any fault, or the Law Firm type code is not set. Never an empty list.
+- **503 `ebilling.disabled`:** eBilling is off.
+
+### `POST /api/finance/core-records/{entityType}/{entityId}/firms`
+
+- **`entityType`:** `Matter`, `Project` or `WorkAssignment`.
+- **Body:** `{ "add": "guid|null", "remove": "guid|null", "confirmRevoke": "guid|null" }`.
+  - `add` alone fills slot 1, then slot 2.
+  - `add` + `remove` replaces, in the slot that holds `remove`.
+  - `remove` alone clears that slot; the other firm is never moved.
+  - A call that takes a firm off the record needs `confirmRevoke` equal to `remove`.
+- **200:**
+  ```json
+  { "changed": true,
+    "firms": [{ "firmId": "guid", "name": "string" }],
+    "assigned": [{ "slot": 1, "firmId": "guid", "name": "string", "active": true }],
+    "access": { "state": "applied|pending",
+                "granted": [{ "firmId": "guid", "name": "string" }],
+                "revoked": [{ "firmId": "guid", "name": "string" }] },
+    "recordActive": true,
+    "notice": "string|null" }
+  ```
+  - `changed: false`: the record already said what was asked (a repeat), so nothing was written.
+  - `firms`: the §8 GET body after the write. It is `null` when that read faulted after a successful write; the pane then reloads it.
+  - `access.state`:
+    - `applied`: the access pass completed.
+    - `pending`: the pass did not complete. The slots stand; resending the same request finishes it. The pane shows "Saved. Spaarke is still updating who can see this record." with Retry.
+  - `notice` (uac-r2 R2) is set on an add that left the firm assigned:
+    - **Active record:** "<firm>'s people will get access to this record." It is given when the firm was granted, or when the pass is pending.
+    - **Inactive record** (`recordActive: false`, EB-D-233): "<firm>'s people will get access to this record when it is active again." `access.state` is `applied` and `granted` is empty: nothing is granted until the record is active again.
+    - **`null`:** on a clear, and on an add where the access pass decided not to grant.
+
+| Status, code | Text (`detail`) | Extra |
+|---|---|---|
+| 400 ValidationProblem | Neither `add` nor `remove`; `add == remove`; an empty id; an unknown `entityType` | `errors` |
+| 404 `sdap.access.deny.record_unavailable` | The pane's text: "This record or firm isn't available to you, or you can't change this record." One answer for all of: an external caller; no user row; an unknown record; no Write on the record (or, for an add, no Append); an unknown firm; no Read or no AppendTo on the firm | `reasonCode` |
+| 409 `ebilling.firm_assign.record_restricted` | "This record is Restricted to internal users, so no firm can be given access to it." | |
+| 409 `ebilling.firm_assign.record_secure` | "This record is secure, so assigning a firm would give it no access. Use Manage Access to add named people." | |
+| 409 `ebilling.firm_assign.record_limited` | "This record is limited, so assigning a firm would give it no access. Use Manage Access to add named people." | |
+| 422 `ebilling.firm_assign.firm_inactive` | "This firm is inactive. Choose another firm." | |
+| 422 `ebilling.firm_assign.not_a_law_firm` | "This organization is not a law firm. Choose a law firm." Checked on an add only; a clear removes any firm | |
+| 409 `ebilling.firm_assign.firm_no_access` | "This firm can't be given access to this record." | |
+| 409 `ebilling.firm_assign.slots_full` | "Two firms are already assigned. Replace one of them." | `assigned` |
+| 409 `ebilling.firm_assign.firm_already_assigned` | "That firm is already assigned to this record." | |
+| 409 `ebilling.firm_assign.record_changed` | "The firms on this record changed. Check them and try again." | `assigned` |
+| 409 `ebilling.firm_assign.revoke_confirmation_required` | "Removing this firm takes away the access this assignment gave its people. Confirm to continue." The pane asks "Removing <firm> takes away the access this assignment gave its people. Continue?" and resends with `confirmRevoke` | `revokes`, `assigned` |
+| 503 `ebilling.submission.record_unavailable` | "Spaarke couldn't do this right now. Try again." A filter-level fault carries the filter's own detail, with the same code | |
+| 503 `ebilling.disabled` | eBilling is off | |
+
+The restricted, secure and limited refusals apply only to an add, whatever the record's state. A clear is never refused for them.
