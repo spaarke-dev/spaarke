@@ -107,7 +107,11 @@ public partial class RouteAuthorizationGuardTests
         + @"|\bMcpServerHandlers\b"
         + @"|\bHandlers\s*\.\s*\w+Handler\s*=(?!=)"
         + @"|\b(?:ListTools|CallTool|ListPrompts|GetPrompt|ListResources|ListResourceTemplates|ReadResource)Handler\s*=(?!=)"
-        + @"|\b(?:Prompt|Resource)Collection\s*=(?!=)",
+        + @"|\b(?:Prompt|Resource)Collection\s*=(?!=)"
+        // Task 030 review F5: once a non-null collection exists, adding to it is the same bypass.
+        + @"|\b(?:Prompt|Resource)Collection\s*(?:\?\?=|!?\s*(?:\?\s*)?\.\s*(?:Add|TryAdd|Insert|AddRange)\b)"
+        // A resource or prompt built by hand: sanctioned only inside a widget resource class (McpSdkBypassIn).
+        + @"|\bMcpServer(?:Resource|Prompt)\s*\.\s*Create\s*\(",
         RegexOptions.Compiled);
 
     /// <summary>
@@ -176,6 +180,15 @@ public partial class RouteAuthorizationGuardTests
     {
         foreach (Match sdk in McpSdkToolRegistration.Matches(unit.Code))
         {
+            // McpServerResource.Create inside a type that is itself a sanctioned widget resource is the widget's own page.
+            if (sdk.Value.StartsWith("McpServerResource", StringComparison.Ordinal)
+                && unit.TypeAt(sdk.Index) is { } owner
+                && owner.Name.EndsWith("WidgetResource", StringComparison.Ordinal)
+                && McpWidgetResourceProblem(bffUnits, owner.Name) is null)
+            {
+                continue;
+            }
+
             var widget = unit.Path == "Infrastructure/DI/McpModule.cs" ? McpWidgetResourceCollection.Match(unit.Code, sdk.Index) : Match.Empty;
             if (!widget.Success)
             {
@@ -845,6 +858,15 @@ public partial class RouteAuthorizationGuardTests
                      "o.Handlers = new McpServerHandlers();",
                      "o.Handlers = new() { CallToolHandler = (ctx, ct) => default };",
                      "serverOptions.PromptCollection = prompts;",
+                     // Task 030 review F5: adding to an existing collection, or building a resource or prompt by hand.
+                     "serverOptions.ResourceCollection.Add(McpServerResource.Create((RequestContext<ReadResourceRequestParams> r, IServiceProvider sp) => \"x\"));",
+                     "serverOptions.ResourceCollection ??= resources;",
+                     "serverOptions.ResourceCollection!.TryAdd(resource);",
+                     "serverOptions.ResourceCollection?.Add(resource);",
+                     "serverOptions.PromptCollection ??= prompts;",
+                     "serverOptions.PromptCollection.Add(prompt);",
+                     "var r = McpServerResource.Create(Read, new McpServerResourceCreateOptions());",
+                     "var p = McpServerPrompt.Create(() => \"x\");",
                  })
         {
             Fires(Scan("Infrastructure/DI/Bad.cs", bypass), "bypasses McpToolCatalog");
