@@ -62,7 +62,16 @@ public partial class RouteAuthorizationGuardTests
 
     // No production tool yet: tasks 022-024 add spaarke_show_decisions, spaarke_get_decision_plan, spaarke_search_decision_lookup and
     // spaarke_complete_decision, each with its entry here, in the diff that adds the tool.
-    private static readonly IReadOnlyList<McpTool> McpTools = Array.Empty<McpTool>();
+    private static readonly IReadOnlyList<McpTool> McpTools = new[]
+    {
+        // spaarkeai-mcp-bff-api-r1 task 023 (one contiguous block; tasks 022 and 024 add their own entries beside it).
+        new McpTool("GetDecisionPlanTool", "", "IDecisionCapability",
+            "FR-06, app-only and read-only: the Signal's decision plan, suppression and full row as the caller through IDecisionCapability "
+            + "(the REST plan route's capability call, which also writes the plan-read stamp). Bare [Authorize]: an A10 workforce user, like the REST Signals group."),
+        new McpTool("SearchDecisionLookupTool", "", "IDecisionLookupSearch",
+            "FR-07, app-only and read-only: the wizard's person, budget and firm search as the caller through IDecisionLookupSearch (the REST "
+            + "lookup route's service); the plan names the table and scope. Bare [Authorize]: an A10 workforce user, like the REST Signals group."),
+    };
 
     private static readonly Regex McpToolClass = new(
         @"(?<attrs>(?:\[[^\[\]]*\]\s*)+)(?:(?:public|internal|private|protected|sealed|static|partial|file)\s+)*class\s+(?<name>[A-Za-z_]\w*)",
@@ -779,11 +788,13 @@ public partial class RouteAuthorizationGuardTests
     {
         static HashSet<string> Seen(params Type[] types) => types.Select(t => t.Name).ToHashSet(StringComparer.Ordinal);
 
-        // MUST NOT FIRE: the text saw it, the ledger lists it, bare [Authorize], a PublicContracts parameter. The real BFF has no
-        // tool yet, so the real cross-check is empty too.
+        // MUST NOT FIRE: the text saw it, the ledger lists it, bare [Authorize], a PublicContracts parameter. The real cross-check is
+        // given the tools the real source scan found (task 023: the BFF has production tools, so an empty "seen" set would be a violation).
         var sanctioned = typeof(McpReflectionSanctionedTool);
         Assert.Empty(McpToolReflectionViolations(new[] { sanctioned }, Seen(sanctioned), new[] { McpReflectionEntry(sanctioned) }));
-        Assert.Empty(McpToolReflectionViolations(typeof(McpToolDefinition).Assembly.GetTypes(), new HashSet<string>(), McpTools));
+        var realSeen = new HashSet<string>(StringComparer.Ordinal);
+        McpToolViolations(Real.Set.Units, McpTools, AiInternalTypeNames(Real.Set.Units), realSeen);
+        Assert.Empty(McpToolReflectionViolations(typeof(McpToolDefinition).Assembly.GetTypes(), realSeen, McpTools));
 
         // MUST FIRE, one cause each.
         Fires(McpToolReflectionViolations(new[] { sanctioned }, new HashSet<string>(), new[] { McpReflectionEntry(sanctioned) }),
