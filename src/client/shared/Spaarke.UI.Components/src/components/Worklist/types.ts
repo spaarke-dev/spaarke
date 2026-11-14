@@ -20,7 +20,12 @@ export type PastDueWording = 'overdue' | 'late';
  * Do: finishOrReschedule, comingDue, chaseResponse. The route maps the option value; each item has exactly one.
  */
 export type WorkType =
-  'askOutsideCounsel' | 'approveOrRebudget' | 'chaseReply' | 'finishOrReschedule' | 'comingDue' | 'chaseResponse';
+  | 'askOutsideCounsel'
+  | 'approveOrRebudget'
+  | 'chaseReply'
+  | 'finishOrReschedule'
+  | 'comingDue'
+  | 'chaseResponse';
 
 /** One Work Item: the display columns of one `sprk_signal` row. */
 export interface WorklistItem {
@@ -50,6 +55,25 @@ export interface WorklistItem {
    * and Closed earlier sets, whose age or due state would be misleading ("5d overdue" on a finished item).
    */
   timingText?: string | null;
+  /**
+   * Set by the route (task 174) on a billing item: a Signal about an invoice or an invoice line. Such an item is decided only
+   * in the Invoice Review page (D-207): activating it opens that page on `invoiceId` (focused on `lineId` when there is one)
+   * and never the Decision wizard. Every other item omits it.
+   */
+  invoiceReview?: InvoiceReviewTarget | null;
+}
+
+/** The invoice (and optionally the line) a billing item is decided on in the Invoice Review page (D-207). */
+export interface InvoiceReviewTarget {
+  /** `sprk_invoice` id. */
+  invoiceId: string;
+  /** `sprk_billingevent` id of the line the Signal is about; absent or null for an invoice-level item. */
+  lineId?: string | null;
+}
+
+/** True for a billing item (D-207): it carries an invoice to open in Invoice Review. */
+export function hasInvoiceReview(item: Pick<WorklistItem, 'invoiceReview'>): boolean {
+  return Boolean(item.invoiceReview?.invoiceId);
 }
 
 /**

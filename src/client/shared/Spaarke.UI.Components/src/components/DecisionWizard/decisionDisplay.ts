@@ -112,8 +112,13 @@ export function joinLabels(labels: readonly string[]): string {
 // Failures and warnings, in words a person can act on (no HTTP phrases, codes or ids)
 // ---------------------------------------------------------------------------
 
+/** The commit route's refusal of a billing item (D-207, task 174): decided only in the Invoice Review page. */
+const INVOICE_REVIEW_REASON = 'ontology.decision.decided_in_invoice_review';
+
 /** The heading of a failed attempt: what happened to the decision, not the status line of the request. */
 export function failureHeading(failure: DecisionCommitFailure): string {
+  // Task 175 (D-207): the code says more than the status (the route may answer 409), so it is read first.
+  if (failure.reasonCode === INVOICE_REVIEW_REASON) return 'Decide this in Invoice Review';
   switch (failure.httpStatus) {
     case 0:
       return 'The decision may not have been recorded';
@@ -141,6 +146,9 @@ export function failureMessage(failure: DecisionCommitFailure): string {
       return 'The earlier attempt cannot be continued. Nothing more was recorded.';
     case 'ontology.decision.review_in_progress':
       return 'This decision is already being recorded. Wait a moment, then try again.';
+    // Task 175 (D-207): a billing item reached the commit route; it is decided only in Invoice Review.
+    case INVOICE_REVIEW_REASON:
+      return 'Invoice items are decided in Invoice Review. Nothing was recorded.';
   }
   if (failure.httpStatus === 409) return 'This decision is already being recorded. Wait a moment, then try again.';
   if (failure.httpStatus === 503) return 'Recording could not start. Nothing was written. Try again in a moment.';

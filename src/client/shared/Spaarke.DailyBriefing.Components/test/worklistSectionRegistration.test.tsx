@@ -9,6 +9,8 @@
  *   3. The widget's `lookup` slot (the wizard's Person / Lookup search - without it Revise budget / Reassign / Add To Do / Assign Work
  *      cannot be completed) and `aggregateRow` slot (task 054's card, opening the Email Review tab on the pane bus) are filled as the
  *      direct widget fills them; with no Xrm `lookup` is undefined and the section still renders.
+ *   3b. `openInvoiceReview` (task 175, D-207) is passed: the Console mounts the Worklist through THIS shim, so a slot filled only in
+ *      the direct widget never reaches a user.
  *   4. Negative: the shim never reads `sprk_signal` / `sprk_decisionrecord` (D-15), statically and at runtime. Other Dataverse reads
  *      (the lookup's contacts / budgets / organizations) are allowed.
  *
@@ -54,7 +56,7 @@ jest.mock('../../../../solutions/LegalWorkspace/src/config/runtimeConfig', () =>
   getBffBaseUrl: jest.fn(() => 'https://bff.example.test'),
 }));
 
-import { WorklistWidget, createWorklistService, launchDecisionWizard } from '@spaarke/ui-components';
+import { WorklistWidget, createWorklistService, launchDecisionWizard, openInvoiceReview } from '@spaarke/ui-components';
 import type { SectionFactoryContext } from '@spaarke/ui-components';
 import { createWorklistLookup, createWorklistOpenLookup, createWorklistOpenRecord } from '@spaarke/ai-widgets';
 import { worklistRegistration } from '../../../../solutions/LegalWorkspace/src/sections/worklist.registration';
@@ -124,6 +126,16 @@ describe('worklist section shim (task 156)', () => {
   test('opens a line through launchDecisionWizard (the in-app host)', () => {
     mountSection();
     expect(widgetMock.mock.calls[0][0].launchWizard).toBe(launchDecisionWizard);
+  });
+
+  test('opens a billing item in Invoice Review: WorklistWidget gets the shared opener, with or without Xrm (task 175, D-207)', () => {
+    mountSection();
+    expect(widgetMock.mock.calls[0][0].openInvoiceReview).toBe(openInvoiceReview);
+    widgetMock.mockClear();
+    withXrm(() => {
+      mountSection();
+      expect(widgetMock.mock.calls[0][0].openInvoiceReview).toBe(openInvoiceReview);
+    });
   });
 
   test('with Xrm: WorklistWidget gets the wizard lookup and the aggregate row', () => {

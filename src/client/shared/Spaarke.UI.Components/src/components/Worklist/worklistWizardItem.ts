@@ -18,6 +18,7 @@ import type {
 } from '../DecisionWizard/decisionWizardTypes';
 import { CONSOLE_STATE_BADGES, resolveConsoleState } from '../ConsoleKit';
 import type { EvidenceTier } from '../ConsoleKit';
+import { hasInvoiceReview } from './types';
 import type { WorklistRouteSetName, WorklistSetName, WorklistGroupData, WorklistRouteItem } from './worklistService';
 
 const TIERS: ReadonlySet<string> = new Set(['Fact', 'Interpretation', 'Observation', 'Missing']);
@@ -160,8 +161,10 @@ export function buildWizardItem({ item, group, set, today = new Date() }: BuildW
     // The rule's sentence as the route returns it (task 154, D-23); null when the Signal stores none, and the wizard then omits its quote block.
     sentence: item.sentence ?? null,
     evidence: parseEvidenceRefs(item.evidenceRefs),
-    // Other open items on the same core record in the same lane. A Not filed item has none (D-34/35).
-    otherOpenItems: open && group.core ? group.items.filter(i => i.signalId !== item.signalId) : [],
+    // Other open items on the same core record in the same lane. A Not filed item has none (D-34/35). Billing items (D-207) are
+    // decided only in Invoice Review, so the wizard's "Also resolve" never offers one.
+    otherOpenItems:
+      open && group.core ? group.items.filter(i => i.signalId !== item.signalId && !hasInvoiceReview(i)) : [],
     resolution: resolutionFor(item, set, today),
   };
 }

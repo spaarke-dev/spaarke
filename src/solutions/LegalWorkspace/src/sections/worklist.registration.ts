@@ -27,7 +27,11 @@
  * `DecisionWizardHost`) the launcher returns its own `{ opened: false, reason: 'no-host' }` result and the
  * widget shows its notice; no host is added here.
  *
- * The widget's two optional slots are filled as the direct widget fills them (`WorklistWorkspaceWidget`):
+ * This section is the Console's LIVE path to the Worklist: `WorklistWorkspaceWidget` (the registered `worklist` direct widget) has no
+ * Console path that mounts it, so a slot filled only there never reaches a user. Every slot added to the shared widget must be filled
+ * HERE too (task 175 found `openInvoiceReview` missing from this mount).
+ *
+ * The widget's optional slots are filled as the direct widget fills them (`WorklistWorkspaceWidget`):
  *   - `lookup` - `createWorklistLookup(Xrm.WebApi)`, the decision wizard's Person / Lookup search. The
  *     `DecisionWizardHost` has no lookup of its own, so without it Revise budget, Reassign, Add To Do and
  *     Assign Work (required Lookup / Person fields) cannot be completed. It queries contacts, `sprk_budget`
@@ -37,6 +41,8 @@
  *     `createXrmNavigationService()`. Every Person / Lookup field in the wizard then opens the platform side-pane
  *     lookup (scoped as `lookup` is), and the subject in *What was found* opens in a modal above the wizard.
  *     Undefined when there is no Xrm (the wizard keeps its inline type-ahead and shows the subject as text).
+ *   - `openInvoiceReview` - task 175 (D-207): billing Work Items are decided only in the Invoice Review page; the shared opener
+ *     shows it as a dialog (`Xrm.Navigation.navigateTo`) and the widget reads the lists again when it closes.
  *   - `aggregateRow` - task 054's `ReconciliationAggregateCard`; "Open Email Review" dispatches `widget_load`
  *     for the reconciliation tab on the PaneEventBus the Console mounts above the embedded workspace
  *     (a no-op where there is no bus, e.g. the standalone page, via `useOptionalDispatchPaneEvent`).
@@ -63,6 +69,7 @@ import {
   createXrmNavigationService,
   getXrm,
   launchDecisionWizard,
+  openInvoiceReview,
 } from "@spaarke/ui-components";
 import {
   createWorklistLookup,
@@ -136,6 +143,9 @@ const WorklistSectionMount: React.FC = () => {
       openRecord,
       aggregateRow,
       launchWizard: launchDecisionWizard,
+      // Task 175 (D-207): a billing Work Item opens the eBilling Invoice Review page as a dialog instead of the wizard. The opener
+      // is Xrm-coupled and rejects without Xrm.Navigation (the widget then shows "Invoice Review could not be opened").
+      openInvoiceReview,
     }),
   );
 };

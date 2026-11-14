@@ -5,7 +5,18 @@ export { MatterCard } from './MatterCard';
 export type { MatterCardProps } from './MatterCard';
 export { composeIssueLine, formatAge, formatDueState } from './composeIssueLine';
 export type { IssueLineView, TimingTone } from './composeIssueLine';
-export type { OpenItemEvent, PastDueWording, WorkType, WorklistCore, WorklistItem, WorklistLane } from './types';
+export type {
+  InvoiceReviewTarget,
+  OpenItemEvent,
+  PastDueWording,
+  WorkType,
+  WorklistCore,
+  WorklistItem,
+  WorklistLane,
+} from './types';
+export { hasInvoiceReview } from './types';
+// Billing items open Invoice Review as a dialog (task 175, D-207); the launcher is Xrm-coupled and the HOST passes it to the widget.
+export { buildInvoiceReviewLaunch, openInvoiceReview } from './openInvoiceReview';
 // The lane count filters are DATA for the existing WorkspaceShell/MetricCardRow (D-24); no new card component.
 export { bucketLaneItems, buildLaneCountCards, filterLaneItems, resolveLaneFilterKey } from './laneCountFilters';
 export type { BuildLaneCountCardsOptions, LaneCountBucket, LaneFilterKey } from './laneCountFilters';
