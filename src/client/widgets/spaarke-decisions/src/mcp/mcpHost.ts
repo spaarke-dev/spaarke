@@ -13,7 +13,7 @@
 import { createElement, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useApp, type App } from '@modelcontextprotocol/ext-apps/react-with-deps';
 import type { CallServerTool, McpToolResult } from './mcpFetch';
-import { McpHostContext, type HostContext, type McpHostConnection } from './mcpHostContext';
+import { McpHostContext, type DisplayMode, type HostContext, type McpHostConnection } from './mcpHostContext';
 
 export { McpHostContext, useMcpHost, type McpHostConnection } from './mcpHostContext';
 
@@ -57,9 +57,21 @@ export function McpHostProvider({ name, children }: { name: string; children: Re
     return result.isError !== true;
   }, []);
 
+  const requestDisplayMode = useCallback(async (mode: DisplayMode) => {
+    const current = appRef.current;
+    if (!current) return null;
+    try {
+      const result = await current.requestDisplayMode({ mode });
+      return result.mode;
+    } catch {
+      // A host that does not offer the mode (or the request timing out) is an answer, not a failure: the caller falls back.
+      return null;
+    }
+  }, []);
+
   const value = useMemo<McpHostConnection>(
-    () => ({ isConnected, error, hostContext, toolResult, callTool, openLink }),
-    [isConnected, error, hostContext, toolResult, callTool, openLink]
+    () => ({ isConnected, error, hostContext, toolResult, callTool, openLink, requestDisplayMode }),
+    [isConnected, error, hostContext, toolResult, callTool, openLink, requestDisplayMode]
   );
 
   return createElement(McpHostContext.Provider, { value }, children);

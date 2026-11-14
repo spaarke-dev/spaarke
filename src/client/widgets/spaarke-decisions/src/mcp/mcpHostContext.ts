@@ -24,7 +24,15 @@ export interface McpHostConnection {
   callTool: CallServerTool;
   /** Asks the host to open a link in the user's browser (the widget declares no network origins and never navigates itself). */
   openLink: (url: string) => Promise<boolean>;
+  /**
+   * Asks the host to change the display mode (the in-frame wizard asks for fullscreen). Resolves with the mode the host actually set,
+   * which may differ from the one asked for, or `null` when the host is not connected or refused the request outright. Never rejects.
+   */
+  requestDisplayMode: (mode: DisplayMode) => Promise<DisplayMode | null>;
 }
+
+/** The display modes of the MCP Apps spec. */
+export type DisplayMode = 'inline' | 'fullscreen' | 'pip';
 
 export const DISCONNECTED: McpHostConnection = {
   isConnected: false,
@@ -33,6 +41,7 @@ export const DISCONNECTED: McpHostConnection = {
   toolResult: null,
   callTool: () => Promise.reject(new Error('The host is not connected.')),
   openLink: () => Promise.resolve(false),
+  requestDisplayMode: () => Promise.resolve(null),
 };
 
 export const McpHostContext = createContext<McpHostConnection>(DISCONNECTED);

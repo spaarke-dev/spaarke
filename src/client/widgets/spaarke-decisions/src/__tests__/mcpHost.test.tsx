@@ -17,6 +17,7 @@ interface FakeApp {
   getHostContext: jest.Mock;
   callServerTool: jest.Mock;
   openLink: jest.Mock;
+  requestDisplayMode: jest.Mock;
 }
 
 const sdk = {
@@ -47,6 +48,7 @@ function makeApp(hostContext: Record<string, unknown> | undefined): FakeApp {
     getHostContext: jest.fn(() => hostContext),
     callServerTool: jest.fn(),
     openLink: jest.fn(),
+    requestDisplayMode: jest.fn(),
   };
 }
 
@@ -187,5 +189,39 @@ describe('openLink', () => {
     sdk.app = null;
     const disconnected = mount();
     await expect(disconnected.seen.current!.openLink('https://x.test/')).resolves.toBe(false);
+  });
+});
+
+describe('requestDisplayMode (task 032: the wizard asks for the room a dialog needs)', () => {
+  it('asks the host for the mode and answers the mode the host chose', async () => {
+    const app = makeApp({});
+    app.requestDisplayMode.mockResolvedValue({ mode: 'fullscreen' });
+    sdk.created = app;
+    const { seen } = mount();
+    await expect(seen.current!.requestDisplayMode('fullscreen')).resolves.toBe('fullscreen');
+    expect(app.requestDisplayMode).toHaveBeenCalledWith({ mode: 'fullscreen' });
+  });
+
+  it('answers the mode the host kept when it declined (it is told where the frame is, not that it failed)', async () => {
+    const app = makeApp({});
+    app.requestDisplayMode.mockResolvedValue({ mode: 'inline' });
+    sdk.created = app;
+    const { seen } = mount();
+    await expect(seen.current!.requestDisplayMode('fullscreen')).resolves.toBe('inline');
+  });
+
+  it('answers null (never throws) when the host rejects the request or there is no connection', async () => {
+    const app = makeApp({});
+    app.requestDisplayMode.mockRejectedValue(new Error('not supported'));
+    sdk.created = app;
+    const connected = mount();
+    await expect(connected.seen.current!.requestDisplayMode('fullscreen')).resolves.toBeNull();
+    connected.view.unmount();
+
+    sdk.created = null;
+    sdk.app = null;
+    sdk.isConnected = false;
+    const disconnected = mount();
+    await expect(disconnected.seen.current!.requestDisplayMode('fullscreen')).resolves.toBeNull();
   });
 });
