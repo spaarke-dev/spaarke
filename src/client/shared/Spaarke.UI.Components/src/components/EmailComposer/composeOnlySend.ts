@@ -270,7 +270,8 @@ export async function sendComposedEmail(
     return {
       success: false,
       warning: failureWarning(err, {
-        hasRecord: (options.associations?.length ?? 0) > 0, // never throws, even for a caller that passes none
+        // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- typed as an array, but a JS host or an older caller can pass none; the send must never throw
+        hasRecord: (options.associations?.length ?? 0) > 0,
         retryLabel: options.retryLabel,
       }),
     };
