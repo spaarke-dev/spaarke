@@ -62,6 +62,8 @@ export interface DecisionItemContextValue {
   openItemsLeft: number | null;
   /** "Now" for ages and due states; injectable for tests. */
   today: Date;
+  /** Optional seam (FR-15): Confirm shows an optional "because" box and the review carries it. Absent or false: no box, as before. */
+  collectBecause?: boolean;
 }
 
 export const DecisionItemContext = React.createContext<DecisionItemContextValue | null>(null);
