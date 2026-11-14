@@ -4,7 +4,7 @@
 
 .DESCRIPTION
     Multi-environment deployment for the Spaarke BFF API:
-    1. Builds the API in Release mode
+    1. Builds the decisions MCP App widget (npm; 3 MB size gate), then the API in Release mode, and verifies the widget is embedded
     2. Creates deployment package (zip)
     3. Deploys to target slot (production direct or staging slot)
     4. Verifies health check on deployed slot
@@ -204,6 +204,16 @@ function Test-HealthCheck {
     return $healthy
 }
 
+function Test-DecisionsWidgetEmbedded {
+    param([string]$PublishDir)
+
+    $dll = Join-Path $PublishDir "Sprk.Bff.Api.dll"
+    if (-not (Test-Path $dll)) { return $false }
+    # Latin1 maps every byte to one char, so a byte search for the ASCII/UTF-8 resource name is a plain substring search.
+    $text = [System.Text.Encoding]::Latin1.GetString([System.IO.File]::ReadAllBytes($dll))
+    return $text.Contains("Sprk.Bff.Api.Widgets.decisions.html")
+}
+
 # --- Step 1: Build ---
 $stepNum = 1
 
@@ -213,6 +223,33 @@ if (-not $SkipBuild) {
     # Clean publish directory to avoid stale artifacts
     if (Test-Path $PublishPath) {
         Remove-Item $PublishPath -Recurse -Force
+    }
+
+    # spaarkeai-mcp-bff-api-r1 task 030 (FR-12, NFR-03): the Spaarke decisions MCP App widget is ONE html file embedded in the BFF
+    # (Sprk.Bff.Api.csproj, EmbeddedResource Condition=Exists). It must be built BEFORE `dotnet publish`, or the deployed BFF answers an
+    # error for resources/read of ui://spaarke/decisions.html. `npm run build` type-checks, builds, and runs scripts/check-bundle-size.mjs
+    # (fails above 3 MB, or when the page is not self-contained). Same steps as publish-bff-artifact.yml.
+    $WidgetDir = "$RepoRoot\src\client\widgets\spaarke-decisions"
+    Push-Location $WidgetDir
+    try {
+        # npm writes warnings to stderr; do not let them become terminating errors, judge by the exit code.
+        $ErrorActionPreference = "Continue"
+        Write-Host "  Building the decisions widget (npm install + build)..." -ForegroundColor Gray
+        $npmOutput = & npm install --legacy-peer-deps --no-audit --no-fund 2>&1
+        if ($LASTEXITCODE -ne 0) {
+            $npmOutput | ForEach-Object { Write-Host "    $_" }
+            throw "Widget npm install failed with exit code $LASTEXITCODE"
+        }
+        $npmOutput = & npm run build 2>&1
+        if ($LASTEXITCODE -ne 0) {
+            $npmOutput | ForEach-Object { Write-Host "    $_" }
+            throw "Widget build failed with exit code $LASTEXITCODE (type-check, vite build or the 3 MB size gate)"
+        }
+        $npmOutput | Select-Object -Last 1 | ForEach-Object { Write-Host "  $_" -ForegroundColor Gray }
+    }
+    finally {
+        $ErrorActionPreference = "Stop"
+        Pop-Location
     }
 
     Push-Location $ApiProject
@@ -234,10 +271,22 @@ if (-not $SkipBuild) {
     finally {
         Pop-Location
     }
+
+    # The csproj embeds the widget only when dist/index.html exists (Condition=Exists), so a skipped or failed-open widget build would
+    # publish a BFF that serves an error for ui://spaarke/decisions.html. Fail here instead. The logical name is stored as UTF-8 in the
+    # assembly's manifest-resource table, so a byte search of the published dll finds it (same check as publish-bff-artifact.yml).
+    if (-not (Test-DecisionsWidgetEmbedded -PublishDir $PublishPath)) {
+        throw "The published Sprk.Bff.Api.dll does not embed the decisions widget (Sprk.Bff.Api.Widgets.decisions.html). The widget build did not produce src\client\widgets\spaarke-decisions\dist\index.html."
+    }
+    Write-Host "  Decisions widget is embedded" -ForegroundColor Green
 } else {
     Write-Host "[$stepNum/$totalSteps] Skipping build (using existing publish)" -ForegroundColor Gray
     if (-not (Test-Path $PublishPath)) {
         throw "Publish folder not found at '$PublishPath'. Run without -SkipBuild first."
+    }
+    # -SkipBuild keeps its meaning (deploy what is there), so a publish made before the widget existed is a warning, not a failure.
+    if (-not (Test-DecisionsWidgetEmbedded -PublishDir $PublishPath)) {
+        Write-Host "  WARNING: the existing publish does not embed the decisions widget; resources/read for ui://spaarke/decisions.html will answer an error. Re-run without -SkipBuild to build it." -ForegroundColor Yellow
     }
 }
 
