@@ -89,7 +89,12 @@ import {
   searchMatterTypes,
   searchPracticeAreas,
 } from '../CreateWorkAssignmentWizard/workAssignmentService';
-import { EMPTY_COMPOSED_EMAIL, isComposedEmailReady, sendComposedEmail } from '../EmailComposer/composeOnlySend';
+import {
+  EMAIL_NOT_SENT_NO_SERVER,
+  EMPTY_COMPOSED_EMAIL,
+  isComposedEmailReady,
+  sendComposedEmail,
+} from '../EmailComposer/composeOnlySend';
 import type { IComposedEmail, IEmailComposeHandlers } from '../EmailComposer/composeOnlySend';
 
 // ---------------------------------------------------------------------------
@@ -575,6 +580,8 @@ const CreateReportCardWizard: React.FC<ICreateReportCardWizardProps> = ({
             onResolveShareLink: emailComposeHandlers?.onResolveShareLink,
           });
           if (!emailResult.success && emailResult.warning) warnings.push(emailResult.warning);
+        } else if (context.selectedActions.includes('send-email') && emailRef.current.to.length > 0) {
+          warnings.push(EMAIL_NOT_SENT_NO_SERVER);
         }
 
         const hasWarnings = warnings.length > 0;

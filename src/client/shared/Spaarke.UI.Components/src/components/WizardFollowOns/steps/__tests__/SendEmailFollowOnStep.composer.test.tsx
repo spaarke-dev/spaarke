@@ -334,6 +334,53 @@ describe('sendComposedEmail: the Finish send through the composer request path (
     expect(result.warning).toMatch(/not sent.*Graph refused the send.*corr-9/);
   });
 
+  it('a send the server accepted without confirming it says the email may have been sent (no blind resend)', async () => {
+    const fetch = jest.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({}) });
+    const result = await sendComposedEmail(COMPOSED, {
+      associations: association,
+      authenticatedFetch: fetch as unknown as AuthenticatedFetchFn,
+    });
+    expect(result.success).toBe(false);
+    expect(result.warning).toMatch(/^The email may have been sent/);
+    expect(result.warning).toMatch(/Check your Sent Items or the record's Messages before sending it again\./);
+    expect(result.warning).not.toMatch(/sendCommunication|communicationId|not sent|draft/i);
+  });
+
+  it('a server error with no detail is described in words, never "HTTP 500", and never mentions a draft', async () => {
+    const fetch = jest.fn().mockResolvedValue({
+      ok: false,
+      status: 500,
+      headers: { get: () => 'text/plain' },
+      json: async () => {
+        throw new Error('not json');
+      },
+      text: async () => '',
+    });
+    const result = await sendComposedEmail(COMPOSED, {
+      associations: association,
+      authenticatedFetch: fetch as unknown as AuthenticatedFetchFn,
+    });
+    expect(result.success).toBe(false);
+    expect(result.warning).toBe("The email was not sent. The email service couldn't send it right now.");
+    expect(result.warning).not.toMatch(/HTTP|draft/i);
+  });
+
+  it('an expired sign-in says to sign in and send it from the record (the composer is gone)', async () => {
+    const fetch = jest.fn().mockResolvedValue({
+      ok: false,
+      status: 401,
+      headers: { get: () => 'application/json' },
+      json: async () => ({ title: 'Unauthorized', status: 401 }),
+    });
+    const result = await sendComposedEmail(COMPOSED, {
+      associations: association,
+      authenticatedFetch: fetch as unknown as AuthenticatedFetchFn,
+    });
+    expect(result.warning).toBe(
+      'The email was not sent. Your sign-in had expired. Sign in again, then send it from the record.'
+    );
+  });
+
   it('refuses, with a warning, an attachment that never uploaded (never sent without it)', async () => {
     const fetch = okFetch();
     const result = await sendComposedEmail(

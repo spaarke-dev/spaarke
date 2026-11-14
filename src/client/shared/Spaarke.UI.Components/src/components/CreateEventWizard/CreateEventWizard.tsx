@@ -55,7 +55,7 @@ import {
   searchPracticeAreas,
 } from '../CreateWorkAssignmentWizard/workAssignmentService';
 import { completeOrClose } from '../../services/surfaceHandoff/readHandoff';
-import { sendComposedEmail } from '../EmailComposer/composeOnlySend';
+import { EMAIL_NOT_SENT_NO_SERVER, sendComposedEmail } from '../EmailComposer/composeOnlySend';
 import type { IEmailComposeHandlers } from '../EmailComposer/composeOnlySend';
 
 // ---------------------------------------------------------------------------
@@ -509,6 +509,8 @@ const CreateEventWizard: React.FC<ICreateEventWizardProps> = ({
             onResolveShareLink: emailComposeHandlers?.onResolveShareLink,
           });
           if (!emailResult.success && emailResult.warning) warnings.push(emailResult.warning);
+        } else if (context.selectedActions.includes('send-email') && context.followOn.email.to.length > 0) {
+          warnings.push(EMAIL_NOT_SENT_NO_SERVER);
         }
 
         const hasWarnings = warnings.length > 0;

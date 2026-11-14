@@ -20,7 +20,7 @@ import { CreateProjectWizard } from '../CreateProjectWizard';
 import { describeHeldBackForSecure } from '../provisioningService';
 import { ASSIGNED_ACCESS_SYNC_PATH } from '../../../services/assignedAccessSync';
 import { throwingAuthenticatedFetch } from '../../../__tests__/helpers/authenticatedFetchDouble';
-import { EMPTY_COMPOSED_EMAIL } from '../../EmailComposer/composeOnlySend';
+import { EMAIL_NOT_SENT_NO_SERVER, EMPTY_COMPOSED_EMAIL } from '../../EmailComposer/composeOnlySend';
 
 const mockShell: { config?: ICreateRecordWizardConfig } = {};
 jest.mock('../../CreateRecordWizard', () => ({
@@ -257,6 +257,13 @@ describe('CreateProjectWizard — a secure-requested project whose provisioning 
         associations: [expect.objectContaining({ entityType: 'sprk_project' })],
       })
     );
+  });
+
+  it('secure not requested and no BFF: the composed email is not sent, and the success screen says so (task 182)', async () => {
+    const success = await finish(false, undefined);
+
+    expect(mockCalls).not.toContain('email');
+    expect(success.warnings).toContain(EMAIL_NOT_SENT_NO_SERVER);
   });
 
   it.each([true, false])(

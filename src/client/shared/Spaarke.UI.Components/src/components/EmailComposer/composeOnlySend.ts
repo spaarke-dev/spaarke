@@ -15,11 +15,17 @@
  * No Xrm (ADR-012); `authenticatedFetch` is injected (ADR-028).
  */
 import type { AuthenticatedFetchFn } from '../../services/EntityCreationService';
-import { sendCommunication, SendCommunicationError } from '../../services/communicationApi';
+import { sendCommunication } from '../../services/communicationApi';
 import type { CommunicationSendMode, ICommunicationAssociation } from '../../services/communicationApi';
 import { EMAIL_RE, initialState, mapStateToSendRequest } from './EmailComposer.reducer';
 import { findUnresolvedLinks, resolveAttachmentShareLinks } from './EmailComposer';
 import { toPlainText } from './composeOnlyText';
+import {
+  SEND_FAILURE_NETWORK_CODE,
+  SEND_FAILURE_UNCONFIRMED_CODE,
+  meaningfulDetail,
+  toSendCommunicationError,
+} from './describeSendFailure';
 import type {
   EmailComposerBodyFormat,
   EmailComposerState,
@@ -121,6 +127,13 @@ export function joinRecipientAddresses(recipients: readonly IRecipient[]): strin
     .join('; ');
 }
 
+/**
+ * The Finish warning when the host gave the wizard no way to reach the BFF (no authenticated fetch or BFF URL): the
+ * composed email cannot be sent, and the user must be told rather than see a clean success screen.
+ */
+export const EMAIL_NOT_SENT_NO_SERVER =
+  'The email was not sent: this page has no connection to the Spaarke email service. Send it from the new record.';
+
 export interface ISendComposedEmailOptions {
   /** The record(s) the email is filed under: the record the wizard just created. */
   associations: ICommunicationAssociation[];
@@ -144,11 +157,35 @@ export interface ISendComposedEmailResult {
   warning?: string;
 }
 
-function failureDetail(err: unknown): string {
-  if (err instanceof SendCommunicationError) {
-    return err.correlationId ? `${err.detail} (reference ${err.correlationId})` : err.detail;
+/**
+ * Why a Finish send failed, for the success screen's warnings. Normalised the way the composer's own send failure is
+ * (`toSendCommunicationError`, `meaningfulDetail`), so "HTTP 500" and developer strings never show. A send the server
+ * accepted without confirming it may have gone out: say so, so the user checks before sending it again. The composer
+ * is gone after Finish, so nothing here says the draft is still there.
+ */
+function failureWarning(err: unknown): string {
+  const e = toSendCommunicationError(err);
+  const reference = e.correlationId && e.correlationId.trim() ? ` (reference ${e.correlationId.trim()})` : '';
+  const checkFirst = "Check your Sent Items or the record's Messages before sending it again.";
+  if (e.code === SEND_FAILURE_UNCONFIRMED_CODE) {
+    return `The email may have been sent: Spaarke accepted it but did not confirm it, so it may not appear on the record. ${checkFirst}${reference}`;
   }
-  return err instanceof Error ? err.message : 'unknown error';
+  if (e.code === SEND_FAILURE_NETWORK_CODE) {
+    return `The email may not have been sent: no response came from the Spaarke server. ${checkFirst}${reference}`;
+  }
+  if (e.status === 401) {
+    // The composer is gone after Finish, so "resend" has nowhere to happen: send it from the record.
+    return `The email was not sent. Your sign-in had expired. Sign in again, then send it from the record.${reference}`;
+  }
+  const detail = e.status === 0 ? undefined : meaningfulDetail(e.detail);
+  const reason =
+    detail ??
+    (e.status === 0
+      ? 'Something went wrong on this page.'
+      : e.status >= 500
+        ? "The email service couldn't send it right now."
+        : 'The email service refused it.');
+  return `The email was not sent. ${reason}${reference}`;
 }
 
 /**
@@ -205,6 +242,6 @@ export async function sendComposedEmail(
     });
     return { success: true, communicationId: result.communicationId };
   } catch (err) {
-    return { success: false, warning: `The email was not sent: ${failureDetail(err)}.` };
+    return { success: false, warning: failureWarning(err) };
   }
 }

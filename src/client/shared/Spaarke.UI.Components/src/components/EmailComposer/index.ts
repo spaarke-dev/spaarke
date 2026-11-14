@@ -86,6 +86,7 @@ export type { IComposerActionBarProps } from './subcomponents/ComposerActionBar'
 // Compose-only hosts (task 182): the moved plain-text helper, and the collected email + its send at the host's Finish
 export { toPlainText } from './composeOnlyText';
 export {
+  EMAIL_NOT_SENT_NO_SERVER,
   EMPTY_COMPOSED_EMAIL,
   composedEmailFromState,
   pendingAttachments,

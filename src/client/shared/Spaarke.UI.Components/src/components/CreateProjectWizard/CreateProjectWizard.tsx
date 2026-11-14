@@ -49,7 +49,7 @@ import { WorkAssignmentService } from '../CreateWorkAssignmentWizard/workAssignm
 import type { ICreateWorkAssignmentFormState, IAssignWorkState } from '../CreateWorkAssignmentWizard/formTypes';
 import type { AssociationResult } from '../AssociateToStep/types';
 import { fileProjectUnderMatter } from '../../utils/adapters/bffChildWriteAdapter';
-import { sendComposedEmail } from '../EmailComposer/composeOnlySend';
+import { EMAIL_NOT_SENT_NO_SERVER, sendComposedEmail } from '../EmailComposer/composeOnlySend';
 import type { IEmailComposeHandlers } from '../EmailComposer/composeOnlySend';
 
 // ---------------------------------------------------------------------------
@@ -907,6 +907,8 @@ const CreateProjectWizard: React.FC<ICreateProjectWizardProps> = ({
             onResolveShareLink: emailComposeHandlers?.onResolveShareLink,
           });
           if (!emailResult.success && emailResult.warning) warnings.push(emailResult.warning);
+        } else if (!secureBlocked && wantsEmail) {
+          warnings.push(EMAIL_NOT_SENT_NO_SERVER);
         }
 
         // Surface a provisioning refusal as the designed state the service classified, VERBATIM.

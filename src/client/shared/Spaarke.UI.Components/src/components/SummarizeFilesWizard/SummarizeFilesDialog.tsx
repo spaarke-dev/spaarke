@@ -463,6 +463,7 @@ export const SummarizeFilesDialog: React.FC<ISummarizeFilesDialogProps> = ({
         ...prev,
         subject: buildSummaryEmailSubject(),
         body: buildSummaryEmailBody(summarizeResult.summary, summarizeResult.shortSummary, includeShortSummary),
+        bodyFormat: 'PlainText',
       }));
     }
   }, [selectedActions, summarizeResult, email.subject, includeShortSummary]);
@@ -470,10 +471,12 @@ export const SummarizeFilesDialog: React.FC<ISummarizeFilesDialogProps> = ({
   // ── Update email body when short summary toggle changes ───────────────
   React.useEffect(() => {
     if (selectedActions.includes('send-email') && summarizeResult) {
-      // The step restarts its composer from this body when it is open (task 182).
+      // The step restarts its composer from this body when it is open (task 182). The body is plain text, even when
+      // the user had switched the composer to rich text: read as HTML, its line breaks would collapse.
       setEmail(prev => ({
         ...prev,
         body: buildSummaryEmailBody(summarizeResult.summary, summarizeResult.shortSummary, includeShortSummary),
+        bodyFormat: 'PlainText',
       }));
     }
     // Only re-run when the toggle changes, not on every render
@@ -499,7 +502,8 @@ export const SummarizeFilesDialog: React.FC<ISummarizeFilesDialogProps> = ({
     // carries no association (as before).
     if (currentSelectedActions.includes('send-email') && currentEmail.to.length > 0) {
       if (!authenticatedFetch) {
-        warnings.push('Email failed: authenticatedFetch is required — unauthenticated BFF calls are not permitted.');
+        // No record exists for a summary, so there is nowhere else to send it from.
+        warnings.push('The email was not sent: this page has no connection to the Spaarke email service.');
       } else {
         const emailResult = await sendComposedEmail(currentEmail, {
           associations: [],

@@ -104,6 +104,7 @@ import {
   ANALYSIS_REGARDING_TARGETS,
   AddTodoFollowOnStep,
   CreateRecordWizard,
+  EMAIL_NOT_SENT_NO_SERVER,
   EMPTY_COMPOSED_EMAIL,
   EMPTY_TODO_FORM,
   EntityCreationService,
@@ -1005,6 +1006,8 @@ const CreateAnalysisWizardWidget: React.FC<WorkspaceWidgetProps<CreateAnalysisWi
             }
           );
           if (!emailResult.success && emailResult.warning) warnings.push(emailResult.warning);
+        } else if (context.selectedActions.includes('send-email') && emailRef.current.to.length > 0) {
+          warnings.push(EMAIL_NOT_SENT_NO_SERVER);
         }
 
         // -- Open the document in the EDITABLE Compose/TipTap surface (Phase 1, UAT

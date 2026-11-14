@@ -378,6 +378,7 @@ const WorkAssignmentWizardDialog: React.FC<IWorkAssignmentWizardDialogProps> = (
           setEmail(prev => ({
             ...prev,
             body: next.body,
+            bodyFormat: 'PlainText',
             subject: prev.subject === auto.subject ? next.subject : prev.subject,
           }));
           autoEmailRef.current = next;
@@ -477,7 +478,7 @@ const WorkAssignmentWizardDialog: React.FC<IWorkAssignmentWizardDialogProps> = (
     if (selectedActions.includes('send-email') && !autoEmailRef.current && formStateRef.current.name) {
       const prefill = buildEmailPrefill(formStateRef.current);
       autoEmailRef.current = prefill;
-      setEmail(prev => ({ ...prev, subject: prefill.subject, body: prefill.body }));
+      setEmail(prev => ({ ...prev, subject: prefill.subject, body: prefill.body, bodyFormat: 'PlainText' }));
 
       // Auto-CC the current user (unless the person already has a Cc)
       if (emailRef.current.cc.length === 0) {

@@ -553,7 +553,7 @@ export const CreateRecordWizard: React.FC<ICreateRecordWizardProps> = ({
         const body = config.buildEmailBody
           ? config.buildEmailBody(fields)
           : `Dear Client,\n\nA new record "${entityName}" has been created.\n\nKind regards`;
-        setEmail(prev => ({ ...prev, subject, body }));
+        setEmail(prev => ({ ...prev, subject, body, bodyFormat: 'PlainText' }));
       }
     }
   }, [selectedActions, email.subject, config]);
