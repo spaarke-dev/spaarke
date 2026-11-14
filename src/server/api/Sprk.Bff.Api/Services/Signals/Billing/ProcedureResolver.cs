@@ -878,7 +878,7 @@ public sealed class ProcedureResolution
 /// </remarks>
 public static class ProcedureResolver
 {
-    private const int StateActive = 0;
+    private const int StateActive = ProcedureEntity.StateActive;
     private const int PageSize = 5000;
     private const string UnnamedProcedure = "(unnamed Procedure)";
     private const string PolicyCodeColumn = "sprk_policycode";
