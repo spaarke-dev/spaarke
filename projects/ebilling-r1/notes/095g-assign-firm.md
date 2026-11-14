@@ -318,3 +318,11 @@ Q5 and the per-person scope of `ClassifyEligibility` are clarifications of uac-r
 - **Gate:** two adversarial passes before merge; uac-r2 reviews the PR.
 - **Not affected by #2799:** the slot fields are outside its locked set.
 - **Owner questions still open:** Q2, Q3, Q8, Q9, Q10.
+
+## Owner answers (2026-11-14)
+
+- **Q2 → allow (EB-D-233).** The design's recommendation was refuse; the owner chose allow ("it may be required"). Step 2 drops the inactive-record check and the `record_inactive` code. The other step 2 refusals stay.
+- **Q3 → the existing organization type (EB-D-234).** Only an active organization whose `sprk_organizationtype` is the "Law Firm" row is listed or accepted on add; anything else gets 422 `not_a_law_firm`. The row is matched by `sprk_organizationtypecode`, which is empty on dev today, so 095g's deploy seeds it.
+  - **Dev data, read 2026-11-14.** There is one type row, "Law Firm". Of the active organizations, 3 have that type and 3 have no type. Two of the untyped ones are assigned firms today: one appears on 6 matters, and one is the customer's own organization, as firm 2 on 2 matters. Neither would be offered for a new add until its type is set. Existing assignments are not affected, because a clear does not check the type. Setting a type is a live data write and needs the owner's OK.
+- **Q8, Q9, Q10 → as recommended (EB-D-235).**
+- **No owner questions remain open.** Build per the design with uac-r2's R1 and R2. uac-r2 was told that Q2 changed.

@@ -30,15 +30,19 @@
 4. **When 045g is on work**:
    - reword `InvoiceApprovalLineOriginTests.LinesDetachedMovedToANewCoreAndReattached_Approve` to state the rule only. Name NO route; the repo is public.
    - Add a runbook line: a legacy invoice with no core, or with two, cannot be filed through the BFF (EB-D-231).
-5. **PR #2822 open** (095e, 095f part 1, 084d). Reviews were asked of ontology-r1 and uac-r2. After it merges, send the master SHA to word-add-in-r1 and spa-r4.
-6. **095g build** once the owner answers Q2, Q3, Q8, Q9 and Q10.
-   - uac-r2 APPROVED the design with R1 (Append on the record for an add) and R2 (the pane states the access effect on every add).
-   - The build needs two adversarial passes; uac-r2 reviews the PR.
-7. **095f part 2** (the Invoice Review steps) once the owner answers:
-   - Should Approve get a note?
-   - Do line-level reasons count?
-   - Should a from-document Correction (097b) need a note?
-   - The builder's suggested split is 2a (lifecycle extension + reject/return), 2b (adjustment) and 2c (override + blocked return). Overwrite with the latest reason; Decision Records keep the history.
+5. **PR #2822 open.** ontology-r1 PASSED it at 565f82624b, with K1–K4 and no F findings. uac-r2's review is in progress.
+   - Do NOT push to the work branch while uac-r2 reviews; commit locally only.
+   - Asked ontology-r1 which test was its 1/2990 failure (it needed a file that isn't in the repo); fix or file that.
+   - K4: should a per-record Procedure override file a Decision Record? This goes to the owner.
+   - Merging needs uac-r2's pass plus the owner's go. After the merge, send the master SHA to word-add-in-r1 and spa-r4.
+6. **095g build.** The owner answered every question (EB-D-233..235; 095g notes, "Owner answers").
+   - Q2 changed to ALLOW an inactive record. uac-r2 was asked whether its approval still holds; wait for that answer before building.
+   - Q3: organization type "Law Firm", matched by `sprk_organizationtypecode`, which is empty on dev and has to be seeded (a live write). Two firms assigned on dev have no type.
+   - The build includes R1 and R2, needs two adversarial passes, and uac-r2 reviews the PR.
+7. **095f part 2.** The owner answered (EB-D-236, 237):
+   - every decision allows an optional short note, line decisions included;
+   - every Correction needs a note, the from-document route and the Create Invoice wizard too.
+   - Split: 2a (lifecycle extension + reject/return), 2b (adjustment), 2c (override + blocked return), 2d (line-decision notes), 2e (from-document Correction note, 094 route + CreateInvoiceWizard). Overwrite with the latest reason; Decision Records keep the history.
 8. DONE 2026-11-14 03:45Z: `sprk_createinvoicewizard` redeployed to dev from master `cfa97d718b`. The owner's go was typed. uac-r2 got notices before and after. Recorded in `notes/053-wp2-deploy.md`.
 9. Then task 112 (deploy). The 095f hold is RELEASED: word-add-in-r1's pane, which sends `correctionNote`, is live on dev at 942b2889bf (#2815 759dc4b1f6, #2820). `Deploy-EbillingInvoiceCorrectionNoteColumn.ps1` must run on every environment beyond dev before 095f goes there.
 
