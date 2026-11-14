@@ -211,6 +211,8 @@ export const CreateRecordWizard: React.FC<ICreateRecordWizardProps> = ({
   const [createEventDueDate, setCreateEventDueDate] = React.useState('');
   const [createEventPriority, setCreateEventPriority] = React.useState(100000001); // Normal
   const [createEventDescription, setCreateEventDescription] = React.useState('');
+  const [createEventAssignedToId, setCreateEventAssignedToId] = React.useState('');
+  const [createEventAssignedToName, setCreateEventAssignedToName] = React.useState('');
 
   // -- Send Email state --
   const [emailTo, setEmailTo] = React.useState('');
@@ -314,6 +316,10 @@ export const CreateRecordWizard: React.FC<ICreateRecordWizardProps> = ({
   createEventPriorityRef.current = createEventPriority;
   const createEventDescriptionRef = React.useRef(createEventDescription);
   createEventDescriptionRef.current = createEventDescription;
+  const createEventAssignedToIdRef = React.useRef(createEventAssignedToId);
+  createEventAssignedToIdRef.current = createEventAssignedToId;
+  const createEventAssignedToNameRef = React.useRef(createEventAssignedToName);
+  createEventAssignedToNameRef.current = createEventAssignedToName;
   const emailToRef = React.useRef(emailTo);
   emailToRef.current = emailTo;
   const emailSubjectRef = React.useRef(emailSubject);
@@ -492,8 +498,8 @@ export const CreateRecordWizard: React.FC<ICreateRecordWizardProps> = ({
             description: createEventDescriptionRef.current,
             regardingRecordId: '',
             regardingRecordName: '',
-            assignedToId: '',
-            assignedToName: '',
+            assignedToId: createEventAssignedToIdRef.current,
+            assignedToName: createEventAssignedToNameRef.current,
           };
           return (
             <CreateEventFollowOnStep
@@ -507,6 +513,8 @@ export const CreateRecordWizard: React.FC<ICreateRecordWizardProps> = ({
                 setCreateEventDueDate(vals.dueDate);
                 setCreateEventPriority(vals.priority);
                 setCreateEventDescription(vals.description);
+                setCreateEventAssignedToId(vals.assignedToId);
+                setCreateEventAssignedToName(vals.assignedToName);
               }}
               onValidChange={() => {
                 /* canAdvance is always true for follow-on */
@@ -652,6 +660,8 @@ export const CreateRecordWizard: React.FC<ICreateRecordWizardProps> = ({
         createEventDueDate: createEventDueDateRef.current,
         createEventPriority: createEventPriorityRef.current,
         createEventDescription: createEventDescriptionRef.current,
+        createEventAssignedToId: createEventAssignedToIdRef.current,
+        createEventAssignedToName: createEventAssignedToNameRef.current,
         // Send Email fields
         emailTo: emailToRef.current,
         emailSubject: emailSubjectRef.current,

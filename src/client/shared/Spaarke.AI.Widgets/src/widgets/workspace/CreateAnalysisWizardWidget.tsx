@@ -583,6 +583,7 @@ const CreateAnalysisWizardWidget: React.FC<WorkspaceWidgetProps<CreateAnalysisWi
           dataService ? (
             <AddTodoFollowOnStep
               dataService={dataService}
+              navigationService={navigationService}
               formValues={todoFormRef.current}
               onFormValuesChange={setTodoForm}
               onSearchAssignees={handleSearchAssignees}
@@ -592,7 +593,7 @@ const CreateAnalysisWizardWidget: React.FC<WorkspaceWidgetProps<CreateAnalysisWi
           ),
       },
     ],
-    [dataService, searchUsers, handleSearchAssignees]
+    [dataService, navigationService, searchUsers, handleSearchAssignees]
   );
 
   // ── Wizard config ────────────────────────────────────────────────────────

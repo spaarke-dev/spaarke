@@ -205,6 +205,10 @@ export interface ICreateEventFollowOnState {
   createEventPriority: number;
   /** Description free text (optional). Maps to sprk_description. */
   createEventDescription: string;
+  /** Assigned To contact GUID (optional; '' = no assignee). Bound as the event's Assigned To contact lookup. */
+  createEventAssignedToId: string;
+  /** Assigned To contact display name. */
+  createEventAssignedToName: string;
 }
 
 /** State collected from the optional follow-on steps. */
