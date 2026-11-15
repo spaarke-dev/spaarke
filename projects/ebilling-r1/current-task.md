@@ -16,7 +16,7 @@
 - **#2844 / ISS-022 (found by the gate):** the invoice index job selected the removed `sprk_invoice.sprk_document`, so every invoice re-index has failed since task 094 (2026-10-27).
   - Fix d7f36ddd6d on work, with regression test `Issue2844_*` and ArchTest `InvoiceIndexColumnsGuardTests`.
   - Sonnet review: no defects. BFF build has 0 warnings. ArchTests 2633/0. Master merged in.
-  - **PR #2846 open** (with 113b), CI running; merging needs the owner's go. uac-r2 has the number. Then a BFF deploy (owner go in uac-r2's session).
+  - **PR #2846 open, auto-merge ON** (owner, 2026-11-15; merge commit, head 5a40371528). DO NOT push work/ebilling-r1 until it merges; commit locally only. uac-r2 has the number. Then a BFF deploy (owner go in uac-r2's session).
   - **Then the re-index sweep:** every sprk_invoice with modifiedon ≥ 2026-10-27, through the normal indexing job. It writes to the dev search index, so it needs **the owner's go HERE**. Report the count and the result to uac-r2.
 - **113b ✅ on work (owner go 2026-11-15):** the Invoice Review page now shows 113's Procedure-change banner (`ProcedureChangeNotice.tsx`). One Sonnet adversarial pass found no F-class defects; its unknown-state point is closed. It ships with task 112, the page's first deploy.
 - **Reminder for 084h-2 (ontology-r1):** the writer caps only `reason` at 2000 characters, not `note`. 084h-2 must enforce or trim the note at the service (design §9), so an over-long note never reaches the create and fails as a retryable CreateFailed.
