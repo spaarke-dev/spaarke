@@ -51,8 +51,10 @@ public sealed record ProcedureChangeBannerDto(
 /// any fault, a 429, a timeout, or an invoice that does not name exactly one core record. A fault never reads as <see cref="NotChanged"/>.</para>
 /// <para><b>Who and when.</b> A result is returned only when step 0 classed the caller internal (<see cref="FinanceStepZeroVerdict.Internal"/>, task
 /// 099, read from the request, never resolved a second time here) and the invoice is open (In Review; "pending" is an In Review invoice whose
-/// submission is still processing). Otherwise <c>null</c>: the member is absent. An invoice with no firm is exempt too: it was judged only by the
-/// submission's own system finding (firm needed), never by a Procedure, and the resolver needs a firm.</para>
+/// submission is still processing). Otherwise <c>null</c>: the member is absent. An invoice no Procedure judged is exempt too (it was judged only by
+/// the submission's own system finding): one with no firm (the resolver needs a firm), and one whose stored findings carry no decision, which is how
+/// the pipeline records that no evaluation ran (no firm at submission, or the Procedures could not be resolved on the last delivery). A null
+/// snapshot alone is not that marker (a correction, an added line and the size cap store one too, and read "Not yet checked").</para>
 /// <para><b>Rights.</b> The resolver runs with the app identity (the injected <see cref="IGenericEntityService"/>), exactly like the evaluation, so a
 /// caller who cannot read a distance-1 parent gets neither a false banner nor a fault. The result is one state, never the basis.</para>
 /// <para><b>Cost.</b> One resolution per invoice: the resolver's own reads, each once, none per line. Every work date is resolved in memory.</para>
@@ -116,7 +118,21 @@ public sealed class ProcedureChangeBanner
             return null;
         }
 
-        var stored = StoredSnapshotOf(findingsJson, out var receivedOn);
+        if (ParseFindings(findingsJson) is not { } root)
+        {
+            return Of(NotYetChecked);
+        }
+
+        // Exempt: no evaluation ran (the stored findings carry no decision of 073). The submission was held before any rule was judged (it has
+        // no firm yet, or its Procedures could not be resolved on the last delivery), so only the system submission finding judged it and no
+        // Procedure's version can have changed under it. This is NOT "the snapshot is null": a correction, an added line and the size cap also
+        // store a null snapshot, and those invoices WERE evaluated (they keep a decision) and read "Not yet checked".
+        if (root["decision"] is null)
+        {
+            return null;
+        }
+
+        var stored = StoredSnapshotOf(root, out var receivedOn);
         if (stored is null)
         {
             return Of(NotYetChecked);
@@ -135,15 +151,21 @@ public sealed class ProcedureChangeBanner
                 return CouldNot(invoice.Id, "dates", null);
             }
 
+            // The token stops a resolver that honours it; WaitAsync holds the limit even for a Dataverse call that ignores it.
             using var timeout = new CancellationTokenSource(ResolutionTimeout, _clock);
             using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, timeout.Token);
             try
             {
                 var resolution = await ProcedureResolver.ReadAsync(
-                    _entities, _logger, new CoreRecordReference(KindOf(single.Entity), single.Id), firm, linked.Token).ConfigureAwait(false);
+                        _entities, _logger, new CoreRecordReference(KindOf(single.Entity), single.Id), firm, linked.Token)
+                    .WaitAsync(ResolutionTimeout, _clock, ct).ConfigureAwait(false);
                 var current = ProcedureSnapshot.Build(new BillingProcedureBasis(
                     resolution.Chain, dates.Select(resolution.RulesOn).ToList(), []));
                 return Of(SameResolution(stored, current) ? NotChanged : Changed);
+            }
+            catch (TimeoutException)
+            {
+                return CouldNot(invoice.Id, "timeout", null);
             }
             catch (OperationCanceledException) when (!ct.IsCancellationRequested && timeout.IsCancellationRequested)
             {
@@ -173,13 +195,9 @@ public sealed class ProcedureChangeBanner
         _ => null,
     });
 
-    /// <summary>
-    /// The stored snapshot member of <paramref name="findingsJson"/> and the received date the evaluator fell back on, or null: there is no usable
-    /// snapshot (no findings, a damaged or unparseable text, no member, a member that is JSON null, an unknown snapshot version).
-    /// </summary>
-    private static JsonObject? StoredSnapshotOf(string? findingsJson, out DateOnly? receivedOn)
+    /// <summary>The stored findings as an object, or null: no findings, or a damaged or unparseable text.</summary>
+    private static JsonObject? ParseFindings(string? findingsJson)
     {
-        receivedOn = null;
         if (string.IsNullOrWhiteSpace(findingsJson))
         {
             return null;
@@ -187,16 +205,7 @@ public sealed class ProcedureChangeBanner
 
         try
         {
-            if (JsonNode.Parse(findingsJson) is not JsonObject root || ProcedureSnapshot.Read(root) is null || root[ProcedureSnapshot.Member] is not JsonObject member)
-            {
-                return null;
-            }
-
-            receivedOn = root["receivedOn"] is JsonValue value && value.TryGetValue<string>(out var text)
-                && DateOnly.TryParseExact(text, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var date)
-                ? date
-                : null;
-            return member;
+            return JsonNode.Parse(findingsJson) as JsonObject;
         }
         catch (JsonException)
         {
@@ -205,8 +214,28 @@ public sealed class ProcedureChangeBanner
     }
 
     /// <summary>
-    /// The distinct work dates the evaluation judges, in order: the invoice date (else the received date, as the evaluator falls back), and each Fee and
-    /// Expense line's date (else the invoice date). The stored columns, which already hold any correction. Adjustment lines are never evaluated.
+    /// The stored snapshot member of <paramref name="root"/> and the received date the evaluator fell back on, or null: there is no usable
+    /// snapshot (no member, a member that is JSON null, a damaged member, an unknown snapshot version).
+    /// </summary>
+    private static JsonObject? StoredSnapshotOf(JsonObject root, out DateOnly? receivedOn)
+    {
+        receivedOn = null;
+        if (ProcedureSnapshot.Read(root) is null || root[ProcedureSnapshot.Member] is not JsonObject member)
+        {
+            return null;
+        }
+
+        receivedOn = root["receivedOn"] is JsonValue value && value.TryGetValue<string>(out var text)
+            && DateOnly.TryParseExact(text, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var date)
+            ? date
+            : null;
+        return member;
+    }
+
+    /// <summary>
+    /// The distinct work dates the evaluation judges, in order (<see cref="BillingJudgedDates"/>, the evaluator's rule): the invoice date (else the
+    /// received date, as the evaluator falls back), and each Fee and Expense line's date (else the invoice date). The stored columns, which already
+    /// hold any correction. Lines that are not evaluated (an Adjustment, a row with no cost type) contribute nothing.
     /// </summary>
     internal static IReadOnlyList<DateOnly> WorkDatesOf(Entity invoice, IReadOnlyList<Entity> lineRows, DateOnly? receivedOn)
     {
@@ -216,13 +245,11 @@ public sealed class ProcedureChangeBanner
             return [];
         }
 
-        return lineRows
-            .Where(r => r.GetAttributeValue<OptionSetValue>(InvoiceTotalsService.LineCostType)?.Value != (int)InvoiceLineCostType.Adjustment)
-            .Select(r => r.GetAttributeValue<DateTime?>(InvoiceSubmissionPersister.LineEventDate) is { } date ? DateOnly.FromDateTime(date) : fallback)
-            .Append(fallback)
-            .Distinct()
-            .Order()
-            .ToList();
+        return BillingJudgedDates.Of(
+            fallback,
+            lineRows
+                .Where(r => BillingJudgedDates.IsEvaluated(r.GetAttributeValue<OptionSetValue>(InvoiceTotalsService.LineCostType)?.Value))
+                .Select(r => r.GetAttributeValue<DateTime?>(InvoiceSubmissionPersister.LineEventDate) is { } date ? DateOnly.FromDateTime(date) : (DateOnly?)null));
     }
 
     private static bool SameResolution(JsonObject stored, JsonObject current) =>

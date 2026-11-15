@@ -1,4 +1,6 @@
 using System.Reflection;
+using Sprk.Bff.Api.Api.Filters;
+using Sprk.Bff.Api.Api.Finance;
 using Sprk.Bff.Api.Infrastructure.DI;
 using Sprk.Bff.Api.Services.Finance;
 using Sprk.Bff.Api.Services.Finance.Procedures;
@@ -18,6 +20,9 @@ namespace Spaarke.ArchTests;
 /// included), a call to one of its members, to a method that takes or returns it, or to a member of a type that returns it (so reading
 /// <c>InvoiceReviewDto.ProcedureChange</c> counts), a generic method instantiated over it, an IL type operand, and a string constant that names it.
 /// A lambda or an async state machine is attributed to the outermost type it is written in. The type itself is not a referrer.</para>
+/// <para><b>What else is listed.</b> Every type that names <c>InvoiceReviewDto</c> (the model that carries the member), and every caller of the
+/// <c>InvoiceReviewReadService.GetAsync</c> overload that takes step 0's verdict. Not covered: the value a caller passes (the route's wiring is a
+/// contract test), a reflection or delegate hand-off, and test assemblies.</para>
 /// <para><b>Closed lists, no baseline.</b> The expected set must equal the found set: an extra referrer fails, and a listed type that no longer
 /// references the target fails too, so the lists only shrink. <b>Controls</b>: <see cref="Detector_MustFireAndMustNotFire"/> runs the same detector
 /// over the <c>BannerControl*</c> fixtures below. Why not a source scan: a text search misses a reference by <c>var</c>, a generic argument or a
@@ -44,6 +49,34 @@ public class ProcedureChangeBannerCallerBoundaryGuardTests
         var found = Referrers(typeof(Program).Assembly.GetTypes(), BannerDto);
 
         AssertSame(found, Sorted(typeof(ProcedureChangeBanner), typeof(InvoiceReviewDto), typeof(InvoiceReviewReadService)), BannerDto);
+    }
+
+    [Fact(DisplayName = "113 (model 8.2): only the review route and the review service name InvoiceReviewDto (the model that carries the member reaches no other route or projection)")]
+    public void OnlyTheReviewRouteAndService_NameTheReviewModel()
+    {
+        var found = Referrers(typeof(Program).Assembly.GetTypes(), typeof(InvoiceReviewDto));
+
+        AssertSame(found, Sorted(typeof(InvoiceReviewReadService), typeof(InvoiceLineReviewEndpoints)), typeof(InvoiceReviewDto));
+    }
+
+    [Fact(DisplayName = "113 (model 8.2): only the review route (and the service's own verdict-less overload) calls the GetAsync overload that takes step 0's verdict (no other caller can request the banner)")]
+    public void OnlyTheReviewRoute_CallsTheVerdictOverload()
+    {
+        var found = CallersOf(typeof(Program).Assembly.GetTypes(), VerdictOverload);
+
+        // The service itself calls it from its verdict-less overload (passing none), which is why it is listed beside the route.
+        AssertSame(found, Sorted(typeof(InvoiceLineReviewEndpoints), typeof(InvoiceReviewReadService)), typeof(InvoiceReviewReadService));
+    }
+
+    private static readonly MethodInfo VerdictOverload = typeof(InvoiceReviewReadService).GetMethods()
+        .Single(m => m.Name == nameof(InvoiceReviewReadService.GetAsync) && m.GetParameters().Any(p => p.ParameterType == typeof(FinanceStepZeroVerdict?)));
+
+    [Fact(DisplayName = "113 (controls): the verdict-overload detector flags a caller of the verdict overload and passes a caller of the verdict-less one and an unrelated type")]
+    public void VerdictOverloadDetector_MustFireAndMustNotFire()
+    {
+        var found = CallersOf([typeof(VerdictControlCaller), typeof(VerdictControlWithoutVerdict), typeof(BannerControlBystander)], VerdictOverload);
+
+        Assert.Equal(new[] { typeof(VerdictControlCaller).FullName! }, found.ToArray());
     }
 
     [Fact(DisplayName = "113 (controls): the detector flags a caller by call, by field, by generic resolution and by a getter's return, and passes an unrelated type")]
@@ -80,6 +113,13 @@ public class ProcedureChangeBannerCallerBoundaryGuardTests
             + "Allowed (and expected): " + string.Join(", ", allowed)
             + ". Found: " + string.Join(", ", found.OrderBy(n => n, StringComparer.Ordinal))
             + ". A new referrer must be reviewed (internal callers only, model 8.2) and be listed here with that reason.");
+
+    /// <summary>The outermost types (full names) whose method bodies call exactly <paramref name="method"/>.</summary>
+    private static HashSet<string> CallersOf(IEnumerable<Type> types, MethodInfo method) =>
+        IlCallScan.MethodReferences(types.ToList())
+            .Where(r => r.Target is MethodInfo called && called.MetadataToken == method.MetadataToken && called.Module == method.Module)
+            .Select(r => IlCallScan.Outermost(r.Caller).FullName!)
+            .ToHashSet(StringComparer.Ordinal);
 
     /// <summary>The outermost types (full names) that hold, resolve, call or name <paramref name="target"/>. The target and its nested types are not referrers.</summary>
     private static HashSet<string> Referrers(IEnumerable<Type> types, Type target)
@@ -170,6 +210,20 @@ internal static class BannerControlResolver
 internal static class BannerControlGetterReader
 {
     internal static string? Read(InvoiceReviewDto review) => review.ProcedureChange?.State;
+}
+
+/// <summary>Control (must fire): calls the overload that takes step 0's verdict.</summary>
+internal static class VerdictControlCaller
+{
+    internal static Task<InvoiceReviewDto?> Call(InvoiceReviewReadService service, Guid id, InvoiceContextService.InvoiceCaller caller) =>
+        service.GetAsync(id, caller, FinanceStepZeroVerdict.Internal, CancellationToken.None);
+}
+
+/// <summary>Control (must not fire): calls the overload with no verdict, which can never carry the banner.</summary>
+internal static class VerdictControlWithoutVerdict
+{
+    internal static Task<InvoiceReviewDto?> Call(InvoiceReviewReadService service, Guid id, InvoiceContextService.InvoiceCaller caller) =>
+        service.GetAsync(id, caller, CancellationToken.None);
 }
 
 /// <summary>Control (must not fire): has nothing to do with the banner or its member.</summary>

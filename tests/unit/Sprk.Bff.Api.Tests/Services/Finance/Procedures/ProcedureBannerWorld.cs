@@ -228,7 +228,14 @@ internal sealed class ProcedureBannerWorld
             Entities.Object, NullLogger.Instance, new CoreRecordReference(CoreRecordKind.Matter, M), firm, CancellationToken.None);
         var snapshot = ProcedureSnapshot.Build(new BillingProcedureBasis(
             resolution.Chain, dates.Distinct().Order().Select(resolution.RulesOn).ToList(), []));
-        return new JsonObject { ["schema"] = 1, ["receivedOn"] = "2026-03-20", [ProcedureSnapshot.Member] = snapshot }.ToJsonString();
+        // "decision": the stored 073 decision, present exactly when an evaluation ran (its absence is what exempts a held, never-evaluated invoice).
+        return new JsonObject
+        {
+            ["schema"] = 1,
+            ["receivedOn"] = "2026-03-20",
+            ["decision"] = new JsonObject { ["outcome"] = "Accepted" },
+            [ProcedureSnapshot.Member] = snapshot,
+        }.ToJsonString();
     }
 
     /// <summary>The number of Dataverse reads made so far (the resolver's reads and nothing else: the banner reads through no other seam).</summary>

@@ -297,11 +297,11 @@ public sealed class ProcedureChangeBannerTests
     }
 
     [Theory(DisplayName = "113 NotYetChecked: a snapshot without the 7.4 Procedure members (before v5, dropped, damaged, unknown version) is Not yet checked, never NotChanged")]
-    [InlineData("""{"schema":1,"receivedOn":"2026-03-20","findings":[]}""")]
-    [InlineData("""{"schema":1,"receivedOn":"2026-03-20","procedureSnapshot":null}""")]
-    [InlineData("""{"schema":1,"receivedOn":"2026-03-20","procedureSnapshot":{"version":2,"applications":[],"resolutions":[]}}""")]
-    [InlineData("""{"schema":1,"receivedOn":"2026-03-20","procedureSnapshot":{"version":1,"chain":[],"overrides":[]}}""")]
-    [InlineData("""{"schema":1,"procedureSnapshot":"damaged"}""")]
+    [InlineData("""{"schema":1,"receivedOn":"2026-03-20","decision":{"outcome":"Accepted"},"findings":[]}""")]
+    [InlineData("""{"schema":1,"receivedOn":"2026-03-20","decision":{"outcome":"Accepted"},"procedureSnapshot":null}""")]
+    [InlineData("""{"schema":1,"receivedOn":"2026-03-20","decision":{"outcome":"Accepted"},"procedureSnapshot":{"version":2,"applications":[],"resolutions":[]}}""")]
+    [InlineData("""{"schema":1,"receivedOn":"2026-03-20","decision":{"outcome":"Accepted"},"procedureSnapshot":{"version":1,"chain":[],"overrides":[]}}""")]
+    [InlineData("""{"schema":1,"decision":{"outcome":"Accepted"},"procedureSnapshot":"damaged"}""")]
     [InlineData("""{not json""")]
     [InlineData("""[]""")]
     public async Task UnusableSnapshot_IsNotYetChecked(string findings)
