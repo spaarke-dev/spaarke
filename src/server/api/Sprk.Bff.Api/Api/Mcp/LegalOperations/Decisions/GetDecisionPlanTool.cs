@@ -124,7 +124,8 @@ internal sealed class GetDecisionPlanTool : McpToolDefinition
         if (row.EvidenceTruncated)
         {
             summary += row.EvidenceTotal > 0
-                ? $" The item stores {row.EvidenceTotal} evidence line(s); the first ones are returned."
+                // True also when the budget left room for none of the lines (a large unfinished review): "not all", never "the first ones".
+                ? $" The item stores {row.EvidenceTotal} evidence line(s); not all of them are returned here; open the item in Spaarke to see them all."
                 : " The item's evidence is too large to return here; open the item in Spaarke to see it.";
         }
 

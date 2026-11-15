@@ -15,6 +15,7 @@ import '@testing-library/jest-dom';
 import { fireEvent, screen, waitFor } from '@testing-library/react';
 import { DO_ID, doItem, doPlan } from '../__fixtures__/decisionWizardFixtures';
 import { CONFIRM_GUARD_MS } from '../DecisionItemWizard';
+import { DecisionCommitError } from '../decisionWizardTypes';
 import type { DecisionCommitFailure, DecisionReview } from '../decisionWizardTypes';
 import { makeLoader, makeService, renderWizard } from './decisionTestKit';
 
@@ -197,4 +198,25 @@ describe('Confirm guard on the send-choice footer (resumed unfinished review)', 
       expect(service.commit.mock.calls[0][1]).toMatchObject({ reviewId: REVIEW_ID, retry: true });
     }
   );
+
+  it('after a record fails with a send choice, Send again is held by the guard again before it posts', async () => {
+    // Not a resumed review: the choice buttons appear only after this record attempt fails (the guard re-arms on that transition).
+    const { service } = setup({ confirmGuardMs: GUARD });
+    service.commit.mockRejectedValueOnce(new DecisionCommitError(failure({ sendChoiceRequired: true })));
+    const next = await toLastActionStep();
+    fireEvent.click(next);
+    await screen.findByTestId('step-confirm');
+    await waitFor(() => expect(button('Record decision')).toBeEnabled(), { timeout: 3000 });
+    fireEvent.click(button('Record decision'));
+
+    const sendAgain = await screen.findByTestId('send-again');
+    expect(sendAgain).toBeDisabled();
+    fireEvent.click(sendAgain);
+    expect(service.commit).toHaveBeenCalledTimes(1); // only the failed record
+
+    await waitFor(() => expect(screen.getByTestId('send-again')).toBeEnabled(), { timeout: 3000 });
+    fireEvent.click(screen.getByTestId('send-again'));
+    await waitFor(() => expect(service.commit).toHaveBeenCalledTimes(2));
+    expect(service.commit.mock.calls[1][1]).toMatchObject({ retry: true, sendChoice: 'send-again' });
+  });
 });
