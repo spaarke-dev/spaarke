@@ -12,42 +12,22 @@
 
 ### In flight
 
-- **#2833 ordering with uac-r2 #2838:** #2838 adds `tests/Spaarke.ArchTests/ScriptMetadataStrongConsistencyGuardTests.cs`. Its KnownOffenders baseline lists the 12 scripts/ebilling files our e36a1e54c4 fixes, and the guard fails on any stale entry. If #2838 merges first, our master PR must delete those 12 entries in the same change. If ours merges first, tell uac-r2 so it empties the baseline before merging #2838.
-
-- **UPDATE:** 093's fix round (A–H) is merged into work at a95f7e7297 and pushed; the 093 branches are deleted.
-  - Sent to uac-r2 for review (gate diff plus callers). The conflict check found one overlap: #2615 on the Ledger ArchTest.
-  - ArchTests are being re-run on the merge.
-  - The PR to master waits for uac-r2 (093), ontology-r1 (084h-1) and the owner's go.
-  - The details below are history.
-
-- **093 (firm file routes)**
-  - Build: branch `worktree-agent-aa64df149f3786340` (dc2e5ab86c).
-  - Two Opus adversarial reviews are done.
-  - **Fix round 1 is running** in an Opus agent, on branch `worktree-agent-a69a2b98b7b63b95a`.
-    - **A (uac-r2 ruling B):** a systemuser caller also needs Read on the INVOICE ROW through CallerRecordAccessProbe's gate variant, intersected with the root Read. None → uniform 404; fault → 503, never the inherit answer. Contacts are unchanged.
-    - **B:** a firm-specific, server-side filtered Stored File read (no 50-row 503).
-    - **C:** the vacuous (a′) guard check.
-    - **D:** delete-own invoice-parent tests.
-    - **E:** remove the dead upload-only code.
-    - **F:** notes (no Content-Disposition; `.ProducesProblem(403)`).
-    - **G:** stale ProcedureLibraryCiamDenyTests header.
-    - **H:** known limits.
-  - **On its arrival:**
-    1. Check the diff.
-    2. Re-check only the fix diff.
-    3. Run `/conflict-check`.
-    4. Send the head to uac-r2 for review (gate diff plus direct callers).
-    5. Tell spa-r4 whether the DTO changed (today: value[] {id, fileName, contentType, sizeBytes, createdOn, scanStatus}).
-    6. Merge into work, then open the PR work → master.
-  - **Deploy order (strict):** spa-r4 has R4 task 021 built and merged first; then uac-r2 swaps in the BFF; then spa-r4 deploys the SPA immediately after.
-- Nothing else is running.
+- **Master PR (work → master): being opened.** It carries 093, 113, 084h-1 (with fix round 2), the #2833 ebilling slice and notes. master is merged into work at bd18cb8d60 (clean; no BFF changes came in).
+  - ontology-r1 PASSED 084h-1 fix round 2 and approves by PR comment once CI is green. The PR description lists the amended `DecisionRecordContextImmutabilityTests` and the new `RecordProcedureActions` set.
+  - uac-r2 PASSED 093.
+  - **Merging needs the owner's go.** After the merge, send the SHA to uac-r2, spa-r4 and word-add-in-r1.
+  - **#2838 ordering:** #2838 adds `tests/Spaarke.ArchTests/ScriptMetadataStrongConsistencyGuardTests.cs`. Its KnownOffenders baseline lists the 12 scripts/ebilling files our e36a1e54c4 fixes, and the guard fails on any stale entry. #2838 is still OPEN.
+    - If #2838 merges first, our PR deletes those 12 entries in the same change.
+    - If ours merges first, tell uac-r2 to empty the baseline before #2838 merges.
+  - **Deploy order (strict):** spa-r4's R4 021 built and merged first; then uac-r2's BFF swap (owner go in uac-r2's session); then spa-r4's SPA immediately after.
+- **Reminder for 084h-2 (ontology-r1):** the writer caps only `reason` at 2000 characters, not `note`. 084h-2 must enforce or trim the note at the service (design §9), so an over-long note never reaches the create and fails as a retryable CreateFailed.
 
 ### Done today, on work (pushed)
 
 - **113 Procedure-change banner:** ✅, merged 84e708682c. One adversarial pass plus fix round. ontology-r1 PASSED the judged-dates helper extract (`Services/Signals/Billing/BillingJudgedDates.cs`); keep the Fee/Expense filter at the row→request boundary.
 - **084h-1 writer entry** (`WriteRecordProcedureDecisionAsync`, `RecordProcedureActions`): merged df7dc16ac9. One adversarial pass plus fix round 1 (shared FindKeyedRecordsAsync / AlreadyRecordedOrRefuse helpers, JSON blank note). Billing tests untouched and green (549/549).
-  - **Next:** send it to ontology-r1 for the path-B review, citing the amended `DecisionRecordContextImmutabilityTests`.
-  - Mark the TASK-INDEX 084h-1 row ✅ after ontology-r1 PASSES.
+  - Fix round 2 (ontology-r1's F3-1, F3-2 and item 3) merged at e841d90118; ontology-r1 PASSED it. TASK-INDEX row ✅.
+- **093 firm file routes:** ✅, merged a95f7e7297; uac-r2 PASSED it. TASK-INDEX row ✅.
   - Hand-offs H-1/H-2 to 084h-2/3 are in `notes/084h-1-writer-entry.md`.
 - **084h and 095f part 2 designs:** ontology-r1 PASSED both after round 1 (73ce24172c).
   - 084h-2 never deploys without 084h-3 (the repair job, ADR-004 IJobHandler).
@@ -87,17 +67,16 @@ The owner was offered "as recommended" for all ten.
 
 ## Next actions (in order)
 
-1. When the 093 fix round reports, follow the "On its arrival" list above.
-2. Send 084h-1 to ontology-r1 for the path-B review.
-3. When the owner answers, update decisions-log (EB-D-239+), then:
+1. Open the master PR (see In flight), ask ontology-r1 to sign off once CI is green, and get the owner's merge go.
+2. When the owner answers, update decisions-log (EB-D-239+), then:
    - write POMLs for 095f-2a … 2e and 084h-2/3/4;
    - build 095f-2a and 084h-2 + 084h-3 in parallel (max 4 agents).
-4. Task 112 (deploy, owner go here plus uac-r2 notices):
+3. Task 112 (deploy, owner go here plus uac-r2 notices):
    - the 084f role apply;
    - first create of `sprk_recordprocedures` plus the SpaarkeMaster AddSolutionComponent;
    - Billing-tab form placement.
    - `Deploy-EbillingInvoiceCorrectionNoteColumn.ps1` must run on any environment beyond dev before 095f goes there.
-5. Still owed to ontology-r1: the DEF-059 role note, the DEF-060 Signals diff, the 176 fixture change.
+4. Still owed to ontology-r1: the DEF-059 role note, the DEF-060 Signals diff, the 176 fixture change.
 
 ## Standing gates
 

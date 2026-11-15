@@ -87,6 +87,7 @@ Base: `e93ad7298d`. Binding rule unchanged: no existing signature or behaviour c
 |---|---|---|
 | H-1 | The decider-contact supplier 084h-2 will reuse (`BillingDecisionRecorder.cs:166`, `DeciderUnreadable`) refuses as `BillingRecordLookupFailed`, not `RecordProcedureLookupFailed`. Through the Procedure entry, an unreadable deciding contact therefore surfaces with the billing reason. | 084h-2 maps it: it either supplies its own contact reader with a Procedure reason, or translates the refusal at the recorder boundary. 084h-3's retry list must classify `BillingRecordLookupFailed` (a transient identity read: retry) and `CreateFailed` (retryable; after a timeout the row may exist, so the next delivery answers AlreadyRecorded). It must also classify `OwnerRefused` (a deleted core, K-c: permanent) and `OwnerResolutionFailed` (retry), which design §7.3 does not list. |
 | H-2 | A whitespace-only `Reason` hashes differently from a null one, as on the billing path (the writer hashes the reason as given). | 084h-2 trims the reason, and turns a blank one into null, before it builds the request. The repair job carries the same text, so the two stay equal. |
+| H-3 | The writer caps `reason` at 2000 characters but not the note (ontology-r1, fix round 2 PASS). An over-long note would reach the create and fail as a retryable `CreateFailed`. | 084h-2 enforces or trims the note to 2000 at the service before it builds the request (design §9), with a test. |
 
 **Runs (fix round 1)**
 
