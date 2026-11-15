@@ -41,6 +41,10 @@ export interface DecisionWizardHostProps {
   collectBecause?: boolean;
   /** Optional seam: render the wizard in place, with no modal envelope, for a frame too small for a dialog. Absent or false: SprkModal. */
   embedded?: boolean;
+  /** Optional seam: the Confirm step cannot record until it has been showing this long (`CONFIRM_GUARD_MS`). Absent or 0: no guard. */
+  confirmGuardMs?: number;
+  /** Optional seam: Escape closes the wizard (through the discard check). Absent or false: it never does. */
+  closeOnEscape?: boolean;
 }
 
 interface ActiveLaunch {
@@ -62,6 +66,8 @@ export const DecisionWizardHost: React.FC<DecisionWizardHostProps> = ({
   openRecord,
   collectBecause,
   embedded,
+  confirmGuardMs,
+  closeOnEscape,
 }) => {
   const [active, setActive] = React.useState<ActiveLaunch | null>(null);
   const activeRef = React.useRef<ActiveLaunch | null>(null);
@@ -116,6 +122,8 @@ export const DecisionWizardHost: React.FC<DecisionWizardHostProps> = ({
       uiScale={uiScale}
       collectBecause={collectBecause}
       embedded={embedded}
+      confirmGuardMs={confirmGuardMs}
+      closeOnEscape={closeOnEscape}
     />
   );
 };

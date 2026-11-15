@@ -79,6 +79,16 @@ export interface DecisionWizardProps {
   collectBecause?: boolean;
   /** Optional seam: render in the page with no modal envelope (a frame too small for a dialog). Absent or false: the modal wizard. */
   embedded?: boolean;
+  /**
+   * Optional seam: the Confirm step cannot record until it has been showing this long (`CONFIRM_GUARD_MS`), so a double click on Next
+   * at the last action step cannot record a decision the user has not seen (NFR-06). Absent or 0: no guard, as before.
+   */
+  confirmGuardMs?: number;
+  /**
+   * Optional seam: Escape closes the wizard (through the same discard check as Close), in the modal and embedded forms alike. Absent
+   * or false: Escape never closes it (the shell's explicit dismissal), as before.
+   */
+  closeOnEscape?: boolean;
 }
 
 type Loaded =
@@ -126,6 +136,8 @@ export const DecisionWizard: React.FC<DecisionWizardProps> = ({
   today: todayProp,
   collectBecause,
   embedded,
+  confirmGuardMs,
+  closeOnEscape,
 }) => {
   const today = React.useMemo(() => todayProp ?? new Date(), [todayProp]);
 
@@ -442,12 +454,30 @@ export const DecisionWizard: React.FC<DecisionWizardProps> = ({
       uiScale={uiScale}
       today={today}
       embedded={embedded}
+      confirmGuardMs={confirmGuardMs}
     />
   );
 
+  // Escape (optional seam). A React event reaches here through the modal's portal. It is taken in the capture phase, before the
+  // dialog surface sees it (which would only swallow it: the shell's dismissal is explicit). A control that has its own list or menu
+  // open keeps its Escape (it closes that, not the wizard), and nothing is closed while a request is out (`requestClose`).
+  const onEscape = (e: React.KeyboardEvent<HTMLDivElement>): void => {
+    if (e.key !== 'Escape') return;
+    if ((e.target as HTMLElement | null)?.closest?.('[aria-expanded="true"],[role="listbox"],[role="menu"]')) return;
+    e.stopPropagation();
+    requestClose();
+  };
+
   return (
     <>
-      {body}
+      {closeOnEscape ? (
+        // eslint-disable-next-line jsx-a11y/no-static-element-interactions -- listens for Escape from the wizard's own controls
+        <div style={{ display: 'contents' }} onKeyDownCapture={onEscape}>
+          {body}
+        </div>
+      ) : (
+        body
+      )}
       {/* Mounted only while asked: a closed Fluent dialog left mounted marks the open wizard surface aria-hidden. */}
       {confirmClose && (
         <ConfirmModal

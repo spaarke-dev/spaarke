@@ -31,6 +31,7 @@ import {
   makeStyles,
   tokens,
 } from '@fluentui/react-components';
+import { CONFIRM_GUARD_MS } from '@spaarke/ui-components/components/DecisionWizard/DecisionItemWizard';
 import { DecisionWizardHost } from '@spaarke/ui-components/components/DecisionWizard/DecisionWizardHost';
 import { launchDecisionWizard } from '@spaarke/ui-components/components/DecisionWizard/decisionWizardLauncher';
 import type { WorklistData } from '@spaarke/ui-components/components/Worklist/worklistService';
@@ -256,7 +257,14 @@ export function WizardDialog({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [place.place, place.launch]);
 
-  const wizardProps = { authenticatedFetch: bridge.fetch, bffBaseUrl: '', collectBecause: true } as const;
+  // `confirmGuardMs`: Confirm cannot record until it has been showing half a second (NFR-06), so a double click or a held Enter on Next at
+  // the last action step moves to Confirm and records nothing: Next and Record decision are the same button.
+  const wizardProps = {
+    authenticatedFetch: bridge.fetch,
+    bffBaseUrl: '',
+    collectBecause: true,
+    confirmGuardMs: CONFIRM_GUARD_MS,
+  } as const;
 
   return (
     <div className={styles.root}>

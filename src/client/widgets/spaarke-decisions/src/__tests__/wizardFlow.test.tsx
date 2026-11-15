@@ -91,11 +91,21 @@ async function pick(placeholder: RegExp, typed: string, candidate: string) {
 const next = () => fireEvent.click(button('Next'));
 const skip = () => fireEvent.click(screen.getByRole('button', { name: /^skip$/i }));
 
+/**
+ * Waits for Confirm's Record button to be usable. Confirm holds its button for half a second after it appears (NFR-06: a double click on
+ * Next must not record), so a test that means to record waits for that, as a person reading the step would.
+ */
+async function recordButtonReady(name: RegExp = /^(record decision|dismiss and record)$/i) {
+  await screen.findByTestId('step-confirm');
+  await waitFor(() => expect(screen.getByRole('button', { name })).toBeEnabled());
+  return screen.getByRole('button', { name });
+}
+
 /** Records on the Confirm step with a because; resolves with the review the host received. */
 async function confirmAndRecord(host: WizardHost, because = 'Because the matter settled.') {
   await screen.findByTestId('step-confirm');
   enter(screen.getByRole('textbox', { name: /^Because/ }), because);
-  fireEvent.click(screen.getByRole('button', { name: /^(record decision|dismiss and record)$/i }));
+  fireEvent.click(await recordButtonReady());
   await waitFor(() => expect(host.callsTo(COMPLETE_TOOL)).toHaveLength(1));
   return host.callsTo(COMPLETE_TOOL)[0].args as { signalId: string; review: DecisionReview };
 }
@@ -332,8 +342,7 @@ describe('what the server says is shown, and the Work Item stays open', () => {
     enter(screen.getByRole('textbox', { name: /^New budget/ }), '250000');
     enter(screen.getByRole('textbox', { name: /^Reason for revision/ }), 'Appeal added');
     next();
-    await screen.findByTestId('step-confirm');
-    fireEvent.click(button('Record decision'));
+    fireEvent.click(await recordButtonReady(/^record decision$/i));
     return screen.findByTestId('commit-failure');
   }
 
@@ -635,7 +644,7 @@ describe('the Because box', () => {
     await screen.findByTestId('step-confirm');
     expect(screen.getByTestId('because')).toBeInTheDocument();
     enter(screen.getByRole('textbox', { name: /^Because/ }), '   ');
-    fireEvent.click(button('Record decision'));
+    fireEvent.click(await recordButtonReady(/^record decision$/i));
     await waitFor(() => expect(host.callsTo(COMPLETE_TOOL)).toHaveLength(1));
     expect((host.callsTo(COMPLETE_TOOL)[0].args.review as DecisionReview).because).toBeUndefined();
   });
