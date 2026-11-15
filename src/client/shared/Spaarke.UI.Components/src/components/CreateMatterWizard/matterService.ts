@@ -36,9 +36,11 @@ import type {
 import type { AuthenticatedFetchFn as ThrowingFetchFn } from '../../utils/fetchTypes';
 import { createRecordViaBffWithWarnings } from '../../utils/adapters/bffChildWriteAdapter';
 import { cleanGuid, discoverNavProps, toNavPropMap } from '../../services/PolymorphicResolverService';
+import { sendComposedEmail } from '../EmailComposer/composeOnlySend';
+import type { IComposedEmail } from '../EmailComposer/composeOnlySend';
 
 // ---------------------------------------------------------------------------
-// Contact type (used by AssignCounselStep search results)
+// Contact type (used by contact search results)
 // ---------------------------------------------------------------------------
 
 /**
@@ -89,7 +91,8 @@ export interface IDraftSummaryInput {
 export interface IFollowOnActions {
   assignCounsel?: IAssignCounselInput;
   draftSummary?: IDraftSummaryInput;
-  sendEmail?: { to: string; subject: string; body: string };
+  /** Task 182 (D-219): the composed email, sent with `sendComposedEmail` and the new matter as the association. */
+  sendEmail?: { email: IComposedEmail; onResolveShareLink?: (documentId: string) => Promise<string | null> };
 }
 
 // ---------------------------------------------------------------------------
@@ -373,9 +376,9 @@ export class MatterService {
             uploadResult.errors.map(e => e.fileName).join(', ')
         );
       }
-    } else if (uploadedFiles.length > 0 && !this._containerId) {
-      warnings.push('File upload skipped -- no SPE container configured. Files can be added later.');
     }
+    // There is no "upload skipped, no SPE container" branch: since task 076 the upload does not depend on `_containerId`,
+    // so a caller with files always reaches the upload above (the old `else if` was unreachable).
 
     // -- Step 3: Follow-on actions --
     if (followOnActions.assignCounsel) {
@@ -393,14 +396,14 @@ export class MatterService {
     }
 
     if (followOnActions.sendEmail) {
-      const emailResult = await this._entityService.sendEmail({
-        to: followOnActions.sendEmail.to,
-        subject: followOnActions.sendEmail.subject,
-        body: followOnActions.sendEmail.body,
+      const emailResult = await sendComposedEmail(followOnActions.sendEmail.email, {
         associations: [{ entityType: 'sprk_matter', entityId: matterId, entityName: form.matterName.trim() }],
+        authenticatedFetch: this._authenticatedFetch,
+        bffBaseUrl: this._bffBaseUrl,
+        onResolveShareLink: followOnActions.sendEmail.onResolveShareLink,
       });
       if (!emailResult.success) {
-        warnings.push(emailResult.warning ?? 'Failed to create email activity. Please send manually.');
+        warnings.push(emailResult.warning ?? 'The email was not sent. Send it from the matter.');
       }
     }
 
@@ -454,7 +457,7 @@ export class MatterService {
 }
 
 // ---------------------------------------------------------------------------
-// Contact search helper (for AssignCounselStep and lookup fields)
+// Contact search helper (for lookup fields)
 // ---------------------------------------------------------------------------
 
 /**
@@ -571,7 +574,7 @@ export async function searchPracticeAreas(dataService: IDataService, nameFilter:
 }
 
 // ---------------------------------------------------------------------------
-// AI draft summary helper (for DraftSummaryStep)
+// AI draft summary helper (used by CreateRecordStep; the DraftSummaryStep it was written for was retired by ontology task 184)
 // ---------------------------------------------------------------------------
 
 export interface IAiDraftSummaryResponse {

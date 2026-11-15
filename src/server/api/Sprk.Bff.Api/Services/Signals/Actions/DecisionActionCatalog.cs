@@ -169,7 +169,16 @@ public static class DecisionActionCatalog
         // ---- Decide lane ----------------------------------------------------------------------------------
         new("send-budget-inquiry", "Send budget inquiry", DecisionLane.Decide, IsNextStep: false, WorkType: "ask",
             [
-                .. MessageParameters,
+                // Task 192 (D-224): the email opens with the standard default Subject and Message (the plan route's DefaultSource mechanism,
+                // task 167); declared on THIS action's own parameters, so send-reminder keeps the shared ones with no default.
+                MessageParameters[0],
+                MessageParameters[1] with { DefaultSource = DecisionParameterSources.BudgetInquirySubjectDefault },
+                MessageParameters[2] with { DefaultSource = DecisionParameterSources.BudgetInquiryBodyDefault },
+                // Task 190 (D-222): Cc and Bcc are sent end to end on THIS action only; send-reminder keeps the shared To/Subject/Message.
+                new("cc", "Cc", DecisionParameterKind.Text, Required: false,
+                    Hint: "Copied recipients; each sees the other recipients"),
+                new("bcc", "Bcc", DecisionParameterKind.Text, Required: false,
+                    Hint: "Blind-copied recipients; hidden from the others"),
                 // Task 043 / 070: which of the matter's outside firms the inquiry is to (sprk_regardingorganization).
                 new("outsideFirm", "Outside firm", DecisionParameterKind.Lookup, Required: false,
                     Hint: "The outside firm the inquiry is to; recorded on the inquiry so replies are tracked per firm",

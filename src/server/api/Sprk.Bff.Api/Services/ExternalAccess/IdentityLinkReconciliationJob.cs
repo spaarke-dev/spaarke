@@ -26,13 +26,21 @@ namespace Sprk.Bff.Api.Services.ExternalAccess;
 ///
 /// <para><b>Which environments.</b> First this BFF's own (<c>Dataverse:ServiceUrl</c>, through the DI-registered
 /// binder). Then its PROVISIONING TARGETS: the environment registration writes to when no target is given
-/// (<c>DATAVERSE_URL</c>) and every ACTIVE <c>sprk_dataverseenvironment</c> row — the only environments the approve
+/// (<c>DATAVERSE_URL</c>) and every ACTIVE, set-up <c>sprk_dataverseenvironment</c> row it serves (below) — the only environments the approve
 /// endpoint provisions into. A registration link that does not land there (a fault, a deny, a lost race, a
 /// collision) is therefore re-decided here on the next run, and a flag written there is re-evaluated and cleared
 /// here — the gap the second verifier round recorded (notes/task-141-identity-binding.md §12.1) is closed, not
 /// documented. Each target is reconciled exactly like the own environment, through the registration service's
 /// existing per-environment token path (ADR-028: the BFF's own credential, no new secret). One environment's
 /// failure fails the run but never stops the others.</para>
+///
+/// <para><b>Only the environments this BFF serves</b> (#2761). A registry row naming ANOTHER BFF's App Service
+/// (<c>sprk_appservicename</c>, compared with this BFF's <c>WEBSITE_SITE_NAME</c>) is a customer stamp. That stamp's own BFF
+/// reconciles it as ITS own environment, and this BFF's identity has no seat there (D-12/D-13), so it is skipped and
+/// logged, never reconciled from here. Coverage is unchanged: every environment is still reconciled, by the BFF that
+/// serves it. A registration this BFF makes in a stamp environment could not succeed either, for the same reason.
+/// Limit: if a stamp's App Service is renamed or removed while its row still names the old one, no BFF reconciles that
+/// environment until the row is corrected; the skip line in every run's log names the App Service it expected.</para>
 ///
 /// <para><b>Two passes per environment, one reason to change</b> (identity binding — CLAUDE.md §11.5;
 /// deliberately NOT folded into <see cref="ExternalAccessReconciliationJob"/>, whose single reason to change is the
@@ -106,6 +114,13 @@ public sealed class IdentityLinkReconciliationJob : IScheduledJob
     /// <summary>The configuration key naming the environment registration provisions into by default.</summary>
     internal const string RegistrationEnvironmentConfigKey = "DATAVERSE_URL";
 
+    /// <summary>
+    /// The configuration key naming this BFF's own App Service: <c>WEBSITE_SITE_NAME</c>, which App Service sets on every
+    /// app (read through the environment-variable configuration source). Compared with a registry row's
+    /// <c>sprk_appservicename</c> to decide which rows this BFF serves (#2761, <see cref="IsServedByThisBff"/>).
+    /// </summary>
+    internal const string OwnAppServiceConfigKey = "WEBSITE_SITE_NAME";
+
     private static readonly JsonSerializerOptions ResultJsonOptions = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
 
     private static readonly HashSet<SystemUserLinkOutcome> Definitive = new()
@@ -149,7 +164,7 @@ public sealed class IdentityLinkReconciliationJob : IScheduledJob
         "Links every enabled interactive systemuser to its contact by Entra oid (bind, create, or link), flags "
         + "identity collisions for an operator, and clears flags whose collision has been resolved — in this BFF's "
         + "own environment and in every environment it provisions users into (DATAVERSE_URL and the active, set-up "
-        + "sprk_dataverseenvironment rows). Never re-points or clears an existing link. Report-only until "
+        + "sprk_dataverseenvironment rows this BFF serves; a row naming another BFF's App Service is left to that BFF). Never re-points or clears an existing link. Report-only until "
         + "IdentityLink:Reconciliation:WritesEnabled is true. In its own environment it also removes the external access "
         + "of inactive contacts that still hold a binding or a grant (the removal sweep), which writes only when "
         + "IdentityLink:Reconciliation:RemovalSweepWritesEnabled is true as well.";
@@ -158,33 +173,95 @@ public sealed class IdentityLinkReconciliationJob : IScheduledJob
     internal bool WritesEnabled => ContactIdentityBinder.LinkWritesEnabled(_configuration);
 
     /// <summary>
-    /// The URLs of the registry rows this job reconciles: active rows whose setup has finished. A row still being
-    /// provisioned (<see cref="EnvironmentSetupStatus.NotStarted"/>, <see cref="EnvironmentSetupStatus.InProgress"/>) or
-    /// whose provisioning failed (<see cref="EnvironmentSetupStatus.Issue"/>) has no identity-binding schema and no BFF
-    /// access yet, so reading it fails every run (T186: the ACME placeholder failed the job every 5 minutes from
-    /// 2026-10-14). A row with no status predates the column and is kept, as before. Pure.
+    /// True when this BFF serves the registry row's environment: the row names no BFF App Service
+    /// (<c>sprk_appservicename</c> blank: an environment this BFF provisions into, e.g. a demo or the dev row), or names
+    /// this BFF's own App Service (<paramref name="ownAppServiceName"/>, from <see cref="OwnAppServiceConfigKey"/>),
+    /// compared case-insensitively. A row naming ANOTHER App Service is a customer stamp served by its own BFF, which
+    /// reconciles that environment as its own (#2761): this BFF's identity has no seat there (D-12/D-13 stamp isolation),
+    /// so reconciling it here could only fault. When this BFF's own name is unknown (blank, e.g. off App Service), every
+    /// row that names an App Service is treated as another BFF's. Pure.
     /// </summary>
-    public static IEnumerable<string?> ReconcilableRegistryUrls(IEnumerable<DataverseEnvironmentRecord> activeEnvironments)
+    public static bool IsServedByThisBff(DataverseEnvironmentRecord environment, string? ownAppServiceName)
+    {
+        ArgumentNullException.ThrowIfNull(environment);
+        if (string.IsNullOrWhiteSpace(environment.AppServiceName))
+        {
+            return true;
+        }
+
+        return !string.IsNullOrWhiteSpace(ownAppServiceName)
+            && string.Equals(environment.AppServiceName.Trim(), ownAppServiceName.Trim(), StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// The URLs of the registry rows this job reconciles: active rows that this BFF serves
+    /// (<see cref="IsServedByThisBff"/>, #2761) and whose setup has finished. A row still being provisioned
+    /// (<see cref="EnvironmentSetupStatus.NotStarted"/>, <see cref="EnvironmentSetupStatus.InProgress"/>) or whose
+    /// provisioning failed (<see cref="EnvironmentSetupStatus.Issue"/>) has no identity-binding schema and no BFF access
+    /// yet, so reading it fails every run (T186: the ACME placeholder failed the job every 5 minutes from 2026-10-14). A
+    /// row with no status predates the column and is kept, as before. Pure.
+    /// </summary>
+    public static IEnumerable<string?> ReconcilableRegistryUrls(
+        IEnumerable<DataverseEnvironmentRecord> activeEnvironments, string? ownAppServiceName)
     {
         ArgumentNullException.ThrowIfNull(activeEnvironments);
         return activeEnvironments
+            .Where(e => IsServedByThisBff(e, ownAppServiceName))
             .Where(e => e.SetupStatus is null or EnvironmentSetupStatus.Ready)
             .Select(e => e.DataverseUrl);
     }
 
     /// <summary>
-    /// The active registry rows <see cref="ReconcilableRegistryUrls"/> leaves out, counted by setup status (ordered by
-    /// status). Pure.
+    /// The active registry rows this BFF serves that <see cref="ReconcilableRegistryUrls"/> leaves out because their setup
+    /// has not finished, counted by setup status (ordered by status). Rows served by another BFF are counted by
+    /// <see cref="RegistryRowsServedByAnotherBff"/> instead, so the two counts never overlap. Pure.
     /// </summary>
     public static IReadOnlyDictionary<EnvironmentSetupStatus, int> SkippedRegistryRowsByStatus(
-        IEnumerable<DataverseEnvironmentRecord> activeEnvironments)
+        IEnumerable<DataverseEnvironmentRecord> activeEnvironments, string? ownAppServiceName)
     {
         ArgumentNullException.ThrowIfNull(activeEnvironments);
         return activeEnvironments
+            .Where(e => IsServedByThisBff(e, ownAppServiceName))
             .Where(e => e.SetupStatus is { } status && status != EnvironmentSetupStatus.Ready)
             .GroupBy(e => e.SetupStatus!.Value)
             .OrderBy(g => g.Key)
             .ToDictionary(g => g.Key, g => g.Count());
+    }
+
+    /// <summary>
+    /// The active registry rows served by another BFF (<see cref="IsServedByThisBff"/> false), as the App Service each
+    /// names, counted (ordered by name, case-insensitive). Logged every run so a row skipped for this reason is visible,
+    /// never silently dropped (#2761). Pure.
+    /// </summary>
+    public static IReadOnlyDictionary<string, int> RegistryRowsServedByAnotherBff(
+        IEnumerable<DataverseEnvironmentRecord> activeEnvironments, string? ownAppServiceName)
+    {
+        ArgumentNullException.ThrowIfNull(activeEnvironments);
+        return activeEnvironments
+            .Where(e => !IsServedByThisBff(e, ownAppServiceName))
+            .GroupBy(e => e.AppServiceName!.Trim(), StringComparer.OrdinalIgnoreCase)
+            .OrderBy(g => g.Key, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => g.Count(), StringComparer.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// The customer ids of the rows this job WILL reconcile (setup Ready, or no status) that carry a <c>sprk_customerid</c> but
+    /// no <c>sprk_appservicename</c> (ordered, case-insensitive, distinct). A finished stamp row looks like this when
+    /// provisioning's registry write was lost (REGISTRY-STALE; recovered with <c>/provision-environment</c> Step 6a).
+    /// <see cref="IsServedByThisBff"/> keeps such a row, as before, so the run warns about it instead of the row faulting
+    /// silently (#2761, provisioning-r1). A row still being provisioned (its App Service is written only when provisioning
+    /// completes) or one that failed is not reconciled, so it is not named. Pure.
+    /// </summary>
+    public static IReadOnlyList<string> CustomerRowsWithoutAnAppService(IEnumerable<DataverseEnvironmentRecord> activeEnvironments)
+    {
+        ArgumentNullException.ThrowIfNull(activeEnvironments);
+        return activeEnvironments
+            .Where(e => e.SetupStatus is null or EnvironmentSetupStatus.Ready)
+            .Where(e => string.IsNullOrWhiteSpace(e.AppServiceName) && !string.IsNullOrWhiteSpace(e.CustomerId))
+            .Select(e => e.CustomerId!.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(id => id, StringComparer.OrdinalIgnoreCase)
+            .ToList();
     }
 
     /// <summary>
@@ -399,7 +476,8 @@ public sealed class IdentityLinkReconciliationJob : IScheduledJob
 
     /// <summary>
     /// The environments this BFF provisions users into (third fix round, closing the registration-link gap): the
-    /// registration default (<c>DATAVERSE_URL</c>) and every ACTIVE registry row, each reconciled like the own
+    /// registration default (<c>DATAVERSE_URL</c>) and every ACTIVE, set-up registry row this BFF serves
+    /// (<see cref="ReconcilableRegistryUrls"/>; a row naming another BFF's App Service is left to that BFF, #2761), each reconciled like the own
     /// environment. Not configured when <c>DATAVERSE_URL</c> is absent — then this BFF registers nobody anywhere.
     /// </summary>
     private async Task ReconcileProvisioningTargetsAsync(
@@ -420,11 +498,37 @@ public sealed class IdentityLinkReconciliationJob : IScheduledJob
             var registry = services.GetService<DataverseEnvironmentService>()
                 ?? throw new InvalidOperationException("DataverseEnvironmentService is not registered.");
             var active = await registry.GetActiveEnvironmentsAsync(ct).ConfigureAwait(false);
-            registryUrls = ReconcilableRegistryUrls(active).ToList();
+            var ownAppService = _configuration[OwnAppServiceConfigKey];
+            registryUrls = ReconcilableRegistryUrls(active, ownAppService).ToList();
+
+            // #2761: a row naming another BFF's App Service is that stamp's own environment, reconciled by that BFF. It is
+            // logged (never silently dropped), and recorded in the run's result.
+            var servedElsewhere = RegistryRowsServedByAnotherBff(active, ownAppService);
+            targets.ServedByAnotherBff = servedElsewhere.Values.Sum();
+            if (servedElsewhere.Count > 0)
+            {
+                _logger.LogInformation(
+                    "[ID-LINK-RECON] Skipped {SkippedCount} registry row(s) served by another BFF (each reconciles its own "
+                    + "environment): {SkippedByAppService}. This BFF's App Service: {OwnAppService}. correlationId={CorrelationId}",
+                    targets.ServedByAnotherBff,
+                    string.Join(", ", servedElsewhere.Select(kv => $"{kv.Key}={kv.Value}")),
+                    string.IsNullOrWhiteSpace(ownAppService) ? "(unknown)" : ownAppService,
+                    context.CorrelationId);
+            }
+
+            var unnamedCustomerRows = CustomerRowsWithoutAnAppService(active);
+            if (unnamedCustomerRows.Count > 0)
+            {
+                _logger.LogWarning(
+                    "[ID-LINK-RECON] {Count} active registry row(s) carry a customer id but no App Service name, so this BFF "
+                    + "reconciles them: {CustomerIds}. If a row is a customer stamp, its registry write is stale (REGISTRY-STALE; "
+                    + "recover with /provision-environment Step 6a). correlationId={CorrelationId}",
+                    unnamedCustomerRows.Count, string.Join(", ", unnamedCustomerRows), context.CorrelationId);
+            }
 
             // Skipped rows are logged, so a live environment stuck in Issue (a failed re-provision) shows in the run log
             // rather than silently dropping out of reconciliation (uac-r2 review of #1901).
-            var skipped = SkippedRegistryRowsByStatus(active);
+            var skipped = SkippedRegistryRowsByStatus(active, ownAppService);
             if (skipped.Count > 0)
             {
                 _logger.LogInformation(
@@ -708,6 +812,7 @@ public sealed class IdentityLinkReconciliationJob : IScheduledJob
             {
                 configured = targets.Configured,
                 registryReadFailed = targets.RegistryFailed,
+                registryRowsServedByAnotherBff = targets.ServedByAnotherBff,
                 environments = targets.Environments.Select(t => new
                 {
                     environment = t.Environment,
@@ -821,6 +926,10 @@ public sealed class IdentityLinkReconciliationJob : IScheduledJob
         public bool Configured;
         public bool RegistryFailed;
         public string? RegistryError;
+
+        /// <summary>#2761: active registry rows left to the BFF they name (<see cref="IsServedByThisBff"/>).</summary>
+        public int ServedByAnotherBff;
+
         public readonly List<RunReport> Environments = new();
     }
 

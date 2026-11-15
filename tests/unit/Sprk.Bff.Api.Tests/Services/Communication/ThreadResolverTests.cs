@@ -1668,6 +1668,35 @@ public class ThreadResolverTests
     }
 
     [Fact]
+    public async Task ReconcileThreadForFiling_AnEmailWhoseStoredUrlNamesAnotherRecord_AnchorsTheThreadWithTheUrlOfItsOwnRecord()
+    {
+        // Task 045f (fix round 1): the url the thread takes is the one of the record the email's typed regarding names, never the
+        // email's stored text.
+        var communicationId = Guid.NewGuid();
+        var threadId = Guid.NewGuid();
+        var matter = Guid.NewGuid();
+        var oldProject = Guid.NewGuid();
+        var email = SetupFiledEmail(communicationId, threadId, "sprk_matter", matter);
+        email["sprk_regardingrecordurl"] = $"https://other.example/main.aspx?etn=sprk_project&id={oldProject:D}";
+        SetupRecordName("sprk_matter", matter, "PAT-444023");
+        SetupReconcileThreadRead(threadId, OpenThread(threadId, ThreadTypeRecordAnchored, regardingType: "sprk_project", regardingId: oldProject));
+        SetupThreadMessagesForFiling(threadId, Message(communicationId, "sprk_matter", matter));
+        SetupThreadRead(threadId, Thread(threadId, name: "Old project", nameIsAutoDerived: true,
+            regardingType: "sprk_matter", regardingId: matter.ToString(), regardingName: "PAT-444023", threadType: ThreadTypeRecordAnchored));
+        var writes = new List<Dictionary<string, object>>();
+        _entity
+            .Setup(e => e.UpdateAsync("sprk_communicationthread", threadId, It.IsAny<Dictionary<string, object>>(), It.IsAny<CancellationToken>()))
+            .Callback<string, Guid, Dictionary<string, object>, CancellationToken>((_, _, d, _) => writes.Add(d))
+            .Returns(Task.CompletedTask);
+
+        await CreateFilingSut().ReconcileThreadForFilingAsync(communicationId, CancellationToken.None);
+
+        writes.Should().NotBeEmpty();
+        writes[0]["sprk_regardingrecordurl"].Should().Be(
+            Spaarke.Dataverse.RegardingRecordType.BuildRecordUrl("sprk_matter", matter.ToString("D")));
+    }
+
+    [Fact]
     public async Task ReconcileThreadForFiling_ThreadOfAPreviousRecord_WhoseOnlyFiledMessageIsReFiled_FollowsTheEmailWhole()
     {
         // Owner clarification 2026-10-11, case (a): T is anchored to R_old (a project) and this email is its only filed

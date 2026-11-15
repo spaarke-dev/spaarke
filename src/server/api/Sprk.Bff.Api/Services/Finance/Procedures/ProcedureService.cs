@@ -34,6 +34,9 @@ public static class ProcedureEntity
     public const string StatusColumn = "sprk_status";
     public const string NotesColumn = "sprk_notes";
 
+    /// <summary>statecode Active (the platform state, not the sprk_status choice); a Procedure deactivated in Dataverse reads anything else.</summary>
+    public const int StateActive = 0;
+
     public const int StatusActive = 100000000;
     public const int StatusRetired = 100000001;
 

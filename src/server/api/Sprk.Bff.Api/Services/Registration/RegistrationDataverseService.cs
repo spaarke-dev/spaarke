@@ -639,8 +639,11 @@ public class RegistrationDataverseService : IDisposable
     /// re-decides the user on its next run once <c>IdentityLink:Reconciliation:WritesEnabled</c> is true; until then
     /// it reports what it would do. (Second fix round: the job scanned only its own environment and this path
     /// logged "NOT retried" for every other one — verifier finding 4, closed in the third fix round.)</para>
-    /// <para>The one way out of that coverage is an operator deactivating the environment's registry row after
+    /// <para>The one way out of THIS BFF's coverage is an operator deactivating the environment's registry row after
     /// provisioning into it: the BFF then stops serving that environment, deliberately.</para>
+    /// <para>A row naming ANOTHER BFF's App Service (<c>sprk_appservicename</c>, a customer stamp) is reconciled by that
+    /// stamp's own BFF as its own environment, not by this one (#2761). This BFF's identity has no seat there, so a link
+    /// attempted from here fails anyway; the stamp's BFF picks the user up on its next run.</para>
     /// </remarks>
     /// <returns>The link result, or null when nothing could be attempted (unusable oid, or a fault).</returns>
     public async Task<SystemUserLinkResult?> LinkContactForNewSystemUserAsync(

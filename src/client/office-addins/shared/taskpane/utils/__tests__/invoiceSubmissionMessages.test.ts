@@ -17,6 +17,8 @@ import {
   FIRM_MISSING_CODE,
   REPLACED_BY_CORRECTION_CODE,
   describeAcceptedOutcome,
+  NO_FIRM_LINKED_MESSAGE,
+  CORRECTION_NO_FIRM_MESSAGE,
   isRetryableSubmissionRefusal,
   PERMANENT_SUBMISSION_CODES,
 } from '../invoiceSubmissionMessages';
@@ -117,6 +119,7 @@ const PINNED_OUTCOME_CODES = [
   'ebilling.submission.firm_changed',
   'ebilling.submission.changed',
   'ebilling.submission.row_version_missing',
+  'ebilling.submission.firm_name_unreadable', // 095e (EB-D-226): retried, then stored; nothing written; re-attempt allowed
   // task 094 step 3 (97c793670b): the saved .eml changed state before the commit
   'ebilling.submission.document_already_invoiced',
   'ebilling.submission.document_rejected',
@@ -390,11 +393,21 @@ describe('invoice submission messages — task 094', () => {
       'ebilling.submission.firm_changed',
       'ebilling.submission.changed',
       'ebilling.submission.row_version_missing',
+      'ebilling.submission.firm_name_unreadable', // 095e (EB-D-226)
     ]) {
       const sentence = describeInvoiceOutcome(code, {}, 'Failed');
       expect(sentence).toMatch(/Submit it again\.$/);
       expect(sentence).not.toBe(GENERIC_FAILED_OUTCOME_MESSAGE);
     }
+  });
+
+  it('095e: firm_name_unreadable says the invoice was not processed and to submit again; a near-miss code stays generic', () => {
+    expect(describeInvoiceOutcome('ebilling.submission.firm_name_unreadable', {}, 'Failed')).toBe(
+      "Spaarke couldn't read the firm's name, so the invoice was not processed. Submit it again."
+    );
+    expect(describeInvoiceOutcome('ebilling.submission.firm_name_unreadable_x', {}, 'Failed')).toBe(
+      GENERIC_FAILED_OUTCOME_MESSAGE
+    );
   });
 
   it('must-fire: a refusal after step A says the email stays filed; must-not-fire: without the flag it does not', () => {
@@ -415,6 +428,38 @@ describe('invoice submission messages — task 094', () => {
     expect(describeSubmissionRefusal({ kind: 'refused', status: 409, code: 'x.new', filingKept: true })).toBe(
       `${GENERIC_SUBMISSION_MESSAGE} ${FILING_KEPT_MESSAGE}`
     );
+  });
+});
+
+describe('the no-firm sentences (task 134, owner ruling 2026-11-13: never an invoice without a firm)', () => {
+  it('must-fire: the no-firm-linked and no-firm-correction sentences are the owner-approved wording, exactly', () => {
+    expect(NO_FIRM_LINKED_MESSAGE).toBe(
+      'No firm is linked to this record. Add a firm to the record in Spaarke, then submit.'
+    );
+    expect(CORRECTION_NO_FIRM_MESSAGE).toBe(
+      'This invoice has no firm. Set its firm in Spaarke, then submit the correction.'
+    );
+  });
+
+  it('must-not-fire: neither sentence promises a reviewer will add the firm (the old held-for-firm wording is gone)', () => {
+    for (const sentence of [NO_FIRM_LINKED_MESSAGE, CORRECTION_NO_FIRM_MESSAGE]) {
+      expect(sentence).not.toMatch(/held until a reviewer/i);
+    }
+  });
+
+  it('095e must-fire: firm_invalid is the owner-approved wording (a firm is required, or the firm is not active), exactly', () => {
+    expect(describeSubmissionRefusal({ kind: 'refused', status: 400, code: 'ebilling.submission.firm_invalid' })).toBe(
+      "Spaarke didn't accept the firm for this invoice. Choose an active firm linked to this record. Nothing was submitted."
+    );
+  });
+
+  it('095e must-not-fire: the old firm_invalid sentence is gone, and firm_not_linked keeps its own', () => {
+    expect(
+      describeSubmissionRefusal({ kind: 'refused', status: 400, code: 'ebilling.submission.firm_invalid' })
+    ).not.toMatch(/chosen firm isn't an active firm/);
+    expect(
+      describeSubmissionRefusal({ kind: 'refused', status: 403, code: 'ebilling.submission.firm_not_linked' })
+    ).toBe("The chosen firm isn't linked to this record. Nothing was submitted.");
   });
 });
 

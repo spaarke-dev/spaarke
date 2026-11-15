@@ -775,7 +775,9 @@ public static class FieldMappingEndpoints
                 rootFiling,
                 lookupBinds,
                 entityService,
-                impersonatedQuery);
+                impersonatedQuery,
+                // #2799: a locked invoice-family column is checked as the caller (this probe, naming them) and written as the app.
+                lockedWriteProbe: probe);
 
             failedCount += refusals.Length;
             var success = updatedCount > 0 || (failedCount == 0 && childIds.Length > 0);
@@ -1317,7 +1319,8 @@ public static class FieldMappingEndpoints
         Sprk.Bff.Api.Services.Access.SecureRootFilingGate? rootFiling = null,
         IReadOnlyDictionary<FieldMappingRuleDto, LookupBindPlan>? lookupBinds = null,
         IGenericEntityService? appOnlyEntities = null,
-        IImpersonatedCommunicationQuery? callerQuery = null)
+        IImpersonatedCommunicationQuery? callerQuery = null,
+        CallerRecordAccessProbe? lockedWriteProbe = null)
     {
         var errors = new List<PushFieldMappingsError>();
         var fieldResults = new List<FieldMappingResultDto>();
@@ -1471,8 +1474,13 @@ public static class FieldMappingEndpoints
                     // Task 045b: and before the pair planner below, so a family row's refusal keeps its own code; the planner
                     // never writes a lookup this guard decides on (only the pair and its display columns), so the decision is the
                     // same. The filing gate below (work assignment, project — never a family table) stays after the planner.
+                    // Task 045g: the push writes AS THE CALLER, so a refusal of rules 1-3 is decided on the rows as the caller
+                    // reads them. A row not found keeps its own answer here: the push's ids come from a query the caller read
+                    // (#2081 fix round 2).
                     if (await Sprk.Bff.Api.Services.Dataverse.InvoiceFamilyCoreRecordGuard.CheckGenericUpdateAsync(
-                            targetEntity, childRecordId, updatePayload, appOnlyEntities, ct) is { RefusalCode: { } familyCode })
+                            targetEntity, childRecordId, updatePayload, appOnlyEntities, ct,
+                            asPerson: Sprk.Bff.Api.Services.Dataverse.OwnedChildWrite.PersonRowReader(
+                                callerQuery, appOnlyEntities, callerSystemUserId)) is { RefusalCode: { } familyCode })
                     {
                         failed++;
                         errors.Add(new PushFieldMappingsError
@@ -1485,7 +1493,8 @@ public static class FieldMappingEndpoints
 
                     // Task 045b (owner rulings Q4, Q7): the push never writes the pair, but a lookup it moves or clears takes the
                     // pair that repeated it along (the update planner, with the push's own app-only reader), before the checks
-                    // below and the write. It adds no check. A failed read fails THIS child (RecordOwnerUnresolvedException, below).
+                    // below and the write. The planner adds no check; the same call decides a sent regarding record URL (task 045f),
+                    // which the push never maps. A failed read fails THIS child (RecordOwnerUnresolvedException, below).
                     // The push derives display values as the caller (CallerDisplayReader): a record the caller cannot read has
                     // its display columns cleared; any other failed read fails this child.
                     updatePayload = await Sprk.Bff.Api.Services.Dataverse.OwnedChildWrite.KeepRegardingPairWholeAppOnlyAsync(
@@ -1493,6 +1502,31 @@ public static class FieldMappingEndpoints
                         lookupsAreMapped: true,
                         displayRecord: Sprk.Bff.Api.Services.Dataverse.OwnedChildWrite.CallerDisplayReader(
                             callerQuery, appOnlyEntities, callerSystemUserId));
+
+                    // Task 045d (owner ruling Q8 (a); owner, 2026-11-12, option (b)): an invoice-family child whose own core
+                    // lookup this push sets takes the resolver fields of the record it will name, in this same child write (after
+                    // the pair planner so they win). The stored row and the catalog are read app-only; the name and number as
+                    // the caller, as the planner reads display values here (a record the caller cannot read has them cleared).
+                    // They are the server's, never copied from the source, so they are added after the source gate and the
+                    // access-column scrub above, and are no access column. A derive that cannot be done fails THIS child as
+                    // the guard above does: its code only.
+                    var familyFields = await Sprk.Bff.Api.Services.Dataverse.OwnedChildWrite.KeepInvoiceFamilyResolverFieldsAppOnlyAsync(
+                        appOnlyEntities, targetEntity, childRecordId, updatePayload, "FIELD-MAPPING-PUSH",
+                        Sprk.Bff.Api.Services.Dataverse.OwnedChildWrite.CallerDisplayReader(
+                            callerQuery, appOnlyEntities, callerSystemUserId),
+                        logger, ct);
+                    if (familyFields.RefusalCode is { } derivedCode)
+                    {
+                        failed++;
+                        errors.Add(new PushFieldMappingsError
+                        {
+                            RecordId = childRecordId,
+                            Error = $"Not written: {Sprk.Bff.Api.Services.Dataverse.InvoiceFamilyCoreRecordGuard.CodeOnlyRefusalMessage(derivedCode)}"
+                        });
+                        continue;
+                    }
+
+                    updatePayload = familyFields.Payload;
 
                     // Task 158 (owner round 6): a work assignment or project this push files under a matter or project —
                     // whether that record is secure must be readable, or this record is not written (fail closed; a
@@ -1543,17 +1577,21 @@ public static class FieldMappingEndpoints
                     // ebilling-r1 #2081: an invoice or line is written UPDATE-ONLY (If-Match: *, still as the caller). The
                     // guard above read its row; one deleted since must not be re-created by the upsert. The not-found answer
                     // is thrown so a re-file stops before its owner step, and it fails THIS child with the guard's code.
+                    // #2799 (uac-r2): a locked invoice-family column is checked AS THE CALLER (Write/Append on the row, AppendTo
+                    // on each record it names) and written AS THE APP; a refusal is the helper's code, nothing written.
                     string? goneCode = null;
                     var recordNotFound = false;
                     async Task Write(CancellationToken token)
                     {
                         if (Sprk.Bff.Api.Services.Dataverse.InvoiceFamilyCoreRecordGuard.IsUpdateOnlyTarget(targetEntity))
                         {
-                            goneCode = await Sprk.Bff.Api.Services.Dataverse.InvoiceFamilyCoreRecordGuard.UpdateExistingAsync(
-                                dataverseService, targetEntity, childRecordId, updatePayload, callerSystemUserId, notFoundAsReadFailed: false, token);
+                            goneCode = await Sprk.Bff.Api.Services.Dataverse.InvoiceFamilyLockedWrite.UpdateExistingSplitAsync(
+                                dataverseService, targetEntity, childRecordId, updatePayload, callerSystemUserId, notFoundAsReadFailed: false,
+                                Sprk.Bff.Api.Services.Dataverse.InvoiceFamilyLockedWrite.RightsOfPrincipal(lockedWriteProbe, callerSystemUserId),
+                                logger, token);
                             if (goneCode is not null)
                             {
-                                throw Sprk.Bff.Api.Services.Dataverse.InvoiceFamilyCoreRecordGuard.RefusalException(targetEntity, goneCode);
+                                throw Sprk.Bff.Api.Services.Dataverse.InvoiceFamilyLockedWrite.RefusalException(targetEntity, goneCode);
                             }
 
                             return;
@@ -1661,12 +1699,15 @@ public static class FieldMappingEndpoints
                     }
                     catch (Sprk.Bff.Api.Services.Dataverse.RecordOwnerUnresolvedException) when (goneCode is not null)
                     {
-                        // ebilling-r1 #2081: the invoice or line is gone now; nothing was written or re-owned.
+                        // ebilling-r1 #2081: the invoice or line is gone now; nothing was written or re-owned. #2799: or the
+                        // locked-column check refused (nothing written), or only the other columns were saved (K-1, fixed text).
                         failed++;
                         errors.Add(new PushFieldMappingsError
                         {
                             RecordId = childRecordId,
-                            Error = $"Not written: {Sprk.Bff.Api.Services.Dataverse.InvoiceFamilyCoreRecordGuard.CodeOnlyRefusalMessage(goneCode)}"
+                            Error = goneCode == Sprk.Bff.Api.Services.Dataverse.InvoiceFamilyLockedWrite.LockedWritePartlySavedCode
+                                ? Sprk.Bff.Api.Services.Dataverse.InvoiceFamilyLockedWrite.PartlySavedMessage
+                                : $"Not written: {Sprk.Bff.Api.Services.Dataverse.InvoiceFamilyLockedWrite.RefusalMessage(goneCode)}"
                         });
                         continue;
                     }
@@ -1740,6 +1781,10 @@ public static class FieldMappingEndpoints
                     RecordId = childRecordId,
                     Error = RefileRefusedMessage(unresolved.RefusalCode),
                 });
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw; // the request was cancelled: the push stops; a cancellation is never one child's failure
             }
             catch (Exception ex)
             {

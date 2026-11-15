@@ -1418,7 +1418,7 @@ public sealed partial class DecisionCommitServiceTests
         var missing = PathBReview() with { Actions = [Take("send-budget-inquiry", Values(("to", "a@x.example"))), Skip("revise-budget"), Skip("approve-variance")] };
         var unknown = PathBReview() with
         {
-            Actions = [Take("send-budget-inquiry", Values(("to", "a@x.example"), ("subject", "s"), ("body", "b"), ("bcc", "x"))), Skip("revise-budget"), Skip("approve-variance")],
+            Actions = [Take("send-budget-inquiry", Values(("to", "a@x.example"), ("subject", "s"), ("body", "b"), ("replyBy", "x"))), Skip("revise-budget"), Skip("approve-variance")],
         };
 
         (await rig.CommitAsync(missing)).ReasonCode.Should().Be(DecisionCommitReasons.InvalidParameter);
@@ -3754,10 +3754,14 @@ public sealed partial class DecisionCommitServiceTests
     [Fact]
     public async Task K3_AResumeAfterTheReviewWindow_DoesNotRecloseASystemResolutionOlderThanTheWindow()
     {
+        // Task 191 fix round 1 (D-222): the window bounds a resume whose first attempt landed NOTHING. One whose writes landed is an
+        // unfinished review and keeps its start (AnUnfinishedReview_FinishedAfterThePlanReadWindow_StillReclosesTheSignalTheTriggerClosed_Acted).
         var rig = new Rig();
-        rig.Executors["add-todo"].Result = DecisionActionOutcome.Refused("add-todo", DecisionActionReasons.WriteFailed, "no");
+        rig.Executors["revise-budget"].Result = DecisionActionOutcome.Refused("revise-budget", DecisionActionReasons.WriteFailed, "no");
         var review = PathBReview(inquiry: false);
-        (await rig.CommitAsync(review)).Resumable.Should().BeTrue(); // the review started at Now
+        var first = await rig.CommitAsync(review);
+        first.Resumable.Should().BeTrue(); // the review started at Now
+        first.Landed.Should().BeEmpty();
 
         // The system closed the Signal 30 minutes after the review started; the resume comes five hours later.
         rig.Signals[Primary]["sprk_signalstatus"] = new OptionSetValue(Resolved);
@@ -3765,7 +3769,7 @@ public sealed partial class DecisionCommitServiceTests
         rig.Signals[Primary]["sprk_resolvedon"] = Now.UtcDateTime.AddMinutes(30);
         rig.Versions[Primary]++;
         rig.Clock.Advance(TimeSpan.FromHours(5));
-        rig.Executors["add-todo"].Result = null;
+        rig.Executors["revise-budget"].Result = null;
 
         var retried = await rig.CommitAsync(review with { Retry = true });
 

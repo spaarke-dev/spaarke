@@ -226,9 +226,25 @@ public static class OperationAccessPolicy
         // "ebilling.invoice.assign_firm" — Write on the INVOICE (sprk_invoices, route invoiceId) of POST /api/finance/invoices/{invoiceId}/firm
         // (ebilling-r1 task 095d-1b, notes/095c-from-email-firm-optional.md 16.4): Set firm on a held no-firm invoice. The application then
         // writes the invoice's firm, tracking number and hold, and renames its lines, approval and files, so the caller must be able to
-        // change the invoice (the "ebilling.invoice.decide" reasoning). The firm in the body is asked separately ("read" and
-        // "finance.attach_invoice"). Write is an existing right: no new privilege or role. A separate key so deny logs name the act.
-        ["ebilling.invoice.assign_firm"] = AccessRights.Write,
+        // change the invoice (the "ebilling.invoice.decide" reasoning). The invoice also HOLDS the firm lookup (sprk_vendororg) this route
+        // sets, and in Dataverse the row that holds a lookup needs Append, which Write does not imply (the "finance.link_invoice"
+        // reasoning; uac-r2 review of #2822, F4). Known limit: the lines, approval and files also carry the firm lookup and are written
+        // under the invoice's Write and Append, with no per-row check (the same rule as task 095g's R1). The firm in the body is asked
+        // separately ("read" and "finance.attach_invoice"). Write and Append are existing rights: no new privilege or role. A separate
+        // key so deny logs name the act.
+        ["ebilling.invoice.assign_firm"] = AccessRights.Write | AccessRights.Append,
+        // "ebilling.record.assign_firm" — Read, Write AND Append on the CORE RECORD (sprk_matters / sprk_projects / sprk_workassignments)
+        // named by the route of POST /api/finance/core-records/{entityType}/{entityId}/firms when the body ADDS a firm (an add or a replace;
+        // ebilling-r1 task 095g, EB-D-224). The application then sets an Assigned Law Firm lookup ON the record: Write for the column update,
+        // and Append because the record HOLDS the lookup (the "finance.link_invoice" reasoning; Append is not implied by Write). Read because
+        // every answer tells the caller about the record: its assigned firms by name, and whether a firm is on it (uac-r2 review of 095g).
+        // All three come from ONE caller snapshot. The firm in the body is asked separately ("read" and "finance.attach_invoice"). A separate
+        // key so deny logs name the act.
+        ["ebilling.record.assign_firm"] = AccessRights.Read | AccessRights.Write | AccessRights.Append,
+        // "ebilling.record.remove_firm" — Read AND Write on the CORE RECORD of the same route when the body only CLEARS a firm (ebilling-r1
+        // task 095g): clearing a lookup sets nothing to attach, so Append is not asked. Read for the same reason as the add: the answer says
+        // whether the named firm was on the record and lists its firms. A separate key so deny logs name the act.
+        ["ebilling.record.remove_firm"] = AccessRights.Read | AccessRights.Write,
 
         // "analysis.attach" — Read AND AppendTo on each PARENT record a NEW app-created sprk_analysis will point
         // at: the document and the regarding matter/project of POST /api/ai/analysis/promote (body, or the

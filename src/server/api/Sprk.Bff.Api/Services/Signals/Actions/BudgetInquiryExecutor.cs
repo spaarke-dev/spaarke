@@ -2,9 +2,11 @@ using System.Text.Json;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Authentication;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
+using Sprk.Bff.Api.Infrastructure.Exceptions;
 using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Ai.Handlers.Dataverse;
 using Sprk.Bff.Api.Services.Communication;
+using Sprk.Bff.Api.Services.Communication.Channels;
 using Sprk.Bff.Api.Services.Communication.Models;
 using Sprk.Bff.Api.Services.RecordCreation;
 
@@ -18,8 +20,11 @@ namespace Sprk.Bff.Api.Services.Signals.Actions;
 /// <param name="Body">Email body, as the human edited and confirmed it in the wizard.</param>
 /// <param name="Confirmed">True only when the wizard's Confirm step ran (D-52). Anything else makes the executor do nothing.</param>
 /// <param name="OutsideFirmId">The outside firm (<c>sprk_organization</c>) the inquiry is to. Only the caller knows which of the matter's two firm slots it is; it is written to <c>sprk_regardingorganization</c> so the disposition is queryable per outside firm.</param>
+/// <param name="Cc">Task 190 (D-222): copied recipients, optional. Sent on the email's Cc line and recorded on <c>sprk_communication.sprk_cc</c>.</param>
+/// <param name="Bcc">Task 190 (D-222): blind-copied recipients, optional. Sent as Bcc only (never in To, Cc, the subject, the body or a link line) and recorded on <c>sprk_communication.sprk_bcc</c>.</param>
 public sealed record BudgetInquiryRequest(
-    Guid MatterId, IReadOnlyList<string> To, string Subject, string Body, bool Confirmed, Guid? OutsideFirmId = null);
+    Guid MatterId, IReadOnlyList<string> To, string Subject, string Body, bool Confirmed, Guid? OutsideFirmId = null,
+    IReadOnlyList<string>? Cc = null, IReadOnlyList<string>? Bcc = null);
 
 /// <summary>How an Inquiry execution ended. The commit route records this in the Decision Record's step list.</summary>
 public enum BudgetInquiryOutcome
@@ -34,8 +39,15 @@ public enum BudgetInquiryOutcome
     Refused,
     /// <summary>Dataverse failed creating the service request; nothing was sent.</summary>
     CreateFailed,
-    /// <summary>The service request WAS created but the email was not sent; <see cref="BudgetInquiryResult.ServiceRequestId"/> says which.</summary>
+    /// <summary>The service request WAS created but the email was not sent; <see cref="BudgetInquiryResult.ServiceRequestId"/> says which.
+    /// Ontology task 191 (D-223): DEFINITELY not sent (<see cref="BudgetInquiryExecutor.DefinitelyNotSent"/>), so sending it once more
+    /// cannot deliver it twice.</summary>
     SendFailed,
+
+    /// <summary>Ontology task 191 (D-223): the service request WAS created and the email MAY have gone out (a 5xx, a 408, a timeout, a
+    /// cancellation or a transport fault after the request left, or any failure that cannot be placed before the send). Only the
+    /// person decides whether it is sent again.</summary>
+    SendOutcomeUnknown,
 }
 
 /// <summary>The executor's answer. <see cref="ServiceRequestId"/> is set whenever a row was written, even when the send failed.</summary>
@@ -69,12 +81,23 @@ public class InquiryEmailSender(CommunicationService communication, IHttpContext
     /// <summary>Sends the inquiry email, associated with the matter and the service request. Throws on failure.</summary>
     /// <returns>The <c>sprk_communication</c> id when the core tracked one, and the core's archival warning (D-216: the send is
     /// archived as .eml, and an archive that failed must not vanish).</returns>
+    /// <remarks>Ontology task 191 (D-223): a failure before the communication core is called (no request, the record facts, the
+    /// send request itself) throws <see cref="InquiryEmailNotSentException"/>: nothing was handed to the core, so nothing was sent.</remarks>
     public virtual async Task<InquirySendResult> SendAsync(BudgetInquiryRequest request, Guid serviceRequestId, CancellationToken ct)
     {
-        var context = http.HttpContext
-            ?? throw new InvalidOperationException("The inquiry email is sent as the signed-in user and needs an HTTP request.");
+        HttpContext context;
+        SendCommunicationRequest send;
+        try
+        {
+            context = http.HttpContext
+                ?? throw new InvalidOperationException("The inquiry email is sent as the signed-in user and needs an HTTP request.");
+            send = await PrepareAsync(request, serviceRequestId, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            throw new InquiryEmailNotSentException(ex);
+        }
 
-        var send = await PrepareAsync(request, serviceRequestId, ct).ConfigureAwait(false);
         var response = await communication.SendAsync(send, context, ct).ConfigureAwait(false);
         return new InquirySendResult(response.CommunicationId, response.ArchivalWarning);
     }
@@ -86,9 +109,12 @@ public class InquiryEmailSender(CommunicationService communication, IHttpContext
     internal async Task<SendCommunicationRequest> PrepareAsync(BudgetInquiryRequest request, Guid serviceRequestId, CancellationToken ct)
     {
         // The commit route sets MatterId only for a matter core, so the inquiry's core record is always that matter.
+        // Task 190 (D-222): the record link is chosen on To only (a Bcc must not add an "External recipients" line that reveals a hidden
+        // recipient), but the record's NAME goes to every recipient, so the label is decided over To, Cc and Bcc.
+        var everyone = (request.To ?? []).Concat(request.Cc ?? []).Concat(request.Bcc ?? []).ToArray();
         var extras = facts is null
             ? null
-            : await facts.ResolveAsync(BudgetInquiryExecutor.MatterTable, request.MatterId, request.To ?? [], ct).ConfigureAwait(false);
+            : await facts.ResolveAsync(BudgetInquiryExecutor.MatterTable, request.MatterId, request.To ?? [], everyone, ct).ConfigureAwait(false);
         return Build(request, serviceRequestId, extras);
     }
 
@@ -112,10 +138,17 @@ public class InquiryEmailSender(CommunicationService communication, IHttpContext
         if (to.Length == 0)
             throw new ArgumentException("An inquiry email needs at least one recipient.", nameof(request));
 
+        // Task 190 (D-222): Cc and Bcc are optional. An address already in To is not repeated in Cc or Bcc, and one in Cc is not repeated in
+        // Bcc (any case), so a recipient gets one copy. Empty means null, so a To-only inquiry builds exactly the request it always did.
+        var cc = CleanCopies(request.Cc, to);
+        var bcc = CleanCopies(request.Bcc, [.. to, .. cc]);
+
         var lines = extras?.LinkLines ?? [];
         return new SendCommunicationRequest
         {
             To = to,
+            Cc = cc.Length > 0 ? cc : null,
+            Bcc = bcc.Length > 0 ? bcc : null,
             Subject = request.Subject,
             Body = lines.Count > 0 ? $"{request.Body}\n\n{string.Join("\n", lines)}" : request.Body,
             BodyFormat = BodyFormat.PlainText,
@@ -138,7 +171,21 @@ public class InquiryEmailSender(CommunicationService communication, IHttpContext
             ],
         };
     }
+
+    /// <summary>Trimmed, de-duplicated (any case) addresses of a copy line, without any address in <paramref name="already"/>.</summary>
+    private static string[] CleanCopies(IReadOnlyList<string>? addresses, IReadOnlyCollection<string> already) =>
+        (addresses ?? [])
+            .Where(a => !string.IsNullOrWhiteSpace(a))
+            .Select(a => a.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Where(a => !already.Contains(a, StringComparer.OrdinalIgnoreCase))
+            .ToArray();
 }
+
+/// <summary>Ontology task 191 (D-223): the inquiry email failed BEFORE it was handed to the communication core, so it was not sent.
+/// <see cref="BudgetInquiryExecutor.DefinitelyNotSent"/> reads this marker; the cause is the inner exception.</summary>
+internal sealed class InquiryEmailNotSentException(Exception inner)
+    : Exception("The inquiry email was not handed to the communication core.", inner);
 
 /// <summary>
 /// The Inquiry (spec FR-36; task 070): creates a <c>sprk_servicerequest</c> with direction Outbound AS THE CALLER and
@@ -323,8 +370,29 @@ public sealed class BudgetInquiryExecutor(
             return new(BudgetInquiryOutcome.Refused, Error: "The inquiry was not sent.");
         }
 
-        // Email last: the row exists, so the outcome from here on ALWAYS carries its id. The send is deliberately not
-        // cancellable: a cancelled caller must not leave an email that may or may not have gone out and no id to list.
+        return await SendEmailAsync(request, serviceRequestId).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Ontology task 191 (D-223): the inquiry email ALONE, for an inquiry whose service request <paramref name="serviceRequestId"/> an
+    /// earlier attempt of the same decision already created (the commit route passes the id it stored, never a client value). No
+    /// create and no second row: the email is associated with that service request exactly as a first send is.
+    /// </summary>
+    public async Task<BudgetInquiryResult> SendOnlyAsync(BudgetInquiryRequest request, Guid serviceRequestId, CancellationToken ct)
+    {
+        if (Validate(request) is { } invalid)
+            return invalid;
+        if (serviceRequestId == Guid.Empty)
+            return new(BudgetInquiryOutcome.Invalid, Error: "The earlier attempt's service request is not known.");
+
+        ct.ThrowIfCancellationRequested();
+        return await SendEmailAsync(request, serviceRequestId).ConfigureAwait(false);
+    }
+
+    /// <summary>The email, last: the row exists, so the outcome from here on ALWAYS carries its id. The send is deliberately not
+    /// cancellable: a cancelled caller must not leave an email that may or may not have gone out and no id to list.</summary>
+    private async Task<BudgetInquiryResult> SendEmailAsync(BudgetInquiryRequest request, Guid serviceRequestId)
+    {
         try
         {
             var sent = await email.SendAsync(request, serviceRequestId, CancellationToken.None).ConfigureAwait(false);
@@ -342,10 +410,45 @@ public sealed class BudgetInquiryExecutor(
         }
         catch (Exception ex)
         {
-            logger.LogWarning(ex, "Budget inquiry email not sent | ServiceRequestId: {ServiceRequestId}", serviceRequestId);
-            return new(BudgetInquiryOutcome.SendFailed, serviceRequestId, Error: "The service request was created but the email was not sent.");
+            if (DefinitelyNotSent(ex))
+            {
+                logger.LogWarning(ex, "Budget inquiry email not sent | ServiceRequestId: {ServiceRequestId}", serviceRequestId);
+                return new(BudgetInquiryOutcome.SendFailed, serviceRequestId, Error: "The service request was created but the email was not sent.");
+            }
+
+            logger.LogWarning(ex, "Budget inquiry email may have been sent (outcome unknown) | ServiceRequestId: {ServiceRequestId}", serviceRequestId);
+            return new(BudgetInquiryOutcome.SendOutcomeUnknown, serviceRequestId,
+                Error: "The service request was created; whether the email went out is not known.");
         }
     }
+
+    /// <summary>
+    /// Ontology task 191 (D-223): true only when a failed inquiry send PROVABLY did not go out, so sending it once more cannot deliver
+    /// it twice. Anything else (a 5xx, a 408, a timeout, a cancellation, a transport fault, or a failure that cannot be placed before
+    /// the send) is false: the email may have been sent, and the person chooses.
+    /// <list type="bullet">
+    /// <item>A failure before the communication core was called (<see cref="InquiryEmailNotSentException"/>).</item>
+    /// <item><c>GRAPH_SEND_FAILED</c> whose <see cref="EmailChannelSender.SendOutcomeExtension"/> is
+    /// <see cref="EmailChannelSender.SendOutcomeNotSent"/> (the channel's reading of the Graph handler's record, #2779). Without the
+    /// extension (the core's catch-all, which also wraps a fault AFTER a send) it is unknown.</item>
+    /// <item>Any other <see cref="SdapProblemException"/> with a 4xx status: the communication core's own refusals (validation, the
+    /// sender, the record it prepares), all thrown before the send; its steps after the send are best-effort and do not throw.</item>
+    /// </list>
+    /// </summary>
+    internal static bool DefinitelyNotSent(Exception ex) => ex switch
+    {
+        InquiryEmailNotSentException => true,
+        SdapProblemException { Code: GraphSendFailedCode } graph =>
+            graph.Extensions is { } extensions
+            && extensions.TryGetValue(EmailChannelSender.SendOutcomeExtension, out var outcome)
+            && outcome is string text
+            && string.Equals(text, EmailChannelSender.SendOutcomeNotSent, StringComparison.Ordinal),
+        SdapProblemException refusal => refusal.StatusCode is >= 400 and < 500,
+        _ => false,
+    };
+
+    /// <summary>The communication core's code for a provider send failure (<see cref="EmailChannelSender"/>).</summary>
+    private const string GraphSendFailedCode = "GRAPH_SEND_FAILED";
 
     /// <summary>
     /// Task 017 (2d-3; ADR-019, NFR-07): a <see cref="RecordCreationService"/> refusal in this executor's EXISTING outcome

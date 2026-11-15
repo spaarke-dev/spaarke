@@ -757,15 +757,27 @@ internal sealed partial class RecordCreationService
             }
         }
 
+        // ── Task 045f: a sent regarding record URL names the record the row's pair names, stored in canonical form ──────
+        var recordUrl = await KeepRegardingRecordUrlAsync(table, user, callerItem, item, noun, ct).ConfigureAwait(false);
+        if (recordUrl.Refusal is { } recordUrlRefusal)
+            return Decision.Refuse(recordUrlRefusal);
+        callerItem = recordUrl.CallerItem!;
+        item = recordUrl.Item!;
+
         // ── Step 5½: the table's pre-write rules, on the row as it will be written (ebilling-r1 recipe) ────────────────
         if (rule.PreWriteRules.Count > 0)
         {
             trace.Begin(RecordCreationStep.PreWriteRules);
-            if (await RunPreWriteRulesAsync(table, rule, user, item, noun, ct).ConfigureAwait(false) is { } preWriteRefusal)
+            var preWrite = await RunPreWriteRulesAsync(table, rule, user, item, noun, ct).ConfigureAwait(false);
+            if (preWrite.Refusal is { } preWriteRefusal)
                 return Decision.Refuse(preWriteRefusal);
 
+            // Task 045d (owner ruling Q8 (a)): the columns a rule derived (an invoice-family row's five resolver fields) are set
+            // over the caller's own on the SAME local, so step 6 onwards, and the create, see the row as it is written.
+            item = OwnedChildWrite.WithColumnsSet(table, item, preWrite.Columns);
             trace.Record(RecordCreationStep.PreWriteRules, RecordCreationStepState.Ran,
-                string.Join(", ", rule.PreWriteRules.Select(r => r.Rule.Name)));
+                string.Join(", ", rule.PreWriteRules.Select(r => r.Rule.Name)) +
+                (preWrite.Columns.Count == 0 ? string.Empty : $"; {preWrite.Columns.Count} column(s) derived"));
         }
 
         // ── Step 6: the secure-root plan (a work assignment or project filed under a secure record) ───────────────────
@@ -1655,7 +1667,9 @@ internal sealed partial class RecordCreationService
         catch (Exception ex)
         {
             _logger.LogError(ex, "[RECORD-REPAIR] the owner of {Table} {Id} could not be decided (fault); it was not changed", table, row.Id);
-            var blockedOnFault = filed ? RecordRepairReason.MappingFilingUndecided : null;
+            // Task 052b (review F2-a, F4): a fault, not an answer — the row is asked again. Always blocked: a fault before the
+            // filing is decided (a thread's parents unread) leaves `filed` false without the row being known to be unfiled.
+            const string blockedOnFault = RecordRepairReason.MappingFilingUnavailable;
             return keep is { } keptOnFault
                 ? OwnerKept(keptOnFault, blockedOnFault, report)
                 : OwnerRefused(row, OwnerUnavailable(noun), report, blockedOnFault);
@@ -2035,6 +2049,54 @@ internal sealed partial class RecordCreationService
     }
 
     /// <summary>
+    /// Task 045f, on a create: a regarding record URL the row sends names the record its regarding pair names
+    /// (<see cref="OwnedChildWrite.DecideRegardingRecordUrlAsync"/>; a create has no stored pair, so only the pair it sends), on
+    /// the row as it is written (after step 4½ and step 5). The pair type's table is read as the caller, or app-only for the
+    /// system principal. An admitted URL is set in canonical form on both items; a refusal is the pre-write rules' coded refusal
+    /// (400, <see cref="RegardingPairWrite.RecordUrlMismatchCode"/>); a failed read is the caller's own failure, or "not
+    /// saved" for the app-only read. Nothing is written on either. The invoice-family tables are not decided here: their
+    /// step 5½ derive writes the URL.
+    /// </summary>
+    private async Task<(DataverseWriteItemMapper.MappedItem? CallerItem, DataverseWriteItemMapper.MappedItem? Item, RecordCreationRefusal? Refusal)>
+        KeepRegardingRecordUrlAsync(
+            string table, IDataverseUserClient? user, DataverseWriteItemMapper.MappedItem callerItem,
+            DataverseWriteItemMapper.MappedItem item, string noun, CancellationToken ct)
+    {
+        var written = OwnedChildWrite.PairWriteOf(item);
+        if (!OwnedChildWrite.RegardingRecordUrlRuleApplies(table) || !written.SetsUrl)
+            return (callerItem, item, null);
+
+        var decided = await OwnedChildWrite.DecideRegardingRecordUrlAsync(
+                table, written, storedRow: null,
+                user is null ? OwnedChildWrite.AppOnlyReaders(_entities, table, Guid.Empty).Type : OwnedChildWrite.CallerPairTypeTable(user),
+                ct)
+            .ConfigureAwait(false);
+        if (decided.Refused)
+        {
+            return (null, null, MapPreWriteRefusal(
+                PreWriteRefusal.Refused(RegardingPairWrite.RecordUrlMismatchCode, RegardingPairWrite.RecordUrlMismatchReason), noun));
+        }
+
+        if (decided.Failed)
+        {
+            return (null, null, decided.Failure is { } failure
+                ? Upstream(failure, noun)
+                : new RecordCreationRefusal(RecordCreationRefusalKind.Undecided, RecordCreationRefusal.CheckFailedCode,
+                    $"The regarding record of the {noun} could not be checked, so it was not created."));
+        }
+
+        if (decided.CanonicalUrl is not { } canonical || string.Equals(written.UrlText, canonical, StringComparison.Ordinal))
+            return (callerItem, item, null);
+
+        var set = new Dictionary<string, object?> { [RegardingPairWrite.RecordUrlColumn] = canonical };
+        var canonicalItem = OwnedChildWrite.WithColumnsSet(table, item, set);
+        var canonicalCaller = ReferenceEquals(callerItem, item) ? canonicalItem
+            : OwnedChildWrite.PairWriteOf(callerItem).SetsUrl ? OwnedChildWrite.WithColumnsSet(table, callerItem, set)
+            : callerItem;
+        return (canonicalCaller, canonicalItem, null);
+    }
+
+    /// <summary>
     /// Whether <paramref name="item"/>'s regarding pair names a type and no id (absent, null, empty or whitespace). Only a table
     /// that holds the whole pair (<see cref="OwnedChildWrite.RegardingPairTables"/>, as the update planner) has a pair to keep
     /// whole: a table whose regarding type stands alone, with no id column (a matter), keeps its type and number as sent.
@@ -2161,43 +2223,73 @@ internal sealed partial class RecordCreationService
     /// <see cref="RecordCreationRefusalKind.Undecided"/> (500) with its code; any other coded refusal is
     /// <see cref="RecordCreationRefusalKind.Invalid"/> (400) with its code (task 017, F2). A system principal has no
     /// caller to ask as, so a table with rules refuses it (fail closed; task 012's open point).
+    /// Task 045d (owner ruling Q8 (a)): with no refusal, the columns the rules derived, merged in rule order (a later rule's
+    /// value wins); each rule decides on the row as the caller sent it. The regarded record's name and number are read as
+    /// the caller (fix round 5); the record-type catalog app-only, as the dedicated writers read it. Both are asked here,
+    /// after step 5's AppendTo.
     /// </summary>
-    private static async Task<RecordCreationRefusal?> RunPreWriteRulesAsync(
+    private async Task<(RecordCreationRefusal? Refusal, IReadOnlyDictionary<string, object?> Columns)> RunPreWriteRulesAsync(
         string table, RecordTableRule rule, IDataverseUserClient? user, DataverseWriteItemMapper.MappedItem item, string noun,
         CancellationToken ct)
     {
+        var columns = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
         if (user is null)
         {
-            return new RecordCreationRefusal(RecordCreationRefusalKind.Forbidden, RecordCreationRefusal.SystemPrincipalUnsupportedCode,
+            return (new RecordCreationRefusal(RecordCreationRefusalKind.Forbidden, RecordCreationRefusal.SystemPrincipalUnsupportedCode,
                 $"A {noun} is checked as the person creating it ({string.Join(", ", rule.PreWriteRules.Select(r => r.Rule.Name))}), " +
-                "and this create acts for no caller, so it was not created.");
+                "and this create acts for no caller, so it was not created."), columns);
         }
 
-        var row = new PreWriteRow(user, table, item);
+        // Task 045d fix round 5: the regarded record's name and number are read AS THE CALLER, so a caller who may append to
+        // a record but not read it never gets its name or number copied into a row they can read: it is checked to exist
+        // app-only and its name and number are cleared (OwnedChildWrite.CallerDisplayRecords); a missing record is refused as
+        // before. The catalog row stays app-only (it names no record's values).
+        var row = new PreWriteRow(user, table, item,
+            OwnedChildWrite.CallerDisplayRecords(_entities, OwnedChildWrite.CallerRecordDisplay(user)),
+            RecordTypeRowAsync);
         foreach (var preWrite in rule.PreWriteRules)
         {
-            var refusal = await preWrite.Check(row, ct).ConfigureAwait(false);
-            if (refusal is null)
-                continue;
-
-            return refusal switch
+            var result = await preWrite.Check(row, ct).ConfigureAwait(false);
+            if (result.Refusal is not { } refusal)
             {
-                { ParentUnavailable: true } => new RecordCreationRefusal(RecordCreationRefusalKind.NotFoundOrDenied,
-                    RecordCreationRefusal.NotFoundCode, NotAvailableToFileUnder)
-                { PreWrite = refusal },
-                { ClientFailure: { } failure } => Upstream(failure, noun) with { PreWrite = refusal },
-                // Task 017 (ebilling-r1 F2): a rule that could not decide is "not saved" (500) with its own code — never the
-                // uniform not-found, which only NotFound() reaches (the arm above).
-                { IsUndecided: true } => new RecordCreationRefusal(RecordCreationRefusalKind.Undecided, refusal.Code!, refusal.Detail!)
-                {
-                    PreWrite = refusal,
-                },
-                _ => new RecordCreationRefusal(RecordCreationRefusalKind.Invalid, refusal.Code!, refusal.Detail!) { PreWrite = refusal },
-            };
+                foreach (var (column, value) in result.AdditionalColumns)
+                    columns[column] = value;
+                continue;
+            }
+
+            return (MapPreWriteRefusal(refusal, noun), columns);
         }
 
-        return null;
+        return (null, columns);
     }
+
+    /// <summary>
+    /// Task 045d: a table's <c>sprk_recordtype_ref</c> row, app-only (<see cref="ICommunicationDataverseService.QueryRecordTypeRefAsync"/>,
+    /// the dedicated writers' reader), resolved when a rule asks. No reader registered is a fault, so the rule fails closed.
+    /// </summary>
+    private async Task<Microsoft.Xrm.Sdk.Entity?> RecordTypeRowAsync(string recordTable, CancellationToken ct)
+    {
+        using var scope = _scopes.CreateScope();
+        var recordTypes = scope.ServiceProvider.GetService<ICommunicationDataverseService>()
+                          ?? throw new InvalidOperationException("no record-type reader is registered");
+        return await recordTypes.QueryRecordTypeRefAsync(recordTable, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>Step 5½'s refusal in this service's contract (unchanged by task 045d).</summary>
+    private static RecordCreationRefusal MapPreWriteRefusal(PreWriteRefusal refusal, string noun) => refusal switch
+    {
+        { ParentUnavailable: true } => new RecordCreationRefusal(RecordCreationRefusalKind.NotFoundOrDenied,
+            RecordCreationRefusal.NotFoundCode, NotAvailableToFileUnder)
+        { PreWrite = refusal },
+        { ClientFailure: { } failure } => Upstream(failure, noun) with { PreWrite = refusal },
+        // Task 017 (ebilling-r1 F2): a rule that could not decide is "not saved" (500) with its own code — never the
+        // uniform not-found, which only NotFound() reaches (the arm above).
+        { IsUndecided: true } => new RecordCreationRefusal(RecordCreationRefusalKind.Undecided, refusal.Code!, refusal.Detail!)
+        {
+            PreWrite = refusal,
+        },
+        _ => new RecordCreationRefusal(RecordCreationRefusalKind.Invalid, refusal.Code!, refusal.Detail!) { PreWrite = refusal },
+    };
 
     /// <summary>A question asked as the caller failed at Dataverse: their failure, carried, never its text.</summary>
     private static RecordCreationRefusal Upstream(DataverseUserResponse failure, string noun) =>

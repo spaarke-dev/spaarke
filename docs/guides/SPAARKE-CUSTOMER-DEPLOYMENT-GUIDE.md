@@ -941,6 +941,18 @@ ResultJson's `provisioningTargets.environments[]`) but never stops the others. D
 the BFF reconciling that environment — deliberately. (Before 2026-10-01's third fix round the job scanned only its
 own environment and this was a recorded gap.)
 
+**Only the rows this BFF serves (#2761, 2026-11-13).** A registry row whose `sprk_appservicename` names ANOTHER App
+Service is a customer stamp. That stamp's own BFF reconciles it as its own `Dataverse:ServiceUrl`, so this BFF skips it.
+Its identity has no application user there (D-12/D-13 stamp isolation), and before the fix the row faulted every run
+with WhoAmI 403 `0x80072560`. A row with a blank `sprk_appservicename` (dev, demo and legacy rows) is reconciled as
+above. The BFF's own name is the App Service's `WEBSITE_SITE_NAME`, compared case-insensitively. Off App Service the
+name is unknown, and every row that names an App Service is skipped. Each run logs the skipped rows by App Service name
+(`[ID-LINK-RECON] Skipped … served by another BFF`) and records their count in
+`provisioningTargets.registryRowsServedByAnotherBff`. A Ready row that has a `sprk_customerid` but no App Service name
+is reconciled here and logged as a warning: a stamp row looks like that when provisioning's registry write failed
+(REGISTRY-STALE; recover with `/provision-environment` Step 6a). **Limit:** if a stamp's App Service is renamed or
+removed while its row still names the old one, no BFF reconciles that environment until the row is corrected.
+
 **Every one of those environments needs the Dataverse prerequisite below** — an environment without it is
 reported by every run as a failed environment, and registration links there deny `binding_column_missing`.
 
@@ -1421,6 +1433,30 @@ and `.sprk_isdefaultthread`, and `sprk_communication.sprk_sentby`, `.sprk_direct
 - **Binding rule:** the BFF settings `DirectMessage:BusinessUnitName` and `DirectMessage:OwnerTeamName` stay **unset** on an
   environment until `Set-ThreadFlagFieldSecurity.ps1 -Verify` exits 0 there. While they are unset, no message is owned by
   the Direct team and nothing grants access from `sprk_sentby` / `sprk_directrecipient`.
+
+**Invoice-family links: field security on every environment** (unified-access-control-r2 #2799). The 24 lookups that file an
+invoice, invoice line, submission, approval, correction or external identifier under its matter, project or work assignment
+(and link it to its invoice) are written only by the BFF application user. The BFF checks each person-driven write AS THE
+PERSON and then writes these columns AS THE APPLICATION, so a user can no longer re-file a row through a form or the Web API
+and skip those checks. `scripts/Set-InvoiceFamilyFieldSecurity.ps1` secures them (the named entry point of
+`Set-DocumentPointerFieldSecurity.ps1 -Target InvoiceFamilyLinks`, with the same two BFF-managed profiles). Run it in this
+order on each environment; do not skip a step:
+1. **Deploy the BFF** build that writes the links as the application (#2799 chunks 1-3). Before it, locking would make every
+   person-driven write of these columns fail.
+2. **Redeploy every web resource the dry run (p4a) lists.** It scans the deployed code pages and form scripts for a write of a
+   locked column on a family table, and `-Apply` refuses (nothing written) while any is found. On dev (2026-11-13) it names
+   `sprk_creatematterwizard`, `sprk_spaarkeai` and `sprk_createinvoicewizard`, which are older than source.
+3. **Dry run:** `Set-InvoiceFamilyFieldSecurity.ps1 -EnvironmentUrl <org> -BffApplicationIds <ids>`. Writes nothing; every
+   precondition must be OK.
+4. **Apply, with the owner's go:** the same command plus `-BffWritesInvoiceFamilyLinksAsApp -Apply`. The switch is your
+   confirmation that step 1 is done; `-Apply` refuses without it.
+5. **Verify:** the same command with `-Verify` must exit 0 (non-zero names each gap).
+- **After every SpaarkeMaster import:** run `Set-InvoiceFamilyFieldSecurity.ps1 -Verify`.
+- **A new business unit:** its default team joins the reader profile through `Set-RecordCreatorPersonSchema.ps1 -Apply`; then
+  run `-Verify`.
+- **Known limit (K-1):** a write that sets a locked column and other columns is two requests. If the second fails, the other
+  columns stay saved and the caller gets an error (`invoice_family_locked_write_partly_saved`), never success.
+- Registry row: [DATAVERSE-WRITE-PATH-ARCHITECTURE.md](../architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md) I-24.
 
 **H7** sets the 7 per-customer env-var values (§6.4).
 
@@ -1962,12 +1998,15 @@ Run intake no longer takes `communicationGraphResource` / `emailGraphResource`. 
 >   it. Do not assign it in the admin UI: the UI offers the copy in the user's own unit first, and that copy reaches nothing
 >   above that unit. Admins homed in the customer's unit itself need no assignment.
 > - **Then run `-Verify`.** It fails if the org setting is off; if `isinherited` is not 0; if the role grants anything but Read
->   at Deep on `sprk_policy`; if any team holds any copy of the role; if a user holds the root copy, the `Secure Record` copy or
->   a copy below a customer top unit; if a holder of the customer unit's copy lacks the marker or is homed outside the
+>   at Deep on `sprk_policy`; if any team holds any copy of the role; if a user holds the root copy, the `Secure Record` copy,
+>   the `Spaarke Ontology Writer` copy or a copy below a customer top unit; if a holder of the customer unit's copy lacks the marker or is homed outside the
 >   customer's unit and the units below it (another customer's admin would read this customer's rules); or if a holder of
 >   **another** customer top unit's copy is homed outside that unit and the units below it. The script also refuses to run, in
->   every mode and before any write, when the business-unit tree is not the expected shape: `Secure Record` must be a direct
->   child of the root and outside every customer subtree (D-123).
+>   every mode and before any write, when `Secure Record` or the ontology writer's unit `Spaarke Ontology Writer` (task 267)
+>   sits inside the named customer's subtree (each must be outside every customer subtree, D-123; each customer's own run
+>   checks its subtree). The ontology writer's unit is never a customer unit (task 269): naming it (by name or id) is
+>   refused, it is never counted as another customer top unit, a declared team in or below it is drift, two units of that
+>   name refuse, and a `-SecureBusinessUnitName` that names it refuses.
 > - **Live-proof gate.** Before the first customer with a child unit relies on this, an admin homed in a child unit and holding
 >   the top unit's copy must be able to read (and exclude) a Billing rule owned in the customer's top unit, and must **not** be
 >   able to read a rule owned by `Secure Record Owners` (still 403). See Phase 7a. Until the admin holds the role, that
@@ -2640,11 +2679,13 @@ pac admin assign-user --environment "https://spaarke-acme.crm.dynamics.com/" `
 # the CUSTOMER TOP UNIT's copy. -Apply also sets the org setting EnableOwnershipAcrossBusinessUnits if it is off: an
 # ORG-WIDE write, logged as its own step (one orgdborgsettings element changes; the rest is written back as read).
 # -Verify fails while the org setting is off, isinherited is not 0, the role grants anything else or another depth, any team
-# holds any copy, a user holds the root copy, the Secure Record copy or a copy below a customer top unit, or a holder of this
+# holds any copy, a user holds the root copy, the Secure Record copy, the Spaarke Ontology Writer copy or a copy below a
+# customer top unit, or a holder of this
 # unit's copy lacks prvWritesprk_ruleset (the billing-admin marker) or is homed outside the customer's unit and the units
 # below it, or a holder of ANOTHER customer top unit's copy is homed outside that unit and the units below it. Every mode
-# refuses to run, before any write, when Secure Record sits inside the customer's subtree (it must be a direct child of the
-# root and outside every customer subtree, D-123).
+# refuses to run, before any write, when Secure Record or the ontology writer's unit sits inside the customer's subtree (each
+# must be a direct child of the root and outside every customer subtree, D-123 / task 267). The unit 'Spaarke Ontology
+# Writer' is never a customer unit (task 269): naming it is refused, and it is never another customer top unit.
 # Provisioning's H7c (#2429) replaces this step in a provisioning run: one handler for the two teams and the role, after H7b
 # and before H9, from the files $DeclaredRoleFiles lists (restricted-content-owner-role.json,
 # customer-configuration-owner-role.json, billing-rule-readers-role.json), with its own gate and an H13 re-check.
@@ -3107,6 +3148,7 @@ These are **module-scoped** deployment / build workflows — NOT customer-provis
 | 2026-11-10 | §5 displayName + `customerBusinessUnitId` row + §7.7 H10 + H7b S11/S16/S24/S25: the ontology writer sits alone in its own unit `Spaarke Ontology Writer` (H10 finds or creates it, moves a writer task 266 put in the customer's unit, records `ontologyWriterBusinessUnitId`; intake reserves the name); H7b (procedure v8) checks that unit by id, gives the writer that unit's role copy, keeps its default team out of every profile, and S25 gives the customer unit's default team `Spaarke Basic User` so it can own contacts — the operator step for #2618 is gone | `customer-provisioning-orchestration-r1` task 267 (#2618) |
 | 2026-11-10 | §5 H7b row + §6.5.2 + §7.7 H10/S24 + Secure Record setup: the nine operator scripts that add "every default team" to a reader profile skip the ontology writer unit's default team and FAIL when it is there (`scripts/common/OntologyWriterUnit.ps1`); a move keeps roles where `DoNotRemoveRolesOnChangeBusinessUnit` is set (S24 hint, remove by hand); the moved writer holds no role between H10 and H7b S24; H10 also refuses a writer whose client id is the BFF app registration's | `customer-provisioning-orchestration-r1` task 267 review fixes (#2618) |
 | 2026-11-11 | §5 H7b row + Secure Record setup S26: H7b procedure 9 verifies ebilling task 166's lock on the seven `sprk_invoice` amounts and firm (EB-D-200; secured, Readers read, Writers 4/4/4, no other writer); incomplete → `secure_setup.invoice_money_lock_incomplete` (Resumable: a SpaarkeMaster release above 1.3.0.0 carrying 166, or ebilling's script), other writer → `…_other_writer` (QuarantineRequired). The System Administrator profile is now excused by its fixed id in every H7b other-writer check, never by name (task 268). |
+| 2026-11-13 | §7.11 + §12.2 Phase 7a (Set-CustomerOwnerTeams): the ontology writer's unit `Spaarke Ontology Writer` (task 267) is never a customer unit — refused when named (by name or id, every mode), never counted as another customer top unit, a declared team or a role copy holder in it is drift, it must sit outside every customer subtree, and two units of that name refuse (task 269). |
 
 ---
 

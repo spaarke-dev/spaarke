@@ -183,6 +183,10 @@ public sealed partial class RecordCreationServiceMappingSeamTests
                 if (table == "sprk_event" && columns.SequenceEqual(["sprk_eventnumber"]))
                     return Task.FromResult(new Entity(table, id) { ["sprk_eventnumber"] = "EVT-000001" });
 
+                // Task 045d: the invoice-family rule's derive reads the core record's name and number (not a mapping-source read).
+                if (RegardingRecordType.GetPrimaryNameField(table) is { } nameField && columns.SequenceEqual([nameField, table + "number"]))
+                    return Task.FromResult(new Entity(table, id) { [nameField] = "Core record", [table + "number"] = "CR-000001" });
+
                 _journal.Add("source-read");
                 _sourceReads.Add((table, id, columns));
                 if (!_sources.TryGetValue((table, id), out var row))
@@ -1177,11 +1181,22 @@ public sealed partial class RecordCreationServiceMappingSeamTests
         return new RecordCreationService(
             resolver, _appOnly.Object, _sourceReader.Object,
             _rootFiling(), restamper, shares,
-            _scopes ?? new ServiceCollection().BuildServiceProvider().GetRequiredService<IServiceScopeFactory>(), _publisher,
+            _scopes ?? new ServiceCollection().AddSingleton(RecordTypeCatalog()).BuildServiceProvider().GetRequiredService<IServiceScopeFactory>(), _publisher,
             _logger ?? NullLogger<RecordCreationService>.Instance)
         {
             TableRules = t => _tableRules(t),
         };
+    }
+
+    /// <summary>Task 045d: the app-only record-type catalog — one active row per table, naming the table's number column.</summary>
+    private static ICommunicationDataverseService RecordTypeCatalog()
+    {
+        var catalog = new Mock<ICommunicationDataverseService>(MockBehavior.Strict);
+        catalog
+            .Setup(c => c.QueryRecordTypeRefAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string table, CancellationToken _) =>
+                new Entity("sprk_recordtype_ref", Guid.NewGuid()) { [RegardingRecordType.RecordNumberFieldColumn] = table + "number" });
+        return catalog.Object;
     }
 
     /// <summary>Registers a fixture pre-write rule on the event table (the invoice-family rule is not on this branch).</summary>
@@ -1196,7 +1211,7 @@ public sealed partial class RecordCreationServiceMappingSeamTests
                     (row, _) =>
                     {
                         asked.Add(row);
-                        return Task.FromResult<PreWriteRefusal?>(null);
+                        return Task.FromResult(PreWriteResult.Admit);
                     }),
             ],
         };

@@ -78,13 +78,14 @@ public sealed class ProcedureResolverTests
 
     private static DateTime Stored(DateOnly date) => date.ToDateTime(TimeOnly.MinValue);
 
-    private Guid AddProcedure(string? name, ProcedureAppliesTo? appliesTo, Guid? firm = null, int status = ProcedureEntity.StatusActive)
+    private Guid AddProcedure(string? name, ProcedureAppliesTo? appliesTo, Guid? firm = null, int status = ProcedureEntity.StatusActive, int state = 0)
     {
         var id = Guid.NewGuid();
         var columns = new List<(string, object)>
         {
             (ProcedureEntity.AreaColumn, Option(RuleDomains.PolicyDomainBilling)),
             (ProcedureEntity.StatusColumn, Option(status)),
+            ("statecode", Option(state)),
         };
         if (name is not null) columns.Add((ProcedureEntity.NameColumn, name));
         if (appliesTo is { } a) columns.Add((ProcedureEntity.AppliesToColumn, Option((int)a)));
@@ -338,6 +339,86 @@ public sealed class ProcedureResolverTests
         Assign(Matter, M, procedure);
 
         (await CodesOn(CoreRecordKind.Matter, M, F, Feb1)).Should().BeEmpty();
+    }
+
+    // ── ISS-021: a deactivated Procedure (statecode 1) is not applicable, whatever its Status says ───────────────
+
+    /// <summary>
+    /// Makes the world answer every query of <paramref name="table"/> as if its <c>statecode</c> condition were not there, so a deactivated row
+    /// reaches the resolver and only the per-row re-check can drop it. The query actually sent is still recorded (and asserted on) by the caller.
+    /// </summary>
+    private void AnswerWithoutStatecodeFilter(string table) =>
+        _entities
+            .Setup(e => e.RetrieveMultipleAsync(It.Is<Microsoft.Xrm.Sdk.Query.QueryExpression>(q => q.EntityName == table), It.IsAny<CancellationToken>()))
+            .Returns((Microsoft.Xrm.Sdk.Query.QueryExpression query, CancellationToken _) =>
+            {
+                foreach (var condition in query.Criteria.Conditions.Where(c => c.AttributeName == "statecode").ToList())
+                {
+                    query.Criteria.Conditions.Remove(condition);
+                }
+
+                return Task.FromResult(_world.Answer(query));
+            });
+
+    private bool QueryFiltersStatecode(string table) =>
+        _world.Queries.Where(q => q.EntityName == table).ToList() is { Count: > 0 } sent
+        && sent.All(q => q.Criteria.Conditions.Any(c => c.AttributeName == "statecode"));
+
+    /// <summary>Seeds Procedure "DEACT" (an All-records one, or an Assigned-records-only one assigned on the matter) with a rule, in the given state.</summary>
+    private Guid SeedForStateTest(bool assigned, int state)
+    {
+        var procedure = AddProcedure("Procedure DEACT", assigned ? ProcedureAppliesTo.AssignedRecordsOnly : ProcedureAppliesTo.AllRecords, state: state);
+        var version = AddVersion(procedure, 1, Jan1, null);
+        AddRuleVersion(AddProcedureRule(procedure, "DEACT-1"), version, Jan1);
+        if (assigned)
+        {
+            Assign(Matter, M, procedure);
+        }
+
+        return procedure;
+    }
+
+    [Theory(DisplayName = "ISS-021 (a): an Active Procedure with statecode 1 is not applied, whether it comes from Applies to or an assignment")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ADeactivatedProcedure_IsNotApplied(bool assigned)
+    {
+        SeedForStateTest(assigned, state: 1);
+
+        (await CodesOn(CoreRecordKind.Matter, M, F, Feb1)).Should().BeEmpty();
+        var rows = await ProcedureResolver.ReadRowsAsync(_entities.Object, NullLogger.Instance, new CoreRecordReference(CoreRecordKind.Matter, M), F, CancellationToken.None);
+        rows.Procedures.Should().BeEmpty();
+        QueryFiltersStatecode(ProcedureEntity.Entity).Should().BeTrue("the Procedure read names statecode");
+    }
+
+    [Theory(DisplayName = "ISS-021 (b): the per-row re-check alone drops a deactivated Procedure the query returned")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ADeactivatedProcedure_ThatSlipsPastTheQuery_IsDroppedByTheRowCheck(bool assigned)
+    {
+        SeedForStateTest(assigned, state: 1);
+        AnswerWithoutStatecodeFilter(ProcedureEntity.Entity);
+
+        (await CodesOn(CoreRecordKind.Matter, M, F, Feb1)).Should().BeEmpty();
+        var rows = await ProcedureResolver.ReadRowsAsync(_entities.Object, NullLogger.Instance, new CoreRecordReference(CoreRecordKind.Matter, M), F, CancellationToken.None);
+        rows.Procedures.Should().BeEmpty();
+        QueryFiltersStatecode(ProcedureEntity.Entity).Should().BeFalse("the rig answered without the statecode condition, so the row check is what decided");
+    }
+
+    [Theory(DisplayName = "ISS-021 (c, must-not-fire): an Active Procedure with statecode 0 is applied, through the query and through the row check alone")]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
+    public async Task AnActiveProcedure_IsStillApplied(bool assigned, bool rowCheckOnly)
+    {
+        SeedForStateTest(assigned, state: 0);
+        if (rowCheckOnly)
+        {
+            AnswerWithoutStatecodeFilter(ProcedureEntity.Entity);
+        }
+
+        (await CodesOn(CoreRecordKind.Matter, M, F, Feb1)).Should().Equal("DEACT-1");
     }
 
     [Fact(DisplayName = "082b sources: one Procedure from several sources takes the highest level")]

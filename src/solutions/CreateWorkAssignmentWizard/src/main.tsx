@@ -6,6 +6,7 @@ import { parseDataParams } from "@spaarke/ui-components/utils/parseDataParams";
 import { getXrm } from "@spaarke/ui-components/utils/xrmContext";
 import { createXrmDataService } from "@spaarke/ui-components/utils/adapters/xrmDataServiceAdapter";
 import { createXrmNavigationService } from "@spaarke/ui-components/utils/adapters/xrmNavigationServiceAdapter";
+import { createXrmEmailComposeHandlers } from "@spaarke/ui-components/components/EmailComposer";
 import { WorkAssignmentWizardDialog } from "@spaarke/ui-components/components/CreateWorkAssignmentWizard";
 import { readHandoffFromUrl, handoffSeed as computeHandoffSeed, completeHandoff as writeCompleteHandoff } from "@spaarke/ui-components/services/surfaceHandoff";
 import { resolveRuntimeConfig, initAuth, authenticatedFetch } from "@spaarke/auth";
@@ -49,6 +50,11 @@ function App() {
 
   const dataService = React.useMemo(() => createXrmDataService(), []);
   const navigationService = React.useMemo(() => createXrmNavigationService(), []);
+  // Send Email step (task 182, D-219): recipient pane, record lookup, upload, templates, AI draft.
+  const emailComposeHandlers = React.useMemo(
+    () => createXrmEmailComposeHandlers({ authenticatedFetch, bffBaseUrl: resolvedBffBaseUrl || undefined }),
+    [resolvedBffBaseUrl]
+  );
 
   // UAT R5-8 (the create-flow file leg): when launched from the Assistant "Assign Work" Quick Start
   // card via the surface-launch envelope, read this page's hand-off and pass the session file refs
@@ -104,6 +110,7 @@ function App() {
       <WorkAssignmentWizardDialog
         dataService={dataService}
         navigationService={navigationService}
+        emailComposeHandlers={emailComposeHandlers}
         embedded={true}
         open={true}
         onClose={handleClose}

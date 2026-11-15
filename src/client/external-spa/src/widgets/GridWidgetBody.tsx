@@ -51,7 +51,7 @@ import { getRecordDetailEntity } from '../components/detail/RecordDetailFields';
 import { RecordTemplateModal } from '../components/record/RecordTemplateModal';
 import { getRecordTemplate } from '../components/record/recordTemplates';
 import type { RecordTemplateConfig } from '../components/record/recordTemplate.types';
-import type { WidgetBodyComponent, WidgetBodyProps } from '../registry/PlaceholderWidgetBody';
+import type { WidgetBodyProps } from '../registry/PlaceholderWidgetBody';
 
 const useStyles = makeStyles({
   root: {
@@ -77,6 +77,16 @@ interface DetailTarget {
   index: number;
 }
 
+/**
+ * Commands the host of a grid body adds to the shared grid's command bar (the grid's generic `hostCommands` slot),
+ * read off the wrapper's props so this file never imports the shared grid's module. Placement and id-collision rules
+ * are on the shared `DataGridHostCommand` type. Absent: the grid's toolbar is exactly what its configuration gives.
+ */
+export type GridHostCommands = React.ComponentProps<typeof ExternalDataGrid>['hostCommands'];
+
+/** The props of a grid widget body: the registry's `WidgetBodyProps` plus the optional host commands. */
+export type GridWidgetBodyProps = WidgetBodyProps & { hostCommands?: GridHostCommands };
+
 /** Resolves + live-tracks the ambient light/dark/Teams theme (same source as the app shell). */
 function useAmbientTheme(): Theme {
   const [theme, setTheme] = React.useState<Theme>(() => resolveCodePageTheme() ?? webLightTheme);
@@ -88,10 +98,11 @@ function useAmbientTheme(): Theme {
  * Builds a widget-body component bound to one `sprk_gridconfiguration` record id. The returned
  * component ignores the incoming `title`/`description` props (the shared grid framework renders its
  * OWN header from `sprk_configjson.display.title`) — matches `WidgetBodyComponent`'s contract so it
- * plugs into `widgetRegistry.ts`'s `lazyLoader` unchanged.
+ * plugs into `widgetRegistry.ts`'s `lazyLoader` unchanged. The one extra, optional prop is `hostCommands`: commands
+ * the host widget adds to the grid's toolbar (see {@link GridHostCommands}); the registry never passes it.
  */
-export function createGridWidgetBody(configId: string): WidgetBodyComponent {
-  const GridWidgetBody: React.FC<WidgetBodyProps> = ({ onNavigate }) => {
+export function createGridWidgetBody(configId: string): React.ComponentType<GridWidgetBodyProps> {
+  const GridWidgetBody: React.FC<GridWidgetBodyProps> = ({ hostCommands }) => {
     const s = useStyles();
     const theme = useAmbientTheme();
     // The grid's loaded rows, in grid order. A ref, not state: the grid re-fires `onRecordsLoaded` whenever its
@@ -145,6 +156,7 @@ export function createGridWidgetBody(configId: string): WidgetBodyComponent {
           theme={theme}
           onRecordsLoaded={handleRecordsLoaded}
           onRecordOpen={handleRecordOpen}
+          hostCommands={hostCommands}
         />
         {detail && (
           <RecordTemplateModal
@@ -156,7 +168,6 @@ export function createGridWidgetBody(configId: string): WidgetBodyComponent {
             index={detail.index}
             onIndexChange={handleIndexChange}
             onRecordDeleted={handleRecordDeleted}
-            onNavigate={onNavigate}
           />
         )}
       </div>
