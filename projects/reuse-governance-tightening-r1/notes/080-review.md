@@ -18,6 +18,8 @@
 | 8 | `hooks/index.ts` now pulls `useDocumentActions` (and `@spaarke/auth`) into the pcf-safe module graph | K4 | Recorded. Verified harmless: MatterHeader `build:prod` 67,327 bytes, no auth/msal strings (tree-shaken). Optional hardening only. |
 | — | `src/solutions/LegalWorkspace/package-lock.json:207` keeps Compose's old `@spaarke/document-operations` edge | K4 | Recorded. No failing path: LegalWorkspace Vite build passes and `npm install` (never `npm ci`) prunes it. |
 
+**Fix verification (2026-11-15, commit `518b5bec8d`)**: full Compose jest 112/112 suites, 1457 tests; `SharedPackageCensus` ArchTests 8/8; `Test-InstructionPaths.ps1` new 0; workflow YAML parses (jscpd step `timeout-minutes: 10`, `continue-on-error: true`). Scoped re-check (one `adversarial-reviewer` on **sonnet**, fix diff + direct callers only, not a second full pass): **clean** — the new `git log` lists 2,497 files vs a 2,496-file ground-truth diff on origin/master (none missed, one harmless extra), a timed-out jscpd step reaches the "no readable report → failing" branch, the test stub matches the siblings and the hook's shape, and every name, count and path in the edited docs is true. No F-class finding remains open.
+
 Requirements trace: FR-01 and task 033 were "not met" only through findings 4 and 1, both now fixed; every other item-1–4 criterion is met or not verifiable from a diff (process items, the first weekly cron on 2026-11-16, the item-4 PR that does not exist yet). Full trace below.
 
 ## Reviewer report (verbatim)
