@@ -44,13 +44,15 @@ internal static class ProcedureSnapshot
     internal const string DecisionRecordFact = "procedureSnapshot";
 
     /// <summary>The snapshot of <paramref name="evaluation"/>'s basis, or null when nothing was evaluated (a held fault, a pre-evaluation stop).</summary>
-    internal static JsonObject? Build(BillingEvaluationResult? evaluation)
-    {
-        if (evaluation?.ProcedureBasis is not { } basis)
-        {
-            return null;
-        }
+    internal static JsonObject? Build(BillingEvaluationResult? evaluation) =>
+        evaluation?.ProcedureBasis is { } basis ? Build(basis) : null;
 
+    /// <summary>
+    /// The snapshot of <paramref name="basis"/>. The one builder: the submission's snapshot is <c>Build(evaluation.ProcedureBasis)</c> and task 113's
+    /// read-time comparison builds the current resolution's side with the same code, so the two can only differ by what they were built from.
+    /// </summary>
+    internal static JsonObject Build(BillingProcedureBasis basis)
+    {
         var rows = new Dictionary<Guid, ProcedureOverrideRow>();
         void Collect(IEnumerable<ProcedureOverrideRow> deciding)
         {

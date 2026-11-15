@@ -536,7 +536,10 @@ public sealed class InvoiceLineReviewEndpointsAuthorizationContractTests
             builder.Services.AddScoped(sp => new InvoiceReviewReadService(
                 host.Entities.Object, sp.GetRequiredService<AuthorizationService>(), settings.Object,
                 new Mock<Sprk.Bff.Api.Infrastructure.Dataverse.IDataverseUserClient>(MockBehavior.Strict).Object,
-                new EarlierInvoiceReadability(NullLogger<EarlierInvoiceReadability>.Instance), NullLogger<InvoiceReviewReadService>.Instance));
+                new EarlierInvoiceReadability(NullLogger<EarlierInvoiceReadability>.Instance),
+                new Sprk.Bff.Api.Services.Finance.Procedures.ProcedureChangeBanner(
+                    host.Entities.Object, NullLogger<Sprk.Bff.Api.Services.Finance.Procedures.ProcedureChangeBanner>.Instance),
+                NullLogger<InvoiceReviewReadService>.Instance));
 
             var locks = new Mock<IIdempotencyService>();
             locks.Setup(l => l.TryAcquireProcessingLockAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<TimeSpan?>(), It.IsAny<CancellationToken>())).ReturnsAsync(true);
