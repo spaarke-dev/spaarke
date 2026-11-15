@@ -12,7 +12,7 @@
 
 ### In flight
 
-- **Master PR (work → master): being opened.** It carries 093, 113, 084h-1 (with fix round 2), the #2833 ebilling slice and notes. master is merged into work at bd18cb8d60 (clean; no BFF changes came in).
+- **Master PR #2839 (work → master): open, CI running.** It carries 093, 113, 084h-1 (with fix round 2), the #2833 ebilling slice and notes. master is merged into work at bd18cb8d60 (clean; no BFF changes came in).
   - ontology-r1 PASSED 084h-1 fix round 2 and approves by PR comment once CI is green. The PR description lists the amended `DecisionRecordContextImmutabilityTests` and the new `RecordProcedureActions` set.
   - uac-r2 PASSED 093.
   - **Merging needs the owner's go.** After the merge, send the SHA to uac-r2, spa-r4 and word-add-in-r1.
