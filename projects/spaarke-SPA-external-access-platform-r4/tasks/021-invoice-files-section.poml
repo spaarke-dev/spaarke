@@ -4,7 +4,7 @@
     <title>Invoice Files section; remove invoice upload/versions (FR-13)</title>
     <phase>2 Invoices and documents</phase>
     <gate>after 018, 020, 023 AND ebilling's /invoices/{id}/files routes on master (hard gate, see escalation)</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .ts/.tsx code: new Files section, removal of the invoice documents path</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -55,7 +55,7 @@
       Only the invoice PDF is listed (firm-visible, servable, clean, matching parent).
       BREAKING: 093 retires all four `/invoices/{id}/documents` routes, so the BFF and SPA deploy back to back, BFF first. R4 is the SPA side.
       Owner retest 2026-11-14 ("I don't see the actual invoice document/file"; big Upload button) is answered by this task: the real file shows, and invoice upload goes away.
-      Review ebilling's DTO and file:line before their 093 PR.
+      Review ebilling's DTO and file:line before their 093 PR (done 2026-11-15; 093 is in master PR #2839). Also: 403 from the workforce ceiling (`ReadInvoiceFiles`); the content route sends no Content-Disposition name, so name the download from the list's `fileName`; `sizeBytes` and `createdOn` may be null.
     </constraint>
   </constraints>
 
@@ -141,7 +141,8 @@
     <criterion testable="true">Test scope: cover the stated contract plus the edge cases named in these criteria. Anything beyond that needs a one-line justification in the task notes.</criterion>
   </acceptance-criteria>
 
-  <notes>Spec FR-13, SC-5. Deploys only after ebilling's files-routes BFF deploy (task 028 checks). If ebilling slips, 028 ships P2 without this task and records it.</notes>
+  <notes>Spec FR-13, SC-5. Built 2026-11-15 against ebilling PR #2839 (owner pulled it ahead; gate deviation recorded). Read-only InvoiceFilesList (Clean/NotScanned Download, Checking, 409 race, ebilling.disabled neutral line, empty-name fallback); invoice documents root removed (compiler-enforced). Review: F1 kill switch, F2 test title, F4 notes, K2 empty name, all fixed. Detail: notes/task-021-notes.md. Deploy: BFF swap with 093 first, then SPA.
+rework: fix-round-1 task 021</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
