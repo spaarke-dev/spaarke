@@ -8,9 +8,9 @@
 | Field | Value |
 |-------|-------|
 | **Task** | 018 retest round 2: 012 ✅ and 013 ✅ in PR #2837 (CI pending). Next: merge, SPA dev deploy (owner approval), owner retest. Then 021 (ebilling 093) |
-| **Step** | PR #2837 open; waiting on CI and the owner go for merge + SPA deploy |
+| **Step** | #2837 merged (04dbd8df05). Dev SPA run 43735968667 is live; owner retest round 2 in progress |
 | **Status** | Dev BFF `5a9b687a0b` (see Live state). Dev SPA from run 43598875136 (master `2747977f47`), live 13:19Z; bundle has the new strings, no "Can contribute" or "To Do". |
-| **Next Action** | After the owner says go: merge #2837 once CI is green, then dispatch deploy-external-spa.yml (dev, master); rollback master `2747977f47`. NOTE: no SPA deploy once 021 is merged and before the 093 BFF swap. |
+| **Next Action** | Collect the owner retest results and fix anything found. Record them in notes/task-018-notes.md and close 018. Then 021 against the ebilling 093 contract (owner confirmation still pending on pulling it forward). SPA rollback: master `2747977f47` (run 43598875136). |
 
 ## Done after merge
 - The merge SHA was sent to ebilling-r1 (for their 095 notes) and acknowledged to uac-r2.
@@ -30,7 +30,7 @@
 
 ## Live state
 - **Dev BFF:** `5a9b687a0b` = master `2747977f47` + mcp spike (uac-r2, live ~15:19Z). BFF rollback `0173e1486e`.
-- **Dev SPA:** master `2747977f47` build (run 43598875136, 2026-11-14 13:19Z). Previous build: `2ef4a17915`.
+- **Dev SPA:** master `04dbd8df05` (run 43735968667, 2026-11-15; tasks 012 and 013). Previous build: `2747977f47`.
 - **Never deploy the BFF directly.** uac-r2 orchestrates the BFF deploy, and the owner gives the go per SHA.
 
 ## Open items / issues
