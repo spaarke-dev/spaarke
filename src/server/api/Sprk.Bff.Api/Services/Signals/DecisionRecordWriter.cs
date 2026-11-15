@@ -1944,9 +1944,20 @@ public sealed class DecisionRecordWriter
         System.Text.Json.Nodes.JsonNode node => node.GetValueKind() switch
         {
             JsonValueKind.Null or JsonValueKind.Undefined => true,
-            JsonValueKind.String => string.IsNullOrWhiteSpace(node.GetValue<string>()),
+            // TryGetValue, not GetValue: a JsonValue over a Guid or a date reports the String kind but holds no string (GetValue<string> throws).
+            JsonValueKind.String => node is System.Text.Json.Nodes.JsonValue text && text.TryGetValue<string>(out var noteText) && string.IsNullOrWhiteSpace(noteText),
             _ => false,
         },
+        _ => false,
+    };
+
+    /// <summary>True for a note that is text: a string, a JSON string, or a JsonValue holding a string. Anything else (a number, an object, an
+    /// array, a Guid) is not a note and is refused (task 084h-1 fix round 2).</summary>
+    private static bool IsTextNote(object? value) => value switch
+    {
+        string => true,
+        JsonElement { ValueKind: JsonValueKind.String } => true,
+        System.Text.Json.Nodes.JsonValue node => node.TryGetValue<string>(out _),
         _ => false,
     };
 
@@ -2040,6 +2051,10 @@ public sealed class DecisionRecordWriter
         if (r.Reason is { Length: > ReasonMaxLength }) throw Invalid("Reason is too long for sprk_reason.");
 
         var values = RecordProcedureValuesOf(r);
+
+        // A blank note is already dropped above; a note that is left must be text (a non-string JSON value is not one).
+        if (values.TryGetValue(RecordProcedureNoteKey, out var note) && !IsTextNote(note)) throw Invalid("A note must be text.");
+
         foreach (var parameter in definition.Parameters.Where(p => p.Required))
         {
             if (parameter.Code == "reason")

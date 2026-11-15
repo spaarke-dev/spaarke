@@ -99,6 +99,31 @@ Base: `e93ad7298d`. Binding rule unchanged: no existing signature or behaviour c
 | `tests/Spaarke.ArchTests` (full) | 2622 / 2622 pass |
 | `dotnet build src/server/api/Sprk.Bff.Api/ --warnaserror --no-incremental` | 0 warnings, 0 errors |
 
+## Fix round 2 (ontology-r1 review)
+
+Base: `32fca114b3`. Two test fixes and one small hardening, from the ontology team's review of `WriteRecordProcedureDecisionAsync`. The only writer change is item 3 (`IsBlankNote`, a new `IsTextNote`, one check in `ValidateRecordProcedure`); `DecisionRecordWriterTests.Billing.cs` and `DecisionActionCatalogTests.cs` are untouched.
+
+| # | Finding | Fix | Proof |
+|---|---|---|---|
+| F3-1 | The pre-I/O refusals in `ValidateRecordProcedure` (an empty `DecisionId`, a blank `DeciderRole`, a blank `Outcome`, a `Reason` over `ReasonMaxLength`) had no test. Deleting the reason check left everything green, and a 2001-char reason would then fail AFTER I/O, in the create, as `CreateFailed` (retryable). | Theory `RecordProcedure_FixRound2_APreIoRefusal_IsReviewInvalid_WithNoIo_AndThePreflightRefusesIt_TheSame` (six cases: reason too long, empty decision id, empty and whitespace role, empty and whitespace outcome). Each answers `ReviewInvalid` through the writer with `NoIo(h)`, and through `PreflightRecordProcedureDecision` (which throws the same refusal). New test `RecordProcedure_FixRound2_ThePreflight_RefusesAReasonOverTheColumnSize_AndPassesOneAtTheLimit` (2001 refused, 2000 passes). | Each check deleted in turn, the tests run, the check restored: decision id, 1 fails; role, 2 fail; outcome, 2 fail; reason, 2 fail. |
+| F3-2 | W6's "the derivation reads nothing" verified only `RetrieveAsync(table, id, ...)` never ran. A derivation read through `RetrieveMultipleAsync`, or of another table or id, passed. | W6 (`RecordProcedure_W6_TheRecordIsFiledUnderTheCoreRecord_...`) now also asserts that every `h.Entities` invocation is `RetrieveMultipleAsync` and that `h.Lookups` holds exactly one query (the already-recorded lookup). | An extra `RetrieveMultipleAsync` before the core derivation: W6 (3 cases) and W4 fail. An extra `RetrieveAsync("sprk_other", ...)`: W6 (3 cases) fail; the old assertion passed both. |
+| 3 | (Hardening) `IsBlankNote` called `GetValue<string>()` on a `JsonNode` of kind String. A `JsonValue` over a Guid or a date reports that kind but holds no string, so the call threw `InvalidOperationException` while the note was classified (an unhandled exception out of the entry, not a refusal). A non-string note (a number, an object, an array, a boolean) was also accepted, hashed and written as if it were text, because `note` is no declared parameter and nothing validated it. | `IsBlankNote` uses `JsonValue.TryGetValue<string>`, so a non-string value is not blank and nothing throws. New `IsTextNote` (a string, a JSON string, or a `JsonValue` holding a string), and `ValidateRecordProcedure` refuses a note that is left and is not text: `ReviewInvalid` ("A note must be text."), before any I/O, so the preflight refuses it too. | Tests: `..._ANonStringNote_IsNotBlank_AndDoesNotThrowWhileItIsClassified` (8 kinds: JSON number, object, array, boolean; JsonNode number, Guid, object; CLR int; the Guid case threw before) and `..._ANonStringNote_IsRefusedAsReviewInvalid_BeforeAnyIo_AndByThePreflight` (the same 8); `..._ATextNote_ThroughAJsonValue_IsStillWritten`. Before the change 9 of these failed; with the note check deleted, 8 fail. |
+
+**Known limits (not fixed here)**
+
+| # | Limit | Owner |
+|---|---|---|
+| K1 | 084h-3's retry list must classify every refusal this entry gives for an unreadable dependency: `BillingRecordLookupFailed` (the deciding contact's read, via the billing recorder's supplier, H-1), `OwnerRefused` (a deleted core record, K-c: permanent, so no retry), `OwnerResolutionFailed` (retry) and `CreateFailed` (retryable; after a timeout the row may exist, so the next delivery answers `AlreadyRecorded`). The `OwnerRefused`-for-a-deleted-core case needs its own test in 084h-2/3, where the request reaches the entry through the real path. | 084h-3 (retry list), 084h-2/3 (the test). ontology-r1 checks the list in the 084h-3 review. |
+| K2 | The required-parameter check accepts `Guid.Empty` and blank ids for a parameter (it refuses only a missing, null or whitespace-string value), as `ValidateBilling` does. No real path reaches it: the 089 service builds every id from a row it has read. | None (same as billing). |
+
+**Runs (fix round 2)**
+
+| Run | Result |
+|---|---|
+| `DecisionRecordWriterTests.RecordProcedure_*` | 116 / 116 pass (92 after round 1, plus 24 new cases: 6 + 1 + 8 + 8 + 1; W6 was strengthened in place) |
+| `DecisionRecordWriterTests` (all partials) + `DecisionActionCatalogTests` + `DecisionRecordContextImmutabilityTests` | 573 / 573 pass |
+| `dotnet build src/server/api/Sprk.Bff.Api/ --warnaserror --no-incremental` | 0 warnings, 0 errors |
+
 ## Out of scope (untouched)
 
 084h-2 (recorder, `ProcedureAssignmentService`, endpoints, S1-S10), 084h-3 (repair job, J1-J5), 084h-4 (UI). No live Dataverse, no deploy.
