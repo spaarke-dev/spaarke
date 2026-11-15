@@ -163,3 +163,54 @@ describe('a short query (minSearchLength with shortQueryHint)', () => {
     expect(screen.getByText('Pick the budget')).toBeInTheDocument();
   });
 });
+
+describe('a browse at a term below the minimum survives the parent re-rendering', () => {
+  const browse = () => fireEvent.click(screen.getByRole('button', { name: `Browse ${LABEL}` }));
+
+  it('a re-render with a new onSearch identity mid-flight does not drop the answer', async () => {
+    const { pending, onChange, rerender } = renderField({ minSearchLength: 2 });
+
+    browse();
+    await waitFor(() => expect(pending).toHaveLength(1));
+    // The parent re-renders with an inline onSearch (a new identity every render), so the effect runs again while the browse is out.
+    const next = controlledSearch();
+    rerender(
+      <LookupField label={LABEL} value={null} onChange={onChange} onSearch={next.onSearch} minSearchLength={2} />
+    );
+    await act(async () => pending[0].resolve([NEW]));
+
+    expect(await screen.findByText(NEW.name)).toBeInTheDocument();
+    expect(screen.queryByText('Searching...')).toBeNull();
+  });
+
+  it('a re-render does not close a browse list that is already showing', async () => {
+    const { pending, onChange, rerender } = renderField({ minSearchLength: 2 });
+
+    browse();
+    await waitFor(() => expect(pending).toHaveLength(1));
+    await act(async () => pending[0].resolve([NEW]));
+    expect(await screen.findByText(NEW.name)).toBeInTheDocument();
+    const next = controlledSearch();
+    rerender(
+      <LookupField label={LABEL} value={null} onChange={onChange} onSearch={next.onSearch} minSearchLength={2} />
+    );
+
+    expect(screen.getByText(NEW.name)).toBeInTheDocument();
+  });
+
+  it('still drops an answer for a longer term once the text is cut below the minimum, and on a change within the short range', async () => {
+    const { pending } = renderField({ minSearchLength: 3 });
+    type('fy2');
+    await waitFor(() => expect(pending).toHaveLength(1), { timeout: 3000 });
+    type('fy');
+    await act(async () => pending[0].resolve([OLD]));
+    expect(screen.queryByText(OLD.name)).toBeNull();
+
+    // A browse at 'fy', then the text changes within the short range: the browse answer is for a term that is gone.
+    browse();
+    await waitFor(() => expect(pending).toHaveLength(2));
+    type('f');
+    await act(async () => pending[1].resolve([OLD]));
+    expect(screen.queryByText(OLD.name)).toBeNull();
+  });
+});

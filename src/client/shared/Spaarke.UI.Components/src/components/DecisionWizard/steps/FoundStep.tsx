@@ -83,17 +83,23 @@ export const FoundStep: React.FC = () => {
   const coreId = item.core?.recordId.trim() || '';
   // D-182: the subject is a link only when the host can open it and the subject has an entity and an id.
   const canOpenSubject = openRecord != null && coreName != null && coreType !== '' && coreId !== '';
+  // A host that refuses to open the record says so, once, until an open succeeds (a click that does nothing reads as a dead link).
+  const [openFailed, setOpenFailed] = React.useState(false);
+  const itemId = item.row.signalId;
+  React.useEffect(() => setOpenFailed(false), [itemId]);
   const open = (entity: string, id: string) => {
     if (!openRecord) return;
-    // The record opens in a platform modal above the wizard (or wherever the host sends it); a failure to open changes nothing here.
+    const failed = (err: unknown) => {
+      console.warn('[DecisionWizard] openRecord failed', err);
+      setOpenFailed(true);
+    };
+    // The record opens in a platform modal above the wizard (or wherever the host sends it); a failure to open changes nothing but the note.
     try {
-      void Promise.resolve(openRecord(entity, id)).catch(err => {
-        console.warn('[DecisionWizard] openRecord failed', err);
-      });
+      void Promise.resolve(openRecord(entity, id)).then(() => setOpenFailed(false), failed);
     } catch (err) {
       // The wizard keeps its place.
-      // eslint-disable-next-line no-restricted-syntax -- opening the record is a convenience link; the wizard keeps its step and values, and the failure is logged
-      console.warn('[DecisionWizard] openRecord failed', err);
+      // eslint-disable-next-line no-restricted-syntax -- opening the record is a convenience link; the wizard keeps its step and values, and the failure is logged and shown
+      failed(err);
     }
   };
   const openSubject = () => open(coreType, coreId);
@@ -176,6 +182,11 @@ export const FoundStep: React.FC = () => {
             );
           })
         )}
+        {openFailed ? (
+          <Caption1 className={styles.meta} data-testid="open-record-failed" role="status">
+            Could not open the record in Spaarke.
+          </Caption1>
+        ) : null}
         {truncation ? (
           <Caption1 className={styles.meta} data-testid="evidence-truncated" role="status">
             {truncation.total != null && truncation.total > evidence.length

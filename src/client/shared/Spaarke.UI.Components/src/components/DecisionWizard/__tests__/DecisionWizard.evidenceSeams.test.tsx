@@ -3,6 +3,7 @@
  * in a modal or hold every evidence line (the MCP widget). Both are off by default: the Console shows neither.
  *
  *  - `evidenceLinks` + `openRecord`: an evidence line whose `ref` is `{table}:{guid}` gets "Open in Spaarke", which calls `openRecord(table, guid)`.
+ *    A host that refuses to open says so (one polite status) until the next open succeeds.
  *    Never: a line the server withheld, a ref that names no record, a host with no `openRecord`, or the seam off.
  *  - `item.evidenceTruncation`: "Showing N of M evidence lines." (with "Open in Spaarke" when the host can), and an item whose lines
  *    could not be brought at all does not say "No evidence was recorded".
@@ -44,6 +45,7 @@ async function setup(item: DecisionWizardItem, props: Partial<Parameters<typeof 
   return view;
 }
 
+const OPEN_FAILED = 'Could not open the record in Spaarke.';
 const links = () => screen.queryAllByRole('button', { name: /^open in spaarke/i });
 
 describe('evidenceLinks', () => {
@@ -93,7 +95,7 @@ describe('evidenceLinks', () => {
     expect(openRecord).not.toHaveBeenCalled();
   });
 
-  it('a failing openRecord is logged and the wizard keeps its place', async () => {
+  it('a failing openRecord is logged, says so in one polite status, and the wizard keeps its place', async () => {
     const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
     try {
       const err = new Error('host would not open it');
@@ -101,9 +103,47 @@ describe('evidenceLinks', () => {
         throw err;
       });
       await setup(itemWith(evidence), { evidenceLinks: true, openRecord });
+      expect(screen.queryByText(OPEN_FAILED)).toBeNull();
       fireEvent.click(links()[0]);
       await waitFor(() => expect(warn).toHaveBeenCalledWith('[DecisionWizard] openRecord failed', err));
+      const status = await screen.findByText(OPEN_FAILED);
+      expect(status).toHaveAttribute('role', 'status');
+      fireEvent.click(links()[1]);
+      await waitFor(() => expect(openRecord).toHaveBeenCalledTimes(2));
+      expect(screen.getAllByText(OPEN_FAILED)).toHaveLength(1); // one status, however many opens failed
       expect(screen.getByTestId('step-found')).toBeInTheDocument();
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('a synchronous throw from openRecord shows the same status', async () => {
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+    try {
+      const openRecord = jest.fn(() => {
+        throw new Error('no host');
+      });
+      await setup(itemWith(evidence), { evidenceLinks: true, openRecord });
+      fireEvent.click(links()[0]);
+      expect(await screen.findByText(OPEN_FAILED)).toBeInTheDocument();
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('the status is cleared by the next successful open', async () => {
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+    try {
+      let fail = true;
+      const openRecord = jest.fn(async () => {
+        if (fail) throw new Error('host would not open it');
+      });
+      await setup(itemWith(evidence), { evidenceLinks: true, openRecord });
+      fireEvent.click(links()[0]);
+      expect(await screen.findByText(OPEN_FAILED)).toBeInTheDocument();
+      fail = false;
+      fireEvent.click(links()[0]);
+      await waitFor(() => expect(screen.queryByText(OPEN_FAILED)).toBeNull());
     } finally {
       warn.mockRestore();
     }

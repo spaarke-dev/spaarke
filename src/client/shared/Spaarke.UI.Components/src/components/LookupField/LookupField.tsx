@@ -406,6 +406,8 @@ export const LookupField: React.FC<ILookupFieldProps> = ({
    * waiting for, nor turn the spinner off under it.
    */
   const searchSeq = React.useRef(0);
+  /** The short (below `minSearchLength`) term whose stale search was already dropped; null while the term is searchable. */
+  const shortTermHandled = React.useRef<string | null>(null);
   const debounceRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const wrapperRef = React.useRef<HTMLDivElement>(null);
   /**
@@ -464,13 +466,19 @@ export const LookupField: React.FC<ILookupFieldProps> = ({
 
     if (searchTerm.trim().length < minSearchLength) {
       // Too short to search: anything still out for an earlier, longer term is stale, and its spinner and error go with it.
-      searchSeq.current += 1;
-      setLoading(false);
-      setSearchFailed(false);
-      setResults([]);
-      setShowResults(false);
+      // Only when the TERM changed into (or within) the short range: this effect also re-runs when `onSearch` changes identity (a parent
+      // that passes an inline function), and that must not drop a browse started at this very term or close the list it opened.
+      if (shortTermHandled.current !== searchTerm) {
+        shortTermHandled.current = searchTerm;
+        searchSeq.current += 1;
+        setLoading(false);
+        setSearchFailed(false);
+        setResults([]);
+        setShowResults(false);
+      }
       return;
     }
+    shortTermHandled.current = null;
 
     debounceRef.current = setTimeout(() => startSearch(searchTerm.trim(), '[LookupField] Search error:'), 300);
 
