@@ -322,6 +322,20 @@ export interface DecisionWizardItem {
   otherOpenItems: WorklistItem[];
   /** Present when the item is already closed; absent while it is open. */
   resolution?: DecisionResolution | null;
+  /**
+   * Optional seam: the host's `evidence` holds only the first lines of what the item stores (the MCP plan tool bounds a row for its
+   * result size). Present: What was found says "Showing N of M" under the lines instead of passing them off as all of them. Absent
+   * (the Console, which holds every line): nothing is said, as before.
+   */
+  evidenceTruncation?: DecisionEvidenceTruncation;
+}
+
+/** How much of an item's evidence the host could bring. */
+export interface DecisionEvidenceTruncation {
+  /** How many lines the item stores. Absent or not above what is shown: the note says some are not shown, without a count. */
+  total?: number;
+  /** Where the rest can be read (the host opens the Console). Absent: the note has no link. */
+  openAll?: () => void;
 }
 
 // ---------------------------------------------------------------------------

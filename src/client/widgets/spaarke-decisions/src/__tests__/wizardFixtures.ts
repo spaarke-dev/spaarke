@@ -141,6 +141,13 @@ export interface ServerItem {
   plan: DecisionPlan;
   core?: string;
   subjectName?: string;
+  /** The evidence lines the row stores, as `sprk_evidencerefs` holds them. Default: one line whose ref names no record. */
+  evidence?: unknown[];
+  /**
+   * The plan tool bounded the row: it returns `evidence` (the first lines) and says the item stores this many (`evidenceTotal`,
+   * `evidenceTruncated: true`). Absent: the row is inside the bounds (`evidenceTruncated: false`).
+   */
+  evidenceStored?: number;
 }
 
 export type CommitAnswer = (signalId: string, review: DecisionReview) => McpToolResult;
@@ -180,9 +187,17 @@ export function restRow(item: ServerItem) {
     pastDueWording: 'overdue',
     raisedOn: '2026-10-06T12:00:00Z',
     sentence: SENTENCE,
-    evidenceRefs: JSON.stringify([
-      { kind: 'sprk_communication', ref: 'c-1', tier: 'Fact', text: 'Invoice 4411 dated 3 Oct 2026', source: 'Email' },
-    ]),
+    evidenceRefs: JSON.stringify(
+      item.evidence ?? [
+        {
+          kind: 'sprk_communication',
+          ref: 'c-1',
+          tier: 'Fact',
+          text: 'Invoice 4411 dated 3 Oct 2026',
+          source: 'Email',
+        },
+      ]
+    ),
   };
 }
 
@@ -217,6 +232,9 @@ export function wizardHost(items: readonly ServerItem[], options: WizardHostOpti
             plan: { ...item.plan, signalId },
             suppression: suppression({ signalId }),
             row: restRow(item),
+            // The server always says (0 and false when there is no evidence).
+            evidenceTotal: item.evidenceStored ?? (item.evidence ?? [1]).length,
+            evidenceTruncated: item.evidenceStored !== undefined,
           },
         };
       }

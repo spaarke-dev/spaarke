@@ -39,6 +39,8 @@ export interface DecisionWizardHostProps {
   openRecord?: DecisionOpenRecord;
   /** Optional seam (FR-15): Confirm shows an optional "because" box and the review carries it. Absent or false: none (the Console). */
   collectBecause?: boolean;
+  /** Optional seam: an evidence line that names a record offers "Open in Spaarke" (through `openRecord`). Absent or false: none (the Console). */
+  evidenceLinks?: boolean;
   /** Optional seam: render the wizard in place, with no modal envelope, for a frame too small for a dialog. Absent or false: SprkModal. */
   embedded?: boolean;
   /** Optional seam: the Confirm step cannot record until it has been showing this long (`CONFIRM_GUARD_MS`). Absent or 0: no guard. */
@@ -65,6 +67,7 @@ export const DecisionWizardHost: React.FC<DecisionWizardHostProps> = ({
   openLookup,
   openRecord,
   collectBecause,
+  evidenceLinks,
   embedded,
   confirmGuardMs,
   closeOnEscape,
@@ -129,6 +132,7 @@ export const DecisionWizardHost: React.FC<DecisionWizardHostProps> = ({
       onRecorded={event => request.onRecorded?.({ signalId: event.signalId, alsoResolved: event.alsoResolved })}
       uiScale={uiScale}
       collectBecause={collectBecause}
+      evidenceLinks={evidenceLinks}
       embedded={embedded}
       confirmGuardMs={confirmGuardMs}
       closeOnEscape={closeOnEscape}

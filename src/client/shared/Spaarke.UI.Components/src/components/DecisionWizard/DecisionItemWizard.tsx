@@ -131,6 +131,8 @@ export interface DecisionItemReady {
   onNextOpenItem?: () => void;
   /** Optional seam (FR-15): Confirm shows an optional "because" box. Absent or false: none, as before. */
   collectBecause?: boolean;
+  /** Optional seam: What was found offers "Open in Spaarke" on an evidence line that names a record (needs `openRecord`). Absent or false: none, as before. */
+  evidenceLinks?: boolean;
 }
 
 /** What the dialog shows for the current item: its steps once loaded, else a single Loading / Unavailable step. */
@@ -565,6 +567,7 @@ export const DecisionItemWizard: React.FC<DecisionItemWizardProps> = ({
         openItemsLeft: ready.openItemsLeft,
         today,
         collectBecause: ready.collectBecause,
+        evidenceLinks: ready.evidenceLinks,
       }
     : null;
 

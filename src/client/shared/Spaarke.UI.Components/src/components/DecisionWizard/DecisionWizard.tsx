@@ -77,6 +77,11 @@ export interface DecisionWizardProps {
   today?: Date;
   /** Optional seam (FR-15): Confirm shows an optional "because" box and the review carries it. Absent or false: none, as before. */
   collectBecause?: boolean;
+  /**
+   * Optional seam: What was found offers "Open in Spaarke" on each evidence line that names a record, through `openRecord`. Absent or
+   * false: no evidence line is a link, as before (the Console).
+   */
+  evidenceLinks?: boolean;
   /** Optional seam: render in the page with no modal envelope (a frame too small for a dialog). Absent or false: the modal wizard. */
   embedded?: boolean;
   /**
@@ -135,6 +140,7 @@ export const DecisionWizard: React.FC<DecisionWizardProps> = ({
   uiScale,
   today: todayProp,
   collectBecause,
+  evidenceLinks,
   embedded,
   confirmGuardMs,
   closeOnEscape,
@@ -441,6 +447,7 @@ export const DecisionWizard: React.FC<DecisionWizardProps> = ({
         openItemsLeft,
         onNextOpenItem: nextOpenIndex >= 0 ? () => setIndex(nextOpenIndex) : undefined,
         collectBecause,
+        evidenceLinks,
       },
     };
   } else if (state?.status === 'error') {

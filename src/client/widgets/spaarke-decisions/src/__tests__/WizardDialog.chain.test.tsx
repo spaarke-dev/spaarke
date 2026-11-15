@@ -28,7 +28,7 @@ const stand = {
 jest.mock('@spaarke/ui-components/components/DecisionWizard/DecisionWizardHost', () => {
   const launcher = jest.requireActual('@spaarke/ui-components/components/DecisionWizard/decisionWizardLauncher');
   return {
-    DecisionWizardHost: (props: { embedded?: boolean; collectBecause?: boolean }) => {
+    DecisionWizardHost: (props: { embedded?: boolean; collectBecause?: boolean; evidenceLinks?: boolean }) => {
       const place = props.embedded ? 'detail' : 'dialog';
       if (stand.throwIn.has(place)) throw new Error(`the ${place} failed`);
       React.useEffect(() => {
@@ -42,7 +42,13 @@ jest.mock('@spaarke/ui-components/components/DecisionWizard/DecisionWizardHost',
             })
         );
       }, []);
-      return <div data-testid={`stand-in-${place}`} data-because={String(props.collectBecause)} />;
+      return (
+        <div
+          data-testid={`stand-in-${place}`}
+          data-because={String(props.collectBecause)}
+          data-evidence-links={String(props.evidenceLinks)}
+        />
+      );
     },
   };
 });
@@ -142,9 +148,10 @@ describe('the places, in order', () => {
     expect(stand.launches[0]).toMatchObject({ itemId: 'sig-1', visibleList: ['sig-1', 'sig-2'] });
     expect(typeof stand.launches[0].loadItem).toBe('function');
     expect(typeof stand.launches[0].lookup).toBe('function');
-    // The Console's pickers are not used: the host has no `openLookup` / `openRecord`.
+    // The Console's side-pane picker is not used (no `openLookup`); a record opens through the host's `openLink` (see the next block).
     expect(stand.launches[0].openLookup).toBeUndefined();
-    expect(stand.launches[0].openRecord).toBeUndefined();
+    expect(typeof stand.launches[0].openRecord).toBe('function');
+    expect(screen.getByTestId('stand-in-dialog')).toHaveAttribute('data-evidence-links', 'true');
     expect(view.openLink).not.toHaveBeenCalled();
   });
 
@@ -334,4 +341,45 @@ describe('one wizard at a time, and closing', () => {
     await act(async () => undefined);
     expect(stand.launches).toHaveLength(1);
   });
+});
+
+describe('opening a record from the wizard ("Open in Spaarke" on an evidence line)', () => {
+  const GUID = 'aaaaaaaa-0000-4000-8000-000000000001';
+  const launched = async (overrides: Parameters<typeof mount>[0] = {}) => {
+    const view = mount(overrides);
+    view.open(request(1));
+    await waitFor(() => expect(stand.launches).toHaveLength(1));
+    return { view, openRecord: stand.launches[0].openRecord };
+  };
+
+  it("asks the host to open the Console's own record form for that table and id, and nothing else", async () => {
+    const { view, openRecord } = await launched();
+    await openRecord!('SPRK_Communication', GUID.toUpperCase());
+    expect(view.openLink).toHaveBeenCalledTimes(1);
+    expect(view.openLink).toHaveBeenCalledWith(
+      `${CONSOLE_BASE}/main.aspx?etn=sprk_communication&id=${GUID}&pagetype=entityrecord`
+    );
+  });
+
+  it('refuses a table or id that is not a logical name and a guid: nothing is opened, and the wizard is told', async () => {
+    const { view, openRecord } = await launched();
+    await expect(openRecord!('core', 'not-a-guid')).rejects.toThrow();
+    await expect(openRecord!('sprk x&y', GUID)).rejects.toThrow();
+    await expect(openRecord!('', GUID)).rejects.toThrow();
+    expect(view.openLink).not.toHaveBeenCalled();
+  });
+
+  it('says so (the wizard logs it and keeps its place) when the host does not open the link', async () => {
+    const { view, openRecord } = await launched({ openLinkResult: false });
+    await expect(openRecord!('sprk_budget', GUID)).rejects.toThrow('did not open');
+    expect(view.openLink).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([null, undefined, 'http://org.crm.dynamics.com', 'not a url'])(
+    'a Console address of %p: the wizard is given no way to open a record, so no line shows a link that cannot work',
+    async consoleBaseUrl => {
+      const { openRecord } = await launched({ consoleBaseUrl });
+      expect(openRecord).toBeUndefined();
+    }
+  );
 });

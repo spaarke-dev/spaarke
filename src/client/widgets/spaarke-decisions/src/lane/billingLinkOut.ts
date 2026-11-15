@@ -63,3 +63,23 @@ export function buildConsoleLinkOut(consoleBaseUrl: string | null | undefined): 
   const base = normalizeConsoleBaseUrl(consoleBaseUrl);
   return base ? `${base}/main.aspx?pagetype=webresource&webresourceName=${CONSOLE_WEB_RESOURCE}` : null;
 }
+
+const RECORD_LOGICAL_NAME = /^[a-z][a-z0-9_]*$/;
+const RECORD_GUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+/**
+ * The link to one record's form in the Console's environment (task 032 fix round, "Open in Spaarke" on an evidence line): the platform's
+ * own record URL, `main.aspx?etn={logical name}&id={guid}&pagetype=entityrecord`, which the host opens (`openLink`; no Xrm in a Copilot
+ * frame). `null` without a usable base, a logical name or a GUID: a record is never linked by guessing its type.
+ */
+export function buildRecordLinkOut(
+  consoleBaseUrl: string | null | undefined,
+  entity: string | null | undefined,
+  id: string | null | undefined
+): string | null {
+  const base = normalizeConsoleBaseUrl(consoleBaseUrl);
+  const logicalName = (entity ?? '').trim().toLowerCase();
+  const guid = cleanGuid(id);
+  if (!base || !RECORD_LOGICAL_NAME.test(logicalName) || !RECORD_GUID.test(guid)) return null;
+  return `${base}/main.aspx?etn=${encodeURIComponent(logicalName)}&id=${guid}&pagetype=entityrecord`;
+}

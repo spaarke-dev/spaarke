@@ -38,7 +38,7 @@ import { CONFIRM_GUARD_MS } from '@spaarke/ui-components/components/DecisionWiza
 import { DecisionWizardHost } from '@spaarke/ui-components/components/DecisionWizard/DecisionWizardHost';
 import { launchDecisionWizard } from '@spaarke/ui-components/components/DecisionWizard/decisionWizardLauncher';
 import type { WorklistData } from '@spaarke/ui-components/components/Worklist/worklistService';
-import { buildConsoleLinkOut } from '../lane/billingLinkOut';
+import { buildConsoleLinkOut, buildRecordLinkOut } from '../lane/billingLinkOut';
 import { WIZARD_OPEN_NOTICE, type OpenWizardEvent } from '../lane/DecideLane';
 import { useMcpHost, type DisplayMode } from '../mcp/mcpHostContext';
 import { createLookupTypeAhead } from './lookupTypeAhead';
@@ -165,6 +165,8 @@ export function WizardDialog({
     laneReads,
     onActiveChange,
     requestDisplayMode,
+    openLink,
+    consoleBaseUrl,
     hostContext,
     typeAhead,
     bridge,
@@ -176,6 +178,8 @@ export function WizardDialog({
     laneReads,
     onActiveChange,
     requestDisplayMode,
+    openLink,
+    consoleBaseUrl,
     hostContext,
     typeAhead,
     bridge,
@@ -256,7 +260,26 @@ export function WizardDialog({
     const open = active.current;
     if (!open) return;
     const mine = place.launch;
-    const loader = createWizardItemLoader(latest.current.bridge, open.lane);
+    // Links to the Console's own record forms, opened by the host (no Xrm in a Copilot frame). Without a usable Console address the wizard
+    // is given none, so no evidence line shows a link that cannot work.
+    const { openLink: hostOpenLink, consoleBaseUrl: base } = latest.current;
+    const consolePage = buildConsoleLinkOut(base);
+    const openRecord = consolePage
+      ? async (entity: string, id: string) => {
+          const url = buildRecordLinkOut(base, entity, id);
+          if (!url) throw new Error('This record has no address to open.');
+          if (!(await hostOpenLink(url))) throw new Error('The host did not open the record.');
+        }
+      : undefined;
+    // The "Showing N of M" note's link: the Console, where the lane holds the whole item.
+    const openAll = consolePage
+      ? () => {
+          void Promise.resolve(hostOpenLink(consolePage)).catch(err => {
+            console.warn('[WizardDialog] opening the Console failed', err);
+          });
+        }
+      : undefined;
+    const loader = createWizardItemLoader(latest.current.bridge, open.lane, undefined, openAll);
     void launchDecisionWizard({
       itemId: open.event.signalId,
       // The host reads the item's core record from what the loader returns; the lane's placeholder type is never passed on.
@@ -264,6 +287,7 @@ export function WizardDialog({
       visibleList: open.event.visibleList,
       loadItem: loader,
       lookup: latest.current.typeAhead,
+      ...(openRecord ? { openRecord } : {}),
       onRecorded: () => latest.current.onRecorded(),
     }).then(
       result => {
@@ -357,6 +381,8 @@ export function WizardDialog({
     bffBaseUrl: '',
     collectBecause: true,
     confirmGuardMs: CONFIRM_GUARD_MS,
+    // An evidence line that names a record offers "Open in Spaarke" (when the launch has a way to open it: a usable Console address).
+    evidenceLinks: true,
     // Escape closes the decision (through the same discard check as Close), in the dialog and beside the lane: the host's own way out.
     closeOnEscape: true,
   } as const;

@@ -77,6 +77,9 @@ export interface PlanToolBody {
   row: unknown;
   suppressionError?: unknown;
   rowError?: unknown;
+  /** How many evidence lines the item stores, and whether `row.evidenceRefs` holds fewer (the tool bounds a row for its result size). */
+  evidenceTotal?: unknown;
+  evidenceTruncated?: unknown;
 }
 
 export interface WizardBridge {
