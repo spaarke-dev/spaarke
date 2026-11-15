@@ -7,6 +7,12 @@
 
 - **#2822 MERGED** (7da54c00a3) and **LIVE on the dev BFF** since about 15:19Z: 5a9b687a0b = master 2747977f47 + mcp spike, deployed by uac-r2. word-add-in-r1 was told. Owner checklist section D (095e/095f) is now testable on dev. `sprk_recordprocedures` is NOT deployed; that is task 112.
 - **#2830 (095g) MERGED** to master as acc96e1927 (merge commit, head d825808b7d), on the owner's go, 2026-11-14. It is NOT on the dev BFF yet; it goes out with uac-r2's next deploy, which needs the owner's go in uac-r2's session. uac-r2 and word-add-in-r1 have the SHA. word-add-in-r1 keeps slice C held until the deploy. The work branch is pushed (a28792ef9e).
+- **2026-11-15: three agents are running.** Each is in its own worktree, based on work tip f9f74de82e. The owner said "Proceed with 093; but also other work tasks that can run in parallel".
+  - **093:** Opus implementer. Two adversarial reviews follow, then uac-r2's review.
+  - **113:** Sonnet implementer. One adversarial review follows.
+  - **084h and 095f part 2:** an Opus agent is writing both designs to notes/. When they are done, send them to ontology-r1 before any build.
+  - On arrival, merge each into work only after its review.
+  - 096 is gated on word-add-in-r1 removing the add-in's invoice save target; word-add-in-r1 was asked.
 - **Task 093 (firm file routes):** spa-r4 asked for it (R4 FR-13, task 021). It has the contract and owns the SPA side. Owed to spa-r4: the DTO shape plus file:line before the 093 PR, and word as soon as 093 is scheduled. The deploy order: R4's 021 SPA build must be ready before uac-r2 swaps in a BFF carrying 093, because the four /documents routes retire. Owner asked whether 093 goes next (vs 084h / 095f part 2); no answer yet.
 - uac-r2 applied the invoice-family field lock on dev (24 lookups, its own owner go) and verified it; 095g is unaffected.
 - **#2833 ebilling slice is done on work (b80da28e20, not yet on master).** Every Dataverse Web API request in `scripts/ebilling` now sends `Consistency: Strong`, so a read-back right after a metadata change no longer sees stale cached values. It ships with the next work → master PR. Run the ebilling Pester files on the version each file declares (5.7.1 or 3.4.0): on this machine plain `Invoke-Pester` loads Pester 6.2, and the Money suite then fails 0/18.
