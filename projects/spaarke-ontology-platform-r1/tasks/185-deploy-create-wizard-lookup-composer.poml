@@ -4,7 +4,7 @@
     <title>Deploy the create-wizard lookup and composer changes to dev and verify (Console, wizard code pages, SemanticSearchControl PCF)</title>
     <phase>12 Create-wizard lookups and composer (UAT round 4)</phase>
     <gate>after 184, 186 and 187; deploys need the owner's go</gate>
-    <status>not-started</status>
+    <status>in-progress</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Deployment-phase task (no code changes).</rigor-reason>
     <model-tier>sonnet</model-tier>
