@@ -50,7 +50,7 @@ uac-r2 holds any 093 BFF until I confirm 021 is merged. **No SPA deploy between 
 - ebilling consumer review of 093 done. Agreed in principle to their optional `correction` wizard prop (conditions sent).
 
 ## Holds
-- **Infrastructure/ExternalAccess/** is held by uac-r2** for #2845 (branch `fix/2845-external-request-latency`, C:\wt2845), from 2026-11-15. No R4 edits there until uac-r2 sends its PR number and it merges. The Event forms BFF task (014, `ExternalDataService.cs`) waits on this.
+- **Infrastructure/ExternalAccess/** is held by uac-r2** for #2845 (PR #2847, branch `fix/2845-external-request-latency`), from 2026-11-15. No R4 edits there until #2847 merges. The Event forms BFF task (014, `ExternalDataService.cs`) waits on this.
 - **Event forms addendum** (`notes/event-forms-design.md`, draft) is waiting on the owner's answers to Q-1 to Q-9. After that: spec FR-35/36, then tasks 014/015/016.
 
 ## Open items / issues
