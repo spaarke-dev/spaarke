@@ -4,10 +4,11 @@
  */
 import * as React from 'react';
 import { configure, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { markComplete } from '@spaarke/ui-components/components/DecisionWizard/__fixtures__/decisionWizardFixtures';
 import { App } from '../App';
 import { DISCONNECTED, McpHostContext, type McpHostConnection } from '../mcp/mcpHostContext';
 import { CONSOLE_BASE, guid, installResponseStandIn } from './laneFixtures';
-import type { WizardHost } from './wizardFixtures';
+import { PLANS, type ServerItem, type WizardHost } from './wizardFixtures';
 
 installResponseStandIn();
 configure({ asyncUtilTimeout: 4000 });
@@ -60,4 +61,20 @@ export function pressEnter(repeat: boolean) {
   const target = document.activeElement ?? document.body;
   const proceeded = fireEvent.keyDown(target, { key: 'Enter', code: 'Enter', repeat });
   if (proceeded && target instanceof HTMLButtonElement && !target.disabled) fireEvent.click(target);
+}
+
+/** One action with nothing to fill in, and no Next steps: Next on the action step goes straight to Confirm. */
+export const ONE_CLICK_PLAN = { ...PLANS.reviseBudget, actions: [markComplete], nextSteps: [] };
+export const oneClickItems = (more = 1): ServerItem[] => [
+  { n: 1, plan: ONE_CLICK_PLAN },
+  ...Array.from({ length: more }, (_, i) => ({ n: i + 2, plan: ONE_CLICK_PLAN })),
+];
+
+/** From What was found to the last action step, with the focus on its Next button. */
+export async function toLastActionStep() {
+  fireEvent.click(button('Next')); // What was found -> the action
+  await screen.findByTestId('step-action-mark-complete');
+  const next = button('Next');
+  next.focus();
+  return next;
 }

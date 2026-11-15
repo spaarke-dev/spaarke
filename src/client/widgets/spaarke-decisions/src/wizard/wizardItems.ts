@@ -22,7 +22,13 @@ import {
 import { buildWizardItem } from '@spaarke/ui-components/components/Worklist/worklistWizardItem';
 import type { WizardBridge } from './wizardFetch';
 
-export const ITEM_GONE = 'This item is no longer on your list. Close the decision and read the list again.';
+/**
+ * Said inside the wizard, which stays open until the user closes it. Closing reads the lane again in place, so the one thing it asks of
+ * the user is to close.
+ */
+export const ITEM_GONE = 'This item is no longer on your list. Close this decision to see the list as it is now.';
+/** Said beside the lane when the Work Item asked for is gone from it (nothing opened): the lane has already been read again. */
+export const ITEM_GONE_NOTICE = 'This item is no longer on your list. The list has been read again.';
 export const ITEM_UNREADABLE = 'The details of this item could not be read. Try again.';
 
 /** The group of the snapshot that holds the Signal (its core record and its sibling items), or null when the snapshot has none. */

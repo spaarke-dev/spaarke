@@ -6,30 +6,25 @@
  *    and record the decision before the person had seen it. Confirm now holds its button for half a second and takes focus off it.
  */
 import { fireEvent, screen, waitFor } from '@testing-library/react';
-import { markComplete } from '@spaarke/ui-components/components/DecisionWizard/__fixtures__/decisionWizardFixtures';
-import { COMPLETE_TOOL, PLANS, wizardHost, type ServerItem } from './wizardFixtures';
-import { LANE_OPEN_KEY, button, count, mount, openItem, pressEnter, recordButtonReady } from './wizardHarness';
+import { COMPLETE_TOOL, wizardHost } from './wizardFixtures';
+import {
+  LANE_OPEN_KEY,
+  button,
+  count,
+  mount,
+  oneClickItems,
+  openItem,
+  pressEnter,
+  recordButtonReady,
+  toLastActionStep,
+} from './wizardHarness';
 
-// One action with nothing to fill in, and no Next steps: Next on the action step goes straight to Confirm.
-const ONE_CLICK_PLAN = { ...PLANS.reviseBudget, actions: [markComplete], nextSteps: [] };
-const items = (): ServerItem[] => [
-  { n: 1, plan: ONE_CLICK_PLAN },
-  { n: 2, plan: ONE_CLICK_PLAN },
-];
+const items = () => oneClickItems(1);
 
 beforeEach(() => {
   window.localStorage.clear();
   window.localStorage.setItem(LANE_OPEN_KEY, JSON.stringify({ Decide: true }));
 });
-
-/** At the last action step with the focus on its Next button. */
-async function toLastActionStep() {
-  fireEvent.click(button('Next')); // What was found -> the action
-  await screen.findByTestId('step-action-mark-complete');
-  const next = button('Next');
-  next.focus();
-  return next;
-}
 
 describe.each([
   ['the dialog', 'fullscreen' as const],

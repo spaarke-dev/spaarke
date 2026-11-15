@@ -16,7 +16,9 @@
  *  3. A link to the Console, opened through the host at once (`openLink`), and kept on screen in case the host does not open it: the
  *     same Work Item is in the user's Decide lane there. Used when master-detail cannot be shown either (the frame is too narrow, or it
  *     threw). The Console has no link to one item, so the link is to the Console page itself.
- * The wizard closing, after the user finished or discarded, returns the frame to inline.
+ * The wizard closing, after the user finished, discarded or pressed Escape, returns the frame to the display mode it was in before the wizard
+ * asked for the room, reads the lane again in place (a decision may have been recorded, and an item may have left the lane), and puts the
+ * focus back on the row the user opened it from.
  *
  * Nothing here records a decision: `spaarke_complete_decision` is reached only by the wizard's own Record decision button. Opening,
  * moving between steps and closing call no write tool.
@@ -29,6 +31,7 @@ import {
   MessageBarActions,
   MessageBarBody,
   makeStyles,
+  mergeClasses,
   tokens,
 } from '@fluentui/react-components';
 import { CONFIRM_GUARD_MS } from '@spaarke/ui-components/components/DecisionWizard/DecisionItemWizard';
@@ -37,10 +40,10 @@ import { launchDecisionWizard } from '@spaarke/ui-components/components/Decision
 import type { WorklistData } from '@spaarke/ui-components/components/Worklist/worklistService';
 import { buildConsoleLinkOut } from '../lane/billingLinkOut';
 import { WIZARD_OPEN_NOTICE, type OpenWizardEvent } from '../lane/DecideLane';
-import { useMcpHost } from '../mcp/mcpHostContext';
+import { useMcpHost, type DisplayMode } from '../mcp/mcpHostContext';
 import { createLookupTypeAhead } from './lookupTypeAhead';
 import { createWizardBridge } from './wizardFetch';
-import { createWizardItemLoader, findDecideGroup, ITEM_GONE } from './wizardItems';
+import { createWizardItemLoader, findDecideGroup, ITEM_GONE_NOTICE } from './wizardItems';
 
 /** A request to open the wizard: the lane's event, numbered so that the same item opened twice is two requests. */
 export interface WizardRequest {
@@ -57,6 +60,13 @@ export interface WizardDialogProps {
   consoleBaseUrl?: string | null;
   /** A decision was recorded: the Work Item has left the lane, which the host reads again. */
   onRecorded: () => void;
+  /**
+   * The lane should be read again, in place: the wizard closed (whatever happened in it, a Work Item may have left the lane), or the Work
+   * Item asked for is no longer in it. The host numbers the read (`reloadToken`).
+   */
+  onReloadLane?: () => void;
+  /** How many times the lane has been read so far: a read that lands after the wizard closed may take the row the focus returns to. */
+  laneReads?: number;
   /** True while a decision is open (from the moment a request is taken until the wizard closes), false after: the lane asks it before opening another. */
   onActiveChange?: (active: boolean) => void;
   /** The master: the Decide lane. It stays mounted, and in place, whatever the wizard shows. */
@@ -65,13 +75,20 @@ export interface WizardDialogProps {
 
 /** A frame narrower than this cannot hold master-detail even stacked: the Console link is used. */
 export const MIN_DETAIL_WIDTH = 480;
+/**
+ * A frame narrower than this cannot hold the lane (320 px) and the decision (420 px) side by side, so they stack. The decision is then put
+ * BEFORE the lane: below it, on a lane of dozens of rows, it would be out of sight, with nothing to say it had opened.
+ */
+export const SIDE_BY_SIDE_MIN_WIDTH = 790;
 
 type Place = 'idle' | 'dialog' | 'detail' | 'link';
 
 const useStyles = makeStyles({
   root: { display: 'flex', flexDirection: 'column', rowGap: tokens.spacingVerticalM, minWidth: 0 },
   split: { display: 'flex', flexWrap: 'wrap', alignItems: 'flex-start', gap: tokens.spacingHorizontalL, minWidth: 0 },
-  master: { flex: '1 1 320px', minWidth: 0 },
+  splitStacked: { flexDirection: 'column', alignItems: 'stretch', flexWrap: 'nowrap' },
+  master: { flex: '1 1 320px', minWidth: 0, outlineStyle: 'none' },
+  masterStacked: { flex: '0 0 auto' },
   detail: {
     flex: '2 1 420px',
     minWidth: 0,
@@ -82,7 +99,10 @@ const useStyles = makeStyles({
     border: `${tokens.strokeWidthThin} solid ${tokens.colorNeutralStroke2}`,
     borderRadius: tokens.borderRadiusMedium,
     overflow: 'hidden',
+    // The section takes the focus when the decision opens (so a screen reader says "Decision" and the page scrolls to it), not a tab stop.
+    outlineStyle: 'none',
   },
+  detailStacked: { flex: '0 0 auto' },
 });
 
 /** Reports a render error to the display chain and renders nothing in the wizard's place. */
@@ -104,6 +124,8 @@ export function WizardDialog({
   getLane,
   consoleBaseUrl,
   onRecorded,
+  onReloadLane,
+  laneReads = 0,
   onActiveChange,
   children,
 }: WizardDialogProps) {
@@ -119,7 +141,13 @@ export function WizardDialog({
   const [linkFailed, setLinkFailed] = React.useState(false);
 
   // What the current open is about, and whether a wizard is open at all (one at a time, as the host allows).
-  const active = React.useRef<{ event: OpenWizardEvent; lane: WorklistData; fullscreen: boolean } | null>(null);
+  const active = React.useRef<{
+    event: OpenWizardEvent;
+    lane: WorklistData;
+    fullscreen: boolean;
+    /** The display mode the frame was in before the wizard asked for the room: what closing restores. */
+    previousMode: DisplayMode;
+  } | null>(null);
   const handled = React.useRef(0);
   const launchCount = React.useRef(0);
   const unmounted = React.useRef(false);
@@ -133,13 +161,28 @@ export function WizardDialog({
   const latest = React.useRef({
     getLane,
     onRecorded,
+    onReloadLane,
+    laneReads,
     onActiveChange,
     requestDisplayMode,
     hostContext,
     typeAhead,
     bridge,
   });
-  latest.current = { getLane, onRecorded, onActiveChange, requestDisplayMode, hostContext, typeAhead, bridge };
+  latest.current = {
+    getLane,
+    onRecorded,
+    onReloadLane,
+    laneReads,
+    onActiveChange,
+    requestDisplayMode,
+    hostContext,
+    typeAhead,
+    bridge,
+  };
+
+  // The row the wizard was opened from, to give the focus back to when it closes (see the effect below).
+  const returnFocus = React.useRef<{ signalId: string; readsAtClose: number } | null>(null);
 
   /** Takes or releases the one open decision, and tells the lane. */
   const setActive = React.useCallback((next: typeof active.current) => {
@@ -153,8 +196,15 @@ export function WizardDialog({
     latest.current.typeAhead.cancel();
     setLinkFailed(false);
     setPlace(prev => ({ place: 'idle', launch: prev.launch }));
-    // The wizard asked for the room; the lane goes back to where it was.
-    if (was?.fullscreen) void latest.current.requestDisplayMode('inline');
+    // The wizard asked for the room; the frame goes back to the mode it was in before (inline unless the host said otherwise). A frame
+    // that was already fullscreen when the wizard opened stays so.
+    if (was?.fullscreen && was.previousMode !== 'fullscreen') void latest.current.requestDisplayMode(was.previousMode);
+    if (was) {
+      // Whatever happened in the wizard (a decision recorded, one found gone, nothing), the lane is read again in place, so what it shows is
+      // what is there; and the focus goes back to the row the user opened it from.
+      returnFocus.current = { signalId: was.event.signalId, readsAtClose: latest.current.laneReads };
+      latest.current.onReloadLane?.();
+    }
   }, [setActive]);
 
   const moveTo = React.useCallback((next: Place) => {
@@ -175,10 +225,13 @@ export function WizardDialog({
     setNotice(null);
     const lane = latest.current.getLane();
     if (!lane || !findDecideGroup(lane, request.event.signalId)) {
-      setNotice(ITEM_GONE);
+      // The lane the user saw is out of date: read it again, so what they see is what is there.
+      setNotice(ITEM_GONE_NOTICE);
+      latest.current.onReloadLane?.();
       return;
     }
-    const opening = { event: request.event, lane, fullscreen: false };
+    const previousMode: DisplayMode = (latest.current.hostContext?.displayMode as DisplayMode | undefined) ?? 'inline';
+    const opening = { event: request.event, lane, fullscreen: false, previousMode };
     setActive(opening);
 
     void (async () => {
@@ -259,12 +312,80 @@ export function WizardDialog({
 
   // `confirmGuardMs`: Confirm cannot record until it has been showing half a second (NFR-06), so a double click or a held Enter on Next at
   // the last action step moves to Confirm and records nothing: Next and Record decision are the same button.
+  // ---- Where the decision sits beside the lane, and where the focus goes --------------------------------------
+  // Side by side when the frame can hold both; stacked otherwise, and then the decision comes FIRST.
+  const [stacked, setStacked] = React.useState(() => window.innerWidth < SIDE_BY_SIDE_MIN_WIDTH);
+  React.useEffect(() => {
+    const onResize = () => setStacked(window.innerWidth < SIDE_BY_SIDE_MIN_WIDTH);
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
+
+  // Master-detail: the decision opens in a frame the user may be looking at the far end of a long lane in, so it takes the focus (a screen
+  // reader says "Decision") and is scrolled into view.
+  const detailRef = React.useRef<HTMLElement>(null);
+  const masterRef = React.useRef<HTMLDivElement>(null);
+  React.useEffect(() => {
+    if (place.place !== 'detail') return;
+    const section = detailRef.current;
+    if (!section) return;
+    section.focus({ preventScroll: true });
+    section.scrollIntoView?.({ block: 'start' });
+  }, [place]);
+
+  // When the wizard has closed, the focus goes back to the row it was opened from, the way a dialog gives it back to its opener (the
+  // in-frame dialog's own focus return finds nothing to return to once the lane has been read again). The lane is read again in place, so
+  // the row is usually still there; when the read lands and the row has gone (it was decided), the focus goes to the lane.
+  React.useEffect(() => {
+    const pending = returnFocus.current;
+    if (!pending || place.place !== 'idle') return;
+    const current = document.activeElement;
+    // Focus the user has already moved on to is left alone; focus that was lost (the wizard's controls were removed) is returned.
+    if (!current || current === document.body || !current.isConnected) {
+      const wanted = pending.signalId.toLowerCase();
+      const row = Array.from(document.querySelectorAll<HTMLElement>('button[data-signal-id]')).find(
+        el => el.dataset.signalId?.toLowerCase() === wanted
+      );
+      (row ?? masterRef.current)?.focus();
+    }
+    // The lane has been read since the wizard closed: what it shows is what there is, so there is nothing more to return to.
+    if (laneReads !== pending.readsAtClose) returnFocus.current = null;
+  }, [place, laneReads]);
+
   const wizardProps = {
     authenticatedFetch: bridge.fetch,
     bffBaseUrl: '',
     collectBecause: true,
     confirmGuardMs: CONFIRM_GUARD_MS,
+    // Escape closes the decision (through the same discard check as Close), in the dialog and beside the lane: the host's own way out.
+    closeOnEscape: true,
   } as const;
+
+  const master = (
+    <div
+      key="master"
+      ref={masterRef}
+      tabIndex={-1}
+      className={mergeClasses(styles.master, stacked && styles.masterStacked)}
+    >
+      {children}
+    </div>
+  );
+  const detail =
+    place.place === 'detail' ? (
+      <section
+        key="detail"
+        ref={detailRef}
+        tabIndex={-1}
+        className={mergeClasses(styles.detail, stacked && styles.detailStacked)}
+        aria-label="Decision"
+        data-testid="wizard-detail"
+      >
+        <WizardBoundary key={`detail-${place.launch}`} onError={() => failed('detail')}>
+          <DecisionWizardHost {...wizardProps} embedded />
+        </WizardBoundary>
+      </section>
+    ) : null;
 
   return (
     <div className={styles.root}>
@@ -281,16 +402,13 @@ export function WizardDialog({
         </div>
       )}
 
-      <div className={styles.split} data-testid="wizard-place" data-place={place.place}>
-        <div className={styles.master}>{children}</div>
-
-        {place.place === 'detail' && (
-          <section className={styles.detail} aria-label="Decision" data-testid="wizard-detail">
-            <WizardBoundary key={`detail-${place.launch}`} onError={() => failed('detail')}>
-              <DecisionWizardHost {...wizardProps} embedded />
-            </WizardBoundary>
-          </section>
-        )}
+      <div
+        className={mergeClasses(styles.split, stacked && styles.splitStacked)}
+        data-testid="wizard-place"
+        data-place={place.place}
+      >
+        {/* Keyed, in an array: the order differs when stacked, and the lane (the master) is never remounted by it. */}
+        {stacked ? [detail, master] : [master, detail]}
       </div>
 
       {/* The dialog renders in the shared shell's own layer, so it needs no place in the split. */}
