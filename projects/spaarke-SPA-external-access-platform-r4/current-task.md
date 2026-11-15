@@ -8,9 +8,9 @@
 | Field | Value |
 |-------|-------|
 | **Task** | 021: invoice Files section on ebilling 093's routes (FR-13). FULL, sonnet high, directional. The owner pulled it ahead of 020/022/023 on 2026-11-15. |
-| **Step** | 021 ✅ in PR #2840 (CI running). Waiting on the owner go to merge |
+| **Step** | #2840 merged (c1eb6e4a8e). Waiting on uac-r2 "BFF live" (master with #2839 + #2840 + mcp spike); the owner has approved the SPA deploy right after |
 | **Status** | 021 committed and pushed; notes in notes/task-021-notes.md; vitest 1715, build OK |
-| **Next Action** | On the owner go: merge #2840 after CI and send the SHA to uac-r2 and ebilling-r1. uac-r2 swaps the BFF (master with #2839 + #2840) on its owner go and sends "BFF live"; I deploy the SPA straight after (rollback 04dbd8df05), then the owner retests invoice Files. NO SPA deploy between merging #2840 and the BFF swap. |
+| **Next Action** | On "BFF live": dispatch deploy-external-spa.yml (dev, master); verify the bundle; give the owner the invoice Files retest. SPA rollback 04dbd8df05 (only together with a BFF rollback, because the old SPA calls the retired routes). |
 
 ## Task 021 facts
 - **Contract (not on master; ebilling PR #2839, head `3b33a8d8cc`, local ref `pr/2839`):**
