@@ -25,6 +25,14 @@
 #      the change touches (src/, tests/), BLOCKING, <1 min, parallel. Added
 #      2026-11-10 (PR #2663) as an owner-approved §6.5 PATH-A EXCEPTION, scoped to
 #      this one job: see the job's comment.
+#   8. mcp-conformance        — the published modelcontextprotocol/conformance suite
+#      (pinned 0.2.0-alpha.12, spec 2026-07-28) against /mcp/legal-operations on the
+#      real BFF host (tests/integration/Mcp.Conformance.Host), BLOCKING, conditional
+#      on the MCP route, the decisions widget, the host or a CI workflow changing,
+#      about 1 min of job commands measured locally (+ checkout, tool setup and a cold
+#      BFF build on a hosted runner), parallel. Added 2026-11-15 by
+#      spaarkeai-mcp-bff-api-r1 task 025 (NFR-09) as an owner-approved §6.5 PATH-A
+#      EXCEPTION, scoped to this one job: see the job's comment.
 #
 # NOT IN TIER 1 (live in ci-tier2-advisory.yml or nightly-health.yml):
 #   whole-solution format (Tier 2 keeps it as an advisory backstop; changed C#
@@ -119,6 +127,7 @@ jobs:
       reporting_surface: ${{ steps.filter.outputs.reporting_surface }}
       datagrid_gate: ${{ steps.filter.outputs.datagrid_gate }}
       xrm_guard: ${{ steps.filter.outputs.xrm_guard }}
+      mcp_conformance: ${{ steps.filter.outputs.mcp_conformance }}
       changed_namespaces: ${{ steps.derive-namespaces.outputs.value }}
     steps:
       - name: Checkout
@@ -189,6 +198,26 @@ jobs:
               - 'src/client/**'
               - 'src/solutions/**'
               - '.github/workflows/**'
+            # Added 2026-11-15 by spaarkeai-mcp-bff-api-r1 task 025: runs mcp-conformance.
+            # A change to anything the MCP route or the conformance host depends on, plus a
+            # workflow edit so a change to the job proves the job.
+            mcp_conformance:
+              - 'src/server/api/Sprk.Bff.Api/Api/Mcp/**'
+              - 'src/server/api/Sprk.Bff.Api/Infrastructure/DI/McpModule.cs'
+              # Everything the real Program host boots the MCP route through: pipeline order,
+              # rate limiter, authorization, route mapping, the MCP SDK package version, and
+              # the factory the conformance host builds on.
+              - 'src/server/api/Sprk.Bff.Api/Program.cs'
+              - 'src/server/api/Sprk.Bff.Api/Sprk.Bff.Api.csproj'
+              - 'src/server/api/Sprk.Bff.Api/Infrastructure/DI/MiddlewarePipelineExtensions.cs'
+              - 'src/server/api/Sprk.Bff.Api/Infrastructure/DI/RateLimitingModule.cs'
+              - 'src/server/api/Sprk.Bff.Api/Infrastructure/DI/AuthorizationModule.cs'
+              - 'src/server/api/Sprk.Bff.Api/Infrastructure/DI/EndpointMappingExtensions.cs'
+              - 'tests/unit/Sprk.Bff.Api.Tests/CustomWebAppFactory.cs'
+              - 'src/client/widgets/spaarke-decisions/**'
+              - 'tests/integration/Mcp.Conformance.Host/**'
+              - 'tests/integration/contract/Api/Mcp/McpProgramHostFactory.cs'
+              - '.github/workflows/**'
 
       - name: Derive Spe.Integration.Tests namespaces from changed surface
         id: derive-namespaces
@@ -235,6 +264,7 @@ jobs:
             echo "| reporting_surface | ${{ steps.filter.outputs.reporting_surface }} |"
             echo "| datagrid_gate (Spaarke.UI.Components, CI workflows) | ${{ steps.filter.outputs.datagrid_gate }} |"
             echo "| xrm_guard (src/client, src/solutions, CI workflows) | ${{ steps.filter.outputs.xrm_guard }} |"
+            echo "| mcp_conformance (MCP route, decisions widget, conformance host, CI workflows) | ${{ steps.filter.outputs.mcp_conformance }} |"
             echo ""
             echo "**BFF changed (from router)**: ${{ inputs.bff_changed }}"
             echo "**Smoke namespaces**: ${{ steps.derive-namespaces.outputs.value }}"
@@ -1080,3 +1110,98 @@ jobs:
       - name: Changed C# files are whitespace-formatted
         shell: bash
         run: bash scripts/quality/check-changed-cs-format.sh "${{ steps.base.outputs.sha }}" HEAD
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # Job 8 — mcp-conformance (BLOCKING)
+  #
+  # §6.5 PATH-A EXCEPTION (owner-approved 2026-11-15, spaarkeai-mcp-bff-api-r1
+  # task 025, NFR-09): the header's "do not extend without spec amendment"
+  # (ci-cd-unit-test-remediation-r1 FR-A02) is waived for THIS ONE JOB.
+  # Reason: the Spaarke MCP endpoint is called by third-party clients (Claude
+  # Cowork and others) that speak the 2026-07-28 Streamable HTTP transport.
+  # Our own tests exercise the tools through our own client, so a transport
+  # regression (dual-Accept handling, stateless behaviour, header validation,
+  # SSE) would pass every other check and fail only in a customer's client.
+  # The published conformance suite is the only independent oracle for that.
+  # A seeded break of dual-Accept handling makes it fail (exit 1, 7 passed /
+  # 112 failed); the unmodified server passes (exit 0).
+  #
+  # WHAT RUNS: the real BFF (Program) in-process on localhost
+  # (tests/integration/Mcp.Conformance.Host: a TEST-ONLY host project that is
+  # not in Spaarke.sln and adds no test auth, switch or bypass to src/). Its
+  # JwtBearer test scheme trusts a test key, and a token injector adds the
+  # bearer token to /mcp requests because the suite's CLI cannot send headers.
+  # Seeded fakes sit at the module boundary (the decision capability and the
+  # lookup search). The suite is pinned to an exact version by
+  # package-lock.json (`npm ci`); 0.1.16 does not know spec 2026-07-28.
+  #
+  # BASELINE: conformance/conformance-baseline.yml lists, per check, the 41
+  # expected entries: 38 failures (37 need reference fixtures this server must
+  # not serve, 1 known gap tracked as issue #2835) and 3 SHOULD warnings
+  # (2 fixture, 1 SDK data.uri). A NEW failure fails the job; a baselined
+  # check that starts passing also fails it (stale entry), so the list only
+  # shrinks.
+  #
+  # BLOCKING: no continue-on-error; a failure fails `CI / Router` the same way
+  # compile / arch-tests do (no router change). RUNS when classify-tier1's
+  # `mcp_conformance` filter matches, fail-closed (an empty output runs it),
+  # and on workflow_dispatch. The same steps run locally:
+  #   bash tests/integration/Mcp.Conformance.Host/run-conformance.sh
+  # ──────────────────────────────────────────────────────────────────────────
+  mcp-conformance:
+    name: MCP conformance (2026-07-28)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15   # hang guard; ~1 min of job commands measured locally
+    needs: classify-tier1
+    if: ${{ github.event_name == 'workflow_dispatch' || needs.classify-tier1.outputs.mcp_conformance != 'false' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.x'
+
+      # Same cache as the other Tier 1 jobs (an optimization, never a gate). The job
+      # restores the BFF and the test assembly's packages, so the key hashes every csproj.
+      - name: Cache NuGet packages
+        uses: actions/cache@v6
+        continue-on-error: true
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-mcp-conformance-${{ hashFiles('**/*.csproj') }}
+          restore-keys: |
+            ${{ runner.os }}-nuget-mcp-conformance-
+            ${{ runner.os }}-nuget-
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      # The BFF embeds the decisions widget only when dist/index.html exists at
+      # build time (Sprk.Bff.Api.csproj), and one conformance check reads it.
+      # Same step as deploy-bff-api.yml.
+      - name: Build the decisions widget
+        working-directory: src/client/widgets/spaarke-decisions
+        run: |
+          npm install --legacy-peer-deps --no-audit --no-fund
+          npm run build
+
+      - name: Conformance suite against the real BFF MCP route
+        shell: bash
+        env:
+          OUT: ${{ runner.temp }}/conformance-results
+          MCP_SKIP_WIDGET: '1'   # built by the previous step
+        run: bash tests/integration/Mcp.Conformance.Host/run-conformance.sh
+
+      # run-conformance.sh writes the suite's per-scenario results AND the host's
+      # log (host.log) into OUT, so a failed run uploads both.
+      - name: Upload conformance results and host log
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v6
+        with:
+          name: mcp-conformance-results
+          path: ${{ runner.temp }}/conformance-results
+          if-no-files-found: ignore
