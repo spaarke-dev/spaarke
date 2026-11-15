@@ -264,7 +264,7 @@ answered AND `canCreate` is not false. The status toggle is excluded (no server 
 
 ## D-17 — External API: every request repeats access resolution (#2845)
 
-**Status.** Handed off → `unified-access-control-r2`, on the owner's direction, 2026-11-15. Filed as an issue (found outside R4), not as deferred R4 scope.
+**Status.** Handed off → `unified-access-control-r2`, on the owner's direction, 2026-11-15. Accepted by uac-r2 the same day; it will run FULL rigor on Opus with two adversarial passes, once its owner gives the go. Filed as an issue (found outside R4), not as deferred R4 scope.
 
 **Where.** The shared external access layer in the BFF:
 - `Infrastructure/ExternalAccess/NoAccessListReader.cs:182` (deny list, deliberately uncached across requests);
