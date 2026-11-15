@@ -12,7 +12,7 @@
 
 ### In flight
 
-- **Master PR #2839 (work → master): open, CI running.** It carries 093, 113, 084h-1 (with fix round 2), the #2833 ebilling slice and notes. master is merged into work at bd18cb8d60 (clean; no BFF changes came in).
+- **Master PR #2839 (work → master): auto-merge ON (owner, 2026-11-15; merge commit, head 4a6e44719d). DO NOT push to work/ebilling-r1 until it merges (a push restarts CI and drops the head match); commit locally only.** It carries 093, 113, 084h-1 (with fix round 2), the #2833 ebilling slice and notes. master is merged into work at bd18cb8d60 (clean; no BFF changes came in).
   - ontology-r1 signed off #2839 by comment (its files, byte-identical at ced184c79a), conditional on green CI. Any later push touching Services/Signals/** or Api/Signals/** needs its re-glance before merge.
   - uac-r2 PASSED 093.
   - **2026-11-15, owner: "what else is required to run the deploy? proceed"**, taken as the go to merge #2839 once CI is green. Asked spa-r4 to build and PR R4 021 now, and uac-r2 to hold #2838 until #2839 merges and to queue the dev BFF deploy (its own owner go). After the merge, send the SHA to uac-r2, spa-r4 and word-add-in-r1.
