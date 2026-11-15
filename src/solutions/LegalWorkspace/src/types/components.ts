@@ -1,6 +1,5 @@
 import { IMatter, IEvent, IProject, IDocument } from './entities';
 import { IPortfolioHealth } from './portfolio';
-import { NotificationCategory } from './enums';
 
 /** Block 2 - Portfolio Health Summary */
 export interface IPortfolioHealthStripProps {
@@ -35,24 +34,6 @@ export interface IProjectItemProps {
 export interface IDocumentItemProps {
   document: IDocument;
   onClick?: (documentId: string) => void;
-}
-
-/** Block 7 - Notification Panel */
-export interface INotificationPanelProps {
-  isOpen: boolean;
-  onClose: () => void;
-  notifications: INotificationItem[];
-}
-
-export interface INotificationItem {
-  id: string;
-  title: string;
-  description: string;
-  category: NotificationCategory;
-  timestamp: string;
-  isRead: boolean;
-  entityType?: string;
-  entityId?: string;
 }
 
 /** Shell components */

@@ -9,8 +9,7 @@
  *   Otherwise  → Short date string, e.g. "Jan 15"
  *
  * The output is intentionally compact to fit the FeedItemCard right-column
- * without wrapping.  For notification-panel prose formatting (e.g. "2 min ago",
- * "1 hour ago") see NotificationPanel/notificationTypes.ts.
+ * without wrapping.
  */
 
 const MONTH_ABBR = [

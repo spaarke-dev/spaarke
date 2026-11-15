@@ -14,7 +14,6 @@
  *   1. Matters list        — useMattersList (Xrm.WebApi: sprk_matter)
  *   2. Events feed         — useEvents      (Xrm.WebApi: sprk_event, top 500)
  *   3. To-do items         — useTodoItems   (Xrm.WebApi: sprk_event where todoflag=true)
- *   4. Notification count  — useNotifications (mock in R1; future: Xrm.WebApi poll)
  *
  * Portfolio Health (usePortfolioHealth) is NOT included here because it hits
  * the BFF HTTP endpoint and has different error/loading semantics — it is
@@ -26,7 +25,6 @@
  *     mattersState,
  *     eventsState,
  *     todosState,
- *     notificationsState,
  *     isAnyLoading,
  *   } = useParallelDataLoad({ webApi, userId, service });
  *
@@ -50,7 +48,6 @@ import { DataverseService } from '../services/DataverseService';
 import { useMattersList, IUseMattersListResult } from './useMattersList';
 import { useEvents, IUseEventsResult } from './useEvents';
 import { useTodoItems, IUseTodoItemsResult } from './useTodoItems';
-import { useNotifications, IUseNotificationsResult } from './useNotifications';
 import { EventFilterCategory } from '../types/enums';
 import { IMatter } from '../types/entities';
 import { IEvent } from '../types/entities';
@@ -99,10 +96,8 @@ export interface IUseParallelDataLoadResult {
   eventsState: IUseEventsResult;
   /** To-do items state — consumed by SmartToDo block */
   todosState: IUseTodoItemsResult;
-  /** Notifications state — consumed by PageHeader notification bell */
-  notificationsState: IUseNotificationsResult;
   /**
-   * True while ANY of the four parallel fetches is still in flight.
+   * True while ANY of the three parallel fetches is still in flight.
    * Use this to show/hide a top-level skeleton overlay.
    * Individual blocks should rely on their own isLoading for granular skeletons.
    */
@@ -114,7 +109,7 @@ export interface IUseParallelDataLoadResult {
 // ---------------------------------------------------------------------------
 
 /**
- * useParallelDataLoad — fires all four independent Xrm.WebApi queries
+ * useParallelDataLoad — fires all three independent Xrm.WebApi queries
  * simultaneously on mount so that the combined latency is bounded by the
  * slowest single query rather than their sum.
  *
@@ -163,11 +158,6 @@ export function useParallelDataLoad(
     mockItems: mockTodos,
   });
 
-  // ── 4. Notifications ─────────────────────────────────────────────────────
-  // R1: Mock implementation (static data, no Xrm.WebApi call).
-  // Future: replace internals with Xrm.WebApi polling or BFF endpoint.
-  const notificationsState = useNotifications();
-
   // ── Combined loading flag ─────────────────────────────────────────────────
   // Memoized so the boolean reference only changes when the individual
   // isLoading values actually change — prevents unnecessary re-renders in
@@ -176,13 +166,11 @@ export function useParallelDataLoad(
     () =>
       mattersState.isLoading ||
       eventsState.isLoading ||
-      todosState.isLoading ||
-      notificationsState.isLoading,
+      todosState.isLoading,
     [
       mattersState.isLoading,
       eventsState.isLoading,
       todosState.isLoading,
-      notificationsState.isLoading,
     ]
   );
 
@@ -190,7 +178,6 @@ export function useParallelDataLoad(
     mattersState,
     eventsState,
     todosState,
-    notificationsState,
     isAnyLoading,
   };
 }

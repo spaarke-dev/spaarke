@@ -29,9 +29,6 @@ export type EventType =
   | 'Analysis'
   | 'AlertResponse';
 
-/** Notification categories */
-export type NotificationCategory = 'Documents' | 'Invoices' | 'Status' | 'Analysis';
-
 /** Portfolio tab options */
 export type PortfolioTab = 'matters' | 'projects' | 'documents';
 

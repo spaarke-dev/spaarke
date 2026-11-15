@@ -32,7 +32,7 @@ import {
   Spinner,
 } from "@fluentui/react-components";
 import { IEvent } from "../../types/entities";
-import { formatRelativeTime } from "../NotificationPanel/notificationTypes";
+import { formatRelativeTime } from "../../utils/formatRelativeTime";
 import { FeedItemCard } from "./FeedItemCard";
 
 // ---------------------------------------------------------------------------

@@ -115,12 +115,11 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
   const service = useDataverseService(webApi);
 
   // -------------------------------------------------------------------------
-  // Daily Digest auto-popup (Task 051)
-  // Opens sprk_dailyupdate Code Page on first workspace launch per session
-  // if the user has the autoPopup preference enabled.
+  // Daily Digest auto-popup (opens as Dataverse dialog, not browser window)
+  // Checks user preference, shows once per session via sessionStorage guard.
   // -------------------------------------------------------------------------
 
-  useDailyDigestAutoPopup({ webApi, userId });
+  useDailyDigestAutoPopup();
 
   // -------------------------------------------------------------------------
   // Dynamic workspace layouts (BFF API)
