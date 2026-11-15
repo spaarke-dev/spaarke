@@ -933,6 +933,30 @@ public sealed class StoredFileService
         return rows.Entities.Select(e => StoredFileRow.From(e, _blobs.TenantId)).ToList();
     }
 
+    /// <summary>
+    /// ebilling-r1 task 093 fix round 1 (the sibling of <see cref="ReadRowsForInvoiceAsync"/>, filtered as
+    /// <see cref="ReadRowsForProcedureVersionAsync"/> is): the rows of the invoice <paramref name="invoiceId"/> a firm may be shown, filtered
+    /// SERVER-SIDE: parent = the invoice, purpose Invoice PDF, <c>sprk_firmvisible</c> true, Servable, and no source document or source
+    /// communication. At most <paramref name="max"/>; a fault throws. The caller re-checks every row
+    /// (<c>ExternalInvoiceSubmissionAuthorizationFilter.IsFirmFile</c>), so a query that lost a filter cannot widen the set.
+    /// </summary>
+    /// <remarks>Component Justification (CLAUDE.md §11): (1) Existing — <see cref="ReadRowsForInvoiceAsync"/> reads every row of the invoice.
+    /// (2) Extension — filtering that read would change the answer its other callers (the internal file list and the submission commit gate)
+    /// need, which is every row. (3) Cost of doing nothing — the firm routes cap the rows they read, so an invoice with many internal files
+    /// would answer the firm's own PDF with a lasting 503.</remarks>
+    internal async Task<IReadOnlyList<StoredFileRow>> ReadFirmVisibleRowsForInvoiceAsync(Guid invoiceId, int max, CancellationToken ct)
+    {
+        var query = new QueryExpression(StoredFileSchema.Entity) { ColumnSet = new ColumnSet(StoredFileSchema.ReadColumns), TopCount = max };
+        query.Criteria.AddCondition(StoredFileSchema.InvoiceTable, ConditionOperator.Equal, invoiceId);
+        query.Criteria.AddCondition(StoredFileSchema.Purpose, ConditionOperator.Equal, (int)StoredFilePurpose.InvoicePdf);
+        query.Criteria.AddCondition(StoredFileSchema.FirmVisible, ConditionOperator.Equal, true);
+        query.Criteria.AddCondition(StoredFileSchema.Status, ConditionOperator.Equal, (int)StoredFileStatus.Servable);
+        query.Criteria.AddCondition(StoredFileSchema.SourceDocument, ConditionOperator.Null);
+        query.Criteria.AddCondition(StoredFileSchema.SourceCommunication, ConditionOperator.Null);
+        var rows = await _entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
+        return rows.Entities.Select(e => StoredFileRow.From(e, _blobs.TenantId)).ToList();
+    }
+
     /// <summary>The most Servable rows of one Procedure Version a read takes (task 116). A version holds one Servable source file.</summary>
     internal const int MaxRowsPerProcedureVersion = 100;
 

@@ -15,6 +15,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Xrm.Sdk;
+using Microsoft.Xrm.Sdk.Query;
 using Moq;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.ExternalAccess;
@@ -29,6 +30,7 @@ using Sprk.Bff.Api.Services.Identity;
 using Sprk.Bff.Api.Tests.Api.Finance;
 using Sprk.Bff.Api.Tests.Finance.Files;
 using Sprk.Bff.Api.Tests.Services.Finance.Submission;
+using Sprk.Bff.Api.Tests.TestInfrastructure;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Api.ExternalAccess;
@@ -167,6 +169,8 @@ public sealed class ExternalInvoiceFileRoutesTests
         "flagged-systemuser-contact-of-another-firm",
         "flagged-systemuser-with-no-contact",
         "internal-systemuser-without-read",
+        "flagged-systemuser-with-root-read-without-invoice-read",
+        "internal-systemuser-with-root-read-without-invoice-read",
         "hidden-by-the-predicate",
         "also-under-a-secure-root-the-caller-cannot-read",
     };
@@ -227,6 +231,15 @@ public sealed class ExternalInvoiceFileRoutesTests
                 break;
             case "internal-systemuser-without-read":
                 host.Resolver.Principal = SystemUserPrincipal(InternalSystemUser, Guid.Empty, new() { [OtherMatter] = AccessRights.Read });
+                break;
+            case "flagged-systemuser-with-root-read-without-invoice-read":
+                // Fix round 1 (A): Read on the invoice's matter, none on the invoice row itself.
+                host.CallerIs("flagged-systemuser");
+                host.Probe.AnswerAppOnly(FlaggedSystemUser, StoredFileSchema.InvoiceEntitySet, Invoice, AccessRights.None);
+                break;
+            case "internal-systemuser-with-root-read-without-invoice-read":
+                host.CallerIs("internal-systemuser");
+                host.Probe.AnswerAppOnly(InternalSystemUser, StoredFileSchema.InvoiceEntitySet, Invoice, AccessRights.None);
                 break;
             case "hidden-by-the-predicate":
                 host.CallerIs("contact");
@@ -381,6 +394,149 @@ public sealed class ExternalInvoiceFileRoutesTests
     }
 
     // =============================================================================================================================
+    // Fix round 1 (A, uac-r2 ruling): a systemuser holds Read on the invoice row itself AND on its root; a contact is decided as before
+    // =============================================================================================================================
+
+    public static TheoryData<string> SystemUsers => new() { "flagged-systemuser", "internal-systemuser" };
+
+    [Theory(DisplayName = "Fix 1 A (must not fire): a systemuser with Read on the invoice and its root lists and downloads; Dataverse is asked about that systemuser and that invoice")]
+    [MemberData(nameof(SystemUsers))]
+    public async Task SystemUser_WithReadOnTheInvoiceAndItsRoot_IsServed(string kind)
+    {
+        await using var host = await Host.StartAsync();
+        host.CallerIs(kind);
+        var file = host.SeedFirmFile();
+        var systemUser = kind == "flagged-systemuser" ? FlaggedSystemUser : InternalSystemUser;
+
+        (await Ids(await host.GetAsync(ListUrl(Invoice)))).Should().Equal(file);
+        var content = await host.GetAsync(ContentUrl(Invoice, file));
+
+        content.StatusCode.Should().Be(HttpStatusCode.OK);
+        (await content.Content.ReadAsByteArrayAsync()).Should().Equal(Pdf);
+        host.Probe.AppOnlyCalls.Should().Equal(
+            (systemUser, StoredFileSchema.InvoiceEntitySet, Invoice), (systemUser, StoredFileSchema.InvoiceEntitySet, Invoice));
+    }
+
+    [Fact(DisplayName = "Fix 1 A (must not fire): a contact with the same grant on the invoice's root is served, and Dataverse is not asked about the invoice row")]
+    public async Task Contact_WithTheSameRootGrant_IsServed_WithoutTheRowQuestion()
+    {
+        await using var host = await Host.StartAsync();
+        host.CallerIs("contact");
+        var file = host.SeedFirmFile();
+
+        (await Ids(await host.GetAsync(ListUrl(Invoice)))).Should().Equal(file);
+        (await host.GetAsync(ContentUrl(Invoice, file))).StatusCode.Should().Be(HttpStatusCode.OK);
+        host.Probe.AppOnlyCalls.Should().BeEmpty();
+    }
+
+    public static TheoryData<string, string> SystemUserRowQuestionFaults => new()
+    {
+        { "flagged-systemuser", "unanswered" },
+        { "flagged-systemuser", "throws" },
+        { "internal-systemuser", "unanswered" },
+        { "internal-systemuser", "throws" },
+    };
+
+    [Theory(DisplayName = "Fix 1 A (fault): Dataverse gives no answer for a systemuser's Read on the invoice row: 503 on both routes, no file row or byte read, never the root's answer alone")]
+    [MemberData(nameof(SystemUserRowQuestionFaults))]
+    public async Task SystemUser_RowQuestionUnanswered_Is503_AndNothingIsServed(string kind, string fault)
+    {
+        await using var host = await Host.StartAsync();
+        host.CallerIs(kind);
+        var file = host.SeedFirmFile();
+        var systemUser = kind == "flagged-systemuser" ? FlaggedSystemUser : InternalSystemUser;
+        if (fault == "unanswered")
+            host.Probe.AnswerAppOnly(systemUser, StoredFileSchema.InvoiceEntitySet, Invoice, null);
+        else
+            host.Probe.AppOnlyFault = new HttpRequestException("Dataverse answered 503.");
+        host.Rig.Dataverse.Calls.Clear();
+
+        foreach (var url in new[] { ListUrl(Invoice), ContentUrl(Invoice, file) })
+        {
+            var response = await host.GetAsync(url);
+            response.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable, url);
+            (await ErrorCode(response)).Should().Be(StoredFileEndpoints.StoreUnavailableErrorCode);
+        }
+
+        host.Rig.Dataverse.Calls.Should().BeEmpty("no file row is read without the caller's Read on the invoice");
+        host.Rig.Gateway.StorageCalls.Should().Be(0);
+        host.AuditEvents.Should().BeEmpty();
+    }
+
+    // =============================================================================================================================
+    // Fix round 1 (B): the firm's files are read filtered by the store, so internal files of the invoice neither crowd them out nor
+    // count against the cap; and the content route judges only the file it names
+    // =============================================================================================================================
+
+    [Fact(DisplayName = "Fix 1 B: an invoice with 60 internal files and one firm PDF lists and serves the PDF")]
+    public async Task ManyInternalFiles_DoNotHideTheFirmPdf()
+    {
+        await using var host = await Host.StartAsync();
+        host.CallerIs("contact");
+        for (var i = 0; i < 30; i++)
+        {
+            host.SeedFirmFile(firmVisible: false);
+            host.SeedFirmFile(purpose: StoredFilePurpose.InvoiceSupportingFile, firmVisible: false);
+        }
+
+        var file = host.SeedFirmFile();
+
+        var list = await host.GetAsync(ListUrl(Invoice));
+        list.StatusCode.Should().Be(HttpStatusCode.OK, await list.Content.ReadAsStringAsync());
+        (await Ids(list)).Should().Equal(file);
+        var content = await host.GetAsync(ContentUrl(Invoice, file));
+        content.StatusCode.Should().Be(HttpStatusCode.OK);
+        (await content.Content.ReadAsByteArrayAsync()).Should().Equal(Pdf);
+    }
+
+    [Fact(DisplayName = "Fix 1 B: the firm route's Stored File query filters on the invoice, Invoice PDF, firm-visible, Servable and no source")]
+    public async Task TheStoredFileQuery_IsFilteredByTheStore()
+    {
+        await using var host = await Host.StartAsync();
+        host.CallerIs("contact");
+        host.SeedFirmFile();
+
+        await host.GetAsync(ListUrl(Invoice));
+
+        var query = host.Rig.Dataverse.Mock.Invocations
+            .Where(i => i.Method.Name == nameof(Spaarke.Dataverse.IGenericEntityService.RetrieveMultipleAsync))
+            .Select(i => i.Arguments[0]).OfType<QueryExpression>()
+            .Should().ContainSingle(q => q.EntityName == StoredFileSchema.Entity).Subject;
+        var conditions = query.Criteria.Conditions
+            .Select(c => $"{c.AttributeName} {c.Operator} {string.Join(",", c.Values)}")
+            .ToList();
+        conditions.Should().BeEquivalentTo(
+            $"{StoredFileSchema.InvoiceTable} {ConditionOperator.Equal} {Invoice}",
+            $"{StoredFileSchema.Purpose} {ConditionOperator.Equal} {(int)StoredFilePurpose.InvoicePdf}",
+            $"{StoredFileSchema.FirmVisible} {ConditionOperator.Equal} {true}",
+            $"{StoredFileSchema.Status} {ConditionOperator.Equal} {(int)StoredFileStatus.Servable}",
+            $"{StoredFileSchema.SourceDocument} {ConditionOperator.Null} ",
+            $"{StoredFileSchema.SourceCommunication} {ConditionOperator.Null} ");
+    }
+
+    [Fact(DisplayName = "Fix 1 (K3): another firm file's storage fault does not refuse a healthy file's content; the list, which judges every file, is the 503")]
+    public async Task SiblingStorageFault_DoesNotRefuseAHealthyDownload()
+    {
+        await using var host = await Host.StartAsync();
+        host.CallerIs("contact");
+        var healthy = host.SeedFirmFile();
+        var broken = host.SeedFirmFile();
+        host.Rig.Gateway.BeforeOp = (_, name) =>
+        {
+            if (name.Contains(broken.ToString("D"), StringComparison.OrdinalIgnoreCase))
+                throw new IOException("connection reset");
+        };
+
+        var content = await host.GetAsync(ContentUrl(Invoice, healthy));
+        content.StatusCode.Should().Be(HttpStatusCode.OK);
+        (await content.Content.ReadAsByteArrayAsync()).Should().Equal(Pdf);
+
+        var list = await host.GetAsync(ListUrl(Invoice));
+        list.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable);
+        (await ErrorCode(list)).Should().Be(StoredFileEndpoints.StoreUnavailableErrorCode);
+    }
+
+    // =============================================================================================================================
     // The kill switch, authentication and the absent routes
     // =============================================================================================================================
 
@@ -478,6 +634,9 @@ public sealed class ExternalInvoiceFileRoutesTests
         public InvoiceData Data { get; } = new();
         public Mock<ISystemUserIdentityResolver> Identity { get; } = new();
         public InvoiceHidingStub Hiding { get; set; } = InvoiceHidingStub.NoneHidden();
+
+        /// <summary>Fix round 1 (A): Dataverse's answer for a systemuser's own rights on a row (app-only, named systemuser). Unseeded is None.</summary>
+        public CallerRecordAccessProbeDouble Probe { get; } = new();
         public ConcurrentQueue<string> Timeline { get; } = new();
         public StoredFileEndpointsTests.CapturingProvider Logs { get; private set; } = null!;
 
@@ -496,6 +655,9 @@ public sealed class ExternalInvoiceFileRoutesTests
             host.Data.RootIsSecure[(ExternalGrantRootType.Matter, Matter)] = false;
             host.Identity.Setup(i => i.IsExternalAsync(FlaggedSystemUser, It.IsAny<CancellationToken>())).ReturnsAsync(true);
             host.Identity.Setup(i => i.IsExternalAsync(InternalSystemUser, It.IsAny<CancellationToken>())).ReturnsAsync(false);
+            // Both systemusers hold Read on the invoice row itself (a test that refuses it overrides the answer).
+            host.Probe.AnswerAppOnly(FlaggedSystemUser, StoredFileSchema.InvoiceEntitySet, Invoice, AccessRights.Read);
+            host.Probe.AnswerAppOnly(InternalSystemUser, StoredFileSchema.InvoiceEntitySet, Invoice, AccessRights.Read);
 
             var builder = WebApplication.CreateBuilder(new WebApplicationOptions { EnvironmentName = "Testing" });
             builder.Logging.ClearProviders();
@@ -516,6 +678,7 @@ public sealed class ExternalInvoiceFileRoutesTests
             builder.Services.AddSingleton(ProductionRegistry());
             builder.Services.AddSingleton(host.Rig.Service);
             builder.Services.AddSingleton(host.Identity.Object);
+            builder.Services.AddSingleton<CallerRecordAccessProbe>(host.Probe);
             builder.Services.AddScoped<ExternalInvoiceHiding>(_ => (caller, ids, ct) => host.Hiding.Seam(caller, ids, ct));
 
             builder.WebHost.UseTestServer();

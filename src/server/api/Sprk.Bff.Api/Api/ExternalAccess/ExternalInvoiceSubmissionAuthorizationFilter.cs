@@ -409,7 +409,12 @@ internal sealed class ExternalInvoiceSubmissionAuthorizationFilter : IEndpointFi
     /// routes use): Read through the invoice's parents after the secure-roots rule and the external invoice predicate ((a'), asked once,
     /// inside the gate). For a firm caller the invoice's vendor firm must be one of the caller's firms, checked on the gate's own invoice read:
     /// another firm's invoice is answered exactly as a missing one.</item>
-    /// <item>The files: this invoice's own Invoice PDF rows marked firm-visible with no source, each judged by
+    /// <item>For a systemuser caller (task 093 fix round 1, uac-r2 ruling): also Read on the invoice row itself, asked of Dataverse app-only
+    /// for the resolved systemuser (<see cref="CallerRecordAccessProbe.GetPrincipalRightsAppOnlyOrUnknownAsync"/>), so the caller holds
+    /// Read on the invoice AND on its root. No answer is the 503. A contact is decided by the record gate alone.</item>
+    /// <item>The files: this invoice's own Invoice PDF rows marked firm-visible with no source (read filtered by the store,
+    /// <see cref="StoredFileService.ReadFirmVisibleRowsForInvoiceAsync"/>, and re-checked by <see cref="IsFirmFile"/>; the content route
+    /// keeps only the file it names), each judged by
     /// <see cref="StoredFileService.JudgeServableAsync"/> (the download rule's step 5): Clean and NotScanned are listed and streamed, Pending
     /// is listed as Checking (content 409), anything else (Malicious, not Servable, Removed, a path mismatch, a missing blob) is omitted.</item>
     /// </list>
@@ -493,18 +498,51 @@ internal sealed class ExternalInvoiceSubmissionAuthorizationFilter : IEndpointFi
                 return (null, ProblemDetailsHelper.UniformRecordNotFound(http));
             }
 
-            // (3) The files.
+            // (2b) A systemuser caller (the task 036 path) must ALSO hold Read on the invoice row itself, asked of Dataverse app-only
+            // for the systemuser the caller principal was resolved to (never a request value). With the record gate above, the caller
+            // holds Read on the invoice AND on its root. No Read is the uniform 404; no answer is the 503, never the record gate's answer
+            // alone. A contact is not asked (it has no Dataverse rights of its own).
+            if (IsSystemUser(principal))
+            {
+                var probe = services.GetRequiredService<CallerRecordAccessProbe>();
+                var invoiceRights = await probe.GetPrincipalRightsAppOnlyOrUnknownAsync(
+                    ExternalProjectDataEndpoints.AppOnlyConfirmationPrincipal(principal),
+                    ExternalDataService.GetDocumentParentBinding(ExternalDataService.DocumentParentKind.Invoice).EntitySet, invoiceId, ct);
+                if (invoiceRights is not { } answered)
+                {
+                    _logger.LogWarning("[EBILLING-FILES] Invoice {InvoiceId}: Dataverse gave no answer for the caller's Read on it (503).", invoiceId);
+                    return (null, StoredFileAccessFilter.Unavailable(http));
+                }
+
+                if (!answered.HasFlag(AccessRights.Read))
+                {
+                    _logger.LogInformation("[EBILLING-FILES] Invoice {InvoiceId}: the caller holds no Read on the invoice row; refused.", invoiceId);
+                    return (null, ProblemDetailsHelper.UniformRecordNotFound(http));
+                }
+            }
+
+            // (3) The files: only the firm-visible ones are read (filtered by the store, re-checked here), so the cap counts those alone.
             var store = services.GetRequiredService<StoredFileService>();
-            var rows = await store.ReadRowsForInvoiceAsync(invoiceId, StoredFileEndpoints.MaxListedFiles + 1, ct);
+            var rows = (await store.ReadFirmVisibleRowsForInvoiceAsync(invoiceId, StoredFileEndpoints.MaxListedFiles + 1, ct))
+                .Where(r => IsFirmFile(r, invoiceId))
+                .ToList();
             if (rows.Count > StoredFileEndpoints.MaxListedFiles)
             {
-                _logger.LogError("[EBILLING-FILES] Invoice {InvoiceId}: more than {Max} stored files; refusing a truncated list (503)",
+                _logger.LogError("[EBILLING-FILES] Invoice {InvoiceId}: more than {Max} firm-visible files; refusing a truncated list (503)",
                     invoiceId, StoredFileEndpoints.MaxListedFiles);
                 return (null, StoredFileAccessFilter.Unavailable(http));
             }
 
+            // The content route judges only the file it names, so another file's storage fault cannot refuse a healthy download. A file
+            // id that is not one of the firm's files leaves an empty set (the handler's uniform 404).
+            if (http.Request.RouteValues.ContainsKey("fileId"))
+            {
+                var fileId = Guid.TryParse(http.Request.RouteValues["fileId"]?.ToString(), out var parsed) ? parsed : Guid.Empty;
+                rows = rows.Where(r => r.FileId == fileId).ToList();
+            }
+
             var files = new List<ExternalInvoiceVisibleFile>();
-            foreach (var row in rows.Where(r => IsFirmFile(r, invoiceId)))
+            foreach (var row in rows)
             {
                 var decision = await store.JudgeServableAsync(row, principal.SystemUserId ?? Guid.Empty, ct);
                 switch (decision.Outcome)
