@@ -8,7 +8,7 @@
  *  - **Nothing is written by the wizard itself.** Record decision posts ONE review, with a client-generated review id, to the
  *    commit route (task 043) through `service.commit`, once: the request is single-flight, so a double click sends one.
  *  - **Closing** with unrecorded choices on ANY item opens a nested "Discard and close / Keep deciding" check. Escape and the
- *    backdrop never close (the shell's `dismiss: 'explicit'`).
+ *    backdrop never close (the shell's `dismiss: 'explicit'`); a host may opt Escape in with `closeOnEscape` (same check).
  *  - **Recording flips the item to read-only in place**: the status bar takes focus, "Next open item" moves on.
  *
  * Item data (sentence, evidence, other open items, the record of a closed item) comes from the host's `loadItem`: the Signal

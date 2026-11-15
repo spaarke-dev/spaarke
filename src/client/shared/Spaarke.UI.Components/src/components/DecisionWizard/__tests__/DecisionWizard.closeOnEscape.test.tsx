@@ -71,7 +71,8 @@ describe.each([
 
     expect(await screen.findByText('Discard unrecorded choices?')).toBeInTheDocument();
     expect(onClose).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole('button', { name: 'Keep deciding' }));
+    // The prompt fades in: its buttons are not yet accessible the instant its text is, so wait for the button rather than read it.
+    fireEvent.click(await screen.findByRole('button', { name: 'Keep deciding' }));
     await waitFor(() => expect(screen.queryByText('Discard unrecorded choices?')).toBeNull());
     expect(onClose).not.toHaveBeenCalled();
     expect(service.commit).not.toHaveBeenCalled();
