@@ -35,7 +35,6 @@ internal static class InvoiceIndexDocument
     internal const string InvoiceName = "sprk_name";
     internal const string InvoiceNumber = "sprk_invoicenumber";
     internal const string InvoiceDate = "sprk_invoicedate";
-    internal const string InvoiceDocumentLookup = "sprk_document";
     internal const string InvoiceMatter = "sprk_matter";
     internal const string InvoiceProject = "sprk_project";
     internal const string InvoiceWorkAssignment = "sprk_regardingworkassignment";
@@ -49,7 +48,7 @@ internal static class InvoiceIndexDocument
     [
         InvoiceName, InvoiceNumber, InvoiceReviewService.InvTrackingNumber, InvoiceDate,
         InvoiceSubmissionPersister.InvoiceBillingPeriodStart, InvoiceSubmissionPersister.InvoiceBillingPeriodEnd,
-        InvoiceSubmissionPersister.InvoiceVendorOrg, InvoiceSubmissionPersister.InvoiceCurrency, InvoiceDocumentLookup,
+        InvoiceSubmissionPersister.InvoiceVendorOrg, InvoiceSubmissionPersister.InvoiceCurrency,
         InvoiceMatter, InvoiceProject, InvoiceWorkAssignment,
         InvoiceTotalsService.InvoiceBilledTotal, InvoiceTotalsService.InvoiceApprovedTotal,
         StatusCodeColumn,
@@ -129,7 +128,6 @@ internal static class InvoiceIndexDocument
             CoreRecordType = coreType,
             CoreRecordId = coreRef is { } c ? c.Id : null,
             CoreRecordName = Clean(coreRef?.Name),
-            DocumentId = invoice.GetAttributeValue<EntityReference>(InvoiceDocumentLookup) is { } d && d.Id != Guid.Empty ? d.Id : null,
             TimekeeperIds = timekeeperIds.ToList(),
             TimekeeperNames = timekeeperNames.ToList(),
             TaskCodes = taskCodes.ToList(),
@@ -155,7 +153,9 @@ internal static class InvoiceIndexDocument
             ["content"] = model.Content,
             ["chunkIndex"] = 0,
             ["invoiceId"] = IdText(model.InvoiceId),
-            ["documentId"] = model.DocumentId is { } document ? IdText(document) : null,
+            // #2844: the invoice links no Document any more (task 094 removed sprk_invoice.sprk_document; its files are Stored Files). Written
+            // as null, not omitted, so a Merge clears a value an older run stored.
+            ["documentId"] = null,
 
             // The firm (D-70: sprk_vendororg) and the core record (FR-05). matterId / projectId stay filled for those two types: the
             // invoice search endpoint filters on matterId.
@@ -410,7 +410,6 @@ internal sealed record InvoiceIndexModel
     public string? CoreRecordType { get; init; }
     public Guid? CoreRecordId { get; init; }
     public string? CoreRecordName { get; init; }
-    public Guid? DocumentId { get; init; }
     public IReadOnlyList<string> TimekeeperIds { get; init; } = [];
     public IReadOnlyList<string> TimekeeperNames { get; init; } = [];
     public IReadOnlyList<string> TaskCodes { get; init; } = [];
