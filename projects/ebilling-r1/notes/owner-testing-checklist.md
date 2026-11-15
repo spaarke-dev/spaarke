@@ -45,7 +45,7 @@ Sign in as a **billing administrator** unless a step says otherwise.
 - [ ] Moving an invoice to another matter or project through Spaarke is refused. The message says to return it to the firm and resubmit.
 - [ ] Approve, Reject, Return and corrections on an invoice still work as before.
 
-## D. After 095e and 095f reach dev (built 2026-11-13, not deployed)
+## D. 095e and 095f: ready to test on dev (deployed 2026-11-14 ~15:19Z, BFF 5a9b687a0b)
 
 - [ ] A submission with no firm is refused in every channel (portal, internal wizard, Outlook pane), and nothing is created.
 - [ ] A new invoice's name reads "{firm name} - {invoice number}" (or the date when there is no number), whatever the PDF says.

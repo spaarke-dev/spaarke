@@ -229,11 +229,13 @@ public static class StoredFileEndpoints
     /// hardening headers (<c>nosniff</c>, <c>no-store</c>, sandbox CSP). Shared by this route and the AP export batch download
     /// (<c>ApExportEndpoints</c>, ebilling-r1 task 151a), so the two cannot differ. With <paramref name="downloadName"/> the response is
     /// an attachment of that name (<c>Content-Disposition</c>) and <paramref name="servedType"/> is sent as given; without it the
-    /// allow-list rule applies (<see cref="OctetStream"/> is an attachment).
+    /// allow-list rule applies (<see cref="OctetStream"/> is an attachment). <paramref name="auditCaller"/> names the caller and route the
+    /// audit event records; without it, the internal route's systemuser (<see cref="StoredFileServable.CallerSystemUserId"/>). The firm
+    /// route (ebilling-r1 task 093) passes its caller and <see cref="StoredFileAudit.RouteFirm"/>.
     /// </summary>
     internal static async Task<IResult> StreamServableAsync(
         HttpContext httpContext, StoredFileServable file, StoredFileService service, ILogger logger, string servedType, string? downloadName,
-        CancellationToken ct)
+        CancellationToken ct, (string CallerKind, Guid CallerId, string RouteKind)? auditCaller = null)
     {
         Stream? stream;
         try
@@ -258,8 +260,9 @@ public static class StoredFileEndpoints
         }
 
         // Before the first byte: the one audit event (O-29), ids only.
-        StoredFileAudit.LogDownloaded(
-            logger, file.FileId, file.Parent.Table, file.Parent.Id, StoredFileAudit.CallerSystemUser, file.CallerSystemUserId, StoredFileAudit.RouteInternal);
+        var (callerKind, callerId, routeKind) =
+            auditCaller ?? (StoredFileAudit.CallerSystemUser, file.CallerSystemUserId, StoredFileAudit.RouteInternal);
+        StoredFileAudit.LogDownloaded(logger, file.FileId, file.Parent.Table, file.Parent.Id, callerKind, callerId, routeKind);
 
         var headers = httpContext.Response.Headers;
         headers[HeaderNames.XContentTypeOptions] = "nosniff";

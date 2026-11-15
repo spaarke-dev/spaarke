@@ -104,13 +104,11 @@ internal static class WorkforceRoleCeilingGate
     internal static readonly IReadOnlyList<WorkforceCeilingRequirement> ReadProjectDocuments = ReadDocumentsOf(ProjectTable);
     internal static readonly IReadOnlyList<WorkforceCeilingRequirement> ReadMatterDocuments = ReadDocumentsOf(MatterTable);
     internal static readonly IReadOnlyList<WorkforceCeilingRequirement> ReadWorkAssignmentDocuments = ReadDocumentsOf(WorkAssignmentTable);
-    internal static readonly IReadOnlyList<WorkforceCeilingRequirement> ReadInvoiceDocuments = ReadDocumentsOf(InvoiceTable);
 
     /// <summary>A document upload to a record: Create on the document, AppendTo on the record (its parent lookup).</summary>
     internal static readonly IReadOnlyList<WorkforceCeilingRequirement> UploadProjectDocument = UploadDocumentTo(ProjectTable);
     internal static readonly IReadOnlyList<WorkforceCeilingRequirement> UploadMatterDocument = UploadDocumentTo(MatterTable);
     internal static readonly IReadOnlyList<WorkforceCeilingRequirement> UploadWorkAssignmentDocument = UploadDocumentTo(WorkAssignmentTable);
-    internal static readonly IReadOnlyList<WorkforceCeilingRequirement> UploadInvoiceDocument = UploadDocumentTo(InvoiceTable);
 
     /// <summary>To-dos regarding a root: Read on the root and on <c>sprk_todo</c>; a create is Create + AppendTo the root.</summary>
     internal static readonly IReadOnlyList<WorkforceCeilingRequirement> ReadProjectTodos = ReadChildrenOf(ProjectTable, TodoTable);
@@ -211,6 +209,14 @@ internal static class WorkforceRoleCeilingGate
     /// </summary>
     internal static readonly IReadOnlyList<WorkforceCeilingRequirement> ReadInvoiceSubmissionsWithInvoice = Set(
         (InvoiceSubmissionTable, AccessRights.Read), (InvoiceTable, AccessRights.Read));
+
+    /// <summary>
+    /// <c>GET /invoices/{id}/files</c> and its <c>/content</c> (ebilling-r1 task 093, the firm file routes): Read on <c>sprk_invoice</c>,
+    /// whose files they list and serve. Not <c>sprk_storedfile</c>: it is one of the hard-deny tables (model 5.2, owner round 131), held
+    /// by a memberless team and read only by the BFF application user (field security, uac-r2 F1-b), so no user role carries Read on it
+    /// and requiring it would refuse every workforce caller. The rows are decided by the route's gate, never by a role.
+    /// </summary>
+    internal static readonly IReadOnlyList<WorkforceCeilingRequirement> ReadInvoiceFiles = Set((InvoiceTable, AccessRights.Read));
 
     /// <summary>
     /// <c>GET /ebilling/invoices/{id}/outcome</c> (ebilling-r1 task 130b): Read on <c>sprk_invoice</c> (status, tracking number,

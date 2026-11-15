@@ -344,6 +344,66 @@ public sealed class ExternalInvoiceLinkedDeleteTests : IClassFixture<ExternalDel
         _fixture.Exists(DeletableKind.Document, id).Should().BeTrue();
     }
 
+    // ── ebilling-r1 task 093 fix round 1 (review 2 F2): a document filed UNDER an invoice (a DocumentParentKind.Invoice parent). The
+    //    caller's Read on the invoice is inherited from its matter (RightsForInvoiceAsync), then (a'). The row's own invoice links are
+    //    left empty so each answer below comes from the parent check alone.
+
+    [Fact(DisplayName = "093 fix1 delete (must not fire): a document filed under an invoice the caller reads through its matter is deleted")]
+    public async Task ADocumentUnderAnInvoiceReadThroughItsMatter_IsDeleted()
+    {
+        _fixture.Data.InvoiceMatters[_own] = Matter;
+        var id = SeedUnderInvoice(_own);
+
+        using var response = await Delete("documents", id);
+
+        response.StatusCode.Should().Be(HttpStatusCode.NoContent, await response.Content.ReadAsStringAsync());
+        _fixture.Exists(DeletableKind.Document, id).Should().BeFalse();
+    }
+
+    [Fact(DisplayName = "093 fix1 delete (must fire): a document filed under an invoice whose matter the caller cannot read is the delete-own 403, and kept")]
+    public async Task ADocumentUnderAnInvoiceWithoutRead_IsRefused_AndKept()
+    {
+        _fixture.Data.InvoiceMatters[_own] = Guid.NewGuid(); // a matter the caller holds nothing on
+        var id = SeedUnderInvoice(_own);
+
+        using var response = await Delete("documents", id);
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        (await response.Content.ReadAsStringAsync()).Should().Contain(ExternalProjectDataEndpoints.DeleteOwnDeniedReasonCode);
+        _fixture.Exists(DeletableKind.Document, id).Should().BeTrue();
+        _hiding.Calls.Should().BeEmpty("the (a') decision is asked only for a caller who reaches the invoice");
+    }
+
+    [Fact(DisplayName = "093 fix1 delete (fault): the invoice's parents cannot be read: the invoice-unreadable 503, and the document is kept")]
+    public async Task ADocumentUnderAnInvoiceWhoseParentsFault_Is503_AndKept()
+    {
+        _fixture.Data.InvoiceParentsFault = new DataverseUnavailableException("Dataverse answered 429 (test).");
+        var id = SeedUnderInvoice(_own);
+
+        using var response = await Delete("documents", id);
+
+        response.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable);
+        (await response.Content.ReadAsStringAsync()).Should().Contain(ExternalProjectDataEndpoints.InvoiceUnreadableReasonCode);
+        _fixture.Exists(DeletableKind.Document, id).Should().BeTrue();
+    }
+
+    [Fact(DisplayName = "093 fix1 delete (must fire): a document filed under an invoice hidden by (a') is the delete-own 403, though its matter is readable, and kept")]
+    public async Task ADocumentUnderAHiddenInvoice_IsRefused_AndKept()
+    {
+        _fixture.Data.InvoiceMatters[_other] = Matter;
+        var id = SeedUnderInvoice(_other);
+
+        using var response = await Delete("documents", id);
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        (await response.Content.ReadAsStringAsync()).Should().Contain(ExternalProjectDataEndpoints.DeleteOwnDeniedReasonCode);
+        _fixture.Exists(DeletableKind.Document, id).Should().BeTrue();
+        _hiding.Calls.Should().ContainSingle().Which.Should().Equal(_other);
+    }
+
+    private Guid SeedUnderInvoice(Guid invoice) =>
+        _fixture.Seed(DeletableKind.Document, contact: CallerContact, parents: new DeleteTargetParent(DocumentParentKind.Invoice, invoice));
+
     private Guid SeedLinkedTo(string segment, params Guid[] invoices)
     {
         var kind = KindOf(segment);

@@ -279,3 +279,62 @@ Describe 'K2: -Revert' {
         foreach ($c in $script:AllColumns) { $script:Dv.Attrs[$c].IsSecured | Should -BeTrue }
     }
 }
+
+# Strongly consistent reads: attribute metadata (IsSecured) is cached per server, and a plain read soon after a change can come back stale.
+# These run the script's OWN request header set and Invoke-DvGet (lifted from its syntax tree) against a Web API that answers stale to any
+# read WITHOUT 'Consistency: Strong'. The decision the script makes from that read (-Verify reports MISSING when IsSecured is false) is
+# therefore only right if the header is on every read.
+Describe 'every read asks for strong consistency (stale metadata cache)' {
+    BeforeAll {
+        $tokens = $null; $errors = $null
+        $realAst = [System.Management.Automation.Language.Parser]::ParseFile($script:ScriptPath, [ref]$tokens, [ref]$errors)
+        $real = [System.Collections.Generic.List[string]]::new()
+        foreach ($statement in $realAst.EndBlock.Statements) {
+            if (($statement -is [System.Management.Automation.Language.AssignmentStatementAst] -and
+                    $statement.Left -is [System.Management.Automation.Language.VariableExpressionAst] -and $statement.Left.VariablePath.UserPath -eq 'headers') -or
+                ($statement -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $statement.Name -eq 'Invoke-DvGet')) {
+                $real.Add($statement.Extent.Text)
+            }
+        }
+        if ($real.Count -ne 2) { throw "Expected the script's headers and Invoke-DvGet, found $($real.Count) piece(s)" }
+        $script:RealRequestCode = $real -join "`n"
+
+        # Reads the column's IsSecured the way the script does (a GET of the attribute with $select=IsSecured) against the stale-cache Web
+        # API. -PlainRead sends a request with no Consistency header at all: the control that shows the Web API double is not lenient.
+        function Read-IsSecured([hashtable]$Truth, [string]$Column, [bool]$Stale, [switch]$PlainRead) {
+            & {
+                param($code, $Truth, $Column, $Stale, $PlainRead)
+                $token = 'test-token'; $Api = 'https://example.invalid/api/data/v9.2'
+                function Invoke-RestMethod {
+                    param($Uri, $Headers, $Method, $Body)
+                    $col = [regex]::Match($Uri, "Attributes\(LogicalName='(\w+)'\)").Groups[1].Value
+                    $strong = $Headers -and $Headers['Consistency'] -eq 'Strong'
+                    [pscustomobject]@{ IsSecured = [bool]($Truth[$col] -and ($strong -or -not $Stale)) }
+                }
+                . ([scriptblock]::Create($code))
+                $path = "EntityDefinitions(LogicalName='sprk_invoice')/Attributes(LogicalName='$Column')?`$select=IsSecured"
+                if ($PlainRead) { (Invoke-RestMethod -Uri "$Api/$path" -Headers @{ Authorization = 'Bearer x' } -Method Get).IsSecured }
+                else { (Invoke-DvGet $path).IsSecured }
+            } $script:RealRequestCode $Truth $Column $Stale $PlainRead
+        }
+        function New-Truth([bool]$Secured) { $t = @{}; foreach ($c in $script:AllColumns) { $t[$c] = $Secured }; $t }
+    }
+
+    It 'the double itself answers stale to a read with no Consistency header (control)' {
+        Read-IsSecured (New-Truth $true) 'sprk_feestotal' $true -PlainRead | Should -BeFalse
+    }
+
+    It 'reads every column as secured on a locked environment whose cache is stale, because the script sends the header (must not fire)' {
+        foreach ($c in $script:AllColumns) {
+            Read-IsSecured (New-Truth $true) $c $true | Should -BeTrue -Because "$c is secured, so -Verify must not report it MISSING"
+        }
+    }
+
+    It 'still reads a column as unsecured when it really is unsecured, stale cache or not (must fire)' {
+        $truth = New-Truth $true
+        $truth['sprk_feestotal'] = $false
+        Read-IsSecured $truth 'sprk_feestotal' $true | Should -BeFalse
+        Read-IsSecured $truth 'sprk_feestotal' $false | Should -BeFalse
+        Read-IsSecured $truth 'sprk_totalamount' $true | Should -BeTrue
+    }
+}

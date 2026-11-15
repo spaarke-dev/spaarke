@@ -9,13 +9,19 @@
 // external caller. Compiled into Sprk.Bff.Api.Tests by the existing tests/integration/auth glob.
 //
 // WHY THE DENY HOLDS (the trace, task 028 notes):
-//   OPEN. A CIAM token authenticates only on the /api/v1/external group. Its only file-bytes routes are
-//   /{projects|matters|workassignments|servicerequests|invoices}/{id}/documents/{documentId}/content, which (1) need Read on the
-//   route record, (2) need the document filed under that record, and only then (3) resolve the row's SPE pointer through
-//   DocumentStorageResolver, which runs RecordContainerResolver's document-pointer check before the app-only read. That check
-//   honours only a container DERIVED for the document's own records (a business unit's container, a secure record's own
-//   container, the communication archive, the unfiled default) — never a container that is only an app setting, such as the
-//   Procedure Library. So even a Procedure Library document filed (by mistake) under a record the firm CAN read is refused.
+//   OPEN. A CIAM token authenticates only on the /api/v1/external group. Its file-bytes routes are:
+//   - /{projects|matters|workassignments|servicerequests}/{id}/documents/{documentId}/content, which (1) need Read on the
+//     route record, (2) need the document filed under that record, and only then (3) resolve the row's SPE pointer through
+//     DocumentStorageResolver, which runs RecordContainerResolver's document-pointer check before the app-only read. That check
+//     honours only a container DERIVED for the document's own records (a business unit's container, a secure record's own
+//     container, the communication archive, the unfiled default) — never a container that is only an app setting, such as the
+//     Procedure Library. So even a Procedure Library document filed (by mistake) under a record the firm CAN read is refused.
+//     (The /invoices/{id}/documents routes retired with ebilling-r1 task 093.)
+//   - /invoices/{id}/files/{fileId}/content (ebilling-r1 task 093), which serves a Stored File, not an SPE document, and only
+//     one the invoice files gate admitted: a row whose parent is the route's invoice, whose purpose is Invoice PDF, marked
+//     firm-visible, Servable and with no source. A Procedure Version's file is parented on its Procedure Version and has
+//     another purpose, so it is never in that set; the route answers it with the uniform 404 (the parent and purpose checks are
+//     pinned by ExternalInvoiceFileRoutesTests: another invoice's file, a supporting file).
 //   SEARCH. No search route admits the Ciam scheme, and the default (workforce) scheme rejects every CIAM token
 //   (AuthorizationModuleCiamTests). The /api/v1/external group has no content or RAG search route. (Its module-data route,
 //   /api/v1/external/api/dataverse/*, does return sprk_documentname for a document filed under a firm-readable record: DEF-015.)

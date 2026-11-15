@@ -30,6 +30,7 @@ using Sprk.Bff.Api.Services.Jobs;
 using Sprk.Bff.Api.Services.Signals;
 using Sprk.Bff.Api.Tests.Services.Signals;
 using Xunit;
+using ProcedureBannerWorld = Sprk.Bff.Api.Tests.Services.Finance.Procedures.ProcedureBannerWorld;
 using FinAuth = Sprk.Bff.Api.Tests.Api.Finance.FinanceEndpointsAuthorizationContractTests;
 
 namespace Sprk.Bff.Api.Tests.Api.Finance;
@@ -432,6 +433,67 @@ public sealed class InvoiceLineReviewEndpointsAuthorizationContractTests
         JsonNode.Parse(body)!["reasonCode"]!.GetValue<string>().Should().Be("sdap.access.deny.record_unavailable");
     }
 
+    [Theory(DisplayName = "Task 113 route wiring: an admitted internal caller of an open invoice with a firm and stored findings gets procedureChange in the JSON; the same invoice decided gets none")]
+    [InlineData(StepZeroCallerKind.FlagFalse)]
+    [InlineData(StepZeroCallerKind.FlagBlank)]
+    public async Task Read_InternalCaller_OpenInvoiceWithAFirmAndFindings_CarriesTheProcedureChange(StepZeroCallerKind kind)
+    {
+        // The route passes step 0's verdict to the service; a route that passed none (null) would omit the member.
+        var (host, invoiceId) = await BannerHostAsync(kind, InvoiceStatusCodes.InReview);
+        await using var _ = host;
+
+        var response = await host.SendAsync(Request("GET", $"/api/finance/invoices/{invoiceId}/review", null));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var json = JsonNode.Parse(await response.Content.ReadAsStringAsync())!.AsObject();
+        json["procedureChange"]!.ToJsonString().Should().Be(
+            """{"state":"Changed","text":"The procedures that apply to this invoice have changed; re-check to apply them."}""");
+
+        // Must-not-fire control: the same rows on a decided invoice carry no member, so the member above is the banner's, not a default.
+        var (decided, decidedId) = await BannerHostAsync(kind, InvoiceStatusCodes.Approved);
+        await using var _2 = decided;
+        var control = await decided.SendAsync(Request("GET", $"/api/finance/invoices/{decidedId}/review", null));
+        control.StatusCode.Should().Be(HttpStatusCode.OK);
+        JsonNode.Parse(await control.Content.ReadAsStringAsync())!.AsObject().ContainsKey("procedureChange").Should().BeFalse();
+    }
+
+    /// <summary>
+    /// A host whose invoice (id derived from its own submission, so the review reads that submission) has a firm, one matter, two dated Fee lines and
+    /// stored findings that carry the snapshot of the Procedure rows as they stood; a rule was switched off since, so the banner reads Changed.
+    /// </summary>
+    private static async Task<(Host Host, Guid InvoiceId)> BannerHostAsync(StepZeroCallerKind kind, int status)
+    {
+        var banner = new ProcedureBannerWorld();
+        var (_, _, rule, _) = banner.Simple("RATE-1");
+        var findings = await banner.StoredFindingsAsync();
+        banner.ExcludeRule(ProcedureBannerWorld.M, rule);
+
+        var submissionId = Guid.Parse("20000000-0000-4000-8000-0000000000d1");
+        var invoiceId = Sprk.Bff.Api.Services.Finance.Submission.InvoiceSubmissionPersister.InvoiceIdFor(submissionId);
+        var host = await Host.StartAsync();
+        host.StepZero.Kind = kind;
+        host.BannerEntities = banner.Entities.Object;
+        host.Access.Grant(InvoiceSet, invoiceId, AccessRights.Read);
+        host.Invoice = new Entity("sprk_invoice", invoiceId)
+        {
+            ["statuscode"] = new OptionSetValue(status),
+            ["sprk_totalamount"] = new Money(100m),
+            ["sprk_invoicedate"] = new DateTime(2026, 3, 15, 0, 0, 0, DateTimeKind.Utc),
+            ["sprk_vendororg"] = new EntityReference("sprk_organization", ProcedureBannerWorld.F),
+            ["sprk_matter"] = new EntityReference("sprk_matter", ProcedureBannerWorld.M),
+        };
+        foreach (var (sequence, date) in new[] { (1, new DateTime(2026, 2, 15, 0, 0, 0, DateTimeKind.Utc)), (2, new DateTime(2026, 3, 15, 0, 0, 0, DateTimeKind.Utc)) })
+        {
+            var line = LineRow(Guid.NewGuid(), InvoiceLineStatus.Flagged);
+            line["sprk_linesequence"] = sequence;
+            line["sprk_eventdate"] = date;
+            host.Lines.Add(line);
+        }
+
+        host.Submission = new Entity("sprk_invoicesubmission", submissionId) { ["sprk_findingsjson"] = findings, ["sprk_trackingnumber"] = "TRK-1" };
+        return (host, invoiceId);
+    }
+
     // =========================================================================================
     // Host
     // =========================================================================================
@@ -488,6 +550,12 @@ public sealed class InvoiceLineReviewEndpointsAuthorizationContractTests
         public Entity? Invoice { get; set; }
         public List<Entity> Lines { get; } = [];
 
+        /// <summary>The invoice's own submission row (task 113: its stored findings are what the Procedure-change banner compares); none by default.</summary>
+        public Entity? Submission { get; set; }
+
+        /// <summary>Task 113: the Dataverse the banner's Procedure resolver reads (an in-memory double that evaluates queries); the strict one above by default.</summary>
+        public IGenericEntityService? BannerEntities { get; set; }
+
         /// <summary>How many writes (line updates, transactions) reached Dataverse.</summary>
         public int Writes => _writes;
 
@@ -520,6 +588,7 @@ public sealed class InvoiceLineReviewEndpointsAuthorizationContractTests
                 {
                     "sprk_invoice" => new EntityCollection(host.Invoice is null ? [] : [host.Invoice]),
                     "sprk_billingevent" => new EntityCollection(host.Lines.ToList()),
+                    "sprk_invoicesubmission" => new EntityCollection(host.Submission is null ? [] : [host.Submission]),
                     _ => new EntityCollection(),
                 }));
             host.Entities
@@ -536,7 +605,10 @@ public sealed class InvoiceLineReviewEndpointsAuthorizationContractTests
             builder.Services.AddScoped(sp => new InvoiceReviewReadService(
                 host.Entities.Object, sp.GetRequiredService<AuthorizationService>(), settings.Object,
                 new Mock<Sprk.Bff.Api.Infrastructure.Dataverse.IDataverseUserClient>(MockBehavior.Strict).Object,
-                new EarlierInvoiceReadability(NullLogger<EarlierInvoiceReadability>.Instance), NullLogger<InvoiceReviewReadService>.Instance));
+                new EarlierInvoiceReadability(NullLogger<EarlierInvoiceReadability>.Instance),
+                new Sprk.Bff.Api.Services.Finance.Procedures.ProcedureChangeBanner(
+                    host.BannerEntities ?? host.Entities.Object, NullLogger<Sprk.Bff.Api.Services.Finance.Procedures.ProcedureChangeBanner>.Instance),
+                NullLogger<InvoiceReviewReadService>.Instance));
 
             var locks = new Mock<IIdempotencyService>();
             locks.Setup(l => l.TryAcquireProcessingLockAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<TimeSpan?>(), It.IsAny<CancellationToken>())).ReturnsAsync(true);
