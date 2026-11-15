@@ -44,6 +44,12 @@
  * task 007, FR-10) is an action host (`actions/SubmitInvoiceAction.tsx`): offered only when the caller's firms are linked
  * to the record, and (task 010) it opens the submission wizard in a child modal over the record: nothing navigates.
  *
+ * COLLAPSIBLE SECTIONS AND CHILD RECORDS (task 013, owner 2026-11-14). The modal tells every section card the record type and
+ * the caller's hashed `/me` id (`RecordSectionStateContext`), so a collapsed section is remembered per user and type
+ * (`recordSectionState.ts`). It also hosts one child record (`useChildRecordHost`, `ChildRecordModal.tsx`): an invoice or
+ * document row in a section opens that record in this same component (`nested`) over this one, through
+ * `ChildRecordContext`. A `nested` modal provides no opener, so a child never opens a grandchild.
+ *
  * ADR-021: Fluent UI v9 semantic tokens via `makeStyles` only; the modal inherits the host FluentProvider.
  */
 import * as React from 'react';
@@ -75,6 +81,8 @@ import { useCallerContext } from '../../hooks/useCallerContext';
 import { formatDetailValue, getRecordDetailEntity, type DetailRecord } from '../detail/RecordDetailFields';
 import { recordLinkFor } from '../detail/record-targets';
 import { RECORD_ACTION_HOSTS } from './actions';
+import { ChildRecordContext } from './childRecord';
+import { useChildRecordHost } from './ChildRecordModal';
 import {
   createRightsOf,
   isCreateActionOffered,
@@ -86,6 +94,7 @@ import {
   type RecordSectionRightId,
 } from './recordAccess';
 import { useRecord, type RecordState } from './recordReads';
+import { RecordSectionStateContext, sectionStateUserKeyOf } from './recordSectionState';
 import { RECORD_ACTION_TEXT, recordActionIdsOf, recordTemplateTitle, recordText } from './recordTemplates';
 import type {
   RecordActionHostContext,
@@ -127,6 +136,12 @@ export interface RecordTemplateModalProps {
   onSettled?: () => void;
   /** Renders one section of the shown record. Default: the template's sections (`renderRecordSection`). */
   renderSection?: (id: RecordSectionId, context: RecordSectionContext) => React.ReactNode;
+  /**
+   * Task 013. True for a record shown as a CHILD of another record (an invoice or document opened from a row of the record
+   * behind it; `ChildRecordModal`): the same modal, with rows that would open a further record behaving as before, so a
+   * child never opens a grandchild. Absent everywhere else.
+   */
+  nested?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -251,6 +266,7 @@ export const RecordTemplateModal: React.FC<RecordTemplateModalProps> = ({
   onRecordDeleted,
   onSettled,
   renderSection = renderRecordSection,
+  nested = false,
 }) => {
   const styles = useStyles();
   const detail = getRecordDetailEntity(config.entity);
@@ -374,6 +390,14 @@ export const RecordTemplateModal: React.FC<RecordTemplateModalProps> = ({
     (section: RecordSectionId) => setSectionSignals(prev => ({ ...prev, [section]: (prev[section] ?? 0) + 1 })),
     []
   );
+
+  // Task 013. Collapsed sections are remembered per user (the `/me` identity, hashed) and record type; a section card reads
+  // this scope. A record that can open a child record (not itself a child) hosts it here, as a descendant of this modal.
+  const sectionStateScope = React.useMemo(
+    () => ({ entity: config.entity, userKey: sectionStateUserKeyOf(caller) }),
+    [config.entity, caller]
+  );
+  const childHost = useChildRecordHost(refreshSection);
 
   // An action deleted the shown record (a 204): show it as deleted, never re-read it, and tell the opener.
   const handleRecordDeleted = React.useCallback(() => {
@@ -610,83 +634,106 @@ export const RecordTemplateModal: React.FC<RecordTemplateModalProps> = ({
   const name = record ? recordText(record, config.nameAttribute) : null;
 
   return (
-    <SprkModal
-      open={open}
-      onClose={handleClose}
-      title={title}
-      size="lg"
-      padded={false}
-      nav={{
-        index,
-        total: recordIds.length,
-        onNavigate: handleNavigate,
-        onBeforeNavigate: () => !holdNavigation,
-      }}
-      footer={
-        <Button appearance="primary" onClick={handleClose} disabled={holdNavigation}>
-          Close
-        </Button>
-      }
-    >
-      <div className={styles.root} data-testid="record-template-body">
-        {/* Fixed chrome: only for a record the caller may see (denied / error / deleted show none of it). */}
-        {ready && record && (
-          <div className={styles.chrome} data-testid="record-template-chrome">
-            <RecordCommandBar className={styles.commandBar} actions={actions} ariaLabel={`${config.label} actions`} />
-            <RecordTemplateHeader
-              name={name ?? config.label}
-              typeLabel={config.label}
-              facts={config.headerFacts.map(fact => ({ label: fact.label, value: formatDetailValue(record, fact) }))}
-              // "Your access" (FR-07, task 006): only what the BFF answered for this record; nothing while unknown.
-              access={yourAccess ?? undefined}
-            />
-            {tabs.length > 0 && (
-              <TabList
-                className={styles.tabs}
-                size="small"
-                selectedValue={shownTab}
-                onTabSelect={(_, data) => setActiveTab(data.value as RecordTemplateTab['id'])}
-                aria-label={`${config.label} sections`}
-              >
-                {tabs.map(tab => (
-                  <Tab key={tab.id} value={tab.id}>
-                    {tab.label}
-                  </Tab>
-                ))}
-              </TabList>
-            )}
-            {shownNotice && (
-              <MessageBar className={styles.notice} intent={shownNotice.intent} data-testid="record-template-notice">
-                <MessageBarBody>
-                  {shownNotice.text}
-                  {shownNotice.link && (
-                    <>
-                      {' '}
-                      <span className={styles.noticeLink}>{shownNotice.link}</span>
-                    </>
-                  )}
-                </MessageBarBody>
-                <MessageBarActions
-                  containerAction={
-                    <Button
-                      appearance="transparent"
-                      icon={<DismissRegular />}
-                      aria-label="Dismiss"
-                      onClick={() => setNotice(null)}
-                    />
-                  }
+    <RecordSectionStateContext.Provider value={sectionStateScope}>
+      <ChildRecordContext.Provider value={nested ? null : childHost.open}>
+        <SprkModal
+          open={open}
+          onClose={handleClose}
+          title={title}
+          size="lg"
+          padded={false}
+          // A child record is one record: no "1 of 1" browsing.
+          nav={
+            nested
+              ? undefined
+              : {
+                  index,
+                  total: recordIds.length,
+                  onNavigate: handleNavigate,
+                  onBeforeNavigate: () => !holdNavigation,
+                }
+          }
+          footer={
+            <Button appearance="primary" onClick={handleClose} disabled={holdNavigation}>
+              Close
+            </Button>
+          }
+        >
+          <div className={styles.root} data-testid="record-template-body">
+            {/* Fixed chrome: only for a record the caller may see (denied / error / deleted show none of it). */}
+            {ready && record && (
+              <div className={styles.chrome} data-testid="record-template-chrome">
+                <RecordCommandBar
+                  className={styles.commandBar}
+                  actions={actions}
+                  ariaLabel={`${config.label} actions`}
                 />
-              </MessageBar>
+                <RecordTemplateHeader
+                  name={name ?? config.label}
+                  typeLabel={config.label}
+                  facts={config.headerFacts.map(fact => ({
+                    label: fact.label,
+                    value: formatDetailValue(record, fact),
+                  }))}
+                  // "Your access" (FR-07, task 006): only what the BFF answered for this record; nothing while unknown.
+                  access={yourAccess ?? undefined}
+                />
+                {tabs.length > 0 && (
+                  <TabList
+                    className={styles.tabs}
+                    size="small"
+                    selectedValue={shownTab}
+                    onTabSelect={(_, data) => setActiveTab(data.value as RecordTemplateTab['id'])}
+                    aria-label={`${config.label} sections`}
+                  >
+                    {tabs.map(tab => (
+                      <Tab key={tab.id} value={tab.id}>
+                        {tab.label}
+                      </Tab>
+                    ))}
+                  </TabList>
+                )}
+                {shownNotice && (
+                  <MessageBar
+                    className={styles.notice}
+                    intent={shownNotice.intent}
+                    data-testid="record-template-notice"
+                  >
+                    <MessageBarBody>
+                      {shownNotice.text}
+                      {shownNotice.link && (
+                        <>
+                          {' '}
+                          <span className={styles.noticeLink}>{shownNotice.link}</span>
+                        </>
+                      )}
+                    </MessageBarBody>
+                    <MessageBarActions
+                      containerAction={
+                        <Button
+                          appearance="transparent"
+                          icon={<DismissRegular />}
+                          aria-label="Dismiss"
+                          onClick={() => setNotice(null)}
+                        />
+                      }
+                    />
+                  </MessageBar>
+                )}
+              </div>
             )}
+            {refreshing && (
+              <ProgressBar className={styles.progress} thickness="medium" aria-label="Refreshing record" />
+            )}
+            {/* Keyed by record, so every section's own state resets when the user pages to another row. */}
+            <div className={styles.content} key={recordKey} data-testid="record-template-content">
+              {renderBody()}
+            </div>
+            {!nested && childHost.modal}
           </div>
-        )}
-        {refreshing && <ProgressBar className={styles.progress} thickness="medium" aria-label="Refreshing record" />}
-        {/* Keyed by record, so every section's own state resets when the user pages to another row. */}
-        <div className={styles.content} key={recordKey} data-testid="record-template-content">
-          {renderBody()}
-        </div>
-      </div>
-    </SprkModal>
+        </SprkModal>
+      </ChildRecordContext.Provider>
+    </RecordSectionStateContext.Provider>
   );
 };
 

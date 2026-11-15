@@ -89,6 +89,7 @@ import {
   type CreateActionReporter,
 } from './createAction';
 import { bffApiCall, bffApiBlob, problemMessage } from '../auth/bff-client';
+import { childRecordAttributesOf } from './record/childRecord';
 import { levelVerdictOf, listCreateRightOf, type CreateRight } from './record/recordAccess';
 import { AccessLevel, ApiError } from '../types';
 
@@ -179,6 +180,31 @@ const useStyles = makeStyles({
     cursor: 'pointer',
     ':hover': {
       textDecoration: 'underline',
+    },
+  },
+  // Record template only (task 013): the name as a link-style button that opens the document's record.
+  documentNameButton: {
+    display: 'flex',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalXS,
+    minWidth: 0,
+    maxWidth: '100%',
+    margin: 0,
+    padding: 0,
+    border: 'none',
+    backgroundColor: 'transparent',
+    font: 'inherit',
+    textAlign: 'start',
+    color: tokens.colorBrandForeground1,
+    cursor: 'pointer',
+    ':hover': {
+      textDecoration: 'underline',
+    },
+    ':focus-visible': {
+      outlineStyle: 'solid',
+      outlineWidth: tokens.strokeWidthThick,
+      outlineColor: tokens.colorStrokeFocus2,
     },
   },
   documentNameIcon: {
@@ -770,6 +796,13 @@ export type DocumentLibraryProps = DocumentLibraryTarget & {
    * unmount), so the record's "Your access" and the Files card's read-only line follow it. Changes nothing on screen here.
    */
   onUploadRightChange?: (right: CreateRight) => void;
+  /**
+   * Record template only (task 013, owner 2026-11-14). When given, a document's name is a link-style button that calls this
+   * with the document's id and the button (focus returns to it when the record opened over this one closes); a document with
+   * no file (`hasFile === false`) is still opened (FR-15: its record shows Information only). Omit it everywhere else: the
+   * Project page keeps plain-text names.
+   */
+  onOpenDocument?: (documentId: string, trigger: HTMLElement) => void;
 };
 
 // ---------------------------------------------------------------------------
@@ -805,6 +838,7 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
   onCreateActionChange,
   onBusyChange,
   onUploadRightChange,
+  onOpenDocument,
 }) => {
   const styles = useStyles();
   // The props type refuses a call with neither; an empty id that still arrives (a caller that casts, or a blank id from
@@ -964,21 +998,36 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
         columnId: 'name',
         compare: (a, b) => (a.sprk_name ?? '').localeCompare(b.sprk_name ?? ''),
         renderHeaderCell: () => 'Name',
-        renderCell: item => (
-          <div className={styles.documentName}>
-            <DocumentRegular className={styles.documentNameIcon} fontSize={16} />
-            <Text
-              size={300}
-              weight="semibold"
-              truncate
-              wrap={false}
-              className={styles.shrinkable}
+        renderCell: item =>
+          onOpenDocument ? (
+            <button
+              type="button"
+              className={styles.documentNameButton}
+              aria-label={`Open document ${item.sprk_name}`}
               title={item.sprk_name}
+              {...childRecordAttributesOf('sprk_document', item.sprk_documentid)}
+              onClick={e => onOpenDocument(item.sprk_documentid, e.currentTarget)}
             >
-              {item.sprk_name}
-            </Text>
-          </div>
-        ),
+              <DocumentRegular className={styles.documentNameIcon} fontSize={16} />
+              <Text size={300} weight="semibold" truncate wrap={false} className={styles.shrinkable}>
+                {item.sprk_name}
+              </Text>
+            </button>
+          ) : (
+            <div className={styles.documentName}>
+              <DocumentRegular className={styles.documentNameIcon} fontSize={16} />
+              <Text
+                size={300}
+                weight="semibold"
+                truncate
+                wrap={false}
+                className={styles.shrinkable}
+                title={item.sprk_name}
+              >
+                {item.sprk_name}
+              </Text>
+            </div>
+          ),
       }),
 
       // --- Type ---
@@ -1102,6 +1151,8 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
       askDelete,
       downloadingId,
       handleDownload,
+      onOpenDocument,
+      styles.documentNameButton,
       styles.documentName,
       styles.documentNameIcon,
       styles.shrinkable,

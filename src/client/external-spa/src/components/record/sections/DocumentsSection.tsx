@@ -16,6 +16,11 @@
  * WHO MAY UPLOAD (task 006, FR-06 / FR-07). Inside the template the library offers Upload only when `createRightOf`
  * (recordAccess.ts) says `true`: the list's `canCreate`, and for a level-decided project caller the `/me` level
  * (`uploadOverride`) agreeing with it. Otherwise the card shows the template's read-only line (`readOnlyNote`).
+ *
+ * OPEN (task 013, owner 2026-11-14). In the record template a document's name opens that document's record in a child modal
+ * over this record (`useChildRecordOpener`; `RecordDocumentList.onOpenDocument`); it names no section to re-read, since a document record cannot
+ * change this list and a re-read would remount the library and lose the grid's sort. Inside a child record there is no opener,
+ * so names stay plain text (one child level only); the Project page never passes it.
  */
 import * as React from 'react';
 import type { CallerIdentity } from '../../../api/delete-own';
@@ -24,6 +29,7 @@ import type { ExternalUserContextResponse } from '../../../auth/bff-client';
 import { canUpload as levelCanUpload } from '../../../hooks/useAccessLevel';
 import { decidingLevelOf } from '../recordAccess';
 import { DocumentLibrary } from '../../DocumentLibrary';
+import { useChildRecordOpener } from '../childRecord';
 import type { CreateActionReporter } from '../../createAction';
 import type { RecordSectionContext } from '../recordTemplate.types';
 import { RecordSectionCard } from './RecordSectionCard';
@@ -58,6 +64,8 @@ export interface RecordDocumentListProps {
   onBusyChange?: (busy: boolean) => void;
   /** Tell the template the Upload right without offering a toolbar action (the invoice Files list; task 006 fix round 1). */
   onUploadRightChange?: (right: boolean | null) => void;
+  /** Open a document's record over the shown record (the Documents section only; see OPEN above). */
+  onOpenDocument?: (documentId: string, trigger: HTMLElement) => void;
 }
 
 /** The R3 documents block: `DocumentLibrary` with R3's props, under R3's test id. Shared by Documents and (P1) Files. */
@@ -70,6 +78,7 @@ export const RecordDocumentList: React.FC<RecordDocumentListProps> = ({
   onCreateActionChange,
   onBusyChange,
   onUploadRightChange,
+  onOpenDocument,
 }) => (
   <div data-testid="record-detail-documents">
     <DocumentLibrary
@@ -83,6 +92,7 @@ export const RecordDocumentList: React.FC<RecordDocumentListProps> = ({
       onCreateActionChange={onCreateActionChange}
       onBusyChange={onBusyChange}
       onUploadRightChange={onUploadRightChange}
+      onOpenDocument={onOpenDocument}
     />
   </div>
 );
@@ -98,6 +108,14 @@ export const DocumentsSection: React.FC<RecordSectionContext> = ({
   headerActions,
   readOnlyNote,
 }) => {
+  const openChild = useChildRecordOpener();
+  const openDocument = React.useMemo(
+    () =>
+      openChild
+        ? (documentId: string, trigger: HTMLElement): void => openChild('sprk_document', documentId, trigger)
+        : undefined,
+    [openChild]
+  );
   // A record with no documents route has no Documents section (no config lists one; this keeps a wrong config inert).
   if (!detail.documentsRoot) return null;
   return (
@@ -110,6 +128,7 @@ export const DocumentsSection: React.FC<RecordSectionContext> = ({
         refreshSignal={refreshSignal}
         onCreateActionChange={offerAction('upload')}
         onBusyChange={onBusyChange}
+        onOpenDocument={openDocument}
       />
     </RecordSectionCard>
   );

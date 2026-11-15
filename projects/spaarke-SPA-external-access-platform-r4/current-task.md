@@ -7,8 +7,8 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | 012 — Events single list (tasks/012-events-single-list.poml), then 013. FULL / sonnet high / directional |
-| **Step** | 012 Step 8: implementation delegated to an implementer agent (one scoped change). Then 9.5 review, then 013 |
+| **Task** | 013 — collapsible sections + child record modals (tasks/013-sections-collapse-child-records.poml). 012 ✅ 5a0d8e8771 |
+| **Step** | 013 Step 8: implementation delegated to an implementer agent |
 | **Status** | Dev BFF `5a9b687a0b` (see Live state). Dev SPA from run 43598875136 (master `2747977f47`), live 13:19Z; bundle has the new strings, no "Can contribute" or "To Do". |
 | **Next Action** | Receive the implementer report for 012, then run code-review, adr-check and an adversarial pass. Mark 012 done, run task-execute for 013, then PR, merge, SPA deploy and owner retest. 021 waits on ebilling 093 (scheduled 2026-11-15). |
 
@@ -39,3 +39,8 @@
 
 ## Uncommitted
 - current-task.md (this checkpoint)
+
+## ebilling 093 (invoice files) — consumer review done 2026-11-15
+- dc2e5ab86c (not merged): list `{value:[{id,fileName,contentType?,sizeBytes?,createdOn?,scanStatus: Clean|Checking|NotScanned}]}`; content 409 `file_scan_pending`, uniform 404 `sdap.access.deny.record_unavailable`, 503 `file_store_unavailable` / `ebilling.disabled`; no Content-Disposition name (the SPA names the blob from `fileName`). The four `/invoices/{id}/documents` routes are retired in the same commit; the only SPA caller is `FilesSection.tsx`.
+- **Deploy order is strict both ways:** uac-r2 swaps the BFF with 093 first, then the 021 SPA right after. NO other SPA deploy may run between merging 021 and that swap: a master SPA build with 021 on the old BFF breaks the invoice Files section.
+- Pulling 021 forward ahead of 020/022/023 is pending owner confirmation.
