@@ -76,6 +76,12 @@ Full table: `spec.md` §Owner Clarifications; review record: `design.md` §9.0 a
 - 2026-11-13 — **Invoices grid toolbar: owner chose option A**, a generic, additive DataGrid host-command option (the owner approved it on behalf of the dataset-grid owners, who have no active session). The SPA uses it for Submit invoice (task 010 part 3).
 - 2026-11-13 — **keep the external to-do BFF routes for now** (rollback option) even though the SPA no longer calls them; uac-r2 asked to delete them now. Retirement after the R4 deploy and retest: D-13 #2800.
 - 2026-11-13 — **access labels match Manage Access everywhere** ("View Only" / "Collaborate" / "Full Access"; no "Can contribute"). Matter/WA records need the level from the BFF (UAC review) rather than an inferred label.
+- 2026-11-14 — **retest round 2 (task 018):**
+  - **Events only.** "We only want Events (which allow for an event type of 'Task')". One Events list with a Task badge, and one Add event with a Type choice (task 012).
+  - Record sections expand and collapse, and the state is saved per user (task 013).
+  - Invoice and document rows open their record in a modal over the record (task 013).
+  - Matter documents without Download are a no-file case (FR-15 / task 023).
+  - The actual invoice file and the big Upload button → FR-13 / task 021, on ebilling's routes.
 - 2026-11-11 — **Esc in a child dialog follows the modal standard (§6.5 Path C):** with a form or confirm child open, Esc closes neither the child nor the record and keeps the draft; Cancel/× close the child. Spec FR-03 amended. No local Esc handlers on presets.
 
 ## 4. Coordination

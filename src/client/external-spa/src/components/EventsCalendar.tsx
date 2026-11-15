@@ -1,11 +1,11 @@
 /**
- * EventsCalendar — the Tasks and Events lists of a record, for the Secure Project Workspace SPA.
+ * EventsCalendar — the Events list of a record, for the Secure Project Workspace SPA.
  *
- * Displays the events of a record in an upcoming/chronological view, in two groups (R4 task 011, owner 2026-11-12:
- * external users work only with sprk_event; a Task is an event of type Task): the events the BFF flags `isTask` are the
- * record's Tasks, every other event is an Event. ONE read feeds both groups. A caller who may create can add an event
- * (no type sent) and, when the list also says `canCreateTask`, a task (`eventType: "task"`) via an inline dialog.
- * View Only users see a read-only list.
+ * Displays the events of a record in an upcoming/chronological view, as ONE list (R4 task 012, owner 2026-11-14: "we
+ * only want Events (which allow for an event type of 'Task')"; external users work only with sprk_event). An event the
+ * BFF flags `isTask` carries a "Task" badge; every other row is a plain event. A caller who may create adds an event via an
+ * inline dialog with a Type choice: Event (no type sent) or, only when the list says `canCreateTask`, Task
+ * (`eventType: "task"`). View Only users see a read-only list.
  *
  * Design pattern follows the internal EventsPage (src/solutions/EventsPage/) —
  * list format with date, title, status badge, and description.
@@ -19,8 +19,8 @@
  *                 without `writeAccessPerRecord` it must allow create AND agree with the list's `canCreate`. Without one,
  *                 the list's `canCreate` decides and a missing one is "cannot" (FR-06; `createRightOf`, in the record
  *                 template and on the project page alike, D-9).
- *   onCreateActionChange / onCreateTaskActionChange — record template only: the section's Add event / Add task are the
- *                 entry points (tasks 009 / 011); without them this list keeps its own Create Event / Create Task buttons.
+ *   onCreateActionChange — record template only: the section's Add event is the entry point (tasks 009 / 012); without
+ *                 it this list keeps its own Create Event button.
  *   caller      — The signed-in principal (task 054, FR-26): an event the caller CREATED shows Delete (asks first;
  *                 a refusal shows an error and the event stays). Independent of accessLevel; none without `caller`.
  *
@@ -40,12 +40,13 @@ import {
   Divider,
   Field,
   Input,
-  Textarea,
+  Radio,
+  RadioGroup,
   MessageBar,
   MessageBarBody,
   MessageBarActions,
 } from '@fluentui/react-components';
-import { AddRegular, CalendarEmptyRegular, DeleteRegular, TaskListLtrRegular } from '@fluentui/react-icons';
+import { AddRegular, CalendarEmptyRegular, DeleteRegular } from '@fluentui/react-icons';
 import { FormModal } from '@spaarke/ui-components/components/SprkModal';
 import { parseDueDate } from '@spaarke/ui-components/utils/dateLocal';
 import {
@@ -61,7 +62,7 @@ import { isCreatedByCaller, type CallerIdentity } from '../api/delete-own';
 import { useDeleteOwn, DeleteOwnConfirm, DeleteFailureNotice } from './DeleteOwn';
 import { TruncatedListNotice } from './TruncatedListNotice';
 import { useChildDialog, useOfferCreateAction, type CreateActionReporter } from './createAction';
-import { createTaskRightOf, levelVerdictOf, listCreateRightOf } from './record/recordAccess';
+import { addEventRightOf, createTaskRightOf, levelVerdictOf, listCreateRightOf } from './record/recordAccess';
 import { BffAccessState, accessFailureOf, type BffAccessFailure } from './auth/BffAccessState';
 import { AccessLevel, ApiError } from '../types';
 import { problemMessage } from '../auth/bff-client';
@@ -76,7 +77,7 @@ const useStyles = makeStyles({
     flexDirection: 'column',
     gap: tokens.spacingVerticalM,
   },
-  // One group of the list: its heading (with the group's own create button outside the record template) and its rows.
+  // The list: its heading (with its own create button outside the record template) and its rows.
   group: {
     display: 'flex',
     flexDirection: 'column',
@@ -200,44 +201,18 @@ const useStyles = makeStyles({
 });
 
 /**
- * The two groups of the list (task 011): an `event` is any event the BFF does not flag `isTask`; a `task` is one it does.
- * "Add task" creates a task; "Add event" creates an event.
+ * The Type choice of the one create dialog (task 012): `event` sends no type; `task` sends `eventType: "task"` and is
+ * offered only when the list's `canCreateTask` is true.
  */
-type EventKind = 'event' | 'task';
+type EventType = 'event' | 'task';
 
-/**
- * One busy reporter per create dialog, combined for the host (task 011, review round 1). The host is told "busy" while
- * EITHER dialog is posting: a dialog going idle (or unmounting) releases only its own hold, never the other's. A report
- * that repeats a dialog's last value is ignored. Exported for its test.
- */
-export function createBusyReporters(report: (busy: boolean) => void): Record<EventKind, (busy: boolean) => void> {
-  const busyOf: Record<EventKind, boolean> = { event: false, task: false };
-  const reporterFor =
-    (kind: EventKind) =>
-    (busy: boolean): void => {
-      if (busyOf[kind] === busy) return;
-      busyOf[kind] = busy;
-      report(busyOf.event || busyOf.task);
-    };
-  return { event: reporterFor('event'), task: reporterFor('task') };
-}
-
-/** The words of each kind: its dialog, its create button and its messages. */
-const KIND_TEXT: Readonly<Record<EventKind, { title: string; create: string; required: string; placeholder: string }>> =
-  {
-    event: {
-      title: 'Create Event',
-      create: 'Create Event',
-      required: 'Event title is required.',
-      placeholder: 'Enter event title',
-    },
-    task: {
-      title: 'Create Task',
-      create: 'Create Task',
-      required: 'Task title is required.',
-      placeholder: 'Enter task title',
-    },
-  };
+/** The words of the one create dialog and its button (a Task is an event type, so one title serves both types). */
+const CREATE_TEXT = {
+  title: 'Create Event',
+  create: 'Create Event',
+  required: 'Event title is required.',
+  placeholder: 'Enter event title',
+} as const;
 
 // ---------------------------------------------------------------------------
 // Event status helpers
@@ -351,14 +326,12 @@ const EventDateColumn: React.FC<EventDateColumnProps> = ({ duedate }) => {
 interface EventRowProps {
   event: ODataEvent;
   isLast: boolean;
-  /** Which group the row is in; names the Delete button ("Delete task X" / "Delete event X"). */
-  kind: EventKind;
   /** Show Delete (the caller created this event). */
   canDelete?: boolean;
   onDelete?: (event: ODataEvent) => void;
 }
 
-const EventRow: React.FC<EventRowProps> = ({ event, isLast, kind, canDelete, onDelete }) => {
+const EventRow: React.FC<EventRowProps> = ({ event, isLast, canDelete, onDelete }) => {
   const styles = useStyles();
 
   return (
@@ -371,6 +344,13 @@ const EventRow: React.FC<EventRowProps> = ({ event, isLast, kind, canDelete, onD
         <div className={styles.eventContent}>
           <div className={styles.eventTitleRow}>
             <Text className={styles.eventTitle}>{event.sprk_name}</Text>
+
+            {/* Event type: a Task is an event the BFF flags `isTask` (task 012); a plain event has no badge. */}
+            {event.isTask === true && (
+              <Badge appearance="tint" color="important" size="small" data-testid="event-task-badge">
+                Task
+              </Badge>
+            )}
 
             {/* Status badge */}
             <Badge appearance="tint" color={getEventStatusColor(event.sprk_status)} size="small">
@@ -391,7 +371,7 @@ const EventRow: React.FC<EventRowProps> = ({ event, isLast, kind, canDelete, onD
             size="small"
             icon={<DeleteRegular />}
             onClick={() => onDelete(event)}
-            aria-label={`Delete ${kind} ${event.sprk_name}`}
+            aria-label={`Delete event ${event.sprk_name}`}
           />
         )}
       </div>
@@ -409,8 +389,9 @@ interface CreateEventDialogProps {
   /** Which kind of record the event is created under, and its id (POST /api/v1/external/{root}/{id}/events). */
   root: EventsRoot;
   recordId: string;
-  /** `task` sends `eventType: "task"`; `event` sends no type (task 011). */
-  kind: EventKind;
+  /** The Type choices the caller has: Event (the caller may create a plain event) and/or Task (`canCreateTask`). */
+  allowEvent: boolean;
+  allowTask: boolean;
   open: boolean;
   onClose: () => void;
   onCreated: (event: ODataEvent) => void;
@@ -421,18 +402,23 @@ interface CreateEventDialogProps {
 const CreateEventDialog: React.FC<CreateEventDialogProps> = ({
   root,
   recordId,
-  kind,
+  allowEvent,
+  allowTask,
   open,
   onClose,
   onCreated,
   onBusyChange,
 }) => {
   const styles = useStyles();
-  const text = KIND_TEXT[kind];
+  const text = CREATE_TEXT;
 
+  // The chosen Type (task 012): Event by default; Task when it is the only type the caller has. A choice the caller no
+  // longer has (the list was re-read and the right went) falls back to the one they do have, never posts a type refused.
+  const defaultType: EventType = allowEvent ? 'event' : 'task';
+  const [chosenType, setChosenType] = React.useState<EventType>(defaultType);
+  const type: EventType = chosenType === 'task' ? (allowTask ? 'task' : 'event') : allowEvent ? 'event' : 'task';
   const [title, setTitle] = React.useState<string>('');
   const [dueDate, setDueDate] = React.useState<string>('');
-  const [description, setDescription] = React.useState<string>('');
   const [submitting, setSubmitting] = React.useState<boolean>(false);
   const [submitError, setSubmitError] = React.useState<string | null>(null);
 
@@ -458,11 +444,13 @@ const CreateEventDialog: React.FC<CreateEventDialogProps> = ({
     if (open) {
       setTitle('');
       setDueDate('');
-      setDescription('');
+      setChosenType(defaultType);
       setSubmitting(false);
       setSubmitError(null);
       setTitleError('');
     }
+    // Reset on open only: a later change of the rights must not wipe a draft (the effective `type` above follows them).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
   const validate = (): boolean => {
@@ -490,8 +478,9 @@ const CreateEventDialog: React.FC<CreateEventDialogProps> = ({
         // Task 098: the date input's own "yyyy-MM-dd" — the column is Date Only and Dataverse refuses a timestamp
         // (the former toISOString() also turned the picked day into a UTC instant).
         ...(dueDate ? { sprk_duedate: dueDate } : {}),
-        // Task 011: a task is an event of the closed type set's one member; an event sends no type at all.
-        ...(kind === 'task' ? { eventType: 'task' as const } : {}),
+        // A Task is an event of the closed type set's one member; a plain event sends no type at all (tasks 011 / 012).
+        // No description: the route carries none (`CreateExternalEventRequest`), so the dialog no longer collects one.
+        ...(type === 'task' ? { eventType: 'task' as const } : {}),
         // sprk_status omitted: the BFF creates the event Open (statuscode 659490001) — task 097 review F9.
         // The parent comes from the route (task 006); `createRootEvent` keeps the project route's body as it was.
       };
@@ -501,7 +490,7 @@ const CreateEventDialog: React.FC<CreateEventDialogProps> = ({
       onClose();
     } catch (err) {
       if (err instanceof ApiError) {
-        setSubmitError(`Failed to create ${kind}: ${err.message}`);
+        setSubmitError(`Failed to create event: ${err.message}`);
       } else {
         setSubmitError('An unexpected error occurred. Please try again.');
       }
@@ -516,8 +505,8 @@ const CreateEventDialog: React.FC<CreateEventDialogProps> = ({
     onClose();
   };
 
-  // A FormModal (task 004, FR-03): Cancel in the left footer slot, Create Event / Create Task on the right. Esc does
-  // nothing (modal standard: an explicit dialog keeps a draft).
+  // A FormModal (task 004, FR-03): Cancel in the left footer slot, Create Event on the right. Esc does nothing (modal
+  // standard: an explicit dialog keeps a draft).
   return (
     <FormModal
       open={open}
@@ -552,24 +541,30 @@ const CreateEventDialog: React.FC<CreateEventDialogProps> = ({
           />
         </Field>
 
-        {/* No type select (task 011, D-6): the old one was never sent. The kind is chosen by the action: Add task / Add event. */}
+        {/* Type (task 012): Event (the default) or Task. Shown only when the caller has a Task choice: Task is offered
+            only on the list's `canCreateTask`, so a caller without it sees no Type at all and creates a plain event. When
+            Task is the only type the caller has, it is the only (and the chosen) option. */}
+        {allowTask && (
+          <Field label="Type">
+            <RadioGroup
+              layout="horizontal"
+              value={type}
+              onChange={(_ev, data) => setChosenType(data.value === 'task' ? 'task' : 'event')}
+              disabled={submitting}
+            >
+              {allowEvent && <Radio value="event" label="Event" />}
+              <Radio value="task" label="Task" />
+            </RadioGroup>
+          </Field>
+        )}
 
         {/* Due date */}
         <Field label="Due Date">
           <Input type="date" value={dueDate} onChange={(_ev, data) => setDueDate(data.value)} disabled={submitting} />
         </Field>
 
-        {/* Description */}
-        <Field label="Description">
-          <Textarea
-            value={description}
-            onChange={(_ev, data) => setDescription(data.value)}
-            placeholder="Optional description or notes"
-            disabled={submitting}
-            rows={3}
-            maxLength={2000}
-          />
-        </Field>
+        {/* No Description (task 012, the D-6 lesson): the route has no description column, so a field for one was
+            collected and never sent. */}
       </div>
     </FormModal>
   );
@@ -587,8 +582,8 @@ export interface EventsCalendarProps {
   /**
    * The caller's `/me` level for this record. A level DECIDES a create only for a project caller without
    * `writeAccessPerRecord`: pass it for that case and omit it otherwise. A matter or work assignment never passes one
-   * (its `/me` `records` level is display only, task 011): Add event follows the list's `canCreate`, and Add task also
-   * needs the list's `canCreateTask` (task 006 / 011).
+   * (its `/me` `records` level is display only, task 011): Add event follows the list's `canCreate` or `canCreateTask`,
+   * and the Task type follows `canCreateTask` (task 006 / 012).
    */
   accessLevel?: AccessLevel;
   /**
@@ -606,28 +601,22 @@ export interface EventsCalendarProps {
    */
   onCreateActionChange?: CreateActionReporter;
   /**
-   * Record template only (task 011): the same for Add task (shown exactly when the list's `canCreateTask` and the event
-   * right both say yes). Without it the list keeps its own "Create Task" button (the project page), under the same rule.
-   * `onCreateActionChange` alone decides whether the list is inside the record template.
-   */
-  onCreateTaskActionChange?: CreateActionReporter;
-  /**
-   * Called with `true` while a create is in flight and `false` otherwise (and on unmount), so the host can hold. Task 011:
-   * the list has two create dialogs (task, event); the hold is on while EITHER is posting, and one going idle never
-   * releases the other's in-flight hold.
+   * Called with `true` while a create is in flight and `false` otherwise (and on unmount), so the host can hold. The list
+   * has one create dialog (task 012), so one flag.
    */
   onBusyChange?: (busy: boolean) => void;
 }
 
 /**
- * EventsCalendar — the Tasks and Events lists of a record for external participants.
+ * EventsCalendar — the Events list of a record for external participants.
  *
  * Fetches the record's events (GET /api/v1/external/{root}/{id}/events), ordered by due date ascending (soonest
- * first), and shows them in two groups: Tasks (`isTask`) and Events (the rest).
+ * first), and shows them as one list; a row the BFF flags `isTask` carries a Task badge.
  *
  * - View Only users: read-only list
- * - Collaborate / Full Access users: "Create Event" button and dialog; "Create Task" too when the list's
- *   `canCreateTask` is true (outside the record template; inside it both are the section's header actions)
+ * - Collaborate / Full Access users: "Create Event" button and dialog, with a Type choice (Event, or Task when the
+ *   list's `canCreateTask` is true); inside the record template the button is the section's "Add event" header action.
+ *   A caller with `canCreateTask` true and `canCreate` false still gets the button, with Task as the only type.
  *
  * Loading and empty states follow the SectionCard + PageContainer pattern
  * established by other SPA components.
@@ -639,7 +628,6 @@ export const EventsCalendar: React.FC<EventsCalendarProps> = ({
   caller,
   writeAccessPerRecord = false,
   onCreateActionChange,
-  onCreateTaskActionChange,
   onBusyChange,
 }) => {
   const styles = useStyles();
@@ -652,17 +640,7 @@ export const EventsCalendar: React.FC<EventsCalendarProps> = ({
   const [loading, setLoading] = React.useState<boolean>(true);
   const [loadError, setLoadError] = React.useState<string | null>(null);
   const createDialog = useChildDialog();
-  const taskDialog = useChildDialog();
 
-  // Task 011: the hold per dialog. Each create dialog reports its own busy state; the host is told "busy" while either
-  // is posting, so one going idle (or unmounting) never releases the other's hold. The host's callback is read through a
-  // ref so a new function identity never re-reports.
-  const onBusyChangeRef = React.useRef(onBusyChange);
-  onBusyChangeRef.current = onBusyChange;
-  const busyReporters = React.useMemo(
-    () => createBusyReporters((busy: boolean) => onBusyChangeRef.current?.(busy)),
-    []
-  );
   // Task 105: the BFF said the list was cut short — shown, never presented as the whole list.
   const [truncated, setTruncated] = React.useState<boolean>(false);
   // A 401/403 on the list is the shared sign-in / denied state; "Try again" re-runs the read (task 057).
@@ -680,39 +658,31 @@ export const EventsCalendar: React.FC<EventsCalendarProps> = ({
   // - a project - for a caller whose write access is not per record) allows too. The same rule in the record template and
   // on the project page (D-9 #2716: the page used to offer on the level alone, which a role ceiling refuses with 403).
   const [listCanCreate, setListCanCreate] = React.useState<boolean | null>(null);
-  // Task 011: the list's own answer for the Task type (`canCreateTask`); null = the BFF said nothing (hide "Add task").
+  // The list's own answer for the Task type (`canCreateTask`); null = the BFF said nothing (no Task type offered).
   const [listCanCreateTask, setListCanCreateTask] = React.useState<boolean | null>(null);
   const inRecordTemplate = onCreateActionChange !== undefined;
   const loaded = !loading && !accessFailure && !loadError;
-  const { right, allowed: canCreate } = listCreateRightOf({
-    loaded,
-    listCanCreate,
-    levelAllows: levelVerdictOf(accessLevel, writeAccessPerRecord),
-  });
-  // Add task = the event right AND the list's `canCreateTask`, both an explicit true (`createTaskRightOf`). For a
-  // `writeAccessPerRecord` caller no level is involved: the label never decides a write action (uac-r2 A2).
-  const taskRight = createTaskRightOf(right, listCanCreateTask);
-  const canCreateTask = taskRight === true;
-  // In the record template the section's Add event / Add task replace this list's buttons (task 004 / 009 / 011): offered
-  // exactly when the right is known to be `true` (the main view is showing), and the dialogs stay here. The right goes
-  // with the offer.
+  const levelAllows = levelVerdictOf(accessLevel, writeAccessPerRecord);
+  const { right: eventRight, allowed: allowEvent } = listCreateRightOf({ loaded, listCanCreate, levelAllows });
+  // The Task type (task 012) is decided by the list's `canCreateTask` alone, an explicit true, plus the `/me` level where
+  // it decides: not through `canCreate`, so a caller with Task and not Event still has Task. For a `writeAccessPerRecord`
+  // caller no level is involved: the label never decides a write action (uac-r2 A2).
+  const taskRight = createTaskRightOf({ loaded, listCanCreateTask, levelAllows });
+  const allowTask = taskRight === true;
+  // "Add event" exists when the caller may create either type; the Type choice inside the dialog offers what they may.
+  const addEventRight = addEventRightOf(eventRight, taskRight);
+  const canAddEvent = addEventRight === true;
+  // In the record template the section's Add event replaces this list's button (task 004 / 009 / 012): offered exactly
+  // when the right is known to be `true` (the main view is showing), and the dialog stays here. The right goes with the
+  // offer.
   const ownCreateButton = !inRecordTemplate;
-  useOfferCreateAction(onCreateActionChange, canCreate && loaded, createDialog.show, right);
-  useOfferCreateAction(onCreateTaskActionChange, canCreateTask && loaded, taskDialog.show, taskRight);
+  useOfferCreateAction(onCreateActionChange, canAddEvent && loaded, createDialog.show, addEventRight);
 
-  // Delete-own (task 054): the event leaves the list on the server's 204; any refusal keeps it and is shown. One state per
-  // group, so the confirm and the failure notice name what the row is ("task" / "event").
-  const removeEvent = (event: ODataEvent): void =>
-    setEvents(prev => prev.filter(e => e.sprk_eventid !== event.sprk_eventid));
+  // Delete-own (task 054): the event leaves the list on the server's 204; any refusal keeps it and is shown.
   const delEvent = useDeleteOwn<ODataEvent>({
     noun: 'event',
     remove: event => deleteOwnEvent(event.sprk_eventid),
-    onRemoved: removeEvent,
-  });
-  const delTask = useDeleteOwn<ODataEvent>({
-    noun: 'task',
-    remove: event => deleteOwnEvent(event.sprk_eventid),
-    onRemoved: removeEvent,
+    onRemoved: (event: ODataEvent): void => setEvents(prev => prev.filter(e => e.sprk_eventid !== event.sprk_eventid)),
   });
 
   // -------------------------------------------------------------------------
@@ -827,110 +797,82 @@ export const EventsCalendar: React.FC<EventsCalendarProps> = ({
   // Render: main view
   // -------------------------------------------------------------------------
 
-  // Task 011: one read, two groups. `isTask` is the BFF's flag (absent = not a task, so an older BFF lists everything
-  // under Events, as before). Order inside a group is the list's own (due date ascending).
-  const tasks = events.filter(e => e.isTask === true);
-  const plainEvents = events.filter(e => e.isTask !== true);
-
-  const renderGroup = (kind: EventKind, rows: ODataEvent[]): React.ReactNode => {
-    const isTaskGroup = kind === 'task';
-    const mayCreate = isTaskGroup ? canCreateTask : canCreate;
-    const del = isTaskGroup ? delTask : delEvent;
-    const label = isTaskGroup ? 'Tasks' : 'Events';
-    const plural = isTaskGroup ? 'tasks' : 'events';
-    const EmptyIcon = isTaskGroup ? TaskListLtrRegular : CalendarEmptyRegular;
-    const createText = KIND_TEXT[kind].create;
-    const addAction = isTaskGroup ? 'Add task' : 'Add event';
-    // Task 105: a cut-short list is not "no {tasks|events}" — the notice says it could not be read, so a group that is
-    // empty in a truncated list claims nothing: no empty-state text. Its heading and its own create button stay (the
-    // caller may still add one; ProjectPage's Calendar tab has no section action). With neither to show, nothing renders.
-    const claimsNothing = rows.length === 0 && truncated;
-    if (claimsNothing && !(mayCreate && ownCreateButton)) return null;
-    return (
-      <div className={styles.group} data-testid={`events-group-${plural}`}>
-        <div className={styles.toolbar}>
-          <Text size={400} weight="semibold" className={styles.toolbarTitle}>
-            {label}
-          </Text>
-
-          {mayCreate && ownCreateButton && (
-            <Button
-              appearance={isTaskGroup ? 'secondary' : 'primary'}
-              icon={<AddRegular />}
-              onClick={isTaskGroup ? taskDialog.show : createDialog.show}
-              size="small"
-            >
-              {createText}
-            </Button>
-          )}
-        </div>
-
-        {claimsNothing ? null : rows.length === 0 ? (
-          <div className={styles.emptyState}>
-            <EmptyIcon className={styles.emptyStateIcon} />
-            <Text size={400} weight="semibold">
-              No {plural} yet
-            </Text>
-            <Text size={300} className={styles.emptyStateText}>
-              {mayCreate
-                ? ownCreateButton
-                  ? `No ${plural} have been added to this ${noun}. Use the ${createText} button to add the first ${kind}.`
-                  : `No ${plural} have been added to this ${noun}. Use ${addAction} above to add the first ${kind}.`
-                : `No ${plural} have been added to this ${noun} yet.`}
-            </Text>
-          </div>
-        ) : (
-          <div className={styles.eventList}>
-            {rows.map((event, index) => (
-              <EventRow
-                key={event.sprk_eventid}
-                event={event}
-                kind={kind}
-                isLast={index === rows.length - 1}
-                canDelete={isCreatedByCaller(event, caller)}
-                onDelete={e => del.ask(e, e.sprk_name)}
-              />
-            ))}
-          </div>
-        )}
-      </div>
-    );
-  };
+  // One read, one list (task 012). `isTask` is the BFF's flag (absent = not a task, so an older BFF lists every row as a plain
+  // event, as before); the row shows a Task badge for it. The order is the list's own (due date ascending).
+  //
+  // Task 105: a cut-short list is not "no events" - the notice says it could not be read, so an empty list that is truncated
+  // claims nothing: no empty-state text. Its heading and its own create button stay (the caller may still add one;
+  // ProjectPage's Calendar tab has no section action). With neither to show, nothing renders. A truncated list never hides
+  // the create action (task 011 F1): in the record template that action is the section's, offered above regardless of rows.
+  const claimsNothing = events.length === 0 && truncated;
+  const showList = !(claimsNothing && !(canAddEvent && ownCreateButton));
 
   return (
     <div className={styles.root}>
-      <TruncatedListNotice truncated={truncated} shown={events.length} noun="tasks and events" />
-      <DeleteFailureNotice del={delTask} />
+      <TruncatedListNotice truncated={truncated} shown={events.length} noun="events" />
       <DeleteFailureNotice del={delEvent} />
 
-      {renderGroup('task', tasks)}
-      {renderGroup('event', plainEvents)}
+      {showList && (
+        <div className={styles.group} data-testid="events-list">
+          {/* The record template's section card already titles the list "Events"; the page's own list brings its heading and button. */}
+          {ownCreateButton && (
+            <div className={styles.toolbar}>
+              <Text size={400} weight="semibold" className={styles.toolbarTitle}>
+                Events
+              </Text>
 
-      <DeleteOwnConfirm del={delTask} />
+              {canAddEvent && (
+                <Button appearance="primary" icon={<AddRegular />} onClick={createDialog.show} size="small">
+                  {CREATE_TEXT.create}
+                </Button>
+              )}
+            </div>
+          )}
+
+          {claimsNothing ? null : events.length === 0 ? (
+            <div className={styles.emptyState}>
+              <CalendarEmptyRegular className={styles.emptyStateIcon} />
+              <Text size={400} weight="semibold">
+                No events yet
+              </Text>
+              <Text size={300} className={styles.emptyStateText}>
+                {canAddEvent
+                  ? ownCreateButton
+                    ? `No events have been added to this ${noun}. Use the ${CREATE_TEXT.create} button to add the first event.`
+                    : `No events have been added to this ${noun}. Use Add event above to add the first event.`
+                  : `No events have been added to this ${noun} yet.`}
+              </Text>
+            </div>
+          ) : (
+            <div className={styles.eventList}>
+              {events.map((event, index) => (
+                <EventRow
+                  key={event.sprk_eventid}
+                  event={event}
+                  isLast={index === events.length - 1}
+                  canDelete={isCreatedByCaller(event, caller)}
+                  onDelete={e => delEvent.ask(e, e.sprk_name)}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
       <DeleteOwnConfirm del={delEvent} />
 
-      {/* Create dialogs — each rendered only while the caller may create that kind here (`createRightOf`: the list's
-          `canCreate`, the `/me` level where it decides, and for a task the list's `canCreateTask`) */}
-      {canCreateTask && (
+      {/* The one create dialog - rendered only while the caller may create an event of some type here (`createRightOf`:
+          the list's `canCreate` and the `/me` level where it decides; `createTaskRightOf` for the Task type). */}
+      {canAddEvent && (
         <CreateEventDialog
           root={root}
           recordId={projectId}
-          kind="task"
-          open={taskDialog.open}
-          onClose={taskDialog.hide}
-          onCreated={handleEventCreated}
-          onBusyChange={busyReporters.task}
-        />
-      )}
-      {canCreate && (
-        <CreateEventDialog
-          root={root}
-          recordId={projectId}
-          kind="event"
+          allowEvent={allowEvent}
+          allowTask={allowTask}
           open={createDialog.open}
           onClose={createDialog.hide}
           onCreated={handleEventCreated}
-          onBusyChange={busyReporters.event}
+          onBusyChange={onBusyChange}
         />
       )}
     </div>

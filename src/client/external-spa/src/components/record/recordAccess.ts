@@ -3,11 +3,12 @@
  * (spaarke-SPA-external-access-platform-r4 task 006, FR-06 / FR-07 / NFR-04).
  *
  * ONE PLACE FOR:
- *   (a) the right behind each of the record's create actions (Upload, New message, Add task, Add event; each in its own
+ *   (a) the right behind each of the record's create actions (Upload, New message, Add event; each in its own
  *       section's header since task 009): `createRightOf`, used by every list inside the record template, so they follow
  *       one rule; and the list-host rule of EventsCalendar and a project's DocumentLibrary, the same in and out of the
- *       template (`levelVerdictOf`, `listCreateRightOf`; D-9: the project page follows it too). Add task adds the list's
- *       `canCreateTask` (`createTaskRightOf`, task 011);
+ *       template (`levelVerdictOf`, `listCreateRightOf`; D-9: the project page follows it too). Add event also offers the
+ *       Task type on the list's `canCreateTask` (`createTaskRightOf`, tasks 011 / 012) and is shown when either right
+ *       is a yes (`addEventRightOf`);
  *   (a2) whether "Submit invoice" is offered (task 007, FR-10): `submitInvoiceRightOf`, from `/me` `firms` and the
  *       firm-records answers (read by `actions/SubmitInvoiceAction.tsx`);
  *   (b) the header's "Your access" value: `yourAccessOf`, from `recordAccessFactsOf` (the caller's `/me` level for the
@@ -17,7 +18,7 @@
  *   SPA since task 011 / D-11).
  *
  * WHERE THE ANSWERS COME FROM (never a guess, ADR-003 fail closed):
- *   - each list's `canCreate` (and, for Add task, `canCreateTask`): the BFF's answer of the matching POST for this caller on
+ *   - each list's `canCreate` (and, for the Task type of an event, `canCreateTask`): the BFF's answer of the matching POST for this caller on
  *     this record (task 002 / 008: the documents, event and message lists of projects, matters and work assignments; the
  *     message thread of every record). It is the ONLY source for a matter, a work assignment, an invoice and a service
  *     request.
@@ -42,9 +43,9 @@ import { AccessLevel } from '../../types';
 import type { RecordHostAction, RecordSectionId, RecordToolbarActionId } from './recordTemplate.types';
 
 /** The create actions a record's lists offer to the template (task 004; in their sections' headers since task 009). */
-export type RecordCreateActionId = Extract<RecordToolbarActionId, 'upload' | 'newMessage' | 'addTask' | 'addEvent'>;
+export type RecordCreateActionId = Extract<RecordToolbarActionId, 'upload' | 'newMessage' | 'addEvent'>;
 
-export const RECORD_CREATE_ACTIONS: readonly RecordCreateActionId[] = ['upload', 'newMessage', 'addTask', 'addEvent'];
+export const RECORD_CREATE_ACTIONS: readonly RecordCreateActionId[] = ['upload', 'newMessage', 'addEvent'];
 
 /**
  * A right a section reports WITHOUT a toolbar action (task 006 fix round 1): the invoice Files list's own Upload, which
@@ -66,7 +67,7 @@ interface ReadOnlyLines {
   /** The invoice's Files card. */
   files: string;
   messages: string;
-  /** Tasks & events: its event list is read-only. */
+  /** Events: its event list is read-only. */
   events: string;
 }
 
@@ -165,15 +166,37 @@ export function listCreateRightOf(input: CreateRightInput): { right: CreateRight
 }
 
 /**
- * The right behind "Add task" (task 011): the event right (`createRightOf`: the list's `canCreate`, and the `/me` level
- * where it decides) AND the list's own `canCreateTask` (the BFF's answer for the Task type, task 008). Only an explicit
- * `true` from both is a yes: a list that says nothing about tasks (an older BFF, a failed read) is unknown, never "can",
- * so the action stays hidden (hide, don't guess). `false` from either is a no; an unknown event right is unknown.
+ * The right to create an event of the Task type (the "Task" choice of "Add event"; task 012): the list's own
+ * `canCreateTask` (the BFF's answer for the Task type, task 008), decided on its own, NOT through the plain event's
+ * `canCreate` (task 008 review F2-1: the two rights are separate answers). Today's BFF only sets `canCreateTask` when
+ * `canCreate` is true (`ExternalProjectDataEndpoints.cs`), so the Task-only case is defensive. A `/me` level that decides (a level-decided
+ * project caller, see `levelVerdictOf`) must also allow. Only an explicit `true` is a yes: a list that says nothing about
+ * tasks (an older BFF, a failed read, not loaded) is unknown, never "can", so the Task choice stays hidden (hide, don't guess).
  */
-export function createTaskRightOf(eventRight: CreateRight, listCanCreateTask: boolean | null | undefined): CreateRight {
-  if (eventRight === false) return false;
-  if (eventRight === null) return null;
+export function createTaskRightOf({ loaded, listCanCreateTask, levelAllows }: TaskRightInput): CreateRight {
+  if (!loaded) return null;
+  if (levelAllows === false) return false;
   return typeof listCanCreateTask === 'boolean' ? listCanCreateTask : null;
+}
+
+export interface TaskRightInput {
+  /** The list has answered (it is not on its first read and the read did not fail). */
+  loaded: boolean;
+  /** The list's `canCreateTask`; `null` / `undefined` when it said nothing. */
+  listCanCreateTask: boolean | null | undefined;
+  /** As `CreateRightInput.levelAllows`: set only for a project caller whose write access is not per record. */
+  levelAllows?: boolean;
+}
+
+/**
+ * The right behind "Add event" (task 012): the action is offered when the caller may create a plain event OR a Task. Any
+ * `true` offers it; otherwise a known `false` event right is a no (the read-only line says why); everything else is unknown.
+ * A Task `false` with the event right unknown stays unknown, never "no" (the list has not decided the event).
+ */
+export function addEventRightOf(eventRight: CreateRight, taskRight: CreateRight): CreateRight {
+  if (eventRight === true || taskRight === true) return true;
+  if (eventRight === false) return false;
+  return null;
 }
 
 /** Strict `/me` label → level: anything else is not an answer (unlike `mapAccessLevelString`, which defaults to ViewOnly). */
@@ -248,7 +271,7 @@ export interface RecordAccessFacts {
   /** The caller's `/me` level for this record as an answer (`recordLevelOf`), to display; undefined when there is none. */
   level: AccessLevel | undefined;
   /**
-   * The level that gates Upload, Add task and Add event is a fail-safe GUESS, not an answer: a level-decided project
+   * The level that gates Upload and Add event is a fail-safe GUESS, not an answer: a level-decided project
    * caller whose `/me` has no (recognisable) entry for the project. `decidingLevelOf` then hides those actions as View
    * Only, but what the caller may do there is unknown, so nothing is said about it (FR-07: unknown shows nothing).
    */
@@ -267,7 +290,7 @@ export function recordAccessFactsOf(
 }
 
 /** The rights a project caller's `/me` level gates (the message thread is not one: it follows the thread alone). */
-const LEVEL_GATED_RIGHTS: readonly (RecordCreateActionId | RecordSectionRightId)[] = ['upload', 'addTask', 'addEvent'];
+const LEVEL_GATED_RIGHTS: readonly (RecordCreateActionId | RecordSectionRightId)[] = ['upload', 'addEvent'];
 
 // ---------------------------------------------------------------------------
 // What the template knows: the rights the record's lists reported
@@ -384,7 +407,7 @@ export function yourAccessOf({ callerContext, level, levelGuessed }: RecordAcces
 
 /**
  * The one line saying why a section is read-only (FR-07), or `null` when it is not, or not known to be. Only a section
- * that owns a create right has one (Documents, Files, Messages, Tasks & events). The line names a grant level only when
+ * that owns a create right has one (Documents, Files, Messages, Events). The line names a grant level only when
  * the deciding `/me` level is KNOWN to be View Only; every other "no" (a ceiling, a per-record caller, a record `/me`
  * has no level for) gets the neutral wording. (Task 011: a level decides only for a project caller without
  * `writeAccessPerRecord`; a per-record caller's level is the read view, so it never triggers the grant wording.) A right decided by a guessed level (`levelGuessed`) is not known, so it

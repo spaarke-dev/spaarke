@@ -19,7 +19,9 @@
 | 009 | Record view: section actions; remove To Do; empty states; Documents columns D-12 (E2E rework) | 1 | ✅ [done] | 007 | Group R | opus / high |
 | 010 | Submit invoice modal over record (locked record) + Invoices grid toolbar (E2E rework; ebilling agree w/ changes) | 1 | ✅ [done] | 009 | — | sonnet / high |
 | 011 | SPA: Manage Access labels everywhere; Tasks = Task events; Add task (E2E rework, D-6, D-11) | 1 | ✅ [done] | 008, 009 | — | sonnet / high |
-| 018 | P1 deploy (BFF via uac-r2, SPA dev) + E2E + first-E2E checks (FR-33) — redeploy + retest after 008–011 | 1 | 🔲 [open] | 002, 004, 005, 006, 007, 008, 009, 010, 011 | — (live) | sonnet / high |
+| 012 | Record "Events": one list (Task = event type badge), one Add event with a Type choice (retest round 2) | 1 | ✅ [done] | 011 | — | sonnet / high |
+| 013 | Collapsible sections remembered per user; invoice/document rows open a child record modal (retest round 2) | 1 | ✅ [done] | 012 | — | sonnet / high |
+| 018 | P1 deploy (BFF via uac-r2, SPA dev) + E2E + first-E2E checks (FR-33) — redeploy + retest after 008–013 | 1 | 🔲 [open] | 002, 004, 005, 006, 007, 008, 009, 010, 011, 012, 013 | — (live) | sonnet / high |
 | 020 | Review detail (082c) + held-Accepted badge (FR-11, FR-12) | 2 | 🔲 [open] | 018 | Group B | sonnet / high |
 | 022 | Inline PDF/image preview (FR-14) | 2 | 🔲 [open] | 018 | Group B | sonnet / high |
 | 023 | Documents with no file + Documents on shared DataGrid (FR-15, FR-16) | 2 | 🔲 [open] | 018, 022 | — | sonnet / xhigh |
