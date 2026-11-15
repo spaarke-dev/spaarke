@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Core.Auth;
@@ -7,6 +8,7 @@ using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Services.Finance.Files;
+using Sprk.Bff.Api.Services.Finance.Procedures;
 using Sprk.Bff.Api.Services.Finance.Submission;
 using Sprk.Bff.Api.Services.Signals;
 using FindingGroup = Sprk.Bff.Api.Services.Finance.DuplicateDetailGate.FindingGroup;
@@ -26,6 +28,11 @@ namespace Sprk.Bff.Api.Services.Finance;
 /// <c>GET /api/finance/files/{fileId}/content</c> (that route makes its own checks); <c>null</c> when the invoice has none that is Servable
 /// (an existing-document confirm, or an upload whose file is not yet, or never, servable).
 /// </param>
+/// <param name="ProcedureChange">
+/// ebilling-r1 task 113 (model 8.2): the read-time Procedure-change banner, ONE state and its text (<see cref="ProcedureChangeBannerDto"/>). Present
+/// only for an internal caller (step 0, task 099) of an open invoice that has a firm, and never for anyone else: omitted from the JSON when null.
+/// It is computed on this route only and carried by no other DTO, list, export, firm projection or external route.
+/// </param>
 public sealed record InvoiceReviewDto(
     ReviewHeaderDto Header,
     ReviewTotalsDto Totals,
@@ -35,7 +42,8 @@ public sealed record InvoiceReviewDto(
     IReadOnlyList<ReviewDecisionRecordDto> DecisionHistory,
     IReadOnlyDictionary<string, int> LineCounts,
     ReviewFlagsDto Flags,
-    Guid? InvoicePdfFileId);
+    Guid? InvoicePdfFileId,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] ProcedureChangeBannerDto? ProcedureChange = null);
 
 /// <param name="Status">The lifecycle status name (<c>InReview</c>, <c>Approved</c>, ...); <c>Unknown</c> for a statuscode the lifecycle does not know.</param>
 /// <param name="Held">True for a blocked internal submission awaiting Override / Return (D-101): In Review and the submission is Rejected with the blocked reason.</param>
@@ -392,15 +400,18 @@ public sealed class InvoiceReviewReadService
     private readonly IEbillingSettingsReader _settings;
     private readonly IDataverseUserClient _user;
     private readonly EarlierInvoiceReadability _earlierInvoices;
+    private readonly ProcedureChangeBanner _procedureChange;
     private readonly ILogger<InvoiceReviewReadService> _logger;
 
     /// <param name="user">The CALLER's Dataverse client (OBO): the D-176 earlier-invoice check reads with it, never app-only (ADR-028).</param>
+    /// <param name="procedureChange">Task 113: the read-time Procedure-change banner, computed app-only for an internal caller of an open invoice.</param>
     public InvoiceReviewReadService(
         IGenericEntityService entities,
         AuthorizationService authorization,
         IEbillingSettingsReader settings,
         IDataverseUserClient user,
         EarlierInvoiceReadability earlierInvoices,
+        ProcedureChangeBanner procedureChange,
         ILogger<InvoiceReviewReadService> logger)
     {
         _entities = entities ?? throw new ArgumentNullException(nameof(entities));
@@ -408,12 +419,26 @@ public sealed class InvoiceReviewReadService
         _settings = settings ?? throw new ArgumentNullException(nameof(settings));
         _user = user ?? throw new ArgumentNullException(nameof(user));
         _earlierInvoices = earlierInvoices ?? throw new ArgumentNullException(nameof(earlierInvoices));
+        _procedureChange = procedureChange ?? throw new ArgumentNullException(nameof(procedureChange));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
-    /// <summary>The read model of <paramref name="invoiceId"/>, or null when the invoice does not exist (deleted between the route check and the read).</summary>
+    /// <summary>
+    /// The read model of <paramref name="invoiceId"/> for a caller whose step-0 class is NOT known to be internal: it carries no Procedure-change
+    /// banner (task 113). The review route uses the overload that passes step 0's verdict.
+    /// </summary>
     /// <exception cref="OperationCanceledException">The request was cancelled.</exception>
-    public async Task<InvoiceReviewDto?> GetAsync(Guid invoiceId, InvoiceContextService.InvoiceCaller caller, CancellationToken ct)
+    public Task<InvoiceReviewDto?> GetAsync(Guid invoiceId, InvoiceContextService.InvoiceCaller caller, CancellationToken ct) =>
+        GetAsync(invoiceId, caller, stepZero: null, ct);
+
+    /// <summary>
+    /// The read model of <paramref name="invoiceId"/>, or null when the invoice does not exist (deleted between the route check and the read).
+    /// <paramref name="stepZero"/> is step 0's verdict for this request (task 099, read from <see cref="HttpContext.Items"/> by the route): only
+    /// <see cref="FinanceStepZeroVerdict.Internal"/> gets the Procedure-change banner (task 113, model 8.2); it is never resolved again here.
+    /// </summary>
+    /// <exception cref="OperationCanceledException">The request was cancelled.</exception>
+    public async Task<InvoiceReviewDto?> GetAsync(
+        Guid invoiceId, InvoiceContextService.InvoiceCaller caller, FinanceStepZeroVerdict? stepZero, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(caller);
 
@@ -461,6 +486,10 @@ public sealed class InvoiceReviewReadService
 
         var invoiceFindings = FindingsFor(parsed, "Invoice", null, invoiceId, overridden, withheld);
 
+        // Task 113 (model 8.2): after the page's own reads, because it needs the stored findings, and never allowed to fail the page.
+        var procedureChange = await _procedureChange.ComputeAsync(
+            invoice, lineRows, submission?.FindingsJson, stepZero, open: known && lifecycle == InvoiceLifecycleStatus.InReview, ct).ConfigureAwait(false);
+
         return new InvoiceReviewDto(
             ToHeader(invoice, known ? lifecycle.ToString() : "Unknown", statusCode, held),
             new ReviewTotalsDto(
@@ -475,7 +504,8 @@ public sealed class InvoiceReviewReadService
             new ReviewFlagsDto(
                 CanRead: true,
                 CanDecide: canWriteTask.Result == CallerReadOutcome.Readable && known && lifecycle == InvoiceLifecycleStatus.InReview),
-            pdfTask.Result);
+            pdfTask.Result,
+            procedureChange);
     }
 
     // ── Reads ──
@@ -538,7 +568,8 @@ public sealed class InvoiceReviewReadService
         return query;
     }
 
-    private sealed record SubmissionRead(ReviewSubmissionDto Dto, bool Held, ParsedFindings? Findings);
+    /// <param name="FindingsJson">The stored <c>sprk_findingsjson</c> text as read (app-only), for task 113's snapshot comparison; never returned.</param>
+    private sealed record SubmissionRead(ReviewSubmissionDto Dto, bool Held, ParsedFindings? Findings, string? FindingsJson);
 
     /// <summary>
     /// ebilling-r1 task 092: the newest Servable Invoice PDF Stored File of the invoice (app-only, after the route's checks), or <c>null</c>. Ids
@@ -569,14 +600,16 @@ public sealed class InvoiceReviewReadService
             return null;
         }
 
-        var parsed = ParsedFindings.Parse(row.GetAttributeValue<string>(InvoiceSubmissionPersister.SubmissionFindingsJson), _logger);
+        var findingsJson = row.GetAttributeValue<string>(InvoiceSubmissionPersister.SubmissionFindingsJson);
+        var parsed = ParsedFindings.Parse(findingsJson, _logger);
         var reason = row.GetAttributeValue<string>(InvoiceSubmissionPersister.SubmissionReasonCode);
         var status = row.GetAttributeValue<OptionSetValue>(InvoiceSubmissionPersister.SubmissionStatus)?.Value;
         var held = status == (int)InvoiceSubmissionStatus.Rejected && string.Equals(reason, SubmissionReasonCodes.Blocked, StringComparison.Ordinal);
         return new SubmissionRead(
             new ReviewSubmissionDto(row.Id, row.GetAttributeValue<string>("sprk_trackingnumber"), parsed?.Kind, parsed?.ReasonCode ?? reason, parsed?.Decision, parsed?.Pipeline ?? []),
             held,
-            parsed);
+            parsed,
+            findingsJson);
     }
 
     private async Task<IReadOnlyList<ReviewDecisionRecordDto>> ReadHistoryAsync(Guid invoiceId, IReadOnlyList<Guid> lineIds, CancellationToken ct)

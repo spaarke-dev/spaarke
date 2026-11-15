@@ -197,8 +197,10 @@ public class DecisionRecordContextImmutabilityTests
     /// <remarks>Task 153 adds <c>WriteConditionClearedAsync</c> (the Routine record of a Do-lane ConditionCleared closure). Issue #2212 adds
     /// <c>WriteBillingDecisionAsync</c>, whose public overload is a forwarder: the overload that reaches <see cref="SharedCreate"/> is the
     /// one the check judges (see <see cref="CreateSiteProblems"/>). Completeness of this list is pinned by
-    /// <see cref="EveryPublicWriteResultMemberIsAListedEntryPoint"/>.</remarks>
-    private static readonly string[] CreateEntryPoints = ["WriteAsync", "WriteGateDecisionAsync", "WriteConditionClearedAsync", "WriteBillingDecisionAsync"];
+    /// <see cref="EveryPublicWriteResultMemberIsAListedEntryPoint"/>. ebilling-r1 task 084h-1 adds <c>WriteRecordProcedureDecisionAsync</c> (the per-record
+    /// Procedure entry, design 084h section 3.2), with the same forwarding public overload as the billing entry.</remarks>
+    private static readonly string[] CreateEntryPoints =
+        ["WriteAsync", "WriteGateDecisionAsync", "WriteConditionClearedAsync", "WriteBillingDecisionAsync", "WriteRecordProcedureDecisionAsync"];
 
     private const string SharedCreate = "CreateAsync";
 
@@ -225,8 +227,17 @@ public class DecisionRecordContextImmutabilityTests
         const string billingNotReaching = billingForwarder
             + "    internal async Task<R> WriteBillingDecisionAsync(B request, Func<Task<Guid>>? deciderContact, CancellationToken ct)\n"
             + "    {\n        return new R();\n    }";
+        // ebilling-r1 task 084h-1: WriteRecordProcedureDecisionAsync has the same forwarding public overload as the billing entry.
+        const string procedureForwarder = "    public Task<R> WriteRecordProcedureDecisionAsync(P request, CancellationToken ct = default) =>\n        WriteRecordProcedureDecisionAsync(request, deciderContact: null, ct);\n";
+        const string procedureReaching = procedureForwarder
+            + "    internal async Task<R> WriteRecordProcedureDecisionAsync(P request, Func<Task<Guid>>? deciderContact, CancellationToken ct)\n"
+            + "    {\n        return await CreateAsync(review, plan, null, ct);\n    }";
+        const string procedureNotReaching = procedureForwarder
+            + "    internal async Task<R> WriteRecordProcedureDecisionAsync(P request, Func<Task<Guid>>? deciderContact, CancellationToken ct)\n"
+            + "    {\n        return new R();\n    }";
 
-        static string Writer(string gateBody, string extra = "", string clearedBody = "        return await CreateAsync(review, plan, null, ct);", string billing = billingReaching) => SourceScan.CodeText(new[]
+        static string Writer(string gateBody, string extra = "", string clearedBody = "        return await CreateAsync(review, plan, null, ct);", string billing = billingReaching,
+            string procedure = procedureReaching) => SourceScan.CodeText(new[]
         {
             "public sealed class DecisionRecordWriter",
             "{",
@@ -246,6 +257,8 @@ public class DecisionRecordContextImmutabilityTests
             "    }",
             "",
             billing,
+            "",
+            procedure,
             "",
             "    private async Task<R> CreateAsync(A request, Plan plan, DecisionRecordOwner? o, CancellationToken ct)",
             "    {",
@@ -286,6 +299,11 @@ public class DecisionRecordContextImmutabilityTests
         // Must fire (#2212): the billing entry point is renamed away (the list must move with it).
         Assert.NotEmpty(CreateSiteProblems(Writer("        return await CreateAsync(review, plan, null, ct);",
             billing: billingReaching.Replace("WriteBillingDecisionAsync", "WriteBillingAsync"))));
+
+        // Must fire (084h-1): the per-record Procedure forwarder's target never reaches the shared create, or the entry is renamed away.
+        Assert.NotEmpty(CreateSiteProblems(Writer("        return await CreateAsync(review, plan, null, ct);", procedure: procedureNotReaching)));
+        Assert.NotEmpty(CreateSiteProblems(Writer("        return await CreateAsync(review, plan, null, ct);",
+            procedure: procedureReaching.Replace("WriteRecordProcedureDecisionAsync", "WriteProcedureAsync"))));
     }
 
     [Fact(DisplayName = "Issue #2212 / D-34: every public Decision Record write-result member of the writer is a listed entry point")]

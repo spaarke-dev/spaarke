@@ -71,6 +71,7 @@ The read-only `-WhatIf` against dev (the dev application ids as in the script's 
 
 - `InvoiceLineAddService` (task 164a, Add line): a WRITER of a line's `sprk_vendororg` only (it copies the invoice's confirmed firm onto the added line, like `InvoiceAdjustmentService`), through `IGenericEntityService` (app-only). It reads the invoice's billed total and firm; it writes no invoice money column (the totals go through `InvoiceTotalsService`, and its version-only invoice update sets no column).
 - `InvoiceFindingsDiff` (164a-4a): a READER of the invoice's `sprk_vendororg` (the rule facts' firm).
+- `ExternalInvoiceSubmissionAuthorizationFilter` (task 093, the firm file gate): a READER of the route invoice's `sprk_vendororg`, app-only through `ExternalDataService.GetInvoiceLookupsAsync`, to compare it with the caller's firms; it writes nothing.
 
 
 ## 7. Live apply on dev (2026-11-09)

@@ -80,9 +80,10 @@ public sealed class AuthenticationSchemeCensusTests
         // caller's active firms, Read on its core record, not hidden by the (a') predicate; every refusal the same 403).
         "GET /api/v1/external/ebilling/invoices/{invoiceId:guid}/outcome",
         "GET /api/v1/external/ebilling/submissions/{submissionId:guid}/outcome",
-        "GET /api/v1/external/invoices/{id:guid}/documents",
-        "GET /api/v1/external/invoices/{id:guid}/documents/{documentId:guid}/content",
-        "GET /api/v1/external/invoices/{id:guid}/documents/{documentId:guid}/versions",
+        // ebilling-r1 task 093: the firm file routes (the four invoice document routes retired), behind CallerPrincipalAuthorizationFilter
+        // and ExternalInvoiceSubmissionAuthorizationFilter's InvoiceFiles gate (every refusal the uniform 404).
+        "GET /api/v1/external/invoices/{id:guid}/files",
+        "GET /api/v1/external/invoices/{id:guid}/files/{fileId:guid}/content",
         "GET /api/v1/external/matters/{id:guid}/documents",
         "GET /api/v1/external/matters/{id:guid}/documents/{documentId:guid}/content",
         "GET /api/v1/external/matters/{id:guid}/documents/{documentId:guid}/versions",
@@ -113,7 +114,6 @@ public sealed class AuthenticationSchemeCensusTests
         "POST /api/v1/external/api/dataverse/fetch",
         "POST /api/v1/external/contact-grants",   // owner-allowed management route (2026-10-13, option A)
         "POST /api/v1/external/contact-grants/revoke",   // owner-allowed management route (2026-10-13, option A)
-        "POST /api/v1/external/invoices/{id:guid}/documents",
         "POST /api/v1/external/matters/{id:guid}/documents",
         "POST /api/v1/external/matters/{id:guid}/events",   // R4 task 002 (FR-08): the project event create, on a matter
         "POST /api/v1/external/matters/{id:guid}/invoice-submissions",   // ebilling-r1 044 (see the invoice-submissions note above)
