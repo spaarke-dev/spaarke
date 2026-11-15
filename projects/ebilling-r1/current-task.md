@@ -12,15 +12,13 @@
 
 ### In flight
 
-- **Master PR #2839 (work → master): open, CI running.** It carries 093, 113, 084h-1 (with fix round 2), the #2833 ebilling slice and notes. master is merged into work at bd18cb8d60 (clean; no BFF changes came in).
-  - ontology-r1 signed off #2839 by comment (its files, byte-identical at ced184c79a), conditional on green CI. Any later push touching Services/Signals/** or Api/Signals/** needs its re-glance before merge.
-  - uac-r2 PASSED 093.
-  - **2026-11-15, owner: "what else is required to run the deploy? proceed"**, taken as the go to merge #2839 once CI is green. Asked spa-r4 to build and PR R4 021 now, and uac-r2 to hold #2838 until #2839 merges and to queue the dev BFF deploy (its own owner go). After the merge, send the SHA to uac-r2, spa-r4 and word-add-in-r1.
-  - **#2838 ordering:** #2838 adds `tests/Spaarke.ArchTests/ScriptMetadataStrongConsistencyGuardTests.cs`. Its KnownOffenders baseline lists the 12 scripts/ebilling files our e36a1e54c4 fixes, and the guard fails on any stale entry. #2838 is still OPEN.
-    - If #2838 merges first, our PR deletes those 12 entries in the same change.
-    - If ours merges first, tell uac-r2 to empty the baseline before #2838 merges.
-  - **spa-r4 is building R4 021** against #2839 head 3b33a8d8cc (its owner said go); PR ETA ~2–3 h; it sends the PR number and merge SHA. uac-r2 holds #2838 until #2839 merges, then clears the 12 entries itself (#2839 needs no change). uac-r2 sequence: #2839 merged → 021 merged → mcp-r1 pinged → owner exact-SHA go in uac-r2 → swap + 30-min gate → spa-r4 SPA.
-  - **Deploy order (strict):** spa-r4's R4 021 built and merged first; then uac-r2's BFF swap (owner go in uac-r2's session); then spa-r4's SPA immediately after.
+- **Dev BFF deployed 2026-11-15 18:32Z: aa7d6345f3** (master c1eb6e4a8e = 095g #2830 + #2839 + R4 021 #2840, plus mcp's spike). uac-r2's 30-min gate passed: 42 requests, 0 5xx, and the external invoice file routes returned 200. word-add-in-r1 was told 095g is live (queued; it is offline). The SPA deploy is spa-r4's, and confirmation is pending. Checklist section E becomes testable once spa-r4 confirms.
+- **#2844 / ISS-022 (found by the gate):** the invoice index job selected the removed `sprk_invoice.sprk_document`, so every invoice re-index has failed since task 094 (2026-10-27).
+  - Fix d7f36ddd6d on work, with regression test `Issue2844_*` and ArchTest `InvoiceIndexColumnsGuardTests`.
+  - Sonnet review: no defects. BFF build has 0 warnings. ArchTests 2633/0. Master merged in.
+  - Next: the PR to master (send uac-r2 the number), then a BFF deploy (owner go in uac-r2's session).
+  - **Then the re-index sweep:** every sprk_invoice with modifiedon ≥ 2026-10-27, through the normal indexing job. It writes to the dev search index, so it needs **the owner's go HERE**. Report the count and the result to uac-r2.
+- **113b ✅ on work (owner go 2026-11-15):** the Invoice Review page now shows 113's Procedure-change banner (`ProcedureChangeNotice.tsx`). One Sonnet adversarial pass found no F-class defects; its unknown-state point is closed. It ships with task 112, the page's first deploy.
 - **Reminder for 084h-2 (ontology-r1):** the writer caps only `reason` at 2000 characters, not `note`. 084h-2 must enforce or trim the note at the service (design §9), so an over-long note never reaches the create and fails as a retryable CreateFailed.
 
 ### Done today, on work (pushed)
