@@ -15,12 +15,19 @@ module.exports = {
   roots: ['<rootDir>/src'],
   testMatch: ['**/__tests__/**/*.test.ts', '**/__tests__/**/*.test.tsx'],
   setupFilesAfterEnv: ['<rootDir>/jest.setup.cjs'],
+  // The wizard's email composer reaches RichTextEditor in the shared lib, which imports lexical and @lexical/* (react, rich-text, list,
+  // html, link, utils, selection). A shared file resolves a bare name from ITS folder, and CI has no node_modules there, so the names
+  // that are not mapped below are also searched in this package's node_modules. (A path mapper per package would bypass the packages'
+  // own `exports`: `@lexical/react/ReactProviderExtension` is the file `LexicalReactProviderExtension.js`.)
+  modulePaths: ['<rootDir>/node_modules'],
   moduleNameMapper: {
     '^@spaarke/ui-components/(.*)$': '<rootDir>/../../shared/Spaarke.UI.Components/src/$1',
     '^@fluentui/react-components$': '<rootDir>/node_modules/@fluentui/react-components',
     '^@fluentui/react-icons$': '<rootDir>/node_modules/@fluentui/react-icons',
     // Reached only through the type graph today (EntityCreationService); mapped so a future runtime import resolves.
     '^@spaarke/sdap-client$': '<rootDir>/../../shared/Spaarke.SdapClient/src/index.ts',
+    // One lexical for every package that imports it (see `modulePaths`).
+    '^lexical$': '<rootDir>/node_modules/lexical',
     '^react$': '<rootDir>/node_modules/react',
     '^react-dom$': '<rootDir>/node_modules/react-dom',
     '^react-dom/client$': '<rootDir>/node_modules/react-dom/client',

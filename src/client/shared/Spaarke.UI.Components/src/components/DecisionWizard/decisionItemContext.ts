@@ -22,7 +22,12 @@ import type {
   SuppressionStatus,
 } from './decisionWizardTypes';
 
-export type DecisionLookup = (request: Omit<DecisionLookupRequest, 'core'>) => Promise<ILookupItem[]>;
+export type DecisionLookup = ((request: Omit<DecisionLookupRequest, 'core'>) => Promise<ILookupItem[]>) & {
+  /** The host's `minChars` (optional seam), carried through the item-scoped wrapper. */
+  minChars?: number;
+  /** The host's `failureText` (optional seam), carried through the item-scoped wrapper. */
+  failureText?: string;
+};
 
 /** The side-pane lookup as a step sees it: the item's core record is already filled in. */
 export type DecisionOpenLookupForItem = ((
@@ -64,6 +69,8 @@ export interface DecisionItemContextValue {
   today: Date;
   /** Optional seam (FR-15): Confirm shows an optional "because" box and the review carries it. Absent or false: no box, as before. */
   collectBecause?: boolean;
+  /** Optional seam: an evidence line that names a record (`ref` = `{table}:{guid}`) gets "Open in Spaarke" through `openRecord`. Absent or false: none, as before. */
+  evidenceLinks?: boolean;
 }
 
 export const DecisionItemContext = React.createContext<DecisionItemContextValue | null>(null);

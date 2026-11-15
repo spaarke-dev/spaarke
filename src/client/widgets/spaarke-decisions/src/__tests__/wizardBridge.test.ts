@@ -130,7 +130,12 @@ describe('the routes', () => {
 
   it('a refusal keeps its reason code, status and message for the wizard to word', async () => {
     const host = wizardHost(SERVER, {
-      complete: () => toolError('ontology.decision.plan_stale', 'The plan changed since you opened it.', 422),
+      complete: () =>
+        toolError(
+          'ontology.decision.actions_do_not_match_plan',
+          "The matter's budgets changed while you were deciding; reopen the item.",
+          422
+        ),
     });
     const service = createDecisionWizardService({ fetch: createWizardBridge(host.callTool).fetch, baseUrl: BASE });
     const error = await service.commit(ID1, REVIEW).then(
@@ -140,8 +145,8 @@ describe('the routes', () => {
     expect(error).toBeInstanceOf(DecisionCommitError);
     expect((error as DecisionCommitError).failure).toMatchObject({
       httpStatus: 422,
-      reasonCode: 'ontology.decision.plan_stale',
-      detail: 'The plan changed since you opened it.',
+      reasonCode: 'ontology.decision.actions_do_not_match_plan',
+      detail: "The matter's budgets changed while you were deciding; reopen the item.",
     });
   });
 

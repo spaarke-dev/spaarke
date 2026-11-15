@@ -22,7 +22,13 @@ import {
 import { buildWizardItem } from '@spaarke/ui-components/components/Worklist/worklistWizardItem';
 import type { WizardBridge } from './wizardFetch';
 
-export const ITEM_GONE = 'This item is no longer on your list. Close the decision and read the list again.';
+/**
+ * Said inside the wizard, which stays open until the user closes it. Closing reads the lane again in place, so the one thing it asks of
+ * the user is to close.
+ */
+export const ITEM_GONE = 'This item is no longer on your list. Close this decision to see the list as it is now.';
+/** Said beside the lane when the Work Item asked for is gone from it (nothing opened): the lane has already been read again. */
+export const ITEM_GONE_NOTICE = 'This item is no longer on your list. The list has been read again.';
 export const ITEM_UNREADABLE = 'The details of this item could not be read. Try again.';
 
 /** The group of the snapshot that holds the Signal (its core record and its sibling items), or null when the snapshot has none. */
@@ -58,7 +64,9 @@ function parseRow(raw: unknown) {
 export function createWizardItemLoader(
   bridge: WizardBridge,
   lane: WorklistData,
-  today: () => Date = () => new Date()
+  today: () => Date = () => new Date(),
+  /** Opens the Console, for the "Showing N of M" note's link; absent: the note has none. */
+  openAll?: () => void
 ): DecisionItemLoader {
   return async signalId => {
     const group = findDecideGroup(lane, signalId);
@@ -73,6 +81,19 @@ export function createWizardItemLoader(
     const row = parseRow(body.row);
     // A different Signal's row is never shown under this item (a GUID may differ only in case, and the wizard's id is the one it asked for).
     if (!row || row.signalId.toLowerCase() !== signalId.toLowerCase()) throw new Error(ITEM_UNREADABLE);
-    return buildWizardItem({ item: { ...row, signalId }, group, set: 'lanes', today: today() });
+    const built = buildWizardItem({ item: { ...row, signalId }, group, set: 'lanes', today: today() });
+    // The tool bounds the row (at most 100 evidence lines and 20,000 bytes of them) and says so: the wizard then says "Showing N of M"
+    // rather than passing the first lines off as all of them.
+    const total =
+      typeof body.evidenceTotal === 'number' && Number.isFinite(body.evidenceTotal) ? body.evidenceTotal : undefined;
+    return {
+      ...built,
+      // The lane's core type is a placeholder (the paged read names none); it never reaches the wizard, so nothing there can open or
+      // search a record of type "core". The core's name and id are what the lane knows.
+      core: built.core ? { ...built.core, recordType: '' } : null,
+      ...(body.evidenceTruncated === true
+        ? { evidenceTruncation: { ...(total !== undefined ? { total } : {}), ...(openAll ? { openAll } : {}) } }
+        : {}),
+    };
   };
 }

@@ -42,8 +42,11 @@ function Shell({ onOpenWizard }: { onOpenWizard?: (event: OpenWizardEvent) => vo
   // The wizard opens on the lane as the user saw it (the lane reports each read), and a recorded decision reads the lane again.
   const lane = React.useRef<WorklistData | null>(null);
   const getLane = React.useCallback(() => lane.current, []);
+  // How many reads of the lane have landed: a close that reads the lane again waits for it before it settles the focus.
+  const [laneReads, setLaneReads] = React.useState(0);
   const onData = React.useCallback((data: WorklistData | null) => {
     lane.current = data;
+    if (data) setLaneReads(n => n + 1);
   }, []);
   const [request, setRequest] = React.useState<WizardRequest | null>(null);
   const requests = React.useRef(0);
@@ -57,7 +60,8 @@ function Shell({ onOpenWizard }: { onOpenWizard?: (event: OpenWizardEvent) => vo
     },
     [onOpenWizard]
   );
-  const onRecorded = React.useCallback(() => setReloadToken(n => n + 1), []);
+  // The lane is read again in place: after a decision is recorded, and whenever the wizard closes.
+  const reloadLane = React.useCallback(() => setReloadToken(n => n + 1), []);
   // One decision at a time: while one is open the lane refuses to open another (and leaves its review where it was).
   const wizardOpen = React.useRef(false);
   const onActiveChange = React.useCallback((active: boolean) => {
@@ -77,7 +81,9 @@ function Shell({ onOpenWizard }: { onOpenWizard?: (event: OpenWizardEvent) => vo
           request={request}
           getLane={getLane}
           consoleBaseUrl={consoleBaseUrl}
-          onRecorded={onRecorded}
+          onRecorded={reloadLane}
+          onReloadLane={reloadLane}
+          laneReads={laneReads}
           onActiveChange={onActiveChange}
         >
           <DecideLane

@@ -215,6 +215,10 @@ const LookupParameter: React.FC<FieldProps> = ({ parameter, scope }) => {
         onSearch={search}
         openOnFocus
         placeholder={`Search ${parameter.label.toLowerCase()}`}
+        // The host's optional seams (the MCP widget's search): a minimum length it will search, and the words for a failed search.
+        minSearchLength={lookup.minChars}
+        shortQueryHint={lookup.minChars && lookup.minChars > 1 ? `Type at least ${lookup.minChars} letters` : undefined}
+        searchErrorText={lookup.failureText}
       />
       {parameter.hint ? <Caption1 className={styles.prefilled}>{parameter.hint}</Caption1> : null}
     </div>
@@ -289,7 +293,9 @@ const BooleanParameter: React.FC<FieldProps> = ({ parameter, scope }) => {
         label={parameter.label}
         checked={checked}
         disabled={locked}
-        onChange={(_e, data) => update(d => withValue(d, scope, parameter.code, data.checked === true ? 'true' : 'false'))}
+        onChange={(_e, data) =>
+          update(d => withValue(d, scope, parameter.code, data.checked === true ? 'true' : 'false'))
+        }
       />
       {parameter.hint ? <Caption1 className={styles.prefilled}>{parameter.hint}</Caption1> : null}
     </div>

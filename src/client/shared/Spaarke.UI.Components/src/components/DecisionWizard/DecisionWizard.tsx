@@ -8,7 +8,7 @@
  *  - **Nothing is written by the wizard itself.** Record decision posts ONE review, with a client-generated review id, to the
  *    commit route (task 043) through `service.commit`, once: the request is single-flight, so a double click sends one.
  *  - **Closing** with unrecorded choices on ANY item opens a nested "Discard and close / Keep deciding" check. Escape and the
- *    backdrop never close (the shell's `dismiss: 'explicit'`).
+ *    backdrop never close (the shell's `dismiss: 'explicit'`); a host may opt Escape in with `closeOnEscape` (same check).
  *  - **Recording flips the item to read-only in place**: the status bar takes focus, "Next open item" moves on.
  *
  * Item data (sentence, evidence, other open items, the record of a closed item) comes from the host's `loadItem`: the Signal
@@ -77,8 +77,23 @@ export interface DecisionWizardProps {
   today?: Date;
   /** Optional seam (FR-15): Confirm shows an optional "because" box and the review carries it. Absent or false: none, as before. */
   collectBecause?: boolean;
+  /**
+   * Optional seam: What was found offers "Open in Spaarke" on each evidence line that names a record, through `openRecord`. Absent or
+   * false: no evidence line is a link, as before (the Console).
+   */
+  evidenceLinks?: boolean;
   /** Optional seam: render in the page with no modal envelope (a frame too small for a dialog). Absent or false: the modal wizard. */
   embedded?: boolean;
+  /**
+   * Optional seam: the Confirm step cannot record until it has been showing this long (`CONFIRM_GUARD_MS`), so a double click on Next
+   * at the last action step cannot record a decision the user has not seen (NFR-06). Absent or 0: no guard, as before.
+   */
+  confirmGuardMs?: number;
+  /**
+   * Optional seam: Escape closes the wizard (through the same discard check as Close), in the modal and embedded forms alike. Absent
+   * or false: Escape never closes it (the shell's explicit dismissal), as before.
+   */
+  closeOnEscape?: boolean;
 }
 
 type Loaded =
@@ -125,7 +140,10 @@ export const DecisionWizard: React.FC<DecisionWizardProps> = ({
   uiScale,
   today: todayProp,
   collectBecause,
+  evidenceLinks,
   embedded,
+  confirmGuardMs,
+  closeOnEscape,
 }) => {
   const today = React.useMemo(() => todayProp ?? new Date(), [todayProp]);
 
@@ -367,14 +385,18 @@ export const DecisionWizard: React.FC<DecisionWizardProps> = ({
   const itemLookup = React.useMemo<DecisionLookup | null>(
     () =>
       lookup && readyItem
-        ? req =>
-            lookup({
-              ...req,
-              core: readyItem.core
-                ? { recordType: readyItem.core.recordType, recordId: readyItem.core.recordId }
-                : null,
-              signalId: readyItem.row.signalId,
-            })
+        ? Object.assign(
+            (req: Parameters<DecisionLookup>[0]) =>
+              lookup({
+                ...req,
+                core: readyItem.core
+                  ? { recordType: readyItem.core.recordType, recordId: readyItem.core.recordId }
+                  : null,
+                signalId: readyItem.row.signalId,
+              }),
+            // The host's optional seams (`minChars`, `failureText`) ride along; absent, the fields behave as they always did.
+            { minChars: lookup.minChars, failureText: lookup.failureText }
+          )
         : null,
     [lookup, readyItem]
   );
@@ -425,6 +447,7 @@ export const DecisionWizard: React.FC<DecisionWizardProps> = ({
         openItemsLeft,
         onNextOpenItem: nextOpenIndex >= 0 ? () => setIndex(nextOpenIndex) : undefined,
         collectBecause,
+        evidenceLinks,
       },
     };
   } else if (state?.status === 'error') {
@@ -442,12 +465,35 @@ export const DecisionWizard: React.FC<DecisionWizardProps> = ({
       uiScale={uiScale}
       today={today}
       embedded={embedded}
+      confirmGuardMs={confirmGuardMs}
     />
   );
 
+  // Escape (optional seam). A React event reaches here through the modal's portal. It is taken in the capture phase, before the
+  // dialog surface sees it (which would only swallow it: the shell's dismissal is explicit). A control that has its own list or menu
+  // open keeps its Escape (it closes that, not the wizard), and nothing is closed while a request is out (`requestClose`).
+  const onEscape = (e: React.KeyboardEvent<HTMLDivElement>): void => {
+    if (e.key !== 'Escape') return;
+    if (
+      (e.target as HTMLElement | null)?.closest?.(
+        '[data-results-open="true"],[aria-expanded="true"],[role="listbox"],[role="menu"]'
+      )
+    )
+      return;
+    e.stopPropagation();
+    requestClose();
+  };
+
   return (
     <>
-      {body}
+      {closeOnEscape ? (
+        // eslint-disable-next-line jsx-a11y/no-static-element-interactions -- listens for Escape from the wizard's own controls
+        <div style={{ display: 'contents' }} onKeyDownCapture={onEscape}>
+          {body}
+        </div>
+      ) : (
+        body
+      )}
       {/* Mounted only while asked: a closed Fluent dialog left mounted marks the open wizard surface aria-hidden. */}
       {confirmClose && (
         <ConfirmModal

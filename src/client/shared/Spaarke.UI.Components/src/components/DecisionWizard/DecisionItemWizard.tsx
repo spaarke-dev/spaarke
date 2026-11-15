@@ -60,6 +60,14 @@ import { ConfirmStep } from './steps/ConfirmStep';
 import { FoundStep } from './steps/FoundStep';
 import { NextStepsStep } from './steps/NextStepsStep';
 
+/**
+ * How long the Confirm step must have been showing before it can record, for a host that asks for the guard (`confirmGuardMs`). A
+ * double click on Next at the last action step would otherwise record: Next and Record decision are the same button, so the second
+ * click lands on Record before the user has seen Confirm (NFR-06). A pointer double click and a held Enter are both over well inside
+ * this; a person who reads the step is not slowed (the guard ends before they could have read it).
+ */
+export const CONFIRM_GUARD_MS = 500;
+
 const FOUND = 'found';
 const NEXT = 'next';
 const CONFIRM = 'confirm';
@@ -123,6 +131,8 @@ export interface DecisionItemReady {
   onNextOpenItem?: () => void;
   /** Optional seam (FR-15): Confirm shows an optional "because" box. Absent or false: none, as before. */
   collectBecause?: boolean;
+  /** Optional seam: What was found offers "Open in Spaarke" on an evidence line that names a record (needs `openRecord`). Absent or false: none, as before. */
+  evidenceLinks?: boolean;
 }
 
 /** What the dialog shows for the current item: its steps once loaded, else a single Loading / Unavailable step. */
@@ -145,9 +155,17 @@ export interface DecisionItemWizardProps {
    * dialog (the MCP widget's master-detail fallback). Absent or false: the SprkModal wizard, as before.
    */
   embedded?: boolean;
+  /**
+   * Optional seam: the Confirm step cannot record until it has been showing this many milliseconds (see `CONFIRM_GUARD_MS`), and keyboard
+   * focus moves onto it when it appears, so a held Enter or a second tap on the button that brought the user here records nothing.
+   * Absent or 0: no guard, as before. A fake timer drives it in tests.
+   */
+  confirmGuardMs?: number;
 }
 
 const useStyles = makeStyles({
+  // The Confirm step is a programmatic focus target (not a tab stop), so it shows no focus ring of its own.
+  confirmFocus: { outlineStyle: 'none' },
   center: {
     display: 'flex',
     flexDirection: 'column',
@@ -233,6 +251,37 @@ const ShellSync: React.FC<{ handle: IWizardShellHandle; syncRef: React.MutableRe
   return null;
 };
 
+/**
+ * Wraps the Confirm step's content. While it is mounted (the step is showing) and a guard is asked for, the step cannot record until
+ * `guardMs` has passed, and keyboard focus is on the step, not on the button that brought the user here (the button is the same node
+ * as Record decision, so a held Enter would otherwise reach it). Layout effect: the guard is up before the browser can deliver another
+ * event. Without a guard it adds no behaviour (a plain wrapper).
+ */
+const ConfirmArrival: React.FC<{
+  guardMs: number;
+  setReady: (ready: boolean) => void;
+  children: React.ReactNode;
+}> = ({ guardMs, setReady, children }) => {
+  const styles = useStyles();
+  const ref = React.useRef<HTMLDivElement>(null);
+  const guarded = guardMs > 0;
+  React.useLayoutEffect(() => {
+    if (!guarded) return undefined;
+    setReady(false);
+    ref.current?.focus({ preventScroll: true });
+    const timer = window.setTimeout(() => setReady(true), guardMs);
+    return () => {
+      window.clearTimeout(timer);
+      setReady(true);
+    };
+  }, [guarded, guardMs, setReady]);
+  return (
+    <div ref={ref} tabIndex={guarded ? -1 : undefined} className={guarded ? styles.confirmFocus : undefined}>
+      {children}
+    </div>
+  );
+};
+
 export const DecisionItemWizard: React.FC<DecisionItemWizardProps> = ({
   itemId,
   view,
@@ -241,6 +290,7 @@ export const DecisionItemWizard: React.FC<DecisionItemWizardProps> = ({
   uiScale,
   today,
   embedded,
+  confirmGuardMs,
 }) => {
   const styles = useStyles();
   const ready = view.status === 'ready' ? view.ready : null;
@@ -263,6 +313,14 @@ export const DecisionItemWizard: React.FC<DecisionItemWizardProps> = ({
   // last ready render: the predicates are only reached from a ready item's steps.
   const latest = React.useRef<DecisionItemReady | null>(ready);
   if (ready) latest.current = ready;
+
+  // The Confirm guard (optional seam): false while the step has not been showing long enough. Read through a ref, like `latest`.
+  const [confirmReady, setConfirmReady] = React.useState(true);
+  const confirmReadyRef = React.useRef(true);
+  confirmReadyRef.current = confirmReady;
+  // No guard on a closed item (nothing to record), and none unless the host asked for one. A ref: the step's content keeps the closure it was added with.
+  const guardMsRef = React.useRef(0);
+  guardMsRef.current = readOnly ? 0 : (confirmGuardMs ?? 0);
 
   // The draft updater of every item this dialog has shown, by item id. A field hands `update` to an async path (the side-pane
   // lookup), and that pick can come back after the person moved on: `update` is bound to the item it was rendered for, so the
@@ -364,6 +422,7 @@ export const DecisionItemWizard: React.FC<DecisionItemWizardProps> = ({
           canAdvance: () => {
             const l = latest.current;
             if (!l || l.resolution || l.recording) return false;
+            if (!confirmReadyRef.current) return false;
             // A message went out and the first attempt cannot be resumed: the owner decides, not another click (task 043).
             const pinned = l.pinnedFailure ?? l.failure;
             if (pinned?.sentButNotRecorded && !pinned.resumable) return false;
@@ -372,7 +431,9 @@ export const DecisionItemWizard: React.FC<DecisionItemWizardProps> = ({
           renderContent: handle => (
             <>
               <ShellSync handle={handle} syncRef={syncRef} />
-              <ConfirmStep />
+              <ConfirmArrival guardMs={guardMsRef.current} setReady={setConfirmReady}>
+                <ConfirmStep />
+              </ConfirmArrival>
             </>
           ),
         };
@@ -506,6 +567,7 @@ export const DecisionItemWizard: React.FC<DecisionItemWizardProps> = ({
         openItemsLeft: ready.openItemsLeft,
         today,
         collectBecause: ready.collectBecause,
+        evidenceLinks: ready.evidenceLinks,
       }
     : null;
 

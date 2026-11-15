@@ -91,11 +91,21 @@ async function pick(placeholder: RegExp, typed: string, candidate: string) {
 const next = () => fireEvent.click(button('Next'));
 const skip = () => fireEvent.click(screen.getByRole('button', { name: /^skip$/i }));
 
+/**
+ * Waits for Confirm's Record button to be usable. Confirm holds its button for half a second after it appears (NFR-06: a double click on
+ * Next must not record), so a test that means to record waits for that, as a person reading the step would.
+ */
+async function recordButtonReady(name: RegExp = /^(record decision|dismiss and record)$/i) {
+  await screen.findByTestId('step-confirm');
+  await waitFor(() => expect(screen.getByRole('button', { name })).toBeEnabled());
+  return screen.getByRole('button', { name });
+}
+
 /** Records on the Confirm step with a because; resolves with the review the host received. */
 async function confirmAndRecord(host: WizardHost, because = 'Because the matter settled.') {
   await screen.findByTestId('step-confirm');
   enter(screen.getByRole('textbox', { name: /^Because/ }), because);
-  fireEvent.click(screen.getByRole('button', { name: /^(record decision|dismiss and record)$/i }));
+  fireEvent.click(await recordButtonReady());
   await waitFor(() => expect(host.callsTo(COMPLETE_TOOL)).toHaveLength(1));
   return host.callsTo(COMPLETE_TOOL)[0].args as { signalId: string; review: DecisionReview };
 }
@@ -238,6 +248,9 @@ describe('the type-ahead inside the wizard', () => {
     // Longer than both debounces (the field's and the widget's): a call that was going to be made would have been.
     await new Promise(resolve => setTimeout(resolve, 900));
     expect(host.callsTo(LOOKUP_TOOL)).toHaveLength(0);
+    // It says why nothing happened; "No results found" would read as "there are none".
+    expect(screen.getByText('Type at least 2 letters')).toBeInTheDocument();
+    expect(screen.queryByText('No results found')).toBeNull();
 
     enter(field, 'fy');
     enter(field, 'fy2');
@@ -249,7 +262,7 @@ describe('the type-ahead inside the wizard', () => {
     expect(host.callsTo(COMPLETE_TOOL)).toHaveLength(0);
   });
 
-  it('a lookup the tool refuses shows no matches and the wizard stays usable', async () => {
+  it('a lookup the tool refuses says the search could not be completed (not "No results found") and the wizard stays usable', async () => {
     const base = wizardHost(items(PLANS.reviseBudget, 0));
     const host: WizardHost = {
       ...base,
@@ -269,6 +282,8 @@ describe('the type-ahead inside the wizard', () => {
     fireEvent.focus(field);
     enter(field, 'fy26');
     await waitFor(() => expect(host.callsTo(LOOKUP_TOOL)).toHaveLength(1), { timeout: 3000 });
+    expect(await screen.findByText('Search could not be completed. Try again.')).toBeInTheDocument();
+    expect(screen.queryByText('No results found')).toBeNull();
     expect(screen.queryByText(BUDGET.name)).toBeNull();
     // Still the wizard, still editable.
     enter(screen.getByRole('textbox', { name: /^Reason for revision/ }), 'Typed after the refusal');
@@ -332,8 +347,7 @@ describe('what the server says is shown, and the Work Item stays open', () => {
     enter(screen.getByRole('textbox', { name: /^New budget/ }), '250000');
     enter(screen.getByRole('textbox', { name: /^Reason for revision/ }), 'Appeal added');
     next();
-    await screen.findByTestId('step-confirm');
-    fireEvent.click(button('Record decision'));
+    fireEvent.click(await recordButtonReady(/^record decision$/i));
     return screen.findByTestId('commit-failure');
   }
 
@@ -346,9 +360,16 @@ describe('what the server says is shown, and the Work Item stays open', () => {
       'You cannot record this decision',
     ],
     [
-      'a stale plan',
-      'ontology.decision.plan_stale',
-      'The plan changed since you opened it. Close it and open the item again.',
+      'actions that no longer match the plan',
+      'ontology.decision.actions_do_not_match_plan',
+      "The matter's budgets changed while you were deciding; reopen the item.",
+      422,
+      'The decision was refused',
+    ],
+    [
+      'a core record that changed',
+      'ontology.decision.core_changed',
+      "An item's matter or project changed while the decision was made; nothing was done.",
       422,
       'The decision was refused',
     ],
@@ -635,7 +656,7 @@ describe('the Because box', () => {
     await screen.findByTestId('step-confirm');
     expect(screen.getByTestId('because')).toBeInTheDocument();
     enter(screen.getByRole('textbox', { name: /^Because/ }), '   ');
-    fireEvent.click(button('Record decision'));
+    fireEvent.click(await recordButtonReady(/^record decision$/i));
     await waitFor(() => expect(host.callsTo(COMPLETE_TOOL)).toHaveLength(1));
     expect((host.callsTo(COMPLETE_TOOL)[0].args.review as DecisionReview).because).toBeUndefined();
   });
