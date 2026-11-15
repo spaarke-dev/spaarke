@@ -197,9 +197,10 @@ public class ExternalInvoiceVisibilityGuardTests
     {
         $"{typeof(ExternalModuleDataEndpoints).FullName}::ExecuteScopedFetchCoreAsync",       // (a) the invoices module fetch
         $"{typeof(ExternalMessageEndpoints).FullName}::EvaluateRecordGateAsync",              // (b) an invoice thread's gate
-        $"{typeof(ExternalProjectDataEndpoints).FullName}::RightsForInvoiceAsync",            // (b′) invoice documents
+        $"{typeof(ExternalProjectDataEndpoints).FullName}::RightsForInvoiceAsync",            // (b′) delete-own of a document under an invoice
         $"{typeof(ExternalInvoiceSubmissionEndpoints).FullName}::ListAsync",                   // (c) the submission list
         $"{typeof(ExternalInvoiceSubmissionAuthorizationFilter).FullName}::DecideReadOneAsync", // (c) the submission read
+        $"{typeof(ExternalInvoiceSubmissionAuthorizationFilter).FullName}::DecideInvoiceFilesAsync", // task 093: the firm file gate
         "Sprk.Bff.Api.Services.Ai.Handlers.DataverseReadQueryHandler::ExecuteChatAsync",      // (d)
         "Sprk.Bff.Api.Services.Ai.Handlers.DataverseSearchDataHandler::ExecuteChatAsync",     // (d)
         "Sprk.Bff.Api.Services.Ai.Handlers.DataverseDescribeHandler::DescribeRecordAsync",   // (d)
@@ -300,7 +301,7 @@ public class ExternalInvoiceVisibilityGuardTests
         Assert.False(NamesAFamilyTable("sprk_documents"));
     }
 
-    // ── The 093 / 152 entries (not on this branch): named so they fail until they reach the predicate (130 landed in 130b) ───
+    // ── The 152 entry (not on this branch): named so it fails until it reaches the predicate (130 landed in 130b, 093 in 093) ───
 
     /// <summary>
     /// The model 9.1 surfaces later tasks build, each with what makes the guard see it. They are not on this branch; when they
@@ -309,21 +310,19 @@ public class ExternalInvoiceVisibilityGuardTests
     /// </summary>
     internal static readonly IReadOnlyDictionary<string, string> PendingSurfaces = new Dictionary<string, string>
     {
-        ["093"] = "The firm file routes (GET /api/v1/external/invoices/{id}/files and …/content) in ExternalInvoiceSubmissionEndpoints / "
-            + "ExternalInvoiceSubmissionAuthorizationFilter: external-plane namespace; they read sprk_storedfile through StoredFileService.",
         ["152"] = "External invoice-index retrieval: InvoiceSearchService is a family reader; a call from the external plane is a surface.",
     };
 
     [Fact(DisplayName = "Task 098: the 093 and 152 surfaces are covered by the guard's primitives before they land")]
     public void TheLaterSurfaces_AreCoveredByThePrimitives()
     {
-        Assert.Equal(new[] { "093", "152" }, PendingSurfaces.Keys.Order(StringComparer.Ordinal).ToArray());
+        Assert.Equal(new[] { "152" }, PendingSurfaces.Keys.Order(StringComparer.Ordinal).ToArray());
         Assert.Contains("Sprk.Bff.Api.Services.Finance.Files.StoredFileService", FamilyReaderTypes.Keys);
         Assert.Contains("Sprk.Bff.Api.Services.Finance.InvoiceSearchService", FamilyReaderTypes.Keys);
         Assert.Contains(typeof(Sprk.Bff.Api.Services.Finance.IInvoiceSearchService), FamilyReaderInterfaces.Value); // F3: 152 calls it so
         Assert.Contains("Sprk.Bff.Api.Services.Finance.FirmFindingsProjection", NamedExternalTypes.Keys);
         Assert.Contains("Sprk.Bff.Api.Api.ExternalAccess.FirmOutcomeEndpoints", NamedExternalTypes.Keys);
-        Assert.True(InScope(typeof(ExternalInvoiceSubmissionEndpoints)), "093's routes live in the external-plane namespace.");
+        Assert.True(InScope(typeof(ExternalInvoiceSubmissionEndpoints)), "093's routes live in the external-plane namespace (wired above).");
         Assert.True(InScope(typeof(ExternalInvoiceSubmissionAuthorizationFilter)), "093's gate lives in the external-plane namespace.");
 
         // The readers named must name real types (a typo would hide a surface); 130's projection has landed, so it is checked too.

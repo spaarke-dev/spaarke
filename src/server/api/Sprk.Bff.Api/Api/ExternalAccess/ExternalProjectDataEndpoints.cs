@@ -38,17 +38,20 @@ namespace Sprk.Bff.Api.Api.ExternalAccess;
 ///   GET  /workassignments/{id}/todos     — to-dos for a work assignment
 ///   POST /workassignments/{id}/todos     — create a new to-do regarding the work assignment
 ///   PATCH /todos/{id}                    — update a to-do (scoped to its own accessible root)
-///   GET  /{matters|workassignments|servicerequests|invoices}/{id}/documents                          — documents (task 031)
-///   GET  /{matters|workassignments|servicerequests|invoices}/{id}/documents/{documentId}/content     — download
-///   POST /{matters|workassignments|servicerequests|invoices}/{id}/documents                          — upload
-///   GET  /{matters|workassignments|servicerequests|invoices}/{id}/documents/{documentId}/versions    — version history
+///   GET  /{matters|workassignments|servicerequests}/{id}/documents                          — documents (task 031)
+///   GET  /{matters|workassignments|servicerequests}/{id}/documents/{documentId}/content     — download
+///   POST /{matters|workassignments|servicerequests}/{id}/documents                          — upload
+///   GET  /{matters|workassignments|servicerequests}/{id}/documents/{documentId}/versions    — version history
 ///   DELETE /{documents|todos|events}/{id} — delete a record the caller created, with Read on its parent (task 032)
 ///
 /// DOCUMENTS ON EVERY CORE RECORD (task 031 / FR-24): one list, download, versions and upload handler,
 /// generalized over the document parent (ExternalDataService.DocumentParentKind). Project, matter and
 /// work assignment rights come from RightsForRoot; a service request's from the submitter scope (the
-/// Service Requests module's accessible set); an invoice's are inherited from its matter and project
-/// (owner decision 2026-10-11, option A — the union, RightsForInvoiceAsync).
+/// Service Requests module's accessible set). An invoice's rights are inherited from its matter and project
+/// (owner decision 2026-10-11, option A — the union, RightsForInvoiceAsync); they still decide delete-own of a
+/// document under an invoice. The four /invoices/{id}/documents routes retired with ebilling-r1 task 093: a firm
+/// reads an invoice's files only through GET /invoices/{id}/files (ExternalInvoiceSubmissionEndpoints), which
+/// serves Stored Files, not SPE documents.
 ///
 /// READ routes verify the caller holds Read on the requested record (HoldsReadOnProject /
 /// ListTodosForRoot, both through RightsForRoot). Returns 403 if not; NEVER an empty collection, which
@@ -380,53 +383,6 @@ public static class ExternalProjectDataEndpoints
             .ProducesProblem(StatusCodes.Status403Forbidden)
             .ProducesProblem(StatusCodes.Status404NotFound);
 
-        // Invoice documents (task 031, owner decision 2026-10-11, option A "inherit"): the same four handlers. An invoice
-        // is not a root, so its rights are the caller's rights on its PARENT records — the union over the invoice's
-        // sprk_matter and sprk_project (RightsForInvoiceAsync). Read lists, downloads and reads versions; Create uploads.
-        group.MapGet("/invoices/{id:guid}/documents", GetInvoiceDocuments)
-            .WithName("GetExternalInvoiceDocuments")
-            .RequireWorkforceCeiling(WorkforceRoleCeilingGate.ReadInvoiceDocuments)
-            .WithSummary("Get documents for an invoice whose matter or project the caller can read")
-            .Produces<ExternalDocumentListResponse>(StatusCodes.Status200OK)
-            .ProducesProblem(StatusCodes.Status401Unauthorized)
-            .ProducesProblem(StatusCodes.Status403Forbidden)
-            .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
-
-        group.MapGet("/invoices/{id:guid}/documents/{documentId:guid}/content", DownloadInvoiceDocumentContent)
-            .WithName("DownloadExternalInvoiceDocument")
-            .RequireWorkforceCeiling(WorkforceRoleCeilingGate.ReadInvoiceDocuments)
-            .WithSummary("Download an invoice document's content (authz-before-stream, app-only)")
-            .Produces(StatusCodes.Status200OK)
-            .ProducesProblem(StatusCodes.Status401Unauthorized)
-            .ProducesProblem(StatusCodes.Status403Forbidden)
-            .ProducesProblem(StatusCodes.Status404NotFound)
-            .ProducesProblem(StatusCodes.Status409Conflict)
-            .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
-
-        group.MapPost("/invoices/{id:guid}/documents", UploadInvoiceDocument)
-            .WithName("UploadExternalInvoiceDocument")
-            .RequireWorkforceCeiling(WorkforceRoleCeilingGate.UploadInvoiceDocument)
-            .WithSummary("Upload a document to an invoice (Create inherited from its matter or project; server-derived container, app-only)")
-            .Accepts<IFormFile>("multipart/form-data")
-            .DisableAntiforgery() // multipart upload; auth is the JWT + Tier-2 gate, not a form token
-            .Produces<ExternalDocumentDto>(StatusCodes.Status201Created)
-            .ProducesProblem(StatusCodes.Status400BadRequest)
-            .ProducesProblem(StatusCodes.Status401Unauthorized)
-            .ProducesProblem(StatusCodes.Status403Forbidden)
-            .ProducesProblem(StatusCodes.Status409Conflict)
-            .ProducesProblem(StatusCodes.Status422UnprocessableEntity)
-            .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
-
-        group.MapGet("/invoices/{id:guid}/documents/{documentId:guid}/versions", GetInvoiceDocumentVersions)
-            .WithName("GetExternalInvoiceDocumentVersions")
-            .RequireWorkforceCeiling(WorkforceRoleCeilingGate.ReadInvoiceDocuments)
-            .WithSummary("Get SPE version history for a document on an invoice")
-            .Produces<ExternalDocumentVersionsResponse>(StatusCodes.Status200OK)
-            .ProducesProblem(StatusCodes.Status401Unauthorized)
-            .ProducesProblem(StatusCodes.Status403Forbidden)
-            .ProducesProblem(StatusCodes.Status404NotFound)
-            .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
-
         // GET /api/v1/external/projects/{id}/events — calendar events for the project
         group.MapGet("/projects/{id:guid}/events", GetEvents)
             .WithName("GetExternalProjectEvents")
@@ -681,7 +637,6 @@ public static class ExternalProjectDataEndpoints
             ExternalDataService.DocumentParentKind.Matter => WorkforceRoleCeilingGate.UploadMatterDocument,
             ExternalDataService.DocumentParentKind.WorkAssignment => WorkforceRoleCeilingGate.UploadWorkAssignmentDocument,
             ExternalDataService.DocumentParentKind.ServiceRequest => WorkforceRoleCeilingGate.UploadServiceRequestDocument,
-            ExternalDataService.DocumentParentKind.Invoice => WorkforceRoleCeilingGate.UploadInvoiceDocument,
             _ => Array.Empty<WorkforceCeilingRequirement>(), // AdmitsAsync refuses an empty set
         };
 
@@ -1804,12 +1759,6 @@ public static class ExternalProjectDataEndpoints
             ExternalDataService.DocumentParentKind.ServiceRequest, id, httpContext, dataService, modules, probe, privileges, logger, ct,
             hideInvoices);
 
-    private static Task<IResult> GetInvoiceDocuments(
-        Guid id, HttpContext httpContext, ExternalDataService dataService, ExternalModuleRegistry modules,
-        CallerRecordAccessProbe probe, IDataversePrivilegeChecker privileges, [Microsoft.AspNetCore.Mvc.FromServices] ExternalInvoiceHiding? hideInvoices, ILogger<Program> logger, CancellationToken ct) =>
-        ListDocumentsForParent(
-            ExternalDataService.DocumentParentKind.Invoice, id, httpContext, dataService, modules, probe, privileges, logger, ct, hideInvoices);
-
     private static Task<IResult> DownloadDocumentContent(
         Guid id, Guid documentId, HttpContext httpContext, ExternalDataService dataService,
         ExternalModuleRegistry modules, IDocumentStorageResolver storageResolver, ISpeFileOperations fileStore,
@@ -1836,13 +1785,6 @@ public static class ExternalProjectDataEndpoints
         ExternalModuleRegistry modules, IDocumentStorageResolver storageResolver, ISpeFileOperations fileStore,
         [Microsoft.AspNetCore.Mvc.FromServices] ExternalInvoiceHiding? hideInvoices, ILogger<Program> logger, CancellationToken ct) =>
         DownloadDocumentForParent(ExternalDataService.DocumentParentKind.ServiceRequest, id, documentId, httpContext,
-            dataService, modules, storageResolver, fileStore, logger, ct, hideInvoices);
-
-    private static Task<IResult> DownloadInvoiceDocumentContent(
-        Guid id, Guid documentId, HttpContext httpContext, ExternalDataService dataService,
-        ExternalModuleRegistry modules, IDocumentStorageResolver storageResolver, ISpeFileOperations fileStore,
-        [Microsoft.AspNetCore.Mvc.FromServices] ExternalInvoiceHiding? hideInvoices, ILogger<Program> logger, CancellationToken ct) =>
-        DownloadDocumentForParent(ExternalDataService.DocumentParentKind.Invoice, id, documentId, httpContext,
             dataService, modules, storageResolver, fileStore, logger, ct, hideInvoices);
 
     private static Task<IResult> UploadDocument(
@@ -1878,15 +1820,6 @@ public static class ExternalProjectDataEndpoints
         UploadDocumentForParent(ExternalDataService.DocumentParentKind.ServiceRequest, id, file, httpContext, dataService,
             modules, containerResolver, fileStore, ownership, indexing, jobs, configuration, probe, logger, ct, hideInvoices);
 
-    private static Task<IResult> UploadInvoiceDocument(
-        Guid id, IFormFile file, HttpContext httpContext, ExternalDataService dataService,
-        ExternalModuleRegistry modules, RecordContainerResolver containerResolver, ISpeFileOperations fileStore,
-        IRecordOwnershipResolver ownership, IPostUploadIndexingEnqueuer indexing, JobSubmissionService jobs,
-        IConfiguration configuration, CallerRecordAccessProbe probe, [Microsoft.AspNetCore.Mvc.FromServices] ExternalInvoiceHiding? hideInvoices,
-        ILogger<Program> logger, CancellationToken ct) =>
-        UploadDocumentForParent(ExternalDataService.DocumentParentKind.Invoice, id, file, httpContext, dataService,
-            modules, containerResolver, fileStore, ownership, indexing, jobs, configuration, probe, logger, ct, hideInvoices);
-
     private static Task<IResult> GetDocumentVersions(
         Guid id, Guid documentId, HttpContext httpContext, ExternalDataService dataService,
         ExternalModuleRegistry modules, IDocumentStorageResolver storageResolver, ISpeFileOperations fileStore,
@@ -1917,14 +1850,6 @@ public static class ExternalProjectDataEndpoints
         Spaarke.Dataverse.IGenericEntityService entityService, [Microsoft.AspNetCore.Mvc.FromServices] ExternalInvoiceHiding? hideInvoices,
         ILogger<Program> logger, CancellationToken ct) =>
         ListDocumentVersionsForParent(ExternalDataService.DocumentParentKind.ServiceRequest, id, documentId, httpContext,
-            dataService, modules, storageResolver, fileStore, entityService, logger, ct, hideInvoices);
-
-    private static Task<IResult> GetInvoiceDocumentVersions(
-        Guid id, Guid documentId, HttpContext httpContext, ExternalDataService dataService,
-        ExternalModuleRegistry modules, IDocumentStorageResolver storageResolver, ISpeFileOperations fileStore,
-        Spaarke.Dataverse.IGenericEntityService entityService, [Microsoft.AspNetCore.Mvc.FromServices] ExternalInvoiceHiding? hideInvoices,
-        ILogger<Program> logger, CancellationToken ct) =>
-        ListDocumentVersionsForParent(ExternalDataService.DocumentParentKind.Invoice, id, documentId, httpContext,
             dataService, modules, storageResolver, fileStore, entityService, logger, ct, hideInvoices);
 
     private static IResult DenyRoot(ExternalDataService.TodoRootKind rootKind) =>

@@ -44,7 +44,6 @@ public sealed class ExternalMultiRootSecureRootsTests : IClassFixture<ExternalRo
     /// <summary>A work assignment the caller cannot read.</summary>
     private static readonly Guid W = Guid.Parse("a0390000-0000-4000-8000-0000000000c1");
 
-    private static readonly Guid Invoice = Guid.Parse("a0390000-0000-4000-8000-0000000000d1");
     private static readonly Guid ServiceRequest = Guid.Parse("a0390000-0000-4000-8000-0000000000e1");
 
     /// <summary>The invoice or event a work assignment is filed through (#1630 intermediates).</summary>
@@ -214,30 +213,8 @@ public sealed class ExternalMultiRootSecureRootsTests : IClassFixture<ExternalRo
     }
 
     // =====================================================================
-    // Review fix 6: GET /invoices/{id}/documents and GET /servicerequests/{id}/documents share GetDocumentsAsync
+    // Review fix 6: GET /servicerequests/{id}/documents runs GetDocumentsAsync (the invoice document routes retired with ebilling-r1 task 093)
     // =====================================================================
-
-    [Fact]
-    public async Task InvoiceDocuments_ADocumentAlsoFiledToASecureUnreadableMatter_IsWithheld()
-    {
-        _fixture.Data.AddInvoice(Invoice, matter: null, project: P);
-        _fixture.Data.AddSecureRoot(ExternalGrantRootType.Matter, M);
-        var plain = _fixture.Data.AddDocument("invoices", Invoice, "Invoice only");
-        _fixture.Data.AddDocument("invoices", Invoice, "Invoice and a secure matter", ("_sprk_matter_value", M));
-
-        (await ListDocumentIds($"/api/v1/external/invoices/{Invoice}/documents")).Should().Equal(plain);
-    }
-
-    [Fact]
-    public async Task InvoiceDocuments_ADocumentAlsoFiledToANonSecureUnreadableMatter_IsShown()
-    {
-        _fixture.Data.AddInvoice(Invoice, matter: null, project: P);
-        _fixture.Data.AddOpenRoot(ExternalGrantRootType.Matter, M);
-        var plain = _fixture.Data.AddDocument("invoices", Invoice, "Invoice only");
-        var dual = _fixture.Data.AddDocument("invoices", Invoice, "Invoice and a non-secure matter", ("_sprk_matter_value", M));
-
-        (await ListDocumentIds($"/api/v1/external/invoices/{Invoice}/documents")).Should().BeEquivalentTo(new[] { plain, dual });
-    }
 
     [Fact]
     public async Task ServiceRequestDocuments_ADocumentAlsoFiledToASecureUnreadableMatter_IsWithheld()

@@ -3,7 +3,10 @@ using Sprk.Bff.Api.Api.Finance;
 using Sprk.Bff.Api.Infrastructure.Errors;
 using Sprk.Bff.Api.Infrastructure.Exceptions;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
+using Sprk.Bff.Api.Services.Dataverse;
+using Sprk.Bff.Api.Services.Finance.Files;
 using Sprk.Bff.Api.Services.Finance.Submission;
+using Sprk.Bff.Api.Services.Identity;
 
 namespace Sprk.Bff.Api.Api.ExternalAccess;
 
@@ -24,6 +27,12 @@ public enum ExternalInvoiceSubmissionAccess
     /// (ebilling-r1 task 051, D-106: the SPA picker lists only those). The firm must be one of the caller's.
     /// </summary>
     FirmRecords,
+
+    /// <summary>
+    /// GET /invoices/{id}/files and GET /invoices/{id}/files/{fileId}/content (ebilling-r1 task 093): the invoice the caller may see and
+    /// its firm-visible files. One gate for both routes and both caller kinds (<see cref="ExternalInvoiceSubmissionAuthorizationFilter"/>).
+    /// </summary>
+    InvoiceFiles,
 }
 
 /// <summary>Attaches <see cref="ExternalInvoiceSubmissionAuthorizationFilter"/> to an external invoice submission route.</summary>
@@ -64,16 +73,29 @@ public static class ExternalInvoiceSubmissionAuthorizationFilterExtensions
 /// <param name="FirmId">Submit: the validated firm the submission is filed for.</param>
 /// <param name="CoreRecord">Submit: the core record the route names.</param>
 /// <param name="Submission">ReadOne: the submission the caller may see.</param>
+/// <param name="InvoiceFiles">InvoiceFiles: the invoice the gate admitted and the files of it the caller may see (task 093).</param>
 internal sealed record ExternalInvoiceSubmissionScope(
     CallerPrincipal Principal,
     IReadOnlyList<Guid> FirmIds,
     Guid? FirmId,
     InvoiceCoreRecord? CoreRecord,
-    InvoiceSubmissionView? Submission)
+    InvoiceSubmissionView? Submission,
+    ExternalInvoiceFileSet? InvoiceFiles = null)
 {
     /// <summary>HttpContext.Items key under which the decided scope is stored.</summary>
     internal static readonly object HttpContextItemsKey = new();
 }
+
+/// <summary>ebilling-r1 task 093: the files of one invoice the firm gate decided the caller may see, in list order.</summary>
+/// <param name="InvoiceId">The invoice the gate admitted (the route's <c>id</c>).</param>
+/// <param name="Files">Every visible file. A file not in this set is the uniform 404 on the content route.</param>
+internal sealed record ExternalInvoiceFileSet(Guid InvoiceId, IReadOnlyList<ExternalInvoiceVisibleFile> Files);
+
+/// <summary>One file of an <see cref="ExternalInvoiceFileSet"/>.</summary>
+/// <param name="Row">The Stored File row (never returned to the client as is: the handler maps it to <see cref="ExternalInvoiceFileItem"/>).</param>
+/// <param name="ScanStatus">One of <see cref="ExternalInvoiceFileScanStatus"/>.</param>
+/// <param name="Servable">What the content route streams; <c>null</c> while the scan has no verdict (the content route answers 409).</param>
+internal sealed record ExternalInvoiceVisibleFile(StoredFileRow Row, string ScanStatus, StoredFileServable? Servable);
 
 /// <summary>
 /// ebilling-r1 task 044 — the route-level gate of the external invoice submission routes (ADR-008), on the
@@ -158,6 +180,7 @@ internal sealed class ExternalInvoiceSubmissionAuthorizationFilter : IEndpointFi
             ExternalInvoiceSubmissionAccess.ReadOne => await DecideReadOneAsync(http, principal),
             ExternalInvoiceSubmissionAccess.List => await DecideListAsync(http, principal),
             ExternalInvoiceSubmissionAccess.FirmRecords => await DecideFirmRecordsAsync(http, principal),
+            ExternalInvoiceSubmissionAccess.InvoiceFiles => await DecideInvoiceFilesAsync(http, principal),
             _ => (null, Deny(StatusCodes.Status403Forbidden, InvoiceSubmissionErrors.RecordForbidden, "Unknown route.")),
         };
 
@@ -372,6 +395,161 @@ internal sealed class ExternalInvoiceSubmissionAuthorizationFilter : IEndpointFi
 
         return (new ExternalInvoiceSubmissionScope(principal, firms, firmId, null, null), null);
     }
+
+    // ── Invoice files (task 093) ──
+
+    /// <summary>
+    /// ebilling-r1 task 093: the ONE gate of the firm file routes, for a CIAM contact and a workforce systemuser alike. It returns the
+    /// invoice's visible file set, so the list and the content route cannot disagree. In order:
+    /// <list type="number">
+    /// <item>Whether the caller is an INTERNAL systemuser (a systemuser not flagged external, <see cref="ISystemUserIdentityResolver.IsExternalAsync"/>).
+    /// Anyone else is a firm caller and has firms (<see cref="ReadCallerFirmsAsync"/>, the one firm definition; for a systemuser, its linked
+    /// contact's): none is the uniform 404.</item>
+    /// <item>The record gate (<see cref="ExternalMessageEndpoints.GetRecordRightsDecisionAsync"/>, the one the invoice message and document
+    /// routes use): Read through the invoice's parents after the secure-roots rule and the external invoice predicate ((a'), asked once,
+    /// inside the gate). For a firm caller the invoice's vendor firm must be one of the caller's firms, checked on the gate's own invoice read:
+    /// another firm's invoice is answered exactly as a missing one.</item>
+    /// <item>The files: this invoice's own Invoice PDF rows marked firm-visible with no source, each judged by
+    /// <see cref="StoredFileService.JudgeServableAsync"/> (the download rule's step 5): Clean and NotScanned are listed and streamed, Pending
+    /// is listed as Checking (content 409), anything else (Malicious, not Servable, Removed, a path mismatch, a missing blob) is omitted.</item>
+    /// </list>
+    /// Every refusal is <see cref="ProblemDetailsHelper.UniformRecordNotFound"/> (never an empty 200); every fault, and a decision that could
+    /// not be made, is the 503 <see cref="StoredFileEndpoints.StoreUnavailableErrorCode"/>.
+    /// </summary>
+    private async Task<(ExternalInvoiceSubmissionScope?, IResult?)> DecideInvoiceFilesAsync(HttpContext http, CallerPrincipal principal)
+    {
+        if (!Guid.TryParse(http.Request.RouteValues["id"]?.ToString(), out var invoiceId) || invoiceId == Guid.Empty)
+        {
+            return (null, ProblemDetailsHelper.UniformRecordNotFound(http));
+        }
+
+        var ct = http.RequestAborted;
+        var services = http.RequestServices;
+        try
+        {
+            // (1) Internal or firm caller. A contact is always a firm caller; a systemuser is internal only when the resolver says it is
+            // not flagged external (no resolver: a firm caller, fail closed).
+            var isInternal = false;
+            if (principal.SystemUserId is { } systemUserId && systemUserId != Guid.Empty
+                && services.GetService<ISystemUserIdentityResolver>() is { } identities)
+            {
+                isInternal = !await identities.IsExternalAsync(systemUserId, ct);
+            }
+
+            IReadOnlyList<Guid> firms = Array.Empty<Guid>();
+            if (!isInternal)
+            {
+                var (callerFirms, unreadable) = await ReadCallerFirmsAsync(principal, _participations, _logger, ct);
+                if (unreadable)
+                {
+                    return (null, StoredFileAccessFilter.Unavailable(http));
+                }
+
+                if (callerFirms.Count == 0)
+                {
+                    return (null, ProblemDetailsHelper.UniformRecordNotFound(http));
+                }
+
+                firms = callerFirms;
+            }
+
+            // (2) The record gate, with the firm match on its one invoice read.
+            var data = services.GetRequiredService<ExternalDataService>();
+            var modules = services.GetRequiredService<ExternalModuleRegistry>();
+            var firmMatched = false;
+
+            async Task<IReadOnlyDictionary<string, object?>> ReadInvoiceAsync(string _, Guid id, string[]? attributes, CancellationToken token)
+            {
+                var columns = (attributes ?? Array.Empty<string>()).Append(InvoiceSubmissionPersister.InvoiceVendorOrg)
+                    .Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+                var row = await data.GetInvoiceLookupsAsync(id, columns, token);
+                if (!isInternal)
+                {
+                    if (!row.TryGetValue(InvoiceSubmissionPersister.InvoiceVendorOrg, out var vendor) || vendor is not Guid vendorFirm || !firms.Contains(vendorFirm))
+                    {
+                        // Another firm's invoice (or one with no firm) is the same answer as a missing one.
+                        throw new RecordNotFoundException("sprk_invoice", id);
+                    }
+
+                    firmMatched = true;
+                }
+
+                return row;
+            }
+
+            var (rights, undecided) = await ExternalMessageEndpoints.GetRecordRightsDecisionAsync(
+                ExternalMessageEndpoints.Roots["invoices"], invoiceId, principal, modules, ReadInvoiceAsync, data.Logger, ct,
+                data.GetNonSecureRootsAsync, data.GetLiveParentRootsAsync, _hideInvoices);
+
+            if (!rights.HasFlag(AccessRights.Read))
+            {
+                return (null, undecided ? StoredFileAccessFilter.Unavailable(http) : ProblemDetailsHelper.UniformRecordNotFound(http));
+            }
+
+            if (!isInternal && !firmMatched)
+            {
+                // The gate admitted without reading the invoice (it always reads one for this module): refuse rather than skip the firm check.
+                _logger.LogWarning("[EBILLING-FILES] Invoice {InvoiceId}: the firm match did not run; refusing (fail closed).", invoiceId);
+                return (null, ProblemDetailsHelper.UniformRecordNotFound(http));
+            }
+
+            // (3) The files.
+            var store = services.GetRequiredService<StoredFileService>();
+            var rows = await store.ReadRowsForInvoiceAsync(invoiceId, StoredFileEndpoints.MaxListedFiles + 1, ct);
+            if (rows.Count > StoredFileEndpoints.MaxListedFiles)
+            {
+                _logger.LogError("[EBILLING-FILES] Invoice {InvoiceId}: more than {Max} stored files; refusing a truncated list (503)",
+                    invoiceId, StoredFileEndpoints.MaxListedFiles);
+                return (null, StoredFileAccessFilter.Unavailable(http));
+            }
+
+            var files = new List<ExternalInvoiceVisibleFile>();
+            foreach (var row in rows.Where(r => IsFirmFile(r, invoiceId)))
+            {
+                var decision = await store.JudgeServableAsync(row, principal.SystemUserId ?? Guid.Empty, ct);
+                switch (decision.Outcome)
+                {
+                    case StoredFileDownloadOutcome.Serve when decision.File is { } servable:
+                        files.Add(new ExternalInvoiceVisibleFile(row,
+                            servable.Scan == StoredFileScanState.NotScanned
+                                ? ExternalInvoiceFileScanStatus.NotScanned
+                                : ExternalInvoiceFileScanStatus.Clean,
+                            servable));
+                        break;
+                    case StoredFileDownloadOutcome.ScanPending:
+                        files.Add(new ExternalInvoiceVisibleFile(row, ExternalInvoiceFileScanStatus.Checking, null));
+                        break;
+                    case StoredFileDownloadOutcome.NotFound:
+                        break; // Malicious, not Servable, Removed, a path mismatch, a missing blob: never listed, never served.
+                    default:
+                        return (null, StoredFileAccessFilter.Unavailable(http));
+                }
+            }
+
+            var ordered = files
+                .OrderBy(f => f.Row.CreatedOn ?? DateTime.MaxValue)
+                .ThenBy(f => f.Row.FileId)
+                .ToList();
+            return (new ExternalInvoiceSubmissionScope(principal, firms, null, null, null, new ExternalInvoiceFileSet(invoiceId, ordered)), null);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            // Any read fault (identity, firms, invoice, (a'), secure roots, file rows, storage): nothing listed or served, a retryable 503.
+            _logger.LogError(ex, "[EBILLING-FILES] Invoice {InvoiceId}: deciding its visible files faulted (503)", invoiceId);
+            return (null, StoredFileAccessFilter.Unavailable(http));
+        }
+    }
+
+    /// <summary>
+    /// A file a firm may see on <paramref name="invoiceId"/>: its own invoice's Invoice PDF, marked firm-visible, with no source (the
+    /// writer marks only the PDF a firm uploaded itself; a copy of a document or an email attachment is never the firm's, whatever the flag).
+    /// </summary>
+    internal static bool IsFirmFile(StoredFileRow row, Guid invoiceId) =>
+        row.Parent is { Kind: StoredFileParentKind.Invoice } parent && parent.Id == invoiceId
+        && row.Purpose == StoredFilePurpose.InvoicePdf
+        && row.FirmVisible
+        && row.SourceDocumentId is null
+        && row.SourceCommunicationId is null;
 
     // ── The firm ──
 

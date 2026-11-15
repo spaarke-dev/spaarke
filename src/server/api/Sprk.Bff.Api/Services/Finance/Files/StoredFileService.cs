@@ -677,7 +677,7 @@ public sealed class StoredFileService
             { State: StoredFileScanState.Malicious } => LogMalicious(fileId),
             { State: StoredFileScanState.Pending } => StoredFileDownloadDecision.ScanPending,
             { } verdict => StoredFileDownloadDecision.Serve(new StoredFileServable(
-                fileId, parent, row.Container!, row.BlobPath!, verdict.Properties.ETag, row.ContentType, callerSystemUserId)),
+                fileId, parent, row.Container!, row.BlobPath!, verdict.Properties.ETag, row.ContentType, callerSystemUserId, verdict.State)),
         };
     }
 
@@ -1219,6 +1219,9 @@ internal sealed record StoredFileRow
     /// <summary>The purpose, or <c>null</c> for an unknown value.</summary>
     public StoredFilePurpose? Purpose { get; init; }
 
+    /// <summary><c>sprk_firmvisible</c> is exactly true (ebilling-r1 task 093: the firm route serves only such a file; unset is false).</summary>
+    public bool FirmVisible { get; init; }
+
     public StoredFileStatus? Status { get; init; }
 
     /// <summary>The ONE parent lookup set, when exactly one is set and it is the purpose's kind; <c>null</c> otherwise.</summary>
@@ -1281,6 +1284,7 @@ internal sealed record StoredFileRow
             Name = entity.GetAttributeValue<string>(StoredFileSchema.Name),
             SizeBytes = entity.GetAttributeValue<int?>(StoredFileSchema.SizeBytes),
             Purpose = purpose,
+            FirmVisible = entity.GetAttributeValue<bool?>(StoredFileSchema.FirmVisible) == true,
             Status = status,
             Parent = parent,
             NoParentLookups = setParents.Count == 0,
@@ -1297,8 +1301,11 @@ internal sealed record StoredFileRow
 }
 
 /// <summary>A file the download rule decided to serve: what the handler opens and what the audit event records.</summary>
+/// <param name="Scan">The verdict it was served on: <see cref="StoredFileScanState.Clean"/>, or <see cref="StoredFileScanState.NotScanned"/>
+/// when scanning is off (ebilling-r1 task 093: the firm list tells the two apart).</param>
 public sealed record StoredFileServable(
-    Guid FileId, StoredFileParent Parent, string Container, string BlobPath, ETag ETag, string? ContentType, Guid CallerSystemUserId);
+    Guid FileId, StoredFileParent Parent, string Container, string BlobPath, ETag ETag, string? ContentType, Guid CallerSystemUserId,
+    StoredFileScanState Scan);
 
 /// <summary>The download rule's answer.</summary>
 public sealed record StoredFileDownloadDecision
@@ -1349,7 +1356,8 @@ public enum StoredFileDownloadOutcome
 
 /// <summary>
 /// The download audit event (section 4.3, O-29): ONE structured log event per served file, written before the first byte, with ids
-/// only. No Dataverse audit row. Shared with 093's firm route (route kind <c>firm</c>, caller kind <c>contact</c>).
+/// only. No Dataverse audit row. Shared with 093's firm route (route kind <c>firm</c>; caller kind <c>contact</c> for a CIAM contact,
+/// <c>systemuser</c> for a licensed user).
 /// </summary>
 public static class StoredFileAudit
 {
@@ -1362,7 +1370,7 @@ public static class StoredFileAudit
     /// <summary>The firm route's kind (093).</summary>
     public const string RouteFirm = "firm";
 
-    /// <summary>A systemuser caller (internal route).</summary>
+    /// <summary>A systemuser caller (internal route; a licensed user on the firm route, 093).</summary>
     public const string CallerSystemUser = "systemuser";
 
     /// <summary>A contact caller (firm route, 093).</summary>
