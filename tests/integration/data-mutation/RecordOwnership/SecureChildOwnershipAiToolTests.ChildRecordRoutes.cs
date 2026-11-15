@@ -1783,8 +1783,10 @@ public sealed partial class SecureChildOwnershipAiToolTests
 
     private static JsonElement Payload(Dictionary<string, object?> payload) => JsonSerializer.SerializeToElement(payload);
 
-    private static HttpContext HttpContextOfCaller() => new DefaultHttpContext
+    /// <remarks>#2799: with the host's application writer of locked invoice-family columns in its request services.</remarks>
+    private HttpContext HttpContextOfCaller() => new DefaultHttpContext
     {
+        RequestServices = LockedWriteServices(),
         User = new ClaimsPrincipal(new ClaimsIdentity(new[]
         {
             new Claim("oid", CallerOid.ToString()),

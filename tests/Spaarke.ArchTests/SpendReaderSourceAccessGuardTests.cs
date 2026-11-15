@@ -11,9 +11,10 @@ namespace Spaarke.ArchTests;
 /// <remarks>
 /// <para><b>O3 (Decision Records).</b> Counted spend keeps an invoice only when its approve Decision Record is found. Below Global read depth the
 /// record of an invoice in another business unit is not returned, so the invoice is silently left out and spend is undercounted (a missing
-/// privilege throws, which is safe). This pins <c>prvReadsprk_DecisionRecord</c> at Global in the evaluator's reading role in the solution
-/// source. The identity that reads at run time is checked live on dev (<c>SpendReaderSourceAccessLiveTests</c>, tests/integration/seam/Signals), because a role file alone cannot
-/// show which roles an environment's identity holds.</para>
+/// privilege throws, which is safe). This test checks one thing only: the role file named in <c>ReadingRoleFile</c> grants
+/// <c>prvReadsprk_DecisionRecord</c> at Global in the solution source. It does not show that the identity reading spend at run time holds
+/// that role, or holds no other role that changes the answer; that is checked live on dev (<c>SpendReaderSourceAccessLiveTests</c>,
+/// tests/integration/seam/Signals), because a role file alone cannot show which roles an environment's identity holds.</para>
 /// <para><b>O4 (hold sources).</b> <see cref="InvoiceBlockedHold.HoldSourceColumns"/> are field-secured, so they are kept apart from the
 /// derived base columns (which must be unsecured). Each must be secured in its <c>Entity.xml</c>, and the "Spaarke BFF-Managed Field Writers"
 /// profile must grant Read (CanRead 4) on it. Membership of the reading identity in that profile is the live half.</para>
@@ -30,7 +31,7 @@ public sealed class SpendReaderSourceAccessGuardTests
 
     // ── O3 ──
 
-    [Fact(DisplayName = "165b-4 O3: the evaluator's reading role holds Decision Record read at Global (spend finds every approve record)")]
+    [Fact(DisplayName = "165b-4 O3: the role file in ReadingRoleFile grants Decision Record read at Global in solution source")]
     public void ReadingRole_HoldsDecisionRecordRead_AtGlobal()
     {
         var role = File.ReadAllText(Path.Combine(SolutionRoot, "Roles", ReadingRoleFile));

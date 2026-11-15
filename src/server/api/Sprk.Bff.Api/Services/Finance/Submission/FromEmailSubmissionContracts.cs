@@ -41,6 +41,12 @@ public static class FromEmailSubmissionErrors
     /// save was refused after the build and before the upload; nothing was saved and nothing was submitted.
     /// </summary>
     public const string AttachmentNotPreserved = "ebilling.submission.attachment_not_preserved";
+
+    /// <summary>
+    /// 400 (task 095f, EB-D-225): a Correction names no note, or a blank one. Decided after the replay of K (a retry of a Correction that was
+    /// accepted is answered as a replay) and before the communication is read or anything is saved, so a refusal writes nothing.
+    /// </summary>
+    public const string CorrectionNoteRequired = "ebilling.submission.correction_note_required";
 }
 
 /// <summary>The <c>reason</c> values of 400 <see cref="FromEmailSubmissionErrors.MarksInvalid"/> (contract section 6).</summary>
@@ -144,6 +150,10 @@ internal sealed record FromEmailSubmissionInput
     public string? PoNumber { get; init; }
     public required string Mode { get; init; }
     public Guid? InvoiceId { get; init; }
+
+    /// <summary>Task 095f (EB-D-225): the correction note, trimmed and checked (<see cref="InvoiceCorrectionNote.Check"/>); null for a New
+    /// request and for a Correction that sent none or a blank one (the service refuses that: <see cref="FromEmailSubmissionErrors.CorrectionNoteRequired"/>).</summary>
+    public string? CorrectionNote { get; init; }
 
     /// <summary>The RFC Message-ID (OP-2: required and RFC-shaped by the body check).</summary>
     public string MessageId => Sprk.Bff.Api.Services.Office.OfficeEmailEnricher.ResolveRfcMessageId(Email)!;
@@ -340,7 +350,8 @@ internal static class FromEmailSubmissionKey
     /// a replay with <c>firmId</c> null or absent is the same request; K is unchanged.
     /// </summary>
     public static string CacheBinding(FromEmailSubmissionInput input) =>
-        Of(input) + "|" + (input.FirmId is { } firm ? firm.ToString("D") : string.Empty) + "|" + (input.FirmInvoiceNumber?.Trim() ?? string.Empty);
+        Of(input) + "|" + (input.FirmId is { } firm ? firm.ToString("D") : string.Empty) + "|" + (input.FirmInvoiceNumber?.Trim() ?? string.Empty)
+        + "|" + (input.CorrectionNote ?? string.Empty);
 
     /// <summary>Whether an attempt row recorded exactly this firm and trimmed firm invoice number (the details K does not carry). Task 095c-2:
     /// a row with no firm and a request with no firm have the same firm detail; a firm on one side only is another detail.</summary>
@@ -374,7 +385,16 @@ internal static class FromEmailSubmissionKey
 public sealed record InvoiceSubmissionFromEmailAccepted(Guid SubmissionId, Guid JobId, string TrackingNumber, string StatusUrl, Guid EmlDocumentId);
 
 /// <summary>One firm of a core record (contract section 8).</summary>
-public sealed record CoreRecordFirm(Guid FirmId, string Name);
+public sealed record CoreRecordFirm(Guid FirmId, string Name)
+{
+    /// <summary>The section 8 order: name (ordinal, ignore case), then id. The ONE definition: the section 8 GET and the firm-assign route's
+    /// <c>firms</c> (ebilling-r1 task 095g) both use it.</summary>
+    internal static IReadOnlyList<CoreRecordFirm> Ordered(IEnumerable<(Guid FirmId, string Name)> firms) => firms
+        .OrderBy(f => f.Name, StringComparer.OrdinalIgnoreCase)
+        .ThenBy(f => f.FirmId)
+        .Select(f => new CoreRecordFirm(f.FirmId, f.Name))
+        .ToList();
+}
 
 /// <summary>The 200 body of <c>GET /api/finance/invoices/{invoiceId}/correction-prefill</c> (ebilling-r1 task 097e; contract section 10).</summary>
 /// <param name="InvoiceId">The invoice asked about.</param>

@@ -394,9 +394,15 @@ public sealed partial class DataverseUpdateRecordHandler : IToolHandler
                 ? await ReadCommunicationMatterAsync(recordId).ConfigureAwait(false)
                 : default;
 
+            // #2799 (uac-r2): the application writer of a locked invoice-family column (checked as the caller first). Absent, a
+            // write of one is unanswered and nothing is written (fail closed); a write without one never uses it.
+            using var lockedScope = _scopes?.CreateScope();
+            var lockedFields = lockedScope?.ServiceProvider.GetService<Spaarke.Dataverse.IFieldMappingDataverseService>();
+
             // Task 146 r2 (verifier item 2): a change to the records the row is FILED under is a re-file.
             var refile = await RefileIfFiledAsync(
-                tool, tablename, recordId, entitySetName, primaryIdAttribute, mapped.Item!, context, startedAt, cancellationToken)
+                tool, tablename, recordId, entitySetName, primaryIdAttribute, mapped.Item!, context, startedAt, cancellationToken,
+                lockedFields)
                 .ConfigureAwait(false);
             if (refile.Result is { } refileResult)
             {
@@ -406,16 +412,21 @@ public sealed partial class DataverseUpdateRecordHandler : IToolHandler
             // (#1616 / task 195: an update that writes a project's pair returned above, through ProjectMatterFiling.)
             if (!refile.Written)
             {
-                // PATCH carries If-Match: * (update-only) — see IDataverseUserClient.PatchAsync.
-                var response = await _dataverse.PatchAsync(
-                    $"{entitySetName}({recordId:D})",
+                // PATCH carries If-Match: * (update-only) — see IDataverseUserClient.PatchAsync. #2799: a locked invoice-family
+                // column in it is checked as the caller and written as the app (a body without one: the caller's PATCH as before).
+                var response = await InvoiceFamilyLockedWrite.PatchAsCallerAsync(
+                    _dataverse, lockedFields, tablename, entitySetName, recordId,
                     mapped.Item!.JsonBody,
+                    _logger, traceId: null,
                     cancellationToken).ConfigureAwait(false);
-                if (!response.IsSuccess)
+                if (response.Kind == InvoiceFamilyLockedWrite.CallerPatchKind.ClientFailure)
                 {
                     // Privilege-denied update surfaces the USER's own access error — never escalates.
-                    return LogOutcome(context, tablename, recordId, MapClientError(tool, response, startedAt), stopwatch);
+                    return LogOutcome(context, tablename, recordId, MapClientError(tool, response.ClientFailure!, startedAt), stopwatch);
                 }
+
+                if (response.Kind != InvoiceFamilyLockedWrite.CallerPatchKind.Written)
+                    return LogOutcome(context, tablename, recordId, LockedWriteError(tool, response.Kind, startedAt), stopwatch);
             }
 
             // Task 156, owner round 8 item 1 (§6.5 path B — see the class remarks): the copies this write moved are
@@ -512,12 +523,13 @@ public sealed partial class DataverseUpdateRecordHandler : IToolHandler
     /// </summary>
     private async Task<RefileStep> RefileIfFiledAsync(
         AnalysisTool tool, string tablename, Guid recordId, string entitySetName, string? primaryIdAttribute,
-        DataverseWriteItemMapper.MappedItem item, ChatInvocationContext context, DateTimeOffset startedAt, CancellationToken ct)
+        DataverseWriteItemMapper.MappedItem item, ChatInvocationContext context, DateTimeOffset startedAt, CancellationToken ct,
+        Spaarke.Dataverse.IFieldMappingDataverseService? lockedFields)
     {
         var callerOid = Guid.TryParse(context.UserId, out var oid) && oid != Guid.Empty ? oid : (Guid?)null;
         var outcome = await OwnedChildWrite.RefileAsync(
             _dataverse, _ownership, tablename, recordId, entitySetName, primaryIdAttribute, item, callerOid, ct, _appOnlyEntities,
-            _directOwner)
+            _directOwner, lockedFields, _logger)
             .ConfigureAwait(false);
 
         return outcome switch
@@ -723,6 +735,7 @@ public sealed partial class DataverseUpdateRecordHandler : IToolHandler
             // ebilling-r1 FR-05 (ISS-010): the invoice-family guard, run by the re-file core — its stable code.
             { InvoiceFamilyRefusal: { } family } => Error(tool, $"The update was NOT written: {family.Reason} ({family.RefusalCode}).",
                 family.RefusalCode ?? ToolErrorCodes.ValidationFailed, startedAt),
+            { LockedWrite: { } locked } => LockedWriteError(tool, locked, startedAt),
             { Denied: { } denied } => Error(tool, denied, DataverseUserClientErrorCodes.AccessDenied, startedAt),
             { SecureFilingRefused: { } owner } => Error(tool,
                 $"A '{tablename}' record cannot be filed under a secure record from chat; the update was NOT written" +
@@ -737,6 +750,25 @@ public sealed partial class DataverseUpdateRecordHandler : IToolHandler
                 $"The update was NOT written: the record's owner could not be decided — {refused.Reason} ({refused.RefusalCode}).",
                 refused.RefusalCode ?? ToolErrorCodes.ValidationFailed, startedAt),
             _ => throw new InvalidOperationException("A re-file outcome with no decision."),
+        };
+
+    /// <summary>
+    /// #2799 (uac-r2): a locked invoice-family column the caller's update wrote, in this tool's words. Denied (one answer for a
+    /// record they may not use and one that does not exist) is the tool's access-denied error; an unanswered check is the
+    /// invoice-family "could not be read" code; nothing is written on either. Partly saved (K-1) is a service error with fixed
+    /// text.
+    /// </summary>
+    private ToolResult LockedWriteError(AnalysisTool tool, InvoiceFamilyLockedWrite.CallerPatchKind kind, DateTimeOffset startedAt) =>
+        kind switch
+        {
+            InvoiceFamilyLockedWrite.CallerPatchKind.Denied => Error(tool,
+                "The update was NOT written: you do not have permission to change what this record is filed under.",
+                DataverseUserClientErrorCodes.AccessDenied, startedAt),
+            InvoiceFamilyLockedWrite.CallerPatchKind.PartlySaved => Error(tool,
+                InvoiceFamilyLockedWrite.PartlySavedMessage, DataverseUserClientErrorCodes.ServiceError, startedAt),
+            _ => Error(tool,
+                $"The update was NOT written: whether you may change what this record is filed under could not be checked ({InvoiceFamilyCoreRecordGuard.ReadFailedCode}).",
+                InvoiceFamilyCoreRecordGuard.ReadFailedCode, startedAt),
         };
 
     // ── helpers ───────────────────────────────────────────────────────────────

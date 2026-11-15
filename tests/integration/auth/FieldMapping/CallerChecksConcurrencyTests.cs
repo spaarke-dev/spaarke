@@ -342,6 +342,12 @@ public partial class CallerChecksConcurrencyTests
         private int _inFlight;
         private int _maxInFlight;
 
+        /// <summary>The table being created (<see cref="Table"/> unless a test says): its metadata and attributes are answered.</summary>
+        public string TableName { get; set; } = Table;
+
+        /// <summary>The tables a lookup may name, whose metadata is answered (user-owned, with an AppendTo privilege).</summary>
+        public HashSet<string> RelatedTables { get; } = new(StringComparer.Ordinal) { "contact" };
+
         public HashSet<string> Held { get; } = new(StringComparer.OrdinalIgnoreCase) { $"prvCreate{Table}", $"prvAppend{Table}" };
 
         public HashSet<string> Secured { get; } = new(StringComparer.Ordinal);
@@ -402,15 +408,15 @@ public partial class CallerChecksConcurrencyTests
 
         private DataverseUserResponse Answer(string path, Guid record)
         {
-            if (path.StartsWith($"EntityDefinitions(LogicalName='{Table}')?$select=LogicalName,Privileges", StringComparison.Ordinal))
+            if (path.StartsWith($"EntityDefinitions(LogicalName='{TableName}')?$select=LogicalName,Privileges", StringComparison.Ordinal))
             {
                 return MetadataFailure ?? Ok(new
                 {
-                    LogicalName = Table,
+                    LogicalName = TableName,
                     Privileges = new[]
                     {
-                        new { PrivilegeType = "Create", Name = $"prvCreate{Table}" },
-                        new { PrivilegeType = "Append", Name = $"prvAppend{Table}" },
+                        new { PrivilegeType = "Create", Name = $"prvCreate{TableName}" },
+                        new { PrivilegeType = "Append", Name = $"prvAppend{TableName}" },
                     },
                 });
             }
@@ -418,7 +424,7 @@ public partial class CallerChecksConcurrencyTests
             if (path.Contains("RetrieveUserSetOfPrivilegesByNames", StringComparison.Ordinal))
                 return Ok(new { RolePrivileges = Held.Select(name => new { PrivilegeName = name, Depth = "Global" }).ToArray() });
 
-            if (path.StartsWith($"EntityDefinitions(LogicalName='{Table}')/Attributes", StringComparison.Ordinal))
+            if (path.StartsWith($"EntityDefinitions(LogicalName='{TableName}')/Attributes", StringComparison.Ordinal))
             {
                 return Ok(new
                 {
@@ -435,14 +441,14 @@ public partial class CallerChecksConcurrencyTests
                     : Ok(new { AccessRights = Appendable.Contains(record) ? "ReadAccess, AppendToAccess" : "ReadAccess" });
             }
 
-            if (path.StartsWith("EntityDefinitions(LogicalName='contact')", StringComparison.Ordinal))
+            if (RelatedTables.FirstOrDefault(t => path.StartsWith($"EntityDefinitions(LogicalName='{t}')", StringComparison.Ordinal)) is { } related)
             {
                 return Ok(new
                 {
-                    LogicalName = "contact",
+                    LogicalName = related,
                     OwnershipType = "UserOwned",
-                    PrimaryIdAttribute = "contactid",
-                    Privileges = new[] { new { PrivilegeType = "AppendTo", Name = "prvAppendTocontact" } },
+                    PrimaryIdAttribute = $"{related}id",
+                    Privileges = new[] { new { PrivilegeType = "AppendTo", Name = $"prvAppendTo{related}" } },
                 });
             }
 

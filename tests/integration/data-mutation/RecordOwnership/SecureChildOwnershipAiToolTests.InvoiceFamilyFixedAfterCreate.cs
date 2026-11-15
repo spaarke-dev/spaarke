@@ -90,7 +90,10 @@ public sealed partial class SecureChildOwnershipAiToolTests
         var result = await UpdateRecord(table, PairFamilyRow, Lookup(invoiceColumn, "sprk_invoice", GuardInvoice));
 
         result.Success.Should().BeTrue(result.ErrorMessage);
-        _user.Patches.Should().ContainSingle();
+        // #2799: the invoice lookup is locked, so the write is the application's single write (checked as the caller).
+        _user.Patches.Should().BeEmpty();
+        _appLockedWrites.Should().ContainSingle().Which.Fields.Should().ContainSingle()
+            .Which.Value!.ToString().Should().Be($"/sprk_invoices({GuardInvoice:D})");
     }
 
     // ── Fail closed: the invoice read faults ─────────────────────────────────────────────────────────────────────
@@ -137,7 +140,9 @@ public sealed partial class SecureChildOwnershipAiToolTests
         var result = await UpdateRecord(table, PairFamilyRow, (invoiceColumn, JsonSerializer.SerializeToElement<object?>(null)));
 
         result.Success.Should().BeTrue(result.ErrorMessage);
-        _user.Patches.Should().ContainSingle();
+        // #2799: clearing a locked lookup is the application's single write too (checked as the caller).
+        _user.Patches.Should().BeEmpty();
+        _appLockedWrites.Should().ContainSingle();
     }
 
     // ── Rule 1: an invoice's core record is never cleared ─────────────────────────────────────────────────────────
