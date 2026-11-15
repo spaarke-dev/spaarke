@@ -1,14 +1,11 @@
 /**
- * R4 task 004 fix round 1 (F4), revised by tasks 009 and 011 - the Tasks & events section holds the record while a create
- * in its list is in flight.
+ * R4 task 004 fix round 1 (F4), revised by tasks 009, 011 and 012 - the Events section holds the record while a create in
+ * its list is in flight.
  *
- * Task 011 (owner 2026-11-12): a Task is an event of type Task, so the section shows ONE list (`EventsCalendar`) in two
- * groups, with two create dialogs (Add task, Add event). The section hands the template's `onBusyChange` to that list
- * unchanged; the list reports "busy" while EITHER dialog is posting and never lets one going idle release the other's
- * hold. That combining rule is `createBusyReporters` (exported by `EventsCalendar`), and its overlap cases are tested
- * in `RecordTemplateAccess.test.tsx` ("createBusyReporters: the host is busy while EITHER dialog is posting"); one
- * dialog's hold and release through the real list is tested next to it. This file pins the seam: what the section hands
- * the list.
+ * Task 012 (owner 2026-11-14): a Task is an event type, so the section shows ONE list (`EventsCalendar`) with ONE create
+ * dialog (Add event, with a Type choice). The section hands the template's `onBusyChange` to that list unchanged; the list
+ * reports "busy" while its dialog is posting (tested through the real list in `RecordTemplateAccess.test.tsx`, "the busy
+ * hold"). This file pins the seam: what the section hands the list.
  *
  * What runs for real: `TasksEventsSection`. Substituted: `EventsCalendar`, by a stand-in that exposes the props the
  * section hands it.
@@ -52,7 +49,7 @@ function renderSection(
   return render(<TasksEventsSection {...context} />);
 }
 
-describe('Tasks & events: the list holds the record', () => {
+describe('Events: the list holds the record', () => {
   it("the list's create in flight holds the record until it settles", () => {
     const onBusyChange = vi.fn();
     renderSection(onBusyChange);
@@ -65,7 +62,7 @@ describe('Tasks & events: the list holds the record', () => {
     expect(onBusyChange).toHaveBeenLastCalledWith(false);
   });
 
-  it('renders one list, inside the Tasks & events card', () => {
+  it('renders one list, inside the Events card', () => {
     lists.mounted = 0;
     renderSection(vi.fn());
     const card = screen.getByTestId('record-section-tasksEvents');
@@ -73,7 +70,7 @@ describe('Tasks & events: the list holds the record', () => {
     expect(screen.getAllByTestId('events-list-stand-in')).toHaveLength(1);
   });
 
-  it('hands the list one reporter per create action: addEvent and addTask, each its own', () => {
+  it('hands the list ONE reporter, for addEvent, and no task reporter (task 012: a Task is an event type)', () => {
     const reporters = new Map<string, () => void>();
     const offerAction: RecordSectionContext['offerAction'] = id => {
       const reporter = (): void => undefined;
@@ -82,16 +79,8 @@ describe('Tasks & events: the list holds the record', () => {
     };
     renderSection(vi.fn(), offerAction);
 
-    expect([...reporters.keys()].sort()).toEqual(['addEvent', 'addTask']);
+    expect([...reporters.keys()]).toEqual(['addEvent']);
     expect(lists.props?.onCreateActionChange).toBe(reporters.get('addEvent'));
-    expect(lists.props?.onCreateTaskActionChange).toBe(reporters.get('addTask'));
-    expect(lists.props?.onCreateTaskActionChange).not.toBe(lists.props?.onCreateActionChange);
-  });
-
-  it('a record whose config lists no Add task gets no task reporter (the list then offers no task button of its own)', () => {
-    renderSection(vi.fn(), id => (id === 'addEvent' ? () => undefined : undefined));
-
-    expect(lists.props?.onCreateActionChange).toBeTypeOf('function');
-    expect(lists.props?.onCreateTaskActionChange).toBeUndefined();
+    expect('onCreateTaskActionChange' in (lists.props ?? {})).toBe(false);
   });
 });

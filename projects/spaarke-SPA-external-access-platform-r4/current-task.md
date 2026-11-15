@@ -7,10 +7,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | 018: redeploy plus owner E2E retest of the rework (008–011 ✅, merged) |
-| **Step** | Dev BFF `5a9b687a0b` (master `2747977f47` + mcp spike, incl. #2822 invoice names) live ~15:19Z; uac-r2 gate is a passive watch. Owner E2E retest in progress |
+| **Task** | 012 — Events single list (tasks/012-events-single-list.poml), then 013. FULL / sonnet high / directional |
+| **Step** | 012 Step 8: implementation delegated to an implementer agent (one scoped change). Then 9.5 review, then 013 |
 | **Status** | Dev BFF `5a9b687a0b` (see Live state). Dev SPA from run 43598875136 (master `2747977f47`), live 13:19Z; bundle has the new strings, no "Can contribute" or "To Do". |
-| **Next Action** | Collect the owner retest results and fix anything found. Record them in `notes/task-018-notes.md`, then complete task 018. Tell uac-r2 when the E2E is done. SPA rollback: the previous dev build `2ef4a17915`, dispatched from a temporary tag. |
+| **Next Action** | Receive the implementer report for 012, then run code-review, adr-check and an adversarial pass. Mark 012 done, run task-execute for 013, then PR, merge, SPA deploy and owner retest. 021 waits on ebilling 093 (scheduled 2026-11-15). |
 
 ## Done after merge
 - The merge SHA was sent to ebilling-r1 (for their 095 notes) and acknowledged to uac-r2.

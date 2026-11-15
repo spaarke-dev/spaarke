@@ -11,6 +11,7 @@ import path from 'path';
 import { describe, expect, it } from 'vitest';
 import {
   ACCESS_LEVEL_LABELS,
+  addEventRightOf,
   createTaskRightOf,
   decidingLevelOf,
   readOnlyNoteOf,
@@ -166,20 +167,46 @@ describe('yourAccessOf: nothing is inferred', () => {
   });
 });
 
-describe('createTaskRightOf: Add task needs the event right AND an explicit canCreateTask', () => {
+describe('createTaskRightOf: the Task type needs an explicit canCreateTask, on its own (task 012)', () => {
   it.each([
-    // [event right, list canCreateTask, expected]
+    // [loaded, list canCreateTask, level allows, expected]
+    [true, true, undefined, true],
+    [true, false, undefined, false],
+    [true, null, undefined, null],
+    [true, undefined, undefined, null],
+    [false, true, undefined, null],
+    // A level that decides (a level-decided project caller) must also allow; it never turns an unknown into a yes.
+    [true, true, true, true],
+    [true, true, false, false],
+    [true, false, true, false],
+    [true, undefined, true, null],
+  ] as const)(
+    'loaded %s, canCreateTask %s, level allows %s -> %s',
+    (loaded, listCanCreateTask, levelAllows, expected) => {
+      expect(createTaskRightOf({ loaded, listCanCreateTask, levelAllows })).toBe(expected);
+    }
+  );
+
+  it('does not go through the plain event right: a caller with Task and no Event still has Task', () => {
+    // The list said canCreate: false (the event right) and canCreateTask: true; the Task right is its own answer.
+    expect(createTaskRightOf({ loaded: true, listCanCreateTask: true })).toBe(true);
+  });
+});
+
+describe('addEventRightOf: Add event is offered when either type is allowed (task 012)', () => {
+  it.each([
+    // [event right, task right, expected]
     [true, true, true],
-    [true, false, false],
-    [true, null, null],
-    [true, undefined, null],
-    [false, true, false],
+    [true, false, true],
+    [true, null, true],
+    [false, true, true],
+    [null, true, true],
     [false, false, false],
-    [false, undefined, false],
-    [null, true, null],
+    [false, null, false],
     [null, false, null],
-  ] as const)('event right %s and canCreateTask %s -> %s', (eventRight, canCreateTask, expected) => {
-    expect(createTaskRightOf(eventRight, canCreateTask)).toBe(expected);
+    [null, null, null],
+  ] as const)('event right %s and task right %s -> %s', (eventRight, taskRight, expected) => {
+    expect(addEventRightOf(eventRight, taskRight)).toBe(expected);
   });
 });
 

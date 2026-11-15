@@ -4,7 +4,7 @@
  * events only and the SPA makes no to-do read, write or delete (was DetailEventsTodosRoots.test.tsx).
  *
  * What runs for real: `RecordTemplateModal` (R4 task 005; was R3's `RecordDetailModal`) with every section (fields,
- * documents, tasks & events, messages), `EventsCalendar`, `DocumentLibrary`, `RecordMessages`, the shared `SprkModal` /
+ * documents, events, messages), `EventsCalendar`, `DocumentLibrary`, `RecordMessages`, the shared `SprkModal` /
  * `ConfirmModal`, `BffAccessState`, `delete-own`, `web-api-client` (the routes) and Fluent v9. What is substituted: the
  * network seam (`bffApiCall`, answering the external routes and throwing `ApiError` exactly as bff-client builds it; a
  * to-do route is not answered, so any call to one fails the test) and MSAL's `useMsal` (BffAccessState reads it).
@@ -197,11 +197,11 @@ afterEach(() => {
 const STATIC_EMPTY = 'No events or tasks to show for this record yet.';
 
 /**
- * Task 009: no to-do control or read anywhere on the record. Task 011: Tasks are events of type Task, so the section has a
- * Tasks group; what stays gone is the old to-do list's controls and its route.
+ * Task 009: no to-do control or read anywhere on the record. Task 012: a Task is an event type, so the section is one Events
+ * list; what stays gone is the old to-do list's controls and its route.
  */
 function expectNoTodoSurface(dialog: HTMLElement): void {
-  expect(within(dialog).queryByRole('button', { name: /add to-do|create new task/i })).toBeNull();
+  expect(within(dialog).queryByRole('button', { name: /add to-do|create new task|add task|create task/i })).toBeNull();
   expect(listCalls('todos')).toEqual([]);
 }
 

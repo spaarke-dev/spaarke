@@ -9,7 +9,7 @@
  * entity name. Each section id renders through `sections/` (`renderRecordSection`); an action whose flow has its own
  * dialogs or notices (Download, Delete request, Submit invoice) is an action host in `actions/`, mounted in the record's
  * content for every action id the config lists (toolbar or section), which offers or withdraws its action. The create
- * actions (Upload, New message, Add task, Add event) are offered by the section that owns the list and its dialog (`offerAction`);
+ * actions (Upload, New message, Add event) are offered by the section that owns the list and its dialog (`offerAction`);
  * that section renders the dialog (a `FormModal`) itself, so the dialog is a React descendant of this modal (FR-03, task
  * 004).
  *
@@ -422,7 +422,7 @@ export const RecordTemplateModal: React.FC<RecordTemplateModalProps> = ({
   };
 
   // The modal's own actions: Refresh (hidden while an operation holds the view, so its result is never replaced) and Copy
-  // link. An action with a host, or one a section offers (Upload, New message, Add task, Add event: tasks 004 / 011), is
+  // link. An action with a host, or one a section offers (Upload, New message, Add event: tasks 004 / 012), is
   // shown while its owner offers it; the rest are hidden, not disabled.
   const handlers: Partial<Record<RecordToolbarActionId, () => void | Promise<void>>> = {
     ...(holdNavigation ? {} : { refresh: handleRefresh }),
@@ -439,7 +439,7 @@ export const RecordTemplateModal: React.FC<RecordTemplateModalProps> = ({
   // for it (task 011: `projects` for a project, `records` for a matter or work assignment), and whether that level is an
   // answer or only the fail-safe guess (no entry for the project). "Your access" is that level and nothing else, and it
   // is display only: a level DECIDES writes only for a project caller without `writeAccessPerRecord` (the lists decide
-  // the rest; Add task follows `canCreateTask`), and a `writeAccessPerRecord` caller sees no level line.
+  // the rest; the Task type of Add event follows `canCreateTask`), and a `writeAccessPerRecord` caller sees no level line.
   const accessFacts = recordAccessFactsOf(detail.documentsRoot, id ?? '', callerContext);
   const yourAccess = yourAccessOf(accessFacts);
   // One descriptor per action, wherever it shows (the toolbar or a section's header): the same visibility rule for both.

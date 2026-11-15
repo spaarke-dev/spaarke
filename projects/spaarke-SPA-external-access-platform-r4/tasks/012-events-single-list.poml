@@ -4,7 +4,7 @@
     <title>Record "Events" section: one list of events (Task shown as the event type), one "Add event" with a type choice; drop the separate Tasks list and Add task (owner retest 2026-11-14)</title>
     <phase>1 Record template and actions (post-E2E rework, round 2)</phase>
     <gate>none (SPA only; BFF contract from 008 unchanged)</gate>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>.tsx in the SPA and the shared icon map</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -48,7 +48,8 @@
     <criterion testable="true">No "Tasks" group heading, "Add task" label or "Create Task" title renders anywhere in the SPA.</criterion>
   </acceptance-criteria>
 
-  <notes></notes>
+  <notes>One Events list (Task badge on isTask rows), one Add event with Type Event/Task (Task on canCreateTask; Task-only defensive), Description removed (never sent). recordAccess createTaskRightOf/addEventRightOf; SPA addTask id removed (shared icon map untouched). Adversarial review: no F; K2/K3/K4 noted. Detail: notes/task-012-notes.md.
+rework: none task 012</notes>
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
   </execution>

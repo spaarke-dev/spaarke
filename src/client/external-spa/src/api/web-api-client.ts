@@ -133,7 +133,7 @@ export interface ODataEvent extends CreatorStamps {
   _sprk_regardingproject_value?: string | null;
   /**
    * `true` when the event is of the Task type (R4 task 008): the BFF reads the type server-side and sends only this
-   * boolean. The record's Tasks list shows these; every other event is an Event. Absent (an older BFF) is "not a task".
+   * boolean. The Events list marks these with a Task badge; every other event is a plain event. Absent (an older BFF) is "not a task".
    */
   isTask?: boolean;
 }
@@ -224,7 +224,7 @@ export interface ListResult<T> {
   truncated: boolean;
   /** The BFF's `canCreate` for the record the list is scoped to, when it wrote one (task 036 fix round 1); else absent. */
   canCreate?: boolean | null;
-  /** The event lists' `canCreateTask` (task 008), when the BFF wrote one; else absent (hide "Add task"). */
+  /** The event lists' `canCreateTask` (task 008), when the BFF wrote one; else absent (no Task type is offered). */
   canCreateTask?: boolean | null;
 }
 
@@ -596,7 +596,7 @@ export interface CreateEventPayload {
   sprk_status?: number;
   /**
    * The event's type, from the BFF's closed set: only `"task"` (R4 task 008). Omit it for an untyped event (Add event); any
-   * other value is refused with 400. Sent by "Add task" only.
+   * other value is refused with 400. Sent only when the create dialog's Type is Task.
    */
   eventType?: 'task';
   /**
@@ -614,7 +614,7 @@ export interface CreateEventPayload {
  *
  * The server takes the parent from the ROUTE only (`CreateExternalEventRequest` has `sprk_name`, `sprk_duedate`,
  * `sprk_status` and, since task 008, the optional `eventType` ("task" only), and no regarding member), so a matter or
- * work-assignment event sends the payload as given. "Add task" sends `eventType: "task"`; "Add event" sends none. The project
+ * work-assignment event sends the payload as given. Type Task sends `eventType: "task"`; Type Event sends none. The project
  * route keeps the body it has always been sent, the project bind included (the server skips that member), byte for byte.
  *
  * @param root      Which kind of record `recordId` is
