@@ -36,6 +36,12 @@ Sign in as a **billing administrator** unless a step says otherwise.
 - [ ] Changing one of its rules is refused as "not in force". Excluding one of its rules still works. Removing its assignment still works.
 - [ ] A Procedure whose Area is not Billing cannot be assigned.
 
+**Procedure-change banner on the Invoice Review page (113b, needs the dev BFF with #2839)**
+- [ ] Open an invoice in review whose firm has a Procedure. With nothing changed since it was checked, no banner shows.
+- [ ] Change that firm's Procedures (for example pin a different version), then reopen the invoice. A warning says the procedures have changed and need a re-check. There is no re-check button yet (R2).
+- [ ] Decisions and corrections still work while the banner shows.
+- [ ] A decided invoice shows no banner.
+
 **Invoices (ISS-021)**
 - [ ] On a record that has the deactivated Procedure, submit or re-run an invoice. That Procedure's rules no longer produce findings.
 

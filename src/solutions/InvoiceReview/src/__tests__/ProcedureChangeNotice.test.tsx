@@ -65,10 +65,17 @@ describe('InvoiceReviewPage: Procedure-change banner (113b)', () => {
     ['absent (the server did not judge it)', undefined],
     ['null', null],
     ['NotChanged', { state: 'NotChanged' }],
-    ['a state this page does not know', { state: 'SomethingNew', text: 'Some new text' }],
+    ['a state this page does not know, with no text', { state: 'SomethingNew' }],
   ])('must-not-fire: %s shows no banner', async (_label, change) => {
     await renderWith(change);
     expect(screen.queryByTestId('procedure-change-notice')).not.toBeInTheDocument();
+  });
+
+  it('must-fire: a state this page does not know, with text, shows that text as information (never read as no change)', async () => {
+    await renderWith({ state: 'SomethingNew', text: 'Some new text' });
+    const notice = screen.getByTestId('procedure-change-notice');
+    expect(notice).toHaveTextContent('Some new text');
+    expect(procedureChangeView({ state: 'SomethingNew', text: 'Some new text' })?.intent).toBe('info');
   });
 
   it('must-not-fire: the banner blocks nothing; Accept all clean and the corrections stay enabled', async () => {

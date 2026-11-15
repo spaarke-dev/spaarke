@@ -4,7 +4,8 @@
  *   Changed           -> warning, the server's sentence ("... re-check to apply them"). There is no re-check action in R1 (ebilling-r2).
  *   CouldNotBeChecked -> warning: an unknown is never shown as "no change".
  *   NotYetChecked     -> info, titled so the server's short text reads as a sentence.
- *   NotChanged, absent, or a state this page does not know -> nothing.
+ *   A state this page does not know -> info with the server's text (nothing if it has no text), never silently "no change".
+ *   NotChanged or absent -> nothing.
  */
 import { MessageBar, MessageBarBody, MessageBarTitle } from '@fluentui/react-components';
 import type { ProcedureChange } from '../services/invoiceReviewApi';
@@ -33,8 +34,14 @@ export function procedureChangeView(change: ProcedureChange | null | undefined):
       return { intent: 'warning', title: null, text: textOr(change.text, PROCEDURE_CHANGE_FALLBACK.CouldNotBeChecked) };
     case 'NotYetChecked':
       return { intent: 'info', title: 'Procedure changes', text: textOr(change.text, PROCEDURE_CHANGE_FALLBACK.NotYetChecked) };
-    default:
+    case 'NotChanged':
+    case undefined:
       return null;
+    default: {
+      // A state this page does not know yet: show the server's text rather than read it as "no change"; without text there is nothing to say.
+      const text = change?.text;
+      return text && text.trim() ? { intent: 'info', title: 'Procedure changes', text } : null;
+    }
   }
 }
 
