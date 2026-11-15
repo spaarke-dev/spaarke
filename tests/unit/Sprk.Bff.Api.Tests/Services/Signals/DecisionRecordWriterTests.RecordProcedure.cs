@@ -629,6 +629,11 @@ public sealed partial class DecisionRecordWriterTests
         h.Row.GetAttributeValue<EntityReference>(table).Should().BeEquivalentTo(new EntityReference(table, id), "the typed core column is the decision context");
         h.Entities.Verify(e => e.RetrieveAsync(table, id, It.IsAny<string[]>(), It.IsAny<CancellationToken>()), Times.Never,
             "a core subject is its own core: the CORE branch derives with no read");
+        // Fix round 2 (F3-2): the check above rules out only RetrieveAsync(table, id); a derivation read through RetrieveMultipleAsync, or of
+        // another table or id, would have passed it. Every reader call the write makes is the one already-recorded lookup, and there is one.
+        h.Entities.Invocations.Select(i => i.Method.Name).Should().OnlyContain(
+            name => name == nameof(IGenericEntityService.RetrieveMultipleAsync), "the only reader calls are RetrieveMultipleAsync lookups");
+        h.Lookups.Should().ContainSingle("the already-recorded lookup is the only read: the CORE derivation reads nothing");
     }
 
     [Fact]
@@ -774,5 +779,113 @@ public sealed partial class DecisionRecordWriterTests
         DecisionActionCatalog.TryGetRecordProcedure("approve-invoice", out _).Should().BeFalse();
         DecisionActionCatalog.TryGetRecordProcedure("Assign-Procedure", out _).Should().BeFalse();
         DecisionActionCatalog.TryGetRecordProcedure(null, out _).Should().BeFalse();
+    }
+
+    // ── Fix round 2 (ontology-r1 review) ─────────────────────────────────────────────────────────────────────────────────────
+
+    /// <summary>The writer's <c>ReasonMaxLength</c> (a private constant: sprk_reason's column size).</summary>
+    private const int RecordProcedureReasonMaxLength = 2000;
+
+    /// <summary>A request that breaks exactly one of the pre-I/O checks, by case name.</summary>
+    private static RecordProcedureDecisionRecordRequest RecordProcedureBreaking(string brokenCheck) => brokenCheck switch
+    {
+        "reason-too-long" => RecordProcedure(reason: new string('r', RecordProcedureReasonMaxLength + 1)),
+        "decision-id-empty" => RecordProcedure(decisionId: Guid.Empty),
+        "role-empty" => RecordProcedure(role: ""),
+        "role-blank" => RecordProcedure(role: "   "),
+        "outcome-empty" => RecordProcedure() with { Outcome = "" },
+        "outcome-blank" => RecordProcedure() with { Outcome = " \t " },
+        _ => throw new ArgumentOutOfRangeException(nameof(brokenCheck), brokenCheck, null),
+    };
+
+    // F3-1: each pre-I/O refusal is its own test. Without the reason-length check a 2001-char reason fails AFTER I/O, in the create, as a
+    // retryable CreateFailed; the others would reach the lookup. Each case must answer ReviewInvalid with the writer having touched nothing.
+    [Theory]
+    [InlineData("reason-too-long")]
+    [InlineData("decision-id-empty")]
+    [InlineData("role-empty")]
+    [InlineData("role-blank")]
+    [InlineData("outcome-empty")]
+    [InlineData("outcome-blank")]
+    public async Task RecordProcedure_FixRound2_APreIoRefusal_IsReviewInvalid_WithNoIo_AndThePreflightRefusesIt_TheSame(string brokenCheck)
+    {
+        var h = RecordProcedureHarness();
+
+        var ex = (await h.Writer.Invoking(w => w.WriteRecordProcedureDecisionAsync(RecordProcedureBreaking(brokenCheck)))
+            .Should().ThrowAsync<DecisionRecordRefusedException>()).Which;
+
+        ex.Reason.Should().Be(DecisionRecordRefusalReason.ReviewInvalid);
+        NoIo(h);
+        h.Writer.Invoking(w => w.PreflightRecordProcedureDecision(RecordProcedureBreaking(brokenCheck)))
+            .Should().Throw<DecisionRecordRefusedException>().Which.Reason.Should().Be(DecisionRecordRefusalReason.ReviewInvalid);
+        NoIo(h);
+    }
+
+    [Fact]
+    public void RecordProcedure_FixRound2_ThePreflight_RefusesAReasonOverTheColumnSize_AndPassesOneAtTheLimit()
+    {
+        var h = RecordProcedureHarness();
+
+        h.Writer.Invoking(w => w.PreflightRecordProcedureDecision(RecordProcedure(reason: new string('r', RecordProcedureReasonMaxLength + 1))))
+            .Should().Throw<DecisionRecordRefusedException>().Which.Reason.Should().Be(DecisionRecordRefusalReason.ReviewInvalid);
+        h.Writer.Invoking(w => w.PreflightRecordProcedureDecision(RecordProcedure(reason: new string('r', RecordProcedureReasonMaxLength))))
+            .Should().NotThrow("the limit itself is a valid reason");
+        NoIo(h);
+    }
+
+    // Item 3: a note is text. A JSON value that is not a string is not a blank note (and must not throw while it is classified), and it is not
+    // a valid note: it is refused as ReviewInvalid before any I/O, never written and hashed as if it were text.
+    public static TheoryData<string> NonStringNoteKinds => new() { "json-number", "json-object", "json-array", "json-bool", "node-number", "node-guid", "node-object", "clr-int" };
+
+    private static object NonStringNote(string kind) => kind switch
+    {
+        "json-number" => JsonDocument.Parse("5").RootElement.Clone(),
+        "json-object" => JsonDocument.Parse("""{"text":"x"}""").RootElement.Clone(),
+        "json-array" => JsonDocument.Parse("""["x"]""").RootElement.Clone(),
+        "json-bool" => JsonDocument.Parse("true").RootElement.Clone(),
+        "node-number" => System.Text.Json.Nodes.JsonValue.Create(5),
+        // A JsonValue over a Guid reports the String kind (it serializes as a string) but is not a string: GetValue<string>() throws on it.
+        "node-guid" => System.Text.Json.Nodes.JsonValue.Create(Guid.NewGuid())!,
+        "node-object" => new System.Text.Json.Nodes.JsonObject { ["text"] = "x" },
+        "clr-int" => 5,
+        _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, null),
+    };
+
+    [Theory]
+    [MemberData(nameof(NonStringNoteKinds))]
+    public void RecordProcedure_FixRound2_ANonStringNote_IsNotBlank_AndDoesNotThrowWhileItIsClassified(string kind)
+    {
+        var request = RecordProcedure(values: WithNote("assign-procedure", NonStringNote(kind)));
+
+        var kept = () => DecisionRecordWriter.RecordProcedureValuesOf(request);
+
+        kept.Should().NotThrow().Which.Should().ContainKey("note", "a non-string note is not a blank one");
+    }
+
+    [Theory]
+    [MemberData(nameof(NonStringNoteKinds))]
+    public async Task RecordProcedure_FixRound2_ANonStringNote_IsRefusedAsReviewInvalid_BeforeAnyIo_AndByThePreflight(string kind)
+    {
+        var h = RecordProcedureHarness();
+        var request = RecordProcedure(values: WithNote("assign-procedure", NonStringNote(kind)));
+
+        var ex = (await h.Writer.Invoking(w => w.WriteRecordProcedureDecisionAsync(request))
+            .Should().ThrowAsync<DecisionRecordRefusedException>()).Which;
+
+        ex.Reason.Should().Be(DecisionRecordRefusalReason.ReviewInvalid);
+        NoIo(h);
+        h.Writer.Invoking(w => w.PreflightRecordProcedureDecision(request))
+            .Should().Throw<DecisionRecordRefusedException>().Which.Reason.Should().Be(DecisionRecordRefusalReason.ReviewInvalid);
+    }
+
+    [Fact]
+    public async Task RecordProcedure_FixRound2_ATextNote_ThroughAJsonValue_IsStillWritten()
+    {
+        var h = RecordProcedureHarness();
+
+        await h.Writer.WriteRecordProcedureDecisionAsync(
+            RecordProcedure(values: WithNote("assign-procedure", System.Text.Json.Nodes.JsonValue.Create("Client asked for this"))));
+
+        StoredValues(h.Row).GetProperty("note").GetString().Should().Be("Client asked for this");
     }
 }
