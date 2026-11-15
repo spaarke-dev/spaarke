@@ -489,3 +489,11 @@ No message is sent from this design. The session sends them.
 - 2e-1 has no dependencies and can run in parallel with 2a.
 - 2b, 2d2 and 2e2 wait on the owner's answers.
 - Deploy beyond dev still needs `Deploy-EbillingInvoiceCorrectionNoteColumn.ps1` first (095f part 1).
+
+## 13. Peer answers
+
+- **spa-r4, 2026-11-15, on Q10:** it accepts an additive optional `correction` prop on `InvoiceSubmissionWizard` in principle. The owner still picks among the options. Its conditions for the two external call sites:
+  1. Without `correction`, the behaviour is byte-for-byte today's, proven by the existing suites unchanged, including `InvoiceSubmissionWizard.lockedRecord.test.tsx`.
+  2. It composes with `lockedRecord`, `hideTitle` and the `submittingRef` close guard. State whether `correction` + `lockedRecord` is supported or refused, and test it.
+  3. A minor version of Spaarke.UI.Components (3.x), with consumer lockfiles refreshed in the same PR.
+  4. A scoped diff review by spa-r4 before the PR.
