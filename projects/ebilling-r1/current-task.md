@@ -12,6 +12,12 @@
 
 ### In flight
 
+- **UPDATE:** 093's fix round (A–H) is merged into work at a95f7e7297 and pushed; the 093 branches are deleted.
+  - Sent to uac-r2 for review (gate diff plus callers). The conflict check found one overlap: #2615 on the Ledger ArchTest.
+  - ArchTests are being re-run on the merge.
+  - The PR to master waits for uac-r2 (093), ontology-r1 (084h-1) and the owner's go.
+  - The details below are history.
+
 - **093 (firm file routes)**
   - Build: branch `worktree-agent-aa64df149f3786340` (dc2e5ab86c).
   - Two Opus adversarial reviews are done.
