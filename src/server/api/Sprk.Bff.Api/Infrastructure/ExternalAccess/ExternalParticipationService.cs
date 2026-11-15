@@ -716,11 +716,18 @@ public class ExternalParticipationService
         response.EnsureSuccessStatusCode();
 
         var page = await response.Content.ReadFromJsonAsync<MemberPageResult>(ct).ConfigureAwait(false);
-        var ids = (page?.Value ?? new List<ExternalOrganizationMembership.ContactOrganizationRow>())
+        if (page?.Value is null)
+        {
+            // #2845 review: a 2xx without a value array is not a Dataverse answer — a fault, never an empty page.
+            throw new InvalidOperationException(
+                $"The active members of Organization {organizationId} were read without a value array.");
+        }
+
+        var ids = page.Value
             .Where(r => r.ContactId is { } id && id != Guid.Empty)
             .Select(r => r.ContactId!.Value)
             .ToList();
-        return new OrganizationMemberPage(ids, page?.NextLink);
+        return new OrganizationMemberPage(ids, page.NextLink);
     }
 
     private sealed class MemberPageResult
@@ -1409,16 +1416,20 @@ public class ExternalParticipationService
         response.EnsureSuccessStatusCode();
 
         using var doc = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(ct), cancellationToken: ct);
-        var ids = new List<Guid>();
-        if (doc.RootElement.TryGetProperty("value", out var value) && value.ValueKind == JsonValueKind.Array)
+        if (!doc.RootElement.TryGetProperty("value", out var value) || value.ValueKind != JsonValueKind.Array)
         {
-            foreach (var row in value.EnumerateArray())
+            // #2845 review: a 2xx without a value array is not a Dataverse answer — a fault, never "no rows" (which the
+            // No Access share enforcer would read as nothing to enforce).
+            throw new InvalidOperationException("The Dataverse read succeeded without a value array.");
+        }
+
+        var ids = new List<Guid>();
+        foreach (var row in value.EnumerateArray())
+        {
+            if (row.TryGetProperty(column, out var cell) && cell.ValueKind == JsonValueKind.String &&
+                Guid.TryParse(cell.GetString(), out var id) && id != Guid.Empty)
             {
-                if (row.TryGetProperty(column, out var cell) && cell.ValueKind == JsonValueKind.String &&
-                    Guid.TryParse(cell.GetString(), out var id) && id != Guid.Empty)
-                {
-                    ids.Add(id);
-                }
+                ids.Add(id);
             }
         }
 
@@ -2072,7 +2083,19 @@ public class ExternalParticipationService
             }
 
             var result = await response.Content.ReadFromJsonAsync<DataverseQueryResult<ContactOrgRow>>(ct);
-            var memberships = ProjectOrganizationMemberships(result?.Value ?? new List<ContactOrgRow>(), TodayUtc);
+            if (result?.Value is null)
+            {
+                // #2845 review: a 2xx without a value array is not a Dataverse answer — never "no organizations", which
+                // would leave every organization wall out of the deny veto.
+                _logger.LogError(
+                    "[EXT-ACCESS] Contact-organization membership query for Contact {ContactId} returned no value array. " +
+                    "Reporting the read as UNREADABLE — the org terms contribute nothing and the deny veto denies every " +
+                    "queried candidate (ISS-019).",
+                    contactId);
+                return ActiveOrgMemberships.Failed;
+            }
+
+            var memberships = ProjectOrganizationMemberships(result.Value, TodayUtc);
 
             if (memberships.ConferringOrganizationIds.Count != memberships.WallSubjectOrganizationIds.Count)
             {

@@ -194,12 +194,21 @@ internal sealed class ExternalPersonRemovalService
         }
         else
         {
-            var written = markOnlyIfUnchanged is { } read
-                ? await _identityStore.WriteRemovedMarkerIfUnchangedAsync(contactId, read.ETag, _time.GetUtcNow(), ct)
-                    .ConfigureAwait(false)
-                : await _identityStore.WriteRemovedMarkerAsync(contactId, _time.GetUtcNow(), ct).ConfigureAwait(false);
-            // #2845: the request forgets the removed marker it may have read (RequestAccessMemo), whatever the write's status.
-            _participations.ForgetRequestAccessReads();
+            StoreWriteResult written;
+            try
+            {
+                written = markOnlyIfUnchanged is { } read
+                    ? await _identityStore.WriteRemovedMarkerIfUnchangedAsync(contactId, read.ETag, _time.GetUtcNow(), ct)
+                        .ConfigureAwait(false)
+                    : await _identityStore.WriteRemovedMarkerAsync(contactId, _time.GetUtcNow(), ct).ConfigureAwait(false);
+            }
+            finally
+            {
+                // #2845: the request forgets the removed marker it may have read (RequestAccessMemo), whatever the write's
+                // status — and when the write threw, since it may still have landed.
+                _participations.ForgetRequestAccessReads();
+            }
+
             if (written.Status == StoreWriteStatus.PreconditionFailed && markOnlyIfUnchanged is not null)
             {
                 _logger.LogInformation(
@@ -311,10 +320,19 @@ internal sealed class ExternalPersonRemovalService
 
         // Removed, or a marker whose read is not proven: the administrator asked to reinstate, so the clear is sent either way,
         // but only on the row version read above (never If-Match: *).
-        var written = await _identityStore.WriteRemovedMarkerIfUnchangedAsync(contactId, contact.ETag, null, ct)
-            .ConfigureAwait(false);
-        // #2845: the request forgets the removed marker it may have read (RequestAccessMemo), whatever the write's status.
-        _participations.ForgetRequestAccessReads();
+        StoreWriteResult written;
+        try
+        {
+            written = await _identityStore.WriteRemovedMarkerIfUnchangedAsync(contactId, contact.ETag, null, ct)
+                .ConfigureAwait(false);
+        }
+        finally
+        {
+            // #2845: the request forgets the removed marker it may have read (RequestAccessMemo), whatever the write's status
+            // — and when the write threw, since it may still have landed.
+            _participations.ForgetRequestAccessReads();
+        }
+
         if (written.Status == StoreWriteStatus.PreconditionFailed)
         {
             _logger.LogWarning(

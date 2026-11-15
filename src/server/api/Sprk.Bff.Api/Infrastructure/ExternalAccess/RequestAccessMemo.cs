@@ -29,9 +29,6 @@ internal sealed class RequestAccessMemo
     /// <summary>The <c>HttpContext.Items</c> key the request's memo is kept under.</summary>
     internal const string HttpContextItemsKey = "uac:request-access-memo";
 
-    /// <summary>Guards creating (and finding) the memo in <c>HttpContext.Items</c>, which is not thread-safe.</summary>
-    private static readonly object ItemsGate = new();
-
     private readonly ConcurrentDictionary<string, object> _entries = new(StringComparer.Ordinal);
 
     /// <summary>
@@ -45,7 +42,9 @@ internal sealed class RequestAccessMemo
             return null;
         }
 
-        lock (ItemsGate)
+        // Items is a plain dictionary. It is locked on itself, as CallerWhoAmIMemo locks it, so every in-request user of
+        // Items takes the same lock and requests never wait on each other.
+        lock (context.Items)
         {
             if (context.Items.TryGetValue(HttpContextItemsKey, out var existing) && existing is RequestAccessMemo memo)
             {

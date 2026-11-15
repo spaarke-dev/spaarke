@@ -286,6 +286,84 @@ public sealed class RequestAccessMemoTests
     }
 
     [Fact]
+    public async Task Memo_ACallerWaitingOnAReadWhoseAnswerIsRejected_AsksAgainItself()
+    {
+        // The owner's read is still open when the waiter joins the same key; it then answers an "unknown" value the
+        // caller's remember() refuses. The waiter must not be served that answer: it reads again itself.
+        var memo = new RequestAccessMemo();
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var reads = 0;
+        static bool Remember(RemovedMarkerRead marker) => marker is RemovedMarkerRead.NotRemoved or RemovedMarkerRead.Removed;
+
+        var owner = memo.GetOrReadAsync(RequestAccessMemo.RemovedMarkerKey(Contact), async _ =>
+        {
+            Interlocked.Increment(ref reads);
+            await release.Task;
+            return RemovedMarkerRead.Unreadable;
+        }, Remember, CancellationToken.None);
+        var waiter = memo.GetOrReadAsync(RequestAccessMemo.RemovedMarkerKey(Contact), _ =>
+        {
+            Interlocked.Increment(ref reads);
+            return Task.FromResult(RemovedMarkerRead.NotRemoved);
+        }, Remember, CancellationToken.None);
+
+        waiter.IsCompleted.Should().BeFalse("precondition: the waiter joined the owner's read while it was in flight");
+        release.SetResult();
+
+        (await owner).Should().Be(RemovedMarkerRead.Unreadable, "the owner is answered with its own read");
+        (await waiter).Should().Be(RemovedMarkerRead.NotRemoved, "the waiter did not inherit the rejected answer; it read again");
+        reads.Should().Be(2);
+        memo.Count.Should().Be(1, "only the proven answer is remembered");
+    }
+
+    [Fact]
+    public async Task CiamPrincipal_AnUnknownDenyChunkAnswerMetByOneConcurrentComposition_FailsOnlyThatOneClosed()
+    {
+        // The reference: the same world with no fault.
+        var referenceWorld = new World();
+        var reference = (await CiamContactPrincipalStrategy.ComposeAsync(
+            referenceWorld.Service(referenceWorld.NewRequest()), Contact, null, null, CancellationToken.None)).Principal;
+        reference.ProjectAccess.Should().NotBeEmpty();
+        reference.MatterAccess.Should().NotBeEmpty();
+        reference.WorkAssignmentAccess.Should().NotBeEmpty();
+
+        // The three compositions run at once (the flag barrier proves it). The ethical-wall query they share answers
+        // "unknown" (null) ONCE, and that read is held open until all three deny-list evaluations have joined it, so two
+        // compositions are WAITING on the read whose answer is rejected.
+        var world = new World();
+        world.Participations.FlagBarrier = new Barrier3();
+        world.NoAccess.UnreadableChunks = 1;
+        world.NoAccess.HoldUnreadableChunkUntilThreeEvaluations = true;
+
+        var composed = (await CiamContactPrincipalStrategy.ComposeAsync(
+            world.Service(world.NewRequest()), Contact, null, null, CancellationToken.None)).Principal;
+
+        world.NoAccess.EvaluationsStarted.Should().Be(3, "precondition: all three evaluations joined the held read");
+        world.NoAccess.OrganizationChunkQueries.Should().Be(2,
+            "the read that answered unknown was asked again once, by a waiter, and its proven answer shared");
+
+        var failedClosed = new[]
+        {
+            composed.ProjectAccess.Count == 0, composed.MatterAccess.Count == 0, composed.WorkAssignmentAccess.Count == 0,
+        };
+        failedClosed.Count(f => f).Should().Be(1, "only the composition that met the unknown answer fails closed");
+        if (!failedClosed[0])
+        {
+            composed.ProjectAccess.Should().BeEquivalentTo(reference.ProjectAccess, o => o.WithStrictOrdering());
+        }
+
+        if (!failedClosed[1])
+        {
+            composed.MatterAccess.Should().Equal(reference.MatterAccess);
+        }
+
+        if (!failedClosed[2])
+        {
+            composed.WorkAssignmentAccess.Should().Equal(reference.WorkAssignmentAccess);
+        }
+    }
+
+    [Fact]
     public async Task Memo_ARejectedAnswerIsNotShared_AndClearForgetsEverything()
     {
         var memo = new RequestAccessMemo();
@@ -513,10 +591,15 @@ public sealed class RequestAccessMemoTests
     }
 
     /// <summary>The REAL deny-list orchestration (chunking, both loops, fail-closed) over a counting wire read.</summary>
-    private sealed class CountingNoAccessReader : NoAccessListReader
+    /// <remarks>It re-implements <see cref="INoAccessListReader"/> only to count the evaluations that have REACHED their first
+    /// query: the real <see cref="NoAccessListReader.GetDeniedRecordsAsync(NoAccessSubjects, IReadOnlyCollection{NoAccessCandidateRecord}, CancellationToken)"/>
+    /// runs synchronously up to its first unfinished await — the memo join of its first query — so when it returns its task,
+    /// that evaluation either owns that read or is waiting on it.</remarks>
+    private sealed class CountingNoAccessReader : NoAccessListReader, INoAccessListReader
     {
         private readonly ForwardingAccessor _accessor;
-        private int _orgQueries, _recordQueries;
+        private readonly TaskCompletionSource _threeEvaluationsJoined = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private int _orgQueries, _recordQueries, _evaluations;
 
         public CountingNoAccessReader()
             : this(new ForwardingAccessor())
@@ -532,8 +615,32 @@ public sealed class RequestAccessMemoTests
         public int OrganizationChunkQueries => Volatile.Read(ref _orgQueries);
         public int RecordChunkQueries => Volatile.Read(ref _recordQueries);
 
+        public int EvaluationsStarted => Volatile.Read(ref _evaluations);
+
         public int UnreadableChunks;
         public int ThrowingChunks;
+
+        /// <summary>When set, an unreadable chunk's answer is held until three evaluations have joined their first query.</summary>
+        public bool HoldUnreadableChunkUntilThreeEvaluations { get; set; }
+
+        Task<NoAccessListResult> INoAccessListReader.GetDeniedRecordsAsync(
+            Guid? contactId, IReadOnlyCollection<Guid> organizationIds, IReadOnlyCollection<NoAccessCandidateRecord> candidates,
+            CancellationToken ct)
+            => Started(GetDeniedRecordsAsync(contactId, organizationIds, candidates, ct));
+
+        Task<NoAccessListResult> INoAccessListReader.GetDeniedRecordsAsync(
+            NoAccessSubjects subjects, IReadOnlyCollection<NoAccessCandidateRecord> candidates, CancellationToken ct)
+            => Started(GetDeniedRecordsAsync(subjects, candidates, ct));
+
+        private Task<NoAccessListResult> Started(Task<NoAccessListResult> evaluation)
+        {
+            if (Interlocked.Increment(ref _evaluations) == 3)
+            {
+                _threeEvaluationsJoined.TrySetResult();
+            }
+
+            return evaluation;
+        }
 
         internal override Task<List<NoAccessEntryRow>?> QueryChunkAsync(string subjectFilter, string objectFilter, CancellationToken ct)
         {
@@ -547,7 +654,9 @@ public sealed class RequestAccessMemoTests
 
                 if (Interlocked.Decrement(ref UnreadableChunks) >= 0)
                 {
-                    return Task.FromResult<List<NoAccessEntryRow>?>(null);
+                    return HoldUnreadableChunkUntilThreeEvaluations
+                        ? UnreadableOnceThreeJoinedAsync()
+                        : Task.FromResult<List<NoAccessEntryRow>?>(null);
                 }
             }
             else
@@ -556,6 +665,12 @@ public sealed class RequestAccessMemoTests
             }
 
             return Task.FromResult<List<NoAccessEntryRow>?>(new List<NoAccessEntryRow>());
+        }
+
+        private async Task<List<NoAccessEntryRow>?> UnreadableOnceThreeJoinedAsync()
+        {
+            await _threeEvaluationsJoined.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            return null;
         }
     }
 }

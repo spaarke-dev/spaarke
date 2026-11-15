@@ -829,12 +829,19 @@ public class NoAccessListReader : INoAccessListReader
     /// (an empty lookup is an explicit JSON null); a row that lacks one was not read in full, so which subject or object the entry
     /// names cannot be told from an entry that names none. That returns <c>null</c>, the same fail-closed signal as a failed query
     /// (the caller denies every queried candidate), instead of letting the entry read as a malformed one that "denies nothing".
+    /// #2845 review: a body with no <c>value</c> array is not a Dataverse answer either. It returns <c>null</c> too, never an
+    /// empty page ("no denials"), as the grant reader treats the same shape as unreadable.
     /// </summary>
     internal static List<NoAccessEntryRow>? ParseRows(string body, ILogger logger)
     {
         using var document = JsonDocument.Parse(body);
         if (!document.RootElement.TryGetProperty("value", out var value) || value.ValueKind != JsonValueKind.Array)
-            return new List<NoAccessEntryRow>();
+        {
+            logger.LogError(
+                "[NO-ACCESS] Deny-list query succeeded without a value array. Failing CLOSED - this chunk's candidates will be " +
+                "denied (NFR-01).");
+            return null;
+        }
 
         var columns = RowSelect.Split(',');
         foreach (var row in value.EnumerateArray())
