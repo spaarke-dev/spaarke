@@ -55,7 +55,7 @@
       Only the invoice PDF is listed (firm-visible, servable, clean, matching parent).
       BREAKING: 093 retires all four `/invoices/{id}/documents` routes, so the BFF and SPA deploy back to back, BFF first. R4 is the SPA side.
       Owner retest 2026-11-14 ("I don't see the actual invoice document/file"; big Upload button) is answered by this task: the real file shows, and invoice upload goes away.
-      Review ebilling's DTO and file:line before their 093 PR.
+      Review ebilling's DTO and file:line before their 093 PR (done 2026-11-15; 093 is in master PR #2839). Also: 403 from the workforce ceiling (`ReadInvoiceFiles`); the content route sends no Content-Disposition name, so name the download from the list's `fileName`; `sizeBytes` and `createdOn` may be null.
     </constraint>
   </constraints>
 
