@@ -8,9 +8,9 @@
 | Field | Value |
 |-------|-------|
 | **Task** | 021: invoice Files section on ebilling 093's routes (FR-13). FULL, sonnet high, directional. The owner pulled it ahead of 020/022/023 on 2026-11-15. |
-| **Step** | #2840 merged (c1eb6e4a8e). Waiting on uac-r2 "BFF live" (master with #2839 + #2840 + mcp spike); the owner has approved the SPA deploy right after |
-| **Status** | 021 committed and pushed; notes in notes/task-021-notes.md; vitest 1715, build OK |
-| **Next Action** | On "BFF live": dispatch deploy-external-spa.yml (dev, master); verify the bundle; give the owner the invoice Files retest. SPA rollback 04dbd8df05 (only together with a BFF rollback, because the old SPA calls the retired routes). |
+| **Step** | DEPLOYED. BFF live 18:32Z (uac-r2 build aa7d6345f3 = master c1eb6e4a8e + mcp spike). SPA run 43747335450 (master c1eb6e4a8e) succeeded; the bundle carries /invoices/{id}/files, "Invoice files aren't available.", "Checking file…" and no invoice /documents root |
+| **Status** | 021 done and deployed; waiting on the owner's invoice Files retest + the 012/013 retest |
+| **Next Action** | Record the owner retest results (018 notes); fix any findings; then phase 2 (020/022/023/024/028). SPA rollback 04dbd8df05 only together with BFF rollback 5a9b687a0b (the old SPA calls the retired routes). uac-r2's 30-minute error gate is running. |
 
 ## Task 021 facts
 - **Contract (not on master; ebilling PR #2839, head `3b33a8d8cc`, local ref `pr/2839`):**
@@ -41,8 +41,8 @@
 uac-r2 holds any 093 BFF until I confirm 021 is merged. **No SPA deploy between merging 021 and that swap.**
 
 ## Live state
-- **Dev BFF:** `5a9b687a0b` (master `2747977f47` + mcp spike). BFF rollback `0173e1486e`.
-- **Dev SPA:** master `04dbd8df05` (run 43735968667; tasks 012/013). SPA rollback: `2747977f47`.
+- **Dev BFF:** `aa7d6345f3` (master `c1eb6e4a8e` + mcp spike), live 18:32Z. BFF rollback `5a9b687a0b`.
+- **Dev SPA:** master `c1eb6e4a8e` (run 43747335450; tasks 012/013/021). SPA rollback: `04dbd8df05` (paired with the BFF rollback).
 - The owner is retesting 012/013 on dev (no results yet).
 
 ## Done this stretch
