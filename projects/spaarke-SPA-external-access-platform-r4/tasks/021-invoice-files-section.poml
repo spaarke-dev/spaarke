@@ -4,7 +4,7 @@
     <title>Invoice Files section; remove invoice upload/versions (FR-13)</title>
     <phase>2 Invoices and documents</phase>
     <gate>after 018, 020, 023 AND ebilling's /invoices/{id}/files routes on master (hard gate, see escalation)</gate>
-    <status>not-started</status>
+    <status>in-progress</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .ts/.tsx code: new Files section, removal of the invoice documents path</rigor-reason>
     <model-tier>sonnet</model-tier>
