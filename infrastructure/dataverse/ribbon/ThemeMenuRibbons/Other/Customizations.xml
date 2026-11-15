@@ -410,15 +410,15 @@
       </RibbonDiffXml>
     </Entity>
     <Entity>
-      <Name LocalizedName="Event Type" OriginalName="Event Type">sprk_EventType</Name>
+      <Name LocalizedName="Event Type Ref" OriginalName="Event Type Ref">sprk_eventtype_ref</Name>
       <EntityInfo>
-        <entity Name="sprk_EventType" unmodified="1">
+        <entity Name="sprk_eventtype_ref" unmodified="1">
           <attributes />
         </entity>
       </EntityInfo>
       <RibbonDiffXml>
         <CustomActions>
-          <CustomAction Id="sprk.ThemeMenu.EventType.CustomAction" Location="Mscrm.HomepageGrid.sprk_eventtype.MainTab.Actions.Controls._children" Sequence="900">
+          <CustomAction Id="sprk.ThemeMenu.EventType.CustomAction" Location="Mscrm.HomepageGrid.sprk_eventtype_ref.MainTab.Actions.Controls._children" Sequence="900">
             <CommandUIDefinition>
               <FlyoutAnchor Id="sprk.ThemeMenu.EventType.Flyout" Command="sprk.ThemeMenu.EventType.Command" LabelText="Dark Mode" ToolTipTitle="Dark Mode" ToolTipDescription="Choose your preferred color theme" Image16by16="$webresource:sprk_ThemeMenu16.svg" Image32by32="$webresource:sprk_ThemeMenu32.svg" PopulateDynamically="false" TemplateAlias="o1">
                 <Menu Id="sprk.ThemeMenu.EventType.Menu">
@@ -433,7 +433,7 @@
               </FlyoutAnchor>
             </CommandUIDefinition>
           </CustomAction>
-          <CustomAction Id="sprk.ThemeMenu.EventType.Form.CustomAction" Location="Mscrm.Form.sprk_eventtype.MainTab.Actions.Controls._children" Sequence="900">
+          <CustomAction Id="sprk.ThemeMenu.EventType.Form.CustomAction" Location="Mscrm.Form.sprk_eventtype_ref.MainTab.Actions.Controls._children" Sequence="900">
             <CommandUIDefinition>
               <FlyoutAnchor Id="sprk.ThemeMenu.EventType.Form.Flyout" Command="sprk.ThemeMenu.EventType.Command" LabelText="Dark Mode" ToolTipTitle="Dark Mode" ToolTipDescription="Choose your preferred color theme" Image16by16="$webresource:sprk_ThemeMenu16.svg" Image32by32="$webresource:sprk_ThemeMenu32.svg" PopulateDynamically="false" TemplateAlias="o1">
                 <Menu Id="sprk.ThemeMenu.EventType.Form.Menu">
