@@ -4,7 +4,7 @@
     <title>MCP conformance in CI and NFR measurements</title>
     <phase>B MCP host and tools</phase>
     <gate>after 010, 022, 023 and 024</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies code (.cs test host) and CI workflow; tests/** modified (root CLAUDE.md §8)</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -116,7 +116,9 @@
     <criterion testable="true">Test scope: cover the stated contract plus the edge cases named in these criteria; anything beyond that needs a one-line justification in the task notes.</criterion>
   </acceptance-criteria>
 
-  <notes>Pin the conformance package version and record it. Live NFR-01 on the dev BFF (p95 3 s / 1.5 s / 15 s) is measured in 042.</notes>
+  <notes>Pin the conformance package version and record it. Live NFR-01 on the dev BFF (p95 3 s / 1.5 s / 15 s) is measured in 042.
+
+Completed 2026-11-15. The owner chose Tier 1 ("Use tier 1", 2026-11-15) and approved the CLAUDE.md §6.5 Path-A exception: job 8 `mcp-conformance` in .github/workflows/ci-tier1-blocking.yml (21a7147a82; Node 22 fix a2616e6f8d). Passing CI run: https://github.com/spaarke-dev/spaarke/actions/runs/43736976687 — 92 passed, 38 baselined failures, "Baseline check passed", job 5 min, shorter than Arch Tests (7 min). It was started by workflow_dispatch on the branch tip because PR #2587 conflicts with master, and GitHub runs no pull_request workflow until master is merged in. The first run (43736096819) failed at load on Node 20 (the suite imports fs.globSync): environment, fixed. The Path-A citation is in the PR #2587 body. Details: notes/nfr-measurements.md "CI run (2026-11-15)".</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

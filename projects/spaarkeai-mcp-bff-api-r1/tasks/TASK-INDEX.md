@@ -28,7 +28,7 @@
 | 023 | spaarke_get_decision_plan and lookup search tools | B | ✅ [done] | 016, 017, 021 | Group F | sonnet / high | FULL |
 | 024 | spaarke_complete_decision app-only write tool | B | ✅ [done] | 014, 017, 021 | Group F | sonnet / high | FULL |
 | 010 | MCP caller-path verification (option C) | B | ✅ [done] | 020, 021, 023, 024 | Group G | opus / high | FULL |
-| 025 | MCP conformance in CI and NFR measurements | B | 🔲 [open] | 010, 022, 023, 024 | Group H | sonnet / high | FULL |
+| 025 | MCP conformance in CI and NFR measurements | B | ✅ [done] | 010, 022, 023, 024 | Group H | sonnet / high | FULL |
 | 030 | Widget scaffold, BFF embedding and CI size gate | C | ✅ [done] | 003, 021 | Group F | sonnet / high | FULL |
 | 031 | Widget Decide lane over MCP shims | C | ✅ [done] | 022, 030 | Group G | sonnet / high | FULL |
 | 032 | Widget Decision wizard over MCP shims | C | ✅ [done] | 023, 024, 031 | Group H | sonnet / xhigh | FULL |
