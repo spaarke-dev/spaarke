@@ -19,6 +19,7 @@
   - **#2838 ordering:** #2838 adds `tests/Spaarke.ArchTests/ScriptMetadataStrongConsistencyGuardTests.cs`. Its KnownOffenders baseline lists the 12 scripts/ebilling files our e36a1e54c4 fixes, and the guard fails on any stale entry. #2838 is still OPEN.
     - If #2838 merges first, our PR deletes those 12 entries in the same change.
     - If ours merges first, tell uac-r2 to empty the baseline before #2838 merges.
+  - **spa-r4 is building R4 021** against #2839 head 3b33a8d8cc (its owner said go); PR ETA ~2–3 h; it sends the PR number and merge SHA. uac-r2 holds #2838 until #2839 merges, then clears the 12 entries itself (#2839 needs no change). uac-r2 sequence: #2839 merged → 021 merged → mcp-r1 pinged → owner exact-SHA go in uac-r2 → swap + 30-min gate → spa-r4 SPA.
   - **Deploy order (strict):** spa-r4's R4 021 built and merged first; then uac-r2's BFF swap (owner go in uac-r2's session); then spa-r4's SPA immediately after.
 - **Reminder for 084h-2 (ontology-r1):** the writer caps only `reason` at 2000 characters, not `note`. 084h-2 must enforce or trim the note at the service (design §9), so an over-long note never reaches the create and fails as a retryable CreateFailed.
 
