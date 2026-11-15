@@ -72,15 +72,34 @@ Beyond the stated contract (one line each): "copy of an email" mirrors "copy of 
 | (a′) seam replaced by null | 23 fail (the record gate fails closed on a missing seam: every invoice refused) |
 | `FirmVisible` check removed from `IsFirmFile` | 1 fails: `not-firm-visible` |
 | `DecideInvoiceFilesAsync` removed from `FirmFileGates` | the guard fails: "NEW external Stored File surface: …DecideInvoiceFilesAsync" |
-| `GetInvoiceFileContentAsync` removed from `FirmFileHandlers` | TBD |
+| `GetInvoiceFileContentAsync` removed from `FirmFileHandlers` | the guard fails: "NEW external Stored File surface: …GetInvoiceFileContentAsync" |
+
+The guard's two seeding runs: 1 failed / 29 passed of the 30 `ExternalDocumentNarrowingGuardTests` each time; restored: 30 / 30.
+
+Found while running the suites: the content handler's `StoredFileService` parameter was inferred as a request body in a host that does not register the service (the submission contract tests' host), which failed that host at startup (all its tests). Production registers the service unconditionally (FinanceModule.cs:490), so production was not affected; the parameter is now `[FromServices]`, as the sibling handlers' seams are.
 
 ### Totals
 
-TBD
+- `ExternalInvoiceFileRoutesTests`: 40 / 40.
+- Targeted set (`ExternalInvoiceFileRoutesTests`, `ExternalRecordDocumentRoutesTests`, `ExternalLiveParentDocumentTests`, `ExternalMultiRootSecureRootsTests`, `WorkforceCeilingRouteFamilyTests`, `InvoiceSubmissionEndpointsContractTests`, `StoredFileEndpointsTests`, `StoredFileServiceTests`): 888 passed, 0 failed.
+- Full `tests/Spaarke.ArchTests`: 2,624 passed, 0 failed.
+- `dotnet build src/server/api/Sprk.Bff.Api --warnaserror --no-incremental`: 0 warnings, 0 errors. `tests/unit/Sprk.Bff.Api.Tests` and `tests/Spaarke.ArchTests` build with 0 warnings, 0 errors.
 
 ## Publish size and CVEs
 
-TBD
+Release publish of `Sprk.Bff.Api`, each zipped with `Compress-Archive`, in two temporary worktrees (removed afterwards with `Remove-WorktreeSafe.ps1`):
+
+| Build | Files | Raw bytes | Zip bytes |
+|---|---|---|---|
+| origin/master `d03537e133` | 191 | 140,307,565 | 42,311,916 |
+| this branch `5e536cac48` | 191 | 140,326,629 | 42,319,222 |
+| Delta | 0 (identical file list) | +19,064 | **+7,306 (≈ +7 KB)** |
+
+The branch side also carries the ebilling work branch's other differences from master, so this is an upper bound for the task. Well under the +5 MB threshold; 42.3 MB total, under 55 MB. No package added. `dotnet list package --vulnerable --include-transitive`: no vulnerable packages.
+
+## Other guard touched
+
+`InvoiceMoneyColumnsAppOnlyWriteGuardTests` (166 K4 C1) failed in the full ArchTests run: the gate names `sprk_vendororg` (it adds it to the record gate's invoice read). The gate only reads it, app-only through `ExternalDataService.GetInvoiceLookupsAsync`, so it is added to that guard's `Readers` with a reason, and recorded in `166-invoice-field-security.md` ("Reviewed after the 164a merge").
 
 ## Decisions
 
