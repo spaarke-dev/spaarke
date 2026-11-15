@@ -2016,8 +2016,15 @@ public class ExternalParticipationService
             response.EnsureSuccessStatusCode();
 
             var page = await response.Content.ReadFromJsonAsync<ColleagueMembershipPage>(ct).ConfigureAwait(false);
-            rows.AddRange(page?.Value ?? new List<ColleagueMembershipRow>());
-            next = page?.NextLink;
+            if (page?.Value is null)
+            {
+                // #2845 review: a 2xx without a value array is not a Dataverse answer — a fault, never "no colleagues".
+                throw new InvalidOperationException(
+                    $"The colleague-by-email memberships of {organizationIds.Count} organization(s) were read without a value array.");
+            }
+
+            rows.AddRange(page.Value);
+            next = page.NextLink;
         }
 
         return rows;

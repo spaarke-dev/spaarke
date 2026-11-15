@@ -42,8 +42,9 @@ internal sealed class RequestAccessMemo
             return null;
         }
 
-        // Items is a plain dictionary. It is locked on itself, as CallerWhoAmIMemo locks it, so every in-request user of
-        // Items takes the same lock and requests never wait on each other.
+        // Items is a plain dictionary. Items access from the concurrent compositions is safe because the only Items writers
+        // reachable while they run (RequestAccessMemo.For, CallerWhoAmIMemo) lock context.Items; other filters write Items
+        // outside the compositions. Any new Items writer reachable from a composition must lock context.Items.
         lock (context.Items)
         {
             if (context.Items.TryGetValue(HttpContextItemsKey, out var existing) && existing is RequestAccessMemo memo)

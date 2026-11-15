@@ -6,7 +6,9 @@
 //   - the id-column read behind the No Access share enforcer (walled contacts; secure / unflagged roots referencing an
 //     organization) — empty = nothing to enforce;
 //   - an organization's member page (the grant-cache invalidation after an organization grant changes) — empty = nobody
-//     to invalidate.
+//     to invalidate;
+//   - the colleague-by-email membership read (review pass 2) — empty = "not a member", where a real colleague must get the
+//     503 fault instead.
 // Each must report the read as unknown, through the signal its callers already treat as a fault. Must-not-fire control:
 // an EMPTY value array is a real answer ("none"). Only the HTTP exchange is substituted (a hand-written handler, never
 // Mock<HttpMessageHandler>: testing.md B1); the request building, parsing and fault contract are the real code.
@@ -92,6 +94,27 @@ public sealed class ExternalParticipationMalformedBodyTests
 
         walk.Complete.Should().BeTrue();
         walk.ContactIds.Should().BeEmpty();
+    }
+
+    [Theory]
+    [MemberData(nameof(BodiesWithoutAValueArray))]
+    public async Task ColleaguesByEmail_A2xxWithoutAValueArray_IsUnreadable_NeverNobody(string body)
+    {
+        var match = await Service(body).FindConferringMembersByEmailAsync(
+            new[] { Organization }, "colleague@firm.example", CancellationToken.None);
+
+        match.Unreadable.Should().BeTrue("the caller must report the fault (503), not 'not a member'");
+        match.ContactIds.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ColleaguesByEmail_AnEmptyValueArray_IsAProvenNone()
+    {
+        var match = await Service("{\"value\":[]}").FindConferringMembersByEmailAsync(
+            new[] { Organization }, "colleague@firm.example", CancellationToken.None);
+
+        match.Unreadable.Should().BeFalse("an empty array is a real answer: no colleagues");
+        match.ContactIds.Should().BeEmpty();
     }
 
     private static ExternalParticipationService Service(string body)

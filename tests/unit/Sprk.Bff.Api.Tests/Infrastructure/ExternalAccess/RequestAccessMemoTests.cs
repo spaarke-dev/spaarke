@@ -6,7 +6,8 @@
 //   1. identical reads are made once per request (exact counts), and never across requests;
 //   2. a fault, or an "unknown" answer a fail-closed veto is built from, is never remembered — even within the request;
 //   3. a grant write (InvalidateGrantSetsAsync, which every grant writer calls) makes the next composition read again;
-//   4. the three compositions run concurrently and build exactly the principal the sequential compositions build.
+//   4. the three compositions run concurrently and build exactly the principal the sequential compositions build;
+//   5. two contacts composed in one request each get their own answers (every subject-level key carries the contact).
 
 using System.Collections.Concurrent;
 using FluentAssertions;
@@ -35,6 +36,14 @@ public sealed class RequestAccessMemoTests
     private static readonly Guid ProjectB = Guid.Parse("28450000-0000-4000-8000-0000000000a2");
     private static readonly Guid MatterA = Guid.Parse("28450000-0000-4000-8000-0000000000b1");
     private static readonly Guid WorkAssignmentA = Guid.Parse("28450000-0000-4000-8000-0000000000d1");
+
+    // A second contact, composed in the same request as Contact (section 5).
+    private static readonly Guid ContactB = Guid.Parse("28450000-0000-4000-8000-0000000000c2");
+    private static readonly Guid FirmB = Guid.Parse("28450000-0000-4000-8000-0000000000f2");
+    private static readonly Guid ProjectC = Guid.Parse("28450000-0000-4000-8000-0000000000a3");
+    private static readonly Guid ProjectD = Guid.Parse("28450000-0000-4000-8000-0000000000a4");
+    private static readonly Guid MatterB = Guid.Parse("28450000-0000-4000-8000-0000000000b2");
+    private static readonly Guid WorkAssignmentB = Guid.Parse("28450000-0000-4000-8000-0000000000d2");
 
     // ─────────────────────────────────────────────────────────────────────
     // 1. Once per request — exact read counts for the CIAM principal's three compositions
@@ -394,6 +403,86 @@ public sealed class RequestAccessMemoTests
     }
 
     // ─────────────────────────────────────────────────────────────────────
+    // 5. Two contacts in ONE request — the second contact is never served the first one's answers
+    // ─────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// The real path: AssignTaskRecipientGate.ComposePortalPrincipalAsync (Services/Signals/AssignTaskRecipientGate.cs)
+    /// composes a SECOND contact — the task recipient — inside an internal request, so the recipient's compositions share
+    /// that request's memo. Contact A, then contact B, are composed in the SAME HttpContext; they differ in grant set,
+    /// organization memberships and deny-list rows, and (first case) in removed marker.
+    /// </summary>
+    /// <remarks>Two cases, because a removed contact's composition stops at its marker (it reads no grant set, no
+    /// memberships, no deny rows). With B removed, the case proves the marker answer is per contact; with both readable, it
+    /// proves the grant set, the memberships and the deny-list queries are.</remarks>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task TwoContactsComposedInOneRequest_TheSecondGetsItsOwnAnswers_AndEachReadHappensOncePerContact(bool contactBRemoved)
+    {
+        var world = new World();
+        world.RemovedMarkerByContact[ContactB] = contactBRemoved ? RemovedMarkerRead.Removed : RemovedMarkerRead.NotRemoved;
+        world.Participations.GrantsByContact[ContactB] = new ExternalGrantSet
+        {
+            Projects = new[] { ProjectC, ProjectD }
+                .Select(id => new ExternalParticipation { ProjectId = id, AccessLevel = ExternalAccessLevel.ViewOnly }).ToList(),
+            MatterGrants = RootGrants(ExternalAccessLevel.FullAccess, MatterB),
+            WorkAssignmentGrants = RootGrants(ExternalAccessLevel.ViewOnly, WorkAssignmentB),
+        };
+        world.Participations.OrganizationByContact[ContactB] = FirmB;
+
+        // A's row walls contact A off ProjectB; B's row walls B's ORGANIZATION off ProjectD (so B's memberships matter).
+        world.NoAccess.Rows.Add(DenyRecord(subjectContact: Contact, subjectOrganization: null, ProjectB));
+        world.NoAccess.Rows.Add(DenyRecord(subjectContact: null, subjectOrganization: FirmB, ProjectD));
+
+        var service = world.Service(world.NewRequest()); // ONE request (one HttpContext, one memo) for both contacts
+
+        var a = (await CiamContactPrincipalStrategy.ComposeAsync(service, Contact, null, null, CancellationToken.None)).Principal;
+        var b = (await CiamContactPrincipalStrategy.ComposeAsync(service, ContactB, null, null, CancellationToken.None)).Principal;
+
+        a.ProjectAccess.Select(p => p.ProjectId).Should().Equal(new[] { ProjectA }, "A's own grants, less A's own deny row");
+        a.MatterAccess.Keys.Should().Equal(MatterA);
+        a.WorkAssignmentAccess.Keys.Should().Equal(WorkAssignmentA);
+
+        if (contactBRemoved)
+        {
+            b.ProjectAccess.Should().BeEmpty("B's own marker says removed; A's 'not removed' is never B's answer");
+            b.MatterAccess.Should().BeEmpty();
+            b.WorkAssignmentAccess.Should().BeEmpty();
+        }
+        else
+        {
+            b.ProjectAccess.Select(p => p.ProjectId).Should().Equal(new[] { ProjectC },
+                "B's own grants (never A's), less the row walling B's own organization (never A's) off ProjectD");
+            b.MatterAccess.Keys.Should().Equal(MatterB);
+            b.WorkAssignmentAccess.Keys.Should().Equal(WorkAssignmentB);
+        }
+
+        // Each read once per contact: A's three compositions read A's answers once; B's read B's own once (none past the
+        // marker when B is removed).
+        var bReadsPastMarker = contactBRemoved ? 0 : 1;
+        world.Participations.ContactStateReadsFor(Contact).Should().Be(1);
+        world.Participations.ContactStateReadsFor(ContactB).Should().Be(1);
+        world.RemovedMarkerReadsFor(Contact).Should().Be(1);
+        world.RemovedMarkerReadsFor(ContactB).Should().Be(1, "B's marker is read for B, not served from A's");
+        world.Participations.GrantSetReadsFor(Contact).Should().Be(1);
+        world.Participations.GrantSetReadsFor(ContactB).Should().Be(bReadsPastMarker, "B's grant set is read for B, not served from A's");
+        world.Participations.OrganizationMembershipReadsFor(Contact).Should().Be(1);
+        world.Participations.OrganizationMembershipReadsFor(ContactB).Should().Be(bReadsPastMarker);
+        world.NoAccess.OrganizationChunkQueriesFor(Contact).Should().Be(1);
+        world.NoAccess.OrganizationChunkQueriesFor(ContactB).Should().Be(bReadsPastMarker);
+    }
+
+    private static NoAccessEntryRow DenyRecord(Guid? subjectContact, Guid? subjectOrganization, Guid record) => new()
+    {
+        sprk_noaccessentryid = Guid.NewGuid(),
+        _sprk_subjectcontact_value = subjectContact,
+        _sprk_subjectorganization_value = subjectOrganization,
+        _sprk_objectrecordtype_value = Guid.Parse("28450000-0000-4000-8000-0000000000e1"),
+        sprk_objectrecordid = record.ToString("D"),
+    };
+
+    // ─────────────────────────────────────────────────────────────────────
     // The world: the real composer and deny-list orchestration over counting wire doubles
     // ─────────────────────────────────────────────────────────────────────
 
@@ -426,6 +515,13 @@ public sealed class RequestAccessMemoTests
 
         public int RemovedMarkerUnreadable;
 
+        /// <summary>The removed marker of each contact other than <see cref="Contact"/> (section 5).</summary>
+        public ConcurrentDictionary<Guid, RemovedMarkerRead> RemovedMarkerByContact { get; } = new();
+
+        private readonly ConcurrentDictionary<Guid, int> _removedMarkerReadsByContact = new();
+
+        public int RemovedMarkerReadsFor(Guid contactId) => _removedMarkerReadsByContact.GetValueOrDefault(contactId);
+
         /// <summary>A new request: a fresh HttpContext (and so a fresh memo) behind the shared accessor.</summary>
         public FixedAccessor NewRequest()
         {
@@ -439,10 +535,18 @@ public sealed class RequestAccessMemoTests
             NoAccess.SetAccessor(accessor);
 
             var store = new Mock<IContactIdentityStore>(MockBehavior.Strict);
-            store.Setup(s => s.ReadRemovedMarkerAsync(Contact, It.IsAny<CancellationToken>()))
-                .Returns(() =>
+            store.Setup(s => s.ReadRemovedMarkerAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+                .Returns((Guid contactId, CancellationToken _) =>
                 {
                     Interlocked.Increment(ref _removedMarkerReads);
+                    _removedMarkerReadsByContact.AddOrUpdate(contactId, 1, (_, n) => n + 1);
+                    if (contactId != Contact)
+                    {
+                        return RemovedMarkerByContact.TryGetValue(contactId, out var marker)
+                            ? Task.FromResult(marker)
+                            : Task.FromException<RemovedMarkerRead>(new InvalidOperationException($"No marker for contact {contactId}."));
+                    }
+
                     if (Interlocked.Decrement(ref RemovedMarkerFaults) >= 0)
                     {
                         return Task.FromException<RemovedMarkerRead>(new HttpRequestException("marker read faulted"));
@@ -522,6 +626,18 @@ public sealed class RequestAccessMemoTests
 
         public ExternalGrantSet Grants { get; set; } = GrantSet(projects: new[] { ProjectA, ProjectB });
 
+        /// <summary>The grant set of each contact other than <see cref="Contact"/> (section 5).</summary>
+        public ConcurrentDictionary<Guid, ExternalGrantSet> GrantsByContact { get; } = new();
+
+        /// <summary>The one organization of each contact other than <see cref="Contact"/> (section 5); Contact's is Firm.</summary>
+        public ConcurrentDictionary<Guid, Guid> OrganizationByContact { get; } = new();
+
+        private readonly ConcurrentDictionary<Guid, int> _contactStateReadsBy = new(), _grantSetReadsBy = new(), _orgReadsBy = new();
+
+        public int ContactStateReadsFor(Guid contactId) => _contactStateReadsBy.GetValueOrDefault(contactId);
+        public int GrantSetReadsFor(Guid contactId) => _grantSetReadsBy.GetValueOrDefault(contactId);
+        public int OrganizationMembershipReadsFor(Guid contactId) => _orgReadsBy.GetValueOrDefault(contactId);
+
         public Barrier3? FlagBarrier { get; set; }
 
         public int ContactStateReads => Volatile.Read(ref _contactStateReads);
@@ -537,6 +653,7 @@ public sealed class RequestAccessMemoTests
         internal override Task<ContactRecordState> QueryContactStateAsync(Guid contactId, CancellationToken ct)
         {
             Interlocked.Increment(ref _contactStateReads);
+            _contactStateReadsBy.AddOrUpdate(contactId, 1, (_, n) => n + 1);
             return Task.FromResult(Interlocked.Decrement(ref UnreadableContactStates) >= 0
                 ? ContactRecordState.Unreadable
                 : ContactRecordState.Active);
@@ -545,6 +662,7 @@ public sealed class RequestAccessMemoTests
         public override Task<ExternalGrantSet> GetGrantSetAsync(Guid contactId, CancellationToken ct = default)
         {
             Interlocked.Increment(ref _grantSetReads);
+            _grantSetReadsBy.AddOrUpdate(contactId, 1, (_, n) => n + 1);
             if (Interlocked.Decrement(ref FaultedGrantSets) >= 0)
             {
                 // A faulted read: what was read is nothing; the set says it is faulted (never cached, task 132).
@@ -557,15 +675,17 @@ public sealed class RequestAccessMemoTests
                 });
             }
 
-            return Task.FromResult(Grants);
+            return Task.FromResult(GrantsByContact.TryGetValue(contactId, out var own) ? own : Grants);
         }
 
         internal override Task<ActiveOrgMemberships> ReadOrganizationMembershipsAsync(Guid contactId, CancellationToken ct = default)
         {
             Interlocked.Increment(ref _orgReads);
+            _orgReadsBy.AddOrUpdate(contactId, 1, (_, n) => n + 1);
+            var organization = OrganizationByContact.TryGetValue(contactId, out var own) ? own : Firm;
             return Interlocked.Decrement(ref OrganizationMembershipFaults) >= 0
                 ? Task.FromException<ActiveOrgMemberships>(new HttpRequestException("junction read faulted"))
-                : Task.FromResult(new ActiveOrgMemberships(new[] { Firm }, new[] { Firm }, Unreadable: false));
+                : Task.FromResult(new ActiveOrgMemberships(new[] { organization }, new[] { organization }, Unreadable: false));
         }
 
         public override async Task<IReadOnlyDictionary<Guid, RootRecordFlags>> GetRootRecordFlagsAsync(
@@ -620,6 +740,16 @@ public sealed class RequestAccessMemoTests
         public int UnreadableChunks;
         public int ThrowingChunks;
 
+        /// <summary>The deny-list rows in Dataverse; a query answers those its subject and object filters name.</summary>
+        public ConcurrentBag<NoAccessEntryRow> Rows { get; } = new();
+
+        private readonly ConcurrentDictionary<string, int> _orgQueriesBySubject = new(StringComparer.Ordinal);
+
+        /// <summary>The organization-object queries whose subject filter names <paramref name="contactId"/>.</summary>
+        public int OrganizationChunkQueriesFor(Guid contactId) => _orgQueriesBySubject
+            .Where(kv => kv.Key.Contains($"_sprk_subjectcontact_value eq {contactId}", StringComparison.Ordinal))
+            .Sum(kv => kv.Value);
+
         /// <summary>When set, an unreadable chunk's answer is held until three evaluations have joined their first query.</summary>
         public bool HoldUnreadableChunkUntilThreeEvaluations { get; set; }
 
@@ -647,6 +777,7 @@ public sealed class RequestAccessMemoTests
             if (objectFilter.Contains("_sprk_objectorganization_value", StringComparison.Ordinal))
             {
                 Interlocked.Increment(ref _orgQueries);
+                _orgQueriesBySubject.AddOrUpdate(subjectFilter, 1, (_, n) => n + 1);
                 if (Interlocked.Decrement(ref ThrowingChunks) >= 0)
                 {
                     return Task.FromException<List<NoAccessEntryRow>?>(new HttpRequestException("deny-list read faulted"));
@@ -664,7 +795,21 @@ public sealed class RequestAccessMemoTests
                 Interlocked.Increment(ref _recordQueries);
             }
 
-            return Task.FromResult<List<NoAccessEntryRow>?>(new List<NoAccessEntryRow>());
+            return Task.FromResult<List<NoAccessEntryRow>?>(Rows.Where(row => Names(subjectFilter, objectFilter, row)).ToList());
+        }
+
+        /// <summary>Whether the query's filters select <paramref name="row"/> (the subject and object fragments only).</summary>
+        private static bool Names(string subjectFilter, string objectFilter, NoAccessEntryRow row)
+        {
+            var subject = (row._sprk_subjectcontact_value is { } contact
+                           && subjectFilter.Contains($"_sprk_subjectcontact_value eq {contact}", StringComparison.Ordinal))
+                          || (row._sprk_subjectorganization_value is { } organization
+                              && subjectFilter.Contains($"_sprk_subjectorganization_value eq {organization}", StringComparison.Ordinal));
+            var obj = (row.sprk_objectrecordid is { } record
+                       && objectFilter.Contains($"sprk_objectrecordid eq '{record}'", StringComparison.Ordinal))
+                      || (row._sprk_objectorganization_value is { } objectOrganization
+                          && objectFilter.Contains($"_sprk_objectorganization_value eq {objectOrganization}", StringComparison.Ordinal));
+            return subject && obj;
         }
 
         private async Task<List<NoAccessEntryRow>?> UnreadableOnceThreeJoinedAsync()
