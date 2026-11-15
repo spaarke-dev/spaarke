@@ -261,12 +261,15 @@ const ShellSync: React.FC<{ handle: IWizardShellHandle; syncRef: React.MutableRe
  * `guardMs` has passed, and keyboard focus is on the step, not on the button that brought the user here (the button is the same node
  * as Record decision, so a held Enter would otherwise reach it). Layout effect: the guard is up before the browser can deliver another
  * event. Without a guard it adds no behaviour (a plain wrapper).
+ * `choiceShown` is true while the footer offers the send-choice buttons (Send again, Record without sending, Retry recording): the
+ * guard is armed again when they appear, so a click aimed at the button they replace (or the second click of a double click) cannot land on them.
  */
 const ConfirmArrival: React.FC<{
   guardMs: number;
+  choiceShown: boolean;
   setReady: (ready: boolean) => void;
   children: React.ReactNode;
-}> = ({ guardMs, setReady, children }) => {
+}> = ({ guardMs, choiceShown, setReady, children }) => {
   const styles = useStyles();
   const ref = React.useRef<HTMLDivElement>(null);
   const guarded = guardMs > 0;
@@ -279,7 +282,7 @@ const ConfirmArrival: React.FC<{
       window.clearTimeout(timer);
       setReady(true);
     };
-  }, [guarded, guardMs, setReady]);
+  }, [guarded, guardMs, choiceShown, setReady]);
   return (
     <div ref={ref} tabIndex={guarded ? -1 : undefined} className={guarded ? styles.confirmFocus : undefined}>
       {children}
@@ -326,6 +329,8 @@ export const DecisionItemWizard: React.FC<DecisionItemWizardProps> = ({
   // No guard on a closed item (nothing to record), and none unless the host asked for one. A ref: the step's content keeps the closure it was added with.
   const guardMsRef = React.useRef(0);
   guardMsRef.current = readOnly ? 0 : (confirmGuardMs ?? 0);
+  // True while the footer offers the send-choice buttons; the step's content keeps its first closure, so this too is read through a ref.
+  const choiceShownRef = React.useRef(false);
 
   // The draft updater of every item this dialog has shown, by item id. A field hands `update` to an async path (the side-pane
   // lookup), and that pick can come back after the person moved on: `update` is bound to the item it was rendered for, so the
@@ -438,7 +443,11 @@ export const DecisionItemWizard: React.FC<DecisionItemWizardProps> = ({
           renderContent: handle => (
             <>
               <ShellSync handle={handle} syncRef={syncRef} />
-              <ConfirmArrival guardMs={guardMsRef.current} setReady={setConfirmReady}>
+              <ConfirmArrival
+                guardMs={guardMsRef.current}
+                choiceShown={choiceShownRef.current}
+                setReady={setConfirmReady}
+              >
                 <ConfirmStep />
               </ConfirmArrival>
             </>
@@ -601,6 +610,7 @@ export const DecisionItemWizard: React.FC<DecisionItemWizardProps> = ({
   // can also be recorded without sending, next to Retry recording, so the item is never stuck.
   const notSentOffer = !readOnly && !choiceRequired && canRecordWithoutSending(pinnedFailure ?? failure);
   const recording = ready?.recording ?? false;
+  choiceShownRef.current = choiceRequired || notSentOffer;
   const choose = React.useCallback(
     (choice: DecisionSendChoice) => {
       void onRecord?.(choice);
@@ -641,7 +651,7 @@ export const DecisionItemWizard: React.FC<DecisionItemWizardProps> = ({
                     <Button
                       appearance="secondary"
                       onClick={() => choose('record-without-sending')}
-                      disabled={recording}
+                      disabled={recording || !confirmReady}
                       data-testid="record-without-sending"
                     >
                       Record without sending
@@ -650,7 +660,7 @@ export const DecisionItemWizard: React.FC<DecisionItemWizardProps> = ({
                       <Button
                         appearance="primary"
                         onClick={() => choose('send-again')}
-                        disabled={recording}
+                        disabled={recording || !confirmReady}
                         data-testid="send-again"
                       >
                         Send again
@@ -659,7 +669,7 @@ export const DecisionItemWizard: React.FC<DecisionItemWizardProps> = ({
                       <Button
                         appearance="primary"
                         onClick={() => void onRecord?.()}
-                        disabled={recording}
+                        disabled={recording || !confirmReady}
                         data-testid="retry-recording"
                       >
                         Retry recording

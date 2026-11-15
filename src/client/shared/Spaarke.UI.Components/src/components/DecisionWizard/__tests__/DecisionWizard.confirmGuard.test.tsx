@@ -15,6 +15,7 @@ import '@testing-library/jest-dom';
 import { fireEvent, screen, waitFor } from '@testing-library/react';
 import { DO_ID, doItem, doPlan } from '../__fixtures__/decisionWizardFixtures';
 import { CONFIRM_GUARD_MS } from '../DecisionItemWizard';
+import type { DecisionCommitFailure, DecisionReview } from '../decisionWizardTypes';
 import { makeLoader, makeService, renderWizard } from './decisionTestKit';
 
 const exact = (name: string) => new RegExp(`^${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i');
@@ -109,4 +110,91 @@ describe('Confirm guard (optional seam)', () => {
     fireEvent.click(button('Record decision'));
     await waitFor(() => expect(service.commit).toHaveBeenCalledTimes(1));
   });
+});
+
+describe('Confirm guard on the send-choice footer (resumed unfinished review)', () => {
+  const REVIEW_ID = 'cccccccc-0000-0000-0000-000000000001';
+  const failure = (overrides: Partial<DecisionCommitFailure> = {}): DecisionCommitFailure => ({
+    httpStatus: 409,
+    title: 'The decision was not recorded',
+    detail: 'Step 3 failed.',
+    reasonCode: 'ontology.action.write_failed',
+    correlationId: 'trace-1',
+    failedStep: 3,
+    landed: [{ entity: 'sprk_servicerequest', id: 'sr-1' }],
+    possiblyLanded: [],
+    steps: [],
+    recordMayExist: false,
+    sentButNotRecorded: false,
+    resumable: true,
+    replayed: true,
+    ...overrides,
+  });
+  const notSentInquiry = () =>
+    failure({
+      steps: [
+        {
+          key: 'action:send-budget-inquiry',
+          code: 'send-budget-inquiry',
+          phase: 4,
+          status: 'Failed',
+          written: [{ entity: 'sprk_servicerequest', id: 'sr-1' }],
+          possiblyWritten: [],
+        },
+      ],
+    });
+
+  /** The wizard opened on the item again; the plan read returns the caller's unfinished review. */
+  function resume(unfinishedFailure: DecisionCommitFailure) {
+    const review: DecisionReview = {
+      reviewId: REVIEW_ID,
+      confirmed: true,
+      actions: [{ code: 'mark-complete', taken: true }],
+    };
+    const resumed = {
+      ...plan,
+      unfinished: { reviewId: review.reviewId, signalId: DO_ID, review, failure: unfinishedFailure },
+    };
+    const service = makeService({ plans: { [DO_ID]: resumed } });
+    renderWizard({
+      service,
+      loadItem: makeLoader([doItem]),
+      itemIds: [DO_ID],
+      startItemId: DO_ID,
+      confirmGuardMs: GUARD,
+    });
+    return service;
+  }
+
+  async function toConfirm() {
+    await toLastActionStep();
+    fireEvent.click(button('Next'));
+    await screen.findByTestId('step-confirm');
+  }
+
+  const cases: Array<[string, () => DecisionCommitFailure, string]> = [
+    ['Send again', () => failure({ sendChoiceRequired: true }), 'send-again'],
+    ['Record without sending', () => failure({ sendChoiceRequired: true }), 'record-without-sending'],
+    ['Retry recording', notSentInquiry, 'retry-recording'],
+  ];
+
+  it.each(cases)(
+    '%s posts nothing on arrival and posts once after the guard has passed',
+    async (name, make, testId) => {
+      const service = resume(make());
+      await toConfirm();
+
+      const target = screen.getByTestId(testId);
+      expect(target).toHaveTextContent(name);
+      expect(target).toBeDisabled();
+      fireEvent.click(target);
+      fireEvent.click(target); // the second click of a double click on Next
+      expect(service.commit).not.toHaveBeenCalled();
+
+      await waitFor(() => expect(screen.getByTestId(testId)).toBeEnabled(), { timeout: 3000 });
+      fireEvent.click(screen.getByTestId(testId));
+      await waitFor(() => expect(service.commit).toHaveBeenCalledTimes(1));
+      expect(service.commit.mock.calls[0][1]).toMatchObject({ reviewId: REVIEW_ID, retry: true });
+    }
+  );
 });
