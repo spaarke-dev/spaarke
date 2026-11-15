@@ -3,12 +3,16 @@
  * access on every call, so the contract is about WHEN it asks:
  *  - nothing before the debounce (300 ms) has passed; one call after it, for the last text typed
  *  - negative: fewer than 2 characters never asks, and a search without a Work Item never asks
- *  - a superseded search is dropped without a call and an answer that arrives after a newer request is dropped
+ *  - a superseded search is dropped without a call, and a superseded search that was already asked is answered with what the NEWER search
+ *    says (never with nothing: the field applies answers as they arrive). The end-to-end rule, through the shared field, is pinned in
+ *    `lookupTypeAhead.field.test.tsx`
+ *  - it tells the field the minimum it will search (2) and the words for a failed search
  *  - candidates become the shared field's items; a failure rejects with the tool's message (the field shows no matches for it)
  */
 import {
   createLookupTypeAhead,
   LOOKUP_DEBOUNCE_MS,
+  LOOKUP_FAILURE_TEXT,
   LOOKUP_MAX_CHARS,
   LOOKUP_MIN_CHARS,
 } from '../wizard/lookupTypeAhead';
@@ -50,6 +54,13 @@ describe('when it asks', () => {
     expect(LOOKUP_MIN_CHARS).toBe(2);
   });
 
+  it('tells the shared field the shortest text it searches, and the words for a failed search', () => {
+    const lookup = createLookupTypeAhead(immediate());
+    expect(lookup.minChars).toBe(2);
+    expect(lookup.failureText).toBe('Search could not be completed. Try again.');
+    expect(LOOKUP_FAILURE_TEXT).toBe(lookup.failureText);
+  });
+
   it('makes no call before the debounce has passed, and exactly one at it', async () => {
     const search = immediate();
     const lookup = createLookupTypeAhead(search);
@@ -89,7 +100,7 @@ describe('when it asks', () => {
 
     expect(search).toHaveBeenCalledTimes(1);
     expect(params(search.mock.calls[0][0]).get('query')).toBe('acme');
-    // The two superseded ones were dropped without a call and settled with no candidates.
+    // The two superseded ones were dropped without a call and settled with what the newest one found (here: nothing).
     await expect(first).resolves.toEqual([]);
     await expect(second).resolves.toEqual([]);
     await expect(third).resolves.toEqual([]);
@@ -166,8 +177,10 @@ describe('when it asks', () => {
   });
 });
 
-describe('a late answer never lands over a newer one', () => {
-  it('drops the answer to the first request when a newer one was made after it was sent', async () => {
+describe('a superseded search is answered with the newer one, never with nothing', () => {
+  const candidate = (id: string, name: string) => ({ candidates: [{ id, name }] });
+
+  it('a search already asked takes the newer answer, whichever order the two arrive in', async () => {
     const finishers: Array<(r: Response) => void> = [];
     const search = jest.fn(() => new Promise<Response>(resolve => finishers.push(resolve)));
     const lookup = createLookupTypeAhead(search);
@@ -178,11 +191,24 @@ describe('a late answer never lands over a newer one', () => {
     await jest.advanceTimersByTimeAsync(LOOKUP_DEBOUNCE_MS);
     expect(search).toHaveBeenCalledTimes(2);
 
-    // The newer answer comes first, then the older one: the older is dropped.
-    finishers[1](answer({ body: { candidates: [{ id: 'b2', name: 'FY26 budget' }] } }));
-    finishers[0](answer({ body: { candidates: [{ id: 'b1', name: 'FY25 budget' }] } }));
+    // The newer answer comes first, then the older one: the older says what the newer said, not "no candidates" and not its own.
+    finishers[1](answer({ body: candidate('b2', 'FY26 budget') }));
+    finishers[0](answer({ body: candidate('b1', 'FY25 budget') }));
     await expect(newer).resolves.toEqual([{ id: 'b2', name: 'FY26 budget' }]);
-    await expect(older).resolves.toEqual([]);
+    await expect(older).resolves.toEqual([{ id: 'b2', name: 'FY26 budget' }]);
+  });
+
+  it('a search still waiting out its debounce takes the newer answer too', async () => {
+    const search = immediate(() => answer({ body: candidate('b2', 'FY26 budget') }));
+    const lookup = createLookupTypeAhead(search);
+    const older = lookup(request({ query: 'fy' }));
+    await jest.advanceTimersByTimeAsync(100);
+    const newer = lookup(request({ query: 'fy26' }));
+    await jest.advanceTimersByTimeAsync(LOOKUP_DEBOUNCE_MS);
+
+    expect(search).toHaveBeenCalledTimes(1);
+    await expect(older).resolves.toEqual([{ id: 'b2', name: 'FY26 budget' }]);
+    await expect(newer).resolves.toEqual([{ id: 'b2', name: 'FY26 budget' }]);
   });
 });
 

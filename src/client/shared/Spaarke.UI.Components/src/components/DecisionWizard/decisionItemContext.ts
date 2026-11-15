@@ -22,7 +22,12 @@ import type {
   SuppressionStatus,
 } from './decisionWizardTypes';
 
-export type DecisionLookup = (request: Omit<DecisionLookupRequest, 'core'>) => Promise<ILookupItem[]>;
+export type DecisionLookup = ((request: Omit<DecisionLookupRequest, 'core'>) => Promise<ILookupItem[]>) & {
+  /** The host's `minChars` (optional seam), carried through the item-scoped wrapper. */
+  minChars?: number;
+  /** The host's `failureText` (optional seam), carried through the item-scoped wrapper. */
+  failureText?: string;
+};
 
 /** The side-pane lookup as a step sees it: the item's core record is already filled in. */
 export type DecisionOpenLookupForItem = ((

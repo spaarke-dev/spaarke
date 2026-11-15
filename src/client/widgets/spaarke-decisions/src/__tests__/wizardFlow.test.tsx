@@ -248,6 +248,9 @@ describe('the type-ahead inside the wizard', () => {
     // Longer than both debounces (the field's and the widget's): a call that was going to be made would have been.
     await new Promise(resolve => setTimeout(resolve, 900));
     expect(host.callsTo(LOOKUP_TOOL)).toHaveLength(0);
+    // It says why nothing happened; "No results found" would read as "there are none".
+    expect(screen.getByText('Type at least 2 letters')).toBeInTheDocument();
+    expect(screen.queryByText('No results found')).toBeNull();
 
     enter(field, 'fy');
     enter(field, 'fy2');
@@ -259,7 +262,7 @@ describe('the type-ahead inside the wizard', () => {
     expect(host.callsTo(COMPLETE_TOOL)).toHaveLength(0);
   });
 
-  it('a lookup the tool refuses shows no matches and the wizard stays usable', async () => {
+  it('a lookup the tool refuses says the search could not be completed (not "No results found") and the wizard stays usable', async () => {
     const base = wizardHost(items(PLANS.reviseBudget, 0));
     const host: WizardHost = {
       ...base,
@@ -279,6 +282,8 @@ describe('the type-ahead inside the wizard', () => {
     fireEvent.focus(field);
     enter(field, 'fy26');
     await waitFor(() => expect(host.callsTo(LOOKUP_TOOL)).toHaveLength(1), { timeout: 3000 });
+    expect(await screen.findByText('Search could not be completed. Try again.')).toBeInTheDocument();
+    expect(screen.queryByText('No results found')).toBeNull();
     expect(screen.queryByText(BUDGET.name)).toBeNull();
     // Still the wizard, still editable.
     enter(screen.getByRole('textbox', { name: /^Reason for revision/ }), 'Typed after the refusal');

@@ -379,14 +379,18 @@ export const DecisionWizard: React.FC<DecisionWizardProps> = ({
   const itemLookup = React.useMemo<DecisionLookup | null>(
     () =>
       lookup && readyItem
-        ? req =>
-            lookup({
-              ...req,
-              core: readyItem.core
-                ? { recordType: readyItem.core.recordType, recordId: readyItem.core.recordId }
-                : null,
-              signalId: readyItem.row.signalId,
-            })
+        ? Object.assign(
+            (req: Parameters<DecisionLookup>[0]) =>
+              lookup({
+                ...req,
+                core: readyItem.core
+                  ? { recordType: readyItem.core.recordType, recordId: readyItem.core.recordId }
+                  : null,
+                signalId: readyItem.row.signalId,
+              }),
+            // The host's optional seams (`minChars`, `failureText`) ride along; absent, the fields behave as they always did.
+            { minChars: lookup.minChars, failureText: lookup.failureText }
+          )
         : null,
     [lookup, readyItem]
   );

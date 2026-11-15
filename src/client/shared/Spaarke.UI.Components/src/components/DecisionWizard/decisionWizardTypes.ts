@@ -346,7 +346,18 @@ export interface DecisionLookupRequest {
   signalId?: string;
 }
 
-export type DecisionLookupSearch = (request: DecisionLookupRequest) => Promise<ILookupItem[]>;
+export type DecisionLookupSearch = ((request: DecisionLookupRequest) => Promise<ILookupItem[]>) & {
+  /**
+   * Optional seam: the fewest characters worth searching. Below it the field asks nothing and says "Type at least N letters" instead of
+   * "No results found". Absent: any text is searched, as before (the Console).
+   */
+  minChars?: number;
+  /**
+   * Optional seam: what the field says when this search REJECTS (throttled, offline), instead of "No results found". Absent: a failed
+   * search reads as no results, as before (the Console).
+   */
+  failureText?: string;
+};
 
 /**
  * What the host needs to open the platform's side-pane lookup for one Person / Lookup field (D-182). The host builds the row

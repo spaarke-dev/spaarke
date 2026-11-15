@@ -11,10 +11,14 @@
  *    too, but it also searches at once on focus and from its search button, and neither of those may reach the tool sooner;
  *  - for a query of at least `LOOKUP_MIN_CHARS` (2) characters: an empty or one-letter query would ask the server for everything, so it
  *    finds nothing and asks nothing. (The Console's empty-query "browse the candidates" is therefore not offered here.)
- * A search superseded by a newer one for the same field is dropped without a call and resolves with no candidates, so a late answer never
- * lands over a newer one. `cancel()` drops whatever is waiting (the wizard closed).
+ * A search superseded by a newer one for the same field is dropped without a call and resolves with what the NEWER search resolves with
+ * (never with nothing: the field applies answers as they arrive, so a superseded search answering `[]` after the newer one would wipe its
+ * candidates). The same goes for a superseded search that was already asked and is answered late. The shared field also ignores an answer
+ * that is not the newest search's; this keeps the rule true for anything calling the type-ahead directly. `cancel()` drops whatever is
+ * waiting (the wizard closed).
  *
- * A failure rejects with the tool's message; the shared field shows no matches for it (it has no error state of its own).
+ * A failure rejects with the tool's message. The field words it ("Search could not be completed. Try again.", `failureText`) instead of
+ * "No results found", and asks for at least `minChars` letters, saying so instead of "No results found" for a shorter one.
  */
 import type { ILookupItem } from '@spaarke/ui-components/types/LookupTypes';
 import type { DecisionLookupSearch } from '@spaarke/ui-components/components/DecisionWizard/decisionWizardTypes';
@@ -23,6 +27,8 @@ import { LOOKUP_ROUTE } from './wizardFetch';
 
 export const LOOKUP_DEBOUNCE_MS = 300;
 export const LOOKUP_MIN_CHARS = 2;
+/** What the field says when a search fails (throttled, offline, refused): never "No results found", which would read as "there are none". */
+export const LOOKUP_FAILURE_TEXT = 'Search could not be completed. Try again.';
 /** The tool's limit on the typed text. */
 export const LOOKUP_MAX_CHARS = 100;
 
@@ -33,7 +39,7 @@ export type LookupTypeAhead = DecisionLookupSearch & {
 
 interface Waiting {
   timer: ReturnType<typeof setTimeout>;
-  settle: (items: ILookupItem[]) => void;
+  settle: (items: ILookupItem[] | Promise<ILookupItem[]>) => void;
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -74,8 +80,10 @@ export function createLookupTypeAhead(
 ): LookupTypeAhead {
   // One waiting search per field of one item: a new one replaces it.
   const waiting = new Map<string, Waiting>();
-  // The newest request of each field (a counter), so an answer that arrives after a newer request is dropped.
+  // The newest request of each field (a counter), so an answer that arrives after a newer request is not used as the field's answer.
   const latest = new Map<string, number>();
+  // The newest request's own answer, which a superseded request resolves with.
+  const newest = new Map<string, Promise<ILookupItem[]>>();
 
   const drop = (key: string) => {
     const previous = waiting.get(key);
@@ -85,17 +93,36 @@ export function createLookupTypeAhead(
     previous.settle([]);
   };
 
-  const lookup = (request => {
+  const base = (request => {
     const signalId = request.signalId;
     const query = request.query.trim().slice(0, LOOKUP_MAX_CHARS);
     const key = `${signalId ?? ''}|${request.parameterCode}`;
     // A newer request for the field supersedes the waiting one, including a request too short to search (the user deleted text),
-    // and one already asked: its answer is dropped when it arrives (`latest` has moved on).
-    drop(key);
+    // and one already asked: that one resolves with the newer request's answer (`latest` has moved on).
+    const previous = waiting.get(key);
+    if (previous) {
+      clearTimeout(previous.timer);
+      waiting.delete(key);
+    }
     const mine = (latest.get(key) ?? 0) + 1;
     latest.set(key, mine);
-    if (!signalId || query.length < LOOKUP_MIN_CHARS) return Promise.resolve([]);
+    const answer =
+      !signalId || query.length < LOOKUP_MIN_CHARS
+        ? Promise.resolve<ILookupItem[]>([])
+        : ask(signalId, query, key, mine, request);
+    newest.set(key, answer);
+    previous?.settle(answer);
+    return answer;
+  }) as DecisionLookupSearch;
 
+  /** The search itself: waits out the debounce, then asks the tool. */
+  function ask(
+    signalId: string,
+    query: string,
+    key: string,
+    mine: number,
+    request: Parameters<DecisionLookupSearch>[0]
+  ): Promise<ILookupItem[]> {
     return new Promise<ILookupItem[]>((resolve, reject) => {
       const timer = setTimeout(() => {
         waiting.delete(key);
@@ -107,18 +134,23 @@ export function createLookupTypeAhead(
               return;
             }
             const body: unknown = await response.json();
-            resolve(latest.get(key) === mine ? toItems(body, request.kind === 'Person') : []);
+            // Superseded while the tool was answering: say what the newer search says (nothing, once `cancel()` has run).
+            resolve(latest.get(key) === mine ? toItems(body, request.kind === 'Person') : (newest.get(key) ?? []));
           },
           () => reject(new Error('The search could not be completed.'))
         );
       }, debounceMs);
       waiting.set(key, { timer, settle: resolve });
     });
-  }) as DecisionLookupSearch as LookupTypeAhead;
+  }
 
+  const lookup = base as LookupTypeAhead;
+  lookup.minChars = LOOKUP_MIN_CHARS;
+  lookup.failureText = LOOKUP_FAILURE_TEXT;
   lookup.cancel = () => {
     for (const key of [...waiting.keys()]) drop(key);
     latest.clear(); // an answer still on its way is dropped when it arrives
+    newest.clear();
   };
   return lookup;
 }
