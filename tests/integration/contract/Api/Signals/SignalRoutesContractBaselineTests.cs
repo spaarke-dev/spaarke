@@ -565,6 +565,29 @@ public sealed partial class DecisionCommitServiceTests
         }
 
         [Fact]
+        public async Task Decision_409_SendChoiceRequired_ARetryWithoutAChoice_IsTheStoredFailureReturnedAgain()
+        {
+            var rig = new Rig();
+            rig.Executors["send-budget-inquiry"].Result = InquiryFailed(DecisionSendFailure.Unknown);
+            var review = PathBReview(reviewId: Rv(41));
+            (await PostDecisionAsync(rig, review)).Status.Should().Be(500);
+            rig.Executors["send-budget-inquiry"].Result = null;
+            // The email may have been sent: the retry carries no sendChoice, so nothing runs and the first failure is returned with the choice named.
+            Verify("decision.409.send-choice-required", await PostDecisionAsync(rig, review with { Retry = true }), 409, DecisionCommitReasons.SendChoiceRequired);
+        }
+
+        [Fact]
+        public async Task Decision_409_ReviewUnfinished_ANewReviewOnAnItemWithAnUnfinishedOne()
+        {
+            var rig = new Rig();
+            rig.Executors["send-budget-inquiry"].Result = InquiryFailed(DecisionSendFailure.NotSent);
+            (await PostDecisionAsync(rig, PathBReview(reviewId: Rv(42)))).Status.Should().Be(500);
+            rig.Executors["send-budget-inquiry"].Result = null;
+            // A new review id on the same item: refused before anything runs, because the first review's writes have landed and are unrecorded.
+            Verify("decision.409.review-unfinished", await PostDecisionAsync(rig, PathBReview(reviewId: Rv(43))), 409, DecisionCommitReasons.ReviewUnfinished);
+        }
+
+        [Fact]
         public async Task Decision_422_PlanRefused_ThePlanDoesNotResolveAgainstTheCatalog()
         {
             var rig = new Rig();
