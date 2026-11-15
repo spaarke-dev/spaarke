@@ -198,6 +198,8 @@ internal sealed class ExternalPersonRemovalService
                 ? await _identityStore.WriteRemovedMarkerIfUnchangedAsync(contactId, read.ETag, _time.GetUtcNow(), ct)
                     .ConfigureAwait(false)
                 : await _identityStore.WriteRemovedMarkerAsync(contactId, _time.GetUtcNow(), ct).ConfigureAwait(false);
+            // #2845: the request forgets the removed marker it may have read (RequestAccessMemo), whatever the write's status.
+            _participations.ForgetRequestAccessReads();
             if (written.Status == StoreWriteStatus.PreconditionFailed && markOnlyIfUnchanged is not null)
             {
                 _logger.LogInformation(
@@ -311,6 +313,8 @@ internal sealed class ExternalPersonRemovalService
         // but only on the row version read above (never If-Match: *).
         var written = await _identityStore.WriteRemovedMarkerIfUnchangedAsync(contactId, contact.ETag, null, ct)
             .ConfigureAwait(false);
+        // #2845: the request forgets the removed marker it may have read (RequestAccessMemo), whatever the write's status.
+        _participations.ForgetRequestAccessReads();
         if (written.Status == StoreWriteStatus.PreconditionFailed)
         {
             _logger.LogWarning(

@@ -354,6 +354,7 @@ public class NoAccessListReader : INoAccessListReader
     private readonly IConfiguration _configuration;
     private readonly TokenCredential _credential;
     private readonly ILogger<NoAccessListReader> _logger;
+    private readonly IHttpContextAccessor? _httpContextAccessor;
     private readonly SemaphoreSlim _tokenSemaphore = new(1, 1);
     private AccessToken? _currentToken;
 
@@ -366,7 +367,8 @@ public class NoAccessListReader : INoAccessListReader
         HttpClient httpClient,
         IConfiguration configuration,
         TokenCredential credential,
-        ILogger<NoAccessListReader> logger)
+        ILogger<NoAccessListReader> logger,
+        IHttpContextAccessor? httpContextAccessor = null)
     {
         // No ArgumentNullException guards — matching ExternalParticipationService's
         // exact constructor shape (the established style of every
@@ -379,6 +381,9 @@ public class NoAccessListReader : INoAccessListReader
         _configuration = configuration;
         _credential = credential;
         _logger = logger;
+        // #2845: the request's memo of identical deny-list queries (RequestAccessMemo). Optional: without it (a test double,
+        // or no request) every query is live, as before.
+        _httpContextAccessor = httpContextAccessor;
     }
 
     /// <inheritdoc />
@@ -487,7 +492,7 @@ public class NoAccessListReader : INoAccessListReader
             {
                 foreach (var chunk in referencedOrgIds.Chunk(ObjectIdChunkSize))
                 {
-                    var rows = await QueryChunkAsync(subjectFilter, BuildOrganizationObjectFilter(chunk), ct).ConfigureAwait(false);
+                    var rows = await QueryChunkOncePerRequestAsync(subjectFilter, BuildOrganizationObjectFilter(chunk), ct).ConfigureAwait(false);
                     if (rows is null)
                     {
                         // QueryChunkAsync already logged the distinct fail-closed signal. One unreadable chunk fails
@@ -500,7 +505,7 @@ public class NoAccessListReader : INoAccessListReader
 
                 foreach (var chunk in candidateRecordIds.Chunk(ObjectIdChunkSize))
                 {
-                    var rows = await QueryChunkAsync(subjectFilter, BuildRecordObjectFilter(chunk), ct).ConfigureAwait(false);
+                    var rows = await QueryChunkOncePerRequestAsync(subjectFilter, BuildRecordObjectFilter(chunk), ct).ConfigureAwait(false);
                     if (rows is null)
                     {
                         return FailClosed(candidates);
@@ -530,6 +535,24 @@ public class NoAccessListReader : INoAccessListReader
             DenyingSubjectKinds = kinds,
             FailedClosed = false,
         };
+    }
+
+    /// <summary>
+    /// #2845: <see cref="QueryChunkAsync"/>, asked once per request for the SAME query. The three per-type compositions of one
+    /// request send the same subject with the same referenced organizations (loop A), so they share those rows instead of
+    /// asking Dataverse three times. The query itself is unchanged: the key is its whole filter. An unreadable chunk
+    /// (<c>null</c>) or a thrown query is never remembered — the next composition asks again. Never across requests.
+    /// </summary>
+    private Task<List<NoAccessEntryRow>?> QueryChunkOncePerRequestAsync(string subjectFilter, string objectFilter, CancellationToken ct)
+    {
+        var memo = RequestAccessMemo.For(_httpContextAccessor?.HttpContext);
+        return memo is null
+            ? QueryChunkAsync(subjectFilter, objectFilter, ct)
+            : memo.GetOrReadAsync(
+                RequestAccessMemo.NoAccessChunkKey(subjectFilter, objectFilter),
+                token => QueryChunkAsync(subjectFilter, objectFilter, token),
+                rows => rows is not null,
+                ct);
     }
 
     /// <summary>Every id in <paramref name="candidates"/>, denied, with no provenance (NFR-01).</summary>

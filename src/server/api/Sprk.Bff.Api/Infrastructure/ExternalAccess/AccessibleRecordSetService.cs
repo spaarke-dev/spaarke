@@ -1268,7 +1268,7 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
     /// cancellation.
     /// </para>
     /// </remarks>
-    private async Task<ActiveOrgMemberships> ReadActiveOrgMembershipsAsync(
+    private Task<ActiveOrgMemberships> ReadActiveOrgMembershipsAsync(
         Guid? subjectContactId, CancellationToken ct)
     {
         if (subjectContactId is not { } contactId || contactId == Guid.Empty)
@@ -1276,9 +1276,22 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
             // The deny list is keyed on contact/organization identities only (FR-23), and organization
             // membership is itself read FROM the contact — so a principal with no contact identity has
             // no relevant subject on EITHER axis. Not a failure.
-            return ActiveOrgMemberships.None;
+            return Task.FromResult(ActiveOrgMemberships.None);
         }
 
+        // #2845: once per request — an Unreadable (Failed) answer is never shared; the next composition reads again.
+        var memo = RequestMemo;
+        return memo is null
+            ? ReadActiveOrgMembershipsLiveAsync(contactId, ct)
+            : memo.GetOrReadAsync(
+                RequestAccessMemo.OrganizationMembershipsKey(contactId),
+                token => ReadActiveOrgMembershipsLiveAsync(contactId, token),
+                orgs => !orgs.Unreadable,
+                ct);
+    }
+
+    private async Task<ActiveOrgMemberships> ReadActiveOrgMembershipsLiveAsync(Guid contactId, CancellationToken ct)
+    {
         try
         {
             return await _participations
@@ -2419,7 +2432,7 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
 
             if (grantContactId is { } resolved && resolved != Guid.Empty)
             {
-                grants = await _participations.GetGrantSetAsync(resolved, ct).ConfigureAwait(false);
+                grants = await ReadGrantSetAsync(resolved, ct).ConfigureAwait(false);
                 contactGrantsApplied = true;
 
                 // Task 137 · defect C5: the linked contact's grants confer nothing while that contact is not
@@ -2695,10 +2708,48 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
     }
 
     /// <summary>
-    /// Slice C: the live read of a contact's removed marker (<see cref="IContactIdentityStore.ReadRemovedMarkerAsync"/>). A
-    /// fault is <see cref="RemovedMarkerRead.Unreadable"/> (fail closed); cancellation propagates. Never cached.
+    /// #2845: the request's memo of the subject-level reads (<see cref="RequestAccessMemo"/>), shared by the three per-type
+    /// compositions of one request; <c>null</c> outside a request (a job, or a construction without the accessor), where
+    /// every read is live as before. Never across requests; a fault is never remembered; a grant write forgets it.
     /// </summary>
-    private async Task<RemovedMarkerRead> ReadRemovedMarkerAsync(Guid contactId, CancellationToken ct)
+    private RequestAccessMemo? RequestMemo => RequestAccessMemo.For(_httpContextAccessor?.HttpContext);
+
+    /// <summary>
+    /// #2845: the contact's grant set, read once per request. A FAULTED set (built over a failed read) is never shared: the
+    /// next composition reads again, exactly as the grant cache never stores one (task 132).
+    /// </summary>
+    private Task<ExternalGrantSet> ReadGrantSetAsync(Guid contactId, CancellationToken ct)
+    {
+        var memo = RequestMemo;
+        return memo is null
+            ? _participations.GetGrantSetAsync(contactId, ct)
+            : memo.GetOrReadAsync(
+                RequestAccessMemo.GrantSetKey(contactId),
+                token => _participations.GetGrantSetAsync(contactId, token),
+                grants => !grants.Faulted,
+                ct);
+    }
+
+    /// <summary>
+    /// Slice C: the live read of a contact's removed marker (<see cref="IContactIdentityStore.ReadRemovedMarkerAsync"/>). A
+    /// fault is <see cref="RemovedMarkerRead.Unreadable"/> (fail closed); cancellation propagates. Never cached across
+    /// requests; #2845: a proven answer is shared by the compositions of ONE request (<see cref="RequestAccessMemo"/>), an
+    /// Unreadable one never is.
+    /// </summary>
+    private Task<RemovedMarkerRead> ReadRemovedMarkerAsync(Guid contactId, CancellationToken ct)
+    {
+        // #2845: once per request — only a PROVEN answer (removed, or proven not removed) is shared; Unreadable is read again.
+        var memo = RequestMemo;
+        return memo is null
+            ? ReadRemovedMarkerLiveAsync(contactId, ct)
+            : memo.GetOrReadAsync(
+                RequestAccessMemo.RemovedMarkerKey(contactId),
+                token => ReadRemovedMarkerLiveAsync(contactId, token),
+                marker => marker is RemovedMarkerRead.NotRemoved or RemovedMarkerRead.Removed,
+                ct);
+    }
+
+    private async Task<RemovedMarkerRead> ReadRemovedMarkerLiveAsync(Guid contactId, CancellationToken ct)
     {
         try
         {
@@ -2813,7 +2864,7 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
         ExternalGrantSet? grants = null;
         if (IsGrantSupported(entityType))
         {
-            grants = await _participations.GetGrantSetAsync(contactId, ct).ConfigureAwait(false);
+            grants = await ReadGrantSetAsync(contactId, ct).ConfigureAwait(false);
             grantsApplied = true;
         }
 

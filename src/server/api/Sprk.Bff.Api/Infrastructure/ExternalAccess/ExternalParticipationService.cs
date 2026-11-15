@@ -511,6 +511,11 @@ public class ExternalParticipationService
         CancellationToken ct = default,
         string? explicitTenantId = null)
     {
+        // #2845: every grant writer calls this after its write, so it is also where the request forgets the access reads it
+        // remembered (grant sets, contact state, organization memberships, deny-list rows): a composition later in the
+        // same request reads again. First, so nothing below can skip it.
+        ForgetRequestAccessReads();
+
         try
         {
             return await InvalidateGrantSetsCoreAsync(contactIds, organizationIds, ct, explicitTenantId)
@@ -740,25 +745,38 @@ public class ExternalParticipationService
     /// row is <see cref="ContactRecordState.Inactive"/>, a fault is <see cref="ContactRecordState.Unreadable"/>,
     /// and the evaluator treats both as "confers nothing" (ADR-003, NFR-01).</para>
     /// <para><b>Once per request.</b> A request that composes several entity types (the CIAM principal composes
-    /// three) reads the row once: an Active or Inactive answer is remembered in <c>HttpContext.Items</c> for the
-    /// rest of that request only — the next request reads again. A fault is not remembered.</para>
+    /// three) reads the row once: an Active or Inactive answer is remembered in the request's
+    /// <see cref="RequestAccessMemo"/> for the rest of that request only — the next request reads again. A fault is not
+    /// remembered. (#2845: the memo replaced the plain <c>HttpContext.Items</c> entry, because the three compositions
+    /// now run concurrently and <c>Items</c> is not thread-safe.)</para>
     /// <para><b>Why its own read.</b> No existing live read covers every plane: the standing-grant reader reads
     /// the contact row only on the workforce contact plane (and task 142 escalation (d) may retire that term), the
     /// junction read returns nothing for a contact with no membership, and the grant read is cached.</para>
     /// </remarks>
-    internal async Task<ContactRecordState> ReadContactStateAsync(Guid contactId, CancellationToken ct)
+    internal Task<ContactRecordState> ReadContactStateAsync(Guid contactId, CancellationToken ct)
     {
-        var items = _httpContextAccessor?.HttpContext?.Items;
-        var key = ContactStateItemKey + contactId.ToString("N");
-        if (items is not null && items.TryGetValue(key, out var remembered) && remembered is ContactRecordState known)
-        {
-            return known;
-        }
+        var memo = RequestAccessMemo.For(_httpContextAccessor?.HttpContext);
+        return memo is null
+            ? ReadContactStateLiveAsync(contactId, ct)
+            : memo.GetOrReadAsync(
+                RequestAccessMemo.ContactStateKey(contactId),
+                token => ReadContactStateLiveAsync(contactId, token),
+                state => state != ContactRecordState.Unreadable,
+                ct);
+    }
 
-        ContactRecordState state;
+    /// <summary>
+    /// #2845: the request-scoped memo of the access reads (<see cref="RequestAccessMemo"/>), forgotten. Every in-request
+    /// writer of an answer the memo can hold calls this (or <see cref="InvalidateGrantSetsAsync"/>, which does), so a read
+    /// after the write goes back to Dataverse. No request, no memo: a no-op.
+    /// </summary>
+    internal void ForgetRequestAccessReads() => RequestAccessMemo.For(_httpContextAccessor?.HttpContext)?.Clear();
+
+    private async Task<ContactRecordState> ReadContactStateLiveAsync(Guid contactId, CancellationToken ct)
+    {
         try
         {
-            state = await QueryContactStateAsync(contactId, ct).ConfigureAwait(false);
+            return await QueryContactStateAsync(contactId, ct).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -771,16 +789,7 @@ public class ExternalParticipationService
                 "nothing on this request (ADR-003).", contactId);
             return ContactRecordState.Unreadable;
         }
-
-        if (items is not null && state != ContactRecordState.Unreadable)
-        {
-            items[key] = state;
-        }
-
-        return state;
     }
-
-    private const string ContactStateItemKey = "uac:contact-state:";
 
     /// <summary>
     /// The live read behind <see cref="ReadContactStateAsync"/>: <c>contacts({id})?$select=statecode</c>, app-only.
