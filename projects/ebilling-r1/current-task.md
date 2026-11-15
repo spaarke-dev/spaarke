@@ -7,6 +7,11 @@
 
 - **#2822 MERGED** (7da54c00a3) and **LIVE on the dev BFF** since about 15:19Z: 5a9b687a0b = master 2747977f47 + mcp spike, deployed by uac-r2. word-add-in-r1 was told. Owner checklist section D (095e/095f) is now testable on dev. `sprk_recordprocedures` is NOT deployed; that is task 112.
 - **#2830 (095g) MERGED** to master as acc96e1927 (merge commit, head d825808b7d), on the owner's go, 2026-11-14. It is NOT on the dev BFF yet; it goes out with uac-r2's next deploy, which needs the owner's go in uac-r2's session. uac-r2 and word-add-in-r1 have the SHA. word-add-in-r1 keeps slice C held until the deploy. The work branch is pushed (a28792ef9e).
+- **2026-11-15 later (agent branches are not merged until reviewed):**
+  - **093:** built on branch worktree-agent-aa64df149f3786340 (dc2e5ab86c). Two Opus adversarial reviews are running. spa-r4 has the DTO; the list field is `sizeBytes`. Next: fixes, then uac-r2's review, then the PR. The deploy waits until spa-r4's 021 is ready.
+  - **113:** built on branch worktree-agent-a066f68fe05c2b621 (0f0e378874). Its review found F1–F5 (route test, system-finding exemption, a third copy of the judged-dates rule, evaluator-based NotChanged, stale comments). A Sonnet fix agent is running.
+  - **084h:** ontology-r1 PASSED the revised design (73ce24172c). An Opus agent is building 084h-1 (writer entry, catalog set, W1–W8), and the owner's §8 classes are drafted as proposed. 084h-2 never deploys without 084h-3 (the repair job). The PR lists the exact-set test amendments for ontology-r1.
+  - **095f part 2:** ontology-r1 PASSED it. The builds wait on the owner's 10 design answers.
 - **2026-11-15: three agents are running.** Each is in its own worktree, based on work tip f9f74de82e. The owner said "Proceed with 093; but also other work tasks that can run in parallel".
   - **093:** Opus implementer. Two adversarial reviews follow, then uac-r2's review.
   - **113:** Sonnet implementer. One adversarial review follows.
