@@ -131,6 +131,27 @@ public sealed class DecisionResultMapperTests
     }
 
     [Fact]
+    public void ToToolError_ReviewUnfinished_MessageIsTrueWhoeverHoldsTheReview_AndNeverSendsThePersonToThePlan()
+    {
+        // The message is shown to the person as is (decisionDisplay.ts). Another user may hold the unfinished review (REST names the
+        // holder), so "read the plan and finish that review from it" is wrong for them; one fixed text covers both cases.
+        var result = new DecisionCommitResult
+        {
+            Status = DecisionCommitStatus.Conflict,
+            ReviewId = Guid.NewGuid(),
+            ReasonCode = DecisionCommitReasons.ReviewUnfinished,
+            Detail = "Held by Pat Example",
+        };
+
+        var error = DecisionResultMapper.ToToolError(result);
+
+        error!.Message.Should().Be(
+            "Another review of this item is unfinished; nothing was done. If you started this decision, close this and open the item again "
+            + "to finish it; otherwise ask the person who started it to finish it first.");
+        error.Message.Should().NotContain("decision plan").And.NotContain("Pat Example");
+    }
+
+    [Fact]
     public void ToToolError_CommitDetailHoldsRecordText_MessageNeverRepeatsIt()
     {
         // ADR-015: a result's Detail can carry text from the records (an executor's refusal, a writer's reason); the tool message is

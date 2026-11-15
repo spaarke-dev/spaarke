@@ -493,7 +493,8 @@ public static partial class DecisionResultMapper
         [DecisionCommitReasons.SendChoiceRequired] =
             "The inquiry email may already have been sent; nothing was done. Have the user check Sent Items, then send the same review again with retry and a sendChoice of send-again or record-without-sending.",
         [DecisionCommitReasons.ReviewUnfinished] =
-            "Another review of this item is unfinished; nothing was done. Read the item's decision plan and finish that review from it.",
+            // One text, true whoever holds the unfinished review (the REST body names the holder; this message is shown to the person as is).
+            "Another review of this item is unfinished; nothing was done. If you started this decision, close this and open the item again to finish it; otherwise ask the person who started it to finish it first.",
         [DecisionCommitReasons.NotResumable] =
             "This failed decision cannot be resumed. Check the item in Spaarke to see what was done.",
         [DecisionCommitReasons.NotAuthorized] =
