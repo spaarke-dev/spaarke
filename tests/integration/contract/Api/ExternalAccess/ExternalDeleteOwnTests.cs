@@ -2108,6 +2108,22 @@ public sealed class ExternalDeleteOwnTests : IClassFixture<ExternalDeleteOwnTest
             DeletableKind kind, Guid id, CallerPrincipal caller, CancellationToken ct = default) =>
             Task.FromResult(ExternalVisibility.TryGetValue((kind, id), out var decision) ? decision : LiveParentDecision.Readable);
 
+        /// <summary>ebilling-r1 task 093 fix round 1 (review 2 F2): an invoice's parents (its matter) as a delete-own row filed under the
+        /// invoice reads them. An invoice not listed does not exist.</summary>
+        public ConcurrentDictionary<Guid, Guid> InvoiceMatters { get; } = new();
+
+        /// <summary>A fault for the invoice-parent read (the real read throws <see cref="DataverseUnavailableException"/>).</summary>
+        public Exception? InvoiceParentsFault { get; set; }
+
+        public override Task<(Guid? MatterId, Guid? ProjectId, Guid? WorkAssignmentId)?> GetInvoiceParentsAsync(
+            Guid invoiceId, CancellationToken ct = default)
+        {
+            if (InvoiceParentsFault is { } fault)
+                return Task.FromException<(Guid?, Guid?, Guid?)?>(fault);
+            return Task.FromResult<(Guid?, Guid?, Guid?)?>(
+                InvoiceMatters.TryGetValue(invoiceId, out var matter) ? (matter, null, null) : null);
+        }
+
         public ConcurrentDictionary<Guid, Guid> Requesters { get; } = new();
 
         public Exception? TargetFault { get; set; }
@@ -2147,6 +2163,8 @@ public sealed class ExternalDeleteOwnTests : IClassFixture<ExternalDeleteOwnTest
             LiveParents.Clear();
             Requesters.Clear();
             ServiceRequestInvoices.Clear();
+            InvoiceMatters.Clear();
+            InvoiceParentsFault = null;
             States.Clear();
             Volatile.Write(ref _requesterAndStateReads, 0);
             StateFault = null;
