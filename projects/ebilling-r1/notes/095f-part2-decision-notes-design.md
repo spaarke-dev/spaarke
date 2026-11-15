@@ -1,7 +1,7 @@
 # 095f part 2: a note on every invoice decision, and a note on every Correction (EB-D-236, EB-D-237): design for review
 
-> **Status:** DESIGN DRAFT, 2026-11-15. No code has been written.
-> **Base:** `work/ebilling-r1` at f9f74de82e.
+> **Status:** DESIGN DRAFT, 2026-11-15, revised the same day after ontology-r1 review round 1 (PASS-WITH-CHANGES; §14). No code has been written.
+> **Base:** `work/ebilling-r1` at f9f74de82e; citations re-verified at f22abed770 (no `src/` or `tests/` change between the two).
 > **Reviewers:**
 > - ontology-r1, before the build: the parts marked **ontology** in §8, which touch the Decision Record writer or the action catalog;
 > - word-add-in-r1 and spa-r4, for the shared client files in 2e;
@@ -34,9 +34,9 @@ The submission route in 2e keeps part 1's field-error shape instead, because it 
 ### 1.2 Where a note is stored
 
 - **Decision Record.** The note goes in the record's `Values["note"]`, inside `sprk_steps`. That is the slot the catalog already declares for approve (`Catalog:417`) and assign-firm (`Catalog:451`).
-  - `Values` is in the billing hash (`Writer:1419-1437`), so a note is part of what was decided: the same decision id with a different note is refused as `ReviewInvalid` (`Writer:1349-1357`) and never written twice.
-  - The key is **added only when a note is given**. A decision without a note hashes exactly as today, so retries of pre-change decisions still match (test N2, §9).
-- **No writer change for Values.** `ValidateBilling` checks only *required* parameters (`Writer:1580-1591`) and never refuses an undeclared value key. A `note` value therefore needs no writer change. Declaring `note` as an optional catalog parameter on more entries only documents it (§8).
+  - `Values` is in the billing hash (`Writer:1419-1437`), so a note is part of what was decided (§10 Q8, answered: inside the hash). **At the writer**, the same decision id with a different note is refused as `ReviewInvalid` (`Writer:1349-1357`) and never written twice. Whether a service ever *reaches* the writer with the edited note on a repeat is the service's own path: reject and return do not (§2 Change 3).
+  - The key is **added only when a note is given**, and **never with a null value**. The hash covers every key, including one whose value is null (`Writer:1429-1430`: each entry is hashed as `[key, value]`), so `note: null` would hash differently from no key, and a retry of a pre-change decision would be refused. "No note" (null, empty or whitespace-only, §1.1) means the key is absent. A decision without a note hashes exactly as today (test N2, §9).
+- **No writer change for Values.** `ValidateBilling` checks only *required* parameters (`Writer:1580-1591`) and never refuses an undeclared value key. A `note` value therefore needs no writer change. `note` is declared as an optional catalog parameter on the touched entries (§8, §10 Q6 answered), which documents it and changes no behaviour.
 - **The invoice-level note** goes to `sprk_invoice.sprk_correctionnote` (`Note:28`), overwritten by the latest invoice-level decision (EB-D-236). The text written is the decision's note when one is given. Whether a decision with a required reason and no note writes its reason instead, or leaves the column unchanged, is §10 Q1. History stays in the Decision Records.
   - **The column must land in the same conditional write as the decision's own invoice change.** A refused or concurrent decision then writes no note, and a note never lands without its decision.
 - **Line notes** stay on the line decision's own record (D-75). They never touch the invoice column.
@@ -102,9 +102,11 @@ Before this change, `sprk_correctionnote` held the firm's own "why corrected" te
    - `TransitionAsync` at `:523` passes the column text (§1.2).
    - `BuildDecision` adds `Values["note"]` when a note is given.
    - The reason rules are unchanged.
-3. **Repeat after 503.** The completing repeat must send the same note. The InvoiceReview wizard keeps its form state across the retry (`src/solutions/InvoiceReview/src/components/decision/InvoiceDecisionWizard.tsx:158`).
-   - If the record was already written, a repeat with an edited note is refused by the hash (§1.2).
-   - If it was not yet written, the record takes the repeat's note while the column keeps the first one (K-1, §11).
+3. **Repeat after 503.** The completing repeat should send the same note. The InvoiceReview wizard keeps its form state across the retry (`src/solutions/InvoiceReview/src/components/decision/InvoiceDecisionWizard.tsx:158`). If the user edits the note before repeating:
+   - **If the record was already written, the edited note is silently dropped, not refused.** The claimant's repeat finds the record through the stored set (`ReplaySignalsAsync` → `FindStoredResolvedSetAsync`, `Fin/InvoiceRejectReturnService.cs:821-856`) and hands it to `FinishAsync` as the existing record (`:635-637`). `FinishAsync` then only closes the stored set and writes the link (`:663-672`); it never calls `RecordAsync` again (`:678` is reached only when no record exists). So the writer's hash never sees the edited note. The record and the column keep the first note, and the call answers Decided. (Round 0 said "refused by the hash"; that was wrong.)
+   - If the record was not yet written, the record takes the repeat's note while the column keeps the first one, because the transition (and so the column) already landed.
+
+   Both cases are known limit K-1 (§11). The design does not add a "note differs" refusal on the repeat path: the existing path deliberately ignores the request's reason once a record exists (the remark at `:635-636`), and the note follows the reason.
 
 ### API contract
 
@@ -121,10 +123,13 @@ Before this change, `sprk_correctionnote` held the firm's own "why corrected" te
 - Reject and return:
   - the note is in `Values` and in the column;
   - with no note, `Values` has no `note` key and the existing hash is byte-identical;
+  - with a whitespace-only note, `Values` has no `note` key (never `note: null`) and the hash equals the no-note hash;
   - 2000 characters is accepted; 2001 and `\u0007` are refused before any lock;
-  - `\n` and `\t` are accepted.
+  - `\n` and `\t` are accepted;
+  - **K-1 (repeat after the record exists):** a decision that fails at "signals" or "link" after its record was written, repeated with an edited note, answers Decided, makes zero `RecordAsync` calls, and leaves the record's `Values["note"]` and `sprk_correctionnote` holding the first note (must-not-fire on the edited text);
+  - **K-1 (repeat before the record exists):** a decision that fails at "record", repeated with an edited note, records the edited note while the column keeps the first.
 
-**Ownership:** eBilling. `Values["note"]` on `reject-invoice` and `return-to-firm` needs no writer change. Declaring the parameter is the optional catalog edit in §8, which is **ontology** (light).
+**Ownership:** eBilling. `Values["note"]` on `reject-invoice` and `return-to-firm` needs no writer change. Declaring `note` as an optional parameter (§8, Q6 answered: declare it) is **ontology** (light).
 
 ## 3. Part 2b: the adjustment note
 
@@ -145,14 +150,31 @@ EB-D-236 lets an adjustment carry a note, with history in the Decision Records. 
 
 **(A) Recommended: give adjustments a Decision Record.**
 
-- Two new billing codes, `add-adjustment` and `remove-adjustment`.
+- Two new billing codes, `add-adjustment` and `remove-adjustment`, each a **full** catalog entry in `DeclaredBilling`. The writer refuses a billing code that has no `Gate` (`Writer:1555`), and checks every required parameter (`Writer:1580-1591`), so the entries are part of the contract, not documentation. Proposed (classes and tiers for ontology-r1 to confirm):
+
+  | Code | Label | Params (each code is also its Values key) | Class | Gate |
+  |---|---|---|---|---|
+  | `add-adjustment` | Add adjustment | `method` (Choice, req.), `value` (Money, req.; see the note below the table), `rule` (Lookup, opt.), `reason` (TextArea, **req.**, as `Fin/InvoiceAdjustmentService.cs:454`), `note` (TextArea, opt.) | Judgement | `Tier2b`, `Reversible: true`, `RecordOfTruthImpact: true`, `ExternallyVisible: false` |
+  | `remove-adjustment` | Remove adjustment | `adjustment` (Lookup `sprk_billingevent`, req.), `note` (TextArea, opt.); **no `reason`** | Judgement | same |
+
+  - The gates follow `add-line` (`Catalog:463-468`), the closest existing entry: a reviewer-made change to the invoice's totals that a later decision can undo. `ExternallyVisible` is false, as on every line-level and totals-level entry today; the firm sees the resulting totals, not the record.
+  - `remove-adjustment` declares no `reason`, because the remove route takes none (`RemoveAdjustmentCommand(InvoiceId, LineId, ReviewerSystemUserId)`, `Fin/InvoiceAdjustmentService.cs:29`; the new body is `{ note? }` only, §3 API contract). Declaring it required would make every remove refused.
+  - The Values keys are exactly the declared codes (one name each): `method`, `value`, `rule` (round 0 said `ruleId`, which would not match a declared `rule`), and `adjustment`.
+  - `DecisionParameterKind` has no number kind (`Catalog:25-38`). `value` is an amount or a percentage depending on `method`; `Money` is proposed as the nearest kind. The kind affects no writer check, and ontology-r1 may prefer `Text`.
 - The subject is the invoice. Codes outside the four line codes already map to the invoice (`Writer:1263-1267`), so **the writer literal is not edited**.
+- **The exact-set tests change, so this is an amendment, not an addition.** `Billing_C2_...` (`tests/unit/Sprk.Bff.Api.Tests/Services/Signals/DecisionRecordWriterTests.Billing.cs:191`) pins the billing set and each code's table, and `BillingActions_AreExactlyTheStatedSet_...` pins the code list (`tests/unit/domain/Signals/DecisionActionCatalogTests.cs:348-354`). Both expected literals gain the two codes (`sprk_invoice` for both), and the required-parameter theory (`:386-396`) gains two rows. Editing an existing test's expected set is an ontology-reviewed amendment of D-100's "additive only" condition, decided at that test as its remark says (`Writer:1255-1262`).
 - The decision id:
   - for an add, the client's `AdjustmentId`, a natural idempotency key that is already in the body;
   - for a remove, an id derived from `remove-{lineId}`.
-- `Values`: `method`, `value`, `ruleId` and, when given, the note.
-- The record is written after the adjustment and totals land, with the reject/return 503-then-repeat pattern.
-- The exact-set test (`tests/unit/Sprk.Bff.Api.Tests/Services/Signals/DecisionRecordWriterTests.Billing.cs:191`) is the designed place to decide a new code's table, and it gains the two codes.
+- The record is written after the adjustment and totals land, with the 503-then-repeat pattern the adjustment route already has (`ebilling.adjustment.incomplete`).
+
+**Idempotency by `AdjustmentId`, verified in the code.** An add is idempotent by `AdjustmentId` today:
+
+- The row id is the client's id hashed with the invoice (`LineIdFor`, `Fin/InvoiceAdjustmentService.cs:262-263`, used at `:471`), so a retry finds its own row (`:498`).
+- A repeat with the same method, value, reason and rule (`IsSameAdjustment` `:703-710`) adds nothing, finishes the totals and answers `alreadyApplied` (`:506-516`). The same id with other content, or after the row was removed, is 409 `ebilling.adjustment.id_reused` (`:72`, `:509-513`). So one `AdjustmentId` is one add, once.
+- A remove is idempotent too: an already-removed row re-runs the recalculation and answers `alreadyApplied` (`:765`, `:819`). A removed adjustment cannot be re-added under the same id (409 above), so `remove-{lineId}` names one removal.
+
+Under (A) the record follows the same rule. `IsSameAdjustment` does not compare a note (the row has none under (A)), so a repeat that changes only the note passes the row check and reaches the writer, whose hash refuses it (`ReviewInvalid`). The service maps that refusal on an `alreadyApplied` repeat to the existing 409 `ebilling.adjustment.id_reused` ("this adjustment id was used for a different adjustment"), so the note is part of "the same adjustment", exactly as the reason is. Unlike reject and return (§2 Change 3), the edited note is refused, not dropped, because under (A) the record is written in `FinishAddAsync`, which every repeat reaches (`:515`). A repeated remove with an edited note is refused the same way and answered 409 `ebilling.adjustment.id_reused` with the detail "This adjustment was already removed with a different note."
 
 **(B) eBilling only.** The note goes on the adjustment row (a new `sprk_billingevent.sprk_adjustmentnote` column, which is a schema add) and on the invoice column. There is no Decision Record, so the history lives on the adjustment rows.
 
@@ -171,11 +193,13 @@ EB-D-236 lets an adjustment carry a note, with history in the Decision Records. 
 ### Tests
 
 - The note is on the record (A) or the row (B), and on the column.
-- No note means no key.
-- (A) A repeated `AdjustmentId` files one record. A remove followed by an add of a new adjustment files two.
+- No note means no key; a whitespace-only note means no key.
+- (A) A repeated `AdjustmentId` with the same content files one record (AlreadyRecorded, one create). A remove followed by an add of a new adjustment files two.
+- (A) A repeated `AdjustmentId` that changes only the note gives 409 `ebilling.adjustment.id_reused` and writes no second record; the same for a repeated remove with an edited note.
+- (A) Each new entry has a `Gate`; `add-adjustment` without a reason is refused by the writer; `remove-adjustment` with a null reason is accepted.
 - The validation set of 2a.
 
-**Ownership:** (A) is **ontology**: two catalog codes and the exact-set test. (B) is eBilling only, plus a schema change.
+**Ownership:** (A) is **ontology**: two full catalog entries and an amendment of the two exact-set tests (reviewed by ontology-r1, not additive). (B) is eBilling only, plus a schema change.
 
 ## 4. Part 2c: the override note and the blocked-return note
 
@@ -213,7 +237,7 @@ EB-D-236 lets an adjustment carry a note, with history in the Decision Records. 
 - The validation set.
 - The existing `tests/unit/Sprk.Bff.Api.Tests/Services/Finance/SubmissionOverrideServiceTests.cs` stays green.
 
-**Ownership:** eBilling. The optional catalog parameter on `override-submission` is **ontology** (light, §8).
+**Ownership:** eBilling. Declaring `note` as an optional parameter on `override-submission` (Q6 answered) is **ontology** (light, §8).
 
 ## 5. Part 2d: line-decision notes (one Decision Record per line decision, D-75)
 
@@ -256,7 +280,7 @@ EB-D-236 lets an adjustment carry a note, with history in the Decision Records. 
   - no line decision writes `sprk_correctionnote`.
 - The validation set.
 
-**Ownership:** eBilling. Declaring `note` on `accept-line`, `reduce-line` and `disallow-line` (`Catalog:391-414`) is the optional **ontology** catalog edit (§8).
+**Ownership:** eBilling. Declaring `note` on `accept-line`, `reduce-line` and `disallow-line` (`Catalog:391-414`) as an optional parameter (Q6 answered) is the **ontology** catalog edit (§8).
 
 ### 5.2 Correct and confirm: there is no Decision Record today
 
@@ -277,7 +301,7 @@ EB-D-236 says correct and confirm notes are "stored with that decision's Decisio
 - New codes `correct-line` and `confirm-line` (subject: the line), plus `correct-header` and `confirm-header` (subject: the invoice).
 - The two header codes fall into the existing invoice default.
 - The two line codes **must be added to the literal at `Writer:1266`**. Otherwise they silently map to the invoice and are then refused at `Writer:1563`.
-- That is an edit to an existing writer line, not an addition, so it needs a §6.5 **path-B amendment** to D-100's C7 ("additive only"). One alternative ontology-r1 may prefer is to replace the literal with a declared per-code subject on `DecisionActionDefinition`, which is a larger, one-time change.
+- That is an edit to an existing writer line, not an addition, so it needs a §6.5 **path-B amendment** to D-100's C7 ("additive only"). ontology-r1 answered §10 Q7: **edit the `:1266` literal**; a per-code subject is not added to the public `DecisionActionDefinition`.
 - **Cost:** one record per field correction. A header pass can correct many fields, so a Correction-heavy review files many records.
 
 **(B) Note on the correction row.**
@@ -422,21 +446,21 @@ No message is sent from this design. The session sends them.
 
 | Part | eBilling only | Ontology-owned change | Review |
 |---|---|---|---|
-| 2a (+ approve) | lifecycle overload, services, routes | none required. Optional: declare `note` on `reject-invoice` and `return-to-firm` (`Catalog:423-436`) | ontology-r1 light (Values content) |
-| 2b | the note field, the column | (A): add `add-adjustment` and `remove-adjustment` to `DeclaredBilling`, plus the exact-set test | ontology-r1 under (A) |
-| 2c | release transaction, routes | optional `note` on `override-submission` (`Catalog:438`) | ontology-r1 light |
-| 2d 5.1 | command, routes | optional `note` on `accept-line`, `reduce-line` and `disallow-line` (`Catalog:391-414`) | ontology-r1 light |
-| 2d 5.2 | (B) or (C) | (A): edit the literal at `Writer:1266` (path-B amendment of C7) plus four codes | ontology-r1 full under (A) |
+| 2a (+ approve) | lifecycle overload, services, routes | declare `note` (optional) on `reject-invoice` and `return-to-firm` (`Catalog:423-436`) | ontology-r1 light (Values content) |
+| 2b | the note field, the column | (A): two full entries (`add-adjustment`, `remove-adjustment`) in `DeclaredBilling`, plus the amendment of the two exact-set tests (§3) | ontology-r1 under (A), as an amendment |
+| 2c | release transaction, routes | declare `note` (optional) on `override-submission` (`Catalog:438`) | ontology-r1 light |
+| 2d 5.1 | command, routes | declare `note` (optional) on `accept-line`, `reduce-line` and `disallow-line` (`Catalog:391-414`) | ontology-r1 light |
+| 2d 5.2 | (B) or (C) | (A): edit the literal at `Writer:1266` (path-B amendment of C7, §10 Q7) plus four full entries | ontology-r1 full under (A) |
 | 2e | server route, persister path | none | word-add-in-r1, spa-r4 |
 
-**Optional catalog parameters.** Declaring `note` as an optional parameter adds lines to existing entries' parameter lists. The writer never reads optional parameters (`Writer:1580-1591`), so behaviour is unchanged. `tests/unit/domain/Signals/DecisionActionCatalogTests.cs` may pin parameter lists and would then be updated. It is listed so ontology-r1 can decline it; the notes work without it (§10 Q6).
+**Optional `note` parameters (§10 Q6, answered: declare them).** `note` is declared optional on `reject-invoice`, `return-to-firm`, `override-submission`, `accept-line`, `reduce-line` and `disallow-line`, as it already is on `approve-invoice` (`Catalog:417`) and `assign-firm` (`Catalog:451`), with the code `note` (one name each: the services write `Values["note"]`). The writer never reads optional parameters (`Writer:1580-1591`), so behaviour is unchanged. `tests/unit/domain/Signals/DecisionActionCatalogTests.cs` checks only the *required* parameters of each billing code (`:386-400`), so its existing rows stay green; a new must-fire row pins `note` as optional on the eight codes.
 
 ## 9. Tests common to every part
 
 | # | Test |
 |---|---|
 | N1 | Every new note field shares the §1.1 table: null, empty, whitespace, 1, 2000 and 2001 characters, `\n`, `\t`, `\u0007` and `\u001b`. Each refusal happens before any read (zero reader calls). |
-| N2 | With no note, the billing hash of every touched decision is byte-identical to the pre-change hash, captured as a golden value per code. |
+| N2 | With no note, **and with a whitespace-only note**, the billing hash of every touched decision is byte-identical to the pre-change hash, captured as a golden value per code. The built `Values` never contains a `note` key with a null value (must-not-fire: a `note: null` entry would change the hash, `Writer:1429-1430`). |
 | N3 | Every route without a note behaves exactly as before (the existing tests are untouched and green). |
 | N4 | `InvoiceCorrectionNoteWritersGuardTests` (ArchTest): the allowed writers are the persister, the lifecycle, the release transaction and the totals path. A planted extra writer fails (must-fire), and the allowed set passes (must-not-fire). |
 | N5 | No log line contains note text: the services log ids and lengths only. |
@@ -453,11 +477,13 @@ No message is sent from this design. The session sends them.
 4. **Correct and confirm (5.2):** (A) Decision Records (a path-B amendment), (B) a note on the correction row, or (C) defer?
 5. **Create Invoice wizard (6.3):** (A) build a Correction path, (B) leave Correction to the email path, or (C) server only for R1?
 
-**For ontology-r1**
+Q1–Q5 stay open. Option B vs A (2b, 5.2) remains the owner's call; ontology-r1's review does not decide it.
 
-6. Should `note` be declared as an optional parameter on `reject-invoice`, `return-to-firm`, `override-submission` and the three line codes, or should it stay an undeclared value?
-7. Under 5.2 (A): an edit to the literal at `Writer:1266`, or a declared per-code subject on `DecisionActionDefinition`?
-8. Is a note inside the billing hash (so a changed note under the same decision id is refused) the behaviour you want, rather than leaving it out of the hash like the facts?
+**For ontology-r1 (answered in review round 1, 2026-11-15)**
+
+6. *Declare `note` as an optional parameter, or leave it an undeclared value?* **Declare it optional**, as on `approve-invoice` (`Catalog:417`) and `assign-firm` (`Catalog:451`). Applied in §8.
+7. *Under 5.2 (A): edit the `Writer:1266` literal, or a declared per-code subject on `DecisionActionDefinition`?* **Edit the `:1266` literal.** No per-code subject on the public `DecisionActionDefinition`. Applied in §5.2.
+8. *Note inside the billing hash?* **Yes, inside the hash.** Applied in §1.2. Note the consequence per path: the adjustment path refuses an edited note on a repeat (§3), while reject and return never reach the writer once the record exists and drop it (§2 Change 3, K-1).
 
 **For word-add-in-r1 and spa-r4**
 
@@ -468,7 +494,7 @@ No message is sent from this design. The session sends them.
 
 | # | Limit |
 |---|---|
-| K-1 | A reject or return that fails at "record" and is repeated with an edited note records the edited note, while the invoice column keeps the first. |
+| K-1 | A reject or return repeated after a 503 with an edited note: if the record was already written (a failure at "signals" or "link"), the edited note is **silently dropped**, and the record and the column keep the first note (the repeat never calls `RecordAsync`, `Fin/InvoiceRejectReturnService.cs:635-637`, `:663-672`); if the record was not yet written (a failure at "record"), the record takes the edited note while the column keeps the first. Tests in §2. |
 | K-2 | A multi-line decision has one note for all its lines, as it has one reason. |
 | K-3 | A decision without a note leaves the column unchanged (pending Q1), so the column may show an older decision's note. |
 
@@ -480,7 +506,7 @@ No message is sent from this design. The session sends them.
 | 2 | 095f-2c | Override and blocked-return notes | S | code-review; ontology-r1 light |
 | 3 | 095f-2d1 | Accept, reduce and disallow notes; accept-clean must-not-fire | M | code-review; ontology-r1 light |
 | 4 | 095f-2e1 | from-document `correctionNote` plus the 400 | S | code-review; word-add-in-r1 told before merge |
-| 5 | 095f-2b | Adjustment note, after Q3 | S (B) / M (A) | ontology-r1 under (A) |
+| 5 | 095f-2b | Adjustment note, after Q3 | S (B) / M (A) | ontology-r1 under (A), as an amendment of the exact-set tests |
 | 6 | 095f-2ui | InvoiceReview note boxes and `decisionApi`/`invoiceReviewApi` | M | code-review |
 | 7 | 095f-2d2 | Correct and confirm notes, after Q4 | M; L under (A) | ontology-r1 full under (A) |
 | 8 | 095f-2e2 | Create Invoice wizard Correction path, after Q5 | M–L | word-add-in-r1 first, then spa-r4 |
@@ -497,3 +523,21 @@ No message is sent from this design. The session sends them.
   2. It composes with `lockedRecord`, `hideTitle` and the `submittingRef` close guard. State whether `correction` + `lockedRecord` is supported or refused, and test it.
   3. A minor version of Spaarke.UI.Components (3.x), with consumer lockfiles refreshed in the same PR.
   4. A scoped diff review by spa-r4 before the PR.
+
+## 14. Review round 1 (ontology-r1, 2026-11-15)
+
+**Verdict:** PASS-WITH-CHANGES. Every citation below was re-checked against the code at f22abed770.
+
+| # | Item | Applied |
+|---|---|---|
+| 1 | §2 Change 3 bullet 1 is wrong: a repeat after the record exists never calls `RecordAsync` again (`InvoiceRejectReturnService.cs:635-637`, `:660-673`), so an edited note is silently dropped, not refused. Fold into K-1 and add a test. | Applied. §2 Change 3 corrected; K-1 (§11) now covers both cases; two K-1 tests added to §2. §1.2 now separates what the writer refuses from what a service actually reaches. |
+| 2 | §3 2b(A): the two new codes need full catalog entries (Gate, record class, reason required, `ExternallyVisible`); they edit the exact-set test, so this is an ontology-reviewed amendment, not additive. Confirm that an add-adjustment repeat is idempotent by `AdjustmentId`. | Applied. §3 now has both full entries (gates as `add-line`; `remove-adjustment` declares no reason because its route takes none). The exact-set edit is stated as an amendment and covers both pinning tests (`DecisionRecordWriterTests.Billing.cs:191` and `DecisionActionCatalogTests.cs:348-354`). **Idempotency confirmed in the code:** the row id is derived from (invoice, `AdjustmentId`) (`InvoiceAdjustmentService.cs:262-263`, `:471`); a same-content repeat answers `alreadyApplied` (`:506-516`); other content or a removed row gives 409 `id_reused` (`:509-513`). One consequence is added: the row check ignores the note, so under (A) a repeat that edits only the note reaches the writer and is refused; it is answered 409 `id_reused`, with tests. The Values key `ruleId` is renamed `rule` to match its declared parameter. |
+| 3 | §1.2: never add a `note` key with a null value (the hash covers every key, including nulls, `Writer:1429-1430`); N2 must also treat whitespace-only as absent. | Applied. §1.2, N2, and the 2a and 2b test lists. |
+
+**Answers recorded:** Q6 (declare `note` optional), Q7 (edit the `:1266` literal; no per-code subject on the public `DecisionActionDefinition`) and Q8 (note inside the hash) in §10, applied in §1.2, §5.2 and §8. Q1–Q5 stay open for the owner, and option B vs A remains the owner's call.
+
+**Citation checks**
+
+- `Writer:1555`, `:1429-1430`, `:1580-1591`, `Catalog:417`, `:451`, `Writer:1266`, `DecisionRecordWriterTests.Billing.cs:191` and `InvoiceRejectReturnService.cs:635-637` match the code.
+- `InvoiceRejectReturnService.cs:660-673` is three lines early at the start: the existing-record branch is `:663-672` (from `if (recordId is { } existing ...)` to its `LinkAsync` return; the first `RecordAsync` call is at `:678`). The substance holds; the doc cites `:663-672`.
+- The review names one exact-set test. A second test also pins the billing code list (`tests/unit/domain/Signals/DecisionActionCatalogTests.cs:348-354`), and the required-parameter theory (`:386-396`) gains rows. Both are listed in §3.
