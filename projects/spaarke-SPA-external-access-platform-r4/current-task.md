@@ -7,10 +7,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | 013 — collapsible sections + child record modals (tasks/013-sections-collapse-child-records.poml). 012 ✅ 5a0d8e8771 |
-| **Step** | 013 Step 8: implementation delegated to an implementer agent |
+| **Task** | 018 retest round 2: 012 ✅ and 013 ✅ in PR #2837 (CI pending). Next: merge, SPA dev deploy (owner approval), owner retest. Then 021 (ebilling 093) |
+| **Step** | PR #2837 open; waiting on CI and the owner go for merge + SPA deploy |
 | **Status** | Dev BFF `5a9b687a0b` (see Live state). Dev SPA from run 43598875136 (master `2747977f47`), live 13:19Z; bundle has the new strings, no "Can contribute" or "To Do". |
-| **Next Action** | Receive the implementer report for 012, then run code-review, adr-check and an adversarial pass. Mark 012 done, run task-execute for 013, then PR, merge, SPA deploy and owner retest. 021 waits on ebilling 093 (scheduled 2026-11-15). |
+| **Next Action** | After the owner says go: merge #2837 once CI is green, then dispatch deploy-external-spa.yml (dev, master); rollback master `2747977f47`. NOTE: no SPA deploy once 021 is merged and before the 093 BFF swap. |
 
 ## Done after merge
 - The merge SHA was sent to ebilling-r1 (for their 095 notes) and acknowledged to uac-r2.
