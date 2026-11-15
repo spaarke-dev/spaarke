@@ -8,9 +8,9 @@
 | Field | Value |
 |-------|-------|
 | **Task** | 021: invoice Files section on ebilling 093's routes (FR-13). FULL, sonnet high, directional. The owner pulled it ahead of 020/022/023 on 2026-11-15. |
-| **Step** | Step 9.5. The adversarial review is done: F1 (`ebilling.disabled` 503 shown as a retryable fault), F2 (a test title contradicts its setup) and a K2 empty-fileName fallback were sent back to the implementer agent, and the fixes are in progress. |
-| **Status** | Uncommitted SPA changes in `src/client/external-spa/` (see Files). Before the fixes: typecheck, lint, vitest 1706 and the build all passed. |
-| **Next Action** | (1) When the implementer reports, re-check the fix diff and rerun the tests. (2) Write `notes/task-021-notes.md`: the contract citations at pr/2839, the gate deviation, the file path, the test-scope justifications, and the review findings with their classes. (3) Set the POML to completed with notes and `rework: fix-round-1 task 021`, mark it ✅ in TASK-INDEX, and run the drift check. (4) Commit, merge origin/master, push, and open the PR. (5) Send the PR number to ebilling-r1 and uac-r2. (6) Merge after CI, with the owner's go. (7) uac-r2 swaps the BFF with 093 (needs its owner's go); then I deploy the SPA straight after. |
+| **Step** | 021 ✅ in PR #2840 (CI running). Waiting on the owner go to merge |
+| **Status** | 021 committed and pushed; notes in notes/task-021-notes.md; vitest 1715, build OK |
+| **Next Action** | On the owner go: merge #2840 after CI and send the SHA to uac-r2 and ebilling-r1. uac-r2 swaps the BFF (master with #2839 + #2840) on its owner go and sends "BFF live"; I deploy the SPA straight after (rollback 04dbd8df05), then the owner retests invoice Files. NO SPA deploy between merging #2840 and the BFF swap. |
 
 ## Task 021 facts
 - **Contract (not on master; ebilling PR #2839, head `3b33a8d8cc`, local ref `pr/2839`):**
