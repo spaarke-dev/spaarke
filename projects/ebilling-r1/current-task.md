@@ -13,11 +13,12 @@
 ### In flight
 
 - **#2839 MERGED to master at 4f1192ab9d** (2026-11-15, auto-merge on the owner's say-so, all 44 checks green). It carried 093, 113, 084h-1 (with fix round 2), the #2833 ebilling slice and notes. The merge SHA went to uac-r2, spa-r4 and word-add-in-r1 (word-add-in-r1 is offline; queued). uac-r2 now empties the 12 scripts/ebilling KnownOffenders entries in #2838 itself.
-- **Deploy chain (dev), now waiting on spa-r4:**
-  1. spa-r4's R4 021 is PR #2840, built against 3b33a8d8cc (no src or tests change from there to the merge). It merges on spa-r4's owner go, and spa-r4 sends the SHA.
+- **Deploy chain (dev), now waiting on uac-r2 (owner go in uac-r2's session):**
+  1. ✅ spa-r4's R4 021 (#2840) merged to master at c1eb6e4a8e.
   2. uac-r2 pings mcp-r1, then asks the owner for the exact-SHA go **in uac-r2's session**. The deploy is master (095g #2830 + #2839) plus mcp's d7369fecf1, with the ledger re-resolved.
   3. uac-r2 swaps the BFF and runs the 30-min gate. spa-r4 deploys the SPA immediately after.
-  4. Then update owner-testing-checklist with 093/113 tests and tell word-add-in-r1 that 095g is live (slice C is unblocked).
+  4. Then tick checklist section E as testable (already drafted) and tell word-add-in-r1 that 095g is live (slice C is unblocked).
+- **Gap found 2026-11-15:** no client shows 113's `procedureChange`. The Invoice Review page (`src/solutions/InvoiceReview`, task 110, done earlier) never reads it, and no task owns the UI. Offered to the owner as a follow-up here.
 - **Reminder for 084h-2 (ontology-r1):** the writer caps only `reason` at 2000 characters, not `note`. 084h-2 must enforce or trim the note at the service (design §9), so an over-long note never reaches the create and fails as a retryable CreateFailed.
 
 ### Done today, on work (pushed)
