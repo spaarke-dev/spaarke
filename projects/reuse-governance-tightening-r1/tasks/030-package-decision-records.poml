@@ -4,7 +4,7 @@
     <title>Decision records for the 9 grandfathered packages</title>
     <phase>4 Package reviews</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Creates a new project note under explicit ADR-012 constraints; ends at an owner gate (FR-08)</rigor-reason>
     <model-tier>opus</model-tier>
@@ -92,6 +92,7 @@
 
   <notes>Hypotheses in design.md section 6.2 are starting points only.</notes>
 
+  <completion-notes>Completed 2026-11-13. Master merged first (265d426d3c); PR #935 still open (affects 031-033 PRs, not this task). Three code-mapper inventories (sonnet, low; 3 launches, the cap). notes/package-reviews.md: nine sections with three-test evidence, re-verified consumer counts, findings and recommendations; summary table and findings list P-1..P-14 at the top (8 Medium, 6 Low, 0 High). Candidate live defects checked in the main session: the CommunicationPage drifted provenance.ts is a non-deployed prototype (P-12, Low); the daily-briefing raw fetch is a same-origin Dataverse metadata call, not a BFF call (P-4, the nav-prop copy); Connections vs Resolver ancestor stamping differs by design (BFF filing route). Overturned hypothesis: the three feature-area packages are recommended for sanction through one Path B amendment (consolidating would put ~437 sprk_ literals into ui-components, which ADR-012 forbids, and grow the barrel 17 PCFs import). Owner approved all nine as written on 2026-11-13; each section records it; decisions.md row added. No code, ADR or test file changed. rework: none task 030</completion-notes>
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
     <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist.</protocol>

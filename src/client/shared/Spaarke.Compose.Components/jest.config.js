@@ -21,7 +21,7 @@
 // The experiment failed with 72 `Cannot find module '@fluentui/react-icons'` errors. The dist route
 // keeps the package boundary honest; the cost is that CI must build the SharedLibs first
 // (`compose-client-gate` in .github/workflows/ci-standalone-checks.yml does exactly that, in dependency order:
-// Spaarke.Auth → Spaarke.SdapClient → Spaarke.UI.Components → Spaarke.DocumentOperations).
+// Spaarke.Auth → Spaarke.SdapClient → Spaarke.UI.Components).
 //
 // NEVER pass `{ virtual: true }` to a `jest.mock()` of an `@spaarke/*` specifier in this package.
 // `virtual: true` registers the specifier in jest's RESOLVER, which is shared by every suite a
