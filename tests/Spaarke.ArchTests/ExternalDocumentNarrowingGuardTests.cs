@@ -630,12 +630,16 @@ public class ExternalDocumentNarrowingGuardTests
     // external-plane source method that reads or streams a Stored File (any StoredFileService member, or the shared
     // StoredFileEndpoints.StreamServableAsync) is a firm file surface. It must be THE gate (ExternalInvoiceSubmissionAuthorizationFilter
     // .DecideInvoiceFilesAsync), which reaches the record gate (ExternalMessageEndpoints.GetRecordRightsDecisionAsync: Read through the
-    // invoice's parents, the secure-roots rule), the one firm definition (ReadCallerFirmsAsync) and the (a') predicate
-    // (ExternalInvoiceHiding); or a listed handler that serves only from the gate's set (it reads ExternalInvoiceSubmissionScope
-    // .InvoiceFiles). A new surface, a gate that stops reaching one of the three, a handler that stops reading the set, and a stale
-    // entry all fail. Controls: FirmFileGuard_MustFireAndMustNotFire over the FirmFileControl* fixtures (end of file).
+    // invoice's parents, the secure-roots rule and the (a') predicate) and the one firm definition (ReadCallerFirmsAsync); or a listed
+    // handler that serves only from the gate's set (it reads ExternalInvoiceSubmissionScope.InvoiceFiles). A new surface, a gate that
+    // stops reaching one of the two, a handler that stops reading the set, and a stale entry all fail. Controls:
+    // FirmFileGuard_MustFireAndMustNotFire over the FirmFileControl* fixtures (end of file).
+    // (a') is NOT checked by reach here (task 093 fix round 1, review 2 F1): any path through the record gate reaches the predicate's
+    // invocation, so a reach check passes whether or not the gate hands the record gate a seam. What covers it: the record gate refuses
+    // every invoice when its (a') seam is null (fail closed), and ExternalInvoiceFileRoutesTests' hidden, predicate-fault and "asked once"
+    // cases fail when the seam is null or hides nothing (the 093 notes' seeding proofs).
 
-    /// <summary>THE firm file gate: each must reach the record gate, the firm read and the (a') predicate.</summary>
+    /// <summary>THE firm file gate: each must reach the record gate (and with it (a')) and the firm read.</summary>
     private static readonly string[] FirmFileGates =
     {
         $"{typeof(ExternalInvoiceSubmissionAuthorizationFilter).FullName}::DecideInvoiceFilesAsync",
@@ -653,7 +657,7 @@ public class ExternalDocumentNarrowingGuardTests
         var problems = FirmFileProblems(BffTypes.Value, IsExternalPlane, FirmFileGates, FirmFileHandlers);
         Assert.True(problems.Count == 0,
             "An external-plane read of a Stored File must go through ExternalInvoiceSubmissionAuthorizationFilter's InvoiceFiles gate " +
-            "(ebilling-r1 task 093): the record gate, the caller's firms and the (a') predicate, then the visible file set; a handler " +
+            "(ebilling-r1 task 093): the record gate (with the (a') predicate) and the caller's firms, then the visible file set; a handler " +
             "serves only a file of that set. Wire it, or list it with a reviewer's reason:\n" + string.Join("\n", problems));
     }
 
@@ -663,14 +667,14 @@ public class ExternalDocumentNarrowingGuardTests
         var fixtures = new[]
         {
             typeof(FirmFileControlReadsWithoutTheGate), typeof(FirmFileControlGateSkipsTheFirmRead),
-            typeof(FirmFileControlGateSkipsThePredicate), typeof(FirmFileControlFullGate),
+            typeof(FirmFileControlGateSkipsTheRecordGate), typeof(FirmFileControlFullGate),
             typeof(FirmFileControlHandlerServesTheSet), typeof(FirmFileControlHandlerWithoutTheSet),
             typeof(NarrowingGuardControlNoDocuments),
         };
         string Key(Type type, string method) => $"{type.FullName}::{method}";
         var gates = new[]
         {
-            Key(typeof(FirmFileControlGateSkipsTheFirmRead), "DecideAsync"), Key(typeof(FirmFileControlGateSkipsThePredicate), "DecideAsync"),
+            Key(typeof(FirmFileControlGateSkipsTheFirmRead), "DecideAsync"), Key(typeof(FirmFileControlGateSkipsTheRecordGate), "DecideAsync"),
             Key(typeof(FirmFileControlFullGate), "DecideAsync"),
         };
         var handlers = new[]
@@ -683,7 +687,7 @@ public class ExternalDocumentNarrowingGuardTests
         Assert.Equal(
             new[]
             {
-                $"GATE MISSES the (a') predicate: {Key(typeof(FirmFileControlGateSkipsThePredicate), "DecideAsync")}",
+                $"GATE MISSES the record gate: {Key(typeof(FirmFileControlGateSkipsTheRecordGate), "DecideAsync")}",
                 $"GATE MISSES the firm read: {Key(typeof(FirmFileControlGateSkipsTheFirmRead), "DecideAsync")}",
                 $"HANDLER does not serve from the gate's set: {Key(typeof(FirmFileControlHandlerWithoutTheSet), "ServeAsync")}",
                 $"NEW external Stored File surface: {Key(typeof(FirmFileControlReadsWithoutTheGate), "ListAsync")}",
@@ -708,7 +712,6 @@ public class ExternalDocumentNarrowingGuardTests
         var surfaces = Scan(inScopeList, _ => false, FirmFileSurfacePrimitive).Surfaces;
         var recordGate = Scan(list, IsRecordGate, _ => null).Reaches;
         var firms = Scan(list, IsFirmRead, _ => null).Reaches;
-        var predicate = Scan(list, IsInvoicePredicate, _ => null).Reaches;
         var fileSet = Scan(list, IsFileSetRead, _ => null).Reaches;
 
         var problems = new List<string>();
@@ -727,8 +730,6 @@ public class ExternalDocumentNarrowingGuardTests
                 problems.Add($"GATE MISSES the record gate: {gate}");
             if (!firms.Contains(gate))
                 problems.Add($"GATE MISSES the firm read: {gate}");
-            if (!predicate.Contains(gate))
-                problems.Add($"GATE MISSES the (a') predicate: {gate}");
         }
 
         foreach (var handler in handlers)
@@ -758,9 +759,6 @@ public class ExternalDocumentNarrowingGuardTests
     private static bool IsFirmRead(MethodBase method) =>
         method.DeclaringType == typeof(ExternalInvoiceSubmissionAuthorizationFilter)
         && method.Name == nameof(ExternalInvoiceSubmissionAuthorizationFilter.ReadCallerFirmsAsync);
-
-    private static bool IsInvoicePredicate(MethodBase method) =>
-        method.DeclaringType == typeof(ExternalInvoiceHiding) && method.Name == nameof(ExternalInvoiceHiding.Invoke);
 
     private static bool IsFileSetRead(MethodBase method) =>
         method.DeclaringType == typeof(ExternalInvoiceSubmissionScope) && method.Name == "get_" + nameof(ExternalInvoiceSubmissionScope.InvoiceFiles);
@@ -2377,18 +2375,16 @@ internal sealed class FirmFileControlGateSkipsTheFirmRead(
     }
 }
 
-/// <summary>MUST FIRE: a gate that asks the record gate and the caller's firms but never reaches the (a') predicate.</summary>
-internal sealed class FirmFileControlGateSkipsThePredicate(
-    Sprk.Bff.Api.Services.Finance.Files.StoredFileService store, ExternalModuleRegistry modules, ExternalParticipationService participations,
+/// <summary>MUST FIRE: a gate that reads the caller's firms and asks the (a') predicate itself, but never asks the record gate.</summary>
+internal sealed class FirmFileControlGateSkipsTheRecordGate(
+    Sprk.Bff.Api.Services.Finance.Files.StoredFileService store, ExternalParticipationService participations, ExternalInvoiceHiding hide,
     Microsoft.Extensions.Logging.ILogger logger)
 {
     internal async Task<object> DecideAsync(CallerPrincipal caller, Guid invoiceId)
     {
         var firms = await ExternalInvoiceSubmissionAuthorizationFilter.ReadCallerFirmsAsync(caller, participations, logger, CancellationToken.None);
-        var decision = await ExternalMessageEndpoints.GetRecordRightsDecisionAsync(
-            ExternalMessageEndpoints.Roots["invoices"], invoiceId, caller, modules,
-            (_, _, _, _) => throw new NotSupportedException(), logger, CancellationToken.None);
-        return (firms, decision, await store.ReadRowsForInvoiceAsync(invoiceId, 1, CancellationToken.None));
+        await hide(caller, new[] { invoiceId }, CancellationToken.None);
+        return (firms, await store.ReadRowsForInvoiceAsync(invoiceId, 1, CancellationToken.None));
     }
 }
 
