@@ -3,6 +3,8 @@
 // POST /api/v1/external/{matters|projects|workassignments}/{id}/invoice-submissions  submit a PDF invoice (202)
 // GET  /api/v1/external/invoice-submissions/{id}                                      one submission's status
 // GET  /api/v1/external/invoice-submissions                                           the caller's firms' submissions (051 resume / flag probe)
+// GET  /api/v1/external/invoices/{id}/files                                           an invoice's firm-visible files (task 093)
+// GET  /api/v1/external/invoices/{id}/files/{fileId}/content                          one of those files' bytes (task 093)
 //
 // Mounted UNDER the shared /api/v1/external group (ExternalAccessEndpoints), so every route inherits the ExternalCollaboration
 // policy and the group-level CallerPrincipalAuthorizationFilter. Each route then carries ExternalInvoiceSubmissionAuthorizationFilter
@@ -14,9 +16,12 @@
 
 using Microsoft.AspNetCore.Mvc;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Api.ExternalAccess.Dtos;
 using Sprk.Bff.Api.Api.Finance;
+using Sprk.Bff.Api.Infrastructure.Errors;
 using Sprk.Bff.Api.Infrastructure.Exceptions;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
+using Sprk.Bff.Api.Services.Finance.Files;
 using Sprk.Bff.Api.Services.Finance.Submission;
 
 namespace Sprk.Bff.Api.Api.ExternalAccess;
@@ -96,7 +101,94 @@ public static class ExternalInvoiceSubmissionEndpoints
             .ProducesProblem(StatusCodes.Status403Forbidden)
             .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
 
+        // ebilling-r1 task 093: the firm file routes. ONE gate (ExternalInvoiceSubmissionAccess.InvoiceFiles) decides the invoice and its
+        // visible files for both routes; the content route serves only a file of that set. No upload route, no versions route.
+        externalGroup.MapGet("/invoices/{id:guid}/files", ListInvoiceFilesAsync)
+            .AddExternalInvoiceSubmissionAuthorizationFilter(ExternalInvoiceSubmissionAccess.InvoiceFiles)
+            .RequireWorkforceCeiling(WorkforceRoleCeilingGate.ReadInvoiceFiles)
+            .RequireEbillingEnabled()
+            .WithName("ListExternalInvoiceFiles")
+            .WithSummary("List the firm-visible files of an invoice the caller can see")
+            .WithDescription(
+                "The invoice's own firm-uploaded Invoice PDF, with scanStatus Clean, NotScanned or Checking (a file whose malware scan has " +
+                "no verdict yet). 404 for an unknown invoice and for one the caller may not see (never an empty list); 503 when any read faults. " +
+                "403 (workforce_baseline_privilege_missing or workforce_baseline_unavailable) from the workforce role ceiling, before any record is read.")
+            .Produces<ExternalCollectionResponse<ExternalInvoiceFileItem>>(StatusCodes.Status200OK)
+            .ProducesProblem(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status403Forbidden)
+            .ProducesProblem(StatusCodes.Status404NotFound)
+            .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
+
+        externalGroup.MapGet("/invoices/{id:guid}/files/{fileId:guid}/content", GetInvoiceFileContentAsync)
+            .AddExternalInvoiceSubmissionAuthorizationFilter(ExternalInvoiceSubmissionAccess.InvoiceFiles)
+            .RequireWorkforceCeiling(WorkforceRoleCeilingGate.ReadInvoiceFiles)
+            .RequireEbillingEnabled()
+            .WithName("GetExternalInvoiceFileContent")
+            .WithSummary("Download a firm-visible file of an invoice the caller can see")
+            .WithDescription(
+                "Streams a file the list shows as Clean or NotScanned; 409 file_scan_pending while it is Checking; 404 for any other file " +
+                "and for an invoice the caller may not see; 503 when any read faults. 403 (workforce_baseline_privilege_missing or " +
+                "workforce_baseline_unavailable) from the workforce role ceiling, before any record is read.")
+            .Produces(StatusCodes.Status200OK)
+            .ProducesProblem(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status403Forbidden)
+            .ProducesProblem(StatusCodes.Status404NotFound)
+            .ProducesProblem(StatusCodes.Status409Conflict)
+            .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
+
         return externalGroup;
+    }
+
+    // ── Invoice files (task 093) ──
+
+    /// <summary>The visible file set the gate decided for THIS route's invoice; <c>null</c> when the handler runs without it.</summary>
+    private static ExternalInvoiceFileSet? InvoiceFiles(HttpContext http, Guid invoiceId) =>
+        Scope(http) is { InvoiceFiles: { } set } && set.InvoiceId == invoiceId ? set : null;
+
+    private static IResult ListInvoiceFilesAsync(Guid id, HttpContext http)
+    {
+        // A handler reached without the gate's decision refuses with the uniform 404 (fail closed, never an empty list).
+        if (InvoiceFiles(http, id) is not { } set)
+        {
+            return ProblemDetailsHelper.UniformRecordNotFound(http);
+        }
+
+        return TypedResults.Ok(new ExternalCollectionResponse<ExternalInvoiceFileItem>
+        {
+            Value = set.Files.Select(f => new ExternalInvoiceFileItem(
+                    f.Row.FileId,
+                    f.Row.Name ?? string.Empty,
+                    f.Row.ContentType,
+                    f.Row.SizeBytes,
+                    f.Row.CreatedOn is { } created ? DateTime.SpecifyKind(created, DateTimeKind.Utc) : null,
+                    f.ScanStatus))
+                .ToList(),
+        });
+    }
+
+    private static async Task<IResult> GetInvoiceFileContentAsync(
+        Guid id, Guid fileId, HttpContext http, [Microsoft.AspNetCore.Mvc.FromServices] StoredFileService service, ILogger<Program> logger,
+        CancellationToken ct)
+    {
+        // Only a file of the gate's set: anything else (another invoice's, a supporting file, a malicious one, an unknown id) is the same 404.
+        if (InvoiceFiles(http, id) is not { } set
+            || Scope(http) is not { } scope
+            || set.Files.FirstOrDefault(f => f.Row.FileId == fileId) is not { } file)
+        {
+            return ProblemDetailsHelper.UniformRecordNotFound(http);
+        }
+
+        if (file.Servable is not { } servable)
+        {
+            return StoredFileAccessFilter.ScanPending(http);
+        }
+
+        var principal = scope.Principal;
+        var auditCaller = principal.SystemUserId is { } systemUserId
+            ? (StoredFileAudit.CallerSystemUser, systemUserId, StoredFileAudit.RouteFirm)
+            : (StoredFileAudit.CallerContact, principal.ContactId, StoredFileAudit.RouteFirm);
+        return await StoredFileEndpoints.StreamServableAsync(
+            http, servable, service, logger, StoredFileEndpoints.SafeContentType(servable.ContentType), downloadName: null, ct, auditCaller);
     }
 
     private static ExternalInvoiceSubmissionScope? Scope(HttpContext http) =>

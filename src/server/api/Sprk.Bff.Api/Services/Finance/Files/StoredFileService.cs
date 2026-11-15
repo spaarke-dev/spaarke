@@ -677,7 +677,7 @@ public sealed class StoredFileService
             { State: StoredFileScanState.Malicious } => LogMalicious(fileId),
             { State: StoredFileScanState.Pending } => StoredFileDownloadDecision.ScanPending,
             { } verdict => StoredFileDownloadDecision.Serve(new StoredFileServable(
-                fileId, parent, row.Container!, row.BlobPath!, verdict.Properties.ETag, row.ContentType, callerSystemUserId)),
+                fileId, parent, row.Container!, row.BlobPath!, verdict.Properties.ETag, row.ContentType, callerSystemUserId, verdict.State)),
         };
     }
 
@@ -929,6 +929,30 @@ public sealed class StoredFileService
     {
         var query = new QueryExpression(StoredFileSchema.Entity) { ColumnSet = new ColumnSet(StoredFileSchema.ReadColumns), TopCount = max };
         query.Criteria.AddCondition(StoredFileSchema.InvoiceTable, ConditionOperator.Equal, invoiceId);
+        var rows = await _entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
+        return rows.Entities.Select(e => StoredFileRow.From(e, _blobs.TenantId)).ToList();
+    }
+
+    /// <summary>
+    /// ebilling-r1 task 093 fix round 1 (the sibling of <see cref="ReadRowsForInvoiceAsync"/>, filtered as
+    /// <see cref="ReadRowsForProcedureVersionAsync"/> is): the rows of the invoice <paramref name="invoiceId"/> a firm may be shown, filtered
+    /// SERVER-SIDE: parent = the invoice, purpose Invoice PDF, <c>sprk_firmvisible</c> true, Servable, and no source document or source
+    /// communication. At most <paramref name="max"/>; a fault throws. The caller re-checks every row
+    /// (<c>ExternalInvoiceSubmissionAuthorizationFilter.IsFirmFile</c>), so a query that lost a filter cannot widen the set.
+    /// </summary>
+    /// <remarks>Component Justification (CLAUDE.md §11): (1) Existing — <see cref="ReadRowsForInvoiceAsync"/> reads every row of the invoice.
+    /// (2) Extension — filtering that read would change the answer its other callers (the internal file list and the submission commit gate)
+    /// need, which is every row. (3) Cost of doing nothing — the firm routes cap the rows they read, so an invoice with many internal files
+    /// would answer the firm's own PDF with a lasting 503.</remarks>
+    internal async Task<IReadOnlyList<StoredFileRow>> ReadFirmVisibleRowsForInvoiceAsync(Guid invoiceId, int max, CancellationToken ct)
+    {
+        var query = new QueryExpression(StoredFileSchema.Entity) { ColumnSet = new ColumnSet(StoredFileSchema.ReadColumns), TopCount = max };
+        query.Criteria.AddCondition(StoredFileSchema.InvoiceTable, ConditionOperator.Equal, invoiceId);
+        query.Criteria.AddCondition(StoredFileSchema.Purpose, ConditionOperator.Equal, (int)StoredFilePurpose.InvoicePdf);
+        query.Criteria.AddCondition(StoredFileSchema.FirmVisible, ConditionOperator.Equal, true);
+        query.Criteria.AddCondition(StoredFileSchema.Status, ConditionOperator.Equal, (int)StoredFileStatus.Servable);
+        query.Criteria.AddCondition(StoredFileSchema.SourceDocument, ConditionOperator.Null);
+        query.Criteria.AddCondition(StoredFileSchema.SourceCommunication, ConditionOperator.Null);
         var rows = await _entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
         return rows.Entities.Select(e => StoredFileRow.From(e, _blobs.TenantId)).ToList();
     }
@@ -1219,6 +1243,9 @@ internal sealed record StoredFileRow
     /// <summary>The purpose, or <c>null</c> for an unknown value.</summary>
     public StoredFilePurpose? Purpose { get; init; }
 
+    /// <summary><c>sprk_firmvisible</c> is exactly true (ebilling-r1 task 093: the firm route serves only such a file; unset is false).</summary>
+    public bool FirmVisible { get; init; }
+
     public StoredFileStatus? Status { get; init; }
 
     /// <summary>The ONE parent lookup set, when exactly one is set and it is the purpose's kind; <c>null</c> otherwise.</summary>
@@ -1281,6 +1308,7 @@ internal sealed record StoredFileRow
             Name = entity.GetAttributeValue<string>(StoredFileSchema.Name),
             SizeBytes = entity.GetAttributeValue<int?>(StoredFileSchema.SizeBytes),
             Purpose = purpose,
+            FirmVisible = entity.GetAttributeValue<bool?>(StoredFileSchema.FirmVisible) == true,
             Status = status,
             Parent = parent,
             NoParentLookups = setParents.Count == 0,
@@ -1297,8 +1325,11 @@ internal sealed record StoredFileRow
 }
 
 /// <summary>A file the download rule decided to serve: what the handler opens and what the audit event records.</summary>
+/// <param name="Scan">The verdict it was served on: <see cref="StoredFileScanState.Clean"/>, or <see cref="StoredFileScanState.NotScanned"/>
+/// when scanning is off (ebilling-r1 task 093: the firm list tells the two apart).</param>
 public sealed record StoredFileServable(
-    Guid FileId, StoredFileParent Parent, string Container, string BlobPath, ETag ETag, string? ContentType, Guid CallerSystemUserId);
+    Guid FileId, StoredFileParent Parent, string Container, string BlobPath, ETag ETag, string? ContentType, Guid CallerSystemUserId,
+    StoredFileScanState Scan);
 
 /// <summary>The download rule's answer.</summary>
 public sealed record StoredFileDownloadDecision
@@ -1349,7 +1380,8 @@ public enum StoredFileDownloadOutcome
 
 /// <summary>
 /// The download audit event (section 4.3, O-29): ONE structured log event per served file, written before the first byte, with ids
-/// only. No Dataverse audit row. Shared with 093's firm route (route kind <c>firm</c>, caller kind <c>contact</c>).
+/// only. No Dataverse audit row. Shared with 093's firm route (route kind <c>firm</c>; caller kind <c>contact</c> for a CIAM contact,
+/// <c>systemuser</c> for a licensed user).
 /// </summary>
 public static class StoredFileAudit
 {
@@ -1362,7 +1394,7 @@ public static class StoredFileAudit
     /// <summary>The firm route's kind (093).</summary>
     public const string RouteFirm = "firm";
 
-    /// <summary>A systemuser caller (internal route).</summary>
+    /// <summary>A systemuser caller (internal route; a licensed user on the firm route, 093).</summary>
     public const string CallerSystemUser = "systemuser";
 
     /// <summary>A contact caller (firm route, 093).</summary>
