@@ -111,9 +111,11 @@ public static class ExternalInvoiceSubmissionEndpoints
             .WithSummary("List the firm-visible files of an invoice the caller can see")
             .WithDescription(
                 "The invoice's own firm-uploaded Invoice PDF, with scanStatus Clean, NotScanned or Checking (a file whose malware scan has " +
-                "no verdict yet). 404 for an unknown invoice and for one the caller may not see (never an empty list); 503 when any read faults.")
+                "no verdict yet). 404 for an unknown invoice and for one the caller may not see (never an empty list); 503 when any read faults. " +
+                "403 (workforce_baseline_privilege_missing or workforce_baseline_unavailable) from the workforce role ceiling, before any record is read.")
             .Produces<ExternalCollectionResponse<ExternalInvoiceFileItem>>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status403Forbidden)
             .ProducesProblem(StatusCodes.Status404NotFound)
             .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
 
@@ -125,9 +127,11 @@ public static class ExternalInvoiceSubmissionEndpoints
             .WithSummary("Download a firm-visible file of an invoice the caller can see")
             .WithDescription(
                 "Streams a file the list shows as Clean or NotScanned; 409 file_scan_pending while it is Checking; 404 for any other file " +
-                "and for an invoice the caller may not see; 503 when any read faults.")
+                "and for an invoice the caller may not see; 503 when any read faults. 403 (workforce_baseline_privilege_missing or " +
+                "workforce_baseline_unavailable) from the workforce role ceiling, before any record is read.")
             .Produces(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status403Forbidden)
             .ProducesProblem(StatusCodes.Status404NotFound)
             .ProducesProblem(StatusCodes.Status409Conflict)
             .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
