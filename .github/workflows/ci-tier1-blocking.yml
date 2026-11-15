@@ -1175,10 +1175,13 @@ jobs:
             ${{ runner.os }}-nuget-mcp-conformance-
             ${{ runner.os }}-nuget-
 
+      # Node 22: the conformance suite imports fs.globSync (Node >= 22); on Node 20
+      # it fails at load with "does not provide an export named 'globSync'"
+      # (first CI run, 2026-11-15).
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
 
       # The BFF embeds the decisions widget only when dist/index.html exists at
       # build time (Sprk.Bff.Api.csproj), and one conformance check reads it.

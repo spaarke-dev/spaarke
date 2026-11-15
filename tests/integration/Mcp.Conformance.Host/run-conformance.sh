@@ -7,8 +7,15 @@
 # Exit code = the conformance CLI's: 0 when every failing check is in conformance/conformance-baseline.yml and no baselined check
 # passes; 1 on a regression or a stale baseline entry. Results (checks.json per scenario) and the host log (host.log) land in $OUT; the default
 # is a new temp directory ($RUNNER_TEMP when set), never the repository. The folder is printed at the end.
-# Needs: .NET SDK 10, Node 20+. Pass MCP_SKIP_WIDGET=1 to leave the widget unbuilt (the resources/read caching check then fails).
+# Needs: .NET SDK 10, Node 22+ (the suite imports fs.globSync). Pass MCP_SKIP_WIDGET=1 to leave the widget unbuilt (the resources/read
+# caching check then fails).
 set -euo pipefail
+
+node_major="$(node -p 'process.versions.node.split(".")[0]' 2>/dev/null || echo 0)"
+if (( node_major < 22 )); then
+  echo "run-conformance.sh: Node 22 or later is required (found ${node_major}); the conformance suite imports fs.globSync." >&2
+  exit 2
+fi
 
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 host_dir="$repo/tests/integration/Mcp.Conformance.Host"
