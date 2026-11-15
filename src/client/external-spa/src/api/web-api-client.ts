@@ -15,6 +15,7 @@
  *   POST  /api/v1/external/projects/{id}/events               → create event
  *   GET   /api/v1/external/{projects|matters|workassignments|servicerequests}/{id}/documents
  *                                                              → a record's documents (task 031; service requests ONLY here)
+ *   GET   /api/v1/external/invoices/{id}/files[/{fileId}/content] → an invoice's files, list and download only (R4 task 021)
  *   DELETE /api/v1/external/documents/{id}                    → delete own document (task 032 / 054)
  *   DELETE /api/v1/external/events/{id}                       → delete own event (task 032 / 054)
  *   POST  /api/v1/external/{matters|projects|workassignments}/{id}/invoice-submissions → submit an invoice PDF (ebilling-r1 051)
@@ -25,7 +26,7 @@
  * See: docs/architecture/external-access-architecture.md
  */
 
-import { bffApiCall, getExternalUserContext } from '../auth/bff-client';
+import { bffApiBlob, bffApiCall, getExternalUserContext } from '../auth/bff-client';
 import { ApiError } from '../types';
 import { gridDataverseClient } from '../services/gridDataverseClient';
 import { InvoiceSubmissionError, isEbillingDisabledError } from '@spaarke/ui-components/components/InvoiceSubmission';
@@ -414,11 +415,10 @@ export async function getDocuments(
 /**
  * The record types whose documents the external plane serves (task 031): the `{root}` segment of
  * `/api/v1/external/{root}/{id}/documents`. A service request's documents are reachable ONLY through the
- * `servicerequests` route (the documents module's scope dimensions lack its lookup), never the module fetch. An invoice's
- * documents use the `invoices` route (owner decision 2026-10-11, option A: rights inherited from the invoice's matter and
- * project, the union of both; task 031 notes).
+ * `servicerequests` route (the documents module's scope dimensions lack its lookup), never the module fetch. An invoice has
+ * NO document root: its files are ebilling's read-only `/invoices/{id}/files` routes (`getInvoiceFiles` below; R4 task 021).
  */
-export type DocumentRoot = 'projects' | 'matters' | 'workassignments' | 'servicerequests' | 'invoices';
+export type DocumentRoot = 'projects' | 'matters' | 'workassignments' | 'servicerequests';
 
 /** `/api/v1/external/{root}/{id}/documents`: list (GET) and upload (POST). */
 export function documentsPath(root: DocumentRoot, recordId: string): string {
@@ -441,7 +441,7 @@ export interface DocumentListResult extends ListResult<ODataDocument> {
 }
 
 /**
- * The documents of a project, matter, work assignment, service request or invoice (task 031 routes), and the BFF's `canCreate`:
+ * The documents of a project, matter, work assignment or service request (task 031 routes), and the BFF's `canCreate`:
  * whether the caller holds Create on the record (so a ViewOnly reader is not offered an upload that can only fail).
  */
 export async function getRecordDocuments(root: DocumentRoot, recordId: string): Promise<DocumentListResult> {
@@ -451,6 +451,99 @@ export async function getRecordDocuments(root: DocumentRoot, recordId: string): 
     truncated: response.truncated === true,
     canCreate: typeof response.canCreate === 'boolean' ? response.canCreate : null,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Invoice files (R4 task 021, FR-13): ebilling-r1 task 093's read-only firm routes
+// ---------------------------------------------------------------------------
+//
+// Contract read at the ebilling PR #2839 head (ref pr/2839):
+//   ExternalInvoiceSubmissionEndpoints.cs:106 GET /api/v1/external/invoices/{id}/files          -> 200 { value: ExternalInvoiceFileItem[] }
+//   ExternalInvoiceSubmissionEndpoints.cs:122 GET /api/v1/external/invoices/{id}/files/{fileId}/content -> the bytes (no Content-Disposition name)
+//   StoredFileContracts.cs:628 `ExternalInvoiceFileItem` (Id, FileName, ContentType?, SizeBytes?, CreatedOn?, ScanStatus)
+// Content for a Checking file answers 409 `errorCode: file_scan_pending` (StoredFileEndpoints.cs:479). A file the caller may not
+// see (an invisible invoice, an unknown or out-of-set file, a Malicious one) is one uniform 404; a fault or the eBilling kill
+// switch is 503 (`file_store_unavailable`, `ebilling.disabled`); the workforce role ceiling is 403. There is no upload route
+// and no versions route: the SPA offers list and download only.
+
+/** `scanStatus`: Clean and NotScanned are served; Checking has no malware verdict yet (its content answers 409). */
+export type InvoiceFileScanStatus = 'Clean' | 'Checking' | 'NotScanned';
+
+/** One row of `GET /api/v1/external/invoices/{id}/files`. `contentType`, `sizeBytes` and `createdOn` (UTC ISO) may be null. */
+export interface InvoiceFileItem {
+  id: string;
+  fileName: string;
+  contentType: string | null;
+  sizeBytes: number | null;
+  createdOn: string | null;
+  /** Typed as the contract's values; the reader treats any other string as not served (never offers Download for it). */
+  scanStatus: InvoiceFileScanStatus;
+}
+
+/** The `errorCode` of the content route's 409 while a file's malware scan has no verdict. */
+export const FILE_SCAN_PENDING_ERROR_CODE = 'file_scan_pending';
+
+/** `/api/v1/external/invoices/{id}/files`: the invoice's firm-visible files (list). */
+export function invoiceFilesPath(invoiceId: string): string {
+  return `/api/v1/external/invoices/${encodeURIComponent(invoiceId)}/files`;
+}
+
+/** The content (download) route of one invoice file. */
+export function invoiceFileContentPath(invoiceId: string, fileId: string): string {
+  return `${invoiceFilesPath(invoiceId)}/${encodeURIComponent(fileId)}/content`;
+}
+
+/** The invoice's files, as the BFF lists them (a Malicious file is omitted by the server). */
+export async function getInvoiceFiles(invoiceId: string): Promise<InvoiceFileItem[]> {
+  const response = await bffApiCall<{ value?: InvoiceFileItem[] }>(invoiceFilesPath(invoiceId));
+  return response.value ?? [];
+}
+
+/** The bytes of one invoice file, through the authenticated blob read (no signed URL, no Graph, no SPE pointer). */
+export async function getInvoiceFileContent(invoiceId: string, fileId: string): Promise<Blob> {
+  return bffApiBlob(invoiceFileContentPath(invoiceId, fileId));
+}
+
+/** Whether a failed content read is the 409 `file_scan_pending` (the file is still being checked). */
+export function isFileScanPendingError(err: unknown): boolean {
+  if (!(err instanceof ApiError) || err.statusCode !== 409) return false;
+  try {
+    return (JSON.parse(err.message) as { errorCode?: unknown }).errorCode === FILE_SCAN_PENDING_ERROR_CODE;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Whether a failed files read is the eBilling kill switch (503 `ebilling.disabled`; both files routes sit behind it). It
+ * reuses the shared detector, which answers true for that code only: an outage 503 (`file_store_unavailable`) is not it.
+ */
+export function isInvoiceFilesDisabledError(err: unknown): boolean {
+  return isEbillingDisabledError(toInvoiceSubmissionError(err));
+}
+
+/** The name an invoice file is shown under when the BFF sends none (it sends `Name ?? ""`). */
+export const INVOICE_FILE_FALLBACK_NAME = 'Invoice file';
+
+/** The name shown for a file: its `fileName`, else {@link INVOICE_FILE_FALLBACK_NAME}. */
+export function invoiceFileDisplayName(file: Pick<InvoiceFileItem, 'fileName'>): string {
+  return file.fileName.trim() ? file.fileName : INVOICE_FILE_FALLBACK_NAME;
+}
+
+const FILE_EXTENSIONS: Readonly<Record<string, string>> = {
+  'application/pdf': 'pdf',
+  'image/png': 'png',
+  'image/jpeg': 'jpg',
+  'image/gif': 'gif',
+  'image/webp': 'webp',
+};
+
+/** The name a file is saved under: its `fileName`, else "invoice-file" plus an extension from its `contentType` (pdf for application/pdf). */
+export function invoiceFileSaveName(file: Pick<InvoiceFileItem, 'fileName' | 'contentType'>): string {
+  if (file.fileName.trim()) return file.fileName;
+  const type = (file.contentType ?? '').split(';')[0].trim().toLowerCase();
+  const extension = FILE_EXTENSIONS[type];
+  return extension ? `invoice-file.${extension}` : 'invoice-file';
 }
 
 // ---------------------------------------------------------------------------
