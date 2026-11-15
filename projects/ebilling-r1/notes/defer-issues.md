@@ -1965,3 +1965,38 @@ K1 (ontology): a D-96 re-file across core records withholds line Duplicates perm
 **Fails without it**: the call carries on after the warning instead of stopping.
 
 ---
+
+### ISS-022 — Invoice indexing job selected the removed `sprk_invoice.sprk_document`
+
+| Field | Value |
+|---|---|
+| **Status** | In Progress (fix d7f36ddd6d on work; PR to master next) |
+| **Urgency** | now |
+| **Filed** | 2026-11-15, by uac-r2 (its 30-minute gate on dev BFF aa7d6345f3) |
+| **Source** | `InvoiceIndexingJobHandler` faulted on dev at 18:51:58Z |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2844 |
+
+**Description**
+
+Task 094 (merged 2026-10-27) removed `sprk_document` from the invoice, but `InvoiceIndexDocument.InvoiceColumns` still named it. Dataverse refuses a query that names a column the table does not have, so every invoice re-index has failed since then and invoice search went stale.
+
+**Entry-points**
+
+- `src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/InvoiceIndexDocument.cs` (`InvoiceColumns`, `Read`, `ToSearchDocument`)
+
+**Fix**
+
+- Drop the column, and write `documentId` as null so a Merge clears old values. Nothing reads that field.
+- Regression test: `tests/integration/regression/Issue2844_InvoiceIndexRemovedDocumentColumnTests.cs`, which fails on the old code.
+- Guard: `tests/Spaarke.ArchTests/InvoiceIndexColumnsGuardTests.cs`. Every index column must exist in the SpaarkeMaster `Entity.xml`, with must-fire and must-not-fire controls.
+
+**After deploy**
+
+Re-index every `sprk_invoice` with modifiedon ≥ 2026-10-27 through the normal indexing job. This writes to the dev search index, so it needs the owner's go here. Report the count and the result to uac-r2.
+
+**Known limits**
+
+- K2: the guard checks the exported solution source, not live dev.
+- K3: `documentId` is now always null. The index field and `InvoiceSearchDocument.DocumentId` could later be removed with a schema change.
+
+---

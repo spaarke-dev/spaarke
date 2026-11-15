@@ -12,12 +12,12 @@
 
 ### In flight
 
-- **#2839 MERGED to master at 4f1192ab9d** (2026-11-15, auto-merge on the owner's say-so, all 44 checks green). It carried 093, 113, 084h-1 (with fix round 2), the #2833 ebilling slice and notes. The merge SHA went to uac-r2, spa-r4 and word-add-in-r1 (word-add-in-r1 is offline; queued). uac-r2 now empties the 12 scripts/ebilling KnownOffenders entries in #2838 itself.
-- **Deploy chain (dev), now waiting on uac-r2 (owner go in uac-r2's session):**
-  1. ✅ spa-r4's R4 021 (#2840) merged to master at c1eb6e4a8e.
-  2. uac-r2 pings mcp-r1, then asks the owner for the exact-SHA go **in uac-r2's session**. The deploy is master (095g #2830 + #2839) plus mcp's d7369fecf1, with the ledger re-resolved.
-  3. uac-r2 swaps the BFF and runs the 30-min gate. spa-r4 deploys the SPA immediately after.
-  4. Then tick checklist section E as testable (already drafted) and tell word-add-in-r1 that 095g is live (slice C is unblocked).
+- **Dev BFF deployed 2026-11-15 18:32Z: aa7d6345f3** (master c1eb6e4a8e = 095g #2830 + #2839 + R4 021 #2840, plus mcp's spike). uac-r2's 30-min gate passed: 42 requests, 0 5xx, and the external invoice file routes returned 200. word-add-in-r1 was told 095g is live (queued; it is offline). The SPA deploy is spa-r4's, and confirmation is pending. Checklist section E becomes testable once spa-r4 confirms.
+- **#2844 / ISS-022 (found by the gate):** the invoice index job selected the removed `sprk_invoice.sprk_document`, so every invoice re-index has failed since task 094 (2026-10-27).
+  - Fix d7f36ddd6d on work, with regression test `Issue2844_*` and ArchTest `InvoiceIndexColumnsGuardTests`.
+  - Sonnet review: no defects. BFF build has 0 warnings. ArchTests 2633/0. Master merged in.
+  - Next: the PR to master (send uac-r2 the number), then a BFF deploy (owner go in uac-r2's session).
+  - **Then the re-index sweep:** every sprk_invoice with modifiedon ≥ 2026-10-27, through the normal indexing job. It writes to the dev search index, so it needs **the owner's go HERE**. Report the count and the result to uac-r2.
 - **113b ✅ on work (owner go 2026-11-15):** the Invoice Review page now shows 113's Procedure-change banner (`ProcedureChangeNotice.tsx`). One Sonnet adversarial pass found no F-class defects; its unknown-state point is closed. It ships with task 112, the page's first deploy.
 - **Reminder for 084h-2 (ontology-r1):** the writer caps only `reason` at 2000 characters, not `note`. 084h-2 must enforce or trim the note at the service (design §9), so an over-long note never reaches the create and fails as a retryable CreateFailed.
 
