@@ -535,9 +535,8 @@ export const DecisionWizard: React.FC<DecisionWizardProps> = ({
   const onEscape = (e: React.KeyboardEvent<HTMLDivElement>): void => {
     if (e.key !== 'Escape') return;
     if (
-      (e.target as HTMLElement | null)?.closest?.(
-        '[data-results-open="true"],[aria-expanded="true"],[role="listbox"],[role="menu"]'
-      )
+      e.target instanceof Element &&
+      e.target.closest('[data-results-open="true"],[aria-expanded="true"],[role="listbox"],[role="menu"]')
     )
       return;
     e.stopPropagation();
