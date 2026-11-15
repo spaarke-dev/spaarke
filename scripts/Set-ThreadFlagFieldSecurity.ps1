@@ -141,6 +141,8 @@ $headers = @{
     'OData-Version'    = '4.0'
     'Content-Type'     = 'application/json; charset=utf-8'
     Prefer             = 'odata.maxpagesize=500'
+    # #2833: strongly consistent reads - attribute metadata (IsSecured) is cached per server; a plain read can be stale.
+    Consistency        = 'Strong'
 }
 function Invoke-DvGet([string]$Path) { Invoke-RestMethod -Uri "$Api/$Path" -Headers $headers -Method Get }
 function Invoke-DvGetAll([string]$Path) {
