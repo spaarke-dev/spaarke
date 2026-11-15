@@ -72,9 +72,16 @@ export const oneClickItems = (more = 1): ServerItem[] => [
 
 /** From What was found to the last action step, with the focus on its Next button. */
 export async function toLastActionStep() {
-  fireEvent.click(button('Next')); // What was found -> the action
+  fireEvent.click(await nextButton()); // What was found -> the action
   await screen.findByTestId('step-action-mark-complete');
-  const next = button('Next');
+  const next = await nextButton();
   next.focus();
   return next;
 }
+
+/**
+ * The wizard's Next button, found including hidden elements. In the dialog the first open of a cold run leaves aria-hidden on the dialog
+ * surface (Fluent / tabster) for a variable time, longer under load, so a role query that skips hidden elements finds nothing even though
+ * the button is there and enabled. Which button it is does not depend on that attribute, so the query does not wait for it.
+ */
+export const nextButton = () => screen.findByRole('button', { name: exact('Next'), hidden: true });
