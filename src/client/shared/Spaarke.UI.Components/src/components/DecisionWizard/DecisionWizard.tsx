@@ -467,7 +467,12 @@ export const DecisionWizard: React.FC<DecisionWizardProps> = ({
   // open keeps its Escape (it closes that, not the wizard), and nothing is closed while a request is out (`requestClose`).
   const onEscape = (e: React.KeyboardEvent<HTMLDivElement>): void => {
     if (e.key !== 'Escape') return;
-    if ((e.target as HTMLElement | null)?.closest?.('[aria-expanded="true"],[role="listbox"],[role="menu"]')) return;
+    if (
+      (e.target as HTMLElement | null)?.closest?.(
+        '[data-results-open="true"],[aria-expanded="true"],[role="listbox"],[role="menu"]'
+      )
+    )
+      return;
     e.stopPropagation();
     requestClose();
   };

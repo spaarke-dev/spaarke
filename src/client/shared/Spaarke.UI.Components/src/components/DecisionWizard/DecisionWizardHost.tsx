@@ -73,7 +73,9 @@ export const DecisionWizardHost: React.FC<DecisionWizardHostProps> = ({
   const activeRef = React.useRef<ActiveLaunch | null>(null);
   const sequence = React.useRef(0);
 
+  const mounted = React.useRef(true);
   React.useEffect(() => {
+    mounted.current = true;
     const unregister = registerDecisionWizardHost(request => {
       if (activeRef.current) return Promise.resolve({ opened: false, reason: 'busy' as const });
       return new Promise<DecisionWizardLaunchResult>(resolve => {
@@ -85,10 +87,16 @@ export const DecisionWizardHost: React.FC<DecisionWizardHostProps> = ({
     });
     return () => {
       unregister();
-      // Never leave a launcher awaiting a wizard that can no longer close.
-      activeRef.current?.settle({ opened: true });
-      activeRef.current = null;
-      setActive(null);
+      mounted.current = false;
+      // Never leave a launcher awaiting a wizard that can no longer close. But React's StrictMode (the dev build) runs this cleanup and
+      // the effect again straight away on a host that is still there; that is not an unmount, and settling then closed the wizard the
+      // moment it opened. So the settling waits one microtask: a host that was mounted again by then stays as it is.
+      void Promise.resolve().then(() => {
+        if (mounted.current) return;
+        activeRef.current?.settle({ opened: true });
+        activeRef.current = null;
+        setActive(null);
+      });
     };
   }, []);
 
