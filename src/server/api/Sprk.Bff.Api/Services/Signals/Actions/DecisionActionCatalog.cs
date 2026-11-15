@@ -518,6 +518,151 @@ public static class DecisionActionCatalog
         return null;
     }
 
+    // ── ebilling-r1 task 084h-1 (EB-D-238; design notes/084h-procedure-change-decision-records-design.md section 8): per-record Procedure changes ──
+
+    /// <summary>
+    /// The ONE gate every per-record Procedure change declares (design section 8, OWNER PROPOSAL, open question Q7): Tier2b, reversible
+    /// (another override undoes any override), record-of-truth impact, never externally visible (section 10: the record stays internal).
+    /// It follows the reversible line-level billing entries. Change it here, and only here.
+    /// </summary>
+    private static readonly DecisionGateFactors RecordProcedureGate = new(GateRiskTier.Tier2b, Reversible: true, RecordOfTruthImpact: true);
+
+    /// <summary>The record classes of the per-record Procedure changes (design section 8, OWNER PROPOSAL, open question Q7): Routine for
+    /// assign, pin and unpin; Judgement for the two excludes, the rule change and the removal of an override. Change them here.</summary>
+    private const DecisionRecordClass RecordProcedureRoutine = DecisionRecordClass.Routine;
+    private const DecisionRecordClass RecordProcedureJudgement = DecisionRecordClass.Judgement;
+
+    private static DecisionActionParameter ProcedureParameter(bool required) =>
+        new("procedure", "Procedure", DecisionParameterKind.Lookup, required, LookupEntity: "sprk_procedure");
+
+    private static DecisionActionParameter VersionParameter() =>
+        new("version", "Procedure version", DecisionParameterKind.Lookup, Required: true, LookupEntity: "sprk_procedureversion");
+
+    private static DecisionActionParameter RuleParameter(bool required) =>
+        new("rule", "Rule", DecisionParameterKind.Lookup, required, LookupEntity: "sprk_policy");
+
+    private static DecisionActionParameter FirmParameter() =>
+        new("firm", "Firm", DecisionParameterKind.Lookup, Required: false, LookupEntity: "sprk_organization");
+
+    private static DecisionActionParameter NoteParameter() =>
+        new("note", "Note", DecisionParameterKind.TextArea, Required: false);
+
+    /// <summary>
+    /// ebilling-r1 task 084h-1 (EB-D-238): the per-record Procedure changes 089 makes on a matter, project or work assignment, a closed set
+    /// of their own. They are recorded by <c>DecisionRecordWriter.WriteRecordProcedureDecisionAsync</c> only: they are NOT in
+    /// <see cref="All"/> (a Signals plan or the commit route refuses them) nor in <see cref="BillingActions"/> (the billing entry refuses
+    /// them). Each parameter code is also the <c>Values</c> key the caller writes (design section 4.1: one name each), because the writer
+    /// checks a required parameter as <c>Values[parameter.Code]</c>. <see cref="DecisionActionDefinition.PlanLane"/> and
+    /// <see cref="DecisionActionDefinition.WorkType"/> are null: no Signals plan offers them.
+    /// </summary>
+    private static readonly DecisionActionDefinition[] DeclaredRecordProcedure =
+    [
+        new("assign-procedure", "Assign Procedure", PlanLane: null, IsNextStep: false, WorkType: null,
+            [ProcedureParameter(required: true), NoteParameter()],
+            ["Applies the Procedure to the record, following its latest version"],
+            Excludes: [],
+            RecordProcedureRoutine)
+        { Gate = RecordProcedureGate },
+
+        new("pin-procedure", "Pin Procedure version", PlanLane: null, IsNextStep: false, WorkType: null,
+            [ProcedureParameter(required: true), VersionParameter(), NoteParameter()],
+            ["Applies the Procedure to the record at the version above"],
+            Excludes: [],
+            RecordProcedureRoutine)
+        { Gate = RecordProcedureGate },
+
+        new("unpin-procedure", "Unpin Procedure version", PlanLane: null, IsNextStep: false, WorkType: null,
+            [ProcedureParameter(required: true), VersionParameter(), NoteParameter()],
+            ["Removes the record's pin of the Procedure to the version above"],
+            Excludes: [],
+            RecordProcedureRoutine)
+        { Gate = RecordProcedureGate },
+
+        new("exclude-procedure", "Exclude Procedure", PlanLane: null, IsNextStep: false, WorkType: null,
+            [
+                ProcedureParameter(required: true),
+                new("reason", "Reason", DecisionParameterKind.TextArea, Required: false),
+                NoteParameter(),
+            ],
+            ["Stops the Procedure from applying to the record"],
+            Excludes: [],
+            RecordProcedureJudgement)
+        { Gate = RecordProcedureGate },
+
+        new("exclude-rule", "Exclude rule for this record", PlanLane: null, IsNextStep: false, WorkType: null,
+            [
+                RuleParameter(required: true),
+                FirmParameter(),
+                new("reason", "Reason for excluding", DecisionParameterKind.TextArea, Required: true, Hint: ReasonHint),
+                NoteParameter(),
+            ],
+            ["Stops the rule from checking the record's invoices (one firm's, when a firm is set)"],
+            Excludes: [],
+            RecordProcedureJudgement)
+        { Gate = RecordProcedureGate },
+
+        new("change-rule", "Change rule for this record", PlanLane: null, IsNextStep: false, WorkType: null,
+            [
+                RuleParameter(required: true),
+                FirmParameter(),
+                new("reason", "Reason for changing", DecisionParameterKind.TextArea, Required: true, Hint: ReasonHint),
+                NoteParameter(),
+            ],
+            ["Replaces the rule for the record with a record rule based on the version in force"],
+            Excludes: [],
+            RecordProcedureJudgement)
+        { Gate = RecordProcedureGate },
+
+        new("remove-override", "Remove override", PlanLane: null, IsNextStep: false, WorkType: null,
+            [ProcedureParameter(required: false), RuleParameter(required: false), FirmParameter(), NoteParameter()],
+            ["Removes the record's override, so the record follows the Procedures it inherits"],
+            Excludes: [],
+            RecordProcedureJudgement)
+        { Gate = RecordProcedureGate },
+    ];
+
+    /// <summary>The per-record Procedure set. Its codes never overlap <see cref="Definitions"/> nor <see cref="BillingDefinitions"/>
+    /// (checked at static initialisation, so a code can never be in two sets).</summary>
+    private static readonly DecisionActionDefinition[] RecordProcedureDefinitions =
+        SeparateRecordProcedure(Mutualize(DeclaredRecordProcedure), Definitions, BillingDefinitions);
+
+    /// <summary>Throws when a per-record Procedure code is also a Signals or a billing catalog code.</summary>
+    private static DecisionActionDefinition[] SeparateRecordProcedure(
+        DecisionActionDefinition[] procedure, DecisionActionDefinition[] signals, DecisionActionDefinition[] billing)
+    {
+        foreach (var clash in procedure.Where(p => signals.Any(s => s.Code == p.Code)))
+        {
+            throw new InvalidOperationException($"Action catalog: per-record Procedure code '{clash.Code}' is also a Signals action.");
+        }
+
+        foreach (var clash in procedure.Where(p => billing.Any(b => b.Code == p.Code)))
+        {
+            throw new InvalidOperationException($"Action catalog: per-record Procedure code '{clash.Code}' is also a billing action.");
+        }
+
+        return procedure;
+    }
+
+    private static readonly FrozenDictionary<string, DecisionActionDefinition> RecordProcedureByCode =
+        RecordProcedureDefinitions.ToFrozenDictionary(d => d.Code, StringComparer.Ordinal);
+
+    /// <summary>ebilling-r1 task 084h-1: every per-record Procedure action, in declaration order. Not part of <see cref="All"/> nor of
+    /// <see cref="BillingActions"/>.</summary>
+    public static IReadOnlyList<DecisionActionDefinition> RecordProcedureActions => RecordProcedureDefinitions;
+
+    /// <summary>Resolves a per-record Procedure code, exactly as <see cref="TryGet"/> resolves a Signals code: case-sensitive, never guessed.</summary>
+    public static bool TryGetRecordProcedure(string? code, out DecisionActionDefinition definition)
+    {
+        if (code is not null && RecordProcedureByCode.TryGetValue(code, out var found))
+        {
+            definition = found;
+            return true;
+        }
+
+        definition = null!;
+        return false;
+    }
+
     /// <summary>
     /// Makes every declared exclusion mutual. Throws (at static initialisation, so the catalog cannot load) when an exclusion
     /// names a code that is not declared: a typo would otherwise silently drop the exclusion.
