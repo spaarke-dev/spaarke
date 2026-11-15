@@ -342,6 +342,10 @@ $headers = @{
     'OData-MaxVersion' = '4.0'
     'OData-Version'    = '4.0'
     'Content-Type'     = 'application/json; charset=utf-8'
+    # Strongly consistent reads: attribute metadata (IsSecured) is cached per server, and a plain read soon after a change can
+    # come back stale. Seen on dev 2026-11-14 right after the #2799 -Apply: 5 of 36 plain reads said false, 0 of 36 strong
+    # reads did, and -Verify reported secured columns as MISSING.
+    Consistency        = 'Strong'
 }
 function Invoke-DvGet([string]$Path, [hashtable]$Extra = @{}) {
     $h = $headers.Clone(); foreach ($k in $Extra.Keys) { $h[$k] = $Extra[$k] }
