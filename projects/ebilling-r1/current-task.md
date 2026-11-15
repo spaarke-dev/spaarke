@@ -12,6 +12,8 @@
 
 ### In flight
 
+- **#2833 ordering with uac-r2 #2838:** #2838 adds `tests/Spaarke.ArchTests/ScriptMetadataStrongConsistencyGuardTests.cs`. Its KnownOffenders baseline lists the 12 scripts/ebilling files our e36a1e54c4 fixes, and the guard fails on any stale entry. If #2838 merges first, our master PR must delete those 12 entries in the same change. If ours merges first, tell uac-r2 so it empties the baseline before merging #2838.
+
 - **UPDATE:** 093's fix round (A–H) is merged into work at a95f7e7297 and pushed; the 093 branches are deleted.
   - Sent to uac-r2 for review (gate diff plus callers). The conflict check found one overlap: #2615 on the Ledger ArchTest.
   - ArchTests are being re-run on the merge.
