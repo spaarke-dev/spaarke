@@ -11,7 +11,7 @@
 
 **Done 2026-11-15:**
 - **025 ✅** — owner chose Tier 1 ("Use tier 1"): job 8 `mcp-conformance` in `.github/workflows/ci-tier1-blocking.yml`, BLOCKING, owner-approved §6.5 Path-A exception (header entry, job comment, PR #2587 body). Node 22 required (suite imports `fs.globSync`; `run-conformance.sh` now stops below 22). Passing run 43736976687: 92 passed, 38 baselined, 5 min (< Arch Tests 7 min).
-- **Master merged in** (448 commits; ontology task 191, #2792): `387f6bf88b` merge + `39c993c58c` MCP mapping (sendChoice pass-through, 409 stored failure, 422, `plan.unfinished`); Fable review (REST byte-equal to master; 5 F) → fix round `a66e9b5509..66060a8f40` → Sonnet re-check clean → `288f558ff4`; merged into the branch `f9d1061111`. Record: `notes/merge-review-2026-11-15.md`. **Ontology must review this merge in PR #2587** (`Services/Signals/**`, `Api/Signals/**`).
+- **Master merged in** (448 commits; ontology task 191, #2792): `387f6bf88b` merge + `39c993c58c` MCP mapping (sendChoice pass-through, 409 stored failure, 422, `plan.unfinished`); Fable review (REST byte-equal to master; 5 F) → fix round `a66e9b5509..66060a8f40` → Sonnet re-check clean → `288f558ff4`; merged into the branch `f9d1061111`. Record: `notes/merge-review-2026-11-15.md`. Ontology reviewed it: PASS-WITH-CHANGES; F4 fixed `efa348273f` (`spaarke_complete_decision` no longer idempotent: a send-again retry can send again). Client-lint fix `850451d189`. **PR #2587 must not merge to master before ontology's #2580 and #2579** (the branch carries their 174/175 code; held until ebilling Invoice Review is on dev) — ontology tells us when they land.
 
 **Next (nothing is workable without the owner or a gate):**
 - 040 (plugin package + skill) — HELD on the owner's batch D results T2/T14/T10 → record in `notes/phase0-results.md` first.
@@ -40,5 +40,5 @@
 - Connector secret rotation runbook (052); ADR-028 A10 follow-up note; user-setup docs state the Copilot licence requirement.
 
 ## Peer obligations
-- **ontology-r1**: review the master merge (task 191 → MCP path) in PR #2587; ping when PR #2587 merges; owner's answer on area connector names.
+- **ontology-r1**: tells us when #2580/#2579 land (then #2587 may merge); ping them when PR #2587 merges; owner's answer on area connector names.
 - **uac-r2**: orchestrates dev deploys (owner per-SHA go there); reviewer for auth diffs; task 041's deploy goes through them.
