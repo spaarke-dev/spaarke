@@ -4,7 +4,7 @@
     <title>Migrate Create Project wizard including secure Project (FR-16, FR-15)</title>
     <phase>3 W3 Product creators onto the service</phase>
     <gate>021 complete</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .ts/.tsx in Spaarke.UI.Components; tags include frontend, security, deploy, testing (TEST-MODIFYING override).</rigor-reason>
     <model-tier>opus</model-tier>

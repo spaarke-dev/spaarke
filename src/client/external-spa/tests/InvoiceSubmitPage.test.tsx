@@ -26,9 +26,20 @@ vi.mock('@azure/msal-react', () => ({
   useMsal: () => ({ instance: { loginRedirect: vi.fn(async () => undefined) }, accounts: [], inProgress: 'none' }),
 }));
 
-// The Invoices widget test needs the widget, not the shared grid behind it.
+// The Invoices widget test needs the widget, not the shared grid behind it. The stub stands in for the grid's
+// `hostCommands` slot: every host command it is handed is rendered as a button INSIDE the grid element, the way the
+// real grid puts it in its own toolbar, so a button outside the grid is a standalone one.
 vi.mock('../src/widgets/GridWidgetBody', () => ({
-  createGridWidgetBody: () => () => React.createElement('div', { 'data-testid': 'invoices-grid' }, 'grid'),
+  createGridWidgetBody:
+    () => (props: { hostCommands?: ReadonlyArray<{ id: string; label: string; onInvoke: () => void }> }) =>
+      React.createElement(
+        'div',
+        { 'data-testid': 'invoices-grid' },
+        'grid',
+        ...(props.hostCommands ?? []).map(c =>
+          React.createElement('button', { key: c.id, 'data-command-id': c.id, onClick: () => c.onInvoke() }, c.label)
+        )
+      ),
 }));
 
 const SLOW = { timeout: 60000 };
@@ -770,17 +781,16 @@ describe('InvoiceSubmitPage — ?invoiceRecord= preselect (R4 task 007, FR-10)',
   // The parser is the one place the link's shape is decided; the page tests above prove what the wizard then shows.
   describe('the link format', () => {
     it(
-      'reads {kind}:{guid} for the three kinds, any case of GUID; the builder writes what the parser reads',
+      'reads {kind}:{guid} for the three kinds, any case of GUID, and from a full address',
       async () => {
-        const { parseInvoiceRecordParam, invoiceSubmitPathFor } = await import('../src/pages/invoiceSubmitLink');
+        const { parseInvoiceRecordParam } = await import('../src/pages/invoiceSubmitLink');
         for (const kind of ['matter', 'project', 'workassignment'] as const) {
           expect(parseInvoiceRecordParam(`${kind}:${MATTER_ID}`)).toEqual({ kind, recordId: MATTER_ID });
           expect(parseInvoiceRecordParam(`${kind}:${MATTER_ID.toUpperCase()}`)).toEqual({
             kind,
             recordId: MATTER_ID.toUpperCase(),
           });
-          const path = invoiceSubmitPathFor(kind, MATTER_ID);
-          expect(path).toBe(`/invoices/submit?invoiceRecord=${kind}%3A${MATTER_ID}`);
+          const path = `/invoices/submit?invoiceRecord=${kind}%3A${MATTER_ID}`;
           expect(parseInvoiceRecordParam(new URL(path, 'https://x.test').searchParams.get('invoiceRecord'))).toEqual({
             kind,
             recordId: MATTER_ID,
@@ -1008,12 +1018,15 @@ describe('Invoices widget — Submit invoice entry (FR-18, FR-45)', () => {
   }
 
   it(
-    'shows the action when eBilling answers, and the action opens the submission page',
+    'offers Submit invoice as a grid toolbar command when eBilling answers, and the command opens the submission page',
     async () => {
       const { InvoicesWidgetBody } = await load();
       renderWidget(InvoicesWidgetBody);
       const action = await screen.findByRole('button', { name: /submit invoice/i }, SLOW);
-      expect(screen.getByTestId('invoices-grid')).toBeTruthy();
+      // It is the grid's own command (handed through `hostCommands`), not a button beside the grid.
+      expect(screen.getByTestId('invoices-grid').contains(action)).toBe(true);
+      expect(action.getAttribute('data-command-id')).toBe('submit-invoice');
+      expect(screen.getAllByRole('button', { name: /submit invoice/i })).toHaveLength(1);
       fireEvent.click(action);
       expect(await screen.findByText('submit page')).toBeTruthy();
     },
@@ -1040,7 +1053,7 @@ describe('Invoices widget — Submit invoice entry (FR-18, FR-45)', () => {
     ['no firm (empty: a systemuser, a deactivated contact)', meWith([])],
     ['a /me that fails', () => problem(500, 'boom')],
   ])(
-    'hides the action for %s (the grid stays)',
+    'hands the grid no command for %s (the grid stays)',
     async (_name, me) => {
       script.me = me;
       const { InvoicesWidgetBody } = await load();

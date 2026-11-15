@@ -74,6 +74,50 @@ public sealed class InvoiceAssignFirmEndpointContractTests
         host.World.ShouldHaveWrittenNothing();
     }
 
+    [Theory(DisplayName = "#2822 F4: Write on the invoice without Append is the uniform 404, byte-identical to an invoice the caller cannot see, with nothing written (must fire)")]
+    [InlineData(AccessRights.Write)]
+    [InlineData(AccessRights.Read | AccessRights.Write)]
+    [InlineData(AccessRights.Read | AccessRights.Write | AccessRights.AppendTo)]
+    public async Task SetFirm_WriteWithoutAppendOnTheInvoice_IsUniform404(AccessRights rights)
+    {
+        // The invoice HOLDS the firm lookup (sprk_vendororg) this route sets; Dataverse would refuse this caller that update.
+        await using var unseen = await Host.StartAsync();
+        unseen.GrantFirm(AccessRights.Read | AccessRights.AppendTo);
+        var unseenResponse = await unseen.SendAsync(new { firmId = Firm });
+
+        await using var host = await Host.StartAsync();
+        host.Access.Grant(InvoiceSet, InvoiceId, rights);
+        host.GrantFirm(AccessRights.Read | AccessRights.AppendTo);
+
+        var response = await host.SendAsync(new { firmId = Firm });
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        unseenResponse.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        // Byte-identical once the per-request ids are set aside (they differ on every response).
+        NormalisedBody(await response.Content.ReadAsStringAsync()).Should().Be(
+            NormalisedBody(await unseenResponse.Content.ReadAsStringAsync()), "a caller without Append learns nothing an unseen invoice would not tell it");
+        host.Access.Calls.Should().ContainSingle().Which.Should().Be(new FinAuth.AccessCall(FinAuth.AccessPath.Record, InvoiceSet, InvoiceId, HasToken: true));
+        host.World.Entities.Invocations.Should().BeEmpty();
+        host.World.ShouldHaveWrittenNothing();
+    }
+
+    private static string NormalisedBody(string body) =>
+        System.Text.RegularExpressions.Regex.Replace(body, "\"(traceId|correlationId)\":\"[^\"]*\"", "\"$1\":\"x\"");
+
+    [Fact(DisplayName = "#2822 F4: Write and Append on the invoice assign the firm (must not fire; control for the Append refusal)")]
+    public async Task SetFirm_WriteAndAppendOnTheInvoice_Assigns()
+    {
+        await using var host = await Host.StartAsync();
+        host.Access.Grant(InvoiceSet, InvoiceId, AccessRights.Write | AccessRights.Append);
+        host.GrantFirm(AccessRights.Read | AccessRights.AppendTo);
+
+        var response = await host.SendAsync(new { firmId = Firm, note = "confirmed" });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        JsonNode.Parse(await response.Content.ReadAsStringAsync())!["outcome"]!.GetValue<string>().Should().Be("assigned");
+        host.World.Applied.Should().NotBeNull("the one apply went to the allocator");
+    }
+
     [Theory(DisplayName = "095d-1b: Write on the invoice without Read AND AppendTo on the firm is 403 (must fire); with both it is assigned (must not fire)")]
     [InlineData(AccessRights.None, false)]
     [InlineData(AccessRights.Read, false)]
@@ -359,7 +403,8 @@ public sealed class InvoiceAssignFirmEndpointContractTests
             return host;
         }
 
-        public void GrantInvoiceWrite() => Access.Grant(InvoiceSet, InvoiceId, AccessRights.Read | AccessRights.Write);
+        // Write AND Append: the invoice holds the firm lookup this route sets (uac-r2 #2822 F4).
+        public void GrantInvoiceWrite() => Access.Grant(InvoiceSet, InvoiceId, AccessRights.Read | AccessRights.Write | AccessRights.Append);
 
         public void GrantFirm(AccessRights rights) => Access.Grant(FirmSet, Firm, rights);
 

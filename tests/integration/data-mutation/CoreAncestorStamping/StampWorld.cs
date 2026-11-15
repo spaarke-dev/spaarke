@@ -309,6 +309,18 @@ internal sealed class StampWorld
         return this;
     }
 
+    /// <summary>
+    /// Field mapping task 022b: an org whose <paramref name="entity"/> table has <paramref name="column"/> (the probe reports
+    /// it), so the inherited-Access-Permission walk selects and reads it.
+    /// </summary>
+    public StampWorld WithColumn(string entity, string column)
+    {
+        if (!_columns.TryGetValue(entity, out var columns))
+            _columns[entity] = columns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        columns.Add(column);
+        return this;
+    }
+
     public StampWorld FailWrite(string entity, Guid id, Exception? fault = null)
     {
         _writeFaults[(entity, id)] = fault ?? new InvalidOperationException($"PATCH {entity} {id} refused");

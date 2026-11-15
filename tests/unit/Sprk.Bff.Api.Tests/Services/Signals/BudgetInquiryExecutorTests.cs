@@ -4,6 +4,8 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
+using Sprk.Bff.Api.Infrastructure.Exceptions;
+using Sprk.Bff.Api.Services.Communication.Channels;
 using Sprk.Bff.Api.Services.Communication.Models;
 using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Signals.Actions;
@@ -93,9 +95,17 @@ public sealed class BudgetInquiryExecutorTests
         /// <summary>The communication core's archival warning this send reports (D-216), or null when the .eml was archived.</summary>
         public string? ArchivalWarning { get; init; }
 
+        /// <summary>Task 191: failures thrown by the next sends, in order, before <see cref="Throw"/> and <c>fail</c> apply.</summary>
+        public Queue<Exception> Failures { get; } = new();
+
+        public List<Guid> ServiceRequestsSeen { get; } = [];
+
         public override Task<InquirySendResult> SendAsync(BudgetInquiryRequest request, Guid serviceRequestId, CancellationToken ct)
         {
             TokenSeen = ct;
+            ServiceRequestsSeen.Add(serviceRequestId);
+            if (Failures.TryDequeue(out var next))
+                throw next;
             if (Throw is not null)
                 throw Throw;
             Sends++;
@@ -272,7 +282,8 @@ public sealed class BudgetInquiryExecutorTests
 
         var result = await sut.ExecuteAsync(Req(), default);
 
-        result.Outcome.Should().Be(BudgetInquiryOutcome.SendFailed);
+        // Task 191 (D-223): a failure that cannot be placed before the send may have delivered the email.
+        result.Outcome.Should().Be(BudgetInquiryOutcome.SendOutcomeUnknown);
         result.ServiceRequestId.Should().Be(rig.Writes.Single().Id);
         result.Succeeded.Should().BeFalse();
     }
@@ -356,6 +367,73 @@ public sealed class BudgetInquiryExecutorTests
         var act = () => InquiryEmailSender.Build(new BudgetInquiryRequest(Matter, to, "s", "b", true), Guid.NewGuid());
 
         act.Should().Throw<ArgumentException>();
+    }
+
+    // ---- task 190 (D-222): Cc and Bcc end to end ---------------------------------------------------------------------------
+
+    private static BudgetInquiryRequest CopyReq(string[]? cc, string[]? bcc, string[]? to = null) =>
+        new(Matter, to ?? ["firm@example.com"], "Budget inquiry", "Please explain the overage.", true, null, cc, bcc);
+
+    [Fact]
+    public void Build_sets_To_Cc_and_Bcc_trimmed_and_deduplicated_and_changes_nothing_else_task190()
+    {
+        var sr = Guid.NewGuid();
+        var withCopies = InquiryEmailSender.Build(
+            CopyReq([" c1@example.com ", "C1@Example.com", "c2@example.com"], ["b1@example.com ", "B1@example.com"]), sr);
+        var toOnly = InquiryEmailSender.Build(Req(), sr);
+
+        withCopies.To.Should().Equal("firm@example.com");
+        withCopies.Cc.Should().Equal("c1@example.com", "c2@example.com");
+        withCopies.Bcc.Should().Equal("b1@example.com");
+        // Everything else is the To-only request: associations, internal-only, archive, private thread, send mode, body.
+        withCopies.Associations.Should().BeEquivalentTo(toOnly.Associations);
+        withCopies.IsInternalOnly.Should().Be(toOnly.IsInternalOnly).And.BeTrue();
+        withCopies.ArchiveToSpe.Should().Be(toOnly.ArchiveToSpe).And.BeTrue();
+        withCopies.CreateThreadPrivate.Should().Be(toOnly.CreateThreadPrivate).And.BeTrue();
+        withCopies.SendMode.Should().Be(SendMode.User);
+        withCopies.Body.Should().Be(toOnly.Body);
+        withCopies.Subject.Should().Be(toOnly.Subject);
+        withCopies.BodyFormat.Should().Be(toOnly.BodyFormat);
+    }
+
+    [Theory]
+    [InlineData(null, null)]
+    [InlineData(new string[0], new string[0])]
+    [InlineData(new[] { " " }, new[] { "" })]
+    public void Build_with_empty_or_absent_Cc_and_Bcc_is_the_To_only_request_task190(string[]? cc, string[]? bcc)
+    {
+        var built = InquiryEmailSender.Build(CopyReq(cc, bcc), Guid.NewGuid());
+
+        built.Cc.Should().BeNull();
+        built.Bcc.Should().BeNull();
+        built.To.Should().Equal("firm@example.com");
+    }
+
+    [Fact]
+    public void Build_sends_an_address_once_in_the_first_line_it_is_on_task190()
+    {
+        var built = InquiryEmailSender.Build(
+            CopyReq(["FIRM@example.com", "c@example.com"], ["firm@example.com", "C@example.com", "b@example.com"]), Guid.NewGuid());
+
+        built.To.Should().Equal("firm@example.com");
+        built.Cc.Should().Equal(new[] { "c@example.com" }, "an address in To is sent once, in To");
+        built.Bcc.Should().Equal(new[] { "b@example.com" }, "an address in To or Cc is sent once, in To or Cc");
+    }
+
+    [Fact]
+    public void Build_never_puts_Bcc_in_To_Cc_subject_body_footer_or_link_lines_task190()
+    {
+        const string hidden = "hidden-recipient@example.com";
+        var built = InquiryEmailSender.Build(
+            CopyReq(["c@example.com"], [hidden]), Guid.NewGuid(),
+            new InquiryEmailExtras("Acme v. Roe (MAT-000123)", ["Open this matter in Spaarke: https://org.example/record"]));
+
+        built.Bcc.Should().Equal(hidden);
+        built.To.Should().NotContain(hidden);
+        built.Cc.Should().NotContain(hidden);
+        built.Subject.Should().NotContain(hidden);
+        built.Body.Should().NotContain(hidden);
+        built.Associations!.Select(a => a.EntityName).Should().NotContain(n => n != null && n.Contains(hidden));
     }
 
     [Fact]
@@ -475,13 +553,119 @@ public sealed class BudgetInquiryExecutorTests
     }
 
     [Fact]
-    public async Task A_cancelled_send_after_the_row_exists_is_SendFailed_with_the_id()
+    public async Task A_cancelled_send_after_the_row_exists_is_SendOutcomeUnknown_with_the_id()
     {
         var (sut, rig) = Build(new FakeUser(true, "AppendToAccess"), new FakeSender { Throw = new OperationCanceledException() });
 
         var result = await sut.ExecuteAsync(Req(), default);
 
+        // Task 191 (D-223): a timeout or cancellation during the send may have delivered the email: the person chooses.
+        result.Outcome.Should().Be(BudgetInquiryOutcome.SendOutcomeUnknown);
+        result.ServiceRequestId.Should().Be(rig.Writes.Single().Id);
+    }
+
+    // ---- task 191 (D-223): NotSent vs Unknown, and the send-only retry ----------------------------------------------
+
+    private static SdapProblemException GraphSendFailed(int status, string? sendOutcome) =>
+        new("GRAPH_SEND_FAILED", "Email send failed", "detail", status,
+            sendOutcome is null ? null : new Dictionary<string, object> { [EmailChannelSender.SendOutcomeExtension] = sendOutcome });
+
+    public static TheoryData<string, Exception, bool> SendFailures => new()
+    {
+        { "before the core", new InquiryEmailNotSentException(new InvalidOperationException("no request")), true },
+        { "Graph refused (NotSent)", GraphSendFailed(500, EmailChannelSender.SendOutcomeNotSent), true },
+        { "Graph 5xx/408 (Unknown)", GraphSendFailed(500, EmailChannelSender.SendOutcomeUnknown), false },
+        { "core catch-all (no outcome)", GraphSendFailed(500, null), false },
+        { "core catch-all 4xx (no outcome)", GraphSendFailed(400, null), false },
+        { "core refusal 4xx", new SdapProblemException("INVALID_RECIPIENT", "bad", statusCode: 400), true },
+        { "core fault 5xx", new SdapProblemException("ARCHIVE_FAILED", "x", statusCode: 500), false },
+        { "transport", new HttpRequestException("reset"), false },
+        { "timeout", new TaskCanceledException("timeout"), false },
+        { "anything else", new InvalidOperationException("graph down"), false },
+    };
+
+    [Theory]
+    [MemberData(nameof(SendFailures))]
+    public void Only_a_send_that_provably_did_not_go_out_is_DefinitelyNotSent(string because, Exception failure, bool notSent) =>
+        BudgetInquiryExecutor.DefinitelyNotSent(failure).Should().Be(notSent, because);
+
+    [Fact]
+    public async Task A_send_Graph_refused_after_the_row_exists_is_SendFailed_with_the_id()
+    {
+        var sender = new FakeSender { Throw = GraphSendFailed(500, EmailChannelSender.SendOutcomeNotSent) };
+        var (sut, rig) = Build(new FakeUser(true, "AppendToAccess"), sender);
+
+        var result = await sut.ExecuteAsync(Req(), default);
+
         result.Outcome.Should().Be(BudgetInquiryOutcome.SendFailed);
         result.ServiceRequestId.Should().Be(rig.Writes.Single().Id);
+    }
+
+    [Fact]
+    public async Task A_send_that_fails_before_the_communication_core_is_marked_not_sent()
+    {
+        var sender = new InquiryEmailSender(null!, new Microsoft.AspNetCore.Http.HttpContextAccessor());
+
+        var act = () => sender.SendAsync(Req(), Guid.NewGuid(), default);
+
+        (await act.Should().ThrowAsync<InquiryEmailNotSentException>()).Which.InnerException.Should().BeOfType<InvalidOperationException>();
+    }
+
+    [Fact]
+    public async Task SendOnly_sends_once_with_the_landed_service_request_and_creates_nothing()
+    {
+        var landed = Guid.NewGuid();
+        var sender = new FakeSender();
+        var (sut, rig) = Build(new FakeUser(true, "AppendToAccess"), sender);
+
+        var result = await sut.SendOnlyAsync(Req(), landed, default);
+
+        result.Outcome.Should().Be(BudgetInquiryOutcome.Sent);
+        result.ServiceRequestId.Should().Be(landed);
+        rig.Writes.Should().BeEmpty("the service request already exists");
+        sender.ServiceRequestsSeen.Should().Equal(landed);
+        InquiryEmailSender.Build(Req(), landed).Associations![0].EntityId.Should().Be(landed, "the email links to the landed row");
+    }
+
+    [Fact]
+    public async Task SendOnly_without_a_landed_id_is_Invalid_and_sends_nothing()
+    {
+        var sender = new FakeSender();
+        var (sut, rig) = Build(new FakeUser(true, "AppendToAccess"), sender);
+
+        var result = await sut.SendOnlyAsync(Req(), Guid.Empty, default);
+
+        result.Outcome.Should().Be(BudgetInquiryOutcome.Invalid);
+        sender.ServiceRequestsSeen.Should().BeEmpty();
+        rig.Writes.Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task A_retry_through_the_action_executor_reuses_the_landed_service_request_and_creates_exactly_one(bool definitelyNotSent)
+    {
+        var sender = new FakeSender();
+        sender.Failures.Enqueue(definitelyNotSent
+            ? GraphSendFailed(500, EmailChannelSender.SendOutcomeNotSent)
+            : GraphSendFailed(500, EmailChannelSender.SendOutcomeUnknown));
+        var (sut, rig) = Build(new FakeUser(true, "AppendToAccess"), sender);
+        var action = new BudgetInquiryActionExecutor(sut);
+        var request = new DecisionActionRequest(new Microsoft.AspNetCore.Http.DefaultHttpContext(), Guid.NewGuid(), null, null, Matter,
+            new Dictionary<string, string?> { ["to"] = "firm@example.com", ["subject"] = "Budget inquiry", ["body"] = "Please explain." });
+
+        var first = await action.ExecuteAsync(request, default);
+
+        first.Status.Should().Be(DecisionActionStatus.Failed);
+        first.SendFailure.Should().Be(definitelyNotSent ? DecisionSendFailure.NotSent : DecisionSendFailure.Unknown);
+        var serviceRequest = rig.Writes.Should().ContainSingle().Subject.Id;
+        first.Written.Should().Equal(new DecisionRecordRef(BudgetInquiryExecutor.Table, serviceRequest));
+
+        var retried = await action.ExecuteAsync(request with { Landed = first.Written }, default);
+
+        retried.Status.Should().Be(DecisionActionStatus.Done);
+        rig.Writes.Should().ContainSingle("the retry never creates a second service request");
+        sender.ServiceRequestsSeen.Should().Equal(serviceRequest, serviceRequest);
+        retried.Written[0].Should().Be(new DecisionRecordRef(BudgetInquiryExecutor.Table, serviceRequest));
     }
 }

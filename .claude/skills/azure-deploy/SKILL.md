@@ -26,7 +26,7 @@ last-reviewed: 2026-11-03
 | BFF API to App Service | `Deploy-BffApi.ps1` + hash-verify | `bff-deploy` skill (the canonical authority — incident-grounded with May 2026 silent-failure hardening) |
 | Office Add-ins to SWA | SWA CLI + `Deploy-OfficeAddins.ps1` | `office-addins-deploy` skill |
 | Dataverse / PCF / solutions | PAC CLI | `dataverse-deploy`, `pcf-deploy` skills |
-| Power Pages Code Site | PAC CLI + Vite build | `power-page-deploy` skill |
+| External SPA to Static Web Apps | Vite build + `Azure/static-web-apps-deploy` | `.github/workflows/deploy-external-spa.yml` (manual `workflow_dispatch`) |
 
 **For Dataverse deployments (PCF, solutions, web resources)**: Use the `dataverse-deploy` skill instead.
 
@@ -395,7 +395,7 @@ Both scripts support `-SkipBuild` flag to deploy existing builds faster.
 - **BFF API deploys** → `bff-deploy` skill (canonical authority; includes May 2026 silent-failure hardening with hash-verify + auto-recover)
 - **Office Add-ins / SWA deploys** → `office-addins-deploy` skill (extracted from this skill 2026-05-17)
 - **Dataverse PCF / solutions** → `dataverse-deploy` / `pcf-deploy` skills
-- **Power Pages Code Sites** → `power-page-deploy` skill
+- **External SPA** (`src/client/external-spa/`) → `.github/workflows/deploy-external-spa.yml` (Azure Static Web Apps). The Power Pages deploy is retired.
 
 ---
 

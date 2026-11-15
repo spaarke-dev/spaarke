@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="034" project="reuse-governance-tightening-r1">
+  <metadata>
+    <title>File the six remaining package actions and report defects</title>
+    <phase>4 Package reviews</phase>
+    <gate>blocked until 030 approved</gate>
+    <status>not-started</status>
+    <rigor>MINIMAL</rigor>
+    <rigor-reason>Issue filing and a project note; no code</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Mechanical filing from approved decision records</model-tier-reason>
+    <effort>medium</effort>
+    <parallel-group>C</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>030</deps>
+    <tags>devops</tags>
+    <estimated-effort>1-2 hours</estimated-effort>
+  </metadata>
+
+  <prompt>For each grandfathered package whose action is not executed in this project, file a GitHub issue carrying its decision, findings and severity; list every defect found in task 030 for the owner.</prompt>
+  <role>SPAARKE platform developer handling backlog hygiene.</role>
+  <goal>Six issues exist (or fewer if a decision was "sanction", which lands as an ADR amendment instead), each labelled for this project and linked from notes/defer-issues.md; the defect list is in the project report section of package-reviews.md.</goal>
+
+  <context>
+    <background>spec.md FR-09 and NFR-10. Packages expected here: sdap-client, smart-todo-components, communication-components, daily-briefing-components, compose-components, ai-outputs (re-check against the census).</background>
+    <relevant-files>
+      <file role="modify">projects/reuse-governance-tightening-r1/notes/package-reviews.md</file>
+      <file role="new">projects/reuse-governance-tightening-r1/notes/defer-issues.md</file>
+      <file role="canonical-reference">.claude/skills/project-defer-issue-tracking/SKILL.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="030" status="pending">Approved decisions and findings</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Use /project-defer-issue-tracking: each filed item appears in notes/defer-issues.md AND as a GitHub issue with label reuse-governance-tightening-r1; never one without the other.</constraint>
+    <constraint source="project">Each issue body carries the decision, the three-test evidence summary, findings with severity, and the migration outline.</constraint>
+    <constraint source="project">A package decided "sanction" is not filed here; record it for task 080's ADR-012 amendment PR or a follow-up, and tell the owner which.</constraint>
+    <constraint source="project">Every defect on a real path is named to the owner in a "Defects found" list (NFR-10), whether or not its package is executed.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/project-defer-issue-tracking/SKILL.md</file>
+      <file>projects/reuse-governance-tightening-r1/notes/package-reviews.md</file>
+      <file>projects/reuse-governance-tightening-r1/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Defer and file" location=".claude/skills/project-defer-issue-tracking/SKILL.md">Local note plus GitHub issue, always both.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">List the packages not executed by 031-033 and their decisions.</step>
+    <step order="2">File one issue per consolidate/retire decision via /project-defer-issue-tracking.</step>
+    <step order="3">Write the "Defects found" list at the top of package-reviews.md and show it to the owner.</step>
+    <step order="4">Update TASK-INDEX.md: change this task's status cell to `✅ [done]`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If a defect is user-visible and severe, raise it to the owner immediately instead of only filing it.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>No defer-issues file in this project yet (Glob projects/reuse-governance-tightening-r1/notes/*).</existing>
+    <extension>No: the defer-issue skill writes this per-project file by design.</extension>
+    <cost-of-doing-nothing>The six packages' findings stay buried in a project note and the backlog says "consolidate X" without why (design.md section 6.1).</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="terminal">gh issue create</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/reuse-governance-tightening-r1/notes/defer-issues.md</output>
+    <output type="docs">projects/reuse-governance-tightening-r1/notes/package-reviews.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Each non-executed consolidate/retire decision has one GitHub issue with the project label and a matching notes/defer-issues.md entry.</criterion>
+    <criterion testable="true">Each issue body contains decision, evidence summary, findings with severity and migration outline.</criterion>
+    <criterion testable="true">package-reviews.md has a "Defects found" list, shown to the owner.</criterion>
+    <criterion testable="true">Negative: no code or ADR file changes in this task.</criterion>
+  </acceptance-criteria>
+
+  <notes>Runs in parallel with 031 (no shared files).</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

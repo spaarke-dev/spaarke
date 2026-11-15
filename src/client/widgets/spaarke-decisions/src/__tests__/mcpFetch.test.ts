@@ -436,7 +436,8 @@ describe('createMcpFetch with the shared Decision wizard service (the real consu
     const { fetch } = harness(planResult());
     const service = createDecisionWizardService({ fetch, baseUrl: 'https://spaarke.invalid' });
 
-    expect(await service.getPlan('abc')).toEqual(PLAN);
+    // Ontology task 191: the shared service adds the plan's `unfinished` review (null when the plan carries none).
+    expect(await service.getPlan('abc')).toEqual({ ...PLAN, unfinished: null });
     expect(await service.getSuppression('abc')).toEqual(SUPPRESSION);
   });
 

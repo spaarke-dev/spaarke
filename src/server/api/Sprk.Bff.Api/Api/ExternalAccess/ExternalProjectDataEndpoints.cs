@@ -2469,13 +2469,24 @@ public static class ExternalProjectDataEndpoints
         // Task 036 fix round 1 (F4) said this for a project, to a caller whose access Dataverse decided. R4 task 002
         // (FR-06): every root has an event create route now (CreateEventForRoot), and every caller is told whether it would
         // admit them here (AppendTo on the root + prvCreatesprk_Event, asked only of a Dataverse-decided caller).
+        var canCreate = await CanCreateUnderRootAsync(
+            callerContext, rootKind, rootId, Sprk.Bff.Api.Api.Events.EventEndpoints.CreateEventPrivilege,
+            CreateEventCeiling(rootKind), httpContext, probe, privileges, logger, ct);
+
+        // R4 task 008 review round 1 (F2-1, FR-07): a Task additionally needs what the create route's B1 check asks — AppendTo on
+        // the Task type row, for a Dataverse-decided caller only, through the SAME check (TaskTypeAppendToAsync). Asked only when
+        // canCreate is already true (one probe per list); an unanswered probe offers no Task and never fails the list.
+        var canCreateTask = canCreate
+            && (!callerContext.DataverseConfirmsWrites
+                || await TaskTypeAppendToAsync(
+                    rootKind, CallerRightsReader(probe, httpContext), httpContext.TraceIdentifier, logger, ct) == true);
+
         return Results.Ok(new ExternalCollectionResponse<ExternalEventDto>
         {
             Value = events.Value,
             Truncated = events.Truncated,
-            CanCreate = await CanCreateUnderRootAsync(
-                callerContext, rootKind, rootId, Sprk.Bff.Api.Api.Events.EventEndpoints.CreateEventPrivilege,
-                CreateEventCeiling(rootKind), httpContext, probe, privileges, logger, ct),
+            CanCreate = canCreate,
+            CanCreateTask = canCreateTask,
         });
     }
 
@@ -2572,12 +2583,7 @@ public static class ExternalProjectDataEndpoints
         if (confirmed.IsUnavailableFor(Spaarke.Dataverse.AccessRights.Create))
             return DataverseRightsUnavailable();
         if (!confirmed.Rights.HasFlag(Spaarke.Dataverse.AccessRights.Create))
-            return Results.Problem(statusCode: 403, title: "Forbidden",
-                detail: $"Your access level does not permit creating events on this {RootNoun(rootKind)}",
-                extensions: new Dictionary<string, object?>
-                {
-                    ["reasonCode"] = "sdap.access.deny.insufficient_rights"
-                });
+            return DenyEventCreate(rootKind);
 
         if (string.IsNullOrWhiteSpace(request.SprkName))
             return Results.Problem(statusCode: 400, title: "Bad Request",
@@ -2589,10 +2595,33 @@ public static class ExternalProjectDataEndpoints
             return Results.Problem(statusCode: 400, title: "Bad Request",
                 detail: "sprk_status must be Draft (1) or Open (659490001); omit it to create the event Open.");
 
+        // R4 task 008 (uac-r2 review 2026-11-13, B; ADR-019): the event type is a CLOSED set — "task" or omitted. Anything else is
+        // a 400 with a stable errorCode, before any Dataverse read, and nothing is created. Omitted is today's create exactly.
+        if (!ExternalDataService.IsCreatableEventType(request.EventType))
+            return Results.Problem(statusCode: 400, title: "Bad Request",
+                detail: "eventType must be \"task\"; omit it to create an event with no type.",
+                extensions: new Dictionary<string, object?>
+                {
+                    ["errorCode"] = ExternalDataService.EventTypeNotAllowedErrorCode
+                });
+
         // Task 098: sprk_event.sprk_duedate is a calendar date (Dataverse Date Only); refuse what is not one rather than let
         // Dataverse answer 400 behind a 500.
         if (DueDateProblem(request.SprkDuedate) is { } badDueDate)
             return badDueDate;
+
+        // R4 task 008 (uac-r2 B1): a Task binds the Task row of sprk_eventtype_ref, and the BFF writes app-only, so Dataverse never
+        // asks the caller's AppendTo on that row itself. For a caller whose access Dataverse decides (a systemuser), ask it here,
+        // through the same app-only reader that names the caller's systemuser (CallerRightsReader — never OBO on this plane), before
+        // anything is written: no AppendTo is the route's own create refusal (403); no answer is the retry-able 503. A contact is
+        // not asked: for a contact the closed set is the authorization.
+        if (request.EventType is ExternalDataService.TaskEventType && callerContext.DataverseConfirmsWrites)
+        {
+            var typeRefusal = await TaskTypeAppendToRefusalAsync(
+                rootKind, CallerRightsReader(probe, httpContext), httpContext.TraceIdentifier, logger, ct);
+            if (typeRefusal is not null)
+                return typeRefusal;
+        }
 
         // Task 146: owned by the ROOT's team (the named Secure team for a secure root), or refused.
         var (owningTeamId, ownerRefusal) = await ResolveChildOwnerAsync(ownership, binding.EntityLogicalName, id, "event", ct);
@@ -2602,6 +2631,84 @@ public static class ExternalProjectDataEndpoints
         // Task 030 (FR-25): the creator stamp comes from the resolved principal.
         var created = await dataService.CreateEventAsync(rootKind, id, request, owningTeamId, callerContext, ct);
         return Results.Created($"/api/v1/external/{RootRouteSegment(rootKind)}/{id}/events/{created.SprkEventid}", created);
+    }
+
+    /// <summary>The event create's insufficient-rights 403 (its detail and <c>reasonCode</c> are the shipped ones).</summary>
+    private static IResult DenyEventCreate(ExternalDataService.TodoRootKind rootKind) =>
+        Results.Problem(statusCode: 403, title: "Forbidden",
+            detail: $"Your access level does not permit creating events on this {RootNoun(rootKind)}",
+            extensions: new Dictionary<string, object?>
+            {
+                ["reasonCode"] = "sdap.access.deny.insufficient_rights"
+            });
+
+    /// <summary>
+    /// R4 task 008 (uac-r2 review 2026-11-13, B1): the create route's answer to a Task from a Dataverse-decided caller, from
+    /// <see cref="TaskTypeAppendToAsync"/> (the ONE check the event lists' <c>canCreateTask</c> also makes).
+    /// <see langword="null"/> when the caller holds AppendTo on the Task row; <see cref="DenyEventCreate"/> (403) for "no";
+    /// <see cref="DataverseRightsUnavailable"/> (503, nothing written) when Dataverse gave no answer or the read threw — a fault
+    /// is never a denial (task 036 fix round 4, F1).
+    /// </summary>
+    private static async Task<IResult?> TaskTypeAppendToRefusalAsync(
+        ExternalDataService.TodoRootKind rootKind,
+        Func<string, Guid, CancellationToken, Task<Spaarke.Dataverse.AccessRights?>> readCallerRights,
+        string traceId,
+        ILogger logger,
+        CancellationToken ct)
+    {
+        switch (await TaskTypeAppendToAsync(rootKind, readCallerRights, traceId, logger, ct).ConfigureAwait(false))
+        {
+            case null:
+                return DataverseRightsUnavailable();
+            case false:
+                logger.LogWarning(
+                    "[EXT-EVENT] Refused a Task on a {RootKind}: Dataverse does not grant the caller AppendTo on the Task event type. TraceId={TraceId}",
+                    rootKind, traceId);
+                return DenyEventCreate(rootKind);
+            default:
+                return null;
+        }
+    }
+
+    /// <summary>
+    /// R4 task 008 (uac-r2 B1; review round 1, F2-1): whether a Dataverse-decided caller holds AppendTo on the Task row of
+    /// <c>sprk_eventtype_ref</c>, asked through <paramref name="readCallerRights"/> (the route's <see cref="CallerRightsReader"/>:
+    /// app-only, naming the caller's resolved systemuser — never OBO on this plane). The ONE check behind both the event create's
+    /// B1 refusal (<see cref="TaskTypeAppendToRefusalAsync"/>) and the event lists' <c>canCreateTask</c>, so the two cannot
+    /// drift. <see langword="true"/>/<see langword="false"/> is Dataverse's answer; <see langword="null"/> is no answer (the
+    /// read returned none or threw), logged at Information with the trace id and nothing that names the caller. Only the
+    /// caller's own cancellation is rethrown.
+    /// </summary>
+    private static async Task<bool?> TaskTypeAppendToAsync(
+        ExternalDataService.TodoRootKind rootKind,
+        Func<string, Guid, CancellationToken, Task<Spaarke.Dataverse.AccessRights?>> readCallerRights,
+        string traceId,
+        ILogger logger,
+        CancellationToken ct)
+    {
+        Spaarke.Dataverse.AccessRights? answer;
+        try
+        {
+            answer = await readCallerRights(Spaarke.Dataverse.EventTypeRef.EntitySet, Spaarke.Dataverse.EventTypeRef.Task, ct)
+                .ConfigureAwait(false);
+        }
+        catch (Exception ex) when (!(ex is OperationCanceledException && ct.IsCancellationRequested))
+        {
+            logger.LogInformation(ex,
+                "[EXT-EVENT] AppendTo on the Task event type could not be read ({RootKind}). TraceId={TraceId}",
+                rootKind, traceId);
+            return null;
+        }
+
+        if (answer is not { } rights)
+        {
+            logger.LogInformation(
+                "[EXT-EVENT] Dataverse gave no answer for AppendTo on the Task event type ({RootKind}). TraceId={TraceId}",
+                rootKind, traceId);
+            return null;
+        }
+
+        return rights.HasFlag(Spaarke.Dataverse.AccessRights.AppendTo);
     }
 
     /// <summary>The route segment of a root kind, as the event and to-do routes are mapped (<c>projects</c>,

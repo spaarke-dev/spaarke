@@ -78,6 +78,10 @@ internal sealed record RecordCreationRefusal
     /// Task 022 fix round 3: a value mapped from a secure source files the row, and the row's owner is not that source's secure
     /// owner, so the value cannot be removed and the create is refused (400). The same request is refused again: create the row
     /// as secure, or file it differently.
+    /// <para>Task 022b (UAC-r2, 2026-11-12): also the code when a value mapped from a source whose Access Permission is
+    /// Restricted files the row and the row is not Restricted once created (<c>RecordCreationService.MappingSourceRestrictedFilingRefused</c>,
+    /// with its own Restricted wording). One code for "a value copied from a protected source would file this row": the same
+    /// request is refused every time, for either reason.</para>
     /// </summary>
     internal const string MappingSourceSecureFilingCode = "record_creation.mapping_source_secure_filing";
 

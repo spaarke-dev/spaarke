@@ -74,7 +74,7 @@ import {
   type HostFilterCondition,
 } from './fetchXmlOverlay';
 import type { MembershipResolver } from '../../services/membership';
-import { CommandBar as DataGridCommandBar } from './commandBar/CommandBar';
+import { CommandBar as DataGridCommandBar, type DataGridHostCommand } from './commandBar/CommandBar';
 import { discoverChips, augmentFetchXmlWithChips, type ChipDescriptor, type ChipState } from './filterChips';
 import { HeaderCellContent } from './HeaderCellContent';
 import { ViewSelector, type SavedView } from './ViewSelector';
@@ -189,6 +189,21 @@ export interface DataGridProps {
    * first as an observer.
    */
   onCreateNew?: () => void;
+
+  /**
+   * OPTIONAL — commands the HOST adds to the grid's command bar, beyond what the
+   * `sprk_gridconfiguration` record and the built-ins give (for example a "Submit"
+   * action that opens a host-owned dialog). Generic: the host owns the behaviour
+   * (`onInvoke`); the grid only places and renders the button. Placement: first
+   * in the bar, in the order supplied, then the normal inline limit / overflow
+   * rules; an `id` equal to a configured or built-in item is skipped (a host command never replaces one; a console.warn names it).
+   * Absent or empty = the command bar is unchanged for every other grid.
+   * `onCommandInvoke` still fires first as an observer. Pass a stable array
+   * (`useMemo`).
+   *
+   * See {@link DataGridHostCommand}.
+   */
+  hostCommands?: ReadonlyArray<DataGridHostCommand>;
 
   /** OPTIONAL — escape-hatch overrides for column renderers, badge map, filter chip allowlist. */
   overrides?: DataGridOverrides;
@@ -725,6 +740,7 @@ export const DataGrid: React.FC<DataGridProps> = props => {
     onRecordAction: _onRecordAction,
     onCommandInvoke,
     onCreateNew,
+    hostCommands,
     overrides,
     pageSize: pageSizeOverride,
     availableViewsAllowlist: availableViewsAllowlistOverride,
@@ -1496,6 +1512,7 @@ export const DataGrid: React.FC<DataGridProps> = props => {
             inlineLimit={3}
             onCommandInvoke={handleCommandInvoke}
             onCreateNew={onCreateNew}
+            hostCommands={hostCommands}
           />
         </div>
 

@@ -39,7 +39,8 @@ public static class DecisionPlanEndpoints
             .WithDescription("Returns the plan's actions in plan order (the first is the recommendation), the Next-steps set and the "
                 + "lane's closed dismissal reasons. 404 when the Signal or its core record is not readable by the caller, or a Do item "
                 + "is not the caller's own work (D-141); 503 when that could not be checked; "
-                + "422 when the plan does not resolve against the closed catalog.")
+                + "422 when the plan does not resolve against the closed catalog. Also returns the caller's unfinished review of the item "
+                + "(unfinished: the review as posted and its stored failure), which is finished by posting it again with retry.")
             .Produces<DecisionPlanResponse>(200)
             .ProducesProblem(StatusCodes.Status403Forbidden)
             .ProducesProblem(StatusCodes.Status404NotFound)
@@ -120,13 +121,15 @@ public sealed record DecisionPlanResponse(
     IReadOnlyList<DecisionActionDto> Actions,
     IReadOnlyList<DecisionActionDto> NextSteps,
     IReadOnlyList<DismissalReasonDto> DismissalReasons,
-    RuleDescription? RuleDescription)
+    RuleDescription? RuleDescription,
+    UnfinishedDecision? Unfinished = null)
 {
     /// <param name="inquiryRecipient">Task 160 (D-179): the To pre-fill of <c>send-budget-inquiry</c> only; null leaves To empty.</param>
     /// <param name="parameterFacts">Task 167 (D-193): the resolved option lists and starting values of the parameters that name a source; null adds none.</param>
+    /// <param name="unfinished">Task 191 fix round 1: the caller's unfinished review of this Signal, which the wizard resumes; null when none.</param>
     internal static DecisionPlanResponse From(
         Guid signalId, DecisionLane lane, Guid policyVersionId, ResolvedDecisionPlan plan, RuleDescription? ruleDescription = null,
-        OutsideFirmContact? inquiryRecipient = null, DecisionParameterFacts? parameterFacts = null) =>
+        OutsideFirmContact? inquiryRecipient = null, DecisionParameterFacts? parameterFacts = null, UnfinishedDecision? unfinished = null) =>
         new(signalId,
             lane.ToString(),
             policyVersionId,
@@ -137,7 +140,8 @@ public sealed record DecisionPlanResponse(
                 parameterFacts)).ToList(),
             plan.NextSteps.Select(a => DecisionActionDto.From(a, isRecommended: false, parameterFacts: parameterFacts)).ToList(),
             plan.DismissalReasons.Select(r => new DismissalReasonDto(r.Code, r.Label, r.CountsTowardSuppression, r.RequiresDetail)).ToList(),
-            ruleDescription);
+            ruleDescription,
+            unfinished);
 }
 
 public sealed record DecisionActionDto(

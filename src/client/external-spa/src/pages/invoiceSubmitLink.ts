@@ -2,10 +2,10 @@
  * invoiceSubmitLink.ts — the address of the invoice-submission page and the optional record preselect it reads
  * (spaarke-SPA-external-access-platform-r4 task 007, FR-10; agreed with ebilling-r1).
  *
- * Router-free on purpose: it imports nothing from react-router or the wizard, so the record view's "Submit invoice"
- * action and the Invoices widget can build the address without importing the page (and with it the router and the
- * shared wizard). `InvoiceSubmitPage` reads the address with the same functions, so the token and its reader stay
- * together.
+ * Router-free on purpose: it imports nothing from react-router or the wizard, so the Invoices widget can name the
+ * route without importing the page (and with it the router and the shared wizard). `InvoiceSubmitPage` reads the
+ * address with the same functions. Since task 010 no in-app link builds an `invoiceRecord` address (the record view's
+ * "Submit invoice" opens a modal); the page still honours one, so a saved or pasted address keeps working.
  *
  *   /invoices/submit?invoiceRecord={kind}:{guid}
  *
@@ -38,9 +38,4 @@ export function parseInvoiceRecordParam(value: string | null): InvoiceRecordRef 
   const recordId = value.slice(at + 1);
   if (!(INVOICE_RECORD_KINDS as readonly string[]).includes(kind) || !GUID_PATTERN.test(recordId)) return null;
   return { kind: kind as InvoiceCoreRecordKind, recordId };
-}
-
-/** The address that opens the page with a record preselected (the record view's "Submit invoice"). */
-export function invoiceSubmitPathFor(kind: InvoiceCoreRecordKind, recordId: string): string {
-  return `${INVOICE_SUBMIT_PATH}?${INVOICE_RECORD_PARAM}=${encodeURIComponent(`${kind}:${recordId}`)}`;
 }

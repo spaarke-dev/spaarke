@@ -201,3 +201,63 @@ answered AND `canCreate` is not false. The status toggle is excluded (no server 
 **Why deferred.** Outside task 006's files.
 
 **Fix shape.** Use the label map exported from `record/recordAccess.ts` (or move it next to `mapAccessLevelString` in `hooks/useAccessLevel.ts`) in all five places; no behaviour change.
+
+## D-12 — Record Documents section columns overlap at the modal width (#2769)
+
+**Where.** `src/client/external-spa/src/components/record/sections/DocumentsSection.tsx` (the document list inside `RecordTemplateModal.tsx`).
+
+**What.** Found in the owner's E2E on dev (2026-11-12, task 018): the file name runs into the Type badge and the Date Added column.
+
+**Effect.** Document name, type and date are hard to read in every record with documents.
+
+**Why deferred.** Owner decision 2026-11-12: finish the E2E first, then one rework pass.
+
+**Fix shape.** In the post-E2E rework task: column widths / truncation at the modal width, with a layout test.
+
+## D-13 — Retire the external to-do BFF routes (#2800)
+
+**Where.** The external to-do routes (list / create / PATCH on projects, matters and work assignments) in `src/server/api/Sprk.Bff.Api/Api/ExternalAccess/**`.
+
+**What.** R4 task 009 removes To Do from the SPA (owner directive 2026-11-12). The SPA was the only client caller, so after that the routes have no caller.
+
+**Effect.** None for users: the routes stay mapped and authorized but unused.
+
+**Why deferred.**
+- uac-r2 (round 10 item 1) asked that the routes be deleted in the same change.
+- **Owner decision 2026-11-13: keep them for now** as a rollback option while Task-typed events (tasks 008/011) go live.
+
+**Fix shape.**
+- After the R4 deploy and the owner retest, re-check that the routes have no callers.
+- Delete the routes.
+- Update the route ledger and the external route counts.
+- Remove the routes' contract tests, with the ADR-038 A3 evidence.
+
+## D-14 — Task event-type GUID still duplicated in three BFF files (#2809)
+
+**Where.** `TaskActionCore.cs:68`, `DailyBriefingCollector.cs:128`, `PortfolioService.cs:99`. Each has its own literal Task type id. Task 008 introduced the shared `EventTypeRef.Task` (`Spaarke.Dataverse/Models.cs`).
+
+**Effect.** Nothing changes today. If the id differs per environment or the constant changes, the AI task action, the daily briefing and the portfolio silently create tasks of the wrong type, or miss them.
+
+**Why deferred.** These files are outside R4 and belong to other projects.
+
+**Fix shape.** Replace the three literals with `EventTypeRef.Task`. Optionally add an ArchTest that bans the literal elsewhere.
+
+## D-15 — Project header icons and dashboard Tasks button do nothing
+
+**Where.** The external SPA project page header (Mail, Tasks and Notifications icons) and the dashboard's "Tasks" button. The code already worked this way before task 009.
+
+**Effect.** Clicking one of them does nothing, which reads as a dead action. That breaks the hide-don't-disable rule.
+
+**Why deferred.** Found by task 009; outside its scope.
+
+**Fix shape.** Wire each control to its destination (Tasks after task 011) or hide it. Add a test.
+
+## D-16 — Shared DataGrid: failed command handler and failed bulk delete are silent (#2823)
+
+**Where.** `Spaarke.UI.Components/src/components/DataGrid/commandBar/CommandBar.tsx`: the `invokeItem` handler catch and the `performBulkDelete` catch. Both are older than R4 and recorded in the client-lint suppression baseline. Task 010 part 3 touched the file, so the CI rule reported them.
+
+**Effect.** If a delete is refused, the confirm dialog closes, the rows stay, and the user sees no message. Other failed commands are also silent.
+
+**Why deferred.** It needs a new user-visible error surface in the shared grid. That is outside R4 scope.
+
+**Fix shape.** Add an error surface to the grid (an inline MessageBar or an `onCommandError` prop) and route both catches to it. Add tests, then prune the suppressions.

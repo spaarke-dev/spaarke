@@ -115,9 +115,9 @@ public class FieldMappingSeederSyncModeClassTests
         return options.AccessConferringRoles;
     }
 
-    private sealed record SeededRule(string Profile, string Table, string TargetField, int SyncMode);
+    internal sealed record SeededRule(string Profile, string Table, string TargetField, int SyncMode);
 
-    private static List<SeededRule> SeededRules()
+    internal static List<SeededRule> SeededRules()
     {
         var seeder = LoadL2Core().GetType(SeederType, throwOnError: true)!;
         var profiles = (IEnumerable)seeder.GetField("SeedProfiles", BindingFlags.NonPublic | BindingFlags.Public | BindingFlags.Static)!

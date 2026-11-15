@@ -16,8 +16,12 @@
  *   - Practice Area (optional, lookup — auto-filled from parent by the wizard)
  *   - Priority (option set: Low / Normal / High / Critical; default Normal)
  *   - Response Due Date (optional, date picker)
- *   - Assigned Attorney / Paralegal (contact lookups)
+ *   - Assigned Attorney / Paralegal (contact lookups, active contacts only)
  *   - Assigned Outside Counsel (organization lookup)
+ *
+ * Every lookup uses the Dataverse side pane (`DataverseLookupField`) when the
+ * host supplies a `navigationService` (owner D-219, 2026-11-12); the
+ * `onSearch*` callbacks are the inline fallback when it is absent.
  *
  * Constraints: Fluent v9 only, semantic tokens (ADR-021), no domain imports
  * (ADR-012).
@@ -25,8 +29,10 @@
 import * as React from 'react';
 import { Text, Input, Textarea, Select, Field, Button, Spinner, makeStyles, tokens } from '@fluentui/react-components';
 import { PersonRegular } from '@fluentui/react-icons';
-import { LookupField } from '../../LookupField/LookupField';
+import { DataverseLookupField } from '../../LookupField/DataverseLookupField';
+import { ACTIVE_CONTACT_LOOKUP_FILTERS } from '../../LookupField/lookupFilters';
 import type { ILookupItem } from '../../../types/LookupTypes';
+import type { INavigationService } from '../../../types/serviceInterfaces';
 
 // ---------------------------------------------------------------------------
 // Priority option set values (sprk_priority on sprk_workassignment)
@@ -97,6 +103,13 @@ export interface IAssignWorkFollowOnStepProps {
   outsideCounselValue: ILookupItem | null;
   onOutsideCounselChange: (item: ILookupItem | null) => void;
   onSearchOutsideCounsel: (query: string) => Promise<ILookupItem[]>;
+
+  /**
+   * Host navigation service. When supplied, every lookup on this step opens the
+   * Dataverse side pane; when omitted the step renders the inline search fields
+   * (the `onSearch*` callbacks) exactly as before.
+   */
+  navigationService?: INavigationService;
 }
 
 // ---------------------------------------------------------------------------
@@ -185,6 +198,7 @@ export const AssignWorkFollowOnStep: React.FC<IAssignWorkFollowOnStepProps> = ({
   outsideCounselValue,
   onOutsideCounselChange,
   onSearchOutsideCounsel,
+  navigationService,
 }) => {
   const styles = useStyles();
   const [isAssigningToMe, setIsAssigningToMe] = React.useState(false);
@@ -246,19 +260,23 @@ export const AssignWorkFollowOnStep: React.FC<IAssignWorkFollowOnStepProps> = ({
           Classification
         </Text>
         <div className={styles.sectionFields}>
-          <LookupField
+          <DataverseLookupField
             label="Matter Type"
+            entityType="sprk_mattertype_ref"
             placeholder="Search matter types..."
             value={matterTypeValue}
             onChange={onMatterTypeChange}
+            navigationService={navigationService}
             onSearch={onSearchMatterTypes}
             minSearchLength={1}
           />
-          <LookupField
+          <DataverseLookupField
             label="Practice Area"
+            entityType="sprk_practicearea_ref"
             placeholder="Search practice areas..."
             value={practiceAreaValue}
             onChange={onPracticeAreaChange}
+            navigationService={navigationService}
             onSearch={onSearchPracticeAreas}
             minSearchLength={1}
           />
@@ -304,12 +322,15 @@ export const AssignWorkFollowOnStep: React.FC<IAssignWorkFollowOnStepProps> = ({
         <div className={styles.sectionFields}>
           <div className={styles.assigneeRow}>
             <div className={styles.assigneeLookup}>
-              <LookupField
+              <DataverseLookupField
                 label="Assigned Attorney"
+                entityType="contact"
                 placeholder="Search contacts..."
                 value={attorneyValue}
                 onChange={onAttorneyChange}
+                navigationService={navigationService}
                 onSearch={onSearchAttorneys}
+                filters={ACTIVE_CONTACT_LOOKUP_FILTERS}
                 minSearchLength={2}
               />
             </div>
@@ -325,19 +346,24 @@ export const AssignWorkFollowOnStep: React.FC<IAssignWorkFollowOnStepProps> = ({
               </Button>
             )}
           </div>
-          <LookupField
+          <DataverseLookupField
             label="Assigned Paralegal"
+            entityType="contact"
             placeholder="Search contacts..."
             value={paralegalValue}
             onChange={onParalegalChange}
+            navigationService={navigationService}
             onSearch={onSearchParalegals}
+            filters={ACTIVE_CONTACT_LOOKUP_FILTERS}
             minSearchLength={2}
           />
-          <LookupField
+          <DataverseLookupField
             label="Assigned Outside Counsel"
+            entityType="sprk_organization"
             placeholder="Search organizations..."
             value={outsideCounselValue}
             onChange={onOutsideCounselChange}
+            navigationService={navigationService}
             onSearch={onSearchOutsideCounsel}
             minSearchLength={2}
           />

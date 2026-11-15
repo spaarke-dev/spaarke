@@ -133,6 +133,7 @@ import {
   createXrmDataService,
   RichFilePreviewDialog,
   SendEmailDialog,
+  createXrmEmailComposeHandlers,
   // FR-C05 (r8 task 052) — the stale-target "apply anyway?" question. ADR-050 canonical shell +
   // ADR-021 semantic tokens; no bespoke chrome (assessment §4.4 O-6).
   ConfirmModal,
@@ -3363,6 +3364,14 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
     }
   }, [bffBaseUrl, state.sessionId, memoActionInFlight, memoNegativeFromError]);
 
+  // Task 188 (D-219 Q3): the memo email shows the SAME composer features as the Console's Send Email dialog —
+  // template picker (`onListEmailTemplates` + `onRenderEmailTemplate`), AI draft (`onDraftWithAi`) and local-file
+  // attachments (`onUploadLocalAttachment`). ONE factory instance, never a second in this component; a host that
+  // omits these handlers silently hides the feature (pattern: wizard-side-pane-lookup-and-email-compose).
+  const memoEmailHandlers = React.useMemo(
+    () => createXrmEmailComposeHandlers({ authenticatedFetch, bffBaseUrl }),
+    [bffBaseUrl]
+  );
   /**
    * "Email memo" — reads the persisted memo (JSON) and opens the canonical `<EmailComposer />`
    * (ADR-045) prefilled with a deterministic HTML body + the "Review Summary Memo — {analysis name}"
@@ -5396,6 +5405,10 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
         initialBodyFormat="HTML"
         authenticatedFetch={authenticatedFetch}
         bffBaseUrl={bffBaseUrl}
+        onListEmailTemplates={memoEmailHandlers.onListEmailTemplates}
+        onRenderEmailTemplate={memoEmailHandlers.onRenderEmailTemplate}
+        onDraftWithAi={memoEmailHandlers.onDraftWithAi}
+        onUploadLocalAttachment={memoEmailHandlers.onUploadLocalAttachment}
         onSent={() => setMemoEmailOpen(false)}
       />
 

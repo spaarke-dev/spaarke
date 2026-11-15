@@ -232,6 +232,29 @@ public sealed partial class DecisionCommitServiceTests
             Verify("plan.200.create-budget", observed, 200);
         }
 
+        /// <summary>Ontology task 191 fix round 1, merged into this branch: the plan route (now the decision capability's plan read, which
+        /// the MCP plan tool also calls) returns the caller's unfinished review, so the wizard resumes it instead of starting a new one.</summary>
+        [Fact]
+        public async Task Plan_200_CarriesTheCallersUnfinishedReview_AfterAnInquiryThatMayHaveBeenSent()
+        {
+            var rig = new Rig();
+            rig.Executors["send-budget-inquiry"].Result = DecisionActionOutcome.Failed("send-budget-inquiry", DecisionActionReasons.WriteFailed,
+                "The service request was created; the email was not sent.", written: [new DecisionRecordRef("sprk_servicerequest", ServiceRequestId)])
+                with
+            { SendFailure = DecisionSendFailure.Unknown };
+            var review = PathBReview(reviewId: Rv(90));
+            (await PostDecisionAsync(rig, review)).Status.Should().Be(500);
+
+            var observed = await GetAsync(rig, PlanRoute);
+
+            observed.Status.Should().Be(200);
+            var unfinished = JsonDocument.Parse(observed.Body).RootElement.GetProperty("unfinished");
+            unfinished.GetProperty("reviewId").GetGuid().Should().Be(review.ReviewId);
+            unfinished.GetProperty("signalId").GetGuid().Should().Be(Primary);
+            unfinished.GetProperty("failure").GetProperty("sendChoiceRequired").GetBoolean().Should().BeTrue();
+            unfinished.GetProperty("failure").GetProperty("replayed").GetBoolean().Should().BeTrue();
+        }
+
         [Fact]
         public async Task Plan_200_DoLane()
         {
@@ -529,7 +552,7 @@ public sealed partial class DecisionCommitServiceTests
         }
 
         [Fact]
-        public async Task Decision_500_NotResumable_ARetryAfterAFailedWrite()
+        public async Task Decision_409_NotResumable_ARetryAfterAFailedWrite_IsTheStoredFailureReturnedAgain()
         {
             var rig = new Rig();
             rig.Executors["revise-budget"].Result = DecisionActionOutcome.Failed("revise-budget", DecisionActionReasons.WriteFailed,
@@ -537,7 +560,8 @@ public sealed partial class DecisionCommitServiceTests
             var review = PathBReview(inquiry: false, reviewId: Rv(26));
             (await PostDecisionAsync(rig, review)).Status.Should().Be(500);
             rig.Executors["revise-budget"].Result = null;
-            Verify("decision.500.not-resumable", await PostDecisionAsync(rig, review with { Retry = true }), 500, DecisionCommitReasons.NotResumable);
+            // Ontology task 191 (merged from master): a stored failure returned again is 409 with the first failure's body, never a 500.
+            Verify("decision.409.not-resumable", await PostDecisionAsync(rig, review with { Retry = true }), 409, DecisionCommitReasons.NotResumable);
         }
 
         [Fact]

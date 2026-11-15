@@ -161,18 +161,34 @@ public sealed class CoreAncestorRestamper
         _coreAncestors.RefreshInheritedAccessPermissionAsync(entityLogicalName, recordId, ct);
 
     /// <summary>
-    /// field-mapping-server-write-path-r1 task 017 (owner decision 2a, FR-06 step 10): the inherited Access Permission (I-16) a
-    /// NEW row of <paramref name="entityLogicalName"/> filed under the lookups in <paramref name="fields"/> takes, for its create
-    /// payload — <see cref="CoreAncestorResolver.ResolveInheritedAccessPermissionAsync"/> for a row that does not exist yet.
-    /// <see langword="null"/> when it takes none (a document never does here, #2169). Never throws (cancellation aside).
+    /// field-mapping-server-write-path-r1 task 017 (owner decision 2a, FR-06 step 10): what the parents named in
+    /// <paramref name="fields"/> give a NEW row of <paramref name="entityLogicalName"/>, for its create payload. Task 022b: the
+    /// parents' answer with its three states (no parent; every parent read, with the value; cannot be told —
+    /// <see cref="CoreAncestorResolver.ResolveNewRowInheritedAccessPermissionAsync"/>), where it was the value alone. A
+    /// document gets no value here (#2169's fence; <see cref="DecideNewDocumentAccessPermissionAsync"/>). Never throws
+    /// (cancellation aside).
     /// </summary>
     /// <remarks>Component justification (CLAUDE.md §11): Existing — <see cref="RefreshInheritedAccessPermissionAsync"/> is the
     /// same pass-through for a row that exists; Extension — this is that pass-through for the resolver's payload overload, the
     /// ONE implementation; Cost of doing nothing — the record-creation service holds only this restamper, so I-16 could not be
     /// set before the create.</remarks>
-    internal Task<int?> ResolveInheritedAccessPermissionAsync(
+    internal Task<InheritedAccessPermission.Answer> ResolveInheritedAccessPermissionAsync(
         string entityLogicalName, IReadOnlyDictionary<string, object> fields, CancellationToken ct = default) =>
-        _coreAncestors.ResolveInheritedAccessPermissionAsync(entityLogicalName, fields, Guid.Empty, ct);
+        _coreAncestors.ResolveNewRowInheritedAccessPermissionAsync(entityLogicalName, fields, ct);
+
+    /// <summary>
+    /// field-mapping-server-write-path-r1 task 022b: a NEW document's Access Permission and its record, decided for the create
+    /// payload by the document decision (<see cref="CoreAncestorResolver.DecideNewDocumentAccessPermissionAsync"/>, which uses
+    /// <see cref="InheritedAccessPermission.DecideDocument"/>). Never throws (cancellation aside).
+    /// </summary>
+    /// <remarks>Component justification (CLAUDE.md §11): Existing — <see cref="ResolveInheritedAccessPermissionAsync"/> is the
+    /// same pass-through for the three other tables; Extension — a document's value is decided with its own narrowing, which
+    /// that path fences off, so the resolver's document decision needs its own pass-through; Cost of doing nothing — the
+    /// record-creation service holds only this restamper, so a document filed under a Restricted parent could not be
+    /// Restricted in its create.</remarks>
+    internal Task<CoreAncestorResolver.NewDocumentAccessPermission> DecideNewDocumentAccessPermissionAsync(
+        string entityLogicalName, IReadOnlyDictionary<string, object> fields, int? own, CancellationToken ct = default) =>
+        _coreAncestors.DecideNewDocumentAccessPermissionAsync(entityLogicalName, fields, own, ct);
 
     /// <summary>
     /// Whether a write of <paramref name="writtenColumns"/> to <paramref name="entityLogicalName"/> can move a stamp — it

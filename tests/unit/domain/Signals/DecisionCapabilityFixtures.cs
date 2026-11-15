@@ -61,10 +61,34 @@ internal static class DecisionCapabilityFixtures
             suppression ?? Unused<SignalSuppressionService>(),
             caller ?? new Mock<IDataverseUserClient>(MockBehavior.Strict).Object,
             suppressionLogger ?? NullLogger<SignalSuppressionService>.Instance,
-            commits ?? Unused<DecisionCommitService>(),
+            commits ?? NoUnfinishedReviews(),
             new WorkItemPrivilege(NullLogger<WorkItemPrivilege>.Instance),
             planReadStamp,
             parameterSources);
+
+    /// <summary>
+    /// The commit service as the plan read meets it (ontology task 191, merged into this branch): the plan read asks it for the caller's
+    /// unfinished review (<see cref="DecisionCommitService.ReadUnfinishedAsync"/>), and here the tenant cache holds none, so the plan carries
+    /// <c>unfinished: null</c>, as master's plan route answers when nothing is unfinished. Every other collaborator is <see cref="Unused{T}"/>:
+    /// a commit through this instance fails the test loudly.
+    /// </summary>
+    public static DecisionCommitService NoUnfinishedReviews() =>
+        new(
+            Unused<SignalCoreRecordAccess>(),
+            Unused<DecisionPlanService>(),
+            Unused<DecisionActionExecutors>(),
+            Unused<DecisionRecordWriter>(),
+            Unused<OntologyWriterDataverseClient>(),
+            new Mock<IGenericEntityService>(MockBehavior.Strict).Object,
+            Unused<Sprk.Bff.Api.Infrastructure.ExternalAccess.CallerRecordAccessProbe>(),
+            new Mock<IIdentityNormalizationService>(MockBehavior.Strict).Object,
+            Unused<Sprk.Bff.Api.Services.ExternalAccess.ContactUserRepresentation>(),
+            new Mock<Sprk.Bff.Api.Infrastructure.Cache.ITenantCache>().Object, // loose: every read finds nothing
+            Unused<DecisionCommitFollowUps>(),
+            new Mock<Spaarke.Scheduling.IScheduledJobLease>(MockBehavior.Strict).Object,
+            Unused<DecisionPlanReadStamp>(),
+            TimeProvider.System,
+            NullLogger<DecisionCommitService>.Instance);
 
     /// <summary>
     /// A Decide-lane Signal on a matter, at the module boundaries: the caller's Dataverse client (strict, so an unscripted read fails)

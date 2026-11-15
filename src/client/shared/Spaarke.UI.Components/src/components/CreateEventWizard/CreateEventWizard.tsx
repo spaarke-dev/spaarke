@@ -55,6 +55,8 @@ import {
   searchPracticeAreas,
 } from '../CreateWorkAssignmentWizard/workAssignmentService';
 import { completeOrClose } from '../../services/surfaceHandoff/readHandoff';
+import { EMAIL_NOT_SENT_NO_SERVER, sendComposedEmail } from '../EmailComposer/composeOnlySend';
+import type { IEmailComposeHandlers } from '../EmailComposer/composeOnlySend';
 
 // ---------------------------------------------------------------------------
 // Pure helpers (exported for unit testing — see __tests__/CreateEventWizard.associateToStep.test.ts)
@@ -165,6 +167,11 @@ export interface ICreateEventWizardProps {
   dataService: IDataService;
   /** Optional INavigationService for opening records after creation. */
   navigationService?: INavigationService;
+  /**
+   * Host-built email composer handlers for the Send Email follow-on (task 182, D-219): recipient side pane, record
+   * lookup, file upload, template picker and AI draft (`createXrmEmailComposeHandlers` in a Dataverse host).
+   */
+  emailComposeHandlers?: IEmailComposeHandlers;
   /** When true, hides the title bar (Dataverse modal provides chrome). */
   embedded?: boolean;
   /**
@@ -284,6 +291,7 @@ const CreateEventWizard: React.FC<ICreateEventWizardProps> = ({
   onClose,
   dataService,
   navigationService,
+  emailComposeHandlers,
   embedded,
   uiScale,
   authenticatedFetch: authFetch,
@@ -377,6 +385,7 @@ const CreateEventWizard: React.FC<ICreateEventWizardProps> = ({
         renderContent: _wizardFiles => (
           <CreateEventStep
             dataService={dataService}
+            navigationService={navigationService}
             onValidChange={setFormValid}
             onFormValues={setFormValues}
             initialFormValues={formValues}
@@ -389,6 +398,12 @@ const CreateEventWizard: React.FC<ICreateEventWizardProps> = ({
       searchUsers: handleSearchUsers,
       searchMatterTypes: handleSearchMatterTypes,
       searchPracticeAreas: handleSearchPracticeAreas,
+
+      // Assign Work follow-on: lookups open the Dataverse side pane (owner D-219).
+      navigationService,
+
+      // Send Email follow-on: the host's composer handlers (task 182, D-219).
+      emailComposeHandlers,
 
       resolveSpeContainerId,
 
@@ -483,18 +498,20 @@ const CreateEventWizard: React.FC<ICreateEventWizardProps> = ({
         // Send email (if selected)
         if (
           context.selectedActions.includes('send-email') &&
-          context.followOn.emailTo.trim() &&
+          context.followOn.email.to.length > 0 &&
           authFetch &&
           bffBaseUrl
         ) {
-          const emailService = new EntityCreationService(webApiAdapter, authFetch, bffBaseUrl);
-          const emailResult = await emailService.sendEmail({
-            to: context.followOn.emailTo,
-            subject: context.followOn.emailSubject,
-            body: context.followOn.emailBody,
+          // Task 182 (D-219): the composer's request path (From, To, Cc, Bcc, attachments), filed under the event.
+          const emailResult = await sendComposedEmail(context.followOn.email, {
             associations: [{ entityType: 'sprk_event', entityId: eventId, entityName: eventName }],
+            authenticatedFetch: authFetch,
+            bffBaseUrl,
+            onResolveShareLink: emailComposeHandlers?.onResolveShareLink,
           });
           if (!emailResult.success && emailResult.warning) warnings.push(emailResult.warning);
+        } else if (context.selectedActions.includes('send-email') && context.followOn.email.to.length > 0) {
+          warnings.push(EMAIL_NOT_SENT_NO_SERVER);
         }
 
         const hasWarnings = warnings.length > 0;
@@ -552,6 +569,7 @@ const CreateEventWizard: React.FC<ICreateEventWizardProps> = ({
       authFetch,
       bffBaseUrl,
       navigationService,
+      emailComposeHandlers,
       resolveSpeContainerId,
       webApiAdapter,
       initialAssociation,

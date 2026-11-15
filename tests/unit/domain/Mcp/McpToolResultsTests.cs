@@ -40,6 +40,7 @@ public sealed class McpToolResultsTests
             RecordMayExist: false,
             SentButNotRecorded: false,
             Resumable: true,
+            SendChoiceRequired: true,
             Replayed: false);
 
         var result = McpToolResults.FromError(new DecisionToolError("commit_failed", "Retry with the same review id.", 500, partial), "corr-9");
@@ -50,6 +51,7 @@ public sealed class McpToolResultsTests
         result.StructuredContent!.Value.GetProperty("correlationId").GetString().Should().Be("corr-9");
         p.GetProperty("failedStep").GetInt32().Should().Be(3);
         p.GetProperty("resumable").GetBoolean().Should().BeTrue();
+        p.GetProperty("sendChoiceRequired").GetBoolean().Should().BeTrue("ontology task 191: the widget offers the send choice from it");
         p.GetProperty("landed")[0].GetProperty("entity").GetString().Should().Be("sprk_budgetrevision");
         p.GetProperty("landed")[0].GetProperty("id").GetGuid().Should().Be(recordId);
         result.Content.Should().ContainSingle().Which.Should().BeOfType<TextContentBlock>()

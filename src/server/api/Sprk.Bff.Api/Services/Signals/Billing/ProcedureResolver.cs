@@ -766,23 +766,32 @@ public sealed class ProcedureResolution
     /// and the episode's first version in one transaction). The base rule must not quietly run in its place. A date before the episode's
     /// first effective-from is not that: the episode has versions, and the base rule runs.</para>
     /// </summary>
-    private ResolvedPolicyVersion? RecordRuleVersionOn(PolicyRow recordRule, ProcedureOverrideRow exclude, DateOnly date)
+    private ResolvedPolicyVersion? RecordRuleVersionOn(PolicyRow recordRule, ProcedureOverrideRow exclude, DateOnly date) =>
+        Latest(CurrentEpisodeVersions(recordRule.Id, _versionsByPolicy[recordRule.Id].ToList(), exclude), date);
+
+    /// <summary>
+    /// The versions of a record rule that belong to its CURRENT episode (see <see cref="RecordRuleVersionOn"/>; ebilling-r1 084e, the one episode
+    /// filter the resolver and the record's rules-in-force read share): with no <c>createdon</c> on the change's Exclude row, every version; else
+    /// the versions created on or after it ("on or after": a version created at the row's own instant counts), a version with no <c>createdon</c>
+    /// never. A known boundary that no version of a rule WITH versions reaches is the fault state described there
+    /// (<see cref="ProcedureResolutionFaultException"/>). No versions at all is an empty list, not a fault.
+    /// </summary>
+    internal static List<ResolvedPolicyVersion> CurrentEpisodeVersions(Guid recordRuleId, IReadOnlyList<ResolvedPolicyVersion> all, ProcedureOverrideRow exclude)
     {
-        var all = _versionsByPolicy[recordRule.Id].ToList();
         if (exclude.CreatedOn is not { } episodeStart)
         {
-            return Latest(all, date);
+            return all.ToList();
         }
 
         var inEpisode = all.Where(v => v.CreatedOn is { } created && created >= episodeStart).ToList();
         if (all.Count > 0 && inEpisode.Count == 0)
         {
             throw new ProcedureResolutionFaultException(
-                $"Record rule {recordRule.Id} has {all.Count} Published version(s) but none was created on or after its change's Exclude row {exclude.RowId}; "
+                $"Record rule {recordRuleId} has {all.Count} Published version(s) but none was created on or after its change's Exclude row {exclude.RowId}; "
                 + "the current change has no version, so it cannot be told from an older change that was removed.");
         }
 
-        return Latest(inEpisode, date);
+        return inEpisode;
     }
 
     private List<RuleOverride> RuleOverridesOf(Guid basePolicyId)
@@ -869,7 +878,7 @@ public sealed class ProcedureResolution
 /// </remarks>
 public static class ProcedureResolver
 {
-    private const int StateActive = 0;
+    private const int StateActive = ProcedureEntity.StateActive;
     private const int PageSize = 5000;
     private const string UnnamedProcedure = "(unnamed Procedure)";
     private const string PolicyCodeColumn = "sprk_policycode";
@@ -1025,11 +1034,13 @@ public static class ProcedureResolver
             {
                 ColumnSet = new ColumnSet(
                     ProcedureEntity.NameColumn, ProcedureEntity.AreaColumn, ProcedureEntity.AppliesToColumn, ProcedureEntity.FirmColumn,
-                    ProcedureEntity.StatusColumn),
+                    ProcedureEntity.StatusColumn, "statecode"),
                 NoLock = true,
             };
             query.Criteria.AddCondition(ProcedureEntity.AreaColumn, ConditionOperator.Equal, RuleDomains.PolicyDomainBilling);
             query.Criteria.AddCondition(ProcedureEntity.StatusColumn, ConditionOperator.Equal, ProcedureEntity.StatusActive);
+            // ISS-021: a Procedure deactivated in Dataverse (statecode Inactive) is not applicable, whatever its Status says.
+            query.Criteria.AddCondition("statecode", ConditionOperator.Equal, StateActive);
             var sources = new FilterExpression(LogicalOperator.Or);
             if (i == 0)
             {
@@ -1048,9 +1059,11 @@ public static class ProcedureResolver
             query.Criteria.AddFilter(sources);
             foreach (var row in await AllAsync(entities, query, ct).ConfigureAwait(false))
             {
-                // Re-checked: Billing area, Active (an assignment to a Retired Procedure is ignored: 089b review 2 K1).
+                // Re-checked: Billing area, Active (an assignment to a Retired Procedure is ignored: 089b review 2 K1), and not deactivated
+                // (ISS-021: an assignment to a deactivated Procedure is ignored too).
                 if (row.GetAttributeValue<OptionSetValue>(ProcedureEntity.AreaColumn)?.Value != RuleDomains.PolicyDomainBilling
-                    || row.GetAttributeValue<OptionSetValue>(ProcedureEntity.StatusColumn)?.Value != ProcedureEntity.StatusActive)
+                    || row.GetAttributeValue<OptionSetValue>(ProcedureEntity.StatusColumn)?.Value != ProcedureEntity.StatusActive
+                    || row.GetAttributeValue<OptionSetValue>("statecode")?.Value is not (null or StateActive))
                 {
                     continue;
                 }
@@ -1080,6 +1093,8 @@ public static class ProcedureResolver
         var versions = new List<ProcedureVersionRow>();
         foreach (var chunk in procedureIds.Chunk(BillingFactLoader.MaxInValues))
         {
+            // statecode deliberately not checked (ISS-021 known limit): a version's lifecycle is Status, owned by ProcedureService (Retire is
+            // the supported stop); filtering here would make Follow latest / ByDate fall back silently to an older version's rules.
             var query = new QueryExpression(ProcedureEntity.VersionEntity)
             {
                 ColumnSet = new ColumnSet(
@@ -1223,6 +1238,8 @@ public static class ProcedureResolver
         var versions = new List<ResolvedPolicyVersion>();
         foreach (var chunk in byId.Keys.Order().Chunk(BillingFactLoader.MaxInValues))
         {
+            // statecode deliberately not checked (ISS-021 known limit): only Published versions of active policies are read, and the BFF
+            // deactivates only Drafts (EB-D-216).
             var query = new QueryExpression(BillingFactLoader.VersionEntity)
             {
                 ColumnSet = new ColumnSet(

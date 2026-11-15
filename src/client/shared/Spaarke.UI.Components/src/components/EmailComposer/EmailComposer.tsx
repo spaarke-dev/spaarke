@@ -1277,22 +1277,26 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
           mailbox. Wired to the engine's existing `sendMode` state. Hidden in read-only (view)
           mode — there is nothing to send. The primary Send control lives HERE, left of "From:"
           (owner UAT 2026-08-03 item 1 — Outlook-style Send in the address section, not a bottom bar). */}
-      {/* Task 160 (D-179): compose-only hides the whole row: Send, "From:" and the sender (switcher or static text). */}
-      {!state.readOnly && !props.composeOnly && (
+      {/* Task 160 (D-179): compose-only hides the whole row: Send, "From:" and the sender (switcher or static text).
+          Task 182 (D-219 Q2): a compose-only host that sets `composeOnlyShowsFrom` gets the row back WITHOUT Send — the
+          host sends later, from the mailbox chosen here. */}
+      {!state.readOnly && (!props.composeOnly || props.composeOnlyShowsFrom === true) && (
         <div className={styles.fromRow} role="group" aria-label="From">
-          <ComposerSendButton
-            isSending={state.isSending}
-            canSend={canSend}
-            sendMode={state.sendMode}
-            showSendModeChoice={showSendModeRadio && !state.readOnly}
-            onSendModeChange={value => dispatch({ type: 'SET_SEND_MODE', value })}
-            onSend={() => {
-              send().catch(() => {
-                /* send() already told the user (failure dialog / host via onError) — swallow so the
-                   click doesn't leave an unhandled rejection. */
-              });
-            }}
-          />
+          {!props.composeOnly && (
+            <ComposerSendButton
+              isSending={state.isSending}
+              canSend={canSend}
+              sendMode={state.sendMode}
+              showSendModeChoice={showSendModeRadio && !state.readOnly}
+              onSendModeChange={value => dispatch({ type: 'SET_SEND_MODE', value })}
+              onSend={() => {
+                send().catch(() => {
+                  /* send() already told the user (failure dialog / host via onError) — swallow so the
+                     click doesn't leave an unhandled rejection. */
+                });
+              }}
+            />
+          )}
           {/* "From:" as plain semibold text, not a boxed label (owner UAT 2026-07-30 R2 item 9);
               the mailbox value beside it stays a subtle switcher (user ↔ Spaarke shared mailbox). */}
           <span className={styles.fromLabel} aria-hidden="true">

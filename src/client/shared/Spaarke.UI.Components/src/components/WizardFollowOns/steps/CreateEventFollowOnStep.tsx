@@ -18,7 +18,7 @@ import * as React from 'react';
 import { Text, makeStyles, tokens } from '@fluentui/react-components';
 import { CreateEventStep } from '../../CreateEventWizard/CreateEventStep';
 import type { ICreateEventFormState } from '../../CreateEventWizard/formTypes';
-import type { IDataService } from '../../../types/serviceInterfaces';
+import type { IDataService, INavigationService } from '../../../types/serviceInterfaces';
 
 // ---------------------------------------------------------------------------
 // Props
@@ -30,6 +30,11 @@ export interface ICreateEventFollowOnStepProps {
    * EventService for `sprk_eventtype_ref` lookups.
    */
   dataService: IDataService;
+  /**
+   * Host navigation service. When supplied, Event Type and Assigned To open the Dataverse side pane
+   * (owner D-219), like the parent wizard's own Enter Info step. Omitted: the inline search fields.
+   */
+  navigationService?: INavigationService;
   /** Current event form field values (controlled by the parent wizard). */
   formValues: ICreateEventFormState;
   /** Called whenever any field in the event form changes. */
@@ -67,6 +72,7 @@ const useStyles = makeStyles({
 
 export const CreateEventFollowOnStep: React.FC<ICreateEventFollowOnStepProps> = ({
   dataService,
+  navigationService,
   formValues,
   onFormValues,
   onValidChange,
@@ -86,6 +92,7 @@ export const CreateEventFollowOnStep: React.FC<ICreateEventFollowOnStepProps> = 
 
       <CreateEventStep
         dataService={dataService}
+        navigationService={navigationService}
         onValidChange={onValidChange}
         onFormValues={onFormValues}
         initialFormValues={formValues}

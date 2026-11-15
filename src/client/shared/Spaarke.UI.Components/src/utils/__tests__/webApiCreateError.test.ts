@@ -226,15 +226,34 @@ describe('describeWebApiCreateError', () => {
     );
   });
 
-  it('a value copied from a secure record that files the record gets its own sentence, which never suggests retrying', () => {
+  // field-mapping-server-write-path-r1 task 022b (review F1): the code is shared by the secure-source and the Restricted-source
+  // refusals, so the server's own sentence is shown; the client's sentence is only the fallback.
+  it.each([
+    "This project can't be created with values copied from a secure record, because it would not be secure. Create it as secure, or file it under a different record.",
+    "This project can't be created with values copied from a record whose access is Restricted, because it would not be Restricted. File it under a different record.",
+  ])('a value copied from a source that files the record shows the server sentence: %s', serverSentence => {
     const asApiError = apiErrorFor(400, {
       title: 'Invalid request',
       status: 400,
-      detail: 'The server words.',
+      detail: serverSentence,
+      reasonCode: 'record_creation.mapping_source_secure_filing',
+    });
+    const asWriteError = new ChildRecordWriteError(serverSentence, 400, 'record_creation.mapping_source_secure_filing');
+    for (const err of [asApiError, asWriteError]) {
+      const text = describeWebApiCreateError(err, 'project');
+      expect(text).toEqual({ message: serverSentence, isAccessDenied: false });
+      expect(text.message.toLowerCase()).not.toContain('try again');
+    }
+  });
+
+  it('a value copied from a secure record, with no server sentence, gets the fallback sentence, which never suggests retrying', () => {
+    const asApiError = apiErrorFor(400, {
+      title: 'Invalid request',
+      status: 400,
       reasonCode: 'record_creation.mapping_source_secure_filing',
     });
     const asWriteError = new ChildRecordWriteError(
-      'The server words.',
+      'Failed to create the record (HTTP 400).',
       400,
       'record_creation.mapping_source_secure_filing'
     );

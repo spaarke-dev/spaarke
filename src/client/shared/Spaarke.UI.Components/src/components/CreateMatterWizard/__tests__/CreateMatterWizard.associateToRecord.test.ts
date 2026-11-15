@@ -1,24 +1,21 @@
 /**
- * CreateMatterWizard — associateToRecord() invoice-association tests
- * (spaarkeai-assistant-enhancements-r1 task 014 / FR-A5)
+ * CreateMatterWizard — associateToRecord() tests
  *
- * Scope: the association picker offers Project / Account / Invoice / none.
- * Project + Account were pre-existing; this file covers the NEW Invoice
- * branch (reverse-direction update: the SELECTED invoice's own `sprk_Matter`
- * lookup is set to the newly created matter) plus a light regression check
- * that Project/Account/unsupported behavior is unchanged.
+ * Scope: the association picker offers Project / Account / none. An invoice is
+ * not offered and is never associated: its matter, project or work assignment
+ * is fixed when it is created, and a wrongly filed invoice is returned to the
+ * firm and resubmitted on the right record (EB-D-231;
+ * field-mapping-server-write-path-r1 task 045g). Project/Account behavior is
+ * pinned unchanged.
  *
  * @see ../CreateMatterWizard.tsx (associateToRecord — exported for testing)
  */
 import { associateToRecord } from '../CreateMatterWizard';
-import { withBffChildWrites } from '../../../utils/adapters/bffChildWriteAdapter';
 import type { IDataService } from '../../../types/serviceInterfaces';
 import type { AssociationResult } from '../../AssociateToStep/types';
-import { apiErrorFor } from '../../../__tests__/helpers/authenticatedFetchDouble';
 
 const MATTER_ID = '11111111-1111-1111-1111-111111111111';
 const INVOICE_ID_RAW = '{22222222-2222-2222-2222-222222222222}';
-const INVOICE_ID_CLEAN = '22222222-2222-2222-2222-222222222222';
 
 function makeDataService(overrides?: Partial<IDataService>): IDataService {
   return {
@@ -31,99 +28,33 @@ function makeDataService(overrides?: Partial<IDataService>): IDataService {
   } as unknown as IDataService;
 }
 
-describe('associateToRecord — sprk_invoice (task 014 / FR-A5)', () => {
-  it("updates the SELECTED invoice's sprk_Matter lookup to point at the new matter", async () => {
+describe('associateToRecord — an invoice is never re-filed under the new matter (EB-D-231, task 045g)', () => {
+  it('writes nothing for an invoice association (no update, no fetch)', async () => {
     const updateRecord = jest.fn().mockResolvedValue(undefined);
-    const dataService = makeDataService({ updateRecord });
+    const fetchMock = jest.fn();
+    const realFetch = global.fetch;
+    (global as unknown as { fetch: unknown }).fetch = fetchMock;
+    const spy = jest.spyOn(console, 'warn').mockImplementation(() => {});
     const association: AssociationResult = {
       entityType: 'sprk_invoice',
       recordId: INVOICE_ID_RAW,
       recordName: 'INV-2026-0007',
     };
 
-    const result = await associateToRecord(dataService, MATTER_ID, association);
+    try {
+      await associateToRecord(makeDataService({ updateRecord }), MATTER_ID, association);
 
-    expect(result.success).toBe(true);
-    expect(updateRecord).toHaveBeenCalledWith('sprk_invoice', INVOICE_ID_CLEAN, {
-      'sprk_Matter@odata.bind': `/sprk_matters(${MATTER_ID})`,
-    });
-  });
-
-  it('normalizes braced GUIDs on both the invoice and matter id', async () => {
-    const updateRecord = jest.fn().mockResolvedValue(undefined);
-    const dataService = makeDataService({ updateRecord });
-    const association: AssociationResult = {
-      entityType: 'sprk_invoice',
-      recordId: '{AAAA1111-BBBB-2222-CCCC-333344445555}',
-      recordName: 'INV-2026-0008',
-    };
-
-    await associateToRecord(dataService, `{${MATTER_ID.toUpperCase()}}`, association);
-
-    expect(updateRecord).toHaveBeenCalledWith(
-      'sprk_invoice',
-      'aaaa1111-bbbb-2222-cccc-333344445555',
-      expect.objectContaining({ 'sprk_Matter@odata.bind': `/sprk_matters(${MATTER_ID})` })
-    );
-  });
-
-  it('degrades gracefully (returns success: false, never throws) when the invoice update fails', async () => {
-    const updateRecord = jest.fn().mockRejectedValue(new Error('403 Forbidden'));
-    const dataService = makeDataService({ updateRecord });
-    const association: AssociationResult = {
-      entityType: 'sprk_invoice',
-      recordId: INVOICE_ID_RAW,
-      recordName: 'INV-2026-0007',
-    };
-
-    const result = await associateToRecord(dataService, MATTER_ID, association);
-
-    expect(result.success).toBe(false);
-  });
-});
-
-describe('associateToRecord — the invoice re-file goes through the BFF (UAC-r2 task 147 r1)', () => {
-  it('sends the invoice re-file to PATCH /api/v1/child-records/sprk_invoice/{id}, not to Xrm.WebApi', async () => {
-    const updateRecord = jest.fn().mockResolvedValue(undefined);
-    const fetchMock = jest.fn().mockResolvedValue({ ok: true, status: 204, json: async () => ({}) } as Response);
-
-    const result = await associateToRecord(
-      withBffChildWrites(makeDataService({ updateRecord }), fetchMock, 'https://bff.example'),
-      MATTER_ID,
-      { entityType: 'sprk_invoice', recordId: INVOICE_ID_RAW, recordName: 'INV-2026-0007' }
-    );
-
-    expect(result.success).toBe(true);
-    expect(updateRecord).not.toHaveBeenCalled();
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    const [url, init] = fetchMock.mock.calls[0];
-    expect(url).toBe(`https://bff.example/api/v1/child-records/sprk_invoice/${INVOICE_ID_CLEAN}`);
-    expect(init.method).toBe('PATCH');
-    expect(JSON.parse(init.body)).toEqual({ 'sprk_Matter@odata.bind': `/sprk_matters(${MATTER_ID})` });
-  });
-
-  it('a refused re-file is a warning (success: false), never a client-side fallback write', async () => {
-    const updateRecord = jest.fn().mockResolvedValue(undefined);
-    // authenticatedFetch THROWS ApiError for a non-2xx; it never resolves { ok: false }.
-    const fetchMock = jest
-      .fn()
-      .mockRejectedValue(
-        apiErrorFor(404, { title: 'Not Found', detail: 'The record was not found, or you do not have access to it.' })
-      );
-
-    const result = await associateToRecord(
-      withBffChildWrites(makeDataService({ updateRecord }), fetchMock, 'https://bff.example'),
-      MATTER_ID,
-      { entityType: 'sprk_invoice', recordId: INVOICE_ID_RAW, recordName: 'INV-2026-0007' }
-    );
-
-    expect(result.success).toBe(false);
-    expect(updateRecord).not.toHaveBeenCalled();
+      expect(updateRecord).not.toHaveBeenCalled();
+      expect(fetchMock).not.toHaveBeenCalled();
+    } finally {
+      spy.mockRestore();
+      (global as unknown as { fetch: unknown }).fetch = realFetch;
+    }
   });
 });
 
 describe('associateToRecord — existing Project/Account behavior unchanged', () => {
-  it('still uses N:N $ref for sprk_project (unaffected by the Invoice addition)', async () => {
+  it('still uses N:N $ref for sprk_project', async () => {
     (global as unknown as { fetch: unknown }).fetch = jest.fn().mockResolvedValue({ ok: true } as Response);
     const dataService = makeDataService();
     const association: AssociationResult = {

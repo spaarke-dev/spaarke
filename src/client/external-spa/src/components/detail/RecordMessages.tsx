@@ -27,7 +27,7 @@
  *
  * No attachment control and no file input exist here by design (FR-11); the body is capped at 10,000 characters.
  *
- * NEW MESSAGE DIALOG (R4 task 004, FR-03). In the record template the toolbar's New message is the entry point: the host
+ * NEW MESSAGE DIALOG (R4 task 004, FR-03). In the record template the section's New message is the entry point: the host
  * passes `onCreateActionChange`, the inline compose box is not drawn, and the same box (same label, counter, errors, draft
  * handling and send) renders in a `FormModal` that this thread owns, so the dialog is a descendant of the record modal.
  * A send in flight holds the host (`onSendingChange`), a failed send leaves the dialog open with the draft and the same
@@ -37,7 +37,7 @@
  * WHO MAY POST (R4 task 006, FR-06 / NFR-04). In the record template New message is offered only when the thread's read
  * answered `canCreate: true` (task 002: the POST's own decision for this caller); anything else hides it, and a `false`
  * gives the section its read-only line instead. A re-read that fails (other than a sign-in failure, which ends the
- * thread) keeps the messages shown but withdraws New message: the right is no longer known. The inline box of a host without a toolbar keeps R3's rule (no such host in
+ * thread) keeps the messages shown but withdraws New message: the right is no longer known. The inline box of a host without a section action keeps R3's rule (no such host in
  * the app since the template replaced R3's modal).
  *
  * ADR-021: Fluent UI v9 semantic tokens only (no hard-coded colours) — the section inherits the host FluentProvider, so
@@ -82,7 +82,7 @@ import { createRightOf } from '../record/recordAccess';
 const UNKNOWN_SENDER = 'Unknown sender';
 const OWN_SENDER = 'You';
 const EMPTY_TEXT = 'No messages yet. Write the first one below.';
-const EMPTY_TEXT_DIALOG = 'No messages yet. Use New message in the toolbar to write the first one.';
+const EMPTY_TEXT_DIALOG = 'No messages yet. Use New message above to write the first one.';
 /** Template, New message not offered: the section's read-only line (task 006) says why. */
 const EMPTY_TEXT_READ_ONLY = 'No messages yet.';
 const LOAD_FAILED = 'The existing messages could not be loaded just now.';
@@ -444,7 +444,7 @@ const MessageThread: React.FC<MessageThreadProps> = ({
   const showCompose = thread.status !== 'access' && thread.status !== 'unavailable';
   const overBy = text.length - MAX_MESSAGE_BODY_LENGTH;
 
-  // In the record template the toolbar's New message replaces the inline box, and the dialog stays here; the draft is kept
+  // In the record template the section's New message replaces the inline box, and the dialog stays here; the draft is kept
   // when it is cancelled. Task 006 (FR-06): it is offered only when the LATEST thread read answered `canCreate: true` (the
   // POST's own decision, task 002). Not loaded yet, failed, refused, unavailable or silent = not offered (fail closed);
   // a failed re-read keeps the messages on screen but forgets the right, so New message is withdrawn until a read answers
@@ -462,7 +462,7 @@ const MessageThread: React.FC<MessageThreadProps> = ({
   };
   // The thread read can turn the offer off while the dialog is open (a read that answers 403 or "unavailable"): the dialog
   // then unmounts with the offer, so close it through hide() too, which resets the open state and returns focus (to the
-  // record dialog, the toolbar button having gone) instead of leaving it on the page body.
+  // record dialog, the header button having gone) instead of leaving it on the page body.
   const { open: composeOpen, hide: hideCompose } = composeDialog;
   React.useEffect(() => {
     if (composeInDialog && !offered && composeOpen) hideCompose();
@@ -627,7 +627,7 @@ export interface RecordMessagesProps {
    */
   embedded?: boolean;
   /**
-   * Record template only (task 004, FR-03): the toolbar's New message is the entry point. The thread then draws no inline
+   * Record template only (task 004, FR-03): the section's New message is the entry point. The thread then draws no inline
    * compose box, offers the action through this callback (task 006: only once the thread's read answered
    * `canCreate: true`) and renders the compose box in a `FormModal` of its own. Omit it for R3's own page.
    */

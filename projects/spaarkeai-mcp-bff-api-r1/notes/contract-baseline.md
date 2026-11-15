@@ -97,7 +97,7 @@ Used by task 017 for its MCP mapping tests. "reasonCode on the wire" is the Prob
 | 422 | `ontology.decision.unresolved_action` | `decision.422.unresolved-action` |
 | 422 | `ontology.decisionplan.refused` | `decision.422.plan-refused` |
 | 500 | `decision.action.write_failed` | `decision.500.step-failed` |
-| 500 | `ontology.decision.not_resumable` | `decision.500.not-resumable` |
+| 409 | `ontology.decision.not_resumable` | `decision.409.not-resumable` (500 before ontology task 191: a stored failure returned again is 409, merged 2026-11-15) |
 | 500 | `ontology.decision.record_write_failed` | `decision.500.record-write-failed` |
 | 503 | `ontology.decision.core_unsupported` | `decision.503.core-unsupported` |
 | 503 | `ontology.decision.idempotency_unavailable` | `decision.503.idempotency-unavailable` |

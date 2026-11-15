@@ -7,6 +7,40 @@ This file tracks changes to the agent-procedure surface — `.claude/skills/`, `
 Format follows [Keep a Changelog](https://keepachangelog.com/) conventions.
 
 ---
+###### 2026-11-12 — `adversarial-reviewer` checks capability duplication and traces acceptance criteria
+
+`reuse-governance-tightening-r1` task 021 (FR-07).
+
+- **`.claude/agents/adversarial-reviewer.md`**: two checks. **Capability duplication** against `.claude/patterns/CAPABILITY-INDEX.md` is F2 for a second implementation of an indexed capability, K-class for a judgment call. **Requirements trace**: given a task POML or `spec.md`, each acceptance criterion is reported met (file:line + test), not met (F4 in scope) or not verifiable from the diff (K-class). A new Input section tells callers to pass those paths. The Output class list now matches the task-execute Step 9.5 table; it had described F1–F4 differently (silent failure, a test that proves nothing, a contract break). Frontmatter unchanged.
+- **`task-execute`** Step 9.5, review-scope rule 3: launch the reviewer with the task POML path, and `spec.md` when one exists. No step renumbered.
+
+###### 2026-11-12 — `design-to-spec` runs one reuse scan in Step 3
+
+`reuse-governance-tightening-r1` task 011 (FR-04), after the task 010 dry-run caught both known duplicates at `low` (about 36k tokens per scan) and the owner said go.
+
+- **`design-to-spec`** Step 3: the "quick Grep/Glob" exception becomes one `code-mapper` agent (sonnet; `low` from its definition) that searches by concept, synonym and interface shape, starting from the capability index, and returns a fixed JSON schema. The orchestrator judges each capability: none found, one extend target, or 2+ (an owner question). Step 4 writes `notes/reuse-scan.md`; Step 5 asks the reuse questions and records them under Owner Clarifications. The Constraints line and the Step 3 scope limitation now name this scan as the single discovery pass; everything else stays in project-pipeline Step 2. No step renumbered.
+- **`references/spec-template.md`**: the §11 overlap column and Owner Clarifications point at `notes/reuse-scan.md`. No new heading.
+- **`project-pipeline`** Step 2: the sentence describing design-to-spec Step 3 is corrected.
+- Task 012 (FR-05), same day: **`project-pipeline`** Step 2 item 5 cites `notes/reuse-scan.md` when it exists and runs the design-to-spec Step 3 scan only when it is missing (Part 2 writes the file). No partial re-scan. A capability with 2+ candidates is a safety gate: autonomous mode stops, interactive mode asks (`references/interactive-mode.md` Step 2 row). **`task-create`** Step 3.5.6: `<existing>` also cites the file's row for the capability. No lint or `Validate-TaskPoml.ps1` change.
+
+###### 2026-11-12 — `power-page-deploy` skill archived (Power Pages deploy retired)
+
+The owner confirmed the Power Pages Code Site deploy for the external SPA is retired; the SPA deploys to Azure Static Web Apps through `.github/workflows/deploy-external-spa.yml` (ISS-003, #2713, found by `reuse-governance-tightening-r1`).
+
+- **`power-page-deploy`** moved to `.claude/archive/2026-11-12/skills/power-page-deploy/` (restore with `git mv`; see `.claude/archive/README.md`). Its two instruction-path baseline lines are removed.
+- **`.claude/skills/INDEX.md`**: row removed. **`azure-deploy`**, **`deploy-new-release`**, **`office-addins-deploy`** now point at the Static Web Apps workflow.
+- Docs: `docs/architecture/client-resources-inventory.md` §9, `docs/procedures/AI-CODING-PROCEDURES-GUIDE.md`, `knowledge/sharepoint-embedded/NOTES.md`.
+
+###### 2026-11-11 — The reuse gate starts at the capability index
+
+`reuse-governance-tightening-r1` task 002 (FR-02). The `<existing>` answer in the component-justification gate now starts at `.claude/patterns/CAPABILITY-INDEX.md` (concept → canonical component, task 001), then Grep.
+
+- **Root `CLAUDE.md` §11** item 1: the pointer is folded into the existing line (+57 bytes, line count unchanged at 218), so it adds no line to a file already over its 200-line budget (owner decision).
+- **`task-create`** Step 3.5.6: `<existing>` cites "CAPABILITY-INDEX row N" + file:line or "CAPABILITY-INDEX: no row" + the Grep run; a task that adds or changes a canonical component updates its row in the same PR.
+- **`code-review`** Step 6.6: the `<existing>` check uses the same index.
+- **`.claude/patterns/INDEX.md`**: describes the index and how it differs from pointer files.
+- **`doc-drift-audit`**: the index is a pointer file to keep accurate, and a deleted or moved canonical component means checking its row.
+
 ###### 2026-11-10 — C# formatting is blocking for changed files; the commit hook formats in seconds
 
 Master had 2,569 whitespace violations in 230 files because commits skipped the pre-commit hook (`--no-verify`, approved in several projects because the hook's full `dotnet format` took 16–45 s and was SIGKILLed under load), and the only CI check was the advisory Tier 2 `format` job, red for weeks. PR #2663.

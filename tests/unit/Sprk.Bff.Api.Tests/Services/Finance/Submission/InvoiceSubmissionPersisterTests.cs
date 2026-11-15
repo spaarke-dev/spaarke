@@ -3296,6 +3296,12 @@ public partial class InvoiceSubmissionPersisterTests
         public bool CommitDespiteFault { get; init; }
         public Exception? TotalsFault { get; set; }
         public bool SubmissionDeleted { get; init; }
+
+        /// <summary>EB-D-226 (task 095e): the firm record's name (<c>sprk_organizationname</c>) the persister reads before it writes (null: a row with no name).</summary>
+        public string? FirmRecordName { get; init; } = "Hartwell and Co LLP";
+
+        /// <summary>EB-D-226 (task 095e): a fault the firm-name read throws.</summary>
+        public Exception? FirmNameReadFault { get; init; }
         public RecordOwnerResolution Owner { get; init; } = RecordOwnerResolution.Owned(TeamId);
 
         /// <summary>EB-D-168a: when set, every owner question is answered by the REAL resolver over this directory (not <see cref="Owner"/>).</summary>
@@ -3419,6 +3425,8 @@ public partial class InvoiceSubmissionPersisterTests
                     "sprk_invoice" when OldInvoice is { } old && old.Id == id => ReadOldInvoice(columns),
                     "sprk_document" when DocumentDeleted => throw new System.ServiceModel.FaultException<OrganizationServiceFault>(new OrganizationServiceFault { ErrorCode = -2147220969 }, "Does Not Exist"),
                     "sprk_document" => ReadDocument(id, columns),
+                    "sprk_organization" when FirmNameReadFault is { } nameFault => throw nameFault,
+                    "sprk_organization" => new Entity(entity, id) { ["sprk_organizationname"] = FirmRecordName },
                     _ => new Entity(entity, id) { [RegardingRecordType.GetPrimaryNameField(entity)!] = "Acme v. Roe", ["sprk_matternumber"] = MatterNumber },
                 });
             // The lines (the resume's read, the undo's delete loop); task 094: the gate's lineage read of the invoice goes to the isolation world.

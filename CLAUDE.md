@@ -117,7 +117,7 @@ The BFF is the single backend for every client surface. Any task that adds endpo
 
 Every new service, abstraction, interface, endpoint, DI registration, package, Dataverse column or file surface answers three questions, one sentence each:
 
-1. **Existing** — what does it overlap with? (Check with Grep/Glob before saying "none".)
+1. **Existing** — what does it overlap with? (`<existing>` starts at `.claude/patterns/CAPABILITY-INDEX.md`; then Grep/Glob before saying "none".)
 2. **Extension** — can an existing component be extended instead? If not, why (≤ 2 sentences)?
 3. **Cost of doing nothing** — what concrete behaviour or contract fails without it? ("Scalability" or "flexibility" is not an answer.)
 

@@ -7,6 +7,7 @@ import { getXrm } from "@spaarke/ui-components/utils/xrmContext";
 import { createXrmDataService } from "@spaarke/ui-components/utils/adapters/xrmDataServiceAdapter";
 import { withBffChildWrites } from "@spaarke/ui-components/utils/adapters/bffChildWriteAdapter";
 import { createXrmNavigationService } from "@spaarke/ui-components/utils/adapters/xrmNavigationServiceAdapter";
+import { createXrmEmailComposeHandlers } from "@spaarke/ui-components/components/EmailComposer";
 import {
   CreateTodoWizard,
   withTodoCreatedBroadcast,
@@ -68,6 +69,11 @@ function App() {
     [resolvedBffBaseUrl],
   );
   const navigationService = React.useMemo(() => createXrmNavigationService(), []);
+  // Send Email step (task 182, D-219): recipient pane, record lookup, upload, templates, AI draft.
+  const emailComposeHandlers = React.useMemo(
+    () => createXrmEmailComposeHandlers({ authenticatedFetch, bffBaseUrl: resolvedBffBaseUrl || undefined }),
+    [resolvedBffBaseUrl]
+  );
 
   // UAC-r2 task 147 r1c: a launch from a record (the parent-form "Create To Do" ribbon, and the secure-record subgrid's
   // "New To Do" that replaces the platform "+ New" under a secure record — owner round 28 item 2) passes the record as
@@ -134,6 +140,7 @@ function App() {
         open={true}
         dataService={dataService}
         navigationService={navigationService}
+        emailComposeHandlers={emailComposeHandlers}
         initialRegarding={initialRegarding}
         embedded={true}
         onClose={handleClose}

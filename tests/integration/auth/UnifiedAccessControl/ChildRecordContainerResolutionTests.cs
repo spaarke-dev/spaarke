@@ -2002,7 +2002,9 @@ public partial class ChildRecordContainerResolutionTests
     public async Task WorkAssignment_FiledUnderAnInvoiceOfItself_Is409_AndTheWalkEnds()
     {
         // A row pair the BFF refuses at write (InvoiceFamilyCoreRecordGuard.WorkAssignmentCycleCode) but the model-driven app
-        // can still store: WA.sprk_regardinginvoice -> I and I.sprk_regardingworkassignment -> WA.
+        // could store before the invoice-family lock (#2799: those lookups are now written only by the BFF application
+        // user, after the person's checks), so a row written then can still hold it: WA.sprk_regardinginvoice -> I and
+        // I.sprk_regardingworkassignment -> WA.
         var invoice = Guid.Parse("eb1112ec-0000-0000-0000-0000000000a1");
         var world = new World(securable: SecurableWithInvoice)
             .WithChild("sprk_workassignment", intermediate: ("sprk_regardinginvoice", invoice), isSecure: false)
