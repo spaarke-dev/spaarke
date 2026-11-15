@@ -163,7 +163,8 @@ public static class ExternalInvoiceSubmissionEndpoints
     }
 
     private static async Task<IResult> GetInvoiceFileContentAsync(
-        Guid id, Guid fileId, HttpContext http, StoredFileService service, ILogger<Program> logger, CancellationToken ct)
+        Guid id, Guid fileId, HttpContext http, [Microsoft.AspNetCore.Mvc.FromServices] StoredFileService service, ILogger<Program> logger,
+        CancellationToken ct)
     {
         // Only a file of the gate's set: anything else (another invoice's, a supporting file, a malicious one, an unknown id) is the same 404.
         if (InvoiceFiles(http, id) is not { } set

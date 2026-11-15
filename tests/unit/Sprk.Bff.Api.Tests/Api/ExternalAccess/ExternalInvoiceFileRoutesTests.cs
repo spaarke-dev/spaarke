@@ -18,6 +18,7 @@ using Microsoft.Xrm.Sdk;
 using Moq;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.ExternalAccess;
+using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Api.Finance;
 using Sprk.Bff.Api.Infrastructure.DI;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
