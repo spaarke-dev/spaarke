@@ -63,7 +63,7 @@ Add `eventTypeName`, `sprk_description`, `sprk_priority`, `assignedToName` (Form
 ## 5. Overlap with planned work
 - **Task 036 / FR-23** (matter events show task type and assignee; gated on ontology D-199/D-129). §4.3 delivers the type and assignee names for **every** root, so 036 shrinks to the assignee-source decision (it names `sprk_assignedto1` from D-129; the live data model shows `sprk_assignedto` → contact). **Proposal:** fold 036 into the new tasks; the assignee source is owner/ontology Q-8.
 - **D-10 #2717** (no server answer for a PATCH right): any status change from the details form (Q-5) needs a new external update route and its own right; that is the same gap.
-- **D-17 #2845** (speed): the new list fields add no Dataverse round trips (same query, more columns); `creatableEventTypes` adds one read of the type rows plus one AppendTo check per type — keep it to one batched call (call-count test).
+- **D-17 #2845** (speed): the new list fields add no Dataverse round trips (same query, more columns); `creatableEventTypes` adds one read of the type rows plus one AppendTo check per type — keep it to one batched call (call-count test). **Agreed with uac-r2 (2026-11-15):** #2845 adds a scoped per-request memo service in `Infrastructure/ExternalAccess`. It is get-or-add keyed on all of a read's inputs, never keeps a faulted or unknown answer, and is cleared on any access write in the same request. The AppendTo-on-type-rows read goes through it: key (principal, entity type, sorted type-row id set), one batched read, only a complete answer memoized. Task 014 builds on it after #2845 merges (uac-r2 will send the type name and API).
 
 ## 6. Owner questions
 
