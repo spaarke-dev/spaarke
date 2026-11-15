@@ -20,7 +20,53 @@ public static class AuthorizationModule
     {
         // Azure AD JWT Bearer Token Validation
         services.AddAuthentication(Microsoft.AspNetCore.Authentication.JwtBearer.JwtBearerDefaults.AuthenticationScheme)
-            .AddMicrosoftIdentityWebApi(configuration.GetSection("AzureAd"));
+            .AddMicrosoftIdentityWebApi(configuration.GetSection("AzureAd"), subscribeToJwtBearerMiddlewareDiagnosticsEvents: false);
+
+        // Log token details on auth failure to diagnose Copilot API Plugin token issues
+        services.Configure<JwtBearerOptions>(JwtBearerDefaults.AuthenticationScheme, options =>
+        {
+            var existingOnFailed = options.Events?.OnAuthenticationFailed;
+            options.Events ??= new JwtBearerEvents();
+            options.Events.OnAuthenticationFailed = async context =>
+            {
+                var logger = context.HttpContext.RequestServices
+                    .GetRequiredService<ILoggerFactory>()
+                    .CreateLogger("JwtAuthDiagnostics");
+
+                var path = context.Request.Path.Value ?? "";
+                var authHeader = context.Request.Headers.Authorization.ToString();
+
+                if (authHeader.StartsWith("Bearer "))
+                {
+                    try
+                    {
+                        var token = authHeader["Bearer ".Length..].Trim();
+                        var handler = new System.IdentityModel.Tokens.Jwt.JwtSecurityTokenHandler();
+                        var jwt = handler.ReadJwtToken(token);
+
+                        logger.LogWarning(
+                            "[COPILOT-AUTH-DIAG] Token REJECTED for {Path}. " +
+                            "Audiences={Audiences}, Issuer={Issuer}, AppId={AppId}, " +
+                            "Azp={Azp}, Scp={Scp}, Tid={Tid}, Error={Error}",
+                            path,
+                            string.Join(",", jwt.Audiences),
+                            jwt.Issuer,
+                            jwt.Claims.FirstOrDefault(c => c.Type == "appid")?.Value ?? "none",
+                            jwt.Claims.FirstOrDefault(c => c.Type == "azp")?.Value ?? "none",
+                            jwt.Claims.FirstOrDefault(c => c.Type == "scp")?.Value ?? "none",
+                            jwt.Claims.FirstOrDefault(c => c.Type == "tid")?.Value ?? "none",
+                            context.Exception?.Message ?? "unknown");
+                    }
+                    catch (Exception ex)
+                    {
+                        logger.LogWarning("[COPILOT-AUTH-DIAG] Could not parse token: {Error}", ex.Message);
+                    }
+                }
+
+                if (existingOnFailed != null)
+                    await existingOnFailed(context);
+            };
+        });
 
         // Register authorization handler (Scoped to match AuthorizationService dependency)
         services.AddScoped<IAuthorizationHandler, ResourceAccessHandler>();
