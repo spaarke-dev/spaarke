@@ -709,7 +709,7 @@ describe('sections', () => {
     const events = within(dialog).getByTestId('record-detail-events');
     await within(events).findByText('Signing call');
     expect(within(dialog).queryByRole('button', { name: /create event/i })).toBeNull();
-    expect(within(dialog).queryByRole('button', { name: /create new task|add task/i })).toBeNull();
+    expect(within(dialog).queryByRole('button', { name: /create new task|add task|create task/i })).toBeNull();
   });
 
   it('Project: shows the empty states when there is nothing', async () => {
@@ -721,8 +721,8 @@ describe('sections', () => {
     await within(within(dialog).getByTestId('record-detail-documents')).findByText('No Documents');
     expect(within(dialog).getByText('No invoices for this record.')).toBeTruthy();
     await within(dialog).findByText(/No events yet/);
-    // Task 011: a Task list next to the events (a Task is an event of type Task); still no to-do read.
-    await within(dialog).findByText('No tasks yet');
+    // Task 012: one Events list (a Task is an event type): no separate Tasks list, no to-do read.
+    expect(within(dialog).queryByText(/No tasks/)).toBeNull();
     expect(bffApiCall.mock.calls.some(call => String(call[0]).endsWith('/todos'))).toBe(false);
   });
 

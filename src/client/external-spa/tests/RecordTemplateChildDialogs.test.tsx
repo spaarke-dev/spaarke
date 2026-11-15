@@ -11,7 +11,7 @@
  * task 009) and New message (in the Messages section's header) open form dialogs, and Delete request (in the record
  * header) a confirm dialog, all reachable today. Add event is not on a service request, so its dialog is proven through
  * the list's own `onCreateActionChange` seam (the last describe block); task 006's `RecordTemplateAccess.test.tsx` drives
- * it from a matter's and a work assignment's Tasks & events section.
+ * it from a matter's and a work assignment's Events section.
  *
  * THE FOCUS / ESC CONTRACT, and how each assertion can fail:
  *   - Tab wraps inside the child (last -> first, Shift+Tab first -> last). Control: the same probe against a non-blocking
