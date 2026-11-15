@@ -348,6 +348,97 @@ public sealed class PlanAndLookupToolTests
         Encoding.UTF8.GetByteCount(lookup.GetRawText()).Should().BeLessThan(64 * 1024);
     }
 
+    // ---- the plan's unfinished review counts against the 64 KiB result limit (FR-05, NFR-02) ---------------------------------
+
+    private static UnfinishedDecision UnfinishedReview(string inquiryBody)
+    {
+        var reviewId = Guid.Parse("0230aaaa-0000-4000-8000-000000000001");
+        var review = new DecisionReview
+        {
+            ReviewId = reviewId,
+            Confirmed = true,
+            Actions =
+            [
+                new DecisionReviewAction
+                {
+                    Code = "revise-budget",
+                    Taken = true,
+                    Values = new Dictionary<string, JsonElement> { ["body"] = JsonSerializer.SerializeToElement(inquiryBody) },
+                },
+            ],
+        };
+        return new UnfinishedDecision(reviewId, DecisionCapabilityFixtures.SignalId, review, new DecisionCommitResult
+        {
+            Status = DecisionCommitStatus.Failed,
+            ReviewId = reviewId,
+            ReasonCode = "ontology.action.write_failed",
+            Resumable = true,
+            SendChoiceRequired = true,
+            Replayed = true,
+        });
+    }
+
+    /// <summary>200 items, the opened one holding the most evidence the row can carry (100 lines of about 340 bytes).</summary>
+    private static async Task<PlanAndLookupHost> HostWith200ItemsAndHeavyEvidenceAsync()
+    {
+        var host = await PlanAndLookupHost.StartAsync(BudgetPlan);
+        host.Script.SeedItems(200);
+        host.Script.Rows[0] = host.Script.Rows[0] with
+        {
+            EvidenceRefs = "[" + string.Join(",", Enumerable.Range(0, 100).Select(i => $$"""{"kind":"note","id":"{{i}}","text":"{{new string('e', 300)}}"}""")) + "]",
+        };
+        return host;
+    }
+
+    private static int KeptEvidenceLines(JsonElement plan) =>
+        JsonNode.Parse(Node(plan.GetProperty("structuredContent"))["row"]!["evidenceRefs"]!.GetValue<string>())!.AsArray().Count;
+
+    [Theory]
+    [InlineData(40_000, 'b')]       // ASCII: 40 KB of inquiry body
+    [InlineData(7_000, 'ж')]        // Cyrillic: 6 bytes a character once escaped, so 42 KB
+    public async Task Plan_WithALargeButFittingUnfinishedReview_StaysUnder64KiB_ReturnsTheReviewIntact_AndGivesUpEvidenceForIt(int length, char fill)
+    {
+        await using var host = await HostWith200ItemsAndHeavyEvidenceAsync();
+        var without = await host.CallAsync("spaarke_get_decision_plan", new { signalId = SignalId });
+        var body = new string(fill, length);
+        host.Script.Unfinished = UnfinishedReview(body);
+
+        var with = await host.CallAsync("spaarke_get_decision_plan", new { signalId = SignalId });
+
+        IsError(without).Should().BeFalse();
+        IsError(with).Should().BeFalse(with.GetRawText());
+        Encoding.UTF8.GetByteCount(with.GetRawText()).Should().BeLessThan(64 * 1024, "the unfinished review is part of the 64 KiB result");
+        var structured = Node(with.GetProperty("structuredContent"));
+        structured["plan"]!["unfinished"]!["review"]!["actions"]![0]!["values"]!["body"]!.GetValue<string>()
+            .Should().Be(body, "the resume needs the review exactly as stored: it is never cut");
+        structured["evidenceTotal"]!.GetValue<int>().Should().Be(100);
+        structured["evidenceTruncated"]!.GetValue<bool>().Should().BeTrue("the review's room comes out of the evidence");
+        KeptEvidenceLines(with).Should().BeLessThan(KeptEvidenceLines(without), "evidence is reduced to make room for the review");
+        KeptEvidenceLines(with).Should().BeGreaterThan(0);
+    }
+
+    [Fact]
+    public async Task Plan_WithAnUnfinishedReviewTooLargeToFit_IsAFixedIsErrorWithNoPartialPlan()
+    {
+        await using var host = await HostWith200ItemsAndHeavyEvidenceAsync();
+        const string recordText = "ж"; // 12,000 of them: 72 KB once escaped, with the plan about 83 KB (measured)
+        host.Script.Unfinished = UnfinishedReview(new string(recordText[0], 12_000));
+
+        var result = await host.CallAsync("spaarke_get_decision_plan", new { signalId = SignalId });
+
+        IsError(result).Should().BeTrue();
+        var error = result.GetProperty("structuredContent");
+        error.GetProperty("reasonCode").GetString().Should().Be("mcp.plan_too_large");
+        error.GetProperty("message").GetString().Should().Be(PlanAndLookupToolSupport.PlanTooLargeMessage)
+            .And.Contain("finish it there", "it sends the person to Spaarke");
+        error.TryGetProperty("plan", out _).Should().BeFalse("no partial plan");
+        error.TryGetProperty("row", out _).Should().BeFalse();
+        result.GetProperty("content")[0].GetProperty("text").GetString().Should().Be(PlanAndLookupToolSupport.PlanTooLargeMessage);
+        result.GetRawText().Should().NotContain(recordText, "no text from the review is in the error (ADR-015)");
+        Encoding.UTF8.GetByteCount(result.GetRawText()).Should().BeLessThan(64 * 1024);
+        host.Script.ListCalls.Should().Be(0, "nothing else is read once the plan cannot be returned");
+    }
+
     [Fact]
     public async Task ALookupWithMoreThanTheCapOfMatches_ReturnsTheCappedPage_UnderTheLimit()
     {
@@ -388,6 +479,9 @@ internal sealed class PlanAndLookupScript
     public SuppressionReadResult Suppression { get; set; } = SuppressionReadResult.Ok(
         new SuppressionResponse(DecisionCapabilityFixtures.SignalId, 1, 2, 3, 30, null, true));
 
+    /// <summary>The caller's unfinished review, as the plan read returns it (the capability's own read of it needs the commit store, which is not scripted here).</summary>
+    public UnfinishedDecision? Unfinished { get; set; }
+
     public int ListCalls { get; set; }
 
     public int SuppressionCalls { get; set; }
@@ -422,10 +516,13 @@ internal sealed class PlanAndLookupScript
 /// <summary>The real capability for the plan (access, resolution, stamp); the worklist and suppression reads are the script's.</summary>
 internal sealed class PlanAndLookupCapability(DecisionCapability real, IHttpContextAccessor accessor, PlanAndLookupScript script) : IDecisionCapability
 {
-    public Task<DecisionPlanReadResult> GetPlanAsync(HttpContext? http, Guid signalId, CancellationToken ct)
+    public async Task<DecisionPlanReadResult> GetPlanAsync(HttpContext? http, Guid signalId, CancellationToken ct)
     {
         script.SameContext.Add(new("GetPlan", ReferenceEquals(http, accessor.HttpContext)));
-        return real.GetPlanAsync(http, signalId, ct);
+        var read = await real.GetPlanAsync(http, signalId, ct);
+        return script.Unfinished is { } unfinished && read.Plan is { } plan
+            ? read with { Plan = plan with { Unfinished = unfinished } }
+            : read;
     }
 
     public Task<SuppressionReadResult> GetSuppressionAsync(HttpContext? http, Guid signalId, CancellationToken ct)

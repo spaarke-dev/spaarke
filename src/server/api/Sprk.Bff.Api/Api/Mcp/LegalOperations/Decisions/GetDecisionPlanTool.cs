@@ -26,7 +26,9 @@ namespace Sprk.Bff.Api.Api.Mcp.LegalOperations.Decisions;
 /// (<see cref="IDecisionCapability.ListDecideAsync"/>, the read the Console's lane makes), not by a new read path. See
 /// <c>notes/task-023-notes.md</c> for the cost and the follow-up. The row is bounded for the 64 KiB result limit
 /// (<see cref="PlanAndLookupToolSupport.BoundRow"/>: clipped text, at most 100 evidence lines and 20,000 bytes of them, with
-/// <c>evidenceTotal</c> and <c>evidenceTruncated</c> beside it); a row inside the bounds equals the REST row.</para>
+/// <c>evidenceTotal</c> and <c>evidenceTruncated</c> beside it); a row inside the bounds equals the REST row. The plan may carry the caller's
+/// unfinished review, which is returned intact: the room it takes comes out of the evidence budget, and a plan that alone leaves no room is
+/// the fixed <c>mcp.plan_too_large</c> error (no partial plan), so the whole result stays under the limit.</para>
 /// <para><b>Placement justification (CLAUDE.md section 10; .claude/constraints/bff-extensions.md).</b> A thin adapter inside the BFF over
 /// the decision capability the REST route also calls (spec "Placement Justification"); no package, no AI-internal type, no background
 /// work, no DI registration (the catalog finds the class by attribute). Component justification (section 11): existing = the REST
@@ -91,6 +93,14 @@ internal sealed class GetDecisionPlanTool : McpToolDefinition
             return McpToolResults.FromError(planError, http!.TraceIdentifier);
         }
 
+        // FR-05 / FR-11: the plan itself is not bounded by the catalog when it carries the caller's unfinished review (the posted inquiry body
+        // has no length cap). That review is returned intact, so the room it leaves is taken from the row's evidence; when the plan alone
+        // leaves no room there is no partial plan, only a fixed message that sends the person to Spaarke (MCP only; REST is unchanged).
+        if (PlanAndLookupToolSupport.EvidenceBudgetFor(PlanAndLookupToolSupport.PlanBytes(plan.Plan!)) is not { } evidenceBudget)
+        {
+            return McpToolResults.FromError(PlanAndLookupToolSupport.PlanTooLarge, http!.TraceIdentifier);
+        }
+
         var suppression = await decisions.GetSuppressionAsync(http, signalId, cancellationToken);
         var suppressionError = DecisionResultMapper.ToToolError(suppression);
 
@@ -99,7 +109,7 @@ internal sealed class GetDecisionPlanTool : McpToolDefinition
 
         // FR-05 / FR-11: the row is the one member of the result no catalog or route bounds (evidenceRefs and the rule sentence have no cap),
         // so it is bounded here, for the MCP result only; the REST routes still return the stored row.
-        var row = PlanAndLookupToolSupport.BoundRow(rowError == null ? FindRow(lanes, signalId) : null);
+        var row = PlanAndLookupToolSupport.BoundRow(rowError == null ? FindRow(lanes, signalId) : null, evidenceBudget);
         var body = new PlanAndLookupToolSupport.PlanBody(
             plan.Plan!,
             suppressionError == null ? suppression.Suppression : null,
