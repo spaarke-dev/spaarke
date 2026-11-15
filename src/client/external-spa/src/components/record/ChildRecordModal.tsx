@@ -15,8 +15,8 @@
  * not the record behind it. Sections reach it through `childRecord.ts` (`useChildRecordOpener`), never by import.
  *
  * FOCUS AND REFRESH. `useChildDialog` remembers the control that opened it and returns focus to it on close. The close also
- * asks the activating section to re-read when the opener named one (an invoice child may have changed something: an upload, a
- * message), which draws the section's rows anew, so `refocusChildRecordRow` puts focus on the same row once it is back. A
+ * asks the activating section to re-read when the opener named one (an invoice child may have changed something: a
+ * message; its Files are read-only), which draws the section's rows anew, so `refocusChildRecordRow` puts focus on the same row once it is back. A
  * document child names none (it cannot change the list), so the parent's grid keeps its sort.
  */
 import * as React from 'react';

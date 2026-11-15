@@ -47,13 +47,6 @@ export type RecordCreateActionId = Extract<RecordToolbarActionId, 'upload' | 'ne
 
 export const RECORD_CREATE_ACTIONS: readonly RecordCreateActionId[] = ['upload', 'newMessage', 'addEvent'];
 
-/**
- * A right a section reports WITHOUT a toolbar action (task 006 fix round 1): the invoice Files list's own Upload, which
- * stays the list's button (no toolbar Upload on an invoice) but is still part of what the caller may do on the record,
- * so "Your access" and the Files card's read-only line follow it.
- */
-export type RecordSectionRightId = 'filesUpload';
-
 /** May the caller create: `true`, `false`, or `null` = not known (yet). Only `true` offers the action. */
 export type CreateRight = boolean | null;
 
@@ -64,8 +57,6 @@ export type CreateRight = boolean | null;
 /** The read-only line of a section, per what is read-only in it. */
 interface ReadOnlyLines {
   documents: string;
-  /** The invoice's Files card. */
-  files: string;
   messages: string;
   /** Events: its event list is read-only. */
   events: string;
@@ -100,13 +91,11 @@ export const RECORD_ACCESS_TEXT: {
   level: ACCESS_LEVEL_LABELS,
   grantLines: {
     documents: 'You can view these documents. Uploading needs Collaborate access.',
-    files: 'You can view these files. Uploading needs Collaborate access.',
     messages: 'You can read this thread. Posting needs Collaborate access.',
     events: 'You can view these events. Adding one needs Collaborate access.',
   },
   neutralLines: {
     documents: 'You can view these documents, but not upload to this record.',
-    files: 'You can view these files, but not upload to this record.',
     messages: 'You can read this thread, but not post to it.',
     events: 'You can view these events, but not add one.',
   },
@@ -290,25 +279,23 @@ export function recordAccessFactsOf(
 }
 
 /** The rights a project caller's `/me` level gates (the message thread is not one: it follows the thread alone). */
-const LEVEL_GATED_RIGHTS: readonly (RecordCreateActionId | RecordSectionRightId)[] = ['upload', 'addEvent'];
+const LEVEL_GATED_RIGHTS: readonly RecordCreateActionId[] = ['upload', 'addEvent'];
 
 // ---------------------------------------------------------------------------
 // What the template knows: the rights the record's lists reported
 // ---------------------------------------------------------------------------
 
-export type RecordCreateRights = Readonly<Partial<Record<RecordCreateActionId | RecordSectionRightId, CreateRight>>>;
+export type RecordCreateRights = Readonly<Partial<Record<RecordCreateActionId, CreateRight>>>;
 
 /**
- * The rights the record's lists reported: with their action offers (only the create actions this record's config lists,
- * in its toolbar or a section's header; a list that has not reported yet is unknown), plus the rights sections reported
- * without an action of the template's (`sectionRights`, e.g. the invoice Files list's Upload).
+ * The rights the record's lists reported with their action offers (only the create actions this record's config lists,
+ * in its toolbar or a section's header; a list that has not reported yet is unknown).
  */
 export function createRightsOf(
   actionIds: readonly RecordToolbarActionId[],
-  offers: Partial<Record<RecordToolbarActionId, RecordHostAction>>,
-  sectionRights: Partial<Record<RecordSectionRightId, CreateRight>> = {}
+  offers: Partial<Record<RecordToolbarActionId, RecordHostAction>>
 ): RecordCreateRights {
-  const rights: Partial<Record<RecordCreateActionId | RecordSectionRightId, CreateRight>> = { ...sectionRights };
+  const rights: Partial<Record<RecordCreateActionId, CreateRight>> = {};
   for (const id of RECORD_CREATE_ACTIONS) {
     if (actionIds.includes(id)) rights[id] = offers[id]?.right ?? null;
   }
@@ -407,7 +394,7 @@ export function yourAccessOf({ callerContext, level, levelGuessed }: RecordAcces
 
 /**
  * The one line saying why a section is read-only (FR-07), or `null` when it is not, or not known to be. Only a section
- * that owns a create right has one (Documents, Files, Messages, Events). The line names a grant level only when
+ * that owns a create right has one (Documents, Messages, Events). The line names a grant level only when
  * the deciding `/me` level is KNOWN to be View Only; every other "no" (a ceiling, a per-record caller, a record `/me`
  * has no level for) gets the neutral wording. (Task 011: a level decides only for a project caller without
  * `writeAccessPerRecord`; a per-record caller's level is the read view, so it never triggers the grant wording.) A right decided by a guessed level (`levelGuessed`) is not known, so it
@@ -434,8 +421,6 @@ export function readOnlyNoteOf(
   switch (section) {
     case 'documents':
       return known.upload === false ? lines.documents : null;
-    case 'files':
-      return known.filesUpload === false ? lines.files : null;
     case 'messages':
       return known.newMessage === false ? lines.messages : null;
     case 'tasksEvents':

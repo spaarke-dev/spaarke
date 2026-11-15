@@ -90,8 +90,6 @@ import {
   readOnlyNoteOf,
   recordAccessFactsOf,
   yourAccessOf,
-  type CreateRight,
-  type RecordSectionRightId,
 } from './recordAccess';
 import { useRecord, type RecordState } from './recordReads';
 import { RecordSectionStateContext, sectionStateUserKeyOf } from './recordSectionState';
@@ -284,10 +282,6 @@ export const RecordTemplateModal: React.FC<RecordTemplateModalProps> = ({
   const [hostActionCallbacks] = React.useState(
     () => new Map<RecordToolbarActionId, (action: RecordHostAction | null) => void>()
   );
-  // Rights a section reports without a toolbar action (the invoice Files list's Upload; task 006 fix round 1), and one
-  // stable reporter per right id. A list reports `null` on unmount, so paging to another record forgets the old answer.
-  const [sectionRights, setSectionRights] = React.useState<Partial<Record<RecordSectionRightId, CreateRight>>>({});
-  const [sectionRightCallbacks] = React.useState(() => new Map<RecordSectionRightId, (right: CreateRight) => void>());
   // Per-section re-read requests (an action asked one section to re-read), added to that section's `refreshSignal`.
   const [sectionSignals, setSectionSignals] = React.useState<Partial<Record<RecordSectionId, number>>>({});
   // The record on screen when Refresh was pressed, kept until the re-read answers (no flash of the loading state).
@@ -366,26 +360,6 @@ export const RecordTemplateModal: React.FC<RecordTemplateModalProps> = ({
     [hostActionCallbacks]
   );
 
-  const sectionRightCallbackFor = React.useCallback(
-    (rightId: RecordSectionRightId): ((right: CreateRight) => void) => {
-      let callback = sectionRightCallbacks.get(rightId);
-      if (!callback) {
-        callback = (right: CreateRight) =>
-          setSectionRights(prev => {
-            if (right === null && !(rightId in prev)) return prev;
-            if (prev[rightId] === right) return prev;
-            const next = { ...prev };
-            if (right === null) delete next[rightId];
-            else next[rightId] = right;
-            return next;
-          });
-        sectionRightCallbacks.set(rightId, callback);
-      }
-      return callback;
-    },
-    [sectionRightCallbacks]
-  );
-
   const refreshSection = React.useCallback(
     (section: RecordSectionId) => setSectionSignals(prev => ({ ...prev, [section]: (prev[section] ?? 0) + 1 })),
     []
@@ -456,9 +430,8 @@ export const RecordTemplateModal: React.FC<RecordTemplateModalProps> = ({
   const actionIds = recordActionIdsOf(config);
   // Task 006 (FR-06 / FR-07): the rights the record's lists reported with their create offers. A create action is shown
   // only when its list offers it AND reported its right as `true` (`isCreateActionOffered`); the sections' read-only lines
-  // are derived from the same answers (recordAccess.ts), never from the entity type. A section's right without an action
-  // of the template's (the invoice Files list's Upload) counts for its own section's line, and adds no action.
-  const createRights = createRightsOf(actionIds, hostActions, sectionRights);
+  // are derived from the same answers (recordAccess.ts), never from the entity type.
+  const createRights = createRightsOf(actionIds, hostActions);
   // The record's route root (its read description's documents root) tells `recordAccessFactsOf` whether `/me` has a level
   // for it (task 011: `projects` for a project, `records` for a matter or work assignment), and whether that level is an
   // answer or only the fail-safe guess (no entry for the project). "Your access" is that level and nothing else, and it
@@ -520,7 +493,6 @@ export const RecordTemplateModal: React.FC<RecordTemplateModalProps> = ({
     headerActions: headerActionsOf(section),
     // Task 006 (FR-07): why this section is read-only, from the rights its lists reported (none while unknown).
     readOnlyNote: readOnlyNoteOf(section, createRights, accessFacts),
-    reportRight: sectionRightCallbackFor,
   });
 
   const hostContext = (actionId: RecordToolbarActionId, row: DetailRecord, rowId: string): RecordActionHostContext => ({

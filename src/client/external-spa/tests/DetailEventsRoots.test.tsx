@@ -125,6 +125,8 @@ function installNet(key: Key, net: Net): void {
         : { entities: [], moreRecords: false };
     }
     if (/\/documents$/.test(path)) return { value: [], canCreate: false };
+    // An invoice's Files list (R4 task 021): the files route, read-only.
+    if (/\/files$/.test(path)) return { value: [] };
     if (/\/messages$/.test(path)) return { value: [] };
     if (/\/events$/.test(path)) {
       eventReads += 1;
@@ -506,7 +508,8 @@ describe('the other detail views', () => {
       installNet(key, { events: empty });
       const dialog = await openDetail(key);
       await within(dialog).findByTestId('record-detail-messages');
-      await within(dialog).findByTestId('record-detail-documents');
+      // An invoice's section is its read-only Files list; a service request's is its documents.
+      await within(dialog).findByTestId(key === 'invoice' ? 'record-detail-files' : 'record-detail-documents');
 
       expect(within(dialog).queryByTestId('record-detail-events')).toBeNull();
       expect(within(dialog).queryByText(STATIC_EMPTY)).toBeNull();

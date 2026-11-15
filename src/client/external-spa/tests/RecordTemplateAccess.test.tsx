@@ -163,6 +163,8 @@ function installNet(key: RecordKey, net: Net): void {
         : { entities: [], moreRecords: false };
     }
     if (/\/documents$/.test(path)) return answer(net.documents);
+    // An invoice's Files list (R4 task 021): ebilling's read-only files route, no create right of any kind.
+    if (/\/files$/.test(path)) return { value: [] };
     if (/\/messages$/.test(path)) return answer(net.messages);
 
     if (/\/events$/.test(path)) {
@@ -864,19 +866,19 @@ describe('each gate holds on its own', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Fix round 1: the invoice (Files keeps its own Upload; the thread's line is neutral)
+// The invoice (R4 task 021): Files is read-only and owns no create right; the thread's line is neutral
 // ---------------------------------------------------------------------------
 
-describe('invoice: the Files list counts for "Your access" without a toolbar action', () => {
+describe('invoice: Files is read-only, so only the thread carries a create right', () => {
   it(
-    'Files may upload, the thread may not: no "Your access" (/me has no level for an invoice), the thread line is neutral, no toolbar Upload',
+    'the thread may not post: no "Your access" (/me has no level for an invoice), the thread line is neutral, no Files line, no toolbar Upload',
     async () => {
       // A partner (no writeAccessPerRecord): /me has no level for an invoice, so the thread's "no" names no grant level.
       installNet('invoice', { ...all(may()), messages: mayNot(), me: meOf() });
       const dialog = await openRecord('invoice');
 
       await waitFor(() => expect(noteOf(dialog, 'messages')).toBe('You can read this thread, but not post to it.'));
-      await within(dialog).findByRole('button', { name: /^upload document/i });
+      await within(dialog).findByTestId('record-detail-files');
       expect(yourAccess(dialog)).toBeNull();
       expect(noteOf(dialog, 'files')).toBeNull();
       expect(actionsOf(dialog)).toEqual(READ_ONLY_TOOLBAR);
@@ -885,31 +887,33 @@ describe('invoice: the Files list counts for "Your access" without a toolbar act
   );
 
   it(
-    'Files may not upload: the Files card says why, its Upload is not rendered, and the header follows the thread',
+    'a documents list saying "may create" adds no Upload to an invoice, and the header follows the thread alone',
     async () => {
-      installNet('invoice', { ...all(may()), documents: mayNot(), me: meOf() });
+      // The documents list is not read for an invoice at all (task 021): whatever it would say changes nothing.
+      installNet('invoice', { ...all(may()), documents: may(), me: meOf() });
       const dialog = await openRecord('invoice');
 
-      await waitFor(() =>
-        expect(noteOf(dialog, 'files')).toBe('You can view these files, but not upload to this record.')
-      );
       await waitFor(() => expect(actionsOf(dialog)).toEqual(['refresh', 'copyLink', 'newMessage']));
+      await within(dialog).findByTestId('record-detail-files');
+      expect(noteOf(dialog, 'files')).toBeNull();
       expect(within(dialog).queryByRole('button', { name: /^upload/i, hidden: true })).toBeNull();
       expect(yourAccess(dialog)).toBeNull();
+      expect(bffApiCall.mock.calls.map(c => String(c[0])).filter(p => /\/invoices\/[^/]+\/documents/.test(p))).toEqual(
+        []
+      );
     },
     SLOW
   );
 
   it(
-    'both say no: both lines, and still no "Your access" (never "Read only")',
+    'the thread says no: its line shows, Files says nothing about uploading, and no create control is rendered or disabled',
     async () => {
       installNet('invoice', { ...all(mayNot()), me: meOf() });
       const dialog = await openRecord('invoice');
 
-      await waitFor(() =>
-        expect(noteOf(dialog, 'files')).toBe('You can view these files, but not upload to this record.')
-      );
       await waitFor(() => expect(noteOf(dialog, 'messages')).toBe('You can read this thread, but not post to it.'));
+      await within(dialog).findByTestId('record-detail-files');
+      expect(noteOf(dialog, 'files')).toBeNull();
       expect(yourAccess(dialog)).toBeNull();
       expectNoDisabledCreateControl(dialog);
     },
