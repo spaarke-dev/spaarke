@@ -147,6 +147,11 @@ public static class FinanceModule
         // 074 recorder and processing lock (decisions). Unconditional (flag rule above); the routes carry the kill switch. The read model also takes
         // the caller's IDataverseUserClient and EarlierInvoiceReadability (SignalsModule, unconditional) for the D-176 Duplicate check (task 119).
         services.AddScoped<InvoiceReviewReadService>();
+        // Read-time Procedure-change banner (ebilling-r1 task 113, model 8.2): the review read model's one extra member, computed on GET /review only,
+        // for an internal caller of an open invoice. Concrete (ADR-010: no interface, one implementation). Scoped, like the read model that holds it.
+        // It reads the Procedure rows with the singleton app-only Dataverse client (the evaluation's identity) and writes nothing. Unconditional (flag
+        // rule above): the read model that takes it maps unconditionally.
+        services.AddScoped<ProcedureChangeBanner>();
         services.AddScoped<InvoiceLineDecisionService>();
         // Invoice-level adjustments (ebilling-r1 task 102, FR-32, D-74): add / remove an Adjustment line and the rule list; 016 owns the amounts and totals.
         services.AddScoped<InvoiceAdjustmentService>();
