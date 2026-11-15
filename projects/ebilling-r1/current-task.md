@@ -12,15 +12,12 @@
 
 ### In flight
 
-- **Master PR #2839 (work → master): auto-merge ON (owner, 2026-11-15; merge commit, head 4a6e44719d). DO NOT push to work/ebilling-r1 until it merges (a push restarts CI and drops the head match); commit locally only.** It carries 093, 113, 084h-1 (with fix round 2), the #2833 ebilling slice and notes. master is merged into work at bd18cb8d60 (clean; no BFF changes came in).
-  - ontology-r1 signed off #2839 by comment (its files, byte-identical at ced184c79a), conditional on green CI. Any later push touching Services/Signals/** or Api/Signals/** needs its re-glance before merge.
-  - uac-r2 PASSED 093.
-  - **2026-11-15, owner: "what else is required to run the deploy? proceed"**, taken as the go to merge #2839 once CI is green. Asked spa-r4 to build and PR R4 021 now, and uac-r2 to hold #2838 until #2839 merges and to queue the dev BFF deploy (its own owner go). After the merge, send the SHA to uac-r2, spa-r4 and word-add-in-r1.
-  - **#2838 ordering:** #2838 adds `tests/Spaarke.ArchTests/ScriptMetadataStrongConsistencyGuardTests.cs`. Its KnownOffenders baseline lists the 12 scripts/ebilling files our e36a1e54c4 fixes, and the guard fails on any stale entry. #2838 is still OPEN.
-    - If #2838 merges first, our PR deletes those 12 entries in the same change.
-    - If ours merges first, tell uac-r2 to empty the baseline before #2838 merges.
-  - **spa-r4 is building R4 021** against #2839 head 3b33a8d8cc (its owner said go); PR ETA ~2–3 h; it sends the PR number and merge SHA. uac-r2 holds #2838 until #2839 merges, then clears the 12 entries itself (#2839 needs no change). uac-r2 sequence: #2839 merged → 021 merged → mcp-r1 pinged → owner exact-SHA go in uac-r2 → swap + 30-min gate → spa-r4 SPA.
-  - **Deploy order (strict):** spa-r4's R4 021 built and merged first; then uac-r2's BFF swap (owner go in uac-r2's session); then spa-r4's SPA immediately after.
+- **#2839 MERGED to master at 4f1192ab9d** (2026-11-15, auto-merge on the owner's say-so, all 44 checks green). It carried 093, 113, 084h-1 (with fix round 2), the #2833 ebilling slice and notes. The merge SHA went to uac-r2, spa-r4 and word-add-in-r1 (word-add-in-r1 is offline; queued). uac-r2 now empties the 12 scripts/ebilling KnownOffenders entries in #2838 itself.
+- **Deploy chain (dev), now waiting on spa-r4:**
+  1. spa-r4's R4 021 is PR #2840, built against 3b33a8d8cc (no src or tests change from there to the merge). It merges on spa-r4's owner go, and spa-r4 sends the SHA.
+  2. uac-r2 pings mcp-r1, then asks the owner for the exact-SHA go **in uac-r2's session**. The deploy is master (095g #2830 + #2839) plus mcp's d7369fecf1, with the ledger re-resolved.
+  3. uac-r2 swaps the BFF and runs the 30-min gate. spa-r4 deploys the SPA immediately after.
+  4. Then update owner-testing-checklist with 093/113 tests and tell word-add-in-r1 that 095g is live (slice C is unblocked).
 - **Reminder for 084h-2 (ontology-r1):** the writer caps only `reason` at 2000 characters, not `note`. 084h-2 must enforce or trim the note at the service (design §9), so an over-long note never reaches the create and fails as a retryable CreateFailed.
 
 ### Done today, on work (pushed)
