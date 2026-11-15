@@ -13,7 +13,7 @@
 ### In flight
 
 - **Master PR #2839 (work → master): open, CI running.** It carries 093, 113, 084h-1 (with fix round 2), the #2833 ebilling slice and notes. master is merged into work at bd18cb8d60 (clean; no BFF changes came in).
-  - ontology-r1 PASSED 084h-1 fix round 2 and approves by PR comment once CI is green. The PR description lists the amended `DecisionRecordContextImmutabilityTests` and the new `RecordProcedureActions` set.
+  - ontology-r1 signed off #2839 by comment (its files, byte-identical at ced184c79a), conditional on green CI. Any later push touching Services/Signals/** or Api/Signals/** needs its re-glance before merge.
   - uac-r2 PASSED 093.
   - **Merging needs the owner's go.** After the merge, send the SHA to uac-r2, spa-r4 and word-add-in-r1.
   - **#2838 ordering:** #2838 adds `tests/Spaarke.ArchTests/ScriptMetadataStrongConsistencyGuardTests.cs`. Its KnownOffenders baseline lists the 12 scripts/ebilling files our e36a1e54c4 fixes, and the guard fails on any stale entry. #2838 is still OPEN.
