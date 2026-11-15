@@ -113,7 +113,9 @@ internal sealed class GetDecisionPlanTool : McpToolDefinition
         var summary = $"Decision plan loaded: {plan.Plan!.Actions.Count} action(s), {plan.Plan.NextSteps.Count} next step(s).";
         if (row.EvidenceTruncated)
         {
-            summary += $" The item stores {row.EvidenceTotal} evidence line(s); the first ones are returned.";
+            summary += row.EvidenceTotal > 0
+                ? $" The item stores {row.EvidenceTotal} evidence line(s); the first ones are returned."
+                : " The item's evidence is too large to return here; open the item in Spaarke to see it.";
         }
 
         return PlanAndLookupToolSupport.Success(summary, body);

@@ -76,8 +76,10 @@ internal static class PlanAndLookupToolSupport
 
     /// <summary>The row's clipped free text, as default-encoded JSON bytes. A 2,000-character rule sentence (the stored maximum) fits unchanged
     /// unless it carries hundreds of escaped characters.</summary>
-    internal const int RowTitleBytes = 240;
-    internal const int RowSubjectNameBytes = 240;
+    /// <remarks>Title and subject allow 1,000 encoded bytes: the default encoder escapes non-ASCII as six bytes, so a lower bound would clip
+    /// an ordinary non-Latin name (240 bytes is about 40 such characters). The worst case stays under the 64 KiB result limit.</remarks>
+    internal const int RowTitleBytes = 1_000;
+    internal const int RowSubjectNameBytes = 1_000;
     internal const int RowRuleShortNameBytes = 120;
     internal const int RowSentenceBytes = 4_000;
     internal const int RowShortTextBytes = 80;
@@ -126,9 +128,9 @@ internal static class PlanAndLookupToolSupport
         {
             lines = JsonNode.Parse(evidenceRefs) as JsonArray;
         }
-        catch (JsonException)
+        catch (Exception ex) when (ex is JsonException or InvalidOperationException)
         {
-            lines = null;
+            lines = null; // malformed (including an invalid surrogate escape): treated as a non-array value below
         }
 
         if (lines is null)
@@ -154,7 +156,9 @@ internal static class PlanAndLookupToolSupport
             changed |= lineChanged;
         }
 
-        if (kept.Count == lines.Count && !changed)
+        // Untouched only when nothing was cut AND the stored string itself fits: a stored string with extra whitespace could otherwise
+        // pass every per-line bound and still exceed the budget.
+        if (kept.Count == lines.Count && !changed && EncodedBytes(evidenceRefs) <= EvidenceBudgetBytes)
         {
             return (evidenceRefs, lines.Count, false); // inside every bound: the stored string, untouched
         }
@@ -168,7 +172,13 @@ internal static class PlanAndLookupToolSupport
         changed = false;
         if (node is not JsonObject source)
         {
-            return node is JsonValue ? node.DeepClone() : null;
+            if (node is JsonValue)
+            {
+                return node.DeepClone();
+            }
+
+            changed = node is not null; // a nested array is dropped, which is a change (the stored string must not be returned as-is)
+            return null;
         }
 
         var line = new JsonObject();
