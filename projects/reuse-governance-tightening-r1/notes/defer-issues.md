@@ -381,4 +381,58 @@ SemanticSearch reports 23 × TS6059 (`@spaarke/auth` source outside `rootDir`) a
 **Related**: —
 
 ---
+
+### ISS-006 — `deploy-spaarke-ai.yml` misses six source trees SpaarkeAi bundles
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | next-round |
+| **Filed** | 2026-11-15 |
+| **Source** | Task 080 adversarial review, finding 5 (`notes/080-review.md`); pre-existing, not caused by this project |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2841 |
+
+**Description**
+
+`src/solutions/SpaarkeAi/vite.config.ts` bundles source from `Spaarke.Compose.Components`, `Spaarke.Communication.Components`, `Spaarke.Notifications`, `DocumentUploadWizard`, `FindSimilarCodePage` and `WorkspaceLayoutWizard`, but none is in the workflow's `paths` trigger. A fix merged to master that touches only one of them does not redeploy the Console to DEV.
+
+**Entry-points**
+
+- `.github/workflows/deploy-spaarke-ai.yml` (`on.push.paths`)
+- `src/solutions/SpaarkeAi/vite.config.ts` (`path.resolve(__dirname, ...)` roots)
+
+**Suggested fix**: add the six `paths` lines; verify with one dispatch run.
+
+**Estimated effort**: 15 minutes
+**Blockers**: none
+**Related**: `.claude/skills/code-page-deploy/SKILL.md` now states the gap (task 080).
+
+---
+
+### ISS-007 — Docs and comments name a `normalizeUrl()` that does not exist
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | someday |
+| **Filed** | 2026-11-15 |
+| **Source** | Task 080 adversarial review, found in passing (same root cause as finding 4) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2842 |
+
+**Description**
+
+The BFF URL normalizer is `normalizeBffBaseUrl()` in `src/client/shared/Spaarke.Auth/src/bffClientConfig.ts:89`. Six places still name `normalizeUrl()` in `resolveRuntimeConfig.ts`, and `docs/architecture/AUTH-AND-BFF-URL-PATTERN.md` shows a code body for it. A reader searches for a function that is not there.
+
+**Entry-points**
+
+- `git grep -n normalizeUrl -- docs src/client`
+- `docs/architecture/AUTH-AND-BFF-URL-PATTERN.md:72,75,77,251,309`; `docs/guides/PCF-DEPLOYMENT-GUIDE.md:100,108`; comments in `src/client/shared/Spaarke.Auth/src/createRuntimeConfigStore.ts:127`, `src/client/pcf/shared/utils/environmentVariables.ts:66`
+
+**Suggested fix**: rename and repoint; replace the doc's code block with the current body or a link. The capability index row 3 and `.claude/patterns/auth/bff-url-normalization.md` were corrected in task 080.
+
+**Estimated effort**: 30 minutes
+**Blockers**: none
+**Related**: ISS-006 (same review)
+
+---
 ## Closed

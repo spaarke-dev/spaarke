@@ -110,7 +110,7 @@ Order matters (each later one consumes earlier ones via path-mapped dist):
 6. `src/client/shared/Spaarke.Events.Components` — same. Build script is `tsc --noEmit`; the lib is consumed via Vite source aliasing.
 7. `src/client/shared/Spaarke.SmartTodo.Components` — same. Build script is `tsc --noEmit`; consumed via source aliasing.
 
-The list above is the core; on 2026-10-11 a clean worktree needed **all** `src/client/shared/*` libs (15 then; 14 since `@spaarke/ai-context` was retired on 2026-11-13) installed and built before the solutions resolved (`@spaarke/ui-components` resolves to `dist/index.js`). Also build Notifications, DocumentOperations, Compose.Components, DailyBriefing.Components, Visuals, Communication.Components and LegalWorkspace. `tsc` failures in AI.Widgets and LegalWorkspace are peer-dependency resolution only (`react`/`@fluentui/*` not installed in the lib under `--legacy-peer-deps`); the emitted `dist` is usable.
+The list above is the core; on 2026-10-11 a clean worktree needed **all** `src/client/shared/*` libs (15 then; 12 since `@spaarke/ai-context`, `@spaarke/legal-workspace` and `@spaarke/document-operations` were retired on 2026-11-13) installed and built before the solutions resolved (`@spaarke/ui-components` resolves to `dist/index.js`). Also build Notifications, Compose.Components, DailyBriefing.Components, Visuals, Communication.Components, AI.Outputs and SdapClient. `tsc` failures in AI.Widgets are peer-dependency resolution only (`react`/`@fluentui/*` not installed in the lib under `--legacy-peer-deps`); the emitted `dist` is usable.
 
 ## Step 2 — Build all Vite solutions
 

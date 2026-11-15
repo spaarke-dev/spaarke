@@ -26,7 +26,7 @@ const url = `${bffBaseUrl}/api/ai/visualization/related/123`;
 
 The Dataverse env var `sprk_BffApiBaseUrl` stores the URL WITH `/api` suffix (e.g., `https://host/api`). Two normalization functions strip it so the resolved base URL is HOST ONLY:
 
-- `normalizeUrl()` in `@spaarke/auth/src/resolveRuntimeConfig.ts:388`
+- `normalizeBffBaseUrl()` in `src/client/shared/Spaarke.Auth/src/bffClientConfig.ts` (called by `resolveRuntimeConfig()`)
 - `normalizeBffUrl()` in `src/client/pcf/shared/utils/environmentVariables.ts`
 
 Every caller then had to manually add `/api/` back when constructing request URLs. This manual step was **the source of multiple production bugs**:
