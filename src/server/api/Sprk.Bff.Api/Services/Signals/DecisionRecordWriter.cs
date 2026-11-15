@@ -1391,31 +1391,20 @@ public sealed class DecisionRecordWriter
             var plan = ValidateBilling(request);
             var key = BillingDecisionKey.IdOf(request.Subject.Entity, request.Subject.Id, request.DecisionId);
             var recorded = await FindBillingRecordsAsync(request.Subject, key, ct).ConfigureAwait(false);
-            if (recorded.Count > 0 && !recorded.Any(r => string.Equals(r.Code, request.ActionCode, StringComparison.Ordinal)))
-            {
-                // The key carries no code, so one decision id can only ever be one billing decision on its subject: another code under
-                // it (a retry that changed its mind after a create timeout) would be a second, contradictory record. Refused; a retry
-                // does not change it.
-                throw new DecisionRecordRefusedException(
-                    DecisionRecordRefusalReason.ReviewInvalid,
-                    "This decision id is already recorded on its subject with another billing action; nothing was written.");
-            }
-
-            var hash = BillingDecisionHash(request);
-            // Of the rows with this code (two can exist after a concurrent pair, see above), the one with THIS decision's hash answers, whichever
-            // row the lookup returned first.
-            var sameCode = recorded.Where(r => string.Equals(r.Code, request.ActionCode, StringComparison.Ordinal)).ToList();
-            var existing = sameCode.FirstOrDefault(r => string.Equals(r.Hash, hash, StringComparison.Ordinal));
-            if (existing.Id == Guid.Empty && sameCode.Count > 0)
-            {
-                // K2 (ontology-r1): the same id and code with other content (reduce-line 800, then 700) is not a repeat of the recorded
-                // decision; answering AlreadyRecorded would tell the caller its 700 was recorded when 800 was. A record whose hash cannot
-                // be read proves nothing either, so it is refused the same way (same reason), never written over with a second record; its
-                // message says so, so a caller can tell it from proven other content (ebilling-r1 164a fix round K2).
-                throw new DecisionRecordRefusedException(
-                    DecisionRecordRefusalReason.ReviewInvalid,
-                    sameCode.Any(r => r.Hash is null) ? BillingContentUnreadableRefusal : BillingOtherContentRefusal);
-            }
+            // The key carries no code, so one decision id can only ever be one billing decision on its subject: another code under it (a retry
+            // that changed its mind after a create timeout) would be a second, contradictory record. Refused; a retry does not change it.
+            // K2 (ontology-r1): the same id and code with other content (reduce-line 800, then 700) is not a repeat of the recorded decision;
+            // answering AlreadyRecorded would tell the caller its 700 was recorded when 800 was. A record whose hash cannot be read proves
+            // nothing either, so it is refused the same way (same reason), never written over with a second record; its message says so, so a
+            // caller can tell it from proven other content (ebilling-r1 164a fix round K2). The rules are shared with the Procedure entry
+            // (AlreadyRecordedOrRefuse, task 084h-1 fix round 1); the messages are billing's own.
+            var (existing, hash) = AlreadyRecordedOrRefuse(
+                recorded,
+                request.ActionCode,
+                () => BillingDecisionHash(request),
+                "This decision id is already recorded on its subject with another billing action; nothing was written.",
+                BillingOtherContentRefusal,
+                BillingContentUnreadableRefusal);
 
             if (existing.Id != Guid.Empty)
             {
@@ -1676,12 +1665,37 @@ public sealed class DecisionRecordWriter
     /// <exception cref="DecisionRecordRefusedException"><see cref="DecisionRecordRefusalReason.BillingRecordLookupFailed"/>: the lookup (or
     /// the writer identity it is narrowed by) faulted, a timeout surfacing as a cancellation the caller did not ask for included. Nothing is
     /// written: guessing "none" would risk a second record; a retry may succeed.</exception>
-    private async Task<IReadOnlyList<(Guid Id, Guid? ConfirmedBy, string Code, string? Hash)>> FindBillingRecordsAsync(
-        DecisionRecordRef subject, Guid key, CancellationToken ct)
+    private Task<IReadOnlyList<(Guid Id, Guid? ConfirmedBy, string Code, string? Hash)>> FindBillingRecordsAsync(
+        DecisionRecordRef subject, Guid key, CancellationToken ct) =>
+        FindKeyedRecordsAsync(
+            subject,
+            key,
+            BillingLookupCodes,
+            BillingSubjectByCode.ContainsKey,
+            DecisionRecordRefusalReason.BillingRecordLookupFailed,
+            "Whether the billing decision's Decision Record already exists could not be checked, so nothing was written.",
+            ct);
+
+    /// <summary>
+    /// ebilling-r1 task 084h-1 fix round 1: the body of the billing "already recorded" lookup (<see cref="FindBillingRecordsAsync"/>), moved
+    /// here unchanged so the per-record Procedure lookup (<see cref="FindRecordProcedureRecordsAsync"/>) reuses it instead of copying it. Runs
+    /// <see cref="KeyedRecordsQueryAsync"/> on <paramref name="codes"/> and reads each row's code, <c>sprk_confirmedby</c> and stored hash
+    /// (<see cref="StoredBillingHashOf"/>), keeping only rows whose code <paramref name="isCode"/> accepts (the code check repeated on each row).
+    /// Any fault, a timeout surfacing as a cancellation the caller did not ask for included, is refused as <paramref name="refusalReason"/>
+    /// with <paramref name="refusalMessage"/>; the caller's own cancellation propagates.
+    /// </summary>
+    private async Task<IReadOnlyList<(Guid Id, Guid? ConfirmedBy, string Code, string? Hash)>> FindKeyedRecordsAsync(
+        DecisionRecordRef subject,
+        Guid key,
+        object[] codes,
+        Func<string, bool> isCode,
+        string refusalReason,
+        string refusalMessage,
+        CancellationToken ct)
     {
         try
         {
-            var query = await BillingRecordsQueryAsync(subject, key, ["sprk_confirmedby", "sprk_actioncode", "sprk_steps"], ct).ConfigureAwait(false);
+            var query = await KeyedRecordsQueryAsync(subject, key, ["sprk_confirmedby", "sprk_actioncode", "sprk_steps"], codes, ct).ConfigureAwait(false);
             var rows = await _entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
 
             var found = new List<(Guid Id, Guid? ConfirmedBy, string Code, string? Hash)>();
@@ -1689,7 +1703,7 @@ public sealed class DecisionRecordWriter
             {
                 if (row.Id != Guid.Empty
                     && row.GetAttributeValue<string>("sprk_actioncode") is { } code
-                    && BillingSubjectByCode.ContainsKey(code))
+                    && isCode(code))
                 {
                     found.Add((row.Id, row.GetAttributeValue<EntityReference>("sprk_confirmedby")?.Id, code, StoredBillingHashOf(row)));
                 }
@@ -1699,14 +1713,49 @@ public sealed class DecisionRecordWriter
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
-            throw new DecisionRecordRefusedException(
-                DecisionRecordRefusalReason.BillingRecordLookupFailed,
-                "Whether the billing decision's Decision Record already exists could not be checked, so nothing was written.",
-                innerException: ex);
+            throw new DecisionRecordRefusedException(refusalReason, refusalMessage, innerException: ex);
         }
     }
 
-    /// <summary>The "already recorded" lookup's query (<see cref="FindBillingRecordsAsync"/>), shared UNCHANGED with
+    /// <summary>
+    /// ebilling-r1 task 084h-1 fix round 1: the "already recorded" decision of the billing entry, moved here unchanged so the per-record
+    /// Procedure entry reuses it. In order: (1) rows found but none with <paramref name="code"/> → <see cref="DecisionRecordRefusalReason.ReviewInvalid"/>
+    /// with <paramref name="otherCodeRefusal"/> (the key carries no code); (2) the request's hash is computed (<paramref name="hashOf"/>, only
+    /// now, as before the move); (3) of the rows with the code, the one with this hash answers, whichever came first; (4) rows with the code
+    /// but none with this hash → <see cref="DecisionRecordRefusalReason.ReviewInvalid"/> with <paramref name="contentUnreadableRefusal"/> when
+    /// any of them has no readable hash, otherwise <paramref name="otherContentRefusal"/>.
+    /// </summary>
+    /// <returns>The matching row (its <c>Id</c> is <see cref="Guid.Empty"/> when nothing is recorded yet) and the request's hash.</returns>
+    private static ((Guid Id, Guid? ConfirmedBy, string Code, string? Hash) Existing, string Hash) AlreadyRecordedOrRefuse(
+        IReadOnlyList<(Guid Id, Guid? ConfirmedBy, string Code, string? Hash)> recorded,
+        string code,
+        Func<string> hashOf,
+        string otherCodeRefusal,
+        string otherContentRefusal,
+        string contentUnreadableRefusal)
+    {
+        if (recorded.Count > 0 && !recorded.Any(r => string.Equals(r.Code, code, StringComparison.Ordinal)))
+        {
+            throw new DecisionRecordRefusedException(DecisionRecordRefusalReason.ReviewInvalid, otherCodeRefusal);
+        }
+
+        var hash = hashOf();
+        // Of the rows with this code (two can exist after a concurrent pair), the one with THIS decision's hash answers, whichever row the
+        // lookup returned first.
+        var sameCode = recorded.Where(r => string.Equals(r.Code, code, StringComparison.Ordinal)).ToList();
+        var existing = sameCode.FirstOrDefault(r => string.Equals(r.Hash, hash, StringComparison.Ordinal));
+        if (existing.Id == Guid.Empty && sameCode.Count > 0)
+        {
+            throw new DecisionRecordRefusedException(
+                DecisionRecordRefusalReason.ReviewInvalid,
+                sameCode.Any(r => r.Hash is null) ? contentUnreadableRefusal : otherContentRefusal);
+        }
+
+        return (existing, hash);
+    }
+
+    /// <summary>The billing "already recorded" query (<see cref="FindBillingRecordsAsync"/> runs the same query through <see cref="FindKeyedRecordsAsync"/>
+    /// with <see cref="BillingLookupCodes"/>), shared UNCHANGED with
     /// <see cref="FindBillingDecisionResolvedSetAsync"/>: the subject's regarding lookup, the key in <c>sprk_steps</c>, created by the writer
     /// identity, billing codes only, at most <see cref="BillingLookupTop"/> rows. Only the columns differ.</summary>
     private Task<QueryExpression> BillingRecordsQueryAsync(DecisionRecordRef subject, Guid key, string[] columns, CancellationToken ct) =>
@@ -1731,7 +1780,8 @@ public sealed class DecisionRecordWriter
         var query = new QueryExpression(Table)
         {
             ColumnSet = new ColumnSet(columns),
-            // Sequential use leaves at most one billing row per key; only a concurrent pair (see WriteBillingDecisionAsync) adds another.
+            // Sequential use leaves at most one row per key, billing or Procedure (each key is per entry: BillingDecisionKey,
+            // RecordProcedureDecisionKey); only a concurrent pair (see WriteBillingDecisionAsync, and K-b in the 084h-1 notes) adds another.
             // Bounded, never a scan.
             TopCount = BillingLookupTop,
             NoLock = true,
@@ -1815,24 +1865,15 @@ public sealed class DecisionRecordWriter
             var plan = ValidateRecordProcedure(request);
             var key = RecordProcedureDecisionKey.IdOf(request.Subject.Entity, request.Subject.Id, request.DecisionId);
             var recorded = await FindRecordProcedureRecordsAsync(request.Subject, key, ct).ConfigureAwait(false);
-            if (recorded.Count > 0 && !recorded.Any(r => string.Equals(r.Code, request.ActionCode, StringComparison.Ordinal)))
-            {
-                // The key carries no code, so one decision id is one change on its core record: another code under it is a contradiction.
-                throw new DecisionRecordRefusedException(
-                    DecisionRecordRefusalReason.ReviewInvalid,
-                    "This decision id is already recorded on its core record with another Procedure change; nothing was written.");
-            }
-
-            var hash = RecordProcedureDecisionHash(request);
-            var sameCode = recorded.Where(r => string.Equals(r.Code, request.ActionCode, StringComparison.Ordinal)).ToList();
-            var existing = sameCode.FirstOrDefault(r => string.Equals(r.Hash, hash, StringComparison.Ordinal));
-            if (existing.Id == Guid.Empty && sameCode.Count > 0)
-            {
-                // As the billing entry (K2): the same id and code with other content is not a repeat; an unreadable hash proves nothing.
-                throw new DecisionRecordRefusedException(
-                    DecisionRecordRefusalReason.ReviewInvalid,
-                    sameCode.Any(r => r.Hash is null) ? RecordProcedureContentUnreadableRefusal : RecordProcedureOtherContentRefusal);
-            }
+            // The billing entry's rules (AlreadyRecordedOrRefuse): one decision id is one change on its core record, so another code under it
+            // is a contradiction; the same code with other content is not a repeat (K2); an unreadable hash proves nothing.
+            var (existing, hash) = AlreadyRecordedOrRefuse(
+                recorded,
+                request.ActionCode,
+                () => RecordProcedureDecisionHash(request),
+                "This decision id is already recorded on its core record with another Procedure change; nothing was written.",
+                RecordProcedureOtherContentRefusal,
+                RecordProcedureContentUnreadableRefusal);
 
             if (existing.Id != Guid.Empty)
             {
@@ -1884,13 +1925,30 @@ public sealed class DecisionRecordWriter
     /// <summary>
     /// The decided content as it is recorded and hashed: <see cref="RecordProcedureDecisionRecordRequest.Values"/> without a <c>note</c> whose
     /// value is null or only white space (design section 4.1: the hash covers every key, a null one included, so a blank note would make two
-    /// otherwise identical changes hash differently; it is never written either). Every other key is kept as given.
+    /// otherwise identical changes hash differently; it is never written either). Every other key is kept as given. A note that came through
+    /// JSON (a <see cref="JsonElement"/> or <see cref="System.Text.Json.Nodes.JsonNode"/> holding a JSON null or a blank string, as Values
+    /// read back from a payload are) is blank in the same way (task 084h-1 fix round 1).
     /// </summary>
     internal static IReadOnlyDictionary<string, object?> RecordProcedureValuesOf(RecordProcedureDecisionRecordRequest r) =>
         (r.Values ?? new Dictionary<string, object?>())
-            .Where(v => !(string.Equals(v.Key, RecordProcedureNoteKey, StringComparison.Ordinal)
-                          && (v.Value is null || v.Value is string text && string.IsNullOrWhiteSpace(text))))
+            .Where(v => !(string.Equals(v.Key, RecordProcedureNoteKey, StringComparison.Ordinal) && IsBlankNote(v.Value)))
             .ToDictionary(v => v.Key, v => v.Value, StringComparer.Ordinal);
+
+    /// <summary>True for a note value that is no note: null, a blank string, or JSON holding null or a blank string.</summary>
+    private static bool IsBlankNote(object? value) => value switch
+    {
+        null => true,
+        string text => string.IsNullOrWhiteSpace(text),
+        JsonElement { ValueKind: JsonValueKind.Null or JsonValueKind.Undefined } => true,
+        JsonElement { ValueKind: JsonValueKind.String } element => string.IsNullOrWhiteSpace(element.GetString()),
+        System.Text.Json.Nodes.JsonNode node => node.GetValueKind() switch
+        {
+            JsonValueKind.Null or JsonValueKind.Undefined => true,
+            JsonValueKind.String => string.IsNullOrWhiteSpace(node.GetValue<string>()),
+            _ => false,
+        },
+        _ => false,
+    };
 
     /// <summary>
     /// A stable hash of what the per-record Procedure change IS (design section 6.2), stored in <c>sprk_steps</c> beside the key, with the
@@ -2010,36 +2068,16 @@ public sealed class DecisionRecordWriter
     /// </summary>
     /// <exception cref="DecisionRecordRefusedException"><see cref="DecisionRecordRefusalReason.RecordProcedureLookupFailed"/>: the lookup (or
     /// the writer identity it is narrowed by) faulted. Nothing is written.</exception>
-    private async Task<IReadOnlyList<(Guid Id, Guid? ConfirmedBy, string Code, string? Hash)>> FindRecordProcedureRecordsAsync(
-        DecisionRecordRef subject, Guid key, CancellationToken ct)
-    {
-        try
-        {
-            var query = await KeyedRecordsQueryAsync(
-                subject, key, ["sprk_confirmedby", "sprk_actioncode", "sprk_steps"], RecordProcedureLookupCodes, ct).ConfigureAwait(false);
-            var rows = await _entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
-
-            var found = new List<(Guid Id, Guid? ConfirmedBy, string Code, string? Hash)>();
-            foreach (var row in rows?.Entities ?? Enumerable.Empty<Entity>())
-            {
-                if (row.Id != Guid.Empty
-                    && row.GetAttributeValue<string>("sprk_actioncode") is { } code
-                    && DecisionActionCatalog.TryGetRecordProcedure(code, out _))
-                {
-                    found.Add((row.Id, row.GetAttributeValue<EntityReference>("sprk_confirmedby")?.Id, code, StoredBillingHashOf(row)));
-                }
-            }
-
-            return found;
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
-        {
-            throw new DecisionRecordRefusedException(
-                DecisionRecordRefusalReason.RecordProcedureLookupFailed,
-                "Whether the Procedure change's Decision Record already exists could not be checked, so nothing was written.",
-                innerException: ex);
-        }
-    }
+    private Task<IReadOnlyList<(Guid Id, Guid? ConfirmedBy, string Code, string? Hash)>> FindRecordProcedureRecordsAsync(
+        DecisionRecordRef subject, Guid key, CancellationToken ct) =>
+        FindKeyedRecordsAsync(
+            subject,
+            key,
+            RecordProcedureLookupCodes,
+            static code => DecisionActionCatalog.TryGetRecordProcedure(code, out _),
+            DecisionRecordRefusalReason.RecordProcedureLookupFailed,
+            "Whether the Procedure change's Decision Record already exists could not be checked, so nothing was written.",
+            ct);
 
     /// <summary>
     /// The fact (in <c>sprk_factsnapshot</c>'s <c>facts</c>) under which a human billing decision stores the D-122 set it read before its
@@ -2434,8 +2472,9 @@ public sealed class DecisionRecordWriter
     }
 
     /// <summary>
-    /// D-34 / D-75: the core record of a billing subject, derived from the subject's OWN core lookups by <see cref="CoreAncestorResolver"/> (a
-    /// line's core is never its invoice's). Only a single derived core is a core here; none or several is returned as no core, and the shared
+    /// D-34 / D-75: the core record of a billing subject, and also of the per-record Procedure entry's core subject (task 084h-1: a matter,
+    /// project or work assignment takes the resolver's CORE branch and is its own core, with no ancestor read), derived from the subject's OWN
+    /// core lookups by <see cref="CoreAncestorResolver"/> (a line's core is never its invoice's). Only a single derived core is a core here; none or several is returned as no core, and the shared
     /// filing step (<see cref="FileUnderSubjectAsync"/>, ebilling-r1 026) refuses it (SubjectUnfileable). The derivation is handed to that
     /// step, so it is not paid for twice. A FAILED derivation is refused here with its own class: a fault is FilingFailed (a retry may
     /// succeed), a data condition SubjectUnfileable.

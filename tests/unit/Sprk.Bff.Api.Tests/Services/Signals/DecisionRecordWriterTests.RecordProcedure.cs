@@ -365,6 +365,142 @@ public sealed partial class DecisionRecordWriterTests
         billingLookup.TopCount.Should().Be(10);
     }
 
+    // ── Fix round 1, item 2: the refusals shared with the billing entry (AlreadyRecordedOrRefuse, FindKeyedRecordsAsync) ───────────
+
+    /// <summary>A Procedure record under this test's key as the writer stored it, with <paramref name="hash"/> as its <c>reviewHash</c>
+    /// (none when null: the hash cannot be read).</summary>
+    private static Entity StoredRecordProcedureRow(string? hash, string code = "assign-procedure") => new("sprk_decisionrecord", Guid.NewGuid())
+    {
+        ["sprk_regardingmatter"] = new EntityReference("sprk_matter", MatterId),
+        ["sprk_steps"] = hash is null
+            ? $"{{\"reviewId\":\"{RecordProcedureDecisionKey.IdOf("sprk_matter", MatterId, RpDecision):D}\",\"steps\":[{{\"code\":\"{code}\"}}]}}"
+            : $"{{\"reviewId\":\"{RecordProcedureDecisionKey.IdOf("sprk_matter", MatterId, RpDecision):D}\",\"reviewHash\":\"{hash}\",\"steps\":[{{\"code\":\"{code}\"}}]}}",
+        ["sprk_actioncode"] = code,
+        ["createdby"] = new EntityReference("systemuser", WriterUser),
+    };
+
+    [Fact]
+    public async Task RecordProcedure_FixRound1_AWriterRecordWithTheSameKeyAndCodeButNoReadableHash_IsTheContentUnreadableRefusal_AndWritesNothing()
+    {
+        var h = RecordProcedureHarness();
+        h.Seeded.Add(StoredRecordProcedureRow(hash: null));
+
+        var ex = (await h.Writer.Invoking(w => w.WriteRecordProcedureDecisionAsync(RecordProcedure()))
+            .Should().ThrowAsync<DecisionRecordRefusedException>()).Which;
+
+        ex.Reason.Should().Be(DecisionRecordRefusalReason.ReviewInvalid);
+        ex.Message.Should().Be(DecisionRecordWriter.RecordProcedureContentUnreadableRefusal, "an unreadable hash proves nothing either way");
+        h.Created.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task RecordProcedure_FixRound1_OfTwoRowsOfTheCode_OneUnreadable_TheRowWithThisHashAnswers()
+    {
+        var h = RecordProcedureHarness();
+        var unreadable = StoredRecordProcedureRow(hash: null);
+        var mine = StoredRecordProcedureRow(DecisionRecordWriter.RecordProcedureDecisionHash(RecordProcedure()));
+        h.Seeded.Add(unreadable);
+        h.Seeded.Add(mine);
+
+        var result = await h.Writer.WriteRecordProcedureDecisionAsync(RecordProcedure());
+
+        result.AlreadyRecorded.Should().BeTrue();
+        result.RecordId.Should().Be(mine.Id);
+        h.Created.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task RecordProcedure_FixRound1_ALookupTimeoutSurfacingAsACancellationTheCallerDidNotAskFor_IsRecordProcedureLookupFailed_AndWritesNothing()
+    {
+        // As billing's adversarial K4: an HTTP timeout surfaces as TaskCanceledException with the caller's token NOT cancelled.
+        var h = RecordProcedureHarness();
+        h.LookupFault = new TaskCanceledException("http timeout");
+
+        var ex = (await h.Writer.Invoking(w => w.WriteRecordProcedureDecisionAsync(RecordProcedure(), CancellationToken.None))
+            .Should().ThrowAsync<DecisionRecordRefusedException>()).Which;
+
+        ex.Reason.Should().Be(DecisionRecordRefusalReason.RecordProcedureLookupFailed);
+        ex.InnerException.Should().BeOfType<TaskCanceledException>();
+        h.Created.Should().BeEmpty();
+        h.OwnerAsks.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task RecordProcedure_FixRound1_TheCallersOwnCancellationInTheLookup_Propagates_AndWritesNothing()
+    {
+        var h = RecordProcedureHarness();
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+        h.LookupFault = new OperationCanceledException(cts.Token);
+
+        await h.Writer.Invoking(w => w.WriteRecordProcedureDecisionAsync(RecordProcedure(), cts.Token))
+            .Should().ThrowAsync<OperationCanceledException>("the caller's own cancellation is never turned into a refusal");
+
+        h.Created.Should().BeEmpty();
+        h.OwnerAsks.Should().BeEmpty();
+    }
+
+    // ── Fix round 1, item 3: Values read back from JSON hash as the inline ones; a JSON null or blank note is no note ──────────────
+
+    /// <summary>The Values after a JSON round trip, as a payload (the 084h-3 repair job) reads them back: each value a JsonElement.</summary>
+    private static Dictionary<string, object?> ThroughJsonAsElements(IReadOnlyDictionary<string, object?> values) =>
+        JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(JsonSerializer.Serialize(values))!
+            .ToDictionary(v => v.Key, v => (object?)v.Value, StringComparer.Ordinal);
+
+    /// <summary>The same, as JsonNode values (a JSON null is a null node).</summary>
+    private static Dictionary<string, object?> ThroughJsonAsNodes(IReadOnlyDictionary<string, object?> values) =>
+        JsonSerializer.Deserialize<Dictionary<string, System.Text.Json.Nodes.JsonNode?>>(JsonSerializer.Serialize(values))!
+            .ToDictionary(v => v.Key, v => (object?)v.Value, StringComparer.Ordinal);
+
+    [Theory]
+    [InlineData("assign-procedure", false)]
+    [InlineData("assign-procedure", true)]
+    [InlineData("change-rule", false)]
+    [InlineData("change-rule", true)]
+    [InlineData("remove-override", true)]
+    public void RecordProcedure_FixRound1_ValuesThroughAJsonRoundTrip_HashEqualToTheInlineOnes_WithAndWithoutANote(string code, bool withNote)
+    {
+        var inline = withNote ? WithNote(code, "Client asked for this") : RecordProcedureValues(code);
+        var expected = DecisionRecordWriter.RecordProcedureDecisionHash(RecordProcedure(code, values: inline));
+
+        DecisionRecordWriter.RecordProcedureDecisionHash(RecordProcedure(code, values: ThroughJsonAsElements(inline))).Should().Be(expected);
+        DecisionRecordWriter.RecordProcedureDecisionHash(RecordProcedure(code, values: ThroughJsonAsNodes(inline))).Should().Be(expected);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData(" \n\t ")]
+    public async Task RecordProcedure_FixRound1_AJsonNullOrBlankNote_IsNoNote_InTheHashAndInTheRecord(string? note)
+    {
+        var none = RecordProcedure();
+        var expected = DecisionRecordWriter.RecordProcedureDecisionHash(none);
+
+        foreach (var values in new[] { ThroughJsonAsElements(WithNote("assign-procedure", note)), ThroughJsonAsNodes(WithNote("assign-procedure", note)) })
+        {
+            var blank = RecordProcedure(values: values);
+            DecisionRecordWriter.RecordProcedureValuesOf(blank).Should().NotContainKey("note", "a JSON null or blank note is no note");
+            DecisionRecordWriter.RecordProcedureDecisionHash(blank).Should().Be(expected);
+        }
+
+        var h = RecordProcedureHarness();
+        await h.Writer.WriteRecordProcedureDecisionAsync(RecordProcedure(values: ThroughJsonAsElements(WithNote("assign-procedure", note))));
+        StoredValues(h.Row).TryGetProperty("note", out _).Should().BeFalse("no note key is written for a JSON null or blank note");
+        (await h.Writer.WriteRecordProcedureDecisionAsync(none)).AlreadyRecorded.Should().BeTrue("the inline request without a note is the same change");
+        h.Created.Should().ContainSingle();
+    }
+
+    [Fact]
+    public void RecordProcedure_FixRound1_AJsonNoteWithText_IsKept()
+    {
+        var values = ThroughJsonAsElements(WithNote("assign-procedure", "Client asked for this"));
+
+        DecisionRecordWriter.RecordProcedureValuesOf(RecordProcedure(values: values)).Should().ContainKey("note");
+        DecisionRecordWriter.RecordProcedureDecisionHash(RecordProcedure(values: values))
+            .Should().NotBe(DecisionRecordWriter.RecordProcedureDecisionHash(RecordProcedure()));
+    }
+
     // ── W5 (P5): human-only; the record carries its confirmer, class and gate tier ───────────────────────────────────────────
 
     [Fact]
