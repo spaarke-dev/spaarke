@@ -15,7 +15,7 @@
 - **Master PR #2839 (work → master): open, CI running.** It carries 093, 113, 084h-1 (with fix round 2), the #2833 ebilling slice and notes. master is merged into work at bd18cb8d60 (clean; no BFF changes came in).
   - ontology-r1 signed off #2839 by comment (its files, byte-identical at ced184c79a), conditional on green CI. Any later push touching Services/Signals/** or Api/Signals/** needs its re-glance before merge.
   - uac-r2 PASSED 093.
-  - **Merging needs the owner's go.** After the merge, send the SHA to uac-r2, spa-r4 and word-add-in-r1.
+  - **2026-11-15, owner: "what else is required to run the deploy? proceed"**, taken as the go to merge #2839 once CI is green. Asked spa-r4 to build and PR R4 021 now, and uac-r2 to hold #2838 until #2839 merges and to queue the dev BFF deploy (its own owner go). After the merge, send the SHA to uac-r2, spa-r4 and word-add-in-r1.
   - **#2838 ordering:** #2838 adds `tests/Spaarke.ArchTests/ScriptMetadataStrongConsistencyGuardTests.cs`. Its KnownOffenders baseline lists the 12 scripts/ebilling files our e36a1e54c4 fixes, and the guard fails on any stale entry. #2838 is still OPEN.
     - If #2838 merges first, our PR deletes those 12 entries in the same change.
     - If ours merges first, tell uac-r2 to empty the baseline before #2838 merges.
