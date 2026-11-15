@@ -128,6 +128,17 @@ describe('the routes', () => {
     expect(COMPLETE_DECISION_TOOL).toBe(COMPLETE_TOOL);
   });
 
+  it("a resumed review's retry and send choice (ontology task 191) reach the commit tool inside the review, unchanged", async () => {
+    const host = wizardHost(SERVER);
+    const service = createDecisionWizardService({ fetch: createWizardBridge(host.callTool).fetch, baseUrl: BASE });
+    const resumed: DecisionReview = { ...REVIEW, retry: true, sendChoice: 'record-without-sending' };
+
+    await service.commit(ID1, resumed);
+
+    expect(host.callsTo(COMPLETE_TOOL)).toHaveLength(1);
+    expect(host.callsTo(COMPLETE_TOOL)[0].args).toEqual({ signalId: ID1, review: resumed });
+  });
+
   it('a refusal keeps its reason code, status and message for the wizard to word', async () => {
     const host = wizardHost(SERVER, {
       complete: () =>
