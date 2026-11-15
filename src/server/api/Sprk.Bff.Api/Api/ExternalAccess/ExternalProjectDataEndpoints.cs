@@ -1310,14 +1310,15 @@ public static class ExternalProjectDataEndpoints
     /// module descriptor, or a module that grants the caller nothing, denies before any read. A requester read that
     /// FAILS (throttle, outage) is a 503 <see cref="ServiceRequestUnreadableReasonCode"/>, never a 403.</para>
     /// <para><b>An invoice is not a root either</b> (owner decision 2026-10-11, option A): it INHERITS the caller's
-    /// rights on its parent records — the union over its matter and project (<see cref="RightsForInvoiceAsync"/>). An
-    /// invoice read that FAILS is a 503 <see cref="InvoiceUnreadableReasonCode"/>.</para>
+    /// Read from its parent records (<see cref="RightsForInvoiceAsync"/>), Read only. Since ebilling-r1 task 093 retired the
+    /// <c>/invoices/{id}/documents</c> routes, only delete-own names an invoice parent here. An invoice read that FAILS is a
+    /// 503 <see cref="InvoiceUnreadableReasonCode"/>.</para>
     /// </remarks>
     /// <param name="confirmWrites">Task 036: set by the upload route and (fix round 1, F4) the document LIST, whose
     /// <c>canCreate</c> is the upload route's answer. Confirms the rights against Dataverse for a caller whose access
-    /// Dataverse decided (<see cref="WithDataverseRightsAsync"/>) — on the root, or on the invoice before its secure-roots
-    /// gate. It only widens a parent that already holds Read, so the list's Read gate is unchanged. A service request's
-    /// requester scope is not confirmed (see the task 036 notes). Download and versions pass nothing and ask Dataverse
+    /// Dataverse decided (<see cref="WithDataverseRightsAsync"/>) on the root. It only widens a parent that already holds
+    /// Read, so the list's Read gate is unchanged. A service request's requester scope is not confirmed (see the task 036
+    /// notes), and an invoice parent takes none (Read only). Download and versions pass nothing and ask Dataverse
     /// nothing.</param>
     /// <param name="logger">Logger for the confirmation; required when <paramref name="confirmWrites"/> is set.</param>
     /// <param name="readCallerPrivilege">Fix round 1 (F1): with <paramref name="confirmWrites"/>, Dataverse's Create also
@@ -1366,8 +1367,8 @@ public static class ExternalProjectDataEndpoints
             case ExternalDataService.DocumentParentKind.Invoice:
                 try
                 {
-                    return WithoutFault(await RightsForInvoiceAsync(
-                        caller, parentId, dataService, modules, ct, confirmWrites, logger, readCallerPrivilege, hideInvoices));
+                    // Read only (delete-own, the one route that still names an invoice parent); confirmWrites does not apply.
+                    return WithoutFault(await RightsForInvoiceAsync(caller, parentId, dataService, ct, hideInvoices));
                 }
                 catch (ExternalDataService.DataverseUnavailableException)
                 {
@@ -1441,37 +1442,26 @@ public static class ExternalProjectDataEndpoints
     }
 
     /// <summary>
-    /// The caller's rights on an invoice's documents (task 031, owner decision 2026-10-11, option A "inherit"): the UNION
-    /// of the caller's rights on the invoice's parent records, its <c>sprk_matter</c> and <c>sprk_project</c>, through
-    /// the same <see cref="RightsForRoot"/> the matter and project routes use.
+    /// The caller's Read on a document's invoice parent, for delete-own (task 031, owner decision 2026-10-11, option A "inherit"):
+    /// Read when the caller holds Read on any of the invoice's parent records (its <c>sprk_matter</c>, <c>sprk_project</c> or work
+    /// assignment, through the same <see cref="RightsForRoot"/> the root routes use) and the (a') predicate leaves the invoice
+    /// visible; otherwise <see cref="Spaarke.Dataverse.AccessRights.None"/>.
     /// </summary>
     /// <remarks>
-    /// <para>The union is the rule the invoices module already applies to make an invoice visible (its matter OR its
-    /// project in the caller's Read set) and the rule the message routes apply to an invoice post
-    /// (<c>ExternalMessageEndpoints.RightsThroughParents</c>). So Read on either parent lists, downloads and reads
-    /// versions; Create on either parent uploads; a ViewOnly parent alone gives Read without Create.</para>
-    /// <para>A caller holding Read on no matter and no project is denied before any read (the read could not change the
-    /// answer). A missing invoice and an invoice under records the caller cannot read deny identically (no oracle).</para>
-    /// <para><b>Create passes the invoice gate</b> (unified-access-control-r2 task 187, fix round 2, F1). When the union
-    /// carries Create, the invoice is put to the gate the invoice thread uses
-    /// (<see cref="ExternalMessageEndpoints.GetRecordRightsDecisionAsync"/>: the rule attributes, the live parents, the
-    /// secure flags, then the invoices module's <c>ScopeRows</c>, D4). An invoice whose live roots include a SECURE root the
-    /// caller cannot read loses Create, so an upload is refused before SPE or Dataverse is touched (and the list offers no
-    /// upload); without this a Create on ordinary matter M wrote the file into secure project X's container. Read is
-    /// unchanged: the read routes withhold such an invoice's documents through the document walk (D4), with their own
-    /// shapes. A gate read that could not decide throws <see cref="ExternalDataService.DataverseUnavailableException"/>,
-    /// which <see cref="RightsForDocumentParentAsync"/> answers with the <see cref="InvoiceUnreadableReasonCode"/> 503.
-    /// A caller without Create causes no gate read.</para>
+    /// <para>Read only. The four <c>/invoices/{id}/documents</c> routes, which also asked Create (upload) here, retired with
+    /// ebilling-r1 task 093; its only caller now is delete-own (<see cref="AuthorizeDeleteOwnAsync"/>, through
+    /// <see cref="RightsForDocumentParentAsync"/>), which asks Read on every parent of the row.</para>
+    /// <para>A caller holding Read on no matter, project or work assignment is denied before any read (the read could not change the
+    /// answer). A missing invoice and an invoice under records the caller cannot read deny identically (no oracle). A parent read
+    /// that fails, and an (a') decision that could not be made for a caller who reaches the invoice, throw
+    /// <see cref="ExternalDataService.DataverseUnavailableException"/>, which <see cref="RightsForDocumentParentAsync"/> answers with
+    /// the <see cref="InvoiceUnreadableReasonCode"/> 503.</para>
     /// </remarks>
     private static async Task<ConfirmedRights> RightsForInvoiceAsync(
         CallerPrincipal caller,
         Guid invoiceId,
         ExternalDataService dataService,
-        ExternalModuleRegistry modules,
         CancellationToken ct,
-        Func<string, Guid, CancellationToken, Task<Spaarke.Dataverse.AccessRights?>>? confirmWrites = null,
-        ILogger? logger = null,
-        Func<string, CancellationToken, Task<bool?>>? readCallerPrivilege = null,
         ExternalInvoiceHiding? hideInvoices = null)
     {
         var denied = new ConfirmedRights(Spaarke.Dataverse.AccessRights.None, Spaarke.Dataverse.AccessRights.None);
@@ -1494,13 +1484,13 @@ public static class ExternalProjectDataEndpoints
             rights |= RightsForRoot(caller, ExternalDataService.TodoRootKind.WorkAssignment, workAssignmentId);
 
         // Task 130-0 fix round 2 (K1): no Read through any parent is the uniform refusal BEFORE the invoice decision, so the seam is
-        // asked only for a caller who reaches the invoice (no timing difference). The steps below only widen a parent that holds Read.
+        // asked only for a caller who reaches the invoice (no timing difference).
         if (!rights.HasFlag(Spaarke.Dataverse.AccessRights.Read))
             return denied;
 
         // ebilling-r1 task 098 (model 9.1, (a')): an invoice whose Submit Invoice source is isolated is denied exactly like a
-        // missing one (the same `denied`, so the same 403 body), before any Dataverse confirmation or gate read. No predicate
-        // and a failed predicate read deny too (fail closed; never "unknown means visible").
+        // missing one (the same `denied`). No predicate and a failed predicate read deny too (fail closed; never "unknown means
+        // visible").
         // Task 130-0 fix round 1 (K1): a failed predicate read is the InvoiceUnreadableReasonCode 503 instead, but only AFTER the record
         // check: the invoice exists (its parents were read) and the caller holds Read through one of them. Any other caller gets the
         // uniform `denied`, so the 503 is no existence oracle.
@@ -1513,38 +1503,7 @@ public static class ExternalProjectDataEndpoints
             return denied;
         }
 
-        // Task 036 (FR-20): the upload confirms against Dataverse on the INVOICE itself (the target record), BEFORE the
-        // secure-roots gate below, so a Dataverse-confirmed Create is put to that gate exactly as a grant-derived one is.
-        var unanswered = Spaarke.Dataverse.AccessRights.None;
-        if (confirmWrites is not null)
-        {
-            var confirmed = await WithDataverseRightsAsync(
-                caller, rights,
-                ExternalDataService.GetDocumentParentBinding(ExternalDataService.DocumentParentKind.Invoice).EntitySet,
-                invoiceId, confirmWrites, logger ?? throw new ArgumentNullException(nameof(logger)), ct,
-                CommunicationRecordAuthorizationFilter.CreateDocumentPrivilege, readCallerPrivilege);
-            (rights, unanswered) = (confirmed.Rights, confirmed.Unanswered);
-        }
-
-        if (!rights.HasFlag(Spaarke.Dataverse.AccessRights.Create))
-            return new ConfirmedRights(rights, unanswered);
-
-        var (gate, undecided) = await ExternalMessageEndpoints.GetRecordRightsDecisionAsync(
-                ExternalMessageEndpoints.Roots["invoices"], invoiceId, caller, modules,
-                (_, id, attributes, token) => dataService.GetInvoiceLookupsAsync(id, attributes ?? Array.Empty<string>(), token),
-                dataService.Logger, ct, dataService.GetNonSecureRootsAsync, dataService.GetLiveParentRootsAsync,
-                // Task 098: the gate asks (a') itself (it refuses an invoice without the predicate); decided visible above.
-                hideInvoices)
-            .ConfigureAwait(false);
-        if (undecided)
-            throw new ExternalDataService.DataverseUnavailableException("The invoice's secure roots could not be read.");
-
-        // A secure-roots refusal is an ANSWER: Create is removed and is not "unanswered" (fix round 4, F1), so the upload is a
-        // 403, never a 503.
-        return gate.HasFlag(Spaarke.Dataverse.AccessRights.Read)
-            ? new ConfirmedRights(rights, unanswered)
-            : new ConfirmedRights(
-                rights & ~Spaarke.Dataverse.AccessRights.Create, unanswered & ~Spaarke.Dataverse.AccessRights.Create);
+        return new ConfirmedRights(Spaarke.Dataverse.AccessRights.Read, Spaarke.Dataverse.AccessRights.None);
     }
 
     /// <summary>
@@ -1616,7 +1575,6 @@ public static class ExternalProjectDataEndpoints
         ExternalDataService.DocumentParentKind.Matter => "matter",
         ExternalDataService.DocumentParentKind.WorkAssignment => "work assignment",
         ExternalDataService.DocumentParentKind.ServiceRequest => "service request",
-        ExternalDataService.DocumentParentKind.Invoice => "invoice",
         _ => "project",
     };
 
@@ -2248,7 +2206,6 @@ public static class ExternalProjectDataEndpoints
         ExternalDataService.DocumentParentKind.Matter => "matters",
         ExternalDataService.DocumentParentKind.WorkAssignment => "workassignments",
         ExternalDataService.DocumentParentKind.ServiceRequest => "servicerequests",
-        ExternalDataService.DocumentParentKind.Invoice => "invoices",
         _ => "projects",
     };
 
