@@ -33,10 +33,12 @@ public static class DecisionCommitEndpoints
             .WithSummary("Record one decision on a Signal: actions, Next steps, messages, then the one Decision Record")
             .WithDescription("200 with the record id, the steps and the Signals closed (a repeated review id returns its first "
                 + "outcome). 403 when the caller is unresolved or lacks a right an action needs; 404 when a Signal or its core "
-                + "record is not readable; 409 when a Signal is no longer open, the review is in progress, or a Signal is an invoice or "
+                + "record is not readable; 409 when a Signal is no longer open, the review is in progress, another review "
+                + "of the item is unfinished (review_unfinished: finish that one from the item), or a Signal is an invoice or "
                 + $"invoice-line item ({DecisionCommitReasons.DecidedInInvoiceReview}: decided in Invoice Review only); 422 when the review "
-                + "is invalid; 500 when a step failed (no record; the writes that landed are listed); 503 when the route cannot "
-                + "check the review id.")
+                + "is invalid; 500 when a step failed (no record; the writes that landed are listed); 409 with the same body when "
+                + "that stored failure is returned again (a repeat, a retry that cannot resume, or one that needs the send choice: "
+                + "sendChoiceRequired, answered by sendChoice on the same POST); 503 when the route cannot check the review id.")
             .Accepts<DecisionReview>("application/json")
             .Produces<DecisionCommitResult>(200)
             .ProducesProblem(StatusCodes.Status403Forbidden)
@@ -59,4 +61,8 @@ public static class DecisionCommitEndpoints
         var result = await decisions.CommitAsync(httpContext, signalId, review, ct);
         return DecisionResultMapper.ToHttp(result, httpContext);
     }
+
+    /// <summary>The route's answer for a commit result: <see cref="DecisionResultMapper.ToHttp(DecisionCommitResult, HttpContext)"/>,
+    /// the one mapper. Kept as a forward because ontology's commit tests (task 191) assert the route's answer through it; it adds nothing.</summary>
+    internal static IResult ToHttp(DecisionCommitResult result, HttpContext httpContext) => DecisionResultMapper.ToHttp(result, httpContext);
 }

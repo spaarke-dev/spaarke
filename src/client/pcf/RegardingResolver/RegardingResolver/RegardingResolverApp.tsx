@@ -283,6 +283,11 @@ import {
 import type { ITodoRegardingTargetCatalogEntry } from '@spaarke/ui-components/dist/services/TodoRegardingUpdateBuilder';
 import { OOB_MODAL_SIZES } from '@spaarke/ui-components/dist/utils/adapters/oobModalSizes';
 import { getXrm } from '@spaarke/ui-components/dist/utils/xrmContext';
+import {
+  readSameOriginRecordTarget,
+  resolveRegardingPairTable,
+  resolveRegardingRecordTarget,
+} from '@spaarke/ui-components/dist/utils/safeRegardingRecordUrl';
 
 /**
  * The shared library's `.d.ts` bundle exposes `PolymorphicPicker` as
@@ -631,6 +636,10 @@ async function handleRefreshInternal(): Promise<void> {
   }
 }
 
+/** The host row's stored regarding URL and the pair it is derived from, in one read. */
+const REGARDING_CLICK_SELECT =
+  '?$select=sprk_regardingrecordurl,sprk_regardingrecordid,_sprk_regardingrecordtype_value';
+
 /**
  * v1.3.6 (SRFR-043) — Click-time click-target resolution helper.
  *
@@ -679,27 +688,19 @@ async function resolveClickTarget(
   if (!webApi || typeof webApi.retrieveRecord !== 'function') return null;
 
   try {
-    const result = await webApi.retrieveRecord(hostEntity, hostRecordId, '?$select=sprk_regardingrecordurl');
-    const urlValue = result?.sprk_regardingrecordurl;
-    if (typeof urlValue === 'string' && urlValue.length > 0) {
-      try {
-        // URL constructor handles absolute URLs; the stored value is
-        // `https://<orgurl>/main.aspx?etn=<entity>&id=<guid>` per the shared
-        // buildRecordUrl helper (used by applyResolverFields on write).
-        const parsed = new URL(urlValue);
-        const etn = parsed.searchParams.get('etn');
-        const id = parsed.searchParams.get('id');
-        if (etn && id) {
-          const cleanId = cleanGuid(id);
-          if (cleanId.length > 0) {
-            return { entityName: etn, entityId: cleanId };
-          }
-        }
-      } catch {
-        // Malformed URL — return null. Warn is intentionally silent here to
-        // avoid noisy logs for admin-edited records; the caller warns on null.
-      }
-    }
+    const result = await webApi.retrieveRecord(hostEntity, hostRecordId, REGARDING_CLICK_SELECT);
+    const urlValue = typeof result?.sprk_regardingrecordurl === 'string' ? result.sprk_regardingrecordurl : null;
+    const pairId = cleanGuid(String(result?.sprk_regardingrecordid ?? ''));
+
+    // The stored URL is read only when it is a same-origin record URL, and it is used as is when it names the
+    // row's pair (or no pair is known). Any other stored value is never opened.
+    const fromUrl = readSameOriginRecordTarget(urlValue);
+    if (fromUrl && (!pairId || fromUrl.entityId === pairId)) return fromUrl;
+
+    // Otherwise the row's PAIR wins: the record id and the table of its record type. When the table cannot be read, an
+    // accepted same-origin URL is still used; with neither, nothing opens.
+    const pairTable = pairId ? await resolveRegardingPairTable(webApi, result?._sprk_regardingrecordtype_value) : null;
+    return resolveRegardingRecordTarget(urlValue, pairTable, pairId);
   } catch (err) {
     // Record deleted, no privilege, or network error. Warn (developer-visible)
     // but do not throw — the host form must never crash from a click.

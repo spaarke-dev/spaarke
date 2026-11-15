@@ -1,0 +1,108 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="020" project="reuse-governance-tightening-r1">
+  <metadata>
+    <title>Weekly jscpd duplication sweep in nightly-health</title>
+    <phase>3 Sweep and reviewer checks</phase>
+    <gate>blocked until 001 and 041</gate>
+    <status>completed</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Creates a new config file and modifies a CI workflow (phase 3, integration)</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>CI job modelled on the existing quality-alert matrix job with a complete spec</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>001, 041</deps>
+    <tags>ci-cd, config</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Add an observation-only weekly jscpd sweep to .github/workflows/nightly-health.yml with a shared .jscpd.json, so that duplication landing across top-level areas raises one quality alert within a week without ever failing a build (G3).</prompt>
+  <role>SPAARKE platform developer. Expert in GitHub Actions and the repo's quality-alert plumbing.</role>
+  <goal>A weekly job in nightly-health.yml runs jscpd (pinned, via npx, exit 0) using .jscpd.json, uploads the report, and calls quality-alert with check weekly/duplication-sweep: failing only for new clusters above the OQ-8 floor, ok otherwise.</goal>
+
+  <context>
+    <background>spec.md FR-06; design.md section 5.1. No baseline file: a cluster is new when one of its files appears in git log --since=7.days --name-only. OQ-8 floor: at least 100 tokens and at least 10 lines, in at least 2 files in different top-level areas. The full report keeps jscpd defaults (50 tokens, 5 lines).</background>
+    <relevant-files>
+      <file role="new">.jscpd.json</file>
+      <file role="modify">.github/workflows/nightly-health.yml</file>
+      <file role="modify">docs/procedures/ci-cd-workflow.md</file>
+      <file role="canonical-reference">.github/actions/quality-alert/action.yml</file>
+      <file role="canonical-reference">scripts/report-large-server-files.ps1</file>
+      <file role="canonical-reference">.claude/patterns/CAPABILITY-INDEX.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="001" status="done">Index rows named in the alert summary</dependency>
+      <dependency task="041" status="done">Sequences edits to nightly-health.yml and ci-cd-workflow.md</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">The job never fails the workflow on duplication: jscpd runs with --exitCode 0 and the decide step always succeeds (NFR-01).</constraint>
+    <constraint source="project">jscpd is pinned to an exact version and run via npx; no package.json change.</constraint>
+    <constraint source="project">.jscpd.json excludes **/node_modules/**, build output (bin, obj, dist, out), generated code, **/*.test.*, tests/**, and .claude/worktrees/agent-*/** (NFR-08).</constraint>
+    <constraint source="project">No baseline file; the 7-day trigger needs checkout fetch-depth covering 7 days.</constraint>
+    <constraint source="project">Alert wiring copies the existing quality-alert call at nightly-health.yml around line 1256 (check, status, summary, dry-run off the default branch). The summary names each new cluster's two paths and the most likely CAPABILITY-INDEX row, if any.</constraint>
+    <constraint source="project">Cadence: a second weekly schedule cron on nightly-health.yml, with the job gated on that schedule or workflow_dispatch; the daily jobs must not run on the weekly cron.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/reuse-governance-tightening-r1/design.md</file>
+      <file>.claude/skills/ci-cd/SKILL.md</file>
+      <file>docs/procedures/ci-cd-workflow.md</file>
+      <file>.claude/patterns/testing/god-class-ratchet.md</file>
+    </files>
+    <patterns>
+      <pattern name="Quality alert per check" location=".github/workflows/nightly-health.yml">Matrix job with a decide step and the quality-alert action.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Write .jscpd.json (formats typescript, tsx, csharp; path src; exclusions; reporters json and markdown).</step>
+    <step order="2">Add the weekly cron and the sweep job: checkout with history, run jscpd, compute new clusters (any file in the 7-day changed list) above the floor across different top-level areas, upload the report artifact, call quality-alert.</step>
+    <step order="3">Ensure existing daily jobs skip the weekly cron (if conditions on github.event.schedule).</step>
+    <step order="4">Add weekly/duplication-sweep to docs/procedures/ci-cd-workflow.md "Quality alerts" and the nightly-health row.</step>
+    <step order="5">Validate the YAML (actionlint if available), then run workflow_dispatch on the branch: alerts are dry-run off master; confirm the artifact and the decided status.</step>
+    <step order="6">Commit; this task's files go in the items 1-3 PR (task 080).</step>
+    <step order="7">Update TASK-INDEX.md: change this task's status cell to `✅ [done]`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the sweep run exceeds 20 minutes or jscpd cannot parse C# in this repo, STOP and report rather than narrowing scope silently.</trigger>
+    <trigger>If PR #909 (dependabot, nightly-health.yml) has merged and conflicts, merge master first; do not rewrite its change.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>nightly-health.yml quality-alert matrix (around line 1256) and scripts/report-large-server-files.ps1 (observation-only); no .jscpd.json and no jscpd use in .github/ (Glob and Grep, 2026-11-10).</existing>
+    <extension>Yes for the job: it is added inside nightly-health.yml reusing its alert step. No for .jscpd.json: it configures a tool the repo does not use yet.</extension>
+    <cost-of-doing-nothing>Parallel worktrees land the same code twice and nothing reports it; without the shared config, local and CI runs disagree on agent-worktree phantoms.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="terminal">gh workflow run nightly-health.yml --ref work/reuse-governance-tightening-r1</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">.jscpd.json</output>
+    <output type="code">.github/workflows/nightly-health.yml</output>
+    <output type="docs">docs/procedures/ci-cd-workflow.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">A workflow_dispatch run completes successfully, uploads the jscpd report artifact and decides a status for weekly/duplication-sweep.</criterion>
+    <criterion testable="true">A cluster whose files all changed more than 7 days ago does not make the status failing (verify from the decide step's log on the dispatch run).</criterion>
+    <criterion testable="true">Negative: duplication above the floor never fails the job or the workflow.</criterion>
+    <criterion testable="true">Negative: no baseline file and no package.json change in the diff.</criterion>
+    <criterion testable="true">.jscpd.json contains the .claude/worktrees/agent-* exclusion.</criterion>
+    <criterion testable="true">Daily jobs do not run on the weekly cron.</criterion>
+  </acceptance-criteria>
+
+  <notes>OQ-8: tune the floor only after four weekly reports.</notes>
+
+  <completion-notes>Completed 2026-11-12. .jscpd.json (src/, typescript/tsx/csharp, 50/5 defaults, exclusions incl. .claude/worktrees/agent-*/**, absolute paths, json+markdown, exitCode 0). nightly-health.yml: cron '0 7 * * 1' plus dispatch input duplication_sweep_only; all 8 daily root jobs gated off it, and flake-hunt/coverage-observation/report/alerts as always() AND the gate; new duplication-sweep job (fetch-depth 0, filter blob:none; npx jscpd@5.4.2 continue-on-error; bash decide step that always exits 0; upload-artifact jscpd-report; quality-alert weekly/duplication-sweep with the existing dry-run expression). Area = first 4 segments under src/client and src/server, else 3. Guards: no readable report = failing; un-stripped absolute paths = failing (a silent pass otherwise). ci-cd-workflow.md: diagram, two schedule tables, job row, dispatch input, alert row. .gitignore: jscpd-report/. PR #909 still open, not merged: no conflict step needed. Verification: dispatch run 43289750101 success in 38 s, every daily job skipped, artifact jscpd-report (705 KB), jscpd parsed C# (4030 clones in 4399 files, 3 formats), decide log: 524 pairs at the floor, 209 cross-area, 17 new (alert), 192 old (logged, not alerted: criterion 2), status failing, alert dry-run (no issue created). The 17 include the seeded nav-prop copy (ResolverWriteHandler.ts with ConnectionsWriteHandler.ts). Found in that run and fixed: the CAPABILITY-INDEX row matcher used a plain path prefix and tagged Api/PermissionsEndpoints.cs as row 5; now exact file, same folder, then folder cell (16dd4d487d), checked locally on 8 paths and on dispatch run 43293619731 (success). Local negative path: with no jq the decide step reported failing and exited 0. Known limit (K2): the row hint is path-based, so concept duplicates outside a canonical file read "no row"; the first master run will raise the alert for the 17 clusters (intended: they changed this week). No baseline file, no package.json change. Not a .claude/ change, so no CHANGELOG entry. actionlint not installed; YAML parsed with PyYAML and GitHub accepted both dispatches. rework: 1 (row matcher) task 020</completion-notes>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

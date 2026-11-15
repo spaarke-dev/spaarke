@@ -21,7 +21,7 @@ public sealed record DecisionToolError(string ReasonCode, string Message, int St
 /// <summary>
 /// What a failed commit left behind (D-17; spaarkeai-mcp-bff-api-r1 task 014, from ontology's review of task 017): the REST route's
 /// Failed extensions (<c>failedStep</c>, <c>landed</c>, <c>possiblyLanded</c>, <c>steps</c>, <c>recordMayExist</c>,
-/// <c>sentButNotRecorded</c>, <c>resumable</c>, <c>replayed</c>) with the same values, so an MCP host can tell the user what was done
+/// <c>sentButNotRecorded</c>, <c>resumable</c>, <c>sendChoiceRequired</c>, <c>replayed</c>) with the same values, so an MCP host can tell the user what was done
 /// and whether a retry resumes. Codes, record ids and flags only (ADR-015): a step's <see cref="DecisionCommitStep.Detail"/> is left
 /// out, as is the result's <see cref="DecisionCommitResult.Detail"/>.
 /// </summary>
@@ -32,6 +32,8 @@ public sealed record DecisionToolError(string ReasonCode, string Message, int St
 /// <param name="RecordMayExist">A step-5 failure without a clear answer: the Decision Record may exist.</param>
 /// <param name="SentButNotRecorded">A message went out and the record was not written.</param>
 /// <param name="Resumable">A retry with the same review id resumes after the steps that landed.</param>
+/// <param name="SendChoiceRequired">Ontology task 191 (D-223): the inquiry email may have been sent, so a retry resumes only with the
+/// person's <c>sendChoice</c> (<c>send-again</c> or <c>record-without-sending</c>).</param>
 /// <param name="Replayed">This is the stored first outcome of a repeated review id.</param>
 public sealed record DecisionToolPartial(
     int? FailedStep,
@@ -41,6 +43,7 @@ public sealed record DecisionToolPartial(
     bool RecordMayExist,
     bool SentButNotRecorded,
     bool Resumable,
+    bool SendChoiceRequired,
     bool Replayed);
 
 /// <summary>One executed step of a failed commit for a tool: <see cref="DecisionCommitStep"/> without its <c>Detail</c> text.</summary>
@@ -206,8 +209,9 @@ public static partial class DecisionResultMapper
                     CallerUnresolvedProblem.ReasonCode, httpContext, result: null);
         }
 
-        var status = CommitStatusCode(result.Status);
-        var title = status switch
+        var status = CommitStatusCode(result);
+        // Ontology task 191: a Failed result keeps its title when it is answered 409 (a stored failure returned again).
+        var title = result.Status == DecisionCommitStatus.Failed ? "The decision was not recorded" : status switch
         {
             StatusCodes.Status403Forbidden => "Forbidden",
             StatusCodes.Status409Conflict => "Conflict",
@@ -303,11 +307,13 @@ public static partial class DecisionResultMapper
     // ── Shared ──────────────────────────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>The ONE status switch of a commit result that is not Recorded, NotFound or CallerUnresolved; REST and MCP both use it.</summary>
-    private static int CommitStatusCode(DecisionCommitStatus status) =>
-        status switch
+    private static int CommitStatusCode(DecisionCommitResult result) =>
+        result.Status switch
         {
             DecisionCommitStatus.Forbidden => StatusCodes.Status403Forbidden,
             DecisionCommitStatus.Conflict or DecisionCommitStatus.InProgress => StatusCodes.Status409Conflict,
+            // Ontology task 191: a stored failure returned again is a known state, not a server fault. Its body is the first failure's.
+            DecisionCommitStatus.Failed when result.Replayed => StatusCodes.Status409Conflict,
             DecisionCommitStatus.Refused => StatusCodes.Status422UnprocessableEntity,
             DecisionCommitStatus.Unavailable => StatusCodes.Status503ServiceUnavailable,
             _ => StatusCodes.Status500InternalServerError,
@@ -337,7 +343,7 @@ public static partial class DecisionResultMapper
     {
         var error = ToToolError(
             string.IsNullOrWhiteSpace(result.ReasonCode) ? FallbackReasonCode(result.Status) : result.ReasonCode,
-            CommitStatusCode(result.Status));
+            CommitStatusCode(result));
         return result.Status == DecisionCommitStatus.Failed ? error with { Partial = PartialOf(result) } : error;
     }
 
@@ -351,6 +357,7 @@ public static partial class DecisionResultMapper
             result.RecordMayExist,
             result.SentButNotRecorded,
             result.Resumable,
+            result.SendChoiceRequired,
             result.Replayed);
 
     /// <summary>The capability's no-caller commit answer (<see cref="DecisionCapability.UserContextRequiredCommitResult"/>), by reference
@@ -396,6 +403,7 @@ public static partial class DecisionResultMapper
                 extensions["recordMayExist"] = result.RecordMayExist;
                 extensions["sentButNotRecorded"] = result.SentButNotRecorded;
                 extensions["resumable"] = result.Resumable;
+                extensions["sendChoiceRequired"] = result.SendChoiceRequired;
                 extensions["replayed"] = result.Replayed;
             }
         }
@@ -482,6 +490,11 @@ public static partial class DecisionResultMapper
             "The decision could not be recorded right now; nothing was done. Try again shortly with the same review id.",
         [DecisionCommitReasons.ReviewChanged] =
             "This review id was already used for a different decision. Send a new decision with a new review id.",
+        [DecisionCommitReasons.SendChoiceRequired] =
+            "The inquiry email may already have been sent; nothing was done. Have the user check Sent Items, then send the same review again with retry and a sendChoice of send-again or record-without-sending.",
+        [DecisionCommitReasons.ReviewUnfinished] =
+            // One text, true whoever holds the unfinished review (the REST body names the holder; this message is shown to the person as is).
+            "Another review of this item is unfinished; nothing was done. If you started this decision, close this and open the item again to finish it; otherwise ask the person who started it to finish it first.",
         [DecisionCommitReasons.NotResumable] =
             "This failed decision cannot be resumed. Check the item in Spaarke to see what was done.",
         [DecisionCommitReasons.NotAuthorized] =

@@ -57,6 +57,11 @@ public sealed class InvoiceSubmissionByEmailContractTests : IAsyncLifetime
     private Exception? _emlQueryFault;
     private Exception? _attemptQueryFault;
     private Exception? _personFault;
+
+    /// <summary>Task 095e (EB-D-226): the firm record's name the route reads for <c>firmName</c> (null: a row with no name); the double answers it whatever the firm's state.</summary>
+    private string? _firmName = "Hartwell and Co LLP";
+    private Exception? _firmFault;
+    private readonly List<string[]> _organizationReads = new();
     private WebApplication _app = null!;
     private HttpClient _client = null!;
 
@@ -109,6 +114,15 @@ public sealed class InvoiceSubmissionByEmailContractTests : IAsyncLifetime
                 return _people.TryGetValue(id, out var name)
                     ? Task.FromResult(new Entity("systemuser", id) { ["fullname"] = name })
                     : Task.FromException<Entity>(W.NotFound());
+            });
+
+        _entities.Setup(e => e.RetrieveAsync("sprk_organization", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .Returns((string _, Guid id, string[] columns, CancellationToken _) =>
+            {
+                _organizationReads.Add(columns);
+                return _firmFault is { } fault
+                    ? Task.FromException<Entity>(fault)
+                    : Task.FromResult(new Entity("sprk_organization", id) { ["sprk_organizationname"] = _firmName });
             });
 
         var builder = WebApplication.CreateBuilder(new WebApplicationOptions { EnvironmentName = "Testing" });
@@ -552,7 +566,7 @@ public sealed class InvoiceSubmissionByEmailContractTests : IAsyncLifetime
         var text = await response.Content.ReadAsStringAsync();
         var names = (await BodyAsync(response)).EnumerateObject().Select(p => p.Name).ToList();
         names.Should().Contain(viewNames, "the by-email body is the status body plus the new fields");
-        names.Should().Contain(["submittedOn", "submittedBy", "isCorrection", "invoiceId"]);
+        names.Should().Contain(["submittedOn", "submittedBy", "isCorrection", "invoiceId", "firmName"]);
         text.ToLowerInvariant().Should().NotContain("sourceemail").And.NotContain(Eml.ToString());
     }
 
@@ -859,6 +873,59 @@ public sealed class InvoiceSubmissionByEmailContractTests : IAsyncLifetime
 
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         (await BodyAsync(response)).GetProperty("submittedBy").ValueKind.Should().Be(JsonValueKind.Null);
+    }
+
+    [Fact(DisplayName = "095e (EB-D-226, seed-proof): the answer names the firm: firmName is the firm record's name beside firmId, read once, the name column only (so an inactive firm is named too)")]
+    public async Task FirmName_IsTheFirmRecordsName()
+    {
+        SeedEml();
+        SeedAttempt("1001.1", InvoiceSubmissionStatus.Accepted);
+
+        var response = await GetAsync();
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var body = await BodyAsync(response);
+        body.GetProperty("firmId").GetGuid().Should().Be(W.FirmId);
+        body.GetProperty("firmName").GetString().Should().Be("Hartwell and Co LLP");
+        _organizationReads.Should().ContainSingle().Which.Should().Equal("sprk_organizationname");
+    }
+
+    [Fact(DisplayName = "095e (must-not-fire): an attempt that names no firm (held for a firm, from before EB-D-223): firmId and firmName are null, and no firm is read")]
+    public async Task NoFirm_FirmNameIsNull_AndNoFirmIsRead()
+    {
+        SeedEml();
+        SeedAttempt("1001.1", InvoiceSubmissionStatus.Accepted).Attributes.Remove(TrackingNumberAllocator.FirmColumn);
+
+        var response = await GetAsync();
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var body = await BodyAsync(response);
+        body.GetProperty("firmId").ValueKind.Should().Be(JsonValueKind.Null);
+        body.GetProperty("firmName").ValueKind.Should().Be(JsonValueKind.Null);
+        _organizationReads.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "095e: a firm record with no name: firmName null, the rest of the answer intact (never the id)")]
+    public async Task FirmWithNoName_IsNull_NotAFault()
+    {
+        SeedEml();
+        SeedAttempt("1001.1", InvoiceSubmissionStatus.Accepted);
+        _firmName = null;
+
+        var response = await GetAsync();
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        (await BodyAsync(response)).GetProperty("firmName").ValueKind.Should().Be(JsonValueKind.Null);
+    }
+
+    [Fact(DisplayName = "095e (seed-proof, fail closed): a fault reading the firm's name is 503, never an answer without it")]
+    public async Task FirmNameFault_Is503()
+    {
+        SeedEml();
+        SeedAttempt("1001.1", InvoiceSubmissionStatus.Accepted);
+        _firmFault = new TimeoutException();
+
+        await Is503Async(await GetAsync());
     }
 
     [Fact(DisplayName = "095a: with Ebilling:Enabled false the route answers 503 ebilling.disabled")]

@@ -21,7 +21,7 @@ last-reviewed: 2026-11-03
 
 Deploy Spaarke Office Add-ins (Outlook, Word) to Azure Static Web App via SWA CLI. This is a niche workflow — the Office Add-ins team iterates on add-in changes (taskpane UI, manifest) and needs fast dev-mode deploys; production deploys go through GitHub Actions.
 
-**Separation of concerns**: This skill is for Office Add-in deploys ONLY. For other Azure work, see `azure-deploy` (Infrastructure + Key Vault), `bff-deploy` (BFF API), `code-page-deploy` (React Code Pages), `pcf-deploy` (PCF controls), `power-page-deploy` (Power Pages Code Site).
+**Separation of concerns**: This skill is for Office Add-in deploys ONLY. For other Azure work, see `azure-deploy` (Infrastructure + Key Vault), `bff-deploy` (BFF API), `code-page-deploy` (React Code Pages), `pcf-deploy` (PCF controls); the external SPA deploys through `.github/workflows/deploy-external-spa.yml`.
 
 ---
 
@@ -186,7 +186,7 @@ There are two manifest eras (task 078, 2026-09-30) — upload the one that chang
 - `bff-deploy` — BFF API deployment
 - `code-page-deploy` — React Code Pages
 - `pcf-deploy` — PCF controls
-- `power-page-deploy` — Power Pages Code Sites
+- `.github/workflows/deploy-external-spa.yml` — the external SPA (Azure Static Web Apps)
 
 ---
 

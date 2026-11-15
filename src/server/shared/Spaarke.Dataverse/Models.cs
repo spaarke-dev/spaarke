@@ -979,6 +979,16 @@ public sealed record ColumnMetadata(
     IReadOnlyList<int>? OptionValues = null);
 
 /// <summary>
+/// A one-to-many relationship of a table along which an Assign (an <c>ownerid</c> write) cascades to the child rows
+/// (<see cref="IGenericEntityService.GetAssignCascadesAsync"/>).
+/// </summary>
+/// <param name="SchemaName">The relationship's schema name.</param>
+/// <param name="ReferencingEntity">The child table (logical name).</param>
+/// <param name="Assign">The relationship's Assign cascade as its metadata states it (<c>Cascade</c>, <c>Active</c>,
+/// <c>UserOwned</c>, ...); <c>null</c> when the metadata does not state it.</param>
+public sealed record AssignCascadeRelationship(string SchemaName, string ReferencingEntity, string? Assign);
+
+/// <summary>
 /// Analysis entity model (sprk_analysis)
 /// </summary>
 public class AnalysisEntity
@@ -1387,6 +1397,28 @@ public static class EventStatusCode
 
         return "Unknown";
     }
+}
+
+/// <summary>
+/// The <c>sprk_eventtype_ref</c> rows the BFF writes or compares by id: reference data shared across environments.
+/// </summary>
+/// <remarks>
+/// <para>ONE definition for Signals' <c>assign-task</c> (ontology task 159, D-178) and the external event create and lists
+/// (spaarke-SPA-external-access-platform-r4 task 008; uac-r2 review 2026-11-13, condition B), so the two cannot name
+/// different rows. Verified on spaarkedev1 2026-10-22.</para>
+/// <para>Other private copies of the same id remain in the AI task node, the Daily Briefing collector and the workspace
+/// portfolio service; they are not part of this definition yet.</para>
+/// </remarks>
+public static class EventTypeRef
+{
+    /// <summary>The entity SET name of <c>sprk_eventtype_ref</c> (live metadata "Collection Name").</summary>
+    public const string EntitySet = "sprk_eventtype_refs";
+
+    /// <summary>The Task row of <c>sprk_eventtype_ref</c>.</summary>
+    public const string TaskId = "124f5fc9-98ff-f011-8406-7c1e525abd8b";
+
+    /// <summary>The Task row id as a <see cref="Guid"/>.</summary>
+    public static readonly Guid Task = new(TaskId);
 }
 
 /// <summary>

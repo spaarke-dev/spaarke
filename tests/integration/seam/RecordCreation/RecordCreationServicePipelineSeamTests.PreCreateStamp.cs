@@ -5,6 +5,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Xrm.Sdk;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
+using Sprk.Bff.Api.Services.Access;
 using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.RecordCreation;
 using Xunit;
@@ -303,11 +304,11 @@ public sealed partial class RecordCreationServicePipelineSeamTests
     }
 
     // =====================================================================================
-    // 4. A document gets no pre-create stamp (#2169)
+    // 4. A document gets no pre-create stamp (#2169); its Access Permission is decided in the create (task 022b)
     // =====================================================================================
 
     [Fact]
-    public async Task CreateAsync_ADocumentUnderARestrictedMatter_GetsNoPreCreateStampOrAccessPermission()
+    public async Task CreateAsync_ADocumentUnderARestrictedMatter_GetsNoPreCreateStamp_ButIsCreatedRestrictedWithItsRecord()
     {
         _stamps.Set("sprk_matter", OrdinaryMatter, InheritedAccessPermission.Column, new OptionSetValue(InheritedAccessPermission.Restricted));
 
@@ -317,9 +318,11 @@ public sealed partial class RecordCreationServicePipelineSeamTests
 
         outcome.Succeeded.Should().BeTrue(outcome.Refusal?.Detail);
         var fields = _creates.Should().ContainSingle().Subject.Fields;
-        fields.Should().NotContainKey(InheritedAccessPermission.Column, "a document's Access Permission is post-create only (#2169)");
-        fields.Should().NotContainKey(MatterStampBind);
-        outcome.Steps.Single(s => s.Step == RecordCreationStep.StampAndInheritance).State.Should().Be(RecordCreationStepState.Skipped);
+        fields.Should().ContainKey(InheritedAccessPermission.Column).WhoseValue.Should().Be(InheritedAccessPermission.Restricted,
+            "task 022b: a document's Access Permission is decided in the create by the document decision");
+        fields.Should().ContainKey(AccessInheritance.Column, "its record is written in the same create");
+        fields.Should().NotContainKey(MatterStampBind, "a document's I-1 stamp is post-create only (#2169)");
+        outcome.Steps.Single(s => s.Step == RecordCreationStep.StampAndInheritance).State.Should().Be(RecordCreationStepState.Ran);
     }
 
     /// <summary>A bind as the create body holds it: the caller's own as a JSON string, a server-added one as a string.</summary>

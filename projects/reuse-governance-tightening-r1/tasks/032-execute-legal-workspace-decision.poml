@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="032" project="reuse-governance-tightening-r1">
+  <metadata>
+    <title>Execute the owner-approved decision for @spaarke/legal-workspace</title>
+    <phase>4 Package reviews</phase>
+    <gate>blocked until 031</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .ts/.tsx code in src/client/shared and src/solutions/SpaarkeAi, and tests</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Single-consumer source-only re-export boundary with a written migration outline from task 030</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>touches .claude/ (ADR-012 census) and shares src/solutions/SpaarkeAi/package.json with 031 and 033</parallel-reason>
+    <deps>031</deps>
+    <tags>typescript, refactoring, migration, testing</tags>
+    <estimated-effort>2-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Carry out the decision recorded for @spaarke/legal-workspace in notes/package-reviews.md, keeping the ADR-012 census table and SharedPackageCensusTests in agreement in the same change.</prompt>
+  <role>SPAARKE platform developer. Expert in the shared TypeScript packages, Vite code pages and the ADR-012 census.</role>
+  <goal>The legal-workspace action is complete, the SpaarkeAi build and tests pass, and SharedPackageCensusTests passes.</goal>
+
+  <context>
+    <background>spec.md FR-09. Consumer (verified 2026-11-10): src/solutions/SpaarkeAi/package.json line 49. The package is a source-only re-export boundary for the LegalWorkspace section registry created by spaarke-dataset-grid-framework-r2 FR-10; the review decides whether that boundary still needs a package.</background>
+    <relevant-files>
+      <file role="modify">src/client/shared/Spaarke.LegalWorkspace</file>
+      <file role="modify">src/solutions/SpaarkeAi/package.json</file>
+      <file role="modify">src/solutions/SpaarkeAi/vite.config.ts</file>
+      <file role="modify">.claude/adr/ADR-012-shared-components.md</file>
+      <file role="modify">tests/Spaarke.ArchTests/SharedPackageCensusTests.cs</file>
+      <file role="canonical-reference">projects/reuse-governance-tightening-r1/notes/package-reviews.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="031" status="pending">Serialises edits to SpaarkeAi package.json and the census</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-012">The census row and the SharedPackageCensusTests entry change in the same commit as the package change; a sanction adds an ADR-012 amendment naming the package and its contract.</constraint>
+    <constraint source="ADR-012">Moved code keeps its tests, uses no ComponentFramework.* or direct Xrm.WebApi, and exports its types.</constraint>
+    <constraint source="ADR-038">Tests move with the code; cover the existing contract only, or justify extras in one line in notes.</constraint>
+    <constraint source="project">Run conflict-check before editing src/solutions/SpaarkeAi; check whether spaarke-dataset-grid-framework-r2 still has open work on this boundary.</constraint>
+    <constraint source="project">Do not touch any other grandfathered package in this task.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>.claude/patterns/testing/mocking-patterns.md</file>
+      <file>.claude/skills/conflict-check/SKILL.md</file>
+      <file>projects/reuse-governance-tightening-r1/notes/package-reviews.md</file>
+    </files>
+    <patterns>
+      <pattern name="Census in one PR" location="tests/Spaarke.ArchTests/SharedPackageCensusTests.cs">Folder list, ADR table and test agree.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Read the legal-workspace section and owner decision; run conflict-check.</step>
+    <step order="2">Apply the decision, updating imports, aliases, package.json and build config in SpaarkeAi.</step>
+    <step order="3">Update the ADR-012 census row and SharedPackageCensusTests in the same change.</step>
+    <step order="4">Build SpaarkeAi and run its tests; run the SharedPackageCensus ArchTests.</step>
+    <step order="5">Update TASK-INDEX.md: change this task's status cell to `✅ [done]`.</step>
+    <step order="6">Record deviations and defects found in projects/reuse-governance-tightening-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If another active project depends on the package boundary (FR-10 of dataset-grid-framework-r2), STOP and ask the owner before removing it.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="npm">npm install --legacy-peer-deps --no-audit --no-fund; npm run build; npm test</tool>
+    <tool name="dotnet">dotnet test tests/Spaarke.ArchTests --filter SharedPackageCensus</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/solutions/SpaarkeAi/package.json</output>
+    <output type="docs">.claude/adr/ADR-012-shared-components.md</output>
+    <output type="test">tests/Spaarke.ArchTests/SharedPackageCensusTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The owner-approved action for legal-workspace is fully applied.</criterion>
+    <criterion testable="true">SpaarkeAi builds and its existing tests pass.</criterion>
+    <criterion testable="true">SharedPackageCensusTests passes; census row and test entry match.</criterion>
+    <criterion testable="true">Negative: after consolidate/retire, Grep finds no @spaarke/legal-workspace reference in src/.</criterion>
+    <criterion testable="true">Cover the existing contract only; extras justified in one line in notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Item 4 PR(s) are separate from the items 1-3 PR (NFR-05).</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

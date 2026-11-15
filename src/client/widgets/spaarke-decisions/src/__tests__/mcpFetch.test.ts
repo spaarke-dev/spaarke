@@ -183,7 +183,7 @@ describe('createMcpFetch: success', () => {
     });
   });
 
-  it('applies the route\'s `result` selector: the plan route returns structuredContent.plan, the suppression route .suppression', async () => {
+  it("applies the route's `result` selector: the plan route returns structuredContent.plan, the suppression route .suppression", async () => {
     const plan = harness(planResult());
     const suppression = harness(planResult());
 
@@ -436,7 +436,8 @@ describe('createMcpFetch with the shared Decision wizard service (the real consu
     const { fetch } = harness(planResult());
     const service = createDecisionWizardService({ fetch, baseUrl: 'https://spaarke.invalid' });
 
-    expect(await service.getPlan('abc')).toEqual(PLAN);
+    // Ontology task 191: the shared service adds the plan's `unfinished` review (null when the plan carries none).
+    expect(await service.getPlan('abc')).toEqual({ ...PLAN, unfinished: null });
     expect(await service.getSuppression('abc')).toEqual(SUPPRESSION);
   });
 
@@ -497,6 +498,30 @@ describe('createMcpFetch with the shared Decision wizard service (the real consu
     expect(failureMessage(failure)).toBe('Invoice items are decided in Invoice Review. Nothing was recorded.');
   });
 
+  it('a stored failure returned again (409, send choice required) reads as on REST: the Failed title, the send-choice message, the review kept', async () => {
+    const stored = failedCommit();
+    const content = stored.structuredContent as {
+      reasonCode: string;
+      status: number;
+      partial: Record<string, unknown>;
+    };
+    content.reasonCode = 'ontology.decision.send_choice_required';
+    content.status = 409;
+    content.partial.sendChoiceRequired = true;
+    content.partial.replayed = true;
+
+    const failure = await commitFailure(stored);
+
+    expect(failure.httpStatus).toBe(409);
+    expect(failure.title).toBe('The decision was not recorded');
+    expect(failure.reasonCode).toBe('ontology.decision.send_choice_required');
+    expect(failure.sendChoiceRequired).toBe(true);
+    expect(failure.replayed).toBe(true);
+    expect(failureHeading(failure)).toBe('The decision was not recorded');
+    expect(failureMessage(failure)).toMatch(/Check Sent Items/);
+    expect(failureKeepsReview(failure)).toBe(true);
+  });
+
   it('a rejected host call is the status-0 "may not have been recorded" failure, and keeps the review', async () => {
     const failure = await commitFailure(new Error('The host is not connected.'));
 
@@ -520,7 +545,9 @@ describe('createMcpFetch with the shared Decision wizard service (the real consu
   });
 
   it('a failed plan read is a request error carrying the status and the tool message', async () => {
-    const { fetch } = harness(refusal('sdap.access.deny.record_unavailable', 'The requested record was not found.', 404));
+    const { fetch } = harness(
+      refusal('sdap.access.deny.record_unavailable', 'The requested record was not found.', 404)
+    );
     const service = createDecisionWizardService({ fetch, baseUrl: 'https://spaarke.invalid' });
 
     const failure = await service.getPlan('abc').then(
@@ -551,7 +578,9 @@ describe('createMcpFetch with the shared Worklist service', () => {
   });
 
   it("surfaces a tool error as the service's own error, with the tool's message and the Response status", async () => {
-    const { fetch } = harness(refusal('ontology.worklist.unavailable', 'The worklist could not be read. Try again.', 503));
+    const { fetch } = harness(
+      refusal('ontology.worklist.unavailable', 'The worklist could not be read. Try again.', 503)
+    );
 
     const failure = await createWorklistService({ fetch, baseUrl: '' })
       .read('lanes')

@@ -143,15 +143,28 @@ internal sealed class RestrictedFilingShareBar
     internal async Task<(IReadOnlyList<Guid> Eligible, bool Complete)> EligibleForGrantAsync(
         Guid communicationId, IReadOnlyList<Guid> candidates, bool excludeDisabled, CancellationToken ct)
     {
+        var answer = await EligibilityForGrantAsync(communicationId, candidates, excludeDisabled, ct).ConfigureAwait(false);
+        return (answer.Eligible, answer.Complete);
+    }
+
+    /// <summary>
+    /// uac-r2 task 197b: what <see cref="EligibleForGrantAsync(Guid, IReadOnlyList{Guid}, bool, CancellationToken)"/> decides, plus
+    /// which candidates the SAME user read returned with a stored <c>sprk_isexternal = true</c> (<see cref="GrantEligibility.FlaggedExternal"/>,
+    /// eligible or not: a barred or disabled one too). A user the read did not return, or a read that faulted, is in neither set: it
+    /// is never granted (fail closed) and never treated as flagged for a revoke (round 70: remove only on a positive answer).
+    /// </summary>
+    internal async Task<GrantEligibility> EligibilityForGrantAsync(
+        Guid communicationId, IReadOnlyList<Guid> candidates, bool excludeDisabled, CancellationToken ct)
+    {
         var ids = candidates.Where(id => id != Guid.Empty).Distinct().ToList();
         if (ids.Count == 0)
-            return ([], true);
+            return GrantEligibility.Nobody(complete: true);
 
         if (_webApi is null)
         {
             _logger.LogWarning("[RESTRICTED-FILING] {Table} {Id}: no user reader is available, so no user is granted.",
                 CommunicationTable, communicationId);
-            return ([], false);
+            return GrantEligibility.Nobody(complete: false);
         }
 
         Dictionary<Guid, InternalShareEndpoints.SystemUserRow> users;
@@ -163,9 +176,10 @@ internal sealed class RestrictedFilingShareBar
         {
             _logger.LogError(ex, "[RESTRICTED-FILING] {Table} {Id}: the users to be granted could not be read; no user is granted.",
                 CommunicationTable, communicationId);
-            return ([], false);
+            return GrantEligibility.Nobody(complete: false);
         }
 
+        var flagged = ids.Where(id => users.TryGetValue(id, out var user) && user.IsExternal == true).ToHashSet();
         var complete = true;
         foreach (var unread in ids.Where(id => !users.ContainsKey(id)))
         {
@@ -223,7 +237,16 @@ internal sealed class RestrictedFilingShareBar
                 "{Restricted}).", CommunicationTable, communicationId, read.Count - eligible.Count, restricted);
         }
 
-        return (eligible, complete);
+        return new GrantEligibility(eligible, flagged, complete);
+    }
+
+    /// <summary>uac-r2 task 197b: the answer of <see cref="EligibilityForGrantAsync"/>.</summary>
+    /// <param name="Eligible">The candidates who may be granted.</param>
+    /// <param name="FlaggedExternal">The candidates the user read returned with a stored <c>sprk_isexternal = true</c>.</param>
+    /// <param name="Complete">Nothing was left undecided (<c>false</c> = retry).</param>
+    internal sealed record GrantEligibility(IReadOnlyList<Guid> Eligible, IReadOnlySet<Guid> FlaggedExternal, bool Complete)
+    {
+        internal static GrantEligibility Nobody(bool complete) => new([], new HashSet<Guid>(), complete);
     }
 
     /// <summary>

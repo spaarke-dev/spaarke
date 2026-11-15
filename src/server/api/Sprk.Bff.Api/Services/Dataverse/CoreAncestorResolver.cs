@@ -1154,6 +1154,157 @@ public sealed class CoreAncestorResolver
     }
 
     /// <summary>
+    /// field-mapping-server-write-path-r1 task 022b: what the parents named in <paramref name="fields"/> give a NEW row of
+    /// <paramref name="hostEntityLogicalName"/> (To Do, Event, Communication), with the three states kept apart:
+    /// <see cref="ParentTopsStatus.NoParent"/> (no parent), <see cref="ParentTopsStatus.Found"/> with the value (every parent
+    /// read), or <see cref="ParentTopsStatus.Undetermined"/> (a parent that cannot be read, a fault, a host without the column).
+    /// The same answer <see cref="ResolveInheritedAccessPermissionAsync"/> collapses to a value; a document gets none here
+    /// (the fence: <see cref="DecideNewDocumentAccessPermissionAsync"/> decides it). Never throws (cancellation aside).
+    /// </summary>
+    internal async Task<InheritedAccessPermission.Answer> ResolveNewRowInheritedAccessPermissionAsync(
+        string hostEntityLogicalName, IReadOnlyDictionary<string, object> fields, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(fields);
+        var parents = ParentLineage.ParentsIn(hostEntityLogicalName, column =>
+            fields.TryGetValue(column, out var value) ? value as EntityReference : null);
+        return await InheritedAccessPermissionAnswerAsync(hostEntityLogicalName, parents, null, Guid.Empty, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>Task 022b: a new document's Access Permission as <see cref="DecideNewDocumentAccessPermissionAsync"/> decided it.</summary>
+    /// <param name="Target">The value the row holds once created, or <see langword="null"/> when it could not be decided.</param>
+    /// <param name="Write">The value the create writes, or <see langword="null"/> when it writes none (the row keeps what its
+    /// payload carries).</param>
+    /// <param name="Record">The own-narrowing record (<see cref="AccessInheritance.Column"/>) the create writes with it, or
+    /// <see langword="null"/>.</param>
+    internal sealed record NewDocumentAccessPermission(int? Target, int? Write, string? Record)
+    {
+        /// <summary>Nothing decided: nothing is written in the create.</summary>
+        internal static NewDocumentAccessPermission Undecided { get; } = new(null, null, null);
+    }
+
+    /// <summary>
+    /// field-mapping-server-write-path-r1 task 022b: <see cref="RefreshDocumentAccessPermissionAsync"/> for a document that does
+    /// not exist yet — its Access Permission and its record decided for the create payload itself, by the SAME decision
+    /// (<see cref="InheritedAccessPermission.DecideDocument"/>, or <see cref="InheritedAccessPermission.DecideDocumentRaiseOnly"/>
+    /// where this environment has no record column) from the parents <paramref name="fields"/> names
+    /// (<see cref="InheritedAccessPermission.ResolveAsync"/>). The value its payload carries is the stored value
+    /// (<paramref name="own"/>); there is no record yet. The value and its record are returned together, for one create.
+    /// Fail closed, as the refresh: parents that cannot be decided, a stored level that is not known, a host without the
+    /// column or a fault decide nothing (<see cref="NewDocumentAccessPermission.Target"/> is <see langword="null"/>), and
+    /// nothing is written. Never throws (cancellation aside).
+    /// </summary>
+    internal async Task<NewDocumentAccessPermission> DecideNewDocumentAccessPermissionAsync(
+        string table, IReadOnlyDictionary<string, object> fields, int? own, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(fields);
+        if (!InheritedAccessPermission.RecordsOwnNarrowing(table))
+            throw new ArgumentException($"{table} does not record its own narrowing.", nameof(table));
+
+        try
+        {
+            var columns = await _columnProbe(table, ct).ConfigureAwait(false);
+            if (!columns.Contains(InheritedAccessPermission.Column))
+            {
+                _logger.LogWarning(
+                    "{Host} has no {Column} column in this environment; its Access Permission is not written in the create.",
+                    table, InheritedAccessPermission.Column);
+                return NewDocumentAccessPermission.Undecided;
+            }
+
+            var parents = ParentLineage.ParentsIn(table, column =>
+                fields.TryGetValue(column, out var value) ? value as EntityReference : null);
+            var walk = new ParentLineageWalk(_entityService, _columnProbe, [InheritedAccessPermission.Column]);
+            var decision = await DecideDocumentAsync(
+                    table, NewDocumentForLog, await DocumentRecordColumnAsync(table, NewDocumentForLog, ct).ConfigureAwait(false),
+                    walk, parents, own, storedRecord: null, self: null, ct)
+                .ConfigureAwait(false);
+            return decision is null
+                ? NewDocumentAccessPermission.Undecided
+                : new NewDocumentAccessPermission(
+                    decision.Target, decision.WriteValue ? decision.Target : null, decision.Record?.Serialize());
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogWarning(ex,
+                "[INHERITED-ACCESS-PERMISSION] A new {Table}'s Access Permission could not be decided; nothing is written in the " +
+                "create, and the refresh after it and the reconciliation job look at it again.", table);
+            return NewDocumentAccessPermission.Undecided;
+        }
+    }
+
+    /// <summary>What the shared document steps log in place of a record id for a document that does not exist yet.</summary>
+    private const string NewDocumentForLog = "(new, in its create)";
+
+    /// <summary>
+    /// Task 022b (review F2): whether this environment has the document's own-narrowing record column — the one probe the
+    /// create's decision and the refresh share. Fix round C (K2): without it the own narrowing cannot be known, so the value
+    /// is only raised to what the parents give, and no record is read or written.
+    /// </summary>
+    private async Task<bool> DocumentRecordColumnAsync(string table, object recordForLog, CancellationToken ct)
+    {
+        var recordColumn = (await _columnProbe(table, ct).ConfigureAwait(false)).Contains(AccessInheritance.Column);
+        if (!recordColumn)
+        {
+            _logger.LogWarning(
+                "[INHERITED-ACCESS-PERMISSION] {Table} {Id}: this environment has no {Column} (the own-narrowing record), so " +
+                "its value is only raised to what its parents give, never lowered, and no record is written.",
+                table, recordForLog, AccessInheritance.Column);
+        }
+
+        return recordColumn;
+    }
+
+    /// <summary>
+    /// Task 022b (review F2): the document decision the create (<see cref="DecideNewDocumentAccessPermissionAsync"/>) and the
+    /// refresh (<see cref="RefreshDocumentAccessPermissionAsync"/>) share — what the parents give
+    /// (<see cref="InheritedAccessPermission.ResolveAsync"/>, a parentless row none), then
+    /// <see cref="InheritedAccessPermission.DecideDocument"/>, or <see cref="InheritedAccessPermission.DecideDocumentRaiseOnly"/>
+    /// without the record column. <see langword="null"/>: nothing is written (fail closed) — parents that cannot be decided,
+    /// or an undecided row whose value would not be raised. An undecided row whose value is raised is returned (its record is
+    /// never written). Every reason is logged.
+    /// </summary>
+    private async Task<InheritedAccessPermission.DocumentDecision?> DecideDocumentAsync(
+        string table, object recordForLog, bool recordColumn, ParentLineageWalk walk, IReadOnlyList<(string Table, Guid Id)> parents,
+        int? stored, string? storedRecord, (string Table, Guid Id)? self, CancellationToken ct)
+    {
+        int? inherited = null;
+        if (parents.Count > 0)
+        {
+            var answer = await InheritedAccessPermission.ResolveAsync(walk, parents, ct, self).ConfigureAwait(false);
+            if (answer.Status != ParentTopsStatus.Found || answer.Value is null)
+            {
+                _logger.LogWarning(
+                    "[INHERITED-ACCESS-PERMISSION] {Table} {Id}: its inherited Access Permission cannot be decided ({Reason}); " +
+                    "nothing is written to it, and the secure-child reconciliation job looks at it again.",
+                    table, recordForLog, answer.Reason);
+                return null;
+            }
+
+            inherited = answer.Value;
+        }
+
+        var decision = recordColumn
+            ? InheritedAccessPermission.DecideDocument(stored, storedRecord, parents, inherited)
+            : InheritedAccessPermission.DecideDocumentRaiseOnly(stored, parents, inherited, undecided: null);
+        if (decision.Undetermined is { } why)
+        {
+            if (!decision.WriteValue)
+            {
+                _logger.LogWarning(
+                    "[INHERITED-ACCESS-PERMISSION] {Table} {Id}: {Reason}; nothing is written to it (fail closed), and the " +
+                    "secure-child reconciliation job looks at it again.", table, recordForLog, why);
+                return null;
+            }
+
+            _logger.LogWarning(
+                "[INHERITED-ACCESS-PERMISSION] {Table} {Id}: {Reason}; its record is left as it is, its value is only raised " +
+                "to what its parents give, and the secure-child reconciliation job looks at it again.", table, recordForLog, why);
+        }
+
+        return decision;
+    }
+
+    /// <summary>
     /// Task 173 (owner round 81): set the inherited Access Permission on a payload from EVERY filing parent it names now —
     /// for a writer that adds a parent after its <c>StampAsync</c> call (the Office To Do's carrier, set after the record
     /// regarding was stamped). Leaves the payload as it is when the row is parentless or the parents cannot be decided.
@@ -1244,53 +1395,18 @@ public sealed class CoreAncestorResolver
     private async Task<int?> RefreshDocumentAccessPermissionAsync(
         string table, Guid recordId, ParentLineageWalk walk, IReadOnlyList<string> columns, CancellationToken ct)
     {
-        // Fix round C (K2): without the record column the document's own narrowing cannot be known, so its value is only
-        // raised to what its parents give (never lowered), and the record column is neither read nor written.
-        var recordColumn = (await _columnProbe(table, ct).ConfigureAwait(false)).Contains(AccessInheritance.Column);
-        if (!recordColumn)
-        {
-            _logger.LogWarning(
-                "[INHERITED-ACCESS-PERMISSION] {Table} {Id}: this environment has no {Column} (the own-narrowing record), so " +
-                "its value is only raised to what its parents give, never lowered, and no record is written.",
-                table, recordId, AccessInheritance.Column);
-        }
-
+        var recordColumn = await DocumentRecordColumnAsync(table, recordId, ct).ConfigureAwait(false);
         var row = await _entityService.RetrieveAsync(
                 table, recordId, recordColumn ? [.. columns, AccessInheritance.Column] : [.. columns], ct)
             .ConfigureAwait(false);
         var parents = await walk.ParentsOfAsync(row, ct).ConfigureAwait(false);
-        InheritedAccessPermission.Answer? answer = null;
-        if (parents.Count > 0)
-        {
-            answer = await InheritedAccessPermission.ResolveAsync(walk, parents, ct, (table, recordId)).ConfigureAwait(false);
-            if (answer.Status != ParentTopsStatus.Found || answer.Value is null)
-            {
-                _logger.LogWarning(
-                    "[INHERITED-ACCESS-PERMISSION] {Table} {Id}: its inherited Access Permission cannot be decided ({Reason}); " +
-                    "left as it is, and the secure-child reconciliation job looks at it again.", table, recordId, answer.Reason);
-                return null;
-            }
-        }
-
-        var stored = row.GetAttributeValue<OptionSetValue>(InheritedAccessPermission.Column)?.Value;
-        var decision = recordColumn
-            ? InheritedAccessPermission.DecideDocument(
-                stored, row.GetAttributeValue<string>(AccessInheritance.Column), parents, answer?.Value)
-            : InheritedAccessPermission.DecideDocumentRaiseOnly(stored, parents, answer?.Value, undecided: null);
-        if (decision.Undetermined is { } why)
-        {
-            if (!decision.WriteValue)
-            {
-                _logger.LogWarning(
-                    "[INHERITED-ACCESS-PERMISSION] {Table} {Id}: {Reason}; nothing is written to it (fail closed), and the " +
-                    "secure-child reconciliation job looks at it again.", table, recordId, why);
-                return null;
-            }
-
-            _logger.LogWarning(
-                "[INHERITED-ACCESS-PERMISSION] {Table} {Id}: {Reason}; its record is left as it is, its value is only raised " +
-                "to what its parents give, and the secure-child reconciliation job looks at it again.", table, recordId, why);
-        }
+        var decision = await DecideDocumentAsync(
+                table, recordId, recordColumn, walk, parents,
+                row.GetAttributeValue<OptionSetValue>(InheritedAccessPermission.Column)?.Value,
+                recordColumn ? row.GetAttributeValue<string>(AccessInheritance.Column) : null, (table, recordId), ct)
+            .ConfigureAwait(false);
+        if (decision is null)
+            return null;
 
         var fields = new Dictionary<string, object>();
         if (decision.WriteValue)
@@ -1311,8 +1427,28 @@ public sealed class CoreAncestorResolver
         CancellationToken ct,
         Guid self = default)
     {
+        var answer = await InheritedAccessPermissionAnswerAsync(
+            hostEntityLogicalName, payloadParents, targetEntityLogicalName, targetRecordId, ct, self).ConfigureAwait(false);
+        return answer.Status == ParentTopsStatus.Found ? answer.Value : null;
+    }
+
+    /// <summary>
+    /// The parents' answer behind <see cref="InheritedAccessPermissionAsync"/> (field-mapping task 022b: unchanged, with the
+    /// three states kept apart): <see cref="ParentTopsStatus.NoParent"/> for a parentless row,
+    /// <see cref="ParentTopsStatus.Found"/> with the value, or <see cref="ParentTopsStatus.Undetermined"/> — a parent that
+    /// cannot be read, a value that is no known level, a host without the column, a fault, or a table this path does not give
+    /// a value to (a document: the fence). Never throws (cancellation aside).
+    /// </summary>
+    private async Task<InheritedAccessPermission.Answer> InheritedAccessPermissionAnswerAsync(
+        string hostEntityLogicalName,
+        IReadOnlyList<(string Table, Guid Id)> payloadParents,
+        string? targetEntityLogicalName,
+        Guid targetRecordId,
+        CancellationToken ct,
+        Guid self = default)
+    {
         if (!InheritedAccessPermission.AppliesTo(hostEntityLogicalName))
-            return null;
+            return InheritedAccessPermission.Answer.Undetermined("the table takes no inherited Access Permission");
 
         // Task 189 (D7 T7a): the fence. A document holds max(own narrowing, inherited), and only
         // InheritedAccessPermission.DecideDocument's writers write it (the reconcile job and
@@ -1320,7 +1456,7 @@ public sealed class CoreAncestorResolver
         // value, so a document gets none: StampAsync, DeriveForHostAsync, ApplyInheritedAccessPermissionAsync and
         // ResolveInheritedAccessPermissionAsync never write one, whoever calls them for a document.
         if (InheritedAccessPermission.RecordsOwnNarrowing(hostEntityLogicalName))
-            return null;
+            return InheritedAccessPermission.Answer.Undetermined("a document's value is decided with its own narrowing");
 
         // The writer's target is a parent when the host can be filed under its table (a contact, an organization or a
         // service request is not: the lineage says so).
@@ -1332,7 +1468,7 @@ public sealed class CoreAncestorResolver
         }
 
         if (parents.Count == 0)
-            return null; // parentless: the row's own value is the user's (round 81)
+            return InheritedAccessPermission.Answer.NoParent; // parentless: the row's own value is the user's (round 81)
 
         try
         {
@@ -1343,15 +1479,12 @@ public sealed class CoreAncestorResolver
                 _logger.LogWarning(
                     "{Host} has no {Column} column in this environment; its inherited Access Permission is not written.",
                     hostEntityLogicalName, InheritedAccessPermission.Column);
-                return null;
+                return InheritedAccessPermission.Answer.Undetermined("the table has no such column in this environment");
             }
 
             var walk = new ParentLineageWalk(_entityService, _columnProbe, [InheritedAccessPermission.Column]);
             var answer = await InheritedAccessPermission.ResolveAsync(
                 walk, parents, ct, self == Guid.Empty ? null : (hostEntityLogicalName, self)).ConfigureAwait(false);
-            if (answer.Status == ParentTopsStatus.Found)
-                return answer.Value;
-
             if (answer.Status == ParentTopsStatus.Undetermined)
             {
                 _logger.LogWarning(
@@ -1360,14 +1493,14 @@ public sealed class CoreAncestorResolver
                     hostEntityLogicalName, string.Join(", ", parents.Select(p => $"{p.Table} {p.Id:D}")), answer.Reason);
             }
 
-            return null;
+            return answer;
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
             _logger.LogWarning(ex,
                 "[INHERITED-ACCESS-PERMISSION] A {Host}'s inherited Access Permission could not be resolved; it is written " +
                 "without it, and the secure-child reconciliation job corrects it within its cycle.", hostEntityLogicalName);
-            return null;
+            return InheritedAccessPermission.Answer.Undetermined("its parents could not be read (a fault)");
         }
     }
 

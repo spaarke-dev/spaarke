@@ -204,6 +204,72 @@ public class RefileWriterUnfileRuleGuardTests
             "must fire: an entry naming no re-file method is stale: " + string.Join(" | ", stale));
     }
 
+    // ── uac-r2 task 197a (#2722): the resolver side of the one unfile rule ─────────────────────────────────────────────
+
+    private const string ResolverNonDirectAnswer = "NonDirectUnfileAnswerAsync";
+    private const string ResolverFactsReader = "ReadUnfiledFactsAsync";
+
+    [Fact(DisplayName = "uac-r2 197a: an unfiled non-Direct communication's owner is decided in ONE resolver member, from facts made in ONE member, through the one creator-team path; every re-derivation after the write carries the facts")]
+    public void TheNonDirectUnfileOwner_HasOneDecisionPoint_AndTheSettleCarriesItsFacts()
+    {
+        var bff = BffTypes.Value;
+        var facts = typeof(UnfiledCommunicationFacts);
+
+        // The creator is read from the facts by the decision point alone (never a second creator lookup).
+        var creatorReaders = SourceMethodsReferencing(bff, m => m.DeclaringType == facts && m.Name == $"get_{nameof(UnfiledCommunicationFacts.CreatorSystemUserId)}", facts);
+        Assert.Equal([(typeof(RecordOwnershipResolver), ResolverNonDirectAnswer)], creatorReaders);
+
+        // The facts are made in one member: what the re-file read before its change.
+        var makers = SourceMethodsReferencing(bff, m => m.DeclaringType == facts
+            && (m.IsConstructor || m.Name is nameof(UnfiledCommunicationFacts.Keep) or nameof(UnfiledCommunicationFacts.ToCreator)), facts);
+        Assert.Equal([(typeof(RecordOwnershipResolver), ResolverFactsReader)], makers);
+
+        // The decision point takes the creator's team from the resolver's one creator-team path (191c included).
+        var decision = MembersReferencedBy(typeof(RecordOwnershipResolver), ResolverNonDirectAnswer);
+        Assert.Contains($"{nameof(RecordOwnershipResolver)}.ResolveFromUserAsync", decision);
+
+        // Every re-derivation after the write (the settle and the check of its unconditional Secure write) passes the facts.
+        foreach (var settle in new[] { "SettleOwnerAsync", "ConfirmUnconditionalSecureWriteAsync" })
+        {
+            var members = MembersReferencedBy(typeof(RecordOwnershipResolver), settle);
+            Assert.True(members.Contains($"{nameof(RecordOwnershipResolver)}.ResolveReparentOwnerAsync") && members.Contains("RowBeforeChange.get_Unfiled"),
+                $"{settle} re-derives the owner without the unfile facts it was decided from: " + string.Join(", ", members.Order()));
+        }
+    }
+
+    [Fact(DisplayName = "uac-r2 197a: control — a second reader of the unfile creator is found; one reader alone is not")]
+    public void UnfileFactsReaderDetector_MustFireAndMustNotFire()
+    {
+        var facts = typeof(UnfiledCommunicationFacts);
+        bool IsCreator(MethodBase m) => m.DeclaringType == facts && m.Name == $"get_{nameof(UnfiledCommunicationFacts.CreatorSystemUserId)}";
+
+        var two = SourceMethodsReferencing(IlCallScan.WithNested(typeof(UnfileFactsControlTwoReaders)), IsCreator, facts);
+        Assert.True(two.Count == 2, "must fire: two members read the creator. Seen: " + string.Join(", ", two));
+
+        var one = SourceMethodsReferencing(IlCallScan.WithNested(typeof(UnfileFactsControlOneReader)), IsCreator, facts);
+        Assert.True(one.Count == 1 && one[0].Method == nameof(UnfileFactsControlOneReader.DecideAsync),
+            "must not fire: one reader, through a lambda attributed to its method. Seen: " + string.Join(", ", one));
+    }
+
+    /// <summary>Every (outermost type, source method) in <paramref name="types"/> outside <paramref name="except"/> that references a
+    /// method <paramref name="target"/> matches, distinct and ordered.</summary>
+    private static List<(Type Type, string Method)> SourceMethodsReferencing(
+        IEnumerable<Type> types, Func<MethodBase, bool> target, Type except) =>
+        IlCallScan.MethodReferences(types)
+            .Where(r => IlCallScan.Outermost(r.Caller) != except && target(r.Target))
+            .Select(r => (IlCallScan.Outermost(r.Caller), SourceMethodOf(r.Caller, r.CallerMethod)))
+            .Distinct()
+            .OrderBy(r => r.Item1.FullName, StringComparer.Ordinal).ThenBy(r => r.Item2, StringComparer.Ordinal)
+            .ToList();
+
+    /// <summary>Every member (<c>Type.Name</c>) the source method <paramref name="method"/> of <paramref name="type"/> references,
+    /// its lambdas, local functions and state machines included.</summary>
+    private static HashSet<string> MembersReferencedBy(Type type, string method) =>
+        IlCallScan.MethodReferences(IlCallScan.WithNested(type))
+            .Where(r => SourceMethodOf(r.Caller, r.CallerMethod) == method)
+            .Select(r => MemberOf(r.Target))
+            .ToHashSet(StringComparer.Ordinal);
+
     // ── detector ─────────────────────────────────────────────────────────────────────────────────────────────────────
 
     private sealed class Use
@@ -564,4 +630,22 @@ internal sealed class UnfileRuleControlExemptTypeWriter(IRecordOwnershipResolver
                 ParentChanges = new Dictionary<string, Microsoft.Xrm.Sdk.EntityReference?> { ["sprk_regardingmatter"] = null },
             },
             write, CancellationToken.None);
+}
+
+/// <summary>197a control, MUST FIRE: two members read the unfile creator.</summary>
+internal sealed class UnfileFactsControlTwoReaders
+{
+    internal static Guid? DecideAsync(UnfiledCommunicationFacts facts) => facts.CreatorSystemUserId;
+
+    internal static bool SecondLookup(UnfiledCommunicationFacts facts) => facts.CreatorSystemUserId is not null;
+}
+
+/// <summary>197a control, MUST NOT FIRE: one reader, inside a lambda of its method.</summary>
+internal sealed class UnfileFactsControlOneReader
+{
+    internal static Guid? DecideAsync(UnfiledCommunicationFacts facts)
+    {
+        Func<Guid?> read = () => facts.CreatorSystemUserId;
+        return read();
+    }
 }

@@ -96,6 +96,12 @@ function titleFor(status: number): string {
   return TITLES[status] ?? (status >= 500 ? 'The request failed' : 'The request was refused');
 }
 
+/**
+ * The commit route's title for a FAILED commit (ontology task 191): a stored failure returned again is 409, and REST keeps "The
+ * decision was not recorded" for it as for the 500 (`DecisionResultMapper.ToHttp`). Only a failed commit carries the D-17 `partial` facts.
+ */
+const FAILED_COMMIT_TITLE = TITLES[500];
+
 // The origin is a placeholder used only to parse a relative address; no request is ever sent to it.
 const PARSE_BASE = 'http://widget.invalid';
 
@@ -123,11 +129,12 @@ function problem(
   status: number,
   reasonCode: string | null,
   detail: string,
-  extras: Record<string, unknown> = {}
+  extras: Record<string, unknown> = {},
+  title: string = titleFor(status)
 ): Response {
   return jsonResponse(status, {
     ...extras,
-    title: titleFor(status),
+    title,
     status,
     detail,
     ...(reasonCode ? { reasonCode } : {}),
@@ -181,10 +188,18 @@ function errorResponse(result: McpToolResult): Response {
     typeof structured.correlationId === 'string' && structured.correlationId ? structured.correlationId : undefined;
 
   // The D-17 partial facts sit at the TOP level, as REST's extensions do; the fixed members below always win over them.
-  return problem(status, reasonCode, detail, {
-    ...(isRecord(structured.partial) ? structured.partial : {}),
-    ...(correlationId ? { correlationId } : {}),
-  });
+  const partial = isRecord(structured.partial) ? structured.partial : null;
+  return problem(
+    status,
+    reasonCode,
+    detail,
+    {
+      ...(partial ?? {}),
+      ...(correlationId ? { correlationId } : {}),
+    },
+    // A failed commit is answered 500, or 409 when it is a stored failure returned again; REST titles both the same way.
+    partial && status === 409 ? FAILED_COMMIT_TITLE : titleFor(status)
+  );
 }
 
 async function readBody(init: RequestInit | undefined): Promise<{ ok: true; body: unknown } | { ok: false }> {

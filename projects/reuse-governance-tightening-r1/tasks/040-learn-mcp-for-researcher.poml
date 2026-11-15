@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="040" project="reuse-governance-tightening-r1">
+  <metadata>
+    <title>5(a) Microsoft Learn MCP server for the researcher</title>
+    <phase>5 Quality tooling</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Modifies an agent definition and MCP config under explicit constraints (FR-10)</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>One config entry and a scoped agent-definition edit</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>touches .claude/ — main-session-only (permission boundary)</parallel-reason>
+    <deps>none</deps>
+    <tags>config</tags>
+    <estimated-effort>1-2 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Add Microsoft's Learn MCP server to .mcp.json and let the researcher agent use it after its local sources and before web search, with queries that never carry customer data; ship it as its own PR.</prompt>
+  <role>SPAARKE platform developer maintaining agent definitions and MCP configuration.</role>
+  <goal>.mcp.json has the Learn MCP server next to dataverse; researcher.md lists its tools and the research order; one researcher run cites a Learn MCP result.</goal>
+
+  <context>
+    <background>spec.md FR-10; design.md section 7.1. researcher.md restricts tools in frontmatter (line 4), so the server's tool names must be added or the agent cannot call it. Research order today is at line 22.</background>
+    <relevant-files>
+      <file role="modify">.mcp.json</file>
+      <file role="modify">.claude/agents/researcher.md</file>
+      <file role="modify">knowledge/README.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="none" status="complete">Independent</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Confirm the current Learn MCP endpoint and tool names from Microsoft Learn itself (via the researcher or WebFetch) before writing the entry.</constraint>
+    <constraint source="project">researcher.md order: own memory, knowledge/, docs/ and ADRs, then Learn MCP, then WebSearch/WebFetch. Queries name the product and API surface; search then fetch one or two pages.</constraint>
+    <constraint source="project">researcher.md gets one line: Learn MCP queries never contain customer data, tenant names or secrets (NFR-09).</constraint>
+    <constraint source="project">A README line says a project-scoped MCP server needs one-time approval per machine. Use knowledge/README.md if it exists; otherwise the nearest README that documents .mcp.json.</constraint>
+    <constraint source="project">Own PR: commit only this task's files; ask the owner before opening the PR.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/agents/researcher.md</file>
+      <file>.mcp.json</file>
+      <file>.claude/skills/ai-procedure-maintenance/SKILL.md</file>
+      <file>projects/reuse-governance-tightening-r1/design.md</file>
+    </files>
+    <patterns>
+      <pattern name="Existing MCP entry" location=".mcp.json">The dataverse server entry shape.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Confirm endpoint and tool names.</step>
+    <step order="2">Add the .mcp.json entry; edit researcher.md tools, order and privacy line; add the README line.</step>
+    <step order="3">After the user approves the server, run one researcher query on a Spaarke-relevant topic and confirm it cites a Learn MCP result; record it in notes/040-learn-mcp.md.</step>
+    <step order="4">Commit only this task's files. With the owner's OK, open the PR from a branch based on origin/master (temporary worktree plus cherry-pick; remove it with scripts/worktree/Remove-WorktreeSafe.ps1).</step>
+    <step order="5">Update TASK-INDEX.md: change this task's status cell to `✅ [done]`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the Learn MCP server requires authentication or sends data beyond the query, STOP and ask the owner.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="Agent">researcher (for the verification run)</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">.mcp.json</output>
+    <output type="docs">.claude/agents/researcher.md</output>
+    <output type="docs">projects/reuse-governance-tightening-r1/notes/040-learn-mcp.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">.mcp.json is valid JSON with the Learn server and the unchanged dataverse server.</criterion>
+    <criterion testable="true">researcher.md frontmatter tools include the Learn MCP tool names; prose carries the order and the privacy line.</criterion>
+    <criterion testable="true">One researcher run cites a Learn MCP result (recorded).</criterion>
+    <criterion testable="true">Negative: the PR contains only this task's files.</criterion>
+  </acceptance-criteria>
+
+  <notes>Item-5 sub-items ship as separate PRs (NFR-05).</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

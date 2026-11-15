@@ -68,6 +68,45 @@ internal static class PlanAndLookupToolSupport
     /// </summary>
     internal const int EvidenceBudgetBytes = 20_000;
 
+    // ---- the bound on the whole plan result (FR-05, FR-11) ---------------------------------------------------------------------------
+    //
+    // The plan carries the caller's unfinished review (task 191: the posted inquiry body, no length cap, and non-ASCII escapes to six bytes a
+    // character), which the resume needs intact, so it is never cut. What gives way is the row's evidence: the evidence budget is whatever the
+    // limit leaves after the measured plan (unfinished review included) and the reserve for the rest of the result. When even a zero evidence
+    // budget cannot fit, there is no partial plan: the call is an error that sends the person to Spaarke (decisions.md "Plan result bound").
+
+    /// <summary>The 64 KiB result limit (FR-05, NFR-02), in bytes of the result's JSON.</summary>
+    internal const int ResultLimitBytes = 64 * 1024;
+
+    /// <summary>What the rest of the result may take besides the plan and the evidence: the row at its text caps (about 7.5 KB), the
+    /// suppression, the summary line and the result's own members, with margin.</summary>
+    internal const int RestOfResultReserveBytes = 12_000;
+
+    /// <summary>The reason code of a plan too large to return whole. MCP only (REST returns the plan as stored), so it is not in the
+    /// decision slice's vocabulary; like <c>mcp.disabled</c> it is a member of this host's own.</summary>
+    internal const string PlanTooLargeReasonCode = "mcp.plan_too_large";
+
+    /// <summary>Fixed text (ADR-015): nothing from the review or the item is in it.</summary>
+    internal const string PlanTooLargeMessage =
+        "This item's unfinished decision is too large to open here. Open the item in Spaarke and finish it there.";
+
+    internal static DecisionToolError PlanTooLarge { get; } =
+        new(PlanTooLargeReasonCode, PlanTooLargeMessage, StatusCodes.Status413PayloadTooLarge);
+
+    /// <summary>The bytes <paramref name="plan"/> takes in the result (its JSON, the unfinished review included).</summary>
+    internal static int PlanBytes(DecisionPlanResponse plan) => JsonSerializer.SerializeToUtf8Bytes(plan, Json).Length;
+
+    /// <summary>
+    /// The evidence budget for a result whose plan takes <paramref name="planBytes"/>: <see cref="EvidenceBudgetBytes"/> unless the plan
+    /// leaves less room, and null when the plan alone leaves no room (the caller returns <see cref="PlanTooLarge"/>). A plan without an
+    /// unfinished review is at most about 28.7 KB, which leaves more than <see cref="EvidenceBudgetBytes"/>: nothing changes for it.
+    /// </summary>
+    internal static int? EvidenceBudgetFor(int planBytes)
+    {
+        var room = ResultLimitBytes - RestOfResultReserveBytes - planBytes;
+        return room < 0 ? null : Math.Min(EvidenceBudgetBytes, room);
+    }
+
     /// <summary>Per evidence line: the longest string member (JSON bytes), the most members kept, the longest member name and the
     /// largest nested value kept. With these, one line is at most about 7 KB, so the first line always fits <see cref="EvidenceBudgetBytes"/>.</summary>
     internal const int EvidenceFieldBytes = 400;
@@ -89,18 +128,18 @@ internal static class PlanAndLookupToolSupport
 
     /// <summary>
     /// <paramref name="row"/> as the plan tool returns it: every free-text member clipped (with an ellipsis, <see cref="WorklistItemSummary.Clip"/>)
-    /// and <c>evidenceRefs</c> cut to at most <see cref="MaxEvidenceLines"/> lines and <see cref="EvidenceBudgetBytes"/>. A row inside every bound
+    /// and <c>evidenceRefs</c> cut to at most <see cref="MaxEvidenceLines"/> lines and <paramref name="evidenceBudgetBytes"/> (default <see cref="EvidenceBudgetBytes"/>). A row inside every bound
     /// is returned unchanged (same text, same evidence string, byte for byte as the REST row), so only an oversized row differs from the REST route.
     /// The caller reports <see cref="BoundedRow.EvidenceTotal"/> and <see cref="BoundedRow.EvidenceTruncated"/> so the omission is never silent.
     /// </summary>
-    internal static BoundedRow BoundRow(WorklistItemRow? row)
+    internal static BoundedRow BoundRow(WorklistItemRow? row, int evidenceBudgetBytes = EvidenceBudgetBytes)
     {
         if (row is null)
         {
             return new BoundedRow(null, 0, false);
         }
 
-        var (evidence, total, truncated) = BoundEvidence(row.EvidenceRefs);
+        var (evidence, total, truncated) = BoundEvidence(row.EvidenceRefs, evidenceBudgetBytes);
         var bounded = row with
         {
             Status = WorklistItemSummary.Clip(row.Status, RowShortTextBytes),
@@ -116,7 +155,7 @@ internal static class PlanAndLookupToolSupport
         return new BoundedRow(bounded, total, truncated);
     }
 
-    private static (string? Evidence, int Total, bool Truncated) BoundEvidence(string? evidenceRefs)
+    private static (string? Evidence, int Total, bool Truncated) BoundEvidence(string? evidenceRefs, int budget)
     {
         if (evidenceRefs is null)
         {
@@ -136,7 +175,7 @@ internal static class PlanAndLookupToolSupport
         if (lines is null)
         {
             // Not an array: the REST route does not produce this (it returns null); keep it only while it fits.
-            return EncodedBytes(evidenceRefs) <= EvidenceBudgetBytes ? (evidenceRefs, 0, false) : (null, 0, true);
+            return EncodedBytes(evidenceRefs) <= budget ? (evidenceRefs, 0, false) : (null, 0, true);
         }
 
         var kept = new JsonArray();
@@ -146,7 +185,7 @@ internal static class PlanAndLookupToolSupport
         {
             var line = BoundEvidenceLine(node, out var lineChanged);
             var size = EncodedBytes(line?.ToJsonString() ?? "null") + (kept.Count > 0 ? 1 : 0);
-            if (kept.Count >= MaxEvidenceLines || used + size > EvidenceBudgetBytes)
+            if (kept.Count >= MaxEvidenceLines || used + size > budget)
             {
                 break;
             }
@@ -158,7 +197,7 @@ internal static class PlanAndLookupToolSupport
 
         // Untouched only when nothing was cut AND the stored string itself fits: a stored string with extra whitespace could otherwise
         // pass every per-line bound and still exceed the budget.
-        if (kept.Count == lines.Count && !changed && EncodedBytes(evidenceRefs) <= EvidenceBudgetBytes)
+        if (kept.Count == lines.Count && !changed && EncodedBytes(evidenceRefs) <= budget)
         {
             return (evidenceRefs, lines.Count, false); // inside every bound: the stored string, untouched
         }

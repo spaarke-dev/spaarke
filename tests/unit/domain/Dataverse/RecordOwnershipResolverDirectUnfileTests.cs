@@ -19,7 +19,7 @@ namespace Sprk.Bff.Api.Tests.Domain.Dataverse;
 /// change is written, no owner is written here, and the answer carries the move for the writer; the lookup refuses → refused
 /// (<see cref="RecordOwnerRefusal.DirectTeamUnusable"/>, 409); the lookup faults → refused
 /// (<see cref="RecordOwnerRefusal.DirectTeamUnavailable"/>, 503); no Direct setting → today's answer, from configuration alone.
-/// Every other unfiled communication is Unchanged pending #2722, and a re-file to a record follows the record.
+/// Every other unfiled communication takes the #2722 rule (RecordOwnershipResolverUnfileOwnerTests), and a re-file to a record follows the record.
 /// </summary>
 /// <remarks>The REAL <see cref="RecordOwnershipResolver"/> over <see cref="FakeDirectory"/>, with the REAL
 /// <see cref="DirectMessageOwnerTeam"/> over <see cref="DirectMessageOwnerTeamDouble"/>.</remarks>
@@ -142,7 +142,7 @@ public class RecordOwnershipResolverDirectUnfileTests
     // ── Must not fire ────────────────────────────────────────────────────────────────────────────────────────────────────
 
     [Fact]
-    public async Task Unfile_OfAnEmail_IsUnchangedPending2722_NoOwnerWritten_AndNeverRefused()
+    public async Task Unfile_OfAnEmail_WithNoRecordedCreator_KeepsItsOwner_NoOwnerWritten_AndNeverRefused()
     {
         var directory = World().WithMessageFiledUnder(MatterId, FakeDirectory.ChildBu, FakeDirectory.ChildTeam,
             type: CommunicationType.Email);

@@ -70,6 +70,7 @@ import {
   DocumentEmailWizard,
   type IDocumentEmailWizardItem,
 } from '@spaarke/ui-components/dist/components/DocumentEmailWizard';
+import { createXrmEmailComposeHandlers } from '@spaarke/ui-components/dist/components/EmailComposer';
 import { AppInsightsService } from '@spaarke/ui-components/dist/services/AppInsightsService';
 import type { IDataService } from '@spaarke/ui-components/dist/types/serviceInterfaces';
 
@@ -359,6 +360,12 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
   // Initialize services (memoized to prevent recreation)
   const apiService = useMemo(() => new SemanticSearchApiService(apiBaseUrl), [apiBaseUrl]);
   const navigationService = useMemo(() => new NavigationService(), []);
+  // Composer handlers for the Email Documents wizard (task 183, D-219): recipient side pane, record lookup, file upload,
+  // template picker, AI draft and the Spaarke record-link resolver. Built here, in the host, so the wizard never touches Xrm.
+  const emailComposeHandlers = useMemo(
+    () => createXrmEmailComposeHandlers({ authenticatedFetch, bffBaseUrl: apiBaseUrl }),
+    [apiBaseUrl]
+  );
   // Dedicated metadata service for FR-DOC-05 (Tags filter). Note: useFilterOptions
   // below also uses a singleton DataverseMetadataService — we mount a second
   // instance here to keep the Tags fetch independently cacheable and to avoid
@@ -1852,7 +1859,7 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
 
       {/* Version Footer (always visible) */}
       <div className={styles.versionFooter}>
-        <Text size={100}>v1.1.85 • Built 2026-10-09</Text>
+        <Text size={100}>v1.1.86 • Built 2026-11-14</Text>
       </div>
 
       {/* Host-mounted preview dialog. Single instance per PCF surface so
@@ -1928,6 +1935,7 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
         authenticatedFetch={authenticatedFetch}
         bffBaseUrl={apiBaseUrl}
         dataService={dataService}
+        emailComposeHandlers={emailComposeHandlers}
         // Named `lg` size (1280px / 85vh) matches the FilePreviewDialog footprint so the wizard
         // doesn't jump in size when stacked over an open preview (ontology task 111).
         size="lg"

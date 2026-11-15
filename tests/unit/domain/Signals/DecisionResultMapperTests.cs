@@ -29,6 +29,7 @@ public sealed class DecisionResultMapperTests
     [InlineData(DecisionCommitStatus.Conflict, 409, DecisionCommitReasons.DecidedInInvoiceReview)]
     [InlineData(DecisionCommitStatus.InProgress, 409, DecisionCommitReasons.ReviewInProgress)]
     [InlineData(DecisionCommitStatus.Conflict, 409, DecisionCommitReasons.SignalNotOpen)]
+    [InlineData(DecisionCommitStatus.Conflict, 409, DecisionCommitReasons.ReviewUnfinished)]
     [InlineData(DecisionCommitStatus.Refused, 422, DecisionCommitReasons.ActionsDoNotMatchPlan)]
     [InlineData(DecisionCommitStatus.Refused, 422, DecisionCommitReasons.ActionsExclude)]
     [InlineData(DecisionCommitStatus.Refused, 422, DecisionCommitReasons.AlsoResolveNotAllowed)]
@@ -65,6 +66,37 @@ public sealed class DecisionResultMapperTests
         Rest(DecisionResultMapper.ToHttp(result, Http())).Should().Be((httpStatus, reasonCode), "REST and MCP share one vocabulary");
     }
 
+    /// <summary>Ontology task 191: a stored failure returned again (Failed + Replayed) is 409 on both hosts, keeps the Failed title on
+    /// REST, and carries <c>sendChoiceRequired</c> in REST's extensions and the tool's partial facts alike.</summary>
+    [Theory]
+    [InlineData(DecisionCommitReasons.SendChoiceRequired, true)]
+    [InlineData(DecisionCommitReasons.NotResumable, false)]
+    public void ToToolError_AStoredFailureReturnedAgain_Is409OnBothHosts_WithTheSendChoiceFlag(string reasonCode, bool sendChoiceRequired)
+    {
+        var result = new DecisionCommitResult
+        {
+            Status = DecisionCommitStatus.Failed,
+            ReviewId = Guid.NewGuid(),
+            ReasonCode = reasonCode,
+            Resumable = sendChoiceRequired,
+            SendChoiceRequired = sendChoiceRequired,
+            Replayed = true,
+            Detail = "detail",
+        };
+
+        var error = DecisionResultMapper.ToToolError(result);
+
+        AssertKnownToolError(error, reasonCode, 409);
+        error!.Partial!.SendChoiceRequired.Should().Be(sendChoiceRequired);
+        error.Partial.Replayed.Should().BeTrue();
+        var problem = DecisionResultMapper.ToHttp(result, Http()).Should().BeOfType<ProblemHttpResult>().Subject.ProblemDetails;
+        problem.Status.Should().Be(409);
+        problem.Title.Should().Be("The decision was not recorded");
+        problem.Extensions["reasonCode"].Should().Be(reasonCode);
+        problem.Extensions["sendChoiceRequired"].Should().Be(sendChoiceRequired);
+        problem.Extensions.Keys.Should().ContainInOrder("resumable", "sendChoiceRequired", "replayed");
+    }
+
     [Fact]
     public void ToToolError_CommitNotFound_IsTheUniformRecordUnavailable404()
     {
@@ -96,6 +128,27 @@ public sealed class DecisionResultMapperTests
         var error = DecisionResultMapper.ToToolError(result);
 
         error!.Message.Should().Contain("decide it").And.Contain("Invoice Review");
+    }
+
+    [Fact]
+    public void ToToolError_ReviewUnfinished_MessageIsTrueWhoeverHoldsTheReview_AndNeverSendsThePersonToThePlan()
+    {
+        // The message is shown to the person as is (decisionDisplay.ts). Another user may hold the unfinished review (REST names the
+        // holder), so "read the plan and finish that review from it" is wrong for them; one fixed text covers both cases.
+        var result = new DecisionCommitResult
+        {
+            Status = DecisionCommitStatus.Conflict,
+            ReviewId = Guid.NewGuid(),
+            ReasonCode = DecisionCommitReasons.ReviewUnfinished,
+            Detail = "Held by Pat Example",
+        };
+
+        var error = DecisionResultMapper.ToToolError(result);
+
+        error!.Message.Should().Be(
+            "Another review of this item is unfinished; nothing was done. If you started this decision, close this and open the item again "
+            + "to finish it; otherwise ask the person who started it to finish it first.");
+        error.Message.Should().NotContain("decision plan").And.NotContain("Pat Example");
     }
 
     [Fact]

@@ -71,8 +71,9 @@ describe.each([
 
     expect(await screen.findByText('Discard unrecorded choices?')).toBeInTheDocument();
     expect(onClose).not.toHaveBeenCalled();
-    // The prompt fades in: its buttons are not yet accessible the instant its text is, so wait for the button rather than read it.
-    fireEvent.click(await screen.findByRole('button', { name: 'Keep deciding' }));
+    // Fluent / tabster leaves aria-hidden on the nested alert dialog for as long as the machine is busy, so the button is not "accessible"
+    // for a variable time. Which button it is does not depend on that: find it by name including hidden ones, never wait for the attribute.
+    fireEvent.click(await screen.findByRole('button', { name: 'Keep deciding', hidden: true }));
     await waitFor(() => expect(screen.queryByText('Discard unrecorded choices?')).toBeNull());
     expect(onClose).not.toHaveBeenCalled();
     expect(service.commit).not.toHaveBeenCalled();

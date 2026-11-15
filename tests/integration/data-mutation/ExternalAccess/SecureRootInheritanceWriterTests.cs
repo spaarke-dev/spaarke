@@ -2121,17 +2121,17 @@ public partial class SecureRootInheritanceWriterTests : TypedToolHandlerTestFixt
     }
 
     /// <summary>
-    /// K3, the field-mapping push: a rule onto <c>sprk_issecure</c> fails that record, nothing written. #2253 fix round 1
-    /// (K2): the push runs as its caller and asks the refusal as <c>WriteIdentity.Caller</c>, which leaves a secure root's
-    /// columns alone, so the filing gate's K3 refusal answers it, as before #2251.
+    /// K3, the field-mapping push: a rule onto <c>sprk_issecure</c> writes nothing. Task 022c (unified-access-control-r2,
+    /// 2026-11-12): the secure flag is an access column, never a mapping target, so the push skips the rule with its code
+    /// before the filing gate is asked; the record is counted skipped, not failed.
     /// </summary>
     [Fact]
-    public async Task FieldMappingPush_OntoTheSecureFlag_FailsThatRecord_AndWritesNothing()
+    public async Task FieldMappingPush_OntoTheSecureFlag_IsSkipped_AndWritesNothing()
     {
         var workAssignment = Guid.NewGuid();
         _fixture.SeedWorkAssignment(workAssignment, isSecure: false);
 
-        var (updated, failed, _, errors, _) = await FieldMappingEndpoints.ApplyMappingsToChildRecordsAsync(
+        var (updated, failed, skipped, errors, results) = await FieldMappingEndpoints.ApplyMappingsToChildRecordsAsync(
             Sprk.Bff.Api.Tests.Domain.Dataverse.FieldMapping.PermissivePushSourceGate.AllowingEveryChild(),
             FieldMappingWritingToTheWorld().Object,
             new StampWorld().Restamper,
@@ -2150,8 +2150,9 @@ public partial class SecureRootInheritanceWriterTests : TypedToolHandlerTestFixt
             CancellationToken.None,
             rootFiling: _gate);
 
-        (updated, failed).Should().Be((0, 1));
-        errors.Should().ContainSingle(e => e.RecordId == workAssignment && e.Error.Contains(AccessFollowsParent.SecureFlagReasonCode));
+        (updated, failed, skipped).Should().Be((0, 0, 1));
+        errors.Should().BeEmpty();
+        results.Should().ContainSingle().Which.ErrorMessage.Should().Be(FieldMappingEndpoints.AccessColumnNotMappedMessage);
         _writes.Should().BeEmpty();
     }
 }

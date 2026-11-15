@@ -645,6 +645,56 @@ public sealed class ExternalVisibilityTests
         decision.Reason.Should().Be(ExternalVisibilityReason.NoRoot);
     }
 
+    /// <summary>
+    /// uac-r2 task 197b: <see cref="ExternalRowVisibility.UndecidedOnlyForNoRoot"/> over the REAL predicate. An unfiled message on
+    /// an Open thread (the Direct shape) is undecided only for no root, and so are its content rows; an internal-only message, one
+    /// on a thread that is not Open, and the review log are Hidden (never "no root"); a filed message is Visible, not "no root".
+    /// </summary>
+    [Fact]
+    public async Task R197b_UndecidedOnlyForNoRoot_IsTrueOnlyForTheUnfiledOpenMessage_AndItsContent()
+    {
+        var unfiled = _world.Communication(internalOnly: false, _world.Thread(Open));
+        var attachment = _world.Add("sprk_communicationattachment", ("sprk_communication", unfiled));
+        var log = _world.Add("sprk_emailreviewlog", ("sprk_communication", unfiled));
+        var internalOnly = _world.Communication(internalOnly: true, _world.Thread(Open));
+        var notOpen = _world.Communication(internalOnly: false, _world.Thread(Private));
+        var filed = _world.Communication(internalOnly: false, _world.Thread(Open), _world.Root());
+
+        var rows = new ExternalRowVisibility(await Decide(
+            ("sprk_communication", unfiled), ("sprk_communicationattachment", attachment), ("sprk_emailreviewlog", log),
+            ("sprk_communication", internalOnly), ("sprk_communication", notOpen), ("sprk_communication", filed)));
+
+        rows.UndecidedOnlyForNoRoot("sprk_communication", unfiled).Should().BeTrue();
+        rows.IsVisible("sprk_communication", unfiled).Should().BeFalse("no root is never Visible");
+        rows.UndecidedOnlyForNoRoot("sprk_communicationattachment", attachment).Should().BeTrue();
+        foreach (var (table, id) in new[]
+                 {
+                     ("sprk_emailreviewlog", log), ("sprk_communication", internalOnly), ("sprk_communication", notOpen),
+                 })
+        {
+            rows.UndecidedOnlyForNoRoot(table, id).Should().BeFalse($"{table} is hidden");
+            rows.IsUndecided(table, id).Should().BeFalse($"{table} is hidden, not undecided");
+            rows.IsVisible(table, id).Should().BeFalse();
+        }
+
+        rows.UndecidedOnlyForNoRoot("sprk_communication", filed).Should().BeFalse();
+        rows.IsVisible("sprk_communication", filed).Should().BeTrue();
+    }
+
+    /// <summary>uac-r2 task 197b: a faulted decision never answers "no root" (its rows are not trusted).</summary>
+    [Fact]
+    public async Task R197b_UndecidedOnlyForNoRoot_IsFalse_WhenTheDecisionFaulted()
+    {
+        var unfiled = _world.Communication(internalOnly: false, _world.Thread(Open));
+        var stub = new Sprk.Bff.Api.Tests.TestInfrastructure.ExternalVisibilitySeamStub { Faulted = true }
+            .Set("sprk_communication", unfiled, ExternalVisibilityVerdict.Undecided, ExternalVisibilityReason.NoRoot);
+
+        var rows = await stub.Seam([("sprk_communication", unfiled)], CancellationToken.None);
+
+        rows.UndecidedOnlyForNoRoot("sprk_communication", unfiled).Should().BeFalse();
+        ExternalRowVisibility.NothingDecided.UndecidedOnlyForNoRoot("sprk_communication", unfiled).Should().BeFalse();
+    }
+
     /// <summary>A parent document's communication link is a lineage edge: a document whose only way to a root runs through it
     /// gets that root (visible here), instead of reaching none.</summary>
     [Fact]

@@ -249,7 +249,7 @@ Every task that adds NEW surface — a new `.cs`/`.ts`/`.tsx` file, endpoint rou
 
 ```xml
 <justification>
-  <existing>Closest existing neighbor — cite file:line from Grep evidence (or "none found" with the grep command shown)</existing>
+  <existing>Closest existing neighbor. Consult `.claude/patterns/CAPABILITY-INDEX.md` first, then Grep. Cite "CAPABILITY-INDEX row N" plus file:line, or "CAPABILITY-INDEX: no row" plus the Grep command run</existing>
   <extension>Yes/No + reason in ≤2 sentences. "Cleaner separation" is NOT a reason.</extension>
   <cost-of-doing-nothing>Concrete behavior or contract that fails without this. NOT "scalability" / "abstraction layer" / "future flexibility".</cost-of-doing-nothing>
 </justification>
@@ -263,6 +263,10 @@ Hollow answers ("separation of concerns", "testability", "future flexibility") f
 ```
 
 Tasks with hollow or missing justification are blocked at review: `code-review` Step 6.6 re-checks concreteness.
+
+A task that adds a canonical component, or changes one's path or extension point, updates its row in `.claude/patterns/CAPABILITY-INDEX.md` in the same PR.
+
+When the project has `notes/reuse-scan.md` (design-to-spec Step 3 or project-pipeline Step 2), `<existing>` also cites that file's row for the capability, including its verdict (extend target, owner answer, or none found with the searches run).
 
 If a task adds new surface or materially grows an existing component, read `references/component-justification.md` before writing its `<justification>` — it holds the real anti-patterns this gate catches and the component-complexity check ([`docs/standards/COMPONENT-COMPLEXITY.md`](../../../docs/standards/COMPONENT-COMPLEXITY.md): judge cohesion, not line count).
 

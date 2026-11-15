@@ -59,6 +59,11 @@ public record PushFieldMappingsResponse
     /// Detailed results for each field mapping rule applied.
     /// Only populated when detailed results are requested.
     /// </summary>
+    /// <remarks>Task 022c (unified-access-control-r2, 2026-11-12): a rule whose target is an access column (<c>sprk_issecure</c>,
+    /// <c>sprk_accesspermission</c>, <c>sprk_accessinheritance</c>, <c>sprk_securitybu</c>, <c>sprk_containerid</c>) is never
+    /// applied, on any table: its entry is <see cref="FieldMappingStatus.Skipped"/> and its
+    /// <see cref="FieldMappingResultDto.ErrorMessage"/> carries the code <c>field_mapping.push.access_column_not_mapped</c>. A
+    /// preview does not list the column in <see cref="Changes"/>.</remarks>
     public FieldMappingResultDto[] FieldResults { get; init; } = [];
 
     /// <summary>
@@ -141,8 +146,9 @@ public record PushFieldMappingsError
     /// Task 022 fix round 4: the stable code of a child the push does not write because of the mapping-source rule
     /// (<c>FieldMappingPushSourceGate</c>), one of <c>field_mapping.push.secure_source_not_isolated</c>,
     /// <c>field_mapping.push.secure_source_undetermined</c> and <c>field_mapping.push.secure_source_refile_not_allowed</c>
-    /// (a secure source's push would change what the child is filed under, UAC-r2 (a)); null for every other entry. Carried
-    /// on the apply and on the preview.
+    /// (a secure source's push would change what the child is filed under, UAC-r2 (a)), and, task 022c,
+    /// <c>field_mapping.push.restricted_source_not_restricted</c> (the source is Restricted and the child is not); null for every
+    /// other entry. Carried on the apply and on the preview.
     /// </summary>
     public string? ReasonCode { get; init; }
 }
@@ -168,7 +174,8 @@ public record FieldMappingResultDto
     public string Status { get; init; } = string.Empty;
 
     /// <summary>
-    /// Error message if the mapping failed, null otherwise.
+    /// Error message if the mapping failed, null otherwise. On a skipped rule, why it was skipped; a stable code, where the skip
+    /// has one, is in parentheses (task 022c: <c>field_mapping.push.access_column_not_mapped</c>).
     /// </summary>
     public string? ErrorMessage { get; init; }
 }

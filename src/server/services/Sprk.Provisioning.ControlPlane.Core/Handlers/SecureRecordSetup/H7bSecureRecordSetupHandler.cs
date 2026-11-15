@@ -84,8 +84,9 @@ public sealed class H7bSecureRecordSetupHandler : IProvisioningHandler
     ///     of the two ontology-writer profiles.
     /// 8 = task 267 (#2618): S24 — the writer is alone in its own unit "Spaarke Ontology Writer" and holds that unit's copy of
     ///     the role; S11/S16 skip that unit's default team; S25 — "Spaarke Basic User" on the customer unit's default team.
+    /// 9 = task 268: S26 — the lock on the invoice amounts and firm (ebilling-r1 task 166, EB-D-200), verified only.
     /// </remarks>
-    internal const string ProcedureVersion = "secure-setup-procedure=8";
+    internal const string ProcedureVersion = "secure-setup-procedure=9";
 
     private readonly IProvisioningRunRepository _repository;
     private readonly ISecureRecordSetupDataverse _dataverse;

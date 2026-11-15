@@ -45,8 +45,10 @@ import {
 } from './decisionDraft';
 import type { Decision, ItemDraft, StepScope } from './decisionDraft';
 import { DecisionItemContext } from './decisionItemContext';
+import { canRecordWithoutSending, needsSendChoice } from './decisionRecording';
 import type { DecisionItemContextValue, DecisionLookup, DecisionOpenLookupForItem } from './decisionItemContext';
 import type {
+  DecisionSendChoice,
   DecisionCommitFailure,
   DecisionCommitResult,
   DecisionOpenRecord,
@@ -118,8 +120,11 @@ export interface DecisionItemReady {
   recordResult: DecisionCommitResult | null;
   /** True while the request is in flight. */
   recording: boolean;
-  /** Post the one review. Resolves when the attempt is over (recorded or failed); never rejects. */
-  onRecord: () => Promise<void>;
+  /**
+   * Post the one review. Resolves when the attempt is over (recorded or failed); never rejects. `choice` answers an earlier
+   * attempt whose inquiry email may have been sent (task 191, D-223); without it such an attempt is not posted.
+   */
+  onRecord: (choice?: DecisionSendChoice) => Promise<void>;
   lookup: DecisionLookup | null;
   /** The host's side-pane lookup with the item's core already filled in (D-182); null keeps the inline type-ahead. */
   openLookup?: DecisionOpenLookupForItem | null;
@@ -256,12 +261,15 @@ const ShellSync: React.FC<{ handle: IWizardShellHandle; syncRef: React.MutableRe
  * `guardMs` has passed, and keyboard focus is on the step, not on the button that brought the user here (the button is the same node
  * as Record decision, so a held Enter would otherwise reach it). Layout effect: the guard is up before the browser can deliver another
  * event. Without a guard it adds no behaviour (a plain wrapper).
+ * `choiceShown` is true while the footer offers the send-choice buttons (Send again, Record without sending, Retry recording): the
+ * guard is armed again when they appear, so a click aimed at the button they replace (or the second click of a double click) cannot land on them.
  */
 const ConfirmArrival: React.FC<{
   guardMs: number;
+  choiceShown: boolean;
   setReady: (ready: boolean) => void;
   children: React.ReactNode;
-}> = ({ guardMs, setReady, children }) => {
+}> = ({ guardMs, choiceShown, setReady, children }) => {
   const styles = useStyles();
   const ref = React.useRef<HTMLDivElement>(null);
   const guarded = guardMs > 0;
@@ -274,7 +282,7 @@ const ConfirmArrival: React.FC<{
       window.clearTimeout(timer);
       setReady(true);
     };
-  }, [guarded, guardMs, setReady]);
+  }, [guarded, guardMs, choiceShown, setReady]);
   return (
     <div ref={ref} tabIndex={guarded ? -1 : undefined} className={guarded ? styles.confirmFocus : undefined}>
       {children}
@@ -321,6 +329,8 @@ export const DecisionItemWizard: React.FC<DecisionItemWizardProps> = ({
   // No guard on a closed item (nothing to record), and none unless the host asked for one. A ref: the step's content keeps the closure it was added with.
   const guardMsRef = React.useRef(0);
   guardMsRef.current = readOnly ? 0 : (confirmGuardMs ?? 0);
+  // True while the footer offers the send-choice buttons; the step's content keeps its first closure, so this too is read through a ref.
+  const choiceShownRef = React.useRef(false);
 
   // The draft updater of every item this dialog has shown, by item id. A field hands `update` to an async path (the side-pane
   // lookup), and that pick can come back after the person moved on: `update` is bound to the item it was rendered for, so the
@@ -426,12 +436,18 @@ export const DecisionItemWizard: React.FC<DecisionItemWizardProps> = ({
             // A message went out and the first attempt cannot be resumed: the owner decides, not another click (task 043).
             const pinned = l.pinnedFailure ?? l.failure;
             if (pinned?.sentButNotRecorded && !pinned.resumable) return false;
+            // Task 191 (D-223): the inquiry email may have been sent; only one of the two choices in the footer goes on.
+            if (needsSendChoice(pinned)) return false;
             return reviewReady(l.plan, l.draft);
           },
           renderContent: handle => (
             <>
               <ShellSync handle={handle} syncRef={syncRef} />
-              <ConfirmArrival guardMs={guardMsRef.current} setReady={setConfirmReady}>
+              <ConfirmArrival
+                guardMs={guardMsRef.current}
+                choiceShown={choiceShownRef.current}
+                setReady={setConfirmReady}
+              >
                 <ConfirmStep />
               </ConfirmArrival>
             </>
@@ -559,6 +575,7 @@ export const DecisionItemWizard: React.FC<DecisionItemWizardProps> = ({
         justRecorded,
         failure,
         locked,
+        lockedBy: locked ? pinnedFailure : null,
         closedIds: ready.closedIds,
         recordResult: ready.recordResult,
         lookup: ready.lookup,
@@ -586,6 +603,20 @@ export const DecisionItemWizard: React.FC<DecisionItemWizardProps> = ({
     await onRecord?.();
   }, [onRecord]);
   const onNextOpenItem = ready?.onNextOpenItem;
+  // Task 191 (D-223): the earlier attempt's inquiry email may have been sent. Confirm offers exactly two ways on: send it again,
+  // or record the decision without sending. Never a plain retry.
+  const choiceRequired = !readOnly && needsSendChoice(pinnedFailure ?? failure);
+  // Task 191 fix round 2: an inquiry that did NOT go out (it may fail the same way on every retry, e.g. a mailbox that may not send)
+  // can also be recorded without sending, next to Retry recording, so the item is never stuck.
+  const notSentOffer = !readOnly && !choiceRequired && canRecordWithoutSending(pinnedFailure ?? failure);
+  const recording = ready?.recording ?? false;
+  choiceShownRef.current = choiceRequired || notSentOffer;
+  const choose = React.useCallback(
+    (choice: DecisionSendChoice) => {
+      void onRecord?.(choice);
+    },
+    [onRecord]
+  );
 
   return (
     <DecisionItemContext.Provider value={contextValue}>
@@ -608,34 +639,73 @@ export const DecisionItemWizard: React.FC<DecisionItemWizardProps> = ({
         nav={nav}
         statusBar={statusBar}
         footer={
-          ready && readOnly
+          ready && (choiceRequired || notSentOffer)
             ? context => ({
-                start: (
-                  <Button appearance="secondary" onClick={context.close}>
-                    Close
-                  </Button>
-                ),
-                end: (
+                end: context.isLastStep ? (
                   <>
                     {!context.isFirstStep ? (
-                      <Button appearance="secondary" onClick={context.goBack}>
+                      <Button appearance="secondary" onClick={context.goBack} disabled={recording}>
                         Back
                       </Button>
                     ) : null}
-                    {!context.isLastStep ? (
-                      <Button appearance="secondary" onClick={context.goNext}>
-                        Next
+                    <Button
+                      appearance="secondary"
+                      onClick={() => choose('record-without-sending')}
+                      disabled={recording || !confirmReady}
+                      data-testid="record-without-sending"
+                    >
+                      Record without sending
+                    </Button>
+                    {choiceRequired ? (
+                      <Button
+                        appearance="primary"
+                        onClick={() => choose('send-again')}
+                        disabled={recording || !confirmReady}
+                        data-testid="send-again"
+                      >
+                        Send again
                       </Button>
-                    ) : null}
-                    {onNextOpenItem ? (
-                      <Button appearance="primary" onClick={onNextOpenItem}>
-                        Next open item
+                    ) : (
+                      <Button
+                        appearance="primary"
+                        onClick={() => void onRecord?.()}
+                        disabled={recording || !confirmReady}
+                        data-testid="retry-recording"
+                      >
+                        Retry recording
                       </Button>
-                    ) : null}
+                    )}
                   </>
-                ),
+                ) : undefined,
               })
-            : undefined
+            : ready && readOnly
+              ? context => ({
+                  start: (
+                    <Button appearance="secondary" onClick={context.close}>
+                      Close
+                    </Button>
+                  ),
+                  end: (
+                    <>
+                      {!context.isFirstStep ? (
+                        <Button appearance="secondary" onClick={context.goBack}>
+                          Back
+                        </Button>
+                      ) : null}
+                      {!context.isLastStep ? (
+                        <Button appearance="secondary" onClick={context.goNext}>
+                          Next
+                        </Button>
+                      ) : null}
+                      {onNextOpenItem ? (
+                        <Button appearance="primary" onClick={onNextOpenItem}>
+                          Next open item
+                        </Button>
+                      ) : null}
+                    </>
+                  ),
+                })
+              : undefined
         }
       />
     </DecisionItemContext.Provider>

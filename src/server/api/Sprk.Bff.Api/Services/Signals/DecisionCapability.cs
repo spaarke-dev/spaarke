@@ -195,8 +195,12 @@ public sealed partial class DecisionCapability : IDecisionCapability
             await _planReadStamp.StampAsync(http, signalId, ct);
         }
 
+        // Task 191 fix round 1 (criterion 134): this caller's unfinished review of the item (a failure after writes landed), so the
+        // wizard resumes it instead of starting a new review that would run those writes again. Best effort; it never fails the read.
+        var unfinished = await _commits.ReadUnfinishedAsync(http, signalId, ct);
+
         return DecisionPlanReadResult.Ok(
-            DecisionPlanResponse.From(signalId, lane, versionId, plan, described.Description, inquiryRecipient, parameterFacts));
+            DecisionPlanResponse.From(signalId, lane, versionId, plan, described.Description, inquiryRecipient, parameterFacts, unfinished));
     }
 
     /// <inheritdoc />

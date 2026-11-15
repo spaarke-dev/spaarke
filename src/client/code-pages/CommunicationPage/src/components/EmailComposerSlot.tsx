@@ -33,7 +33,12 @@
 
 import * as React from 'react';
 import { makeStyles, tokens } from '@fluentui/react-components';
-import { SendEmailPage, searchUsersAndContacts, createXrmDataService } from '@spaarke/ui-components';
+import {
+  SendEmailPage,
+  searchUsersAndContacts,
+  createXrmDataService,
+  createXrmEmailComposeHandlers,
+} from '@spaarke/ui-components';
 import type { AuthenticatedFetchFn } from '@spaarke/auth';
 import type {
   CommunicationMode,
@@ -84,6 +89,14 @@ export function EmailComposerSlot(props: IEmailComposerSlotProps): React.JSX.Ele
     [dataService]
   );
 
+  // Task 188 (D-219 Q3): templates, AI drafting and local-file attachments, like the Console's Send Email dialog.
+  // ONE factory instance; a handler left out silently hides its feature. The page runs in the Dataverse host, so
+  // the factory's Xrm walker resolves like `createXrmDataService()` above.
+  const composeHandlers = React.useMemo(
+    () => createXrmEmailComposeHandlers({ authenticatedFetch: props.authenticatedFetch, bffBaseUrl: props.bffBaseUrl }),
+    [props.authenticatedFetch, props.bffBaseUrl]
+  );
+
   return (
     <div className={styles.root}>
       {/*
@@ -106,6 +119,10 @@ export function EmailComposerSlot(props: IEmailComposerSlotProps): React.JSX.Ele
         initialBody={props.initialBody}
         associations={props.associations}
         onSearchRecipients={handleSearchRecipients}
+        onListEmailTemplates={composeHandlers.onListEmailTemplates}
+        onRenderEmailTemplate={composeHandlers.onRenderEmailTemplate}
+        onDraftWithAi={composeHandlers.onDraftWithAi}
+        onUploadLocalAttachment={composeHandlers.onUploadLocalAttachment}
         onSent={communicationId => props.nav.onSent(communicationId)}
         onClose={props.nav.onClose}
       />

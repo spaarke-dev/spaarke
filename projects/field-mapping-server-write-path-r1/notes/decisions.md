@@ -1078,9 +1078,60 @@ Design note: `task/fm-032b-design` 2692910f2d (`notes/task-032b-design.md`).
 ### 2026-11-12 — task 022b: Restricted mapping source (UAC-r2, round 75; from rounds 2, 67, 81, 84, 87)
 
 - **Agreement:** `sprk_agreement.sprk_accesspermission` is declared in the SOURCE set only, so the Restricted-source check reads it and fails closed. No inheritance or enforcement on agreements. `AccessPermissionTablesGuardTests` holds the code set equal to the solution with no ratchet.
-- **Project and work assignment:** the root's value is set in the create from `SecureRootInheritance`'s own decision, unchanged: the value max(own, floor) AND the access record marking the floor part inherited and the caller's value own. The max is never written as the record's own value (round 87: only inherited strictness follows a parent down). The post-create step stays and agrees with the create. No second writer.
+- **Project and work assignment (SUPERSEDED by the Q2 option (c) bullet below; nothing is written in the create for a root):** the root's value is set in the create from `SecureRootInheritance`'s own decision, unchanged: the value max(own, floor) AND the access record marking the floor part inherited and the caller's value own. The max is never written as the record's own value (round 87: only inherited strictness follows a parent down). The post-create step stays and agrees with the create. No second writer.
 - **Readings confirmed:** a Standard or Limited source maps unchanged (secure sources stay with the secure copy gate); an empty value is Standard; an unreadable value fails closed; the filing refusal reuses `record_creation.mapping_source_secure_filing` with Restricted wording (no client contract change).
 - **A document filed only through the regarding pair:** a known limit. The strip fails closed; a document's access permission is a display copy with no enforcement of its own (round 81), and the reconcile brings it in step.
 - **Repair and the field-mapping push:** task 022c (#2738, DI-027), started right after 022b merges, reviewed by UAC-r2.
 - **Project and work assignment (Q2, UAC-r2 revised to option c):** round 84 already treats a filed child by the parent-derived value from its first moment, so 022b only needs to KNOW the floor and never writes it. Named edit to `SecureRootInheritance`, approved by UAC-r2: `PlanCreateAsync`'s result also returns the Access Permission floor it already computes for the new row (read-only, with an explicit "undecided" when a parent could not be read). No write behaviour changes; task 175 F1-1 stands (a create never carries the access record; the cascade writes it after the create). A Restricted source maps into a project or work assignment only when the caller's own value is Restricted or the floor is Restricted; an undecided floor strips. Two adversarial passes cover the edit; it is listed separately in the diff to UAC-r2. If the floor cannot be separated without changing what `DecideParentsAsync` decides: option (b), the strip as a stated known limit, and UAC-r2 exposes it.
 - **Agreement (Q1, follow-up):** the source check is in place; no caller path reaches it yet (`EntityAccessFilter` has no agreement entity set). Recorded as a K; no entity set added in 022b.
+
+## 2026-11-12 — 022c rules (unified-access-control-r2 confirmed)
+
+- **Push filing:** a Restricted or Unreadable mapping source never changes a child's filing. Such a child is not written (`RefileNotAllowedReasonCode`), the same as rule (a) for a secure source.
+- **Row answer (Repair and push):** the row's stored `sprk_accesspermission`, Restricted only when it reads as the Restricted option. Anything else strips or skips.
+  - Repair: the row is skipped with `record_repair.mapping_source_restricted`.
+  - Push: the child gets `field_mapping.push.restricted_source_not_restricted`. An Unreadable source gives `UndeterminedReasonCode`.
+- **Reads:** the source column joins the existing source read. A child's value is read only when the source is Restricted or Unreadable.
+- **Known limit, in both the 022b and 022c notes:** Restricted-ness is decided at the write. A target loosened later keeps the mapped values, and nothing strips them again.
+
+## 2026-11-12 — Owner go-aheads (this session), and the 045d derive-failure rule
+
+- **Owner go-aheads, given in this session on 2026-11-12:**
+  - the PR to master for 022b and 022c;
+  - the class-aware sync-mode migration on dev. The dry run read 48 rules: 36 to demote to One-time (32 Assigned-To, 4 display copies), 12 plain data already at Manual Refresh, 0 unknown. `-Apply` waits for the owner's review of that list;
+  - task 054's live steps on dev, in the binding deploy order. UAC-r2 coordinates the dev BFF deploy from master `e9208abc5e`;
+  - tasks 045d and 052b.
+- **045d, a derive failure (main session):** when the invoice-family re-derive fails (`ReadFailedCode`, `ResolverFieldsIncompleteCode` or `RecordNotFoundCode`), the write is refused through the existing `InvoiceFamilyPreWrite` refusal mapping. The refusal contract is unchanged (NFR-07).
+  - Reason: the regarding pair decides filing, so a row whose core lookup changed is never written without its five fields (fail closed).
+  - UAC-r2 and ebilling-r1 review the diff.
+
+## 2026-11-12 — Owner answers: sync-mode applied on dev, PR #2768 merge when green, 045d option (b)
+
+- **Sync-mode on dev (owner: "Apply on dev"):** `Set-FieldMappingRuleSyncMode.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com -Apply -Verify` reported 36 changed, 0 failed, VERIFY PASS, exit 0. Assigned-To, display-copy and filing rules are One-time; plain data rules stay Manual Refresh. Other environments still need the owner's go.
+- **PR #2768 (022b + 022c, owner: "Merge when green"):** auto-merge is on, with a merge commit.
+- **045d, a blank name or number (owner: option (b), "write what it has"):** on the generic create and update paths, the record type, the id and the URL are always written; the name and the number are written when the record has them. A blank name or number no longer refuses. A missing catalog row, a missing record or a read fault still refuses through the `InvoiceFamilyPreWrite` mapping. The submission writers keep today's all-five rule unchanged.
+- **052b review (Opus):** the fix round covers:
+  - a re-own is refused for a table whose child relationships cascade on Assign (the allow-list starts empty);
+  - the contact owner rule applies only after the secure decision (a secure parent keeps today's answer);
+  - fault outcomes retry;
+  - an unconfigured customer team skips the contact table without moving its watermark.
+  
+  unified-access-control-r2 confirmed the resolver change with four conditions, all in that round. The deployment dependency is DI-028 (#2771).
+
+## 2026-11-13 — Invoice family: a regarding pair that disagrees with the core lookup is refused (owner, #2772)
+
+- **Owner decision, given in this session on 2026-11-13: "Refuse it"** (option (a) of #2772 / DI-029).
+- **The rule.** On every invoice-family table (invoice, billing event, approval, external identifier, correction, submission), a write's regarding pair (`sprk_regardingrecordid` plus its record type) must agree with the row's core lookup. The core lookup is the effective one: the stored value, or the value written in the same request. A write whose pair disagrees is refused through each path's existing refusal form, and nothing is written. A write that moves the core lookup still gets its pair and the five resolver fields derived by the server (045d).
+- **FR-23 amended for these tables.** The regarding pair stays pushable, but on an invoice-family table a pushed pair that disagrees with the child's core lookup is refused per child. On every other table FR-23 is unchanged.
+- **Views.** ebilling-r1 recommended (a). unified-access-control-r2: either option; there is no access effect while `SecureRootInheritance.BffManagedPairTables` holds no family table (pinned by 045d).
+- **Work:** task 045e, after 045d merges (same files).
+
+## 2026-11-13 — Invoice family: a filed invoice is never moved; children name their invoice's core record (owner, EB-D-231, #2794)
+
+Owner decision EB-D-231 (ebilling-r1, filed as #2794): a wrongly filed invoice is returned to the firm and resubmitted on the right record; it is never moved. Confirmed in this session 2026-11-13, with two answers:
+- **Builder:** this project builds it as task 045g (it owns `InvoiceFamilyCoreRecordGuard` through 045d/045e/045f); ebilling-r1 and unified-access-control-r2 review.
+- **Line detach:** clearing an invoice line's invoice is refused too, unless 045g's inventory finds a legitimate flow that needs it (then stop and ask).
+Rules: (1) every change to an invoice's core record after create is refused (the detach/move/reattach hint is replaced by "return and resubmit on the right record"); (2) approval, submission, correction and external-identifier rows name their invoice's core record, as lines already do; (3) a line's invoice is not cleared. 045g goes to master in its own PR after #2790.
+- **The Create Matter wizard (owner, 2026-11-13: "Build 045g, remove Invoice here"):** 045g's inventory found one product flow that moves an invoice: the Create Matter wizard's "Associate To: Invoice" option creates the matter, then re-files the chosen invoice onto it. Under rule (1) that step can never succeed, so 045g also removes Invoice from the wizard's Associate To options in the shared library (`CreateMatterWizard.tsx`). The other Associate To options are unchanged. The wizard's owning project and ebilling-r1 are told.
+- **An approval or correction always names its invoice (owner, 2026-11-13):** asked whether a BFF write (child-record PATCH, chat tool, playbook update, output orchestrator, field-mapping push) may clear the invoice of an approval or correction, the owner answered that an invoice may be for zero, "but not blank": an approval or correction always names its invoice. Clearing `sprk_invoice` on `sprk_invoiceapproval` or `sprk_invoicecorrection` is refused, as a line's is (rule 3). A submission's and an external identifier's invoice may still be cleared: a submission exists before its invoice, and an external identifier may be filed under its core record alone. ebilling-r1's commit undo clears a submission's invoice through its own service write, which these rules do not reach.
+- **An approval or correction is created with its invoice (owner, 2026-11-13):** the create-side twin of the ruling above. A BFF create of `sprk_invoiceapproval` or `sprk_invoicecorrection` with no `sprk_invoice` is refused. ebilling-r1 supports it; every Finance writer sets the invoice on these creates. Submission and external-identifier creates are unchanged. Task 045g, fix round 4.

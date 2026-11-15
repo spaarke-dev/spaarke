@@ -1527,6 +1527,28 @@ public class DecisionActionExecutorsTests
         var sendFailed = BudgetInquiryActionExecutor.ToOutcome(new BudgetInquiryResult(BudgetInquiryOutcome.SendFailed, sr));
         sendFailed.Status.Should().Be(DecisionActionStatus.Failed);
         sendFailed.Written.Should().Equal(new[] { new DecisionRecordRef("sprk_servicerequest", sr) }, "the row exists; the email did not go");
+        sendFailed.SendFailure.Should().Be(DecisionSendFailure.NotSent, "task 191: SendFailed means definitely not sent");
+
+        var unknown = BudgetInquiryActionExecutor.ToOutcome(new BudgetInquiryResult(BudgetInquiryOutcome.SendOutcomeUnknown, sr));
+        unknown.Status.Should().Be(DecisionActionStatus.Failed);
+        unknown.SendFailure.Should().Be(DecisionSendFailure.Unknown, "task 191: the email may have gone out");
+        unknown.Written.Should().Equal(new[] { new DecisionRecordRef("sprk_servicerequest", sr) });
+        unknown.Detail.Should().Contain("may have been sent");
+
+        sent.SendFailure.Should().BeNull();
+        createFailed.SendFailure.Should().BeNull("nothing landed, so there is no send to classify");
+    }
+
+    [Fact]
+    public void InquiryAdapter_ALandedServiceRequest_IsReadOnlyFromTheRoutesLandedRefs_Task191()
+    {
+        var sr = Guid.NewGuid();
+        var plain = Request(new() { ["to"] = "a@x.example", ["subject"] = "s", ["body"] = "b" });
+
+        BudgetInquiryActionExecutor.LandedServiceRequest(plain).Should().BeNull("a first attempt creates the service request");
+        BudgetInquiryActionExecutor.LandedServiceRequest(plain with { Landed = [new("sprk_servicerequest", sr)] }).Should().Be(sr);
+        BudgetInquiryActionExecutor.LandedServiceRequest(plain with { Landed = [new("sprk_communication", sr)] }).Should().BeNull();
+        BudgetInquiryActionExecutor.LandedServiceRequest(plain with { Landed = [new("sprk_servicerequest", Guid.Empty)] }).Should().BeNull();
     }
 
     [Fact]
@@ -1563,6 +1585,7 @@ public class DecisionActionExecutorsTests
     [InlineData(BudgetInquiryOutcome.Invalid, DecisionActionReasons.InvalidParameter)]
     [InlineData(BudgetInquiryOutcome.CreateFailed, DecisionActionReasons.WriteFailed)]
     [InlineData(BudgetInquiryOutcome.SendFailed, DecisionActionReasons.WriteFailed)]
+    [InlineData(BudgetInquiryOutcome.SendOutcomeUnknown, DecisionActionReasons.WriteFailed)]
     public void InquiryAdapter_NeverPassesTheRawErrorText_ToTheCaller_OnlyAFixedMessageAndTheCode_UacK4(BudgetInquiryOutcome outcome, string reason)
     {
         const string raw = "0x80040220 SecLib::AccessCheckEx failed. Returned hr = -2147187962, ObjectID: 1a2b..., OwnerId: 3c4d...";
@@ -1658,6 +1681,102 @@ public class DecisionActionExecutorsTests
 
         refusal.Should().BeNull();
         request!.To.Should().Equal("Lead.Name+tag@mail.firm.example", "second@firm.example");
+    }
+
+    [Fact]
+    public void InquiryAdapter_CarriesCcAndBcc_TrimmedAndDeDuplicated_Task190()
+    {
+        var (request, refusal) = BudgetInquiryActionExecutor.Map(Request(new()
+        {
+            ["to"] = "a@firm.example",
+            ["cc"] = " c1@firm.example; c2@firm.example,C1@Firm.example ",
+            ["bcc"] = "b1@firm.example\nb2@firm.example;B1@firm.example",
+            ["subject"] = "Budget",
+            ["body"] = "Please revise",
+        }));
+
+        refusal.Should().BeNull();
+        request!.To.Should().Equal("a@firm.example");
+        request.Cc.Should().Equal("c1@firm.example", "c2@firm.example");
+        request.Bcc.Should().Equal("b1@firm.example", "b2@firm.example");
+    }
+
+    [Fact]
+    public void InquiryAdapter_AnAddressInToIsNotRepeatedInCcOrBcc_AndOneInCcIsNotRepeatedInBcc_AnyCase_Task190()
+    {
+        var (request, refusal) = BudgetInquiryActionExecutor.Map(Request(new()
+        {
+            ["to"] = "a@firm.example",
+            ["cc"] = "A@FIRM.example; c@firm.example",
+            ["bcc"] = "a@firm.example; C@Firm.example; b@firm.example",
+            ["subject"] = "s",
+            ["body"] = "b",
+        }));
+
+        refusal.Should().BeNull();
+        request!.To.Should().Equal("a@firm.example");
+        request.Cc.Should().Equal(new[] { "c@firm.example" }, "an address in To once is not in Cc");
+        request.Bcc.Should().Equal(new[] { "b@firm.example" }, "an address in To or Cc is not in Bcc");
+    }
+
+    [Theory]
+    [InlineData(null, null)]
+    [InlineData("", "  ")]
+    [InlineData(";, ", "\n")]
+    [InlineData("a@firm.example", "a@firm.example")]
+    public void InquiryAdapter_EmptyAbsentOrFullyDuplicatedCcAndBcc_AreNull_SoTheRequestIsToOnly_Task190(string? cc, string? bcc)
+    {
+        var (request, refusal) = BudgetInquiryActionExecutor.Map(Request(new()
+        {
+            ["to"] = "a@firm.example",
+            ["cc"] = cc,
+            ["bcc"] = bcc,
+            ["subject"] = "s",
+            ["body"] = "b",
+        }));
+
+        refusal.Should().BeNull();
+        request!.Cc.Should().BeNull();
+        request.Bcc.Should().BeNull();
+    }
+
+    [Theory]
+    [InlineData("cc", "copy@firm", "Cc")]
+    [InlineData("cc", "good@firm.example; copy", "Cc")]
+    [InlineData("bcc", "@firm.example", "Bcc")]
+    [InlineData("bcc", "good@firm.example; hidden@firm", "Bcc")]
+    public async Task InquiryAdapter_RefusesACcOrBccThatIsNotAnAddress_NamingTheField_BeforeAnyReadOrWrite_Task190(
+        string field, string value, string fieldLabel)
+    {
+        // As for To: a bad token is refused before the preflight reads anything and before the service request is written; the send
+        // seam (a sender with no communication core) is never reached.
+        var user = new FakeUserClient();
+        var inquiry = new BudgetInquiryExecutor(
+            user, Owner().Object, new InquiryEmailSender(null!, new HttpContextAccessor()), new HttpContextAccessor(),
+            NullLogger<BudgetInquiryExecutor>.Instance);
+        var executor = new BudgetInquiryActionExecutor(inquiry);
+        var request = Request(new()
+        {
+            ["to"] = "good@firm.example",
+            [field] = value,
+            ["subject"] = "s",
+            ["body"] = "b",
+            ["outsideFirm"] = FirmId.ToString("D"),
+        });
+
+        var (mapped, refusal) = BudgetInquiryActionExecutor.Map(request);
+        mapped.Should().BeNull();
+        refusal!.Status.Should().Be(DecisionActionStatus.Refused);
+        refusal.ReasonCode.Should().Be(DecisionActionReasons.RecipientUnresolved);
+        refusal.Detail.Should().Contain($"Check the {fieldLabel} field");
+
+        (await executor.PreflightAsync(request, CancellationToken.None))!.ReasonCode.Should().Be(DecisionActionReasons.RecipientUnresolved);
+        var executed = await executor.ExecuteAsync(request, CancellationToken.None);
+        executed.Status.Should().Be(DecisionActionStatus.Refused);
+        executed.ReasonCode.Should().Be(DecisionActionReasons.RecipientUnresolved);
+        executed.Written.Should().BeNullOrEmpty("no service request is written for a bad address");
+        user.Gets.Should().BeEmpty("nothing is read as the caller before the refusal");
+        user.Patches.Should().BeEmpty();
     }
 
     [Fact]

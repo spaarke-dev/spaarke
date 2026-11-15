@@ -352,6 +352,10 @@ public sealed class InvoiceSubmissionProcessingJobHandler : IJobHandler
                     outcome = outcome with { StagedFiles = [staged] };
                 }
 
+                // Task 095f (EB-D-225): a from-email Correction's note, from the job's payload; the persister writes it in the invoice's create
+                // (and only for a submission that names the one it replaces).
+                outcome = outcome with { CorrectionNote = ParseCorrectionNote(job.Payload) };
+
                 var persisted = await _persister.PersistAsync(outcome, correlation, ct).ConfigureAwait(false);
                 if (persisted.Status == SubmissionPersistStatus.SourceChanged && staged is not null)
                 {
@@ -900,6 +904,26 @@ public sealed class InvoiceSubmissionProcessingJobHandler : IJobHandler
         }
     }
 
+    /// <summary>Task 095f: the payload's correction note, checked again (the payload is the route's own, but a note over the column's length
+    /// or with a control character is never written); null when there is none.</summary>
+    private static string? ParseCorrectionNote(JsonDocument? payload)
+    {
+        if (payload is null)
+        {
+            return null;
+        }
+
+        try
+        {
+            var parsed = payload.Deserialize<InvoiceSubmissionProcessingPayload>(new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+            return InvoiceCorrectionNote.Check(parsed?.CorrectionNote).Value;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
     /// <summary>A step of the run that cannot continue: permanent (Failed with the code) or transient (retried).</summary>
     private sealed class SubmissionStepFailure : Exception
     {
@@ -920,4 +944,8 @@ public sealed class InvoiceSubmissionProcessingJobHandler : IJobHandler
 public sealed class InvoiceSubmissionProcessingPayload
 {
     public Guid SubmissionId { get; set; }
+
+    /// <summary>Task 095f (EB-D-225): a from-email Correction's note, written on the NEW invoice in the persister's create. Absent for every
+    /// other submission.</summary>
+    public string? CorrectionNote { get; set; }
 }

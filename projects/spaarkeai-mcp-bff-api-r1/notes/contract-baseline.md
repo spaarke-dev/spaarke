@@ -78,6 +78,8 @@ Used by task 017 for its MCP mapping tests. "reasonCode on the wire" is the Prob
 | 409 | `inquiry.disposition_required` | `decision.409.inquiry-disposition-required` |
 | 409 | `ontology.decision.decided_in_invoice_review` | `decision.409.decided-in-invoice-review` |
 | 409 | `ontology.decision.review_in_progress` | `decision.409.review-in-progress` |
+| 409 | `ontology.decision.review_unfinished` | `decision.409.review-unfinished` (recorded 2026-11-15, merge review F4: a new review id on an item whose first review failed after writes landed) |
+| 409 | `ontology.decision.send_choice_required` | `decision.409.send-choice-required` (recorded 2026-11-15, merge review F4: a retry without a `sendChoice` after a maybe-sent inquiry email) |
 | 409 | `ontology.decision.signal_not_open` | `decision.409.signal-not-open` |
 | 422 | `ontology.decision.actions_do_not_match_plan` | `decision.422.actions-do-not-match-plan` |
 | 422 | `ontology.decision.actions_exclude` | `decision.422.actions-exclude` |
@@ -97,7 +99,7 @@ Used by task 017 for its MCP mapping tests. "reasonCode on the wire" is the Prob
 | 422 | `ontology.decision.unresolved_action` | `decision.422.unresolved-action` |
 | 422 | `ontology.decisionplan.refused` | `decision.422.plan-refused` |
 | 500 | `decision.action.write_failed` | `decision.500.step-failed` |
-| 500 | `ontology.decision.not_resumable` | `decision.500.not-resumable` |
+| 409 | `ontology.decision.not_resumable` | `decision.409.not-resumable` (500 before ontology task 191: a stored failure returned again is 409, merged 2026-11-15) |
 | 500 | `ontology.decision.record_write_failed` | `decision.500.record-write-failed` |
 | 503 | `ontology.decision.core_unsupported` | `decision.503.core-unsupported` |
 | 503 | `ontology.decision.idempotency_unavailable` | `decision.503.idempotency-unavailable` |
@@ -112,7 +114,7 @@ Used by task 017 for its MCP mapping tests. "reasonCode on the wire" is the Prob
 - **Worklist 503 `too_many_signals` is not on the wire.** `SignalReadService` returns the internal reason `too_many_signals` (more than `MaxPages` pages), but `SignalReadEndpoints.GetWorklistAsync` answers every `Unavailable` with the same 503 body, `ontology.signal.worklist_unavailable` (the internal reason is never returned). `worklist.503.too-many-signals` pins that: no truncated list, and no new reason code on the wire. A change that surfaces `too_many_signals` as a wire code is a REST change and an escalation.
 - **A core-record read fault on a Signal that has a core record is the uniform 404**, not 503 (`SignalCoreRecordAccess` fails closed). The 503 `ontology.signal.access_unavailable` of the plan and suppression routes is reached through a no-core Do item whose subject read faults (`plan.503.access-unavailable`, `suppression.503.access-unavailable`).
 - **The uniform 404 carries `reasonCode` `sdap.access.deny.record_unavailable`** and is byte-identical (after normalisation) for an unreadable Signal and an unreadable core record: asserted in `plan.404.uniform` and `decision.404.uniform`.
-- **`ontology.decision.not_resumable` is a 500** (status stays `Failed`, `replayed` true), not a 422.
+- **`ontology.decision.not_resumable` is a 409** since ontology task 191 (merged 2026-11-15): a stored failure returned again keeps status `Failed` and `replayed` true and answers 409 with the first failure's body (it was a 500 before; never a 422). `send_choice_required` and `review_unfinished` are 409 as well (`decision.409.send-choice-required`, `decision.409.review-unfinished`).
 - **The writer-identity (WhoAmI) fault answers `ontology.decision.idempotency_unavailable` (503)**, not `record_refused`: pinned in `decision.503.idempotency-unavailable-writer-identity`. `record_refused` 503 is the Decision Record owner resolver faulting (`decision.503.record-refused`).
 - **`ontology.decision.core_unsupported` is 422 when the catalog row is gone and 503 when the read faults**: two cases.
 - **A taken action's refusal or failure carries the action's own code** (`decision.action.not_authorized` 403, `decision.action.write_failed` 500, with `failedStep`, `landed`, `steps`...), not an `ontology.decision.*` code. One representative of each is baselined; the per-executor codes are pinned in `DecisionActionExecutorsTests`.

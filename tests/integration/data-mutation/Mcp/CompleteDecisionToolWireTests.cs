@@ -146,6 +146,65 @@ public sealed class CompleteDecisionToolWireTests
         result.GetRawText().Should().NotContain("Acme v. Beta");
     }
 
+    // ── ontology task 191 (D-223): the send choice travels on the same call ───────────────────────────────────────
+
+    [Fact]
+    public async Task ToolsList_TheReviewSchema_OffersRetryAndSendChoice_AsTheRestBodyDoes()
+    {
+        await using var host = await WireHost.StartAsync(_ => DecisionCapabilityRecorded());
+
+        var list = await host.RpcAsync("tools/list", new { });
+
+        var tool = list.GetProperty("tools").EnumerateArray().Single(t => t.GetProperty("name").GetString() == "spaarke_complete_decision");
+        var review = tool.GetProperty("inputSchema").GetProperty("properties").GetProperty("review");
+        review.GetProperty("properties").EnumerateObject().Select(p => p.Name).Should().Contain(["retry", "sendChoice"],
+            "the review is DecisionReview, bound as the REST body is, so the wizard's retry and send choice reach the service");
+    }
+
+    [Theory]
+    [InlineData(DecisionReview.SendAgain)]
+    [InlineData(DecisionReview.RecordWithoutSending)]
+    public async Task ToolsCall_ARetryWithASendChoice_BindsBoth_AndHandsThemToTheCapabilityUnchanged(string choice)
+    {
+        await using var host = await WireHost.StartAsync(_ => DecisionCapabilityRecorded());
+        var retry = new { reviewId = ReviewId, confirmed = true, retry = true, sendChoice = choice, actions = Array.Empty<object>() };
+
+        var result = await host.RpcAsync("tools/call", new { name = "spaarke_complete_decision", arguments = new { signalId = SignalId, review = retry } });
+
+        (result.TryGetProperty("isError", out var isError) && isError.GetBoolean()).Should().BeFalse();
+        host.Capability.Review!.Retry.Should().BeTrue();
+        host.Capability.Review.SendChoice.Should().Be(choice, "the tool passes the choice through; the service alone decides what it means");
+    }
+
+    [Fact]
+    public async Task ToolsCall_AStoredFailureReturnedAgain_Is409SendChoiceRequired_WithThePartialFacts()
+    {
+        var stored = new DecisionCommitResult
+        {
+            Status = DecisionCommitStatus.Failed,
+            ReasonCode = DecisionCommitReasons.SendChoiceRequired,
+            ReviewId = ReviewId,
+            FailedStep = 4,
+            Landed = [new DecisionCommitRef("sprk_servicerequest", RecordId)],
+            Resumable = true,
+            SendChoiceRequired = true,
+            Replayed = true,
+            Detail = "Acme v. Beta record text that must not be echoed",
+        };
+        await using var host = await WireHost.StartAsync(_ => stored);
+
+        var result = await host.RpcAsync("tools/call", new { name = "spaarke_complete_decision", arguments = new { signalId = SignalId, review = ReviewBody } });
+
+        result.GetProperty("isError").GetBoolean().Should().BeTrue();
+        var error = result.GetProperty("structuredContent");
+        error.GetProperty("reasonCode").GetString().Should().Be(DecisionCommitReasons.SendChoiceRequired);
+        error.GetProperty("status").GetInt32().Should().Be(StatusCodes.Status409Conflict, "the REST route answers a stored failure returned again with 409");
+        error.GetProperty("partial").GetProperty("sendChoiceRequired").GetBoolean().Should().BeTrue();
+        error.GetProperty("partial").GetProperty("replayed").GetBoolean().Should().BeTrue();
+        error.GetProperty("partial").GetProperty("resumable").GetBoolean().Should().BeTrue();
+        result.GetRawText().Should().NotContain("Acme v. Beta");
+    }
+
     [Fact]
     public async Task ToolsCall_LogsOneTelemetryLinePerCall_WithToolOutcomeLatencyAndCorrelation_AndNoSignalReviewOrText()
     {

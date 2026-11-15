@@ -4,7 +4,7 @@
     <title>Billing Rule Readers: a team in the customer's top unit, so child-unit billing admins can read and Exclude org-wide rules</title>
     <phase>3 Rules (follow-up to 089b; owner 2026-11-03)</phase>
     <gate>owner decided 2026-11-03 ("yes Billing Administrator can have read on rules across whole organization"); design by uac-r2 2026-11-03</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Adds a role, a team and a setup step that grant Read on a hard-deny table; tags include auth and tenant-isolation.</rigor-reason>
     <model-tier>opus</model-tier>

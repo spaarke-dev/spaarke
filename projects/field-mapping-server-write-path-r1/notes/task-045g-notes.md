@@ -1,0 +1,380 @@
+# Task 045g — a filed invoice is never moved; rows filed with an invoice regard its core record
+
+POML: `tasks/045g-invoice-family-never-moved-children-match-invoice.poml`. Owner decision EB-D-231 (#2794): a wrongly filed
+invoice is returned to the firm and resubmitted on the right record. It is never moved.
+
+## Rules
+
+1. **Rule 1.** An invoice's core record (`sprk_matter`, `sprk_project`, `sprk_regardingworkassignment`) cannot change after
+   create, on any path.
+   - The refusal is the new code `invoice_family_invoice_core_record_fixed`. Its fixed text names no record.
+   - The hint shown with this code and with the line mismatch code is replaced.
+   - Old hint: detach the lines, move the invoice, move the lines, re-attach them.
+   - New hint (`InvoiceFamilyCoreRecordGuard.ReturnAndResubmitHint`): "A wrongly filed invoice is not moved: it is returned
+     to the firm and resubmitted on the right matter, project or work assignment."
+2. **Rule 2.** These rows must regard their invoice's core record, on create and on update:
+   - an approval, a submission or a correction (through `sprk_invoice`);
+   - an external identifier filed under a core record (through `sprk_regardinginvoice`).
+
+   A mismatch reuses D-96's code, `invoice_family_line_invoice_core_record_mismatch`, with the same hint.
+
+   An external identifier filed under its invoice only (no core lookup) keeps D-68: it regards the invoice and is not
+   compared.
+3. **Rule 3.** A line's invoice (`sprk_billingevent.sprk_invoice`) cannot be cleared after create.
+   - The refusal is the new code `invoice_family_line_invoice_cleared`, with fixed text.
+   - A line may still be pointed at another invoice of its own core record. Rule 2's comparison, the existing line rule,
+     decides that.
+4. **Order.** Rules 1 and 3 are decided right after the guard's own `Check` admits the row, on the stored row, before any
+   other read: lines, the superseded invoice, the work assignment, the catalog.
+5. **Person runs.** On the playbook update and the output orchestrator run as a person, a refusal of rules 1–3 is decided
+   again on the stored row and the other invoice as that person reads them (`PersonRowReader`).
+   - A row the person cannot read gives `invoice_family_read_failed`.
+   - A read fault also gives `invoice_family_read_failed`.
+   - So no refusal turns on a row the person cannot read.
+   - On the caller paths, the stored row and the other invoice are already read as the caller.
+6. **Fail closed.** A stored-row or invoice read that fails writes nothing. The caller's cancellation is rethrown.
+
+## Inventory (who writes these columns)
+
+- **Conflicting flow found.** The Create Matter wizard's "Associate To → Invoice" option re-filed an existing invoice under
+  the new matter (`PATCH /api/v1/child-records/sprk_invoice/{id}` with a matter bind).
+  - Reported as a STOP. The owner decided: "Build 045g, remove Invoice here".
+  - The option, its `associateToRecord` branch and the BFF re-file wrap are removed in
+    `src/client/shared/Spaarke.UI.Components/src/components/CreateMatterWizard/CreateMatterWizard.tsx`. Other options are
+    unchanged.
+  - No consumer outside the library depends on the option:
+    - `src/solutions/CreateMatterWizard/src/main.tsx` launches only from `sprk_project`;
+    - `sprk_wizard_commands.js` opens it only from a project;
+    - the AssociateToStep `types.ts` invoice entries serve other wizards and are unchanged.
+- **Finance writers (ebilling-r1 flows 1–7, verified in code).** They write through `IGenericEntityService` and
+  transactions, app-only. They use only the pure `Check`, so 045g does not reach them. None would be refused anyway:
+  1. Commit undo clears the submission's invoice (`SubmissionCommitGate.cs` 425–446). Rule 3 is a line's only, and a
+     must-not-fire test drives the same shape through the generic paths.
+  2. `BuildSubmissionUpdate` (1965) sets the submission's invoice to one of the same core (`outcome.CoreRecord`, 459–462).
+  3. Rerun `LineUpdate` writes only derived and decision columns (196–207).
+  4. The supersedes link (EB-D-206) is found by `snapshot.CoreRecord`, and the rerun refuses a core mismatch (424–428).
+  5. `BuildRenumberUpdate` (600–622) and its caller (`InvoiceAssignFirmService` 1085–1150) write the firm, numbers, names
+     and findings only.
+  6. Add line and adjustment (`InvoiceLineAddService` 1179–1220, 657–687) create rows with the invoice's own core record.
+  7. No flow updates an existing external identifier.
+  8. (Fix round 1, rule 3b.) No Finance writer clears an approval's or a correction's invoice; the only invoice clear among
+     them is flow 1's, on the submission.
+
+  Also checked: return to firm (`InvoiceRejectReturnService` 595/655/702) writes status, claim and record link only. The
+  repair pass (`RecordCreationService.Repair.cs` 935–947) writes no family row.
+
+## Component justification (§11)
+
+- **`InvoiceCoreRecordFixedCode`, `LineInvoiceClearedCode` (new codes, with fixed reasons).**
+  - Existing: the guard's code set (D-96's mismatch, `MultipleCoreRecordsCode`).
+  - Extension: neither existing code says what was refused. A move with every line following is not a mismatch, and a
+    cleared invoice names no other record. D-96's code is reused for rule 2.
+  - Cost of doing nothing: the refusal would carry a code that names a different rule, and its hint would describe a move
+    the owner has ruled out.
+- **`ReturnAndResubmitHint`.** This replaces `DetachMoveReattachHint` (renamed, new text). It is not new surface.
+- **`InvoiceFamilyCoreRecordGuard.PersonRowLookup` (delegate) and `OwnedChildWrite.PersonRowReader`.**
+  - Existing: 045f's `PersonStoredRowReader`, built on the same `IImpersonatedCommunicationQuery.QueryAsync`.
+  - Extension: that reader reads one column set for 045f's URL rule. The guard needs the guarded lookups of any family row
+    and of the other invoice, as references. The reader keeps the same query and the same 403/404 handling.
+  - Cost of doing nothing: on a person run, a rule-2 refusal could turn on an invoice the person cannot read, which would
+    tell them how that invoice is filed.
+- **`InvoiceCoreRecordChanges` and `RefuseChangeAfterCreate` (pure helpers).**
+  - Existing: `NamesTheSameRecord`, which these use.
+  - Extension: they are the one decision, asked by the guard, by 045d's caller-path derive skip and by the app-only derive.
+  - Cost of doing nothing: three copies of rule 1.
+- **The `stored` parameter of `CheckWriteAsync` and the `asPerson` parameter of `CheckGenericUpdateAsync`.**
+  - These are optional parameters on existing methods. Every create passes no `stored`.
+
+## Before → after
+
+| Write | Before | After |
+|---|---|---|
+| Invoice core lookup changed, any update path (PATCH, chat tool, playbook, orchestrator, push, decision route) | written when every line followed (D-96), with 045d's derived fields | 400 / refused `invoice_family_invoice_core_record_fixed`, return-and-resubmit hint; nothing read after the stored row |
+| Invoice moved under a work assignment | cycle check (UAC-r2) then written | refused `..._core_record_fixed`; the work assignment is not read. The cycle check runs on the create and when an update names the invoice's own work assignment again |
+| Invoice stored under one core record, updated to none or to two (fix round 1) | `..._no_core_record` / `..._multiple_core_records` | refused `..._core_record_fixed`, return-and-resubmit hint. A create, and a stored row naming no single core record, keep the old codes |
+| Invoice naming the core record it already names | written, nothing derived | unchanged |
+| Line's invoice cleared (with or without a move) | written (the old hint's first step) | refused `invoice_family_line_invoice_cleared` |
+| Approval's or correction's invoice cleared (rule 3b, fix round 1) | written | refused `invoice_family_line_invoice_cleared` (same code and text as rule 3) |
+| Line pointed at another invoice of its own core record | written | unchanged |
+| Approval / submission / correction / external identifier (under a core record) given an invoice of another core record, or moved away from its invoice's | written | refused `..._line_invoice_core_record_mismatch` |
+| The same rows given an invoice of their own core record; an external identifier under its invoice only (D-68); a submission's invoice cleared | written | unchanged |
+| Rule refusal on a person's run, row unreadable as the person | n/a | `invoice_family_read_failed` |
+| Create Matter wizard "Associate To" | offered Project, Account, Invoice | offers Project, Account |
+
+## 045d derive paths that become unreachable
+
+- Every derive of an invoice's resolver fields for a core move, on every update path:
+  - On the caller paths, `KeepInvoiceFamilyResolverFieldsAsync` skips the derive when `InvoiceCoreRecordChanges`, and the
+    guard refuses the write.
+  - On the app-only paths, the guard refuses before `KeepInvoiceFamilyResolverFieldsAppOnlyAsync`.
+  - A change seen only by the derive's own read (the row changed in between) is refused with the same code
+    (`DeriveForGenericUpdateAsync`).
+- On the child-record PATCH route, the 045d derive is now unreachable for every family table. The invoice is the route's
+  only family table.
+- The derive stays for:
+  - creates (all six tables);
+  - an approval, submission, correction or external identifier whose core move is admitted (no invoice, or moving with
+    an invoice of the new core record);
+  - the D-68 external identifier.
+
+  Its tests now drive an approval.
+
+## Evidence
+
+- **Filtered Sprk.Bff.Api.Tests.** Filter: InvoiceFamily, RecordOwnership, RecordCreation, Finance, ProcedureAssignment,
+  SecureChildOwnership, UpdateRecord, DataverseUpdateHandler, FieldMapping, `&FullyQualifiedName!~Api.Office.`.
+  - Before the test changes: 96 failed.
+  - After: **11776 passed, 0 failed, 4 skipped (11780)**.
+- **Each must-fire set with its rule switched off.** The switch was a temporary local `false &&`, never committed, and the
+  guard was restored byte-identical.
+  - Rule 1 (`InvoiceCoreRecordChanges` false): **60 of 60 must-fire tests fail**. The set's 2 must-not-fire cases pass.
+  - Rule 2 (`IsInvoiceChild` false and the external-identifier branch off): **41 of 45 fail**. The 4 that pass are the
+    submission cells on the playbook update and the orchestrator. There the handlers' access-column rule refuses the write
+    first. The tests accept either refusal, and nothing is written either way.
+  - Rule 3 (the line branch off): **7 of 7 fail**.
+  - Person re-decision (the `asPerson` block off): **6 of 6 fail**. The 2 must-not-fire cases pass.
+- **Client.**
+  - Spaarke.UI.Components `jest src/components/CreateMatterWizard`: **42 passed, 7 suites**. The linked `@spaarke/sdap-client`
+    and `@spaarke/auth` packages were built locally to run them.
+  - With the old wizard file restored: **3 failed** (the new invoice tests).
+  - `tsc --noEmit`: 0 errors.
+  - eslint: 0 errors. One warning, at line 780, which this task did not touch.
+- **Gates:**
+  - `dotnet build Spaarke.sln`: 0 warnings, 0 errors.
+  - ArchTests alone: 2544 passed, 0 failed.
+  - Filtered Sprk.Bff.Api.Tests (excluding `Api.Office.`): 11776 passed, 0 failed, 4 skipped. Before the test changes,
+    96 failed.
+  - ebilling filters (Finance, ProcedureAssignment, InvoiceFamily; excluding `Api.Office.`): 8351 passed, 0 failed,
+    4 skipped.
+  - `dotnet format whitespace --verify-no-changes` on the 24 touched .cs files: no changes.
+
+## Changed existing expectations (each with its reason)
+
+All of the following are rule 1 unless stated: an invoice's core record no longer moves.
+
+- **`InvoiceFamilyGenericUpdatePathTests.OrphanAndD96`**
+  - `D96_AnInvoiceMovedToAnotherMatter_WhileALineStaysOnTheOldOne…` and `D96_…WhoseLinesAreAllOnIt_IsWritten` are merged into
+    `AnInvoiceMovedToAnotherMatter_IsRefusedCoreRecordFixed_WithTheHint_WhereverItsLinesAre`. It also asserts that no line or
+    catalog query runs.
+  - `D96_ALineMovedToAnotherMatter…` keeps the mismatch code; the hint text is the new one.
+  - `D96_ALineDetachedFromItsInvoice_AndMovedInOneWrite_IsWritten…` becomes `ALineWhoseInvoiceIsCleared_IsRefusedLineInvoiceCleared…`
+    (rule 3; with and without a move).
+  - `TheMismatchRefusalOnTheThrowingPaths_PinsTheExactMessage` now drives a line mismatch. The new
+    `TheCoreRecordFixedRefusal…` pins the invoice text.
+  - The re-attach test's comment no longer describes the detach sequence.
+- **`…ResolverFields`**
+  - The invoice-move derive tests (resolver fields, blank name or number, derive failures, person reads, push caller reads,
+    403, pushed pair, cancellation, second core record after the guard) now drive an approval with no invoice.
+  - The invoice case is `AnInvoiceMovedToAnotherMatter_IsRefusedCoreRecordFixed_AndNothingIsDerived`.
+  - New: `AnInvoiceWhoseCoreRecordChangesAfterTheGuard_IsRefusedCoreRecordFixedByTheDerive…`.
+- **`…WorkAssignmentCycle`**: both move tests become one refusal theory (wherever the work assignment is filed). The cycle
+  check runs on the create and when an update names the invoice's own work assignment again.
+- **`…PairAgreement`**: `D96_AnInvoiceMovedWhileALineStaysBehind_WithAPairSent…` becomes
+  `AnInvoiceMovedWithAPairSent_IsRefusedCoreRecordFixed_NotForThePair`.
+- **`…AllFamilyTables`**: `AnExternalIdentifierUnderAMatter_GivenAnInvoice_IsWritten…` gives the invoice its own matter.
+  Rule 2 now compares the two.
+- **`…FixRound2`**: the push re-file race test writes the matter the invoice already names (the re-file still wraps the
+  write).
+- **Unit `InvoiceFamilyCoreRecordGuardLineSplitTests`**
+  - The hint test pins the new codes and text.
+  - `GenericUpdate_AnInvoiceMovedToAProject…` now expects the fixed code in all three line states.
+- **Unit `InvoiceFamilyCoreRecordGuardTests`**: `CheckWrite_TheOtherFamilyTables_AreNeverComparedWithAnInvoice` is replaced
+  by rule 2's must-fire, must-not-fire and fail-closed tests, plus D-68.
+- **Unit `InvoiceFamilyCoreRecordGuardWorkAssignmentCycleTests`**: the generic-update move tests become one refusal theory.
+- **`SecureChildOwnershipAiToolTests`**
+  - The invoice re-file and chat-tool move tests (`InvoiceFamilyGuard`, `InvoiceFamilyResolverFields`,
+    `InvoiceFamilyPairAgreement`, `DecisionRouteInvoiceFamily`) now expect `..._core_record_fixed` and no patch.
+  - The census theories drop `sprk_invoice` and get `ChildRefile_AnInvoice_IsNeverMovedUnderAnotherMatter_AndKeepsItsOwnerAndShares`.
+    `TheRefileTheory_CoversEveryRefileTable` still covers every route table.
+  - The 045d chat-tool derive tests now drive an approval.
+  - The scripted metadata gains `sprk_invoice` on the approval, the correction and the submission, as on the live tables
+    (the writers in Finance set it).
+
+## Fix round 1 (review of dd08247352)
+
+- **Push (F2).** The push passes its caller's row reader to the guard (`OwnedChildWrite.PersonRowReader(callerQuery,
+  appOnlyEntities, callerSystemUserId)`), so a refusal of rules 1-3 there is decided on the rows as the caller reads them.
+  A row not found keeps `..._record_not_found` on the push (K2).
+- **Rule 1 on a clear or a second core (F4/AC1).** An update of an invoice stored under one core record that would leave it
+  under none, or under two, is `..._core_record_fixed` with the fixed text, on every path (one place:
+  `CheckWriteAgainstOtherInvoiceAsync`).
+- **Chat tool (F2).** New `SecureChildOwnershipAiToolTests.InvoiceFamilyFixedAfterCreate`: rule 2 must fire (given an invoice
+  of another matter; moved away from its stored invoice's matter, which also pins that a stored invoice kept on a non-invoice
+  table is read from the invoice set), must not fire (an invoice of its own matter is patched), fail closed (the invoice
+  read faults), and rule 3 (a line's invoice cleared).
+- **Rule 3b (owner, 2026-11-13).** An invoice may be for nothing, but an approval's or a correction's link to its invoice is
+  never blank: an update that clears `sprk_invoice` on `sprk_invoiceapproval` or `sprk_invoicecorrection` is refused with
+  rule 3's code and text, on every BFF update path that can clear it (the chat tool, the playbook update, the output
+  orchestrator). The code string `invoice_family_line_invoice_cleared` is kept; its text now names the line, the approval
+  and the correction. Clearing the invoice of a submission (it exists before its invoice) or of an external identifier (it
+  may be filed under its core record alone) stays allowed: that is the owner's decision, pinned by
+  `ARowWhoseInvoiceIsCleared_IsNotRefusedByTheseRules` and `UpdateRecordTool_ASubmissionsOrExternalIdentifiersInvoiceCleared_IsPatched`.
+  - The child-record PATCH and the decision route do not write these two tables (`ChildRecordEndpoints.RefileTables`), and
+    the push never clears a lookup (a null source value is skipped), so neither has a 3b cell.
+  - Rule 3b applies to updates; the create rule compares an invoice when one is named.
+  - On a person's run, a 3b refusal is decided again on the row as the person reads it, as for rule 3.
+- **No new writer.** 045g adds no code that writes an invoice-family core lookup or `sprk_billingevent.sprk_invoice`. It
+  removes one: the Create Matter wizard's invoice re-file.
+- **Text (F4).** The work-assignment cycle wording and the line-invoice reasons in `ParentLineage.cs` and
+  `AccessTableReaderScanTests.cs` now state the rules only.
+- **Each new must-fire, run once with its change off** (temporary local edits, never committed; files restored
+  byte-identical):
+  - Push without the caller's reader: **2 of 2 fail** (`OnAPersonsRun_AnInvoiceMove…` and
+    `OnAPersonsRun_ARowGivenAnInvoiceOfAnotherMatter…`, push cells). The push must-not-fire cell passes.
+  - Clear or second core without the new branch: **14 of 14 fail** (unit, the three generic paths, the PATCH and the chat
+    tool). Other tables' second-core tests keep `..._multiple_core_records` and pass.
+  - Chat tool, rule 2 off: **12 of 12 fail** (8 mismatch cells; the 4 fail-closed cells, since nothing reads the invoice).
+    The 4 must-not-fire cells pass.
+  - Chat tool, rule 3 off: **1 of 1 fails**.
+  - The stored invoice read from the row's own set instead of the invoice set: **4 of 4 fail**.
+  - Rule 3b off (a line only): **12 of 12 fail** (2 unit, 4 generic-path, 2 chat-tool, 4 person-run cells). The 8
+    must-not-fire cells (submission and external identifier clears: 2 unit, 4 generic-path, 2 chat-tool) pass.
+- **Gates (fix round 1, final sources).** `dotnet build Spaarke.sln` 0 warnings, 0 errors; ArchTests 2544 passed; filtered
+  Sprk.Bff.Api.Tests 11815 passed, 0 failed, 4 skipped; ebilling filters 8368 passed, 0 failed, 4 skipped;
+  `dotnet format whitespace --verify-no-changes` on the 14 touched .cs files: no changes.
+- **Changed expectations.**
+  - `AnExistingInvoice_FollowsTheExistingRules_…_AndASecondCoreRecordIsRefusedCoreRecordFixed`,
+    `DataverseUpdateHandler_/UpdateRecordActionCore_/FieldMappingPush_AnInvoiceGivenASecondCoreRecord…`,
+    `ChildRefile_/UpdateRecordTool_AnInvoiceFiledUnderAMatter_GivenAProjectToo…`, the unit
+    `GenericUpdate_AnInvoiceUnderAMatterGivenAProjectToo…` and `GenericUpdate_ForAnImpersonatedWrite…`: second core record on
+    an invoice is now rule 1.
+  - `CheckWrite_AnInvoiceCreate_IsNeverRefusedCoreRecordFixed_AndAnUpdateLeavingItUnderNoneOrTwo…`: replaces the test that
+    pinned the old order; a create keeps the old codes.
+  - The person-run theories gain a push cell; the direct push test passes the caller's query.
+  - `ARowWhoseInvoiceIsCleared_IsNotRefusedByTheseRules`: the approval cell becomes an external-identifier cell (rule 3b);
+    the pin now covers the submission and the external identifier on both handler paths.
+  - Harness: on the push, with no person rows given, the caller reads each row's lookups as the app does.
+
+## Fix round 2
+
+- **Rule.** On the push, the playbook update and the output orchestrator run as a person, an invoice the write sets on a
+  family row (`sprk_invoice` on a line, an approval, a submission or a correction; `sprk_regardinginvoice` on an external
+  identifier) is read AS THAT PERSON before any rule compares it (the pattern of 045f's sent record URL). One they cannot
+  read (403, 404, no row, a fault) is `invoice_family_read_failed` and nothing is written, whatever that invoice is filed
+  under. Decided once, in `InvoiceFamilyCoreRecordGuard.CheckGenericUpdateCoreAsync`, beside the person re-decision. A run
+  with no person is unchanged; cancellation is rethrown. A write that sets no invoice reads no invoice as the person.
+- **Tests** (`InvoiceFamilyGenericUpdatePathTests.FixedAfterCreate`, every path × approval, correction, submission,
+  external identifier):
+  - (a) `OnAPersonsRun_ARowGivenAnInvoiceOfItsOwnMatterThePersonCannotRead_IsRefusedReadFailed…`;
+  - (b) `OnAPersonsRun_ARowGivenAnInvoiceOfAnotherMatterThePersonCannotRead_IsRefusedReadFailed…`;
+  - (c) `OnAPersonsRun_ARowGivenAnInvoiceOfItsOwnMatterThePersonReads_IsWritten_ReadingOnlyThatInvoiceAsThePerson`;
+  - (d) `OnAPersonsRun_AWriteThatSetsNoInvoice_ReadsNoRowAsThePerson` (replaces `OnAPersonsRun_AWriteNoRuleRefuses_…`, whose
+    write set an invoice and so now reads it).
+  - The submission cells on the playbook update and the orchestrator are answered by those handlers' access-column rule
+    first, as in rule 2's tests; nothing is written either way.
+- **With the read switched off** (temporary local edit, restored byte-identical): (a) **10 of 12 fail** (the 2 that pass
+  are those submission cells); (c) 10 of 12 fail on its read assertion; (b) 12 of 12 still pass (the re-decision already
+  answered them); (d) 3 of 3 pass.
+- **Gates.** Solution build 0 warnings, 0 errors; ArchTests 2544 passed; filtered suite 11851 passed, 4 skipped; ebilling
+  filters 8404 passed, 4 skipped; `dotnet format --verify-no-changes` clean on the two changed .cs files.
+
+## Fix round 3
+
+- **Rule.** On a person's run of the push, the playbook update or the output orchestrator, the one other invoice a rule
+  compares the write with is read AS THAT PERSON before any rule compares it:
+  - an invoice the patch sets: an invoice's `sprk_supersedesinvoice` (added this round), or the invoice of a line, an
+    approval, a submission, a correction or an external identifier (round 2);
+  - the STORED invoice of such a row (not an invoice) whose core lookup the patch writes, when the patch leaves that
+    invoice as stored (added this round).
+  One the person cannot read (403, 404, no row, a fault) is `invoice_family_read_failed` and nothing is written, whether
+  or not its core record matches. Decided once, in `InvoiceFamilyCoreRecordGuard.CheckGenericUpdateCoreAsync`
+  (`InvoiceComparedOnAPersonsRun`). A run with no person is unchanged; cancellation is rethrown.
+- **The push and cancellation.** A cancelled request stops the push: an `OperationCanceledException` with the request's
+  token cancelled is rethrown from the per-child loop, never counted as one child's failure.
+- **Tests** (`InvoiceFamilyGenericUpdatePathTests.FixedAfterCreate`, every generic path):
+  - superseded invoice of the same matter the person cannot read → read_failed (must fire); one they read → written,
+    reading only that invoice as the person (must not fire);
+  - a row whose core lookup is set to its stored invoice's own matter, stored invoice unreadable → read_failed (must fire,
+    every family table with an invoice); readable → written (must not fire);
+  - the person's read faults → read_failed, no fault text; the request is cancelled during it → rethrown; nothing written;
+  - test (b) now has the person read the row but not the invoice it is given, and checks that invoice is never read as the
+    app;
+  - chat tool: `UpdateRecordTool_AnInvoicesCoreRecordCleared_IsRefusedCoreRecordFixed_AndNothingIsPatched`.
+- **Each new must-fire, run once with its change off** (temporary local edits, files restored byte-identical):
+  - superseded invoice read off: must-fire **3 of 3 fail**; must-not-fire 3 of 3 fail on its read assertion;
+  - stored-invoice read off: must-fire **10 of 12 fail** (the 2 that pass are the submission cells on the playbook update
+    and the orchestrator, refused first by those handlers' access-column rule); must-not-fire 10 of 12 fail on its read
+    assertion;
+  - the whole person read off: test (b) **10 of 12 fail** (same 2 submission cells); fault **3 of 3 fail**; cancel
+    **3 of 3 fail**;
+  - the push loop's rethrow off: the push cancel cell **1 of 1 fails**;
+  - rule 1's clear branch off: the chat-tool clear cell **1 of 1 fails**.
+- **Gates.** Solution build 0 warnings, 0 errors; ArchTests 2544 passed; filtered suite 11888 passed, 4 skipped; ebilling
+  filters 8440 passed, 4 skipped; `dotnet format --verify-no-changes` clean on the six changed .cs files.
+
+## Fix round 4
+
+- **Rule 3b at create (owner decision, 2026-11-13).** An approval or a correction is never created without an invoice: a
+  create of `sprk_invoiceapproval` or `sprk_invoicecorrection` whose `sprk_invoice` is absent, null or an empty id is
+  refused with `invoice_family_invoice_required` (400, fixed text "An approval or a correction names its invoice when it
+  is created. Nothing was written.") and nothing is written. A submission and an external identifier may be created
+  without one, as before. Decided once, in `InvoiceFamilyCoreRecordGuard.CheckWriteAgainstOtherInvoiceAsync`, beside rule
+  3b (`RefuseCreateWithoutInvoice`), on every create that reaches the guard: `RecordCreationService` step 5½
+  (`RecordTableRules.InvoiceFamilyRule`). The chat create tool refuses these two tables before the guard (017c). The Finance
+  writers set `sprk_invoice` on these creates (ebilling-r1) and decide through `Check(row)`, not this path.
+- **Code (§11).**
+  - Existing: `invoice_family_line_invoice_cleared` (rule 3b) answers an update; its text says the invoice "cannot be
+    cleared after the row is created", which is false of a create. `invoice_family_no_core_record` is about core records.
+  - Extension: giving rule 3b's code create text too would make one code mean two things to a caller that keys on it, so a
+    second code is added with its own fixed text.
+  - Cost of doing nothing: an approval or a correction could be created with a blank invoice link, which rule 3b then
+    forbids reaching on update, so the row could never be made right through the BFF.
+- **A fault on the re-decision's read.** On a person's run, the read of the other invoice while a refusal is decided again
+  as that person is wrapped as the pre-read is: a fault is `invoice_family_read_failed`, its text kept out; cancellation is
+  rethrown.
+- **Tests.**
+  - Seam (`RecordCreationServiceInvoiceChildRuleSeamTests`): an approval or a correction created with no invoice (absent,
+    null) → 400 invoice_required, nothing written (must fire); a binding to an empty id → 400 at the payload step, before
+    any rule, nothing written; a submission and an external identifier with no invoice pass the rule (must not fire); one
+    with an invoice of its own matter passes (existing `CreateAsync_ARowFiledWithAnInvoiceOfItsOwnMatter_PassesTheRule`).
+  - Unit (`InvoiceFamilyCoreRecordGuardTests`): absent, null and empty id → invoice_required with the fixed text; with its
+    invoice → admitted; an update of a stored row with no invoice → not refused.
+  - Derive (`RecordTableRulesInvoiceFamilyDeriveTests`): an approval or a correction naming a core record only →
+    invoice_required, nothing derived, nothing read (6 cells).
+  - Generic paths: the re-decision's read of the other invoice faults → read_failed, no fault text, nothing written (3 cells).
+- **Changed expectations.**
+  - `InvoiceFamilyCoreRecordGuardTests.CheckWrite_ARowFiledWithAnInvoiceThatCannotBeRead_FailsClosed_AndWithNoInvoiceIsNotRead`
+    and `CheckWrite_ClearingTheInvoice_IsRefusedForAnApprovalOrCorrection_AndNotForASubmissionOrExternalIdentifier`: their
+    approval and correction creates with no invoice are now invoice_required (still not read); submission and external
+    identifier unchanged.
+  - `RecordTableRulesInvoiceFamilyDeriveTests.FamilyRows` and `InvoiceFamilyRegardingPairAgreementTests.EveryFamilyTable`
+    still list the approval and the correction; their create rows now also name an invoice of the same core record, which
+    the fixture's caller reads (as rule 2's other invoice), so 045d's derive and 045e's pair agreement are exercised on both
+    tables. The same in `ARecordWithABlankNameOrNumber_IsAdmitted…`'s approval cell. Checked: with that invoice under
+    another core record, those cells fail (15).
+  - No Finance or e-billing fixture changed: they do not create these rows through this path.
+- **Each new must-fire, run once with its change off** (temporary local edits, restored byte-identical):
+  - create rule off: **16 of 16 fail** (seam 4, derive 6, unit 6 incl. the two changed expectations); every must-not-fire
+    passes.
+  - re-decision wrap off: the fault cell **still passes** (3 of 3). Before the wrap, the comparison's own catch
+    (`CheckWriteAgainstOtherInvoiceAsync`) already answered that fault `invoice_family_read_failed` and wrote nothing (its
+    reason then named the exception type). The wrap makes the answer local with fixed text; the cell pins the outcome.
+- **Gates.** Solution build 0 warnings, 0 errors; ArchTests 2544 passed; filtered suite 11893 passed, 4 skipped; ebilling
+  filters 8437 passed, 4 skipped; `dotnet format --verify-no-changes` clean on the six changed .cs files.
+- **Follow-up (coverage kept).** The approval and the correction are back in the derive and pair-agreement theories, each
+  create row naming an invoice of its own core record; the 6 invoice_required cells stay. Touched classes
+  (`RecordTableRulesInvoiceFamilyDeriveTests`, `InvoiceFamilyRegardingPairAgreementTests`) 349 passed; ebilling filters
+  8451 passed, 4 skipped (round 3's 8440, plus 6 invoice_required derive cells, 2 unit cells and 3 fault cells).
+
+## Known limits
+
+- **K1.** D-96's app-only line count still runs for an invoice update that writes its core lookup with the record it
+  already names. A stray line from older data is then refused with the mismatch code. This is not a new refusal.
+- **K2.** The field-mapping push writes as its caller. A refusal of rules 1-3 on the push is decided again on the rows as the
+  caller reads them (fix round 1), as on the playbook update and the output orchestrator when they run as a person. A row
+  the push targets that is not found keeps its own answer there (#2081 fix round 2: its ids come from a query the caller
+  read). When the guard admits a row, the write itself is made as the caller, and Dataverse applies the caller's own
+  privileges to it. An invoice the push sets is read as the caller first (fix round 2).
+- **K3.** On the two caller paths a non-invoice row's derive (045d) still runs before the guard. A derive failure is
+  answered before a rule-2 refusal of the same write. This is the existing K3 order, and nothing is written either way.
+- **K4.** A caller create of an approval, submission, correction or external identifier filed with an invoice needs Read on
+  that invoice. An unreadable invoice is the uniform not-found, never a mismatch.
+- **K5.** The create seam fixture has no invoice row for the ownership step. The must-not-fire create test asserts that the
+  registered rule admits the row, not the whole create. The guard's admit is pinned in unit and update-path tests.
+- **K6.** The client change ships with the next shared-library and Create Matter wizard deploy. Not deployed here.
+- **K7.** Comments that still describe the old detach sequence, outside this task's files (left as found):
+  - `tests/integration/Sprk.Bff.Api.IntegrationTests/Signals/SignalReadRouteTests.cs:1464`;
+  - `tests/integration/seam/RecordCreation/RecordCreationServicePipelineSeamTests.WriterOnlyTables.cs:93`;
+  - `tests/unit/Sprk.Bff.Api.Tests/Services/Finance/InvoiceApprovalLineOriginTests.cs:182-191` (an ebilling-r1 test that
+    builds the rows directly; it still passes).
+- **K8.** The rules are decided on every BFF write path; the field-security lock on these columns is tracked as #2799.

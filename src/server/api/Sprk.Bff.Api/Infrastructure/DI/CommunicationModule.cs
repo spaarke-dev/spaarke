@@ -637,7 +637,7 @@ public static class CommunicationModule
     /// <summary>
     /// Job handlers + background (hosted) services: the dedicated sdap-communication queue processor, the
     /// delta-query reconciliation backstop, the Graph webhook subscription manager, the missed-webhook polling
-    /// backup, and the daily send-count reset. Hosted services start in registration order; this helper keeps
+    /// backup (an <c>IScheduledJob</c> since #2749), and the daily send-count reset. Hosted services start in registration order; this helper keeps
     /// their original relative order. Behavior-neutral extraction (r3 task 026) — same registrations, lifetimes,
     /// and order as the original inline block.
     /// </summary>
@@ -671,8 +671,12 @@ public static class CommunicationModule
         services.AddSingleton<GraphSubscriptionManager>();
         services.AddHostedService(sp => sp.GetRequiredService<GraphSubscriptionManager>());
 
-        // Background service: backup polling for missed webhooks (ADR-001)
-        services.AddHostedService<InboundPollingBackupService>();
+        // Scheduled job: backup polling for missed webhooks, every 5 minutes. An IScheduledJob on ScheduledJobHost
+        // (ADR-036) — migrated from a hand-rolled PeriodicTimer BackgroundService by #2749 (PR #2757), which changed its
+        // behaviour; ADR-052 §1 migrates a timer service when it is next touched (owner decision 2026-11-13, §6.5 Path C).
+        // One run per tick across instances (distributed lease). The singleton AddScheduledJob registers keeps the
+        // per-mailbox cursors across runs; the watermark itself is persisted in IDistributedCache.
+        services.AddScheduledJob<InboundPollingBackupService>(InboundPollingBackupService.DefaultCronSchedule);
 
         // Background service: reset daily send counts at midnight UTC (ADR-001)
         services.AddHostedService<DailySendCountResetService>();

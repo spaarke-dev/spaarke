@@ -127,6 +127,7 @@ public static class FinanceModule
         // and exclude a rule for one core record; 089c adds change rule and remove. Concrete (ADR-010). Scoped: it holds the scoped ownership
         // resolver. Unconditional (flag rule above); the routes carry the kill switch.
         services.AddScoped<ProcedureAssignmentService>();
+        services.AddScoped<RecordProcedureReadService>(); // ebilling-r1 task 084: the caller-read lists of a record's Procedures and rules in force
 
         // Rule drafting job (ebilling-r1 task 075, FR-27): ADR-004 IJobHandler, the same shape as the other Finance handlers. Reads the rule
         // set's source document, asks IInvoiceAi.DraftRulesAsync (which has its Null peer, so AI-off is a clear Poisoned outcome, not a
@@ -231,6 +232,11 @@ public static class FinanceModule
         // dependencies (IGenericEntityService, InvoiceSubmissionService, CoreAncestorResolver). It hands its one-transaction apply to the
         // allocator (095d-1a), the number columns' only writer. Unconditional (flag rule above); the route reads the kill switch.
         services.AddScoped<InvoiceAssignFirmService>();
+
+        // Assign a firm to a core record from the Outlook pane (ebilling-r1 task 095g, EB-D-224): the one writer of the record's assigned
+        // law-firm slots for that route, which then runs the Assigned-To owner (AssignedAccessMaterializer, ExternalAccessModule) inline.
+        // Concrete (ADR-010), scoped like its scoped dependencies. Unconditional (flag rule above); the routes read the kill switch.
+        services.AddScoped<CoreRecordFirmAssignmentService>();
 
         // Reject and Return to Firm of an invoice (ebilling-r1 task 104, FR-36): concrete (ADR-010), scoped like the approval service it follows.
         services.AddScoped<InvoiceRejectReturnService>();

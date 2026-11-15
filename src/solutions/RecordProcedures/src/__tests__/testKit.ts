@@ -1,0 +1,122 @@
+/**
+ * Shared builders for the Record Procedures page's tests (ebilling-r1 task 084a).
+ */
+
+import { ApiError, AuthError } from '@spaarke/auth';
+
+export const BASE = 'https://bff.example.com/';
+
+/** An `ApiError` as `authenticatedFetch` throws it, with a ProblemDetails body. */
+export function problem(status: number, errorCode: string | null, extra: Record<string, unknown> = {}): ApiError {
+  return new ApiError(`HTTP ${status}`, status, { status, title: 'x', errorCode, ...extra } as never);
+}
+
+export function jsonResponse(body: unknown) {
+  return { json: async () => body } as never;
+}
+
+export interface Query {
+  core: string;
+  recordId: string;
+  firmId: string | null;
+  date: string;
+}
+
+export type Handler = (q: Query) => unknown;
+
+export interface Call {
+  url: string;
+  method: string | undefined;
+  leaf: 'procedures' | 'rules-in-force' | string;
+  query: Query;
+}
+
+/** One call to a route of task 089 (or task 081's read of a Procedure), as the wizards make it. `body` is the parsed JSON body (undefined for GET and DELETE). */
+export interface WriteCall {
+  route: 'assign' | 'exclude' | 'change' | 'ruleset' | 'preview' | 'remove' | 'procedure' | 'dryrun' | 'assignable' | 'other';
+  method: string | undefined;
+  url: string;
+  pathname: string;
+  core: string;
+  recordId: string;
+  overrideId: string | null;
+  procedureId: string | null;
+  body: unknown;
+  headers: unknown;
+}
+
+export type WriteHandler = (call: WriteCall) => unknown | Promise<unknown>;
+
+/** Which route a URL is, or null for the two list reads. */
+function classify(url: string, init?: RequestInit): WriteCall | null {
+  const u = new URL(url);
+  const parts = u.pathname.split('/').filter(Boolean); // api, finance, ...
+  const base = { method: init?.method, url, pathname: u.pathname, body: init?.body ? (JSON.parse(String(init.body)) as unknown) : undefined, headers: init?.headers };
+  const none = { core: '', recordId: '', overrideId: null, procedureId: null };
+  if (parts[2] === 'procedures' && parts.length === 4) return { ...base, ...none, route: 'procedure', procedureId: parts[3] };
+  // Rule Review's read of a rule set (task 084c reads the published values from it).
+  if (parts[2] === 'rulesets' && parts.length === 4) return { ...base, ...none, route: 'ruleset', recordId: parts[3] };
+  const [core, recordId, a, b, c] = parts.slice(2);
+  const rec = { ...none, core, recordId };
+  if (a === 'procedure-assignments' && parts.length === 5) return { ...base, ...rec, route: 'assign' };
+  if (a === 'rule-overrides' && b === 'exclude') return { ...base, ...rec, route: 'exclude' };
+  if (a === 'rule-overrides' && b === 'change') return { ...base, ...rec, route: 'change' };
+  if (a === 'overrides' && c === 'removal-preview') return { ...base, ...rec, route: 'preview', overrideId: b };
+  if (a === 'overrides' && parts.length === 6) return { ...base, ...rec, route: 'remove', overrideId: b };
+  // Task 084d-4: the dry run (POST .../procedures/dry-run), recorded apart from the writes.
+  if (a === 'procedures' && b === 'dry-run') return { ...base, ...rec, route: 'dryrun' };
+  // Task 084d-5b: the assignable list (GET .../procedures/assignable), recorded apart from the writes and the two list reads.
+  if (a === 'procedures' && b === 'assignable') return { ...base, ...rec, route: 'assignable' };
+  if (a === 'procedures' || a === 'rules-in-force') return null;
+  return { ...base, ...rec, route: 'other' };
+}
+
+/**
+ * A fake `authenticatedFetch`: routes `.../{core}/{id}/procedures` and `.../rules-in-force` to the two handlers. A handler returns the
+ * body, or an Error to be thrown (as `authenticatedFetch` does for a non-2xx). Every call is recorded.
+ */
+export function serverFake(handlers: { procedures: Handler; rules: Handler; writes?: WriteHandler; dryRun?: WriteHandler; assignable?: WriteHandler }) {
+  const calls: Call[] = [];
+  const writeCalls: WriteCall[] = [];
+  const dryRunCalls: WriteCall[] = [];
+  const assignableCalls: WriteCall[] = [];
+  const fetchFn = jest.fn(async (url: string, init?: RequestInit) => {
+    const write = classify(url, init);
+    if (write?.route === 'assignable') {
+      assignableCalls.push(write);
+      if (!handlers.assignable) throw problem(503, 'procedures.unavailable', { title: 'No assignable list in this test' });
+      const out = await handlers.assignable(write);
+      if (out instanceof Error) throw out;
+      return jsonResponse(out);
+    }
+    if (write?.route === 'dryrun') {
+      dryRunCalls.push(write);
+      // No dry-run handler: the dry run is refused as a 503 (the Impact step shows the refusal, Confirm still works, and a plan that removes
+      // asks 089's removal preview in its place: a 503 is one of the refusals that does).
+      if (!handlers.dryRun) throw problem(503, 'procedures.unavailable', { title: 'No dry run in this test' });
+      const out = await handlers.dryRun(write);
+      if (out instanceof Error) throw out;
+      return jsonResponse(out);
+    }
+    if (write) {
+      writeCalls.push(write);
+      if (!handlers.writes) throw new Error(`Unexpected route ${write.pathname}`);
+      const out = await handlers.writes(write);
+      if (out instanceof Error) throw out;
+      return jsonResponse(out);
+    }
+    const u = new URL(url);
+    const parts = u.pathname.split('/').filter(Boolean); // api, finance, {core}, {id}, {leaf}
+    const query: Query = { core: parts[2], recordId: parts[3], firmId: u.searchParams.get('firmId'), date: u.searchParams.get('date') ?? '' };
+    const leaf = parts[4];
+    calls.push({ url, method: init?.method, leaf, query });
+    const handler = leaf === 'procedures' ? handlers.procedures : leaf === 'rules-in-force' ? handlers.rules : null;
+    if (!handler) throw new Error(`Unexpected route ${u.pathname}`);
+    const out = handler(query);
+    if (out instanceof Error) throw out;
+    return jsonResponse(out);
+  });
+  return { fetchFn: fetchFn as never, calls, writeCalls, dryRunCalls, assignableCalls, mock: fetchFn };
+}
+
+export { ApiError, AuthError };
