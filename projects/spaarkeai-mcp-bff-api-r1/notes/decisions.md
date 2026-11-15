@@ -445,3 +445,13 @@ Everything below is in the widget unless it says "shared". Every shared change i
 ## 2026-11-15 — Merge review F1: one `review_unfinished` message for both holders
 
 - `ontology.decision.review_unfinished` is returned both when the caller holds the unfinished review and when another person does (REST names the holder in `detail`). The MCP message was "Read the item's decision plan and finish that review from it", which is shown to the person as is and is wrong for the second case. It is now one fixed text that is true in both: "Another review of this item is unfinished; nothing was done. If you started this decision, close this and open the item again to finish it; otherwise ask the person who started it to finish it first." The REST body is unchanged.
+
+## 2026-11-15 — `spaarke_complete_decision` is not idempotent (ontology review F4)
+
+- **Decision.** `idempotentHint` is `false` and the description says never to repeat a call. Design §7.1's "Idempotent on `reviewId`" holds for the review id's first outcome, but since ontology task 191 a retry with `sendChoice: "send-again"` whose send fails with an unknown outcome is accepted again and sends again (`DecisionCommitService` resume path). A host that auto-retries idempotent-annotated tools after a dropped response would send an inquiry email without the person asking.
+- **Pinned by.** `CompleteDecisionToolTests.CompleteTool_IsListedAppOnly_NotReadOnly_NotIdempotent_…` and `CompleteDecisionToolWireTests.ToolsList_ShowsTheCompleteTool_AppOnly_NotReadOnly_NotIdempotent` (both fail with the hint set back to true).
+- **Source.** ontology-r1 review of PR #2587, 2026-11-15.
+
+## 2026-11-15 — PR #2587 merges after ontology's #2580 and #2579 (ontology review N1)
+
+- The branch carries ontology task 174 (`DecisionCommitService.cs`, `EarlierInvoiceReadability.cs`, from #2580 head `9423f37004`) and task 175's client change (`decisionDisplay.ts`). Those PRs are held until ebilling's Invoice Review (task 112) is on dev. PR #2587 must not merge to master before both land; ontology tells mcp-r1 when they do. Same rule as the 2026-11-06 ontology condition 3, stated in the PR body.

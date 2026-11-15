@@ -44,7 +44,7 @@ public sealed partial class DecisionCommitServiceTests
     // ── listing ──────────────────────────────────────────────────────────────────────────────────────────────
 
     [Fact]
-    public void CompleteTool_IsListedAppOnly_NotReadOnly_Idempotent_AndNotDestructive_WithAUseForNotForDescription()
+    public void CompleteTool_IsListedAppOnly_NotReadOnly_NotIdempotent_AndNotDestructive_WithAUseForNotForDescription()
     {
         var services = new ServiceCollection()
             .AddHttpContextAccessor()
@@ -62,7 +62,8 @@ public sealed partial class DecisionCommitServiceTests
         tool.Title.Should().NotBeNullOrWhiteSpace();
         tool.Annotations!.ReadOnlyHint.Should().BeFalse();
         tool.Annotations.DestructiveHint.Should().BeFalse();
-        tool.Annotations.IdempotentHint.Should().BeTrue();
+        tool.Annotations.IdempotentHint.Should().BeFalse("a retry with a send choice can send again (ontology task 191)");
+        tool.Description.Should().Contain("Never repeat a call");
         tool.Description!.Length.Should().BeLessThanOrEqualTo(1024);
         tool.Description.Should().Contain("Use for:").And.Contain("Not for:");
         tool.Meta!["ui"]!["visibility"]!.AsArray().Select(v => v!.GetValue<string>()).Should().Equal("app");

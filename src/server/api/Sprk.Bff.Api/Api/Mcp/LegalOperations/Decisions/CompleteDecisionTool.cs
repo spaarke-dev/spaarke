@@ -56,12 +56,14 @@ public sealed class CompleteDecisionTool : McpToolDefinition
                 Title = "Complete decision",
                 Description =
                     "Use for: recording one decision on a Work Item after the person pressed Confirm in the decision wizard (sent by the "
-                    + "wizard only; never call it yourself). It writes one Decision Record and closes the Work Item; sending the same review "
-                    + "id again returns the first outcome and writes nothing. Not for: listing or searching Work Items, reading a decision "
-                    + "plan, previewing a decision, or deciding an invoice or invoice line (those are decided in Invoice Review).",
+                    + "wizard only; never call it yourself). It writes one Decision Record and closes the Work Item. Never repeat a call: a "
+                    + "retry that carries a send choice can send an inquiry email again. Not for: listing or searching Work Items, reading a "
+                    + "decision plan, previewing a decision, or deciding an invoice or invoice line (those are decided in Invoice Review).",
                 ReadOnly = false,
                 Destructive = false,
-                Idempotent = true,
+                // Not idempotent since ontology task 191: a retry with sendChoice "send-again" whose send fails unknown again is accepted
+                // again and sends again (DecisionCommitService resume path). A host that auto-retries idempotent tools must not retry this.
+                Idempotent = false,
                 OpenWorld = false,
                 SerializerOptions = RestJson,
                 // MCP Apps visibility: listed to the widget (app), never to the model.

@@ -56,7 +56,7 @@ public sealed class CompleteDecisionToolWireTests
     };
 
     [Fact]
-    public async Task ToolsList_ShowsTheCompleteTool_AppOnly_NotReadOnly_Idempotent()
+    public async Task ToolsList_ShowsTheCompleteTool_AppOnly_NotReadOnly_NotIdempotent()
     {
         await using var host = await WireHost.StartAsync(_ => DecisionCapabilityRecorded());
 
@@ -65,7 +65,7 @@ public sealed class CompleteDecisionToolWireTests
         var tool = list.GetProperty("tools").EnumerateArray().Should().ContainSingle(t => t.GetProperty("name").GetString() == "spaarke_complete_decision").Subject;
         tool.GetProperty("annotations").GetProperty("readOnlyHint").GetBoolean().Should().BeFalse();
         tool.GetProperty("annotations").GetProperty("destructiveHint").GetBoolean().Should().BeFalse();
-        tool.GetProperty("annotations").GetProperty("idempotentHint").GetBoolean().Should().BeTrue();
+        tool.GetProperty("annotations").GetProperty("idempotentHint").GetBoolean().Should().BeFalse("a retry with a send choice can send again (ontology task 191), so a host must not auto-retry it");
         tool.GetProperty("_meta").GetProperty("ui").GetProperty("visibility").EnumerateArray().Select(v => v.GetString()).Should().Equal("app");
         tool.GetProperty("inputSchema").GetProperty("properties").EnumerateObject().Select(p => p.Name).Should().BeEquivalentTo("signalId", "review");
     }
