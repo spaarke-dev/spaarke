@@ -275,3 +275,13 @@ answered AND `canCreate` is not false. The status toggle is excluded (no server 
 **Source.** App Insights `spe-insights-dev-67e2xz`, read-only queries shown to the owner first, 2026-11-15. The KQL is in #2845.
 
 **Fix shape.** Keep "live per request" (no cross-request TTL), but memoize the caller, grant set, deny list and lineage once per request, run the independent reads in parallel, and batch the per-candidate lookups. Add a test that counts Dataverse calls per request. Target: under 1 s.
+
+## D-18 — RequestAccessMemo.For races on a fresh HttpContext.Items (#2851)
+
+**Status.** Open; reported to uac-r2 (owns #2845 / PR #2847) 2026-11-16.
+
+**Where.** `Infrastructure/ExternalAccess/RequestAccessMemo.cs:38`. The lock on `context.Items` doesn't cover the lazy creation of `Items` itself.
+
+**Effect.** When concurrent compositions are the first to touch `Items` in a request, the dictionary can be corrupted (the read is treated as unknown, giving a 503) or the memo can be lost (the #2845 saving silently disappears). Task 014a's memo test reproduced it in 3 of 4 runs.
+
+**Fix shape.** Create the memo once, single-threaded, before any fan-out (in a filter or middleware, or at the evaluator's entry). Add a concurrency test on a fresh `DefaultHttpContext`. 014a works around it locally.
