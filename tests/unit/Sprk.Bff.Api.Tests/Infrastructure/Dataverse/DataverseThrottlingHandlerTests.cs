@@ -229,7 +229,7 @@ public sealed class DataverseThrottlingHandlerTests
             FirstSend.TrySetResult();
             try
             {
-                if (Until is not null) await Until;
+                if (Until is not null) await Until.WaitAsync(ct);
                 if (Hold > TimeSpan.Zero) await Task.Delay(Hold, ct);
                 lock (Script)
                 {
