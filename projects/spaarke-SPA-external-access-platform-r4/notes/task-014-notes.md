@@ -87,3 +87,31 @@ Questions:
 - Owner input:
   - **Q5 — approved (owner, 2026-11-16: "Yes, show it").** The creator's name shows on the event (FormattedValue name only, never an id or email).
   - **Q2.9 — told to the owner 2026-11-16:** contact callers will see the names of other organisations' contacts who are on the record.
+
+## 014a result (2026-11-16)
+- **PR #2852** (head `work/r4-014a-record-contact-access` @ `09ce996d15`, base master). Sent to uac-r2 for its gate review the same day.
+- **Built:**
+  - `Infrastructure/ExternalAccess/RecordContactAccessService.cs`: `GetContactsWithAccessAsync` → `Known` / `Unknown`;
+  - `ExternalGrantLifecycle.GrantFirmIsActiveAsync` extracted (ISS-026), and `ReadContactHeldGrantsAsync` uses it;
+  - `RequestAccessMemo.ReadRemovedMarkerAsync` / `ReadOrganizationMembershipsAsync` (moved out of the evaluator);
+  - DI `AddScoped<RecordContactAccessService>()`.
+- **Verification:**
+  - service tests 32/32;
+  - ExternalAccess/AccessControl 11,464;
+  - ArchTests 2,635;
+  - no vulnerable packages;
+  - publish size +9,584 B (master `ce6c241964` 42,336,904 B; 191 files each).
+- **Review:**
+  - Opus pass 1 found F1 (inactive firm), F2 (memo path untested) and F2 (duplicated readers). All were fixed in `09ce996d15`.
+  - The Sonnet scoped re-check of `ac28d45699..09ce996d15` was clean (185 related tests).
+  - Pass 2 (the auth task's second pass) runs on the full 014 diff after 014b.
+- **Known limits:**
+  - K2: the ancestry is re-read per candidate (bounded by `MaxContacts`);
+  - firm state is read per contact without a memo;
+  - the race half of the memo test is probabilistic;
+  - over 200 contacts or 1,000 rows → `Unknown`.
+- **Defect found:** D-18 #2851, the `RequestAccessMemo.For` race. uac-r2 owns it. 014a pre-creates the memo before its fan-out.
+- **Open for uac-r2:**
+  - K1: conferring-membership vs. workforce standing-grant expansion;
+  - the merge order against `perf/2845-round2` (both touch `RequestAccessMemo.cs` / `AccessibleRecordSetService`).
+- **NFR-05 deviation** (one DI registration, requested by uac-r2 Q2.8): stated in the PR; the owner is told in this session's report.
