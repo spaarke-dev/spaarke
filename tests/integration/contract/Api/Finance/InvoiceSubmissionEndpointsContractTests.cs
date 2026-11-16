@@ -2396,7 +2396,10 @@ public sealed class InvoiceSubmissionEndpointsContractTests : IAsyncLifetime
 
     // ── ebilling-r1 task 097b (EB-D-179 item 2): a Correction from a document (mode / invoiceId, as the from-email route takes them) ──
 
-    private static object CorrectionBody(Guid? invoiceId = null, string? mode = "Correction", string number = CorrectionSeed.Number) => new
+    private const string FromDocumentNote = "The firm re-issued the invoice with the corrected rate.";
+
+    /// <summary>A Correction body. Task 095f-2e1: a Correction carries the firm's note (<paramref name="note"/>; null sends none).</summary>
+    private static object CorrectionBody(Guid? invoiceId = null, string? mode = "Correction", string number = CorrectionSeed.Number, string? note = FromDocumentNote) => new
     {
         communicationId = SourceCommunicationId,
         documentId = SourceDocumentId,
@@ -2405,6 +2408,7 @@ public sealed class InvoiceSubmissionEndpointsContractTests : IAsyncLifetime
         firmInvoiceNumber = number,
         mode,
         invoiceId = invoiceId ?? CorrectionSeed.OldInvoiceId,
+        correctionNote = note,
     };
 
     /// <summary>A correctable invoice (In Review, its own submission, this firm and matter) the caller may Write.</summary>
@@ -2557,6 +2561,133 @@ public sealed class InvoiceSubmissionEndpointsContractTests : IAsyncLifetime
         problem.RootElement.GetProperty("errors").TryGetProperty(field, out _).Should().BeTrue();
         _sourceRights.Calls.Should().BeEmpty("the body is validated before anything is asked");
         NothingWritten();
+    }
+
+    // ── ebilling-r1 task 095f-2e1 (EB-D-237): a from-document Correction carries the firm's correction note, as from-email does ──
+
+    private static object FromDocumentBodyWithNote(string? note, string? mode) => new
+    {
+        communicationId = SourceCommunicationId,
+        documentId = SourceDocumentId,
+        coreRecord = new { kind = "matter", id = MatterId },
+        firmId = FirmId,
+        firmInvoiceNumber = CorrectionSeed.Number,
+        mode,
+        correctionNote = note,
+    };
+
+    [Theory(DisplayName = "095f-2e1 (must fire): a note on a New body (mode New, or no mode) is a field error on correctionNote, before anything is read; nothing written")]
+    [InlineData("New")]
+    [InlineData(null)]
+    public async Task FromDocument_new_with_a_note_is_a_field_error(string? mode)
+    {
+        CorrectableInvoice();
+
+        var response = await PostFromDocumentAsync(FromDocumentBodyWithNote("why", mode));
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        using var problem = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        problem.RootElement.GetProperty("errors").GetProperty("correctionNote")[0].GetString().Should().Be("correctionNote is not sent for mode New.");
+        _sourceRights.Calls.Should().BeEmpty("the body is validated before anything is asked");
+        NothingWritten();
+    }
+
+    [Fact(DisplayName = "095f-2e1 (must-not-fire): a New body with no note, or a null one, is unchanged: 202, and its job carries no note")]
+    public async Task FromDocument_new_without_a_note_is_unchanged()
+    {
+        CorrectableInvoice();
+
+        var response = await PostFromDocumentAsync(FromDocumentBodyWithNote(null, "New"));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Accepted, await response.Content.ReadAsStringAsync());
+        _h.JobsSent.Should().ContainSingle().Which.Payload!.RootElement.TryGetProperty("correctionNote", out _).Should().BeFalse();
+    }
+
+    [Theory(DisplayName = "095f-2e1 (must fire): a Correction with no note, a null one or a blank one is 400 correction_note_required with zero reads: no invoice read, no rights asked, nothing written")]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   \r\n\t ")]
+    public async Task FromDocument_correction_without_a_note_is_the_coded_400(string? note)
+    {
+        CorrectableInvoice();
+
+        var response = await PostFromDocumentAsync(CorrectionBody(note: note));
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest, await response.Content.ReadAsStringAsync());
+        using var problem = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        problem.RootElement.GetProperty("errorCode").GetString().Should().Be("ebilling.submission.correction_note_required");
+        problem.RootElement.GetProperty("detail").GetString().Should().Be("A correction needs a note saying why the invoice is corrected.");
+        _h.Entities.Verify(e => e.RetrieveAsync("sprk_invoice", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()), Times.Never());
+        _sourceRights.Calls.Should().BeEmpty("the invoice's Write is not asked and the source is not read");
+        _h.SubmissionReads.Should().BeEmpty();
+        NothingWritten();
+    }
+
+    [Fact(DisplayName = "095f-2e1: a Correction note of exactly 2000 characters (with line breaks and a tab) is accepted whole and rides the job, trimmed")]
+    public async Task FromDocument_correction_with_a_note_of_the_maximum_length_is_202_and_the_job_carries_it()
+    {
+        CorrectableInvoice();
+        var note = "line one\r\n\tline two " + new string('y', InvoiceCorrectionNote.MaxLength - "line one\r\n\tline two ".Length);
+        note.Length.Should().Be(2000);
+
+        var response = await PostFromDocumentAsync(CorrectionBody(note: "  " + note + "  "));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Accepted, await response.Content.ReadAsStringAsync());
+        var job = _h.JobsSent.Should().ContainSingle().Subject;
+        job.JobType.Should().Be(InvoiceSubmissionService.JobType);
+        job.Payload!.RootElement.GetProperty("correctionNote").GetString().Should().Be(note);
+        job.Payload.RootElement.GetProperty("submissionId").GetGuid().Should().Be(InvoiceSubmissionService.ExistingDocumentSubmissionIdFor(SourceDocumentId));
+    }
+
+    [Fact(DisplayName = "095f-2e1: a Correction with a note carries it on the job exactly as the from-email route does (payload member correctionNote)")]
+    public async Task FromDocument_correction_job_carries_the_note()
+    {
+        CorrectableInvoice();
+
+        var response = await PostFromDocumentAsync(CorrectionBody());
+
+        response.StatusCode.Should().Be(HttpStatusCode.Accepted, await response.Content.ReadAsStringAsync());
+        _h.JobsSent.Should().ContainSingle().Which.Payload!.RootElement.GetProperty("correctionNote").GetString().Should().Be(FromDocumentNote);
+    }
+
+    [Theory(DisplayName = "095f-2e1 (must fire): a Correction note over 2000 characters or with a control character is a field error on correctionNote, before anything is read; nothing written")]
+    [InlineData("tooLong", "correctionNote may be at most 2000 characters.")]
+    [InlineData("control", "correctionNote may not contain control characters other than a line break or a tab.")]
+    public async Task FromDocument_correction_with_an_invalid_note_is_a_field_error(string kind, string message)
+    {
+        CorrectableInvoice();
+        var note = kind == "tooLong" ? new string('x', 2001) : "bad\u0007note";
+
+        var response = await PostFromDocumentAsync(CorrectionBody(note: note));
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        using var problem = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        problem.RootElement.GetProperty("errors").GetProperty("correctionNote")[0].GetString().Should().Be(message);
+        problem.RootElement.TryGetProperty("errorCode", out _).Should().BeFalse("a field error, not the coded 400");
+        _sourceRights.Calls.Should().BeEmpty("the body is validated before anything is asked");
+        NothingWritten();
+    }
+
+    [Fact(DisplayName = "095f-2e1: a retry of a still-Received Correction re-queues its job with the retry's note")]
+    public async Task FromDocument_correction_retry_requeues_the_job_with_the_note()
+    {
+        CorrectableInvoice();
+        _h.Submission = new Entity("sprk_invoicesubmission", InvoiceSubmissionService.ExistingDocumentSubmissionIdFor(SourceDocumentId))
+        {
+            ["sprk_trackingnumber"] = "INV-7.2",
+            ["sprk_firminvoicenumber"] = CorrectionSeed.Number,
+            ["sprk_vendororg"] = new EntityReference("sprk_organization", FirmId),
+            ["sprk_processingstatus"] = new OptionSetValue((int)InvoiceSubmissionStatus.Received),
+            ["sprk_channel"] = new OptionSetValue((int)InvoiceSubmissionChannel.Internal),
+            ["sprk_document"] = new EntityReference("sprk_document", SourceDocumentId),
+            ["sprk_regardingmatter"] = new EntityReference("sprk_matter", MatterId),
+            ["sprk_resubmissionof"] = new EntityReference("sprk_invoicesubmission", CorrectionSeed.OldSubmissionId),
+        };
+
+        var response = await PostFromDocumentAsync(CorrectionBody());
+
+        response.StatusCode.Should().Be(HttpStatusCode.Accepted, await response.Content.ReadAsStringAsync());
+        _h.JobsSent.Should().ContainSingle().Which.Payload!.RootElement.GetProperty("correctionNote").GetString().Should().Be(FromDocumentNote);
     }
 
     // ── ebilling-r1 task 118b-1: supportingDocumentIds on POST from-document (contract, the caller's Read, the same communication) ──

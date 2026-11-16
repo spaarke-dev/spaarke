@@ -12,6 +12,7 @@ using Sprk.Bff.Api.Infrastructure.Exceptions;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Services.Dataverse;
+using Sprk.Bff.Api.Services.Finance;
 using Sprk.Bff.Api.Services.Finance.Submission;
 
 namespace Sprk.Bff.Api.Api.Finance;
@@ -90,14 +91,15 @@ public static class InvoiceSubmissionEndpoints
                 "submission; the processing job copies its bytes into the invoice's file (the document is never moved). Body: " +
                 "{communicationId, documentId, coreRecord: {kind: matter|project|workassignment, id}, firmId, firmInvoiceNumber, poNumber?, " +
                 "mode?: New|Correction, invoiceId? (required for Correction: the In Review invoice it replaces, same firm, record and firm " +
-                "invoice number), supportingDocumentIds? (documents of the same communication kept with the invoice as Supporting files; " +
+                "invoice number), correctionNote? (required for Correction, at most 2000 characters: why the invoice is corrected; not sent " +
+                "for New), supportingDocumentIds? (documents of the same communication kept with the invoice as Supporting files; " +
                 "repeats ignored; the invoice document or more than 50 files in all is 400; one the caller cannot Read, an unknown one or " +
                 "one of another communication is the uniform 404)}. " +
                 "The caller needs Read on the document and its communication, Read and AppendTo on the core record and AppendTo on the firm " +
                 "(and Write on the invoice a Correction replaces); " +
                 "after every read-only check passes, a communication the D-140 chain reads as unfiled is filed " +
                 "to the core record first, as the caller (Write on it). 202 {submissionId, jobId, trackingNumber, statusUrl}; a retry for " +
-                "the same document returns the same submission. Refusals are ProblemDetails with errorCode: 400 validation; 403 " +
+                "the same document returns the same submission. Refusals are ProblemDetails with errorCode: 400 validation, correction_note_required (a Correction with no note); 403 " +
                 "source_forbidden, COMMUNICATION_REFILE_FORBIDDEN, " +
                 "the core record and firm checks; 404 document_not_found, or (reasonCode record_unavailable) the invoice a Correction " +
                 "names is not one the caller can Write; 409 document_core_record_mismatch, document_already_invoiced, " +
@@ -681,6 +683,15 @@ public static class InvoiceSubmissionEndpoints
 
         var core = request.ToCoreRecord()!;
 
+        // Task 095f-2e1 (EB-D-237, design 6.1): a Correction must say why. A missing or blank note is the coded 400, after Validate (an invalid
+        // note is a field error) and BEFORE the invoice is read or the caller's Write on it is asked, so nothing has been read or written.
+        // A New body never reaches here with a note (Validate refuses one).
+        if (request.CorrectedInvoiceId is not null && request.CheckedCorrectionNote is null)
+        {
+            return InvoiceSubmissionHttp.Refused(StatusCodes.Status400BadRequest, FromEmailSubmissionErrors.CorrectionNoteRequired,
+                FromEmailSubmissionErrors.CorrectionNoteRequiredDetail);
+        }
+
         // Task 097b: a Correction first needs the caller's own Write on the invoice it replaces (else the uniform not-found answer).
         Entity? correctedInvoice = null;
         if (request.CorrectedInvoiceId is { } invoiceId)
@@ -724,6 +735,7 @@ public static class InvoiceSubmissionEndpoints
                 CorrelationId = http.TraceIdentifier,
                 FileSourceBeforeWrite = prepared.Hook, // step A: the intake runs it after its read-only refusals (fix round F1-b)
                 CorrectedInvoice = correctedInvoice, // task 097b: judged by the intake after the retry check, before step A
+                CorrectionNote = request.CheckedCorrectionNote, // task 095f-2e1: trimmed, checked; null for New (the job carries it to the persister)
                 SupportingDocumentIds = supporting, // task 118b: compared with an earlier attempt's set (never part of the submission id)
                 // Task 118b-2: the ONE shared document read (the job's), bound here to the route's SharePoint Embedded and container seams;
                 // resolved only when a new attempt reads a supporting document.
@@ -1131,6 +1143,16 @@ public sealed record SubmitInvoiceFromDocumentRequest
     public Guid? InvoiceId { get; init; }
 
     /// <summary>
+    /// Task 095f-2e1 (EB-D-237): the firm's note saying why a <c>Correction</c> corrects the invoice. Required for <c>Correction</c> (a missing
+    /// or blank one is 400 <see cref="FromEmailSubmissionErrors.CorrectionNoteRequired"/>), at most <see cref="InvoiceCorrectionNote.MaxLength"/>
+    /// characters, no control characters other than a line break or a tab; absent (null) for <c>New</c>. The same rules as the from-email route.
+    /// </summary>
+    public string? CorrectionNote { get; init; }
+
+    /// <summary>Task 095f-2e1: the trimmed note once it has passed <see cref="Validate"/>; null when none was sent or it was blank.</summary>
+    internal string? CheckedCorrectionNote => InvoiceCorrectionNote.Check(CorrectionNote).Value;
+
+    /// <summary>
     /// Task 118b: the documents of the same communication to keep with the invoice as its Supporting Stored Files. Optional and additive:
     /// absent or empty behaves exactly as before 118b. Repeats are ignored (<see cref="SupportingDocuments"/>); the invoice document itself
     /// is a 400, and so is more files in total (the invoice document and these) than <see cref="SubmissionCommitGate.MaxFiles"/>. Each must be
@@ -1200,6 +1222,29 @@ public sealed record SubmitInvoiceFromDocumentRequest
             default:
                 errors["mode"] = ["mode must be New or Correction."];
                 break;
+        }
+
+        // Task 095f-2e1 (EB-D-237): the correction note, part 1's rules word for word (InvoiceSubmissionFromEmailHttp.Validate). A New body (an
+        // absent mode is New) has nothing to correct, so a note on it is refused; a Correction's note is checked for length and control
+        // characters here, a body-shape 400 before anything is read. A MISSING or blank one is the coded 400, decided by the handler.
+        if ((Mode ?? FromEmailModes.New) == FromEmailModes.New)
+        {
+            if (CorrectionNote is not null)
+            {
+                errors["correctionNote"] = ["correctionNote is not sent for mode New."];
+            }
+        }
+        else if (Mode == FromEmailModes.Correction)
+        {
+            switch (InvoiceCorrectionNote.Check(CorrectionNote).Refusal)
+            {
+                case InvoiceCorrectionNote.Refusal.TooLong:
+                    errors["correctionNote"] = [$"correctionNote may be at most {InvoiceCorrectionNote.MaxLength} characters."];
+                    break;
+                case InvoiceCorrectionNote.Refusal.ControlCharacter:
+                    errors["correctionNote"] = ["correctionNote may not contain control characters other than a line break or a tab."];
+                    break;
+            }
         }
 
         // Task 118b: the supporting documents' shape, with the body, so a malformed list is a 400 before any rights query or read (and so
