@@ -46,7 +46,7 @@ Spaarke External Access is the external SPA (`src/client/external-spa`). R3 left
 - The inherited first-E2E checks, and wrap-up.
 
 ### Out of Scope
-- Editing core record fields. Matter, Project, Work Assignment and Invoice stay read-only to SPA users.
+- Editing core record fields. Matter, Project, Work Assignment and Invoice stay read-only to SPA users. (Events are the one exception: an event, a child record, can be edited and its status changed under FR-36; owner, 2026-11-15.)
 - The invoice submission wizard. ebilling owns it (`InvoiceSubmitPage.tsx`, `ExternalInvoiceSubmissionEndpoints.cs`); R4 only links to it.
 - ebilling's BFF changes: the `/invoices/{id}/files` routes, the `sprk_reviewdetail` column, its allow-list entry, the 082c-2/082c-3 logic, and the firm-hold backfill. R4 consumes them.
 - Any change to the auth planes, except #2269's status code and #2192's first-sign-in path, both under auth/UAC review.
@@ -207,7 +207,7 @@ Spaarke External Access is the external SPA (`src/client/external-spa`). R3 left
 - **FR-22 Message threads (#2453).** Messages show as threads, as in the model-driven app. Reuse `CommunicationTimeline` if it fits; otherwise extend `RecordMessages`. All HTML goes through the shared `sanitizeEmailHtml`, and `allowRemoteImages` is **never** passed.
   - *Acceptance:* Replies group under their thread. A test asserts that remote `<img>` sources are stripped.
 
-- **FR-23 Matter events: task type and assignee (#2445, ontology D-199).** A matter's events show the task type and assignee, with an optional event deep link. Neither value comes from `sprk_signal`. If the source turns out to be a Signal, it goes through a named external projection with uac-r2 review.
+- **FR-23 Matter events: task type and assignee (#2445, ontology D-199).** *Superseded by FR-35/FR-36 (owner, 2026-11-15): every root's events show type and assignee (`sprk_assignedto`, owner Q-8), and events get a deep link.* A matter's events show the task type and assignee, with an optional event deep link. Neither value comes from `sprk_signal`. If the source turns out to be a Signal, it goes through a named external projection with uac-r2 review.
   - *Acceptance:* Both values render. The data source is cited in the PR.
 
 **P4 — Access, sign-in, carry-overs, Teams**
@@ -263,6 +263,47 @@ Spaarke External Access is the external SPA (`src/client/external-spa`). R3 left
   - (b) a `MODAL-DESIGN-SYSTEM.md` note that child dialogs mount inside the parent SprkModal;
   - (c) a `record-modal-selection.md` note on the Xrm-free SPA case (SprkModal `lg`).
   - *Acceptance:* The drafts are in project notes, and the owner's decision is recorded.
+
+**Events (owner retest round 3, 2026-11-15; design: `notes/event-forms-design.md`)**
+
+- **FR-35 Create event with type, priority, assignee and description.** The record's Events section "Add event" dialog has:
+  - Title (required);
+  - **Event Type** (required dropdown);
+  - Due Date (required when the type's `sprk_requiredduedate` is Yes);
+  - Priority (default Normal);
+  - Assigned To (FR-37);
+  - Description (≤ 2,000).
+
+  It replaces the Event/Task choice. The events list returns `creatableEventTypes` = every active `sprk_eventtype_ref` row the caller has AppendTo on (owner: all types; a config list `ExternalAccess:EventTypes:Allowed` can limit it, with Task + Reminder as the named fallback). The read is batched once per request through `RequestAccessMemo` (#2845). Create validates the type, priority and assignee against the same sets.
+  - *Acceptance:*
+    - A created event carries its type, priority, assignee and description.
+    - A type outside `creatableEventTypes` gives 400 `sdap.event.type_not_allowed` (must-fire), and an allowed one gives 201 (must-not-fire).
+    - A missing type gives 400.
+    - The old `eventType: "task"` body is still accepted for one release.
+    - A call-count test proves the type check is one read per request.
+
+- **FR-36 Event record: read, deep link, edit, status.** A seventh record template, `sprk_event`:
+  - It opens from an Events row as a child record over the current record (task-013 pattern), or top-level from `?record=sprk_event:{id}`.
+  - Information: type, status, due date, priority, assignee name, description, created on/by, regarding (a link).
+  - Toolbar: Edit (title, due date, priority, assignee, description; **type is not editable**), Change status (**any** event status, `statecode` paired), Copy link, Delete (creator only, unchanged).
+  - BFF:
+    - the events list adds type id/name, description, priority, assignee name, creator name, `canEdit`, `canChangeStatus`, `allowedStatuses`;
+    - new `GET /api/v1/external/events/{id}`: readable only when the caller can read **every** parent; otherwise the uniform 404;
+    - new `PATCH /api/v1/external/events/{id}`.
+  - **Edit/status right (owner S-1):** Collaborate or Full Access on every parent; View Only never.
+  - *Acceptance:*
+    - Each right has a must-fire and a must-not-fire test (View Only → no Edit/Change status and 403 on PATCH; Collaborate → 200).
+    - A type change on PATCH gives 400 `sdap.event.type_immutable`.
+    - The deep link opens the event for a reader and gives the uniform not-found state for a non-reader.
+    - The route ledger is updated; the DELETE-route pin is unchanged.
+    - UAC reviews every new column and right; two adversarial passes (external write route).
+
+- **FR-37 Assignable people.** New `GET /api/v1/external/{root}/{id}/assignable-people` → `{ value: [{ contactId, name, isMe }] }` = contacts with an active grant on that record, including the caller (owner S-2). Internal staff are not offered (the column targets contacts). This is the only route that returns contact ids to the SPA. Gate: the caller can create or edit events on that record.
+  - *Acceptance:*
+    - A contact without a grant on the record is never listed, and is refused as an assignee on create or PATCH (400 `sdap.event.assignee_not_allowed`).
+    - A View Only caller gets 403 and the SPA never asks.
+    - Names only (no email/UPN).
+    - UAC review is recorded.
 
 ### Non-Functional Requirements
 
@@ -340,6 +381,11 @@ Spaarke External Access is the external SPA (`src/client/external-spa`). R3 left
 | `POST /matters/{id}/events`, `POST /workassignments/{id}/events` | `POST /projects/{id}/events` (`ExternalProjectDataEndpoints.cs:456`) | Yes: reuse the same handler and service, parameterised by root if possible; otherwise two thin routes | "Add event" fails (no route) on matters and work assignments, though the caller has write |
 | `ReadableColumns` entries (FR-18) | The existing allow-list | Yes: extend the lists | The Information section cannot show the fields partners need; the module fetch refuses them |
 | `RecordCommandBar` (shared) | `HeaderToolbar` (section header slots), `DocumentToolbar` (document-only actions), `DataGrid/commandBar/CommandBar.tsx` (grid-scoped) | No as a direct extension: `HeaderToolbar` is a section-card header and `DocumentToolbar` is document-specific. **It composes `HeaderToolbar` and Fluent primitives rather than duplicating them.** | Six record types each hand-build toolbar visibility, overflow and icon logic, so hide-don't-disable drifts per type and a View-only caller can be shown an action that 403s |
+| `creatableEventTypes`, new create and list fields (FR-35/36) | `canCreate`/`canCreateTask`, `CreateExternalEventRequest`, `ExternalEventDto` | Yes: extend the existing response, request and DTO | No Event Type lookup; events stay type-less; no details form |
+| `GET /events/{id}` (FR-36) | The events list routes | No: a deep link has no parent context for a list filter | Event deep links cannot open |
+| `PATCH /events/{id}` (FR-36) | Internal `PATCH /events/{id}/due-assignee`, `POST /events/{id}/complete` | No: those are workforce-plane, OBO-as-caller routes; the external plane needs its own grant-based gate | Owner Q-5/Q-6 (edit, status change) cannot happen |
+| `GET …/assignable-people` (FR-37) | `/me`, grant lists | No: no route lists a record's people for an external caller | Assigned To cannot be offered (owner Q-3) |
+| `sprk_event` record template (FR-36) | Six templates in `recordTemplates.ts` | Yes: a config entry | Events cannot be opened |
 | `DataGrid` persistence and Money-sort options | `DataGrid` sort and resize (no persistence) | Yes: optional, opt-in props on the existing component | Columns reset on every load (#2489); Money sorts as text (#2446/#2447) |
 
 ## ADR Tensions (CLAUDE.md §6.5)
@@ -375,7 +421,8 @@ No other tensions. #2269's 503 follows ADR-028 ("indeterminate → retry-able 50
   - R4 reviews ebilling's master PR (082c-3 `08702087cb`, 114 `c4b8d43e8f`).
 - **uac-r2:**
   - Every dev BFF deploy goes through uac-r2.
-  - UAC reviews FR-08, FR-18, FR-24, FR-28 and FR-31.
+  - UAC reviews FR-08, FR-18, FR-24, FR-28, FR-31 and FR-35–FR-37.
+  - FR-35–FR-37's BFF work starts after uac-r2's #2845 (PR #2847) merges and builds on its `RequestAccessMemo`.
   - uac-r2 now owns #2270 and #2278.
 - **Ontology:**
   - Agreement on `AssignTaskRecipientGate.cs` (FR-30).
@@ -402,6 +449,7 @@ No other tensions. #2269's 503 follows ADR-028 ("indeterminate → retry-able 50
 | #2508 no grants | Empty tabs or none? | Hide the tabs (2026-11-09) | FR-24 |
 | #2269 503 | SPA reaction? | Auto-retry 3× (1/2/4 s), then a message with Retry (2026-11-09) | FR-28 |
 | Delivery | Staged or one deploy? | Staged by phase, each with dev E2E (2026-11-09) | NFR-06; the phase plan |
+| Event forms | Types, required fields, assign, edit, status, deep link? (Q-1–Q-8, S-1–S-4) | All active types (fallback Task + Reminder); type required; assignee, priority on create; edit and any status by Collaborate/Full on the record; assignees = contacts granted on the record; type not editable; deep link yes; assignee = `sprk_assignedto` (2026-11-15) | FR-35–FR-37; FR-23 superseded |
 
 ## Assumptions
 - **Information field list:** the exact per-type list is fixed by FR-18's live-metadata check. Candidates are design §5. Missing columns (for example `sprk_opendate` and `sprk_billingperiod`) are dropped; `createdon` stands in for open date only if the owner agrees in that task.
@@ -412,7 +460,8 @@ No other tensions. #2269's 503 follows ADR-028 ("indeterminate → retry-able 50
 
 ## Unresolved Questions
 - [ ] **#2192 popup timeout value.** Blocks FR-25's final value; set in the auth/UAC review.
-- [ ] **#2445 data source** (ontology D-199). Blocks FR-23 if the source is a Signal.
+- [x] **#2445 data source** (ontology D-199). Resolved by the owner, 2026-11-15: `sprk_assignedto` (FR-36). Ontology is informed.
+- [ ] **Existing type-less events** (owner Q-9, not answered). Assumed: left as they are, shown as "—".
 - [ ] **`RecordCommandBar` candidate second consumer.** It is named in the FR-04 task, with code-review sign-off (ADR-012 Path C).
 - [ ] **ebilling timing** for the files routes and the 082c-2 deploy. Gates FR-11 and FR-13 in P2. If they slip, P2 ships without them and they move to a later deploy.
 

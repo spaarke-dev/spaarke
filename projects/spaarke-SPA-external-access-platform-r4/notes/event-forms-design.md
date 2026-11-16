@@ -1,6 +1,6 @@
 # Event create, details and edit — spec addendum (DRAFT, owner answers recorded)
 
-> Status: **draft, 2026-11-15.** The owner answered Q-1 to Q-8 the same day (§6). Four follow-up rules (S-1 to S-4) are still open. When they are answered, this becomes FR-35 (create), FR-36 (details, edit, deep link) and FR-37 (assign) in `spec.md`, and tasks are created (§7).
+> Status: **decided, 2026-11-15.** The owner answered Q-1 to Q-8 and S-1 to S-4 the same day (§6). In `spec.md` this is FR-35 (create), FR-36 (event record: read, deep link, edit, status) and FR-37 (assign). Tasks 014/015/016 (§7).
 > Source: owner retest round 3 (`notes/task-018-notes.md`): "the Create Event has option field for 'Event' or 'Task', rather than a lookup for 'Event Type'; also missing many important fields such as description, Assigned*; in the created Event the event type is missing; event status, etc. We need to spec out what this create form and details form needs."
 > **Scope change:** spec §Out of scope says "editing core record fields". Owner Q-6 adds editing of **events** (child records the caller works with), not of the core records (matter, project, work assignment, invoice). The spec's out-of-scope line is narrowed to say so.
 
@@ -47,8 +47,8 @@ A new `sprk_event` record template (the seventh type).
 - **Header:** "Event" + title. Secondary line: type name, status badge, and "Your access".
 - **Information:** Event Type, Status, Due Date, Priority, Assigned To (name), Description, Created On, Created By (name), Regarding (record name, a link that opens the parent record).
 - **Toolbar** (hide, don't disable; each action only when the BFF says the caller may):
-  - **Edit** (Q-6): opens a FormModal child dialog with Title, Due Date, Priority, Assigned To and Description. Event Type changes per S-4.
-  - **Change status** (Q-5): a menu of the statuses allowed from the current one (S-3).
+  - **Edit** (Q-6): opens a FormModal child dialog with Title, Due Date, Priority, Assigned To and Description. Event Type is shown read-only (S-4: the type cannot change).
+  - **Change status** (Q-5): a menu of every event status other than the current one (S-3).
   - **Copy link** (Q-7).
   - **Delete**: creator only, today's rule.
 - After any save, the record and the parent's Events list refresh.
@@ -81,9 +81,13 @@ A new `sprk_event` record template (the seventh type).
 - Gate: the caller can create or edit events on that record. Otherwise it answers 403, and the SPA never asks.
 
 ### 4.5 Update (Q-5, Q-6)
-- **New `PATCH /api/v1/external/events/{id}`** takes partial `sprk_name`, `sprk_duedate`, `sprk_priority`, `sprk_description`, `assignedToContactId`, `eventTypeId` (S-4) and `sprk_status` (one of `allowedStatuses`; `statecode` is paired as on create).
-- Right per S-1, checked server-side. The checks run as the app identity over the grant model, like create; the BFF decides, so no action the UI offers answers 403 (FR-06/07).
-- Errors: 400 with stable codes per field; the uniform 404; 409 when the event is inactive (Cancelled/Transferred/No Further Action) and the change is not a reopen.
+- **New `PATCH /api/v1/external/events/{id}`** takes partial `sprk_name`, `sprk_duedate`, `sprk_priority`, `sprk_description`, `assignedToContactId` and `sprk_status`.
+  - The status may be any `sprk_event` status (S-3), with the matching `statecode` paired, as on create.
+  - `eventTypeId` is **not** accepted (S-4); sending it gives 400 `sdap.event.type_immutable`.
+  - A due date cleared on a type that requires one gives 400.
+- **Right (S-1 = (c)):** the caller has Collaborate or Full Access on **every** parent the event is filed under. View Only never qualifies. It is checked server-side, with the same level resolution `/me` and the lists use. Create is unchanged.
+- The list's `canEdit` and `canChangeStatus` come from the same check, so no action the UI offers answers 403 (FR-06/07).
+- Errors: 400 with stable codes per field; the uniform 404; 403 `sdap.access.deny.event_update` only when the right changed after the list loaded.
 - Route ledger and plane tests updated. DELETE routes are unchanged, so `TheExternalPlane_MapsExactlyFourDeleteRoutes` still holds.
 - This also answers **D-10 #2717** for events (a server-side update right).
 
@@ -120,15 +124,12 @@ A new `sprk_event` record template (the seventh type).
 | Q-8 | Assignee column | **`sprk_assignedto`** |
 | Q-9 | Existing type-less events | Not answered. Assumed: leave them; they show "—" (recommendation) |
 
-### Still open (needed before the tasks are written)
-| # | Question | Options | Recommendation |
-|---|---|---|---|
-| S-1 | Who may edit an event and change its status? | (a) only its creator; (b) creator **or** assignee; (c) anyone with Collaborate or Full Access on the record | **(b)**, and only while the caller still has Collaborate or Full Access on every parent (View Only never). The person who owns or does the work can update it; others on the record cannot overwrite it |
-| S-2 | Who can be chosen in Assigned To? | (a) only "Me"; (b) any contact with an active grant on the same record (incl. me); (c) any contact in the caller's organization | **(b)**. It never shows people who can't see the record. Internal staff can't be chosen because the column targets contacts |
-| S-3 | Which statuses can an external user set? | free choice / a fixed set | **Open, On Hold, Completed, Cancelled** (Draft only on create; Closed, Reassigned and Transferred stay internal); a Completed or Cancelled event can be reopened to Open |
-| S-4 | Can Event Type change after create? | yes / no | **Yes**, within the same allowed set; due date then follows the new type's rule |
+| S-1 | Who may edit an event and change its status? | **(c) anyone with Collaborate or Full Access on the record** (on every parent; View Only never) |
+| S-2 | Who can be chosen in Assigned To? | **(b) any contact with an active grant on the same record, including me**. Internal staff can't be chosen; the column targets contacts |
+| S-3 | Which statuses can an external user set? | **Any** `sprk_event` status, including the inactive ones; `statecode` is paired |
+| S-4 | Can Event Type change after create? | **No** ("no unless this makes work more complicated"; keeping it fixed is simpler: no re-validation of the due-date rule) |
 
-## 7. Proposed tasks (after S-1 to S-4)
+## 7. Tasks
 
 | Task | Scope | Gate |
 |---|---|---|
