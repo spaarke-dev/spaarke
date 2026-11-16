@@ -18,6 +18,7 @@ using System.Text.RegularExpressions;
 using Azure.Core;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Http.Features;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Time.Testing;
@@ -183,8 +184,53 @@ public class RecordContactAccessServiceTests
 
         // Gail's firm has no state in the double: had it been read it would answer 404 and she would be absent.
         Known(result).Select(c => c.ContactId).Should().BeEquivalentTo(new[] { Erin, Bob, Gail });
-        _dataverse.Reads.Count(r => r.EntitySet == "sprk_organizations").Should().Be(2,
-            "only Bob's and Carol's inactive firm is read: Erin has a firm-less row, Gail's firm confers by construction");
+        _dataverse.Reads.Count(r => r.EntitySet == "sprk_organizations").Should().Be(1,
+            "only Bob's and Carol's inactive firm is read, and only ONCE for both (one read per firm per answer): Erin has a " +
+            "firm-less row, Gail's firm confers by construction");
+    }
+
+    [Fact]
+    public async Task GetContactsWithAccess_FirmState_IsReadOncePerFirmPerAnswer_ADistinctFirmIsReadAgain()
+    {
+        _dataverse.FirmStates[Firm] = 0;
+        _dataverse.FirmStates[OtherFirm] = 0;
+        _dataverse.Grant(Alice, Firm, Today.AddDays(30), name: "Alice Firm");
+        _dataverse.Grant(Bob, Firm, Today.AddDays(30), name: "Bob Firm");
+        _dataverse.Grant(Carol, Firm, Today.AddDays(30), name: "Carol Firm");
+        _dataverse.Grant(Dan, OtherFirm, Today.AddDays(30), name: "Dan Other Firm");
+
+        var first = await Service().GetContactsWithAccessAsync(ExternalGrantRootType.Matter, Root, CancellationToken.None);
+
+        Known(first).Select(c => c.ContactId).Should().BeEquivalentTo(new[] { Alice, Bob, Carol, Dan });
+        _dataverse.Reads.Where(r => r.EntitySet == "sprk_organizations").Should().HaveCount(2,
+            "three candidates name the same firm (one read) and one names another (a second read)");
+
+        var second = await Service().GetContactsWithAccessAsync(ExternalGrantRootType.Matter, Root, CancellationToken.None);
+
+        Known(second).Should().Equal(Known(first));
+        _dataverse.Reads.Where(r => r.EntitySet == "sprk_organizations").Should().HaveCount(4,
+            "the cache lives for one answer only: the next answer reads each firm again");
+    }
+
+    [Fact]
+    public async Task GetContactsWithAccess_FirmStateReadFault_SharedByTwoCandidates_IsUnknown_NeverRememberedAsAState()
+    {
+        _dataverse.FirmStates[Firm] = 0;
+        _dataverse.Grant(Alice, null, Today.AddDays(30), name: "Alice Direct");
+        _dataverse.Grant(Hank, Firm, Today.AddDays(30), name: "Hank Firm");
+        _dataverse.Grant(Erin, Firm, Today.AddDays(30), name: "Erin Firm");
+        _dataverse.FirmsThrow = true;
+
+        var faulted = await Service().GetContactsWithAccessAsync(ExternalGrantRootType.Matter, Root, CancellationToken.None);
+
+        faulted.Should().BeOfType<RecordContactAccess.Unknown>()
+            .Which.Reason.Should().Be(RecordContactAccessUnknownReason.FirmUnreadable,
+                "a shared faulted read faults every candidate that needs it — never a Known without Hank and Erin");
+
+        _dataverse.FirmsThrow = false;
+        var healthy = await Service().GetContactsWithAccessAsync(ExternalGrantRootType.Matter, Root, CancellationToken.None);
+        Known(healthy).Select(c => c.ContactId).Should().BeEquivalentTo(new[] { Alice, Hank, Erin },
+            "control: once the firm reads, both of its grantees are listed");
     }
 
     [Fact]
@@ -398,6 +444,49 @@ public class RecordContactAccessServiceTests
             .Which.Reason.Should().Be(expected, "a fault is never a partial or empty list");
     }
 
+    [Theory]
+    [InlineData("{}")]
+    [InlineData("{\"value\":null}")]
+    public async Task GetContactsWithAccess_GrantReadAnsweringWithoutAValueArray_IsUnknown_NeverAnEmptyKnown(string body)
+    {
+        _dataverse.Grant(Alice, null, Today.AddDays(30), name: "Alice Direct");
+        _dataverse.GrantsBody = body;
+
+        var result = await Service().GetContactsWithAccessAsync(ExternalGrantRootType.Matter, Root, CancellationToken.None);
+
+        result.Should().BeOfType<RecordContactAccess.Unknown>()
+            .Which.Reason.Should().Be(RecordContactAccessUnknownReason.GrantsUnreadable,
+                "a 2xx without a value array is not an answer — never Known([]), which means nobody has access");
+    }
+
+    [Fact]
+    public async Task GetContactsWithAccess_GrantReadAnsweringAnEmptyValueArray_IsKnownEmpty()
+    {
+        _dataverse.GrantsBody = "{\"value\":[]}";
+
+        var result = await Service().GetContactsWithAccessAsync(ExternalGrantRootType.Matter, Root, CancellationToken.None);
+
+        result.Should().BeOfType<RecordContactAccess.Known>()
+            .Which.Contacts.Should().BeEmpty("control: an empty value array is Dataverse's answer \"no grant rows\"");
+    }
+
+    [Fact]
+    public async Task GetContactsWithAccess_CancelledDuringTheFlagsRead_PropagatesTheCancel_NotFlagsUnreadable()
+    {
+        _dataverse.Grant(Alice, null, Today.AddDays(30), name: "Alice Direct");
+        using var abort = new CancellationTokenSource();
+
+        var healthy = await Service().GetContactsWithAccessAsync(ExternalGrantRootType.Matter, Root, abort.Token);
+        Known(healthy).Select(c => c.ContactId).Should().Equal(new[] { Alice }, "control: no cancel, the grantee is listed");
+
+        // The production flag reader answers every fault, the caller's own cancel included, as Unreadable.
+        _participations.CancelDuringFlagsRead = abort;
+        var act = () => Service().GetContactsWithAccessAsync(ExternalGrantRootType.Matter, Root, abort.Token);
+
+        await act.Should().ThrowAsync<OperationCanceledException>(
+            "a client abort is the caller's cancellation, not an unreadable record (never logged as FlagsUnreadable)");
+    }
+
     // ── Rule 7: names and ids only ─────────────────────────────────────────────────────────────────────────────────────
 
     [Fact]
@@ -445,12 +534,14 @@ public class RecordContactAccessServiceTests
         _participations.MembershipReads[Bob].Should().Be(2, "control: no memo, this service and the evaluator each read");
 
         // Several fresh requests: each starts with HttpContext.Items untouched, which is when the candidates' concurrent first
-        // memo lookups could race (the memo is created before the fan-out — without that, a request here intermittently
-        // answered Unknown(CandidateUnreadable) from a corrupted Items dictionary, or lost its memo).
+        // memo lookups race (#2851). The memo is created before the fan-out; without that, two first lookups each create an
+        // Items dictionary, lock different objects, and one candidate's memo is lost. LazyItemsHttpContext makes that overlap
+        // certain rather than intermittent, so removing the pre-create fails this test every time.
         DefaultHttpContext context = null!;
-        for (var request = 0; request < 12; request++)
+        var candidates = new[] { Alice, Dan, Bob, Carol }.Concat(crowd).ToArray();
+        for (var request = 0; request < 4; request++)
         {
-            context = new DefaultHttpContext();
+            context = LazyItemsHttpContext();
             var accessor = new HttpContextAccessor { HttpContext = context };
             var inRequest = new Participations(Entities(), accessor);
             foreach (var (id, m) in _participations.Memberships)
@@ -464,6 +555,24 @@ public class RecordContactAccessServiceTests
             Known(inside).Should().Equal(Known(outside), "the memo changes how often a read runs, never the answer");
             inRequest.MembershipReads.Should().OnlyContain(kv => kv.Value == 1,
                 "one membership read per contact per request, shared by this service and the evaluator's No Access check");
+
+            // Every candidate's first memo read (its contact state) landed in the ONE memo the request keeps.
+            var requestMemo = RequestAccessMemo.For(context)!;
+            var lost = new List<Guid>();
+            foreach (var candidate in candidates)
+            {
+                var kept = await requestMemo.GetOrReadAsync(
+                    RequestAccessMemo.ContactStateKey(candidate),
+                    // Absent: the candidate's read went to a lost memo. Unreadable is never remembered, so the probe adds
+                    // nothing; a remembered Active is returned as is.
+                    _ => Task.FromResult(ContactRecordState.Unreadable),
+                    state => state == ContactRecordState.Active,
+                    default);
+                if (kept != ContactRecordState.Active)
+                    lost.Add(candidate);
+            }
+
+            lost.Should().BeEmpty("request {0}: no candidate's memo may be lost to a racing first Items access", request);
         }
 
         var memo = RequestAccessMemo.For(context)!;
@@ -483,6 +592,54 @@ public class RecordContactAccessServiceTests
 
     private static Task<T> NotRead<T>(CancellationToken _)
         => throw new InvalidOperationException("Test: the memo should already hold this answer.");
+
+    /// <summary>
+    /// A real <see cref="DefaultHttpContext"/> whose <see cref="HttpContext.Items"/> is created lazily by its first accessor,
+    /// exactly as in production (the context finds no <see cref="IItemsFeature"/>, creates one and sets it) — with that
+    /// check-then-create window held open: a first accessor that finds no Items feature waits (briefly) for a second one, so
+    /// two concurrent first accesses always each create, and return, their own dictionary (#2851). A lone first accessor (the
+    /// memo created before the fan-out) waits out the short timeout and carries on.
+    /// </summary>
+    private static DefaultHttpContext LazyItemsHttpContext()
+    {
+        var features = new FirstItemsAccessRace();
+        features.Set<IHttpRequestFeature>(new HttpRequestFeature());
+        features.Set<IHttpResponseFeature>(new HttpResponseFeature());
+        features.Set<IHttpResponseBodyFeature>(new StreamResponseBodyFeature(Stream.Null));
+        return new DefaultHttpContext(features);
+    }
+
+    /// <summary>A <see cref="FeatureCollection"/> that holds a missing <see cref="IItemsFeature"/>'s lookup open (see
+    /// <see cref="LazyItemsHttpContext"/>); every other feature passes straight through.</summary>
+    private sealed class FirstItemsAccessRace : IFeatureCollection
+    {
+        private readonly FeatureCollection _inner = new();
+        private readonly Barrier _firstAccessors = new(2);
+
+        public bool IsReadOnly => _inner.IsReadOnly;
+
+        public int Revision => _inner.Revision;
+
+        public object? this[Type key]
+        {
+            get
+            {
+                var feature = _inner[key];
+                if (feature is null && key == typeof(IItemsFeature))
+                    _firstAccessors.SignalAndWait(TimeSpan.FromMilliseconds(300));
+                return feature;
+            }
+            set => _inner[key] = value;
+        }
+
+        public TFeature? Get<TFeature>() => (TFeature?)this[typeof(TFeature)];
+
+        public void Set<TFeature>(TFeature? instance) => this[typeof(TFeature)] = instance;
+
+        public IEnumerator<KeyValuePair<Type, object>> GetEnumerator() => _inner.GetEnumerator();
+
+        System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
+    }
 
     // ── Fixtures ───────────────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -593,6 +750,10 @@ public class RecordContactAccessServiceTests
 
         public ConcurrentDictionary<Guid, RootRecordFlags> Flags { get; } = new();
         public bool FlagsThrow { get; set; }
+
+        /// <summary>Cancels this source during the flags read and answers Unreadable, as the production reader's catch-all
+        /// maps the caller's cancellation.</summary>
+        public CancellationTokenSource? CancelDuringFlagsRead { get; set; }
         public ConcurrentDictionary<Guid, Guid[]> Members { get; } = new();
         public bool MembersThrow { get; set; }
         public ConcurrentDictionary<Guid, (Guid[] Conferring, Guid[] Wall)> Memberships { get; } = new();
@@ -604,6 +765,14 @@ public class RecordContactAccessServiceTests
         {
             if (FlagsThrow)
                 throw new HttpRequestException("Test: the flags could not be read.");
+
+            if (CancelDuringFlagsRead is { } abort)
+            {
+                abort.Cancel();
+                IReadOnlyDictionary<Guid, RootRecordFlags> unreadable = recordIds.Distinct()
+                    .ToDictionary(id => id, _ => RootRecordFlags.Unreadable);
+                return Task.FromResult(unreadable);
+            }
 
             IReadOnlyDictionary<Guid, RootRecordFlags> result = recordIds.Distinct()
                 .ToDictionary(id => id, id => Flags.TryGetValue(id, out var f) ? f : RootRecordFlags.None);
@@ -684,6 +853,28 @@ public class RecordContactAccessServiceTests
                 [root] = Root,
             });
 
+        /// <summary>
+        /// A 2xx body for the grant-row read, in place of the seeded rows (e.g. <c>{}</c>, <c>{"value":null}</c>). Answered
+        /// by the production client's strict collection read over that body (<see cref="StrictBody{T}"/>).
+        /// </summary>
+        public string? GrantsBody { get; set; }
+
+        /// <summary>The grant core's root-row read (strict since #2852): the grant rows, and nothing else.</summary>
+        public override Task<List<T>> QueryStrictAsync<T>(
+            string entitySetName, string? filter = null, string? select = null, int? top = null, int? skip = null,
+            CancellationToken cancellationToken = default)
+        {
+            Reads.Enqueue((entitySetName, select));
+            if (entitySetName != "sprk_externalrecordaccesses")
+                throw new InvalidOperationException($"Test: unexpected strict read of {entitySetName}.");
+            if (GrantsThrow)
+                throw new HttpRequestException("Test: the grant rows could not be read.");
+            if (GrantsBody is { } body)
+                return Task.FromResult(StrictBody<T>(body));
+
+            return Task.FromResult(Rows<T>(_grantRows.Take(top ?? int.MaxValue)));
+        }
+
         public override Task<List<T>> QueryAsync<T>(
             string entitySetName, string? filter = null, string? select = null, int? top = null, int? skip = null,
             CancellationToken cancellationToken = default)
@@ -692,9 +883,7 @@ public class RecordContactAccessServiceTests
             switch (entitySetName)
             {
                 case "sprk_externalrecordaccesses":
-                    if (GrantsThrow)
-                        throw new HttpRequestException("Test: the grant rows could not be read.");
-                    return Task.FromResult(Rows<T>(_grantRows.Take(top ?? int.MaxValue)));
+                    throw new InvalidOperationException("Test: the grant rows are read strictly (QueryStrictAsync), never here.");
 
                 case "contacts":
                     if (NamesThrow)
@@ -736,6 +925,17 @@ public class RecordContactAccessServiceTests
 
         private static List<T> Rows<T>(IEnumerable<Dictionary<string, object?>> rows)
             => JsonSerializer.Deserialize<List<T>>(JsonSerializer.Serialize(rows.ToList()))!;
+
+        /// <summary>The strict read's answer for a 2xx <paramref name="body"/> — the rule
+        /// <c>DataverseWebApiClientStrictQueryTests</c> pins on the real client: no <c>value</c> array (missing or null)
+        /// throws; an array is the rows.</summary>
+        private static List<T> StrictBody<T>(string body)
+        {
+            using var doc = JsonDocument.Parse(body);
+            if (!doc.RootElement.TryGetProperty("value", out var value) || value.ValueKind != JsonValueKind.Array)
+                throw new InvalidOperationException("The Dataverse read succeeded without a value array.");
+            return value.Deserialize<List<T>>()!;
+        }
 
         private sealed class NoCredential : TokenCredential
         {

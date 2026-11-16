@@ -782,17 +782,27 @@ public class RecordShareExpiryTests
                 // passed positionally; this double never authenticates.
                 null!, null!);
 
+            List<ExternalGrantRow> AnswerShares(string _, string? filter, string? select, int? top, int? __, CancellationToken ___)
+            {
+                if (QueryFailure is not null)
+                    throw QueryFailure;
+
+                RejectUnknownColumns(select);
+                return MatchShares(filter).Take(top ?? int.MaxValue).ToList();
+            }
+
             mock.Setup(c => c.QueryAsync<ExternalGrantRow>(
                     GrantEntitySet, It.IsAny<string>(), It.IsAny<string>(),
                     It.IsAny<int?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()))
-                .ReturnsAsync((string _, string? filter, string? select, int? top, int? _, CancellationToken _) =>
-                {
-                    if (QueryFailure is not null)
-                        throw QueryFailure;
+                .ReturnsAsync((string set, string? filter, string? select, int? top, int? skip, CancellationToken ct) =>
+                    AnswerShares(set, filter, select, top, skip, ct));
 
-                    RejectUnknownColumns(select);
-                    return MatchShares(filter).Take(top ?? int.MaxValue).ToList();
-                });
+            // The grant core's root-row read (the share enumeration) is strict (#2852); same table, same rules.
+            mock.Setup(c => c.QueryStrictAsync<ExternalGrantRow>(
+                    GrantEntitySet, It.IsAny<string>(), It.IsAny<string>(),
+                    It.IsAny<int?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((string set, string? filter, string? select, int? top, int? skip, CancellationToken ct) =>
+                    AnswerShares(set, filter, select, top, skip, ct));
 
             mock.Setup(c => c.QueryAsync<ExternalOrganizationMembership.ContactOrganizationRow>(
                     MembershipEntitySet, It.IsAny<string>(), It.IsAny<string>(),

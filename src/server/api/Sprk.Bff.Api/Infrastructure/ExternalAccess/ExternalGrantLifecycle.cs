@@ -743,11 +743,14 @@ internal static class ExternalGrantLifecycle
     /// decides no access either: it shows every active row, and marks the lapsed ones with the read path's own rule
     /// (<see cref="ExternalParticipationService.ConfersAccessOn"/>), so a lapsed share is visible to the people who can renew
     /// or revoke it.</para>
+    /// <para><b>Strict</b> (#2852 review): a success response without a <c>value</c> array throws
+    /// (<see cref="DataverseWebApiClient.QueryStrictAsync{T}"/>) — never "no rows", which every caller would read as nobody
+    /// holding a grant. Each caller already maps a throw to its fail-closed answer.</para>
     /// </remarks>
     internal static Task<List<ExternalGrantRow>> QueryActiveRowsForRootAsync(
         DataverseWebApiClient dataverseClient, ExternalGrantRootType rootType, Guid rootId, int top, CancellationToken ct,
         bool forListing = false)
-        => dataverseClient.QueryAsync<ExternalGrantRow>(
+        => dataverseClient.QueryStrictAsync<ExternalGrantRow>(
             EntitySet,
             filter: ActiveRowsForRootFilter(rootType, rootId),
             select: forListing ? ListingSelect : RowSelect,

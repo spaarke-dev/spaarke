@@ -109,7 +109,7 @@ public abstract record RecordContactAccess
 /// level = not granted).</item>
 /// <item>A contact-keyed row names its contact directly; when it also names a firm it confers only while that firm is active
 /// (ISS-026, <see cref="ExternalGrantLifecycle.GrantFirmIsActiveAsync"/> — the read path's <c>GrantOrganizationConfers</c>
-/// guard). An organization row (no contact) reaches the organization's members
+/// guard; each firm is read at most once per answer). An organization row (no contact) reaches the organization's members
 /// whose membership CONFERS today (date-bounded, active organization — the evaluator's org-grant term reads exactly that set)
 /// — EXCEPT on a direct-only record (Secure or Limited, <see cref="RootRecordFlags.IsDirectOnly"/>, the evaluator's ONE
 /// suppression predicate), where only named direct contact grants count.</item>
@@ -117,6 +117,12 @@ public abstract record RecordContactAccess
 /// No Access list — as itself, through any organization it belongs to (the wall set), or through a secure record the record
 /// is filed under.</item>
 /// </list>
+/// <para><b>Deliberately left out: the workforce standing-grant and derived-member terms</b> (the evaluator's contact-plane
+/// standing-grant membership and organization expansion — <see cref="AccessibleRecordSetService"/>, which runs them on the
+/// ContactOnly plane only). Those terms only ADD access, so leaving them out can only under-list: the answer fails closed,
+/// never over-lists. They cannot be included because this service cannot tell which plane a contact signs in on, and including
+/// them would list contacts whose CIAM sign-in never receives that access (an over-list). Consequently a caller asking "am I on
+/// this list" (<c>isMe</c>) is not found when its only access to the record comes from one of those terms.</para>
 /// <para><b>Fail closed, never partial</b> (uac-r2 Q2.6). A thrown read, an unreadable answer, an over-bound read or an
 /// unverifiable No Access check answers <see cref="RecordContactAccess.Unknown"/>. Only the caller's own cancellation
 /// propagates.</para>
@@ -226,6 +232,10 @@ public sealed class RecordContactAccessService
         {
             return Unknown(RecordContactAccessUnknownReason.FlagsUnreadable, rootType, ex);
         }
+
+        // The flag reader answers every fault — the caller's own cancellation included — as Unreadable. A client abort is
+        // not an unreadable record: let it propagate instead of logging FlagsUnreadable.
+        ct.ThrowIfCancellationRequested();
 
         if (flags.IsUnreadable)
         {
@@ -348,6 +358,7 @@ public sealed class RecordContactAccessService
         // callers can each lock a different object and corrupt it or lose a memo (seen in this class's tests). Afterwards the
         // candidates only find the memo.
         _ = RequestMemo;
+        var firmStates = new FirmStateReads(_dataverse, ct);
         var outcomes = new ConcurrentDictionary<Guid, CandidateOutcome>();
         await Parallel.ForEachAsync(
                 candidates,
@@ -358,6 +369,7 @@ public sealed class RecordContactAccessService
                             entityType, rootId, contactId,
                             directGrants.GetValueOrDefault(contactId),
                             reachedThrough.GetValueOrDefault(contactId),
+                            firmStates,
                             token)
                         .ConfigureAwait(false);
                 })
@@ -425,11 +437,43 @@ public sealed class RecordContactAccessService
         internal HashSet<Guid> Firms { get; } = new();
     }
 
+    /// <summary>
+    /// One answer's firm state reads (ISS-026), shared by its candidates: each firm a direct grant names is point-read at most
+    /// once per <see cref="GetContactsWithAccessAsync"/> call, however many candidates' rows name it. Safe under the
+    /// candidates' fan-out (<see cref="Lazy{T}"/> runs each read once).
+    /// </summary>
+    /// <remarks>
+    /// Only the READ is shared. Whether a firm is one of the candidate's own CONFERRING organizations (active by
+    /// construction — <see cref="ExternalGrantLifecycle.GrantFirmIsActiveAsync"/>'s first rule) is per contact, so it is
+    /// answered before this cache and the shared definition is asked with no conferring set, which makes it read. A faulted
+    /// read stays a faulted task: every candidate awaiting it sees the same exception (FirmUnreadable) — a fault is never
+    /// remembered as active or inactive.
+    /// </remarks>
+    private sealed class FirmStateReads
+    {
+        private readonly ConcurrentDictionary<Guid, Lazy<Task<bool>>> _reads = new();
+        private readonly DataverseWebApiClient _dataverse;
+        private readonly CancellationToken _ct;
+
+        internal FirmStateReads(DataverseWebApiClient dataverse, CancellationToken ct)
+        {
+            _dataverse = dataverse;
+            _ct = ct;
+        }
+
+        /// <summary>Whether <paramref name="firm"/> is active (a firm that no longer exists is not). Throws on a fault.</summary>
+        internal Task<bool> IsActiveAsync(Guid firm)
+            => _reads.GetOrAdd(firm, f => new Lazy<Task<bool>>(() => ExternalGrantLifecycle
+                    .GrantFirmIsActiveAsync(f, Array.Empty<Guid>(), _dataverse, _ct)))
+                .Value;
+    }
+
     /// <param name="direct">The contact's own conferring grant rows, or <c>null</c> when it has none.</param>
     /// <param name="throughOrganizations">The organizations whose grant reached this contact, or <c>null</c> when none did.</param>
+    /// <param name="firmStates">This answer's shared firm state reads.</param>
     private async Task<CandidateOutcome> EvaluateCandidateAsync(
         string entityType, Guid rootId, Guid contactId, DirectGrants? direct, IReadOnlyCollection<Guid>? throughOrganizations,
-        CancellationToken ct)
+        FirmStateReads firmStates, CancellationToken ct)
     {
         try
         {
@@ -477,9 +521,8 @@ public sealed class RecordContactAccessService
                     bool active;
                     try
                     {
-                        active = await ExternalGrantLifecycle
-                            .GrantFirmIsActiveAsync(firm, memberships.ConferringOrganizationIds, _dataverse, ct)
-                            .ConfigureAwait(false);
+                        active = memberships.ConferringOrganizationIds.Contains(firm)
+                            || await firmStates.IsActiveAsync(firm).ConfigureAwait(false);
                     }
                     catch (Exception ex) when (!ct.IsCancellationRequested)
                     {

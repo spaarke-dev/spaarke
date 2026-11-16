@@ -973,6 +973,11 @@ public class GrantorCeilingTests
         /// <summary>When set, every grant-table query throws it (task 193 B-F5: the existing grants cannot be read).</summary>
         public Exception? GrantQueryThrows { get; set; }
 
+        /// <summary>The grant core's strict root-row read (#2852) answers from the same data as every other read.</summary>
+        public override Task<List<T>> QueryStrictAsync<T>(string entitySetName, string? filter = null, string? select = null,
+            int? top = null, int? skip = null, CancellationToken cancellationToken = default)
+            => QueryAsync<T>(entitySetName, filter, select, top, skip, cancellationToken);
+
         public override Task<List<T>> QueryAsync<T>(string entitySetName, string? filter = null, string? select = null,
             int? top = null, int? skip = null, CancellationToken cancellationToken = default)
         {
