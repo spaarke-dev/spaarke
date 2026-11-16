@@ -29,7 +29,7 @@
   - clear on any in-request access-state write (the PATCH).
 
 ## Live state
-- **Dev BFF:** `aa7d6345f3` (master `c1eb6e4a8e` + mcp spike). uac-r2 is swapping to **`f451e0874d`** (master `ce6c241964` incl. #2845 latency fix + ebilling #2846, + spike) with its owner's go. I replied "clear" for the restart; no SPA redeploy needed (no SPA-facing contract change).
+- **Dev BFF:** **`f451e0874d`** (master `ce6c241964` incl. #2845 latency fix + ebilling #2846, + spike), live about 00:45Z 2026-11-16. Rollback: BFF `aa7d6345f3` alone (still pairs with the current SPA). uac-r2's 30-minute gate with request timings is running.
 - **Dev SPA:** master `c1eb6e4a8e` (run 43747335450; tasks 012/013/021). SPA rollback `04dbd8df05` only together with BFF rollback `5a9b687a0b` (the old SPA calls the retired invoice-document routes).
 
 ## Open items / issues
