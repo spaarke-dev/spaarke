@@ -2001,7 +2001,8 @@ Done 2026-11-16 on the owner's go. The first `-Apply` was refused 401 with nothi
 With `sprk_document` gone, all 12 sweep jobs failed with a 400 from AI Search: `coreRecordType` is not on the index. The live dev `spaarke-invoices-index` predates task 152, which added 14 fields, all additive. `Deploy-AllIndexes.ps1 -Environment dev -Indexes invoices-index -VerifyOnly` reports 7 required fields missing. The checked-in `infrastructure/ai-search/spaarke-invoices-index.json` matches `InvoiceIndexDocument` (31 fields each), which 152's document-vs-JSON test already enforces. The index deploy was task 153's step, but 152's BFF code reached dev through master before it. The first fault hid this one, so invoice indexing on dev has not worked since 152 reached dev.
 
 - Fix (needs the owner's go here; uac-r2 notified before and after): run `Deploy-AllIndexes.ps1 -Environment dev -Indexes invoices-index` (an in-place PUT, no recreate), then `-VerifyOnly`, then re-run the sweep.
-- Guard for live vs code: no offline test can see the live index, so the mechanical check is `-VerifyOnly` in the post-deploy gate. That is proposed to uac-r2.
+- Guard for live vs code: no offline test can see the live index. uac-r2's post-deploy gate now runs `-VerifyOnly` across all indexes; the stronger place, inside `Deploy-BffApi.ps1`, is ISS-023 / #2849.
+- Done 2026-11-16 ~01:16Z on the owner's go: the index PUT succeeded in place, `-VerifyOnly` passes, and the sweep re-run queued 12 with 0 failed (correlation `ebilling-iss022-sweep-20261116T011634Z`). Waiting on uac-r2 to confirm the jobs ran clean.
 
 **Known limits**
 
