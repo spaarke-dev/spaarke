@@ -28,6 +28,7 @@ using Sprk.Bff.Api.Services.Finance;
 using Sprk.Bff.Api.Services.Dataverse.Privileges;
 using Sprk.Bff.Api.Services.Finance.Submission;
 using Sprk.Bff.Api.Services.Signals;
+using Sprk.Bff.Api.Services.Signals.Billing;
 using Sprk.Bff.Api.Tests.AccessControl;
 using Sprk.Bff.Api.Tests.Api.ExternalAccess;
 using Sprk.Bff.Api.Tests.Api.Finance;
@@ -405,6 +406,10 @@ public sealed class FirmOutcomeScopeTests : IAsyncLifetime
     };
 
     /// <summary>The stored findings (<c>sprk_findingsjson</c>) of an auto-rejected submission with a line finding (line index 2) and an invoice-level one.</summary>
+    /// <summary>A Signal's <c>sprk_evidencerefs</c> holding one billing.reason entry, the shape BillingFindingSignalMapper writes.</summary>
+    private static string ReasonEvidence(string reasonCode) =>
+        new JsonArray(new JsonObject { ["kind"] = BillingFindingSignalMapper.ReasonEvidenceKind, ["ref"] = reasonCode }).ToJsonString();
+
     private static string RejectedFindingsJson(Guid version) => new JsonObject
     {
         ["schema"] = 1,
@@ -992,6 +997,9 @@ public sealed class FirmOutcomeScopeTests : IAsyncLifetime
             ["sprk_regardinginvoice"] = new EntityReference("sprk_invoice", invoice),
             ["sprk_regardinginvoiceline"] = new EntityReference("sprk_billingevent", InvoiceSubmissionPersister.LineIdFor(own, 2)),
             ["sprk_firmreason"] = "Your rate is above the agreed rate.",
+            // Task 130e-1 (uac-r2 K1): the override is taken only when the Signal's own billing.reason evidence names the finding's code,
+            // as BillingFindingSignalMapper writes it.
+            ["sprk_evidencerefs"] = ReasonEvidence("approved_rate.above_approved"),
             ["createdon"] = new DateTime(2026, 9, 3, 0, 0, 0, DateTimeKind.Utc),
             ["createdby"] = new EntityReference("systemuser", WriterId),
         });
@@ -1001,6 +1009,8 @@ public sealed class FirmOutcomeScopeTests : IAsyncLifetime
             ["sprk_regardinginvoice"] = new EntityReference("sprk_invoice", invoice),
             ["sprk_regardinginvoiceline"] = new EntityReference("sprk_billingevent", InvoiceSubmissionPersister.LineIdFor(own, 2)),
             ["sprk_firmreason"] = ForgedReason,
+            // The same evidence as the writer's row, so only the creator check keeps the forged text out.
+            ["sprk_evidencerefs"] = ReasonEvidence("approved_rate.above_approved"),
             ["createdon"] = new DateTime(2026, 9, 2, 0, 0, 0, DateTimeKind.Utc),
             ["createdby"] = new EntityReference("systemuser", UserId),
         });
