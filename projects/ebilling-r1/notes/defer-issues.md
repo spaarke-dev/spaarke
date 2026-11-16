@@ -2048,7 +2048,7 @@ A BFF deploy can ship code that writes index fields the live index doesn't have.
 | **Source** | uac-r2's review of 130e-1 (the guard's pending entry said "Deployed"); confirmed by a read-only metadata GET (404) and the script's -WhatIf (would create 1) |
 | **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2858 |
 
-**Description**: task 077 (2026-10-18) added the column to `RuleSetService.VersionColumns`, but `Deploy-EbillingRuleRejectionReasonSchema.ps1` was never applied to dev (077 notes :91). The dev BFF (master ce6c241964) selects it, so every `VersionColumns` read (Rule Review, accept/reject, publish, copy-forward, the Procedure-version publish plan and redraft) fails on dev. This is the #2844 class.
+**Description**: task 077 (2026-10-18) added the column to `RuleSetService.VersionColumns`, but `Deploy-EbillingRuleRejectionReasonSchema.ps1` was never applied to dev (077 notes :91). The dev BFF (master ce6c241964) selects it, so every `VersionColumns` read (Rule Review, accept/reject, publish, copy-forward, the Procedure-version publish plan and redraft) fails on dev. This is the #2844 class. **Impact so far (uac-r2, App Insights):** no /rulesets requests on dev in 7 days, so no user has hit it yet. The dev "drafting 503" is unrelated (a package mismatch in POST /api/communications/draft, fixed by uac-r2's pending deploy). uac-r2 closed its duplicate #2857 in favour of #2858.
 
 **Entry-points**: `RuleSetService.cs` (`VersionColumns`); `scripts/ebilling/Deploy-EbillingRuleRejectionReasonSchema.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com -WhatIf`.
 
