@@ -46,7 +46,7 @@
 - Second adversarial pass on the full 014 diff.
 
 ## Live state
-- **Dev BFF** `f451e0874d` (master `ce6c241964` + spike), live since about 00:45Z 2026-11-16. Rollback BFF `aa7d6345f3` alone.
+- **Dev BFF** `be0420d763` (master `16771d1051` + mcp spike-v2), live since about 22:21Z 2026-11-16 (deployed by uac-r2). Carries 014a, NOT 014b. 014b goes into the next candidate together with #2845 round 2; that needs the owner's SHA go, and uac-r2 asks spa-r4 before any restart. Previous: `f451e0874d`.
 - **Dev SPA** master `c1eb6e4a8e`. Rollback `04dbd8df05` only with BFF `5a9b687a0b`.
 - uac-r2's 30-minute gate timings for #2845: not yet received.
 
