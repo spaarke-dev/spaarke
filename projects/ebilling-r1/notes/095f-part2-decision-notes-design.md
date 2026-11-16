@@ -541,3 +541,15 @@ Q1–Q5 stay open. Option B vs A (2b, 5.2) remains the owner's call; ontology-r1
 - `Writer:1555`, `:1429-1430`, `:1580-1591`, `Catalog:417`, `:451`, `Writer:1266`, `DecisionRecordWriterTests.Billing.cs:191` and `InvoiceRejectReturnService.cs:635-637` match the code.
 - `InvoiceRejectReturnService.cs:660-673` is three lines early at the start: the existing-record branch is `:663-672` (from `if (recordId is { } existing ...)` to its `LinkAsync` return; the first `RecordAsync` call is at `:678`). The substance holds; the doc cites `:663-672`.
 - The review names one exact-set test. A second test also pins the billing code list (`tests/unit/domain/Signals/DecisionActionCatalogTests.cs:348-354`), and the required-parameter theory (`:386-396`) gains rows. Both are listed in §3.
+
+## 15. Owner answers (2026-11-16, EB-D-240 to EB-D-243)
+
+These settle §10 Q1-Q5. This section overrides earlier sections where they differ.
+
+| Q | Answer | Effect on the design |
+|---|---|---|
+| 1 | With no note, the invoice-level column takes the decision's required reason (reject, return, override, adjustment). An approve with no note leaves it unchanged. | K-3 narrows to approve without a note. |
+| 2 | A separate internal column, **`sprk_invoice.sprk_decisionnote`** (EB-D-240, amending EB-D-236). | Every "invoice column" in §1.2-§1.4, §2-§5 and N4 now means `sprk_decisionnote`. `sprk_correctionnote` keeps its single writer (the submission persister) and its firm-authored meaning; §1.4's two-author problem is gone. The ArchTest becomes `InvoiceDecisionNoteWritersGuardTests` (allowed: lifecycle, release transaction, totals path), and a second must-fire control keeps `sprk_correctionnote`'s writer set to the persister alone. A new additive column script (`scripts/ebilling/`, Memo 2000, not required, `Consistency: Strong`) is applied on dev with the owner's go before any BFF that writes it deploys; SpaarkeMaster sync goes with a deploy task, and `sprk_decisionnote` is never added to any firm-facing reader or allow-list (must-not-fire test on the external invoice allow-list). |
+| 3 | **(A)**: adjustments get Decision Records (EB-D-241). | §3 option A as written; ontology-r1 reviews the exact-set amendment. |
+| 4 | **(B)**: the note goes on the correction row, `sprk_invoicecorrection.sprk_note` (EB-D-242). | §5.2 option B; a second additive column script. The note is not part of the row's derived id. |
+| 5 | The internal Correction path is needed in R1, but first investigate the least-work option consistent with the existing architecture (EB-D-243). | 095f-2e1 (server) proceeds. 095f-2e2 waits on the investigation and the owner's pick. Premise correction: the from-document route's only client, `emailInvoiceSubmission.ts`, is used by our CommunicationActions control and the email workspace, not the Word add-in (§6.2's "word-add-in-r1's task-118 body" is wrong; Q9 is moot). |
