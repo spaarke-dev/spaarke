@@ -99,6 +99,44 @@ public sealed class RequestAccessMemoFirstTouchTests
         }
     }
 
+    // ── RequestAccessMemo.For: its own first touch is single-threaded (#2845 F-R2) ──────────────────
+
+    [Fact]
+    public async Task RequestAccessMemoFor_ConcurrentFirstCalls_OnAFreshRequestWithNoPreCreate_ShareOneMemo_AndNeverThrow()
+    {
+        const int threads = 32;
+        const int repetitions = 200;
+
+        for (var repetition = 0; repetition < repetitions; repetition++)
+        {
+            var http = NewRequest(); // nothing has touched Items, and nothing pre-creates the memo
+            using var barrier = new Barrier(threads);
+            var seen = new ConcurrentBag<RequestAccessMemo?>();
+            var faults = new ConcurrentBag<Exception>();
+
+            var workers = Enumerable.Range(0, threads).Select(_ => Task.Factory.StartNew(
+                () =>
+                {
+                    try
+                    {
+                        barrier.SignalAndWait(TimeSpan.FromSeconds(30));
+                        seen.Add(RequestAccessMemo.For(http));
+                    }
+                    catch (Exception ex)
+                    {
+                        faults.Add(ex);
+                    }
+                },
+                CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default)).ToArray();
+            await Task.WhenAll(workers);
+
+            faults.Should().BeEmpty($"no first touch of Items may fault (repetition {repetition})");
+            seen.Should().HaveCount(threads);
+            seen.Distinct().Should().ContainSingle($"every caller gets the ONE memo of the request (repetition {repetition})");
+            PeekMemo(http).Should().BeSameAs(seen.First(), "the memo every caller got is the one the request keeps");
+        }
+    }
+
     // ── CallerWhoAmIMemo: its own first touch is single-threaded ─────────────────────────────────────
 
     [Fact]

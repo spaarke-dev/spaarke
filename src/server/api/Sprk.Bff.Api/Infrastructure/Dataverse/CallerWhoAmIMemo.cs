@@ -44,11 +44,11 @@ internal static class CallerWhoAmIMemo
     /// <c>Items</c> getter is itself lazy and unsynchronized, so two threads touching it first at once can each get their own
     /// dictionary (and each lock a different one), losing an answer or corrupting the feature collection. The inner lock is
     /// the one <see cref="ExternalAccess.RequestAccessMemo.For"/> takes, so writes to the shared dictionary still exclude each
-    /// other (lock order: request, then Items; <c>For</c> takes only Items, so there is no cycle). This memo is asked
+    /// other (lock order: request, then Items; <c>For</c> takes the same two in the same order, #2845 F-R2, so there is no
+    /// cycle). This memo is asked
     /// from fan-outs it does not own (concurrent <see cref="ExternalAccess.CallerRecordAccessProbe"/> checks, for example
     /// <c>CallerWriteAuthorization</c>'s), so it cannot rely on a caller creating <c>Items</c> first; locking the request
-    /// makes its own first touch single-threaded. (<see cref="ExternalAccess.RequestAccessMemo.For"/> takes the other route:
-    /// every fan-out that reaches it creates it first.)
+    /// makes its own first touch single-threaded, as <see cref="ExternalAccess.RequestAccessMemo.For"/> now does too.
     /// </remarks>
     private static readonly object ItemsKey = new();
 
