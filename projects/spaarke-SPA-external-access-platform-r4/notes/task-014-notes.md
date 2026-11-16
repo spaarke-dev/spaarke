@@ -155,4 +155,48 @@ Questions:
   - Sent to uac-r2 for its re-check.
 - **uac-r2 re-check PASSED** (`09ce996d15..a866dad1be`). Its gate is cleared, and it gave the go for 014b.
 - **MERGED 2026-11-16 13:24Z:** squash `16771d1051`, on the owner's go ("Yes proceed"), with Router and Client lint green. uac-r2 was given the SHA and rebases #2867 (round 2) onto it.
-- **NFR-05 deviation** (one DI registration, requested by uac-r2 Q2.8): stated in the PR; the owner is told in this session's report.
+- **NFR-05 deviation** (one DI registration, requested by uac-r2 Q2.8)
+
+## 014b (started 2026-11-16, branch `work/r4-014b-event-forms` from `16771d1051`)
+- **Q4's premise doesn't hold (found by the implementer and verified).** The internal assignee write `EventEndpoints.cs:219-232` → `EventDueAssigneeWrite.ApplyAsync` (`:148-174`):
+  - is OBO (`IDataverseUserClient`; no app-only implementation), which is barred on the external plane;
+  - has no membership upkeep after the write (`MembershipOptions.cs:344` reads `sprk_assignedto` at read time);
+  - has different semantics: it allows open work only (`IsOpenWork`, `:139`), forces `statuscode` = Reassigned (`:108`), and writes the reassigned date and reassigned-by.
+- **Options:**
+  - **(a)** write app-only, reusing `BuildPatchJson` for column parity;
+  - **(b)** a plain bind;
+  - **(c)** no assignee on PATCH for now.
+- **Recommendation: (a)**, with:
+  - an explicit `sprk_status` in the same PATCH wins over Reassigned;
+  - a reassign is allowed only on open work (400 otherwise);
+  - reassigned-by = the caller's contact.
+
+  Create keeps the plain bind (a first assignee isn't a reassign).
+- Asked uac-r2 and the owner. The implementer builds the PATCH assignee off (400) until it's decided.
+- **uac-r2 (2026-11-16): Q4 premise WITHDRAWN.** `sprk_assignedto` is "who the event is for", not access; nothing grants on it (D1/C9). **No UAC objection to (a).** The owner decides.
+
+  UAC conditions for create's plain bind and the PATCH, all sent to the implementer:
+  1. **G5:** check the caller's right through the contact-plane evaluator before any app-only read or write. The open-work status read comes after that check. Denied and unknown are indistinguishable (Q1's table: unknown → 503, can't read → 404, read not edit → 403).
+  2. **Assignee re-checked on the server:** in the assignable set AND with effective access to the event (every parent). Otherwise 400.
+  3. **Column allow-list:** never ownership, the core-ancestor stamp, `sprk_accesspermission` or `sprk_issecure`.
+  4. **Fail closed:** 503 or 404, never a write.
+- **Implementer result: local commit `dcbaae5287`** (17 files), not pushed.
+  - Routes `GET /events/{id}` (`GetEvent` ~:3081), `PATCH /events/{id}` (`UpdateEvent` ~:3119; the assignee branch returns 400 `assignee_update_unsupported`) and `GET /{root}/{id}/assignable-people` (~:3209).
+  - `creatableEventTypes` comes from a memoized AppendTo fan-out (4 at a time; there's no batch API).
+  - `canEdit` comes from the same decision as the PATCH.
+  - New codes:
+    - 400: `type_required`, `type_immutable`, `assignee_not_allowed`, `assignee_update_unsupported`, `due_date_required`, `priority_invalid`, `description_too_long`, `status_invalid`, `name_required`, `update_empty`;
+    - 503: `sdap.event.types_unavailable`, `assignees_unavailable`, `unavailable`;
+    - 403: `event_update`, `event_assign`.
+  - Tests:
+    - new contract class 63/63 (52 failed before);
+    - access namespaces 17,609;
+    - ArchTests 2,635;
+    - load timeouts re-run in isolation and green.
+  - No CVEs.
+  - Deviations:
+    - `sprk_event` has no ReadableColumns entry, so it's pinned by an `EventSelect` test;
+    - `canCreateTask` now comes from the creatable set;
+    - `RecordContactAccessService` is unsealed, with a virtual method, for test stubs.
+- **Compatibility fix requested:** the deployed SPA sends no type for "Event", so a blanket `type_required` would break it until 015 ships. Legacy untyped and `"task"` bodies keep working for one release; `type_required` applies to new-shape bodies only.
+- **New readers reported to uac-r2** for the #2867 gate decision: `GetEventTypesAsync`, `GetEventByIdAsync`, and the writer `UpdateEventAsync`.: stated in the PR; the owner is told in this session's report.
