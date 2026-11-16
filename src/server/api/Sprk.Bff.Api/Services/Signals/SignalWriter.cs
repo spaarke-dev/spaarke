@@ -1846,10 +1846,10 @@ public sealed partial class SignalWriter
 
         // ebilling-r1 task 130e-1 (DEF-060, design 3.3 (a)(b)(c)): the firm description rides this one create, as the writer identity; no
         // update path ever sends it (the dedupe refresh sends sprk_lastevaluated and, while open, sprk_duedate only). CheckRequest refused a
-        // text that fails FirmDescriptionRules before this point.
-        if (!string.IsNullOrWhiteSpace(request.FirmReason))
+        // text that fails FirmDescriptionRules before this point. Fix round 1 (a): the stored value is the validated, trimmed text, never the raw one.
+        if (Sprk.Bff.Api.Services.Finance.FirmDescriptionRules.Validate(request.FirmReason).Text is { } firmReason)
         {
-            entity["sprk_firmreason"] = request.FirmReason;
+            entity["sprk_firmreason"] = firmReason;
         }
 
         entity["sprk_signalstatus"] = new OptionSetValue(SignalStatusOpen);

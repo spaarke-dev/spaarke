@@ -22,7 +22,7 @@ public class FirmDescriptionRulesTests
 
     private static string Runes(string rune, int count) => new StringBuilder().Insert(0, rune, count).ToString();
 
-    // 25002500 The bound (200 runes) 25002500
+    // -- The bound (200 runes) --
 
     [Theory(DisplayName = "130e-1: 200 runes are accepted and 201 refused (too_long), counted in runes: ASCII, BMP and surrogate-pair emoji alike")]
     [InlineData("x")]
@@ -53,7 +53,41 @@ public class FirmDescriptionRulesTests
         }
     }
 
-    // 25002500 Refused characters 25002500
+    // -- Refused characters --
+
+    [Theory(DisplayName = "130e-1 F1(b) must-fire: an unpaired UTF-16 surrogate is refused (invisible_character), wherever it sits")]
+    // The code units are passed as numbers: test-case data travels as UTF-8, which turns a lone surrogate into U+FFFD before the test sees it.
+    [InlineData("Rate ", 0xD83D, 0, " too high.")]   // a lone high surrogate
+    [InlineData("Rate ", 0xDE00, 0, " too high.")]   // a lone low surrogate
+    [InlineData("Rate too high.", 0xD83D, 0, "")]    // a high surrogate at the end
+    [InlineData("", 0xDE00, 0xD83D, "")]             // low before high: two unpaired halves
+    public void AnUnpairedSurrogate_IsRefused(string before, int unit, int second, string after)
+    {
+        var text = before + (char)unit + (second == 0 ? string.Empty : ((char)second).ToString()) + after;
+        text.Should().Contain(((char)unit).ToString(), "the setup: the lone code unit reached the test");
+
+        FirmDescriptionRules.Validate(text).RefusalCode.Should().Be(FirmDescriptionRules.InvisibleCharacter);
+    }
+
+    [Fact(DisplayName = "130e-1 F1(b) must-not-fire: a properly paired surrogate (an emoji) is accepted")]
+    public void APairedSurrogate_IsAccepted()
+    {
+        FirmDescriptionRules.Validate("Rate \uD83D\uDE00 too high.").IsValid.Should().BeTrue();
+    }
+
+    [Theory(DisplayName = "130e-1 F4: with a rule type, a Duplicate takes no description (firm_description_duplicate); any other type is the plain check")]
+    [InlineData("Duplicate", FirmDescriptionRules.OnDuplicate)]
+    [InlineData("100000011", FirmDescriptionRules.OnDuplicate)]   // the option value, as the loader and the replay read sprk_ruletype
+    [InlineData("100000004", null)]                               // ApprovedRate
+    [InlineData("ApprovedRate", null)]
+    [InlineData(null, null)]
+    public void WithARuleType_ADuplicateTakesNone(string? ruleType, string? expected)
+    {
+        var check = FirmDescriptionRules.Validate("Travel is billed at half rate.", RuleSetName, PolicyName, ruleType);
+
+        check.RefusalCode.Should().Be(expected);
+        FirmDescriptionRules.Validate("   ", RuleSetName, PolicyName, "Duplicate").Should().Be(new FirmDescriptionCheck(null, null), "a blank text is no description on any type");
+    }
 
     [Theory(DisplayName = "130e-1: braces and angle brackets are refused with their own codes")]
     [InlineData("{", FirmDescriptionRules.Braces)]
@@ -96,7 +130,7 @@ public class FirmDescriptionRulesTests
         FirmDescriptionRules.Validate(text).Should().Be(new FirmDescriptionCheck(text, null));
     }
 
-    // 25002500 C4: the version's own rule set and policy names 25002500
+    // -- C4: the version's own rule set and policy names --
 
     [Theory(DisplayName = "130e-1 C4: a text containing the rule set's or the policy's own name, in any case, is refused (names_rule)")]
     [InlineData("Per the Acme Outside Counsel Guidelines, travel is half rate.")]
@@ -117,7 +151,7 @@ public class FirmDescriptionRulesTests
         FirmDescriptionRules.Validate("Billed under the expenses cap.", "  Expenses  ", null).RefusalCode.Should().Be(FirmDescriptionRules.NamesTheRule);
     }
 
-    // 25002500 One check, every path 25002500
+    // -- One check, every path --
 
     public static TheoryData<string> AgreementInputs()
     {

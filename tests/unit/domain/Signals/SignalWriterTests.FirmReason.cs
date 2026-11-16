@@ -38,6 +38,16 @@ public partial class SignalWriterTests
         org.UpdateCalls.Should().BeEmpty("the firm reason never needs a second round-trip");
     }
 
+    [Fact(DisplayName = "130e-1 F1(a): the create stores the validated, trimmed text, never the raw request value")]
+    public async Task FirmReason_IsStoredTrimmed()
+    {
+        var org = new FakeOrganizationService();
+
+        await FirmReasonWriter(org, FirstRun).WriteAsync(MatterSubjectRequest() with { FirmReason = "  \t" + FirmText + "   " });
+
+        org.CreatedPayloads.Should().ContainSingle().Which.GetAttributeValue<string>("sprk_firmreason").Should().Be(FirmText);
+    }
+
     [Theory(DisplayName = "130e-1 must-not-fire: a request without a firm reason (null, empty or blank) sends no sprk_firmreason key at all")]
     [InlineData(null)]
     [InlineData("")]

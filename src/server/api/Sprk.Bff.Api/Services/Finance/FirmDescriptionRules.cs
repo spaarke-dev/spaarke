@@ -32,11 +32,19 @@ public readonly record struct FirmDescriptionCheck(string? Text, string? Refusal
 /// projection's read filter uses the same rune predicate (<see cref="IsInvisibleControl"/>).
 /// </summary>
 /// <remarks>
-/// In order: trim, and blank means "no description" (valid, <c>null</c>); at most <see cref="MaxRunes"/> Unicode scalars (runes, so a character
-/// outside the Basic Multilingual Plane counts once); no <c>{</c> or <c>}</c> (no template placeholder can exist); no <c>&lt;</c> or <c>&gt;</c>
-/// (no markup); no rune of category Control, Format, LineSeparator or ParagraphSeparator; and, when the version's names are given, neither its
-/// rule set name nor its policy name may appear in it (case-insensitive; uac-r2 Q4 and C4). A refusal is a code only: no caller logs, returns or
-/// echoes the refused text.
+/// The checks, in the order the code runs them (the first that fails gives the code):
+/// <list type="number">
+/// <item>trim; a blank text means "no description" (valid, <c>null</c>);</item>
+/// <item>with a rule type (<see cref="Validate(string?, string?, string?, string?)"/>): a Duplicate rule takes none (<see cref="OnDuplicate"/>);</item>
+/// <item>no unpaired UTF-16 surrogate (<see cref="InvisibleCharacter"/>: it is no character at all, and rune enumeration would hide it as U+FFFD);</item>
+/// <item>no rune of category Control, Format, LineSeparator or ParagraphSeparator (<see cref="InvisibleCharacter"/>);</item>
+/// <item>at most <see cref="MaxRunes"/> Unicode scalars (runes, so a character outside the Basic Multilingual Plane counts once; <see cref="TooLong"/>);</item>
+/// <item>no <c>{</c> or <c>}</c>, so no template placeholder can exist (<see cref="Braces"/>);</item>
+/// <item>no <c>&lt;</c> or <c>&gt;</c>, no markup (<see cref="Markup"/>);</item>
+/// <item>when the version's names are given, neither its rule set name nor its policy name appears in it, case-insensitively (uac-r2 Q4 and C4;
+/// <see cref="NamesTheRule"/>).</item>
+/// </list>
+/// A refusal is a code only: no caller logs, returns or echoes the refused text.
 /// </remarks>
 public static class FirmDescriptionRules
 {
@@ -52,11 +60,14 @@ public static class FirmDescriptionRules
     /// <summary>A <c>&lt;</c> or <c>&gt;</c>: markup.</summary>
     public const string Markup = "firm_description_markup";
 
-    /// <summary>A rune of category Control, Format, LineSeparator or ParagraphSeparator.</summary>
+    /// <summary>A rune of category Control, Format, LineSeparator or ParagraphSeparator, or an unpaired UTF-16 surrogate.</summary>
     public const string InvisibleCharacter = "firm_description_invisible_character";
 
     /// <summary>The text contains the version's own rule set name or policy name (case-insensitive).</summary>
     public const string NamesTheRule = "firm_description_names_rule";
+
+    /// <summary>A Duplicate rule never carries a description: firms always see the standard duplicate wording (design section 5).</summary>
+    public const string OnDuplicate = "firm_description_duplicate";
 
     /// <summary>The stable log code of a stored description the mapper or the plan replay dropped (logged with the code and ids only).</summary>
     public const string DroppedLogCode = "EBILLING-FIRM-DESCRIPTION-DROPPED";
@@ -74,6 +85,11 @@ public static class FirmDescriptionRules
         }
 
         var text = raw.Trim();
+        if (HasUnpairedSurrogate(text))
+        {
+            return Refused(InvisibleCharacter);
+        }
+
         var runes = 0;
         foreach (var rune in text.EnumerateRunes())
         {
@@ -105,6 +121,46 @@ public static class FirmDescriptionRules
         }
 
         return new FirmDescriptionCheck(text, null);
+    }
+
+    /// <summary>
+    /// Fix round 1 F4: the copy-time and edit-time check of a version of a known rule type: a Duplicate rule takes no description
+    /// (<see cref="OnDuplicate"/>), so a stored one is never copied to its Signal; any other type is
+    /// <see cref="Validate(string?, string?, string?)"/>. <paramref name="ruleTypeRaw"/> is <c>sprk_ruletype</c> as text (name or option value).
+    /// </summary>
+    public static FirmDescriptionCheck Validate(string? raw, string? ruleSetName, string? policyName, string? ruleTypeRaw)
+    {
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            return new FirmDescriptionCheck(null, null);
+        }
+
+        if (Sprk.Bff.Api.Services.Signals.RuleBodySchemaValidator.TryParseRuleType(ruleTypeRaw, out var ruleType)
+            && ruleType == Sprk.Bff.Api.Services.Signals.RuleType.Duplicate)
+        {
+            return Refused(OnDuplicate);
+        }
+
+        return Validate(raw, ruleSetName, policyName);
+    }
+
+    private static bool HasUnpairedSurrogate(string text)
+    {
+        for (var i = 0; i < text.Length; i++)
+        {
+            if (char.IsHighSurrogate(text[i]) && i + 1 < text.Length && char.IsLowSurrogate(text[i + 1]))
+            {
+                i++;
+                continue;
+            }
+
+            if (char.IsSurrogate(text[i]))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>
