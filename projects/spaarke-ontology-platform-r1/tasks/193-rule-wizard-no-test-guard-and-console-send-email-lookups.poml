@@ -4,7 +4,7 @@
     <title>New rule wizard asks for a test instead of showing a raw schema error; Console Send Email recipients and Related to use the side pane</title>
     <phase>12 Create-wizard lookups and composer (185 dev check fixes)</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>in-progress</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies shared client code (.ts/.tsx) in @spaarke/ui-components and the Console.</rigor-reason>
     <model-tier>sonnet</model-tier>

@@ -4,7 +4,7 @@
     <title>Email documents (Semantic Search PCF and Document Relationship Viewer): the To/Cc/Bcc side-pane lookup opens above the wizard, not behind it</title>
     <phase>12 Create-wizard lookups and composer (185 dev check fixes)</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>in-progress</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies shared client code (.ts/.tsx), a PCF control and a code page; tags include pcf.</rigor-reason>
     <model-tier>opus</model-tier>
