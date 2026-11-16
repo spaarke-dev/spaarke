@@ -1527,6 +1527,10 @@ internal sealed class StubExternalDataService : ExternalDataService
         return Task.FromResult(new Sprk.Bff.Api.Api.ExternalAccess.Dtos.ExternalCollectionResponse<Sprk.Bff.Api.Api.ExternalAccess.Dtos.ExternalEventDto> { Truncated = TruncatedRequested });
     }
 
+    // R4 task 014b: the event lists offer the creatable types; here, the Task row (the rules are ExternalEventFormsContractTests').
+    public override Task<IReadOnlyList<EventTypeOption>> GetEventTypesAsync(CancellationToken ct = default) =>
+        Task.FromResult<IReadOnlyList<EventTypeOption>>(new[] { new EventTypeOption(Spaarke.Dataverse.EventTypeRef.Task, "Task", false, true) });
+
     public override Task<Sprk.Bff.Api.Api.ExternalAccess.Dtos.ExternalCollectionResponse<Sprk.Bff.Api.Api.ExternalAccess.Dtos.ExternalContactDto>> GetContactsAsync(
         Guid projectId, CancellationToken ct = default)
     {

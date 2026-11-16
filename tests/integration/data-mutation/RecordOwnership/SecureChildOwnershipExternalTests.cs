@@ -93,7 +93,7 @@ public sealed class SecureChildOwnershipExternalTests : IClassFixture<ExternalCh
 
         using var client = _fixture.CreateAuthenticatedClient();
         var response = await client.PostAsJsonAsync(
-            $"/api/v1/external/projects/{ExternalChildOwnershipTestFixture.SecureProject}/events", new { sprk_name = "Hearing" });
+            $"/api/v1/external/projects/{ExternalChildOwnershipTestFixture.SecureProject}/events", new { sprk_name = "Hearing", eventType = "task" });
 
         response.StatusCode.Should().Be(HttpStatusCode.Created);
         _fixture.Data.EventOwners.Should().Equal(Directory.SecureNamedTeam);
@@ -109,7 +109,7 @@ public sealed class SecureChildOwnershipExternalTests : IClassFixture<ExternalCh
 
         using var client = _fixture.CreateAuthenticatedClient();
         var response = await client.PostAsJsonAsync(
-            $"/api/v1/external/projects/{ExternalChildOwnershipTestFixture.FlaggedProject}/events", new { sprk_name = "Hearing" });
+            $"/api/v1/external/projects/{ExternalChildOwnershipTestFixture.FlaggedProject}/events", new { sprk_name = "Hearing", eventType = "task" });
 
         response.StatusCode.Should().Be(HttpStatusCode.Conflict);
         (await ReasonCode(response)).Should().Be(RecordOwnerRefusal.SecureParentNotIsolated);
@@ -361,6 +361,10 @@ public sealed class ExternalChildOwnershipTestFixture : ExternalCollaborationTes
                     request, TryGetRootBinding(rootKind)!, rootId, "root", null, owningTeamId, callerContactId)));
             return Task.FromResult(new ExternalTodoDto { SprkTodoid = Guid.NewGuid().ToString(), SprkName = request.SprkName });
         }
+
+        // R4 task 014b: an external event create names its type and the type must be creatable; here, the active Task row.
+        public override Task<IReadOnlyList<EventTypeOption>> GetEventTypesAsync(CancellationToken ct = default) =>
+            Task.FromResult<IReadOnlyList<EventTypeOption>>(new[] { new EventTypeOption(EventTypeRef.Task, "Task", false, true) });
 
         public override Task<ExternalEventDto> CreateEventAsync(
             TodoRootKind rootKind, Guid rootId, CreateExternalEventRequest request, Guid owningTeamId, CallerPrincipal creator,

@@ -1445,9 +1445,18 @@ and `.sprk_isdefaultthread`, and `sprk_communication.sprk_sentby`, `.sprk_direct
 invoice, invoice line, submission, approval, correction or external identifier under its matter, project or work assignment
 (and link it to its invoice) are written only by the BFF application user. The BFF checks each person-driven write AS THE
 PERSON and then writes these columns AS THE APPLICATION, so a user can no longer re-file a row through a form or the Web API
-and skip those checks. `scripts/Set-InvoiceFamilyFieldSecurity.ps1` secures them (the named entry point of
-`Set-DocumentPointerFieldSecurity.ps1 -Target InvoiceFamilyLinks`, with the same two BFF-managed profiles). Run it in this
-order on each environment; do not skip a step:
+and skip those checks.
+
+**From SpaarkeMaster 1.3.2.0 the import applies the lock** (#2859): the package secures the 24 columns and grants them to
+`Spaarke BFF-Managed Field Readers` (read) and `Spaarke BFF-Managed Field Writers` (read/create/update) only, and it carries
+code pages rebuilt from source that no longer write them. A new stamp needs no script; provisioning H7b S27 verifies the lock
+(customer-provisioning-orchestration-r1 task 270, #2859; not yet on master). On an environment that is already deployed,
+deploy the BFF of step 1 below and the current web resources BEFORE importing 1.3.2.0, or client writes of these lookups
+fail once the import secures them. The profiles' members stay per environment (`Set-RecordCreatorPersonSchema.ps1 -Apply`).
+
+`scripts/Set-InvoiceFamilyFieldSecurity.ps1` (the named entry point of `Set-DocumentPointerFieldSecurity.ps1 -Target
+InvoiceFamilyLinks`, with the same two BFF-managed profiles) is ONLY for an environment below SpaarkeMaster 1.3.2.0, and as a
+repair (`-Verify` names a gap on an environment at 1.3.2.0 or above). On those, run it in this order; do not skip a step:
 1. **Deploy the BFF** build that writes the links as the application (#2799 chunks 1-3). Before it, locking would make every
    person-driven write of these columns fail.
 2. **Redeploy every web resource the dry run (p4a) lists.** It scans the deployed code pages and form scripts for a write of a
@@ -1458,15 +1467,16 @@ order on each environment; do not skip a step:
 4. **Apply, with the owner's go:** the same command plus `-BffWritesInvoiceFamilyLinksAsApp -Apply`. The switch is your
    confirmation that step 1 is done; `-Apply` refuses without it.
 5. **Verify:** the same command with `-Verify` must exit 0 (non-zero names each gap).
-- **New environment (stamp):** the lock ships in SpaarkeMaster from the unified-access-control-r2 release that packages
-  it (owner decision 2026-11-16, task 270 path A; **1.3.1.0 does not carry it**). H7b S27 refuses a stamp where it is not
-  whole (`secure_setup.invoice_family_lock_incomplete`, Resumable) until a new run imports that release at H6. Steps
+- **New environment (stamp):** the lock ships in SpaarkeMaster **1.3.2.0** (#2859; owner decision 2026-11-16, task 270
+  path A; **1.3.1.0 does not carry it**). H7b S27 refuses a stamp where it is not
+  whole (`secure_setup.invoice_family_lock_incomplete`, Resumable) until a new run imports 1.3.2.0 or later at H6. Steps
   3–5 are **not** a remedy on a stamp's first H7b run: H7b refuses before it adds the BFF-managed profiles' members
   (S11/S12), and the script's preconditions require them. They apply only on a stamp where H7b completed before (a
   re-run after a procedure change), with the owner's OK, and the run then resumes; even there the dry run may stop at the web-resource precondition (p4a) when the stamp's SpaarkeMaster web resources predate #2799, and then the release import is the only route. A stamp that imports the release
   needs no step 1 or 2: H9 deploys the master BFF, and the web resources come from the same SpaarkeMaster, which is
   built after #2799.
-- **After every SpaarkeMaster import:** run `Set-InvoiceFamilyFieldSecurity.ps1 -Verify`.
+- **After every SpaarkeMaster import:** run `Set-InvoiceFamilyFieldSecurity.ps1 -Verify` (read-only; on a stamp, H7b S27
+  checks the same lock).
 - **A new business unit:** its default team joins the reader profile through `Set-RecordCreatorPersonSchema.ps1 -Apply`; then
   run `-Verify`.
 - **Known limit (K-1):** a write that sets a locked column and other columns is two requests. If the second fails, the other
@@ -3183,6 +3193,7 @@ These are **module-scoped** deployment / build workflows — NOT customer-provis
 | 2026-11-10 | §5 H7b row + §6.5.2 + §7.7 H10/S24 + Secure Record setup: the nine operator scripts that add "every default team" to a reader profile skip the ontology writer unit's default team and FAIL when it is there (`scripts/common/OntologyWriterUnit.ps1`); a move keeps roles where `DoNotRemoveRolesOnChangeBusinessUnit` is set (S24 hint, remove by hand); the moved writer holds no role between H10 and H7b S24; H10 also refuses a writer whose client id is the BFF app registration's | `customer-provisioning-orchestration-r1` task 267 review fixes (#2618) |
 | 2026-11-11 | §5 H7b row + Secure Record setup S26: H7b procedure 9 verifies ebilling task 166's lock on the seven `sprk_invoice` amounts and firm (EB-D-200; secured, Readers read, Writers 4/4/4, no other writer); incomplete → `secure_setup.invoice_money_lock_incomplete` (Resumable: a SpaarkeMaster release above 1.3.0.0 carrying 166, or ebilling's script), other writer → `…_other_writer` (QuarantineRequired). The System Administrator profile is now excused by its fixed id in every H7b other-writer check, never by name (task 268). |
 | 2026-11-13 | §7.11 + §12.2 Phase 7a (Set-CustomerOwnerTeams): the ontology writer's unit `Spaarke Ontology Writer` (task 267) is never a customer unit — refused when named (by name or id, every mode), never counted as another customer top unit, a declared team or a role copy holder in it is drift, it must sit outside every customer subtree, and two units of that name refuse (task 269). |
+| 2026-11-16 | Invoice-family links: from SpaarkeMaster 1.3.2.0 the import applies the #2799 lock (24 columns, Readers / Writers only) with code pages rebuilt from source; `Set-InvoiceFamilyFieldSecurity.ps1` is only for environments below 1.3.2.0 and as a repair; an existing environment deploys the #2799 BFF and current web resources before the import; H7b S27 verifies (task 270, not yet on master) | `unified-access-control-r2` #2859 |
 | 2026-11-16 | §5 H7b row, §7.4 (message-access and invoice-family locks) and §7.11: H7b procedure 10 (task 270, owner path A) adds S27, the #2799 invoice-family link lock (24 columns; SpaarkeMaster 1.3.1.0 does not carry it, so a stamp refuses until the uac-r2 release that packages it is imported or the script is run), and S28, the message-access lock (four packaged columns, the direct recipient only where it exists); §7.4 no longer claims provisioning runs Set-ThreadFlagFieldSecurity.ps1. |
 
 ---

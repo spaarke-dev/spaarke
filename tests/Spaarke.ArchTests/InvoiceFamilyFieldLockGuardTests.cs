@@ -147,27 +147,26 @@ public class InvoiceFamilyFieldLockGuardTests
     /// The ratchet baseline: committed bundles that still write a locked column on a family table, with their hit count. A
     /// new violation (an unlisted file, or more hits) fails; an entry that no longer violates (fewer hits) fails as stale.
     /// </summary>
-    private static readonly IReadOnlyDictionary<string, (int Hits, string Reason)> Baseline = new Dictionary<string, (int, string)>(StringComparer.Ordinal)
-    {
-        ["src/dataverse/solutions/SpaarkeMaster/WebResources/sprk_creatematterwizard"] =
-            (1, "stale committed bundle; removed when rebuilt from 045g source (the Create Matter wizard's invoice association, updateRecord sprk_invoice sprk_Matter@odata.bind)"),
-        ["src/dataverse/solutions/SpaarkeMaster/WebResources/sprk_spaarkeai"] =
-            (2, "stale committed bundle; removed when rebuilt from 045g source (the embedded Create Matter wizard's invoice association and the Create Invoice wizard's direct createRecord sprk_invoice)"),
-        ["src/dataverse/solutions/SpaarkeMaster/WebResources/sprk_createinvoicewizard"] =
-            (1, "stale committed bundle; removed when rebuilt from 045g source (the Create Invoice wizard's direct createRecord sprk_invoice, payload built at run time)"),
-    };
+    /// <remarks>Empty since #2859: the three stale bundles (sprk_creatematterwizard, sprk_spaarkeai, sprk_createinvoicewizard) were
+    /// rebuilt from current source into SpaarkeMaster 1.3.2.0, which also ships the lock.</remarks>
+    private static readonly IReadOnlyDictionary<string, (int Hits, string Reason)> Baseline = new Dictionary<string, (int, string)>(StringComparer.Ordinal);
 
-    /// <summary>The committed web resources (extensionless JavaScript / HTML bundles, not their .data.xml or images).</summary>
+    /// <summary>The committed web resources (extensionless JavaScript / HTML bundles, not their .data.xml or images) and the committed
+    /// PCF bundles (<c>Controls/**/bundle.js</c>). #2859 review: the solution packs both, and a new stamp never runs the deployed-scan step.</summary>
     private static IEnumerable<string> CommittedWebResources()
     {
         var root = Path.Combine(SourceScan.RepoRoot, "src", "dataverse", "solutions");
         if (!Directory.Exists(root))
             return [];
         return Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories)
-            .Where(f => f.Replace('\\', '/').Contains("/WebResources/", StringComparison.Ordinal))
+            .Where(f => f.Replace('\\', '/').Contains("/WebResources/", StringComparison.Ordinal) || IsCommittedPcfBundle(f))
             .Where(f => !f.EndsWith(".data.xml", StringComparison.OrdinalIgnoreCase))
             .Where(f => !Regex.IsMatch(f, @"\.(png|svg|gif|jpg|jpeg|ico|xsl|xml|resx|css)$", RegexOptions.IgnoreCase));
     }
+
+    private static bool IsCommittedPcfBundle(string path) =>
+        path.Replace('\\', '/').Contains("/Controls/", StringComparison.Ordinal)
+        && Path.GetFileName(path).Equals("bundle.js", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>Every client file the guard covers: client and solution source and PCF bundles, and the committed web resources.</summary>
     internal static IReadOnlyList<string> ScannedFiles() =>
@@ -290,6 +289,8 @@ public class InvoiceFamilyFieldLockGuardTests
         Assert.True(files.Count > 1000, $"only {files.Count} client files were scanned — the scan roots are wrong, and an empty scan proves nothing");
         Assert.True(files.Count(f => f.Replace('\\', '/').Contains("/WebResources/", StringComparison.Ordinal)) > 50,
             "the committed web resources were not scanned — they are what gets deployed");
+        Assert.True(files.Count(f => f.Replace('\\', '/').Contains("/src/dataverse/", StringComparison.Ordinal) && IsCommittedPcfBundle(f)) > 10,
+            "the committed PCF bundles (Controls/**/bundle.js) were not scanned — the solution packs them too (#2859 review)");
 
         var prefilter = Prefilter();
         var candidates = files.Select(f => (File: f, Text: File.ReadAllText(f))).Where(f => prefilter.IsMatch(f.Text)).ToList();
