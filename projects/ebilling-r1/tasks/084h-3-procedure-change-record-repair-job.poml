@@ -34,6 +34,7 @@
     <constraint source="ADR-004, ADR-052, root 17">Queue work through IJobHandler on the existing Service Bus job pipeline; no BackgroundService timer; no IScheduledJob sweep (it would need the forbidden row re-read).</constraint>
     <constraint source="review round 1 item 4">The handler never reads sprk_procedureassignment; row ids recur across episodes.</constraint>
     <constraint source="J4">A retryable refusal is retried by the pipeline's retry policy; a permanent refusal is logged, metered and completed, not retried.</constraint>
+    <constraint source="ontology-r1 K1 (2026-11-16)">The retry list classifies every writer refusal explicitly as retryable or permanent, including the lookup-failed refusal (RecordProcedureLookupFailed, and BillingRecordLookupFailed if the shared helper surfaces it), OwnerRefused (a deleted core record: permanent, with a test), OwnerResolutionFailed and CreateFailed; an unclassified refusal fails a test.</constraint>
     <constraint source="logging">No log line from the enqueuer or handler contains reason or note text.</constraint>
     <constraint source="project">No live call to any environment. No change to DecisionRecordWriter.cs. Never run python. Never --no-verify. No bare git stash.</constraint>
     <constraint source="root 10">Placement Justification, publish-size delta and CVE check in the notes.</constraint>

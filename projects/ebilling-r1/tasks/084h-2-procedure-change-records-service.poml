@@ -40,6 +40,7 @@
     <constraint source="design 9, EB-D-239 Q9">The note is stored only in the record's Values["note"], never on the override row; reason keeps CheckReason (trim, length) unchanged. Unpin and remove records carry a null sprk_reason.</constraint>
     <constraint source="design 7, EB-D-239 Q10">A recorder refusal or exception after Done: 2xx answer, decisionRecord.status Queued, one enqueue; a failed enqueue gives NotRecorded; one Error log with ids only; no rethrow. 089's house rule that a landed change keeps its 2xx is unchanged.</constraint>
     <constraint source="design 10">decisionRecord appears once per answer (OverrideView, OverrideRemoved; not RuleChangedView). The record stays internal: no firm-facing reader changes.</constraint>
+    <constraint source="ontology-r1 H-3">The service (not only the endpoint) enforces the 2000-character note cap and the control-character check on every act, the DELETE JSON body included; a direct service call with a 2001-character note is refused before any read.</constraint>
     <constraint source="logging">No log line contains note or reason text.</constraint>
     <constraint source="project">No edit to DecisionRecordWriter.cs or DecisionActionCatalog.cs (084h-1 owns them). No live call to any environment. Never run python. Never --no-verify. No bare git stash.</constraint>
     <constraint source="root 10">Publish-size delta against a fresh master build and the CVE check recorded in the notes.</constraint>
