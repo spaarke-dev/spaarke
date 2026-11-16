@@ -270,6 +270,15 @@ Questions:
   - The allow-list gains 3 columns. `assignee_update_unsupported` is removed.
   - Tests: forms 129/129 (29 failed before); event/create/internal set 1,684; ExternalAccess 6,743; ArchTests 2,635; the OBO guard 26.
   - Leftovers: the ledger text for PATCH and the OpenAPI summary.
-  - An Opus adversarial review of the diff and the publish-size/CVE check are running.
+  - **Publish size:** +273 B vs master `fc9803419c` (191 files each). No vulnerable packages.
+  - **Opus adversarial review: no F1/F3/F4.** The ordering, unknowns, oracles, statecode/statuscode, allow-list, internal byte parity and multi-parent checks are all verified clean.
+    - **F2** (test gap): a test where one parent is Unknown and the other is Known without the assignee is missing.
+    - **K:** open-work race between read and write (same as internal, `If-Match: *`).
+    - **K:** `canEdit` is true where a reassign is refused (open work, Contact ceiling). Recommended: add `canReassign`.
+    - **K:** a systemuser with an unreadable contact is reassigned without reassigned-by. Decided: → 503 on the external path (per `ContactUnreadable`'s doc).
+    - **K:** the app-only bind skips contact AppendTo (cleared by uac-r2).
+    - Leftovers: ledger text, OpenAPI summary, dead `AssigneeSent`.
+    - **Multi-parent picker note for 015:** `assignable-people` is per root, so a multi-parent event needs the intersection.
+  - **Fix round sent:** F2 rows; `canReassign` on the DTO; `ContactUnreadable` → 503; leftovers.
 - **uac-r2 re-check PASS; UAC gate cleared for 014b at `67b99e2126`** (its own run: 170/170). Merge on Router + Client lint green, then send it the merge SHA for the next dev BFF candidate. #2867 is in CI; whoever merges second rebuilds.
 - **PR #2869 opened 2026-11-16** (head `9719d2f594`, base master `16771d1051`) and sent to uac-r2 for review. Next: uac-r2 OK + CI → merge (owner go) → hand uac-r2 the SHA for the dev BFF deploy → task 015 (SPA). The PATCH-assignee owner decision (a/b/c) is still open. **Publish size:** master `16771d1051` 42,349,704 B vs 014b `c28b4b1478` 42,374,782 B, **+25,078 B** (Compress-Archive, 191 files each, counts match). No CVEs (implementer check).: stated in the PR; the owner is told in this session's report.
