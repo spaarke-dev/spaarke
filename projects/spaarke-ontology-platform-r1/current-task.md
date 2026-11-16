@@ -32,7 +32,7 @@
 **mcp-r1**
 - **#2587** (work/spaarkeai-mcp-bff-api-r1): ontology review PASS (one adversarial pass; F4 idempotent hint fixed in `efa348273f`); sign-off comment 6900723738. **Condition: must not merge before #2580 and #2579** (branch carries 174/175). Then DI-143 #2630 builds on `WorkItemPrivilege`.
 
-**uac-r2** — dev BFF deploy owner. Dev BFF = `5a9b687a0b` (master `2747977f47` + mcp spike; has 192).
+**uac-r2** — dev BFF deploy owner. Dev BFF = `f451e0874d` (master `ce6c241964` + mcp spike, 2026-11-16 00:44Z; has a M.E.AI package mismatch that breaks AI draft, fix in their next build).
 
 **Ours, after the critical path:** DI-144 #2632, DI-145 #2639, DI-146 #2650, DI-147 #2653, DI-148 #2671, DI-149 #2672, DI-154 #2813, DI-155 #2814; `OntologyAdminClassificationService.cs:658/685/705` waits for `sprk_publishstate`; stale `DecisionRecordWriter.cs` comments wait for ebilling 074; close #2212 when ebilling `f0884a175f` reaches master. 176/160 run findings (Graph sentitems 400 after sendMail, `sprk_pendingspend` PATCH 400, `sprk_regardingreportcard` query on thread): check whether filed; detail archived in `notes/handoff-history/2026-11.md`.
 
