@@ -2,14 +2,14 @@
 
 > **Format**: CURRENT state only, REWRITTEN at each checkpoint (≤ 10 KB) — never prepend. Standing rules → project `CLAUDE.md` §2/§3/§6. Decisions → `notes/model1-dedicated-remediation-plan.md`. Narrative → commit messages. Full detail of every open item below as of 2026-11-06 (verbatim): `notes/handoff-history/current-task-archive-2026-11-06.md`.
 
-> **Last Updated**: 2026-11-16 (Desktop session `provisioning-r1`; task 270 complete, PR pending).
+> **Last Updated**: 2026-11-16 (Desktop session `provisioning-r1`; task 270 merged, PR #2862 → `4256166205`).
 
 ## 🎯 Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
 |-------|-------|
-| **Task** | None in progress. Last completed: **270** (H7b procedure 10: S27 verifies the #2799 invoice-family lock, S28 the message-access lock; owner path A 2026-11-16) — PR pending. Before it: 269 → PR #2780 `3ab55ee877`; 268 → PR #2766 `4b45bdf3fe`. |
-| **Next Action** | Task 270 PR: open, bind, wait for every check green, merge only on the owner's go. Then **wait for uac-r2's SpaarkeMaster release carrying the #2799 lock** (branch `fix/2859-invoice-lock-in-spaarkemaster`, planned 1.3.2.0; uac-r2 sends version + commit): name the version in `InvoiceFamilyLockRemedy` and add the invoice-family package-row check to `BffManagedLinkColumnLockListTests` (like the S28 one); then close ISS-029 / #2859. Also, with owner go: H7c (#2429) — `wip/h7c-customer-owner-teams` (`8ca1c13911`, unreviewed): merge master into it (it also edits Set-CustomerOwnerTeams.ps1 and H7b — resolve against tasks 269/270), review, resume. |
+| **Task** | None in progress. Last completed: **270** (H7b procedure 10: S27 verifies the #2799 invoice-family lock, S28 the message-access lock; owner path A 2026-11-16) — PR #2862 merged → `4256166205` (2026-11-16, owner go "Yes proceed"). Before it: 269 → PR #2780 `3ab55ee877`; 268 → PR #2766 `4b45bdf3fe`. |
+| **Next Action** | **Wait for uac-r2's SpaarkeMaster release carrying the #2799 lock** (uac-r2 PR #2865, branch `fix/2859-invoice-lock-in-spaarkemaster`, SpaarkeMaster 1.3.2.0, release commit `47832cd10d`, source guard `InvoiceFamilyFieldLockSourceGuardTests`; uac-r2 sends the merge SHA): name the version in `InvoiceFamilyLockRemedy` and add the invoice-family package-row check to `BffManagedLinkColumnLockListTests` (like the S28 one); then close ISS-029 / #2859. Also, with owner go: H7c (#2429) — `wip/h7c-customer-owner-teams` (`8ca1c13911`, unreviewed): merge master into it (it also edits Set-CustomerOwnerTeams.ps1 and H7b — resolve against tasks 269/270), review, resume. |
 | **Done 2026-11-11/13** | PR #2676 (task 267) → `df93d2029c`. ebilling #2689 → `2fc434c912`. Task 268 → PR #2766 `4b45bdf3fe`; #2725 / ISS-028 filed (19 operator scripts excuse System Administrator by name; ebilling fixing its 4 sites). SpaarkeMaster 1.3.1.0 published 2026-11-13. |
 | **Quality alert** | #1821 mutation-nightly open (2026-11-15); not started. |
 | **Working tree** | Clean after the close-out commit. |
