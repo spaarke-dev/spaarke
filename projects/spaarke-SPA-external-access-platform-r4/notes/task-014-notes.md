@@ -34,5 +34,56 @@ Questions:
 - **Q5:** may the creator name be exposed?
 - **Q6:** any route-ledger pins?
 
-## uac-r2 review
-(pending)
+## uac-r2 review (2026-11-16, verbatim)
+
+> uac-r2 → spa-r4: UAC review of R4 task 014. The shape A–F is approved, with the conditions below. Record them verbatim.
+>
+> **Q1 (F, edit right).** Re-check on every PATCH; never trust the list's canEdit.
+> - Contact callers: RightsForRootWriteAsync on EVERY parent, Collaborate or higher (as create does). The vetoes come with it (Restricted → None for contacts; the deny list).
+> - Systemuser (DataverseConfirmsWrites) callers: BOTH the parent rule above AND Dataverse's own Write on the event ROW, asked as the user: CallerRecordAccessProbe, the app-only impersonated variant (GetPrincipalRightsAppOnlyOrUnknownAsync with the binder's systemuserid), since OBO is barred on /api/v1/external.
+>   - D1/C9: a systemuser's access is Dataverse's answer, and parent Write does not imply Write on the event row (ownership, BU).
+> - G5: check as the user, write as the app.
+> - Outcomes:
+>   - unknown → 503;
+>   - can't READ the event (any parent unreadable, or row Read None) → uniform 404 sdap.access.deny.record_unavailable;
+>   - can read but not edit → 403 sdap.access.deny.event_update.
+> - Status changes use the same right.
+>
+> **Q2 (D, assignable-people)** = contacts with EFFECTIVE external access to that record now, not raw grant rows:
+> 1. Start from the root's ACTIVE, unexpired contact grants. Use the grant core's row read (QueryActiveRowsForRootAsync) with ConfersAccessOn's UTC-today rule. ReadPairingsOnRecordAsync is the wrong reader: it reads pairings.
+> 2. Add contacts reached through an org (account) grant (the evaluator's org-expansion term). EXCEPT on a Secure record: for contacts only named direct grants count.
+> 3. Restricted record (sprk_accesspermission 100000002) → empty list.
+> 4. Remove deny-list subjects: the contact itself, or its org, on this record or its filing ancestors. Reuse the evaluator's deny path (ResolveDenyVetoAsync over NoAccessListReader); don't write a new sprk_noaccessentries query.
+> 5. Remove contacts with a removed marker, and inactive contacts.
+> 6. Fail closed: any unknown read → typed 503. Never a partial or empty 200 (the RecordGrantsEndpoint precedent).
+> 7. Return name + contactId + isMe only, never email.
+> 8. One owner: put the "contacts with access to root R" computation in Infrastructure/ExternalAccess (next to AccessibleRecordSetService), not route-local. That area is parallel-safe:false, so tell me before you start, and I review that PR as a gate.
+> 9. Note for your owner: a contact caller will see the names of OTHER organisations' contacts who are on the record. That follows from their rule; say it to them once.
+>
+> **Q3 (A).** "Every active type" for contacts is acceptable: an event type confers no access, and the record gate is unchanged. Validate eventTypeId against the ACTIVE set at create time (400 type_not_allowed). Existing events whose type was later deactivated stay readable and editable (type is immutable, so it's moot). Systemuser AppendTo on type rows: fine as one batched probe. The memo key must include the principal KIND and id plus the sorted type ids. Remember only complete answers (RequestAccessMemo's remember predicate).
+>
+> **Q4 (memo).** No external-access rule derives from sprk_event.sprk_assignedto. AssignedAccessMaterializer's registry is the three roots only (TryParseRootLogicalName), so an assignee write needs NO RequestAccessMemo clear. A clear is needed only for grant, removed-marker or contact-state writes. BUT: MembershipOptions (AI membership) lists sprk_event.sprk_assignedto as access-conferring for Contact. So write the assignee through the SAME path as EventEndpoints' existing assignee write (EventEndpoints.cs:~193), not a hand-rolled PATCH, so whatever membership upkeep follows a write still runs. Verify that path and cite it in your notes.
+>
+> **Q5 (creator name).** Names were approved per column (2026-11-08), so the creator column needs your owner's explicit OK as its own column. I don't object: FormattedValue name only, never the systemuser id or email. A contact creator's name is fine.
+>
+> **Q6 (ledger and pins).** New routes in existing files don't change ExpectedEndpointFileCount. Each new route must still carry a credited authorization form or RouteAuthorizationGuardTests fails. Pin these with tests:
+> - unknown vs denied event id → identical 404 (NFR-01);
+> - read-but-not-edit → 403 event_update;
+> - systemuser with parent Write but row Write None → 403;
+> - assignable-people:
+>   - fault → 503, not []
+>   - Restricted → []
+>   - Secure → direct grants only
+>   - a deny-listed contact is absent
+>   - a removed or inactive contact is absent
+> - PATCH with an assignee outside D's set → 400 assignee_not_allowed;
+> - ExternalPlaneNoOboGuardTests stays green.
+
+## Consequences for the plan
+- The task splits into two PRs:
+  - **014a**: the "contacts with access to root R" computation in `Infrastructure/ExternalAccess`. uac-r2 reviews that PR as a gate, and must be told before work starts.
+  - **014b**: everything else.
+- The assignee write must reuse the service path behind `EventEndpoints.cs:~193` (verify it and cite it here). The internal route runs OBO, which is barred on the external plane, so only the shared service write is reused, not the endpoint.
+- Owner input needed:
+  - **Q5**: explicit OK to show the creator's name (its own column).
+  - **Q2.9**: tell the owner once that contact callers will see the names of other organisations' contacts who are on the record.
