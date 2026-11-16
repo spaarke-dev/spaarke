@@ -62,6 +62,7 @@ import type { AuthenticatedFetchFn } from '../../services/EntityCreationService'
 import type { IDataService } from '../../types/serviceInterfaces';
 import { readSseStream, parseSseEvent, describeStreamError } from '../../hooks/useSseStream';
 import { getXrm } from '../../utils/xrmContext';
+import { parseSummaryStream } from './summaryStream';
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -200,6 +201,23 @@ const _SUMMARY_PREVIEW_CHAR_CAP = 600;
  *   `4a72f99c-a119-f111-8343-7ced8d1dc988` — Summarize New File(s) playbook.
  */
 const SUMMARIZE_NEW_FILES_PLAYBOOK_ID = '4a72f99c-a119-f111-8343-7ced8d1dc988';
+
+// ---------------------------------------------------------------------------
+// Summary step activation
+// ---------------------------------------------------------------------------
+
+/**
+ * Starts the combined summary when the Summary step is on screen. `WizardShell` calls a step's `renderContent` DURING its
+ * own render, so starting the run there (which sets this wizard's state) made React warn "Cannot update a component
+ * while rendering a different component". An effect runs after the step has rendered; `onActivate` is idempotent per
+ * selection (the wizard's `summaryRanForRef` guard), so a re-render or a back-and-forth never starts a second run.
+ */
+const SummaryStepActivator: React.FC<{ onActivate: () => void }> = ({ onActivate }) => {
+  React.useEffect(() => {
+    onActivate();
+  }, [onActivate]);
+  return null;
+};
 
 // ---------------------------------------------------------------------------
 // Styles
@@ -906,16 +924,24 @@ export const DocumentEmailWizard: React.FC<IDocumentEmailWizardProps> = ({
     return () => summaryAbortRef.current?.abort();
   }, []);
 
-  const renderSummaryStep = React.useCallback(() => {
-    // Trigger the combined-summary call the first time this step renders for
-    // the current selection.
-    void runCombinedSummary();
+  // The playbook streams JSON (and then repeats it): show its tldr and summary once, not the raw text (task 195).
+  // Parsed once per change of the text or the status, not on every render of the step.
+  const streamedSummary = React.useMemo(
+    () => parseSummaryStream(combinedSummary, summaryStatus !== 'running' && summaryStatus !== 'idle'),
+    [combinedSummary, summaryStatus]
+  );
 
+  const renderSummaryStep = React.useCallback(() => {
+    const streamed = streamedSummary;
     const isStreaming = summaryStatus === 'running';
+    // 'idle' is the one render between the step appearing and its effect starting the run.
+    const isWaiting = isStreaming || summaryStatus === 'idle';
     const hasError = summaryStatus === 'error';
 
     return (
       <div className={styles.stepRoot}>
+        {/* Starts the run from an effect, once this step is on screen (never while WizardShell is rendering). */}
+        <SummaryStepActivator onActivate={runCombinedSummary} />
         <div className={styles.stepHeader}>
           <Text as="h2" size={500} weight="semibold" className={styles.stepTitle}>
             Combined Summary
@@ -948,19 +974,41 @@ export const DocumentEmailWizard: React.FC<IDocumentEmailWizardProps> = ({
                 Could not generate summary: {summaryError}
               </Text>
             )}
-            {!hasError && combinedSummary ? (
-              <Text size={200} className={styles.summaryBody}>
-                {combinedSummary}
-              </Text>
-            ) : (
-              !hasError &&
-              !isStreaming && (
-                <Text size={200} className={styles.summaryEmpty}>
-                  (no summary available)
-                </Text>
-              )
+            {!hasError && streamed.kind === 'structured' && (
+              <>
+                {streamed.tldr && (
+                  <div data-testid="summary-tldr">
+                    <Text size={200} weight="semibold" className={styles.summaryHeader} block>
+                      TL;DR
+                    </Text>
+                    <Text size={200} className={styles.summaryBody} block>
+                      {streamed.tldr}
+                    </Text>
+                  </div>
+                )}
+                {streamed.summary && streamed.summary !== streamed.tldr && (
+                  <div data-testid="summary-body">
+                    <Text size={200} weight="semibold" className={styles.summaryHeader} block>
+                      Summary
+                    </Text>
+                    <Text size={200} className={styles.summaryBody} block>
+                      {streamed.summary}
+                    </Text>
+                  </div>
+                )}
+              </>
             )}
-            {!hasError && !combinedSummary && isStreaming && (
+            {!hasError && streamed.kind === 'text' && (
+              <Text size={200} className={styles.summaryBody} data-testid="summary-text">
+                {streamed.text}
+              </Text>
+            )}
+            {!hasError && !isWaiting && (streamed.kind === 'pending' || streamed.kind === 'empty') && (
+              <Text size={200} className={styles.summaryEmpty}>
+                (no summary available)
+              </Text>
+            )}
+            {!hasError && isWaiting && (streamed.kind === 'pending' || streamed.kind === 'empty') && (
               <Text size={200} className={styles.summaryEmpty}>
                 Generating combined summary…
               </Text>
@@ -969,7 +1017,7 @@ export const DocumentEmailWizard: React.FC<IDocumentEmailWizardProps> = ({
         )}
       </div>
     );
-  }, [kept, styles, runCombinedSummary, combinedSummary, summaryStatus, summaryError]);
+  }, [kept, styles, runCombinedSummary, streamedSummary, summaryStatus, summaryError]);
 
   // ---------------------------------------------------------------------
   // Step 3 — Compose
