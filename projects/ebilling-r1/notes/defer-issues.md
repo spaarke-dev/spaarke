@@ -2042,7 +2042,7 @@ A BFF deploy can ship code that writes index fields the live index doesn't have.
 
 | Field | Value |
 |---|---|
-| **Status** | Open: fix needs the owner's go (dev apply of the 077 script) |
+| **Status** | Done on dev 2026-11-16 (owner "Yes, add both"; uac-r2 and ontology-r1 notified before and after): column created (Memo 2000, not secured), a read naming it returns 200; #2858 closed. SpaarkeMaster source sync is task 079 (the guard's pending list holds it) |
 | **Urgency** | now |
 | **Filed** | 2026-11-16 |
 | **Source** | uac-r2's review of 130e-1 (the guard's pending entry said "Deployed"); confirmed by a read-only metadata GET (404) and the script's -WhatIf (would create 1) |
