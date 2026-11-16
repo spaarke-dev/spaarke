@@ -169,6 +169,16 @@ public sealed record InvoiceSubmissionRequest
     public Microsoft.Xrm.Sdk.Entity? CorrectedInvoice { get; init; }
 
     /// <summary>
+    /// ebilling-r1 task 095f-2e1 (EB-D-237): the firm's correction note of a from-document Correction, already checked by the route
+    /// (<see cref="InvoiceCorrectionNote.Check"/>: trimmed, within the length, no control characters) and required there when
+    /// <see cref="CorrectedInvoice"/> is set. Read only by <see cref="InvoiceSubmissionService.SubmitExistingDocumentAsync"/>, which carries it on the
+    /// processing job (<see cref="InvoiceSubmissionService.BuildJob"/>); the persister writes it to <c>sprk_correctionnote</c> on the new invoice.
+    /// Null for a New submission and for every other entry (the job payload is then exactly what it was). Never part of the submission id and
+    /// never compared with an earlier attempt: a retry of a still-Received Correction re-queues the job with the retry's note.
+    /// </summary>
+    public string? CorrectionNote { get; init; }
+
+    /// <summary>
     /// ebilling-r1 task 118b: the from-document route's supporting documents, de-duplicated and sorted, already checked by the route (the
     /// caller's Read, the same communication). Empty (the default) behaves exactly as before 118b. Read only by
     /// <see cref="InvoiceSubmissionService.SubmitExistingDocumentAsync"/>: the set joins the "same details?" comparison with an earlier

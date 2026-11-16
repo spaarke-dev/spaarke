@@ -754,7 +754,8 @@ public class InvoiceSubmissionService
             return AfterFiling(await AnswerWithEarlierAsync(request, number, concurrent, documentId, jobId, fileSource: null, write), filed);
         }
 
-        if (!await TrySubmitJobAsync(jobId, submissionId, request.CorrelationId))
+        // Task 095f-2e1 (EB-D-237): a Correction's note rides the job (the submission row has no column for it), as on the from-email route.
+        if (!await TrySubmitJobAsync(jobId, submissionId, request.CorrelationId, request.CorrectedInvoice is null ? null : request.CorrectionNote))
         {
             return AfterFiling(NotQueued(), filed);
         }
@@ -826,7 +827,8 @@ public class InvoiceSubmissionService
         if (earlier.Status == nameof(InvoiceSubmissionStatus.Received))
         {
             ct.ThrowIfCancellationRequested();
-            if (!await TrySubmitJobAsync(jobId, earlier.SubmissionId, request.CorrelationId))
+            // Task 095f-2e1: the retry's own note (the route required one for a Correction), so a re-queued Correction's job carries it.
+            if (!await TrySubmitJobAsync(jobId, earlier.SubmissionId, request.CorrelationId, request.CorrectedInvoice is null ? null : request.CorrectionNote))
             {
                 return AfterFiling(NotQueued(), filed);
             }
@@ -1498,11 +1500,11 @@ public class InvoiceSubmissionService
 
 
     /// <summary>Submits the job (ADR-004, the submission id as idempotency key); false when the queue refused it (logged).</summary>
-    private async Task<bool> TrySubmitJobAsync(Guid jobId, Guid submissionId, string? correlationId)
+    private async Task<bool> TrySubmitJobAsync(Guid jobId, Guid submissionId, string? correlationId, string? correctionNote = null)
     {
         try
         {
-            await _jobs.SubmitJobAsync(BuildJob(jobId, submissionId, correlationId), CancellationToken.None);
+            await _jobs.SubmitJobAsync(BuildJob(jobId, submissionId, correlationId, correctionNote), CancellationToken.None);
             return true;
         }
         catch (Exception ex)

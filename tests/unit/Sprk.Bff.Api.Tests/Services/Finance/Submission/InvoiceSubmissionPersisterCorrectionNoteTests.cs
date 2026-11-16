@@ -58,6 +58,35 @@ public partial class InvoiceSubmissionPersisterTests
         InvoiceCreate(store).Attributes.Should().NotContainKey("sprk_correctionnote");
     }
 
+    // Task 095f-2e1 (EB-D-237): the from-document route now carries a note on the job, so a from-document Correction reaches the persister with
+    // one, and the persister's "no note" warning (legacy payloads only) must stay quiet for it. The control proves the warning still fires.
+    private const string NoNoteWarning = "carries no correction note";
+
+    [Fact(DisplayName = "095f-2e1 (must-not-fire): a Correction that carries a note (a from-document one now does) never logs the no-note warning")]
+    public async Task CorrectionWithANote_DoesNotLogTheNoNoteWarning()
+    {
+        var logger = new CapturingLogger();
+        var store = CorrectionStore(logger: logger);
+
+        var result = await store.Build().PersistAsync((await CorrectionOutcomeAsync()) with { CorrectionNote = NoteText }, null);
+
+        result.Status.Should().Be(SubmissionPersistStatus.Committed);
+        InvoiceCreate(store).GetAttributeValue<string>("sprk_correctionnote").Should().Be(NoteText);
+        logger.Entries.Should().NotContain(e => e.Message.Contains(NoNoteWarning));
+    }
+
+    [Fact(DisplayName = "095f-2e1 (must-fire control): a Correction with no note (a legacy payload) still logs the no-note warning once and persists")]
+    public async Task CorrectionWithoutANote_StillLogsTheNoNoteWarning()
+    {
+        var logger = new CapturingLogger();
+        var store = CorrectionStore(logger: logger);
+
+        var result = await store.Build().PersistAsync(await CorrectionOutcomeAsync(), null);
+
+        result.Status.Should().Be(SubmissionPersistStatus.Committed);
+        logger.Entries.Where(e => e.Level == Microsoft.Extensions.Logging.LogLevel.Warning && e.Message.Contains(NoNoteWarning)).Should().ContainSingle();
+    }
+
     [Theory(DisplayName = "095f: a note over the column's length or with a control character is never written, never truncated")]
     [InlineData("tooLong")]
     [InlineData("control")]
