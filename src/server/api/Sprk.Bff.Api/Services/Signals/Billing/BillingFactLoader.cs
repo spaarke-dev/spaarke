@@ -281,6 +281,14 @@ public sealed class BillingFactLoader
     /// (Memo 2000, unsecured, EB-D-213; the cap applied is <see cref="Sprk.Bff.Api.Services.Finance.FirmDescriptionRules.MaxRunes"/>).</summary>
     internal const string FirmDescriptionColumn = "sprk_firmdescription";
 
+    /// <summary>The <c>sprk_policyversion</c> columns the rule read selects (task 130e-1 fix round 1 F2a: every one must exist in the solution
+    /// source or be listed as pending schema, <c>PolicyVersionColumnsGuardTests</c>).</summary>
+    internal static readonly string[] VersionColumns =
+    [
+        "sprk_policy", "sprk_versionnumber", "sprk_ruletype", "sprk_rulebody", "sprk_messagetemplate", "sprk_shortheadline",
+        "sprk_consequence", "sprk_clausereference", "sprk_clauselocation", "sprk_inforcefrom", "sprk_inforceto", FirmDescriptionColumn,
+    ];
+
     /// <summary>The primary name column of <c>sprk_ruleset</c> and <c>sprk_policy</c> (read for the firm description's name check).</summary>
     internal const string NameColumn = "sprk_name";
 
@@ -543,9 +551,7 @@ public sealed class BillingFactLoader
         {
             var versionQuery = new QueryExpression(VersionEntity)
             {
-                ColumnSet = new ColumnSet(
-                    "sprk_policy", "sprk_versionnumber", "sprk_ruletype", "sprk_rulebody", "sprk_messagetemplate", "sprk_shortheadline",
-                    "sprk_consequence", "sprk_clausereference", "sprk_clauselocation", "sprk_inforcefrom", "sprk_inforceto", FirmDescriptionColumn),
+                ColumnSet = new ColumnSet(VersionColumns),
                 NoLock = true,
             };
             versionQuery.Criteria.AddCondition("sprk_policy", ConditionOperator.In, chunk.Cast<object>().ToArray());

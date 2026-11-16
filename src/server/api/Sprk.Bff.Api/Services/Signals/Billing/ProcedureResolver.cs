@@ -1244,6 +1244,16 @@ public static class ProcedureResolver
         return policies.OrderBy(p => p.Id).ToList();
     }
 
+    /// <summary>The <c>sprk_policyversion</c> columns the Published-version read selects (task 130e-1 fix round 1 F2a, pinned against the solution
+    /// source by <c>PolicyVersionColumnsGuardTests</c>).</summary>
+    internal static readonly string[] PolicyVersionColumns =
+    [
+        "sprk_policy", "sprk_versionnumber", "sprk_ruletype", "sprk_rulebody", "sprk_messagetemplate", "sprk_shortheadline",
+        "sprk_consequence", "sprk_clausereference", "sprk_clauselocation", "sprk_inforcefrom", RuleSetService.ProcedureVersionColumn,
+        RuleSetService.PublishStateColumn, ProcedureAssignmentService.BasedOnVersionColumn, CreatedOnColumn,
+        BillingFactLoader.FirmDescriptionColumn,
+    ];
+
     private static async Task<IReadOnlyList<ResolvedPolicyVersion>> ReadPolicyVersionsAsync(
         IGenericEntityService entities, IReadOnlyList<PolicyRow> policies, CancellationToken ct)
     {
@@ -1255,11 +1265,7 @@ public static class ProcedureResolver
             // deactivates only Drafts (EB-D-216).
             var query = new QueryExpression(BillingFactLoader.VersionEntity)
             {
-                ColumnSet = new ColumnSet(
-                    "sprk_policy", "sprk_versionnumber", "sprk_ruletype", "sprk_rulebody", "sprk_messagetemplate", "sprk_shortheadline",
-                    "sprk_consequence", "sprk_clausereference", "sprk_clauselocation", "sprk_inforcefrom", RuleSetService.ProcedureVersionColumn,
-                    RuleSetService.PublishStateColumn, ProcedureAssignmentService.BasedOnVersionColumn, CreatedOnColumn,
-                    BillingFactLoader.FirmDescriptionColumn),
+                ColumnSet = new ColumnSet(PolicyVersionColumns),
                 NoLock = true,
             };
             query.Criteria.AddCondition("sprk_policy", ConditionOperator.In, chunk.Cast<object>().ToArray());
