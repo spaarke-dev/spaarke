@@ -62,3 +62,10 @@ No new service, endpoint, DI registration, package, column or file surface. One 
 - A retry of a still-Received from-document Correction is answered as before; the "same details?" comparison (`AnswerWithEarlierAsync`) does not include the note, so a retry with a different note is accepted and the re-queued job carries the retry's note (the job's idempotency key is the submission id, so a job that already ran is not run again). From-email handles its retry the same way except that it refuses a retry with no note; here the handler already refuses any Correction with no note before the intake.
 - The internal multipart route and the external SPA route still accept New only (§16 option B'); a later task may add Correction there.
 - `InvoiceSubmissionEndpoints.cs` documents the route in an OpenAPI description string only; the client type in `emailInvoiceSubmission.ts` is not changed in this task (no client change).
+
+## Review (2026-11-16): one adversarial pass, no F-class finding
+
+Known limits:
+- **K1, retry note.** A retry of a still-Received Correction with a different note re-queues the job with the retry's note, but the first job the handler processes wins (processing lock, `IdempotencyKey = submissionId`); a later message finds the submission moved on and does nothing. Both texts are the firm's, and there is no wrong-invoice outcome. From-email's idempotency key excludes the note too (it is only in the response-cache binding), and from-document has no such cache.
+- **K2, service-level rule.** `SubmitExistingDocumentAsync` accepts a `CorrectedInvoice` with no note; the route is its only caller and refuses that before the service. A second caller would have to enforce the rule itself (from-email enforces it in its service).
+- **K3, "zero reads" wording.** The 400 comes after the route filter's authorization reads (parity with from-email; authorization before validation is correct). The tests prove the handler's order, not the filter's.
