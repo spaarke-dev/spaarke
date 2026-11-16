@@ -346,6 +346,89 @@ internal sealed class RequestAccessMemo
     private void Forget(string key, object entry)
         => _entries.TryRemove(new KeyValuePair<string, object>(key, entry));
 
+    // ── Shared reads: ONE key and ONE remember rule per subject read, for every consumer ──────────────────────────────
+    // The evaluator (AccessibleRecordSetService) and RecordContactAccessService (r4 task 014a) read the same per-contact
+    // answers inside one request; both go through these, so the key, the remember rule and the fault mapping cannot drift.
+
+    /// <summary>
+    /// The contact's removed marker (<see cref="IContactIdentityStore.ReadRemovedMarkerAsync"/>), once per request through
+    /// <paramref name="memo"/> (none: live). Only a PROVEN answer (removed, or proven not removed) is shared; a fault is
+    /// <see cref="RemovedMarkerRead.Unreadable"/> (fail closed), is never shared, and is logged. The caller's cancellation
+    /// propagates.
+    /// </summary>
+    internal static Task<RemovedMarkerRead> ReadRemovedMarkerAsync(
+        RequestAccessMemo? memo, IContactIdentityStore identityStore, ILogger logger, Guid contactId, CancellationToken ct)
+    {
+        return memo is null
+            ? ReadRemovedMarkerLiveAsync(identityStore, logger, contactId, ct)
+            : memo.GetOrReadAsync(
+                RemovedMarkerKey(contactId),
+                token => ReadRemovedMarkerLiveAsync(identityStore, logger, contactId, token),
+                marker => marker is RemovedMarkerRead.NotRemoved or RemovedMarkerRead.Removed,
+                ct);
+    }
+
+    private static async Task<RemovedMarkerRead> ReadRemovedMarkerLiveAsync(
+        IContactIdentityStore identityStore, ILogger logger, Guid contactId, CancellationToken ct)
+    {
+        try
+        {
+            return await identityStore.ReadRemovedMarkerAsync(contactId, ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex,
+                "[WF-AUTHZ] The removed marker of Contact {ContactId} could not be read. Failing CLOSED — it confers nothing " +
+                "on this request.", contactId);
+            return RemovedMarkerRead.Unreadable;
+        }
+    }
+
+    /// <summary>
+    /// The contact's organization memberships (<see cref="ExternalParticipationService.ReadOrganizationMembershipsAsync"/>:
+    /// the conferring set beside the wall set), once per request through <paramref name="memo"/> (none: live). An unreadable
+    /// answer is never shared; a fault is <see cref="ActiveOrgMemberships.Failed"/> and is logged. The caller's cancellation
+    /// propagates — a timeout is a fault, not a cancellation.
+    /// </summary>
+    internal static Task<ActiveOrgMemberships> ReadOrganizationMembershipsAsync(
+        RequestAccessMemo? memo, ExternalParticipationService participations, ILogger logger, Guid contactId,
+        CancellationToken ct)
+    {
+        return memo is null
+            ? ReadOrganizationMembershipsLiveAsync(participations, logger, contactId, ct)
+            : memo.GetOrReadAsync(
+                OrganizationMembershipsKey(contactId),
+                token => ReadOrganizationMembershipsLiveAsync(participations, logger, contactId, token),
+                orgs => !orgs.Unreadable,
+                ct);
+    }
+
+    private static async Task<ActiveOrgMemberships> ReadOrganizationMembershipsLiveAsync(
+        ExternalParticipationService participations, ILogger logger, Guid contactId, CancellationToken ct)
+    {
+        try
+        {
+            return await participations.ReadOrganizationMembershipsAsync(contactId, ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex,
+                "[WF-AUTHZ] Active-organization read FAILED for contact {ContactId}. The org-expansion " +
+                "term will contribute NOTHING, and the deny veto will deny every queried candidate — " +
+                "the two consumers fail in opposite, deliberate directions (NFR-01).",
+                contactId);
+            return ActiveOrgMemberships.Failed;
+        }
+    }
+
     // ── Keys: one prefix per reader ─────────────────────────────────────────────────────────────────
 
     /// <summary>App-only read of root records' own Secure / Access Permission / state columns

@@ -2,7 +2,7 @@ $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 
 Set-Location $PSScriptRoot
-$version = "1.21.6"
+$version = "1.21.7"
 $solutionName = "SpaarkeRelatedDocumentCount"
 $zipPath = "bin\${solutionName}_v$version.zip"
 

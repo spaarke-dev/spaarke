@@ -85,8 +85,10 @@ public sealed class H7bSecureRecordSetupHandler : IProvisioningHandler
     /// 8 = task 267 (#2618): S24 — the writer is alone in its own unit "Spaarke Ontology Writer" and holds that unit's copy of
     ///     the role; S11/S16 skip that unit's default team; S25 — "Spaarke Basic User" on the customer unit's default team.
     /// 9 = task 268: S26 — the lock on the invoice amounts and firm (ebilling-r1 task 166, EB-D-200), verified only.
+    /// 10 = task 270: S27 — the lock on the invoice family's core-record lookups and invoice links (unified-access-control-r2
+    ///      #2799); S28 — the lock on the message-access columns (field-mapping task 054b); both verified only.
     /// </remarks>
-    internal const string ProcedureVersion = "secure-setup-procedure=9";
+    internal const string ProcedureVersion = "secure-setup-procedure=10";
 
     private readonly IProvisioningRunRepository _repository;
     private readonly ISecureRecordSetupDataverse _dataverse;

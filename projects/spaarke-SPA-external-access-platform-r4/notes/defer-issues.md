@@ -261,3 +261,17 @@ answered AND `canCreate` is not false. The status toggle is excluded (no server 
 **Why deferred.** It needs a new user-visible error surface in the shared grid. That is outside R4 scope.
 
 **Fix shape.** Add an error surface to the grid (an inline MessageBar or an `onCommandError` prop) and route both catches to it. Add tests, then prune the suppressions.
+
+## D-17 — External API: every request repeats access resolution (#2845)
+
+**Status.** Handed off → `unified-access-control-r2`, on the owner's direction, 2026-11-15. Accepted by uac-r2 the same day; it will run FULL rigor on Opus with two adversarial passes, once its owner gives the go. Filed as an issue (found outside R4), not as deferred R4 scope.
+
+**Where.** The shared external access layer in the BFF:
+- `Infrastructure/ExternalAccess/NoAccessListReader.cs:182` (deny list, deliberately uncached across requests);
+- `ExternalParticipationService.cs`, `AccessibleRecordSetService.cs`, `CallerPrincipalResolver.cs`, `Services/Dataverse/ParentLineage.cs`.
+
+**Effect.** Every external request takes 3–4 s on the server: 50–60 Dataverse calls one after another at about 85 ms each. Within one request, `sprk_noaccessentries` is read 8 times, Organization.svc is called 6.7 times, `sprk_matters` is read 6.5 times, and `sprk_contactorganizations` and `contacts({id})` 4 times each. The route's own data is 1–2 calls. The owner reported the SPA as very slow. It isn't capacity: P1v3, 1 worker, `/ping` about 0.1 s.
+
+**Source.** App Insights `spe-insights-dev-67e2xz`, read-only queries shown to the owner first, 2026-11-15. The KQL is in #2845.
+
+**Fix shape.** Keep "live per request" (no cross-request TTL), but memoize the caller, grant set, deny list and lineage once per request, run the independent reads in parallel, and batch the per-candidate lookups. Add a test that counts Dataverse calls per request. Target: under 1 s.

@@ -157,7 +157,7 @@ export const RelatedDocumentCount: React.FC<IRelatedDocumentCountProps> = ({ con
       : null;
 
   return (
-    <div data-pcf-version="1.21.6">
+    <div data-pcf-version="1.21.7">
       <RelationshipCountCard
         count={count}
         isLoading={effectiveIsLoading}
@@ -167,7 +167,13 @@ export const RelatedDocumentCount: React.FC<IRelatedDocumentCountProps> = ({ con
         lastUpdated={lastUpdated ?? undefined}
         graphPreview={graphPreview}
       />
-      <FindSimilarViewerDialog open={isDialogOpen} onClose={handleClose} url={isDialogOpen ? viewerUrl : null} />
+      {/* Task 194: on a form the viewer's Email documents lookup opens in this page, so the dialog yields to it. */}
+      <FindSimilarViewerDialog
+        open={isDialogOpen}
+        onClose={handleClose}
+        url={isDialogOpen ? viewerUrl : null}
+        yieldToFrameSidePane
+      />
     </div>
   );
 };
