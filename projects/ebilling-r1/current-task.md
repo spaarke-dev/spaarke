@@ -18,6 +18,12 @@
   - Sonnet review: no defects. BFF build has 0 warnings. ArchTests 2633/0. Master merged in.
   - **#2846 MERGED to master at c88ed7105a** (2026-11-15). 43 checks passed; the only failure was the known Office-scope 20-min timeout. uac-r2 has the SHA. Next: uac-r2's BFF deploy (owner go in its session). The sweep has NO existing operator path; it needs a small script that queues the normal InvoiceIndexing job per invoice (owner go before running it). uac-r2 has the number. Then a BFF deploy (owner go in uac-r2's session).
   - **Then the re-index sweep:** every sprk_invoice with modifiedon ≥ 2026-10-27, through the normal indexing job. It writes to the dev search index, so it needs **the owner's go HERE**. Report the count and the result to uac-r2.
+- **IN PROGRESS (owner go 2026-11-15): re-index sweep script** `scripts/ebilling/Invoke-EbillingInvoiceReindexSweep.ps1` + `tests/scripts/Invoke-EbillingInvoiceReindexSweep.Tests.ps1` (Pester 5.7.1). Design:
+  - Dry run by default: GET sprk_invoices modifiedon ≥ -Since (2026-10-27), all states, paged, headers with `Consistency = 'Strong'`. Print the COUNT only.
+  - `-Apply` sends one Service Bus message per invoice: POST `https://spaarke-servicebus-dev.servicebus.windows.net/sdap-jobs/messages`, token for `https://servicebus.azure.net`, BrokerProperties {MessageId = idempotency key, CorrelationId, Label = InvoiceIndexing}, plus headers JobType, Attempt, CreatedAt.
+  - The body copies `InvoiceIndexingJobHandler.BuildJob` in camelCase: jobId, jobType InvoiceIndexing, subjectId, correlationId, idempotencyKey `invoice-index-{N}-sweep-2844`, attempt 1, maxAttempts 3, createdAt, payload {InvoiceId, Change}.
+  - Copy the AST-extraction test pattern of `tests/scripts/Deploy-EbillingStoredFileSchema.Tests.ps1`.
+  - Running with `-Apply` needs the owner's go HERE, after uac-r2 deploys c88ed7105a. Report the count and the result to uac-r2.
 - **113b ✅ on work (owner go 2026-11-15):** the Invoice Review page now shows 113's Procedure-change banner (`ProcedureChangeNotice.tsx`). One Sonnet adversarial pass found no F-class defects; its unknown-state point is closed. It ships with task 112, the page's first deploy.
 - **Reminder for 084h-2 (ontology-r1):** the writer caps only `reason` at 2000 characters, not `note`. 084h-2 must enforce or trim the note at the service (design §9), so an over-long note never reaches the create and fails as a retryable CreateFailed.
 
