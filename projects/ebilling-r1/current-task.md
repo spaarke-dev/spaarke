@@ -63,14 +63,12 @@ The owner was offered "as recommended" for all ten.
 9. Correct/confirm get a note on the correction row (option B).
 10. Create Invoice wizard: server-only for R1 (option C).
 
-**Premise correction to log:** EB-D-237 assumed the Create Invoice wizard has a Correction path. It has none and does not use from-document. The only from-document client is word-add-in-r1's emailInvoiceSubmission.ts (New only).
+**Premise correction to log:** EB-D-237 assumed the Create Invoice wizard has a Correction path. It has none and does not use from-document. **Corrected 2026-11-16 (word-add-in-r1, verified by grep):** from-document's client is the shared `Spaarke.Communication.Components/src/logic/invoice/emailInvoiceSubmission.ts`, consumed by OUR CommunicationActions PCF (task 118) and the EmailWorkspace, not by the add-in. The Outlook add-in's Invoice tab uses only from-email, which already sends `correctionNote`. So "does from-document offer Correction" is ebilling's call; fold it into 095f part 2.
 
 ### Waiting on peers
 
 - **word-add-in-r1** (offline; messages queued):
-  - 096 gate: has the add-in removed the Invoice save target and invoice quick-create, plus one release since?
-  - Will from-document offer Correction?
-  - Slice C (the firm-assign pane) waits until 095g is on the dev BFF.
+  - **096 gate NOT met (2026-11-16):** the add-in still offers Invoice as a Save target and invoice quick-create (Outlook and Word). Removal is its task 133 slice C (#2829), which waits for the owner's merge go in its session. It will send the SHA and the deploy run, and the one-release clock starts then. Keep 096's server legs.
 - **spa-r4:**
   - Accepts an optional `correction` prop on InvoiceSubmissionWizard, with conditions (095f design §13).
   - Builds R4 021 against the 093 contract once its task 013 is done.
