@@ -1970,7 +1970,7 @@ K1 (ontology): a D-96 re-file across core records withholds line Duplicates perm
 
 | Field | Value |
 |---|---|
-| **Status** | In Progress (fix d7f36ddd6d on work; PR to master next) |
+| **Status** | In Progress: fix merged (#2846, c88ed7105a), live on dev BFF f451e0874d, sweep ran 2026-11-16 (12 queued, 0 failed). Closes when uac-r2's gate shows the 12 jobs ran clean |
 | **Urgency** | now |
 | **Filed** | 2026-11-15, by uac-r2 (its 30-minute gate on dev BFF aa7d6345f3) |
 | **Source** | `InvoiceIndexingJobHandler` faulted on dev at 18:51:58Z |
@@ -1993,6 +1993,8 @@ Task 094 (merged 2026-10-27) removed `sprk_document` from the invoice, but `Invo
 **After deploy**
 
 Re-index every `sprk_invoice` with modifiedon ≥ 2026-10-27 through the normal indexing job: `scripts/ebilling/Invoke-EbillingInvoiceReindexSweep.ps1 -Apply` (12 invoices on dev, dry run 2026-11-15). This writes to the dev search index, so it needs the owner's go here. Report the count and the result to uac-r2.
+
+Done 2026-11-16 on the owner's go. The first `-Apply` was refused 401 with nothing sent, because the account had no Service Bus data role. The owner granted "Azure Service Bus Data Sender" on the dev namespace, and the retry queued 12 with 0 failed (correlation id `ebilling-iss022-sweep-20261116T005512Z`). uac-r2 was told before and after.
 
 **Known limits**
 
