@@ -114,3 +114,22 @@ File counts match. Far below the +5 MB per-task trigger and the 55 / 60 MB cumul
 6. `WaitAsync` holds the 5 s limit for a token-ignoring read; tests for the timeout and for request cancellation during such a read.
 7. Guard: closed lists for `InvoiceReviewDto` and for the callers of the verdict overload, with a must-fire control (section 3).
 8. Known limits added (section 6); section 3 corrected.
+
+## 113b: the banner on the Invoice Review page (2026-11-15)
+
+No client rendered `procedureChange`: task 110 built the page before 113. Added on the owner's go.
+
+- `src/solutions/InvoiceReview/src/components/ProcedureChangeNotice.tsx`, rendered in `InvoiceReviewPage`'s banner area after the firm-first notice.
+  - Changed and CouldNotBeChecked show as warnings, with the server's text.
+  - NotYetChecked shows as information, titled "Procedure changes".
+  - An unknown state with text shows as information, so a future state is never read as "no change".
+  - NotChanged, absent, or an unknown state with no text shows nothing.
+- Fallback sentences copy the server's, and are used only when a state arrives without text.
+- The banner blocks no action.
+- Review: one Sonnet adversarial pass, with no F findings. Its K2 (unknown state) is closed as above.
+- Known limits:
+  - K1: the text says "re-check" but R1 has no re-check action (ebilling-r2).
+  - K3: a warning MessageBar on first render is announced by screen readers, as the firm-first notice already is.
+  - K4: the fallback constants are not tested against the server's.
+- Tests: `__tests__/ProcedureChangeNotice.test.tsx`, 14 cases. The page suite passes 256/256.
+- Deploy: the page (`sprk_invoicereviewpage`) has never been deployed. Its first deploy is part of task 112 (owner go), and 113b ships with it. The banner needs a BFF that carries #2839.

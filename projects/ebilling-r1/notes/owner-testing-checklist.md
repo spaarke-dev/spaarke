@@ -36,6 +36,12 @@ Sign in as a **billing administrator** unless a step says otherwise.
 - [ ] Changing one of its rules is refused as "not in force". Excluding one of its rules still works. Removing its assignment still works.
 - [ ] A Procedure whose Area is not Billing cannot be assigned.
 
+**Procedure-change banner on the Invoice Review page (113b, needs the dev BFF with #2839)**
+- [ ] Open an invoice in review whose firm has a Procedure. With nothing changed since it was checked, no banner shows.
+- [ ] Change that firm's Procedures (for example pin a different version), then reopen the invoice. A warning says the procedures have changed and need a re-check. There is no re-check button yet (R2).
+- [ ] Decisions and corrections still work while the banner shows.
+- [ ] A decided invoice shows no banner.
+
 **Invoices (ISS-021)**
 - [ ] On a record that has the deactivated Procedure, submit or re-run an invoice. That Procedure's rules no longer produce findings.
 
@@ -52,3 +58,13 @@ Sign in as a **billing administrator** unless a step says otherwise.
 - [ ] Invoices already waiting on "Set firm" can still be given a firm.
 - [ ] After Set firm on a held invoice, new findings in the Worklist show the new invoice name.
 - [ ] In the Outlook pane, a Correction asks for a note. Without one it is refused. With one, the new invoice shows the note (Correction Note field).
+
+## E. 093 invoice files in the external portal: after uac-r2's dev BFF deploy and spa-r4's SPA deploy
+
+Not yet. #2839 (BFF) and #2840 (SPA) are merged to master. uac-r2 deploys the BFF on your go in its session, then spa-r4 deploys the SPA straight after. Sign in to the external portal as a law-firm user.
+
+- [ ] Open one of your firm's invoices. Its files are listed with name, type, size and date.
+- [ ] A file that is still being virus-scanned shows as checking, and opening it says it isn't ready yet. Once the scan is clean it opens.
+- [ ] A clean file opens in the browser.
+- [ ] An invoice of another firm cannot be opened. It looks the same as an invoice that doesn't exist.
+- [ ] Nothing in the portal still calls the old invoice-documents address (no "not found" error in the files section).

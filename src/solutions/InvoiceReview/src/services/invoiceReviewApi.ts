@@ -199,6 +199,15 @@ export interface ReviewDecisionRecord {
   reason: string | null;
 }
 
+/** ebilling-r1 task 113: the server's states for the read-time Procedure-change banner (`ProcedureChangeBanner`). */
+export type ProcedureChangeState = 'Changed' | 'NotChanged' | 'NotYetChecked' | 'CouldNotBeChecked';
+
+/** ebilling-r1 task 113: whether the Procedures that apply to the invoice changed since it was judged. `text` is omitted for NotChanged. */
+export interface ProcedureChange {
+  state: ProcedureChangeState | string;
+  text?: string | null;
+}
+
 export interface InvoiceReview {
   header: ReviewHeader;
   totals: ReviewTotals;
@@ -209,6 +218,11 @@ export interface InvoiceReview {
   lineCounts: Record<string, number>;
   flags: ReviewFlags;
   invoicePdfFileId: string | null;
+  /**
+   * ebilling-r1 task 113 (113b renders it). Absent when the server does not judge it: the caller is not internal, the invoice is decided,
+   * it has no firm, or no evaluation ran.
+   */
+  procedureChange?: ProcedureChange | null;
 }
 
 export interface DecidedLine {
