@@ -4,7 +4,7 @@
     <title>5(a) Microsoft Learn MCP server for the researcher</title>
     <phase>5 Quality tooling</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Modifies an agent definition and MCP config under explicit constraints (FR-10)</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -84,6 +84,8 @@
   </acceptance-criteria>
 
   <notes>Item-5 sub-items ship as separate PRs (NFR-05).</notes>
+
+  <completion-notes>Completed 2026-11-16. Config in cb613e3098: .mcp.json microsoft-learn http server (https://learn.microsoft.com/api/mcp; no auth, three tools), dataverse entry values unchanged (Prettier reflow only); researcher.md tools allow-list + research order + privacy line; knowledge/README.md per-machine approval line. Owner approved the project MCP server on this machine. Verification: one researcher (sonnet) run on the SPE container-type limits followed the order (memory, knowledge/, docs) and called microsoft_docs_search + microsoft_docs_fetch, citing three Learn pages; no auth prompt, only the query and URL sent (escalation trigger not fired). Recorded in notes/040-learn-mcp.md; researcher memory file from the run ships with it. Found in passing: root CLAUDE.md SPE line is conservative (trial types are deletable) - reported, not a defect. K: Learn tool names may change (allow-list update). PR: own PR with the owner's OK (NFR-05). rework: none task 040</completion-notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
