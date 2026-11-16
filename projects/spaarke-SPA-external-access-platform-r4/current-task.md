@@ -7,10 +7,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | None in progress. Next: **014** (BFF Event forms, FR-35–FR-37). FULL, opus high, two adversarial passes |
-| **Step** | 014 not started. Its gates: (1) PR #2847 merged — **done** (`ce6c241964`, hold released); (2) uac-r2's UAC review of the proposal (`notes/event-forms-design.md` §4) recorded BEFORE any BFF code |
+| **Task** | **014** IN PROGRESS: BFF Event forms (FR-35–FR-37), `tasks/014-bff-event-forms.poml`. FULL, opus high, two adversarial passes |
+| **Step** | Step 1 (gates): master merged at `5eb257a40d` (incl. #2847); conflict check clean; proposal + Q1–Q6 sent to uac-r2 2026-11-16 — **waiting on its review; no BFF code before it** |
 | **Status** | 018 ✅ (retest round 3 passed). Event forms: owner decided Q-1–Q-8, S-1–S-4; spec FR-35–FR-37 written; tasks 014/015/016 created; 036 superseded |
-| **Next Action** | When the owner says go: start 014 via task-execute; first send uac-r2 the proposal (design §4) and wait for its review. Phase 2 (020/022/023/024/028) is still open and independent of the event work |
+| **Next Action** | On uac-r2's review: record it verbatim in `notes/task-014-notes.md`, adjust the design if asked, then load knowledge (Step 4) and implement. Phase 2 (020/022/023/024/028) still open |
 
 ## Event forms (decided 2026-11-15)
 - Design and every file:line: `notes/event-forms-design.md`. Spec: FR-35 (create), FR-36 (event record: read, deep link, edit, status), FR-37 (assignable people); FR-23 superseded; out-of-scope line narrowed (events are editable).
