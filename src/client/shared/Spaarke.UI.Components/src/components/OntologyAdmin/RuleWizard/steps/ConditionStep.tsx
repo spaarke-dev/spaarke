@@ -44,6 +44,14 @@ const CLAUSE_KINDS: ReadonlyArray<{ readonly kind: ClauseKind; readonly label: s
   { kind: 'notExists', label: 'Has no related records that match' },
 ];
 
+/**
+ * A schema refusal at the root of the body has an empty path, so the BFF's text starts with ": " (": Required properties [...]").
+ * That prefix is noise to the admin; a message without it is shown unchanged.
+ */
+function withoutLeadingColon(message: string): string {
+  return message.replace(/^\s*:\s*/, '');
+}
+
 export const ConditionStep: React.FC<StepBaseProps> = ({ catalog, draft, onChange, errors, locked }) => {
   const styles = useStepStyles();
   const condition = draft.condition;
@@ -56,7 +64,10 @@ export const ConditionStep: React.FC<StepBaseProps> = ({ catalog, draft, onChang
     onChange(d => ({ ...d, condition: change(d.condition) }));
 
   const subjects = isThreshold ? catalog.subjects.filter(s => s.thresholdFields.length > 0) : catalog.subjects;
-  const ruleBodyError = errorMessage(errors, 'ruleBody');
+  const ruleBodyError = errorMessage(
+    { ...errors, ruleBody: ('ruleBody' in errors ? errors.ruleBody : []).map(withoutLeadingColon) },
+    'ruleBody'
+  );
   const maxClauses = catalog.limits.maxClauses;
 
   const setClause = (id: string, change: (clause: ClauseDraft) => ClauseDraft) =>
@@ -65,14 +76,17 @@ export const ConditionStep: React.FC<StepBaseProps> = ({ catalog, draft, onChang
   return (
     <div className={styles.step} data-testid="rule-wizard-condition">
       <Text className={styles.intro}>
-        Say what the rule looks for. Everything here is chosen from the lists the service offers; the rule is written for you.
+        Say what the rule looks for. Everything here is chosen from the lists the service offers; the rule is written
+        for you.
       </Text>
 
       <RefusableField label="Kind of rule" field="ruleType" errors={errors} required>
         <Select
           value={condition.ruleType}
           disabled={locked}
-          onChange={(_event, data) => setCondition(c => ({ ...c, ruleType: data.value, subject: '', when: [], clauses: [], thresholdField: '' }))}
+          onChange={(_event, data) =>
+            setCondition(c => ({ ...c, ruleType: data.value, subject: '', when: [], clauses: [], thresholdField: '' }))
+          }
           data-testid="rule-wizard-rule-type"
         >
           {catalog.ruleTypes.map(type => (
@@ -87,7 +101,9 @@ export const ConditionStep: React.FC<StepBaseProps> = ({ catalog, draft, onChang
         <Select
           value={condition.subject}
           disabled={locked}
-          onChange={(_event, data) => setCondition(c => ({ ...c, subject: data.value, when: [], clauses: [], thresholdField: '' }))}
+          onChange={(_event, data) =>
+            setCondition(c => ({ ...c, subject: data.value, when: [], clauses: [], thresholdField: '' }))
+          }
           data-testid="rule-wizard-subject"
         >
           <option value="">Choose a table</option>
@@ -173,7 +189,9 @@ export const ConditionStep: React.FC<StepBaseProps> = ({ catalog, draft, onChang
           ) : (
             <section className={styles.group} aria-label="Related records" data-testid="rule-wizard-clauses">
               <Text weight="semibold">Related records</Text>
-              {condition.clauses.length === 0 ? <Text className={styles.muted}>No related-record tests yet.</Text> : null}
+              {condition.clauses.length === 0 ? (
+                <Text className={styles.muted}>No related-record tests yet.</Text>
+              ) : null}
               {condition.clauses.map((clause, index) => {
                 const join = subject.joins.find(j => j.related === clause.related);
                 const clauseId = `rule-wizard-clause-${index}`;
@@ -184,7 +202,9 @@ export const ConditionStep: React.FC<StepBaseProps> = ({ catalog, draft, onChang
                         value={clause.kind}
                         disabled={locked}
                         aria-label="Kind of related test"
-                        onChange={(_event, data) => setClause(clause.id, c => ({ ...c, kind: data.value as ClauseKind }))}
+                        onChange={(_event, data) =>
+                          setClause(clause.id, c => ({ ...c, kind: data.value as ClauseKind }))
+                        }
                         data-testid={`${clauseId}-kind`}
                       >
                         {CLAUSE_KINDS.map(k => (
@@ -214,7 +234,9 @@ export const ConditionStep: React.FC<StepBaseProps> = ({ catalog, draft, onChang
                         icon={<DeleteRegular />}
                         aria-label="Remove this related-record test"
                         disabled={locked}
-                        onClick={() => setCondition(c => ({ ...c, clauses: c.clauses.filter(x => x.id !== clause.id) }))}
+                        onClick={() =>
+                          setCondition(c => ({ ...c, clauses: c.clauses.filter(x => x.id !== clause.id) }))
+                        }
                         data-testid={`${clauseId}-remove`}
                       />
                     </div>
@@ -247,9 +269,7 @@ export const ConditionStep: React.FC<StepBaseProps> = ({ catalog, draft, onChang
                   size="small"
                   icon={<AddRegular />}
                   disabled={locked || condition.clauses.length >= maxClauses || subject.joins.length === 0}
-                  onClick={() =>
-                    setCondition(c => ({ ...c, clauses: [...c.clauses, emptyClause(catalog, '')] }))
-                  }
+                  onClick={() => setCondition(c => ({ ...c, clauses: [...c.clauses, emptyClause(catalog, '')] }))}
                   data-testid="rule-wizard-add-clause"
                 >
                   Add a related-record test

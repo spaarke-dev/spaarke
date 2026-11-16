@@ -36,6 +36,14 @@ export interface BrowseModalProps {
   headerActions?: React.ReactNode;
   /** Stage content — e.g. a `RichFilePreview` renderer. Defaults to a placeholder. */
   children?: React.ReactNode;
+  /**
+   * Opt-in, forwarded to `SprkModal`: while `true` the modal stays mounted but dims, goes inert and drops just below
+   * the host's lookup side pane (`sidePaneLayering.ts`). A host sets it while ANOTHER modal stacked over this one has
+   * the pane open (e.g. the Email documents wizard over a preview), so this one does not cover the pane. Default
+   * `false`.
+   * @since ontology task 194
+   */
+  yieldToSidePane?: boolean;
   /** Browse ("N of M") navigation — forwarded to `SprkModal`'s header nav group. */
   nav: SprkModalNav;
   /**
@@ -56,6 +64,7 @@ export const BrowseModal: React.FC<BrowseModalProps> = ({
   metadata = [],
   headerActions,
   children,
+  yieldToSidePane,
   nav,
   onBeforeNavigate,
 }) => {
@@ -76,6 +85,7 @@ export const BrowseModal: React.FC<BrowseModalProps> = ({
       padded={false}
       uiScale={uiScale}
       headerActions={headerActions}
+      yieldToSidePane={yieldToSidePane}
       nav={effectiveNav}
       footer={
         <Button appearance="primary" onClick={onClose}>

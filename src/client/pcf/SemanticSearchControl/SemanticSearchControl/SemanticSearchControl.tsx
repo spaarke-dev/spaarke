@@ -331,6 +331,11 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
   // Find Similar dialog state — URL of the web resource to show in the iframe dialog
   const [findSimilarUrl, setFindSimilarUrl] = useState<string | null>(null);
 
+  // Task 194: the Dataverse lookup side pane opens in this page. While the Email documents wizard or the Find Similar
+  // viewer has it open, those dialogs yield to it; a preview open under them must yield too, or it covers the pane.
+  const [wizardLookupOpen, setWizardLookupOpen] = useState(false);
+  const [findSimilarLookupOpen, setFindSimilarLookupOpen] = useState(false);
+
   // ── v1.1.49 — Host-level preview dialog state (Item 6) ─────────────────
   // Both list view AND card view now route preview-open through the SAME
   // host-mounted FilePreviewDialog so the navigation set (Prev/Next) is
@@ -1859,7 +1864,7 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
 
       {/* Version Footer (always visible) */}
       <div className={styles.versionFooter}>
-        <Text size={100}>v1.1.86 • Built 2026-11-14</Text>
+        <Text size={100}>v1.1.87 • Built 2026-11-15</Text>
       </div>
 
       {/* Host-mounted preview dialog. Single instance per PCF surface so
@@ -1881,7 +1886,13 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
           documentType={hostPreviewTarget.documentType}
           createdAt={hostPreviewTarget.createdAt}
           createdBy={hostPreviewTarget.createdBy}
-          onClose={() => setHostPreviewDocId(null)}
+          // Task 194: the wizard and Find Similar are non-modal (no backdrop of their own), so a click around them
+          // lands on this preview's light-dismiss backdrop. While one is stacked on it the preview stays, so the user
+          // returns to it when that dialog closes.
+          onClose={() => {
+            if (emailWizardOpen || findSimilarUrl) return;
+            setHostPreviewDocId(null);
+          }}
           fetchPreviewUrl={() => handlePreviewTelemetry(hostPreviewTarget)}
           onFetchSummary={() => handleSummary(hostPreviewTarget)}
           onOpenFile={mode => handleOpenFileTelemetry(hostPreviewTarget, mode)}
@@ -1894,11 +1905,19 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
           navigationTotal={hostPreviewNavSet.length}
           currentIndex={hostPreviewIndex >= 0 ? hostPreviewIndex : undefined}
           onNavigate={handleHostPreviewNavigate}
+          yieldToSidePane={wizardLookupOpen || findSimilarLookupOpen}
         />
       )}
 
       {/* Find Similar — shared iframe dialog */}
-      <FindSimilarViewerDialog open={!!findSimilarUrl} onClose={() => setFindSimilarUrl(null)} url={findSimilarUrl} />
+      {/* Task 194: the viewer's Email documents lookup opens in this page, so this dialog yields to it while it is open. */}
+      <FindSimilarViewerDialog
+        open={!!findSimilarUrl}
+        onClose={() => setFindSimilarUrl(null)}
+        url={findSimilarUrl}
+        yieldToFrameSidePane
+        onFrameSidePaneLookupChange={setFindSimilarLookupOpen}
+      />
 
       {/* Document Email Wizard — unified single-doc + bulk Email surface.
           When launched from a row's 3-dot menu, `handleEmailDocument`
@@ -1936,6 +1955,10 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
         bffBaseUrl={apiBaseUrl}
         dataService={dataService}
         emailComposeHandlers={emailComposeHandlers}
+        // Task 194: the PCF shares the Dataverse page's document, so the To/Cc/Bcc side pane would open behind a
+        // blocking wizard; non-blocking, the wizard yields to the pane while a lookup is open.
+        nonBlocking
+        onSidePaneLookupChange={setWizardLookupOpen}
         // Named `lg` size (1280px / 85vh) matches the FilePreviewDialog footprint so the wizard
         // doesn't jump in size when stacked over an open preview (ontology task 111).
         size="lg"
