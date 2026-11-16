@@ -891,6 +891,17 @@ public static class ExternalProjectDataEndpoints
             _ => Array.Empty<WorkforceCeilingRequirement>(), // a deny state: AdmitsAsync refuses an empty set
         };
 
+    /// <summary>The events list's own ceiling for a root (Read on the root's table and on <c>sprk_event</c>) — what
+    /// <c>GET /events/{id}</c> asks of each parent (R4 task 014b, uac-r2 gate F1).</summary>
+    private static IReadOnlyList<WorkforceCeilingRequirement> ReadEventsCeiling(ExternalDataService.TodoRootKind rootKind) =>
+        rootKind switch
+        {
+            ExternalDataService.TodoRootKind.Project => WorkforceRoleCeilingGate.ReadProjectEvents,
+            ExternalDataService.TodoRootKind.Matter => WorkforceRoleCeilingGate.ReadMatterEvents,
+            ExternalDataService.TodoRootKind.WorkAssignment => WorkforceRoleCeilingGate.ReadWorkAssignmentEvents,
+            _ => Array.Empty<WorkforceCeilingRequirement>(), // a deny state: AdmitsAsync refuses an empty set
+        };
+
     private static async Task<IResult> CreateTodoForRoot(
         ExternalDataService.TodoRootKind rootKind,
         Guid rootId,
@@ -2473,28 +2484,28 @@ public static class ExternalProjectDataEndpoints
     private static Task<IResult> CreateEvent(
         Guid id, CreateExternalEventRequest request, HttpContext httpContext,
         ExternalDataService dataService, IRecordOwnershipResolver ownership, CallerRecordAccessProbe probe,
-        RecordContactAccessService contactAccess, IConfiguration configuration,
+        RecordContactAccessService contactAccess, IConfiguration configuration, IDataversePrivilegeChecker privileges,
         ILogger<Program> logger, CancellationToken ct) =>
         CreateEventForRoot(ExternalDataService.TodoRootKind.Project, id, request, httpContext, dataService, ownership,
-            probe, contactAccess, configuration, logger, ct);
+            probe, contactAccess, configuration, privileges, logger, ct);
 
     /// <summary>POST /api/v1/external/matters/{id}/events — create a calendar event on a matter (R4 task 002, FR-08).</summary>
     private static Task<IResult> CreateMatterEvent(
         Guid id, CreateExternalEventRequest request, HttpContext httpContext,
         ExternalDataService dataService, IRecordOwnershipResolver ownership, CallerRecordAccessProbe probe,
-        RecordContactAccessService contactAccess, IConfiguration configuration,
+        RecordContactAccessService contactAccess, IConfiguration configuration, IDataversePrivilegeChecker privileges,
         ILogger<Program> logger, CancellationToken ct) =>
         CreateEventForRoot(ExternalDataService.TodoRootKind.Matter, id, request, httpContext, dataService, ownership,
-            probe, contactAccess, configuration, logger, ct);
+            probe, contactAccess, configuration, privileges, logger, ct);
 
     /// <summary>POST /api/v1/external/workassignments/{id}/events — create a calendar event on a work assignment (R4 task 002, FR-08).</summary>
     private static Task<IResult> CreateWorkAssignmentEvent(
         Guid id, CreateExternalEventRequest request, HttpContext httpContext,
         ExternalDataService dataService, IRecordOwnershipResolver ownership, CallerRecordAccessProbe probe,
-        RecordContactAccessService contactAccess, IConfiguration configuration,
+        RecordContactAccessService contactAccess, IConfiguration configuration, IDataversePrivilegeChecker privileges,
         ILogger<Program> logger, CancellationToken ct) =>
         CreateEventForRoot(ExternalDataService.TodoRootKind.WorkAssignment, id, request, httpContext, dataService, ownership,
-            probe, contactAccess, configuration, logger, ct);
+            probe, contactAccess, configuration, privileges, logger, ct);
 
     /// <summary>
     /// Create a calendar event on one accessible root — project, matter or work assignment. ONE implementation; the three
@@ -2523,6 +2534,7 @@ public static class ExternalProjectDataEndpoints
         CallerRecordAccessProbe probe,
         RecordContactAccessService contactAccess,
         IConfiguration configuration,
+        IDataversePrivilegeChecker privileges,
         ILogger logger,
         CancellationToken ct)
     {
@@ -2635,6 +2647,11 @@ public static class ExternalProjectDataEndpoints
         // the root's set is every parent's. Unknown is the 503 and nothing is written; outside the set is the 400.
         if (request.AssignedToContactId is { } assignee)
         {
+            // uac-r2 gate F3: naming an assignee asks the assignable set, which is contact data; the caller's role must read contacts,
+            // as assignable-people requires — checked BEFORE the set is asked, so 400-vs-201 cannot reveal who has access.
+            if (!await WorkforceRoleCeilingGate.AdmitsAsync(callerContext, privileges, WorkforceRoleCeilingGate.AssignEventContact, ct))
+                return DenyEventAssign(rootKind);
+
             // A create is filed under the route root only, so checking the root's assignable set is sufficient (coordinator, 2026-11-16).
             if (await AssigneeDecisionAsync(contactAccess, rootKind, id, assignee, ct) is { } assigneeRefusal)
                 return assigneeRefusal;
@@ -2923,6 +2940,8 @@ public static class ExternalProjectDataEndpoints
     /// No parent, or a parent that is not one of the three roots, is Denied. A right missing only because Dataverse gave no
     /// answer is Unavailable (the PATCH's 503). Dataverse's answer WITHOUT Read on the event row is NotReadable (the PATCH's
     /// uniform 404, uac-r2 Q1). The list and GET use the SAME decision for <c>canEdit</c> (only Allowed is true).
+    /// <para>NotReadable refuses only the PATCH: the GET's readability is the parent rule (owner decision Q-7), so the same
+    /// systemuser gets the GET's 200 with <c>canEdit</c> false. The asymmetry is deliberate (uac-r2 K6; see <see cref="GetEvent"/>).</para>
     /// </summary>
     /// <param name="rootCache">Root answers already decided in this request (the list asks many rows under few roots).</param>
     /// <param name="httpContext">The request whose <see cref="RequestAccessMemo"/> remembers the row answer.</param>
@@ -3181,6 +3200,15 @@ public static class ExternalProjectDataEndpoints
     /// the caller can read EVERY record it is filed under (<see cref="CheckEventReadableAsync"/>); otherwise — and when it does
     /// not exist — the uniform 404. <c>canEdit</c> is the PATCH's own decision (<see cref="EventEditDecisionAsync"/>).
     /// </summary>
+    /// <remarks>
+    /// <para>Every parent also passes the events list's own workforce ceiling (<see cref="ReadEventsCeiling"/>: Read on the parent's
+    /// table and on <c>sprk_event</c>), because the response names the parent in <c>regarding</c> (uac-r2 gate F1): a refusal is
+    /// the uniform 404, an unreadable role the 503. The row served must be filed under exactly the parents checked (F2).</para>
+    /// <para><b>Deliberate asymmetry</b> (uac-r2 K6): readability here is the PARENT rule (owner decision Q-7), so a systemuser
+    /// whom Dataverse gives no Read on the event ROW still gets this 200, with <c>canEdit</c> false, while its PATCH is the
+    /// uniform 404 (uac-r2 Q1, <see cref="EventEditDecision.NotReadable"/>). Not a defect; do not "fix" one to match the other
+    /// without both decisions changing.</para>
+    /// </remarks>
     private static async Task<IResult> GetEvent(
         Guid id, HttpContext httpContext, ExternalDataService dataService, ExternalModuleRegistry modules,
         CallerRecordAccessProbe probe, IDataversePrivilegeChecker privileges,
@@ -3194,6 +3222,20 @@ public static class ExternalProjectDataEndpoints
                 hideInvoices, t => target = t) is { } refusal)
             return refusal;
 
+        // uac-r2 gate F1: each parent's table under the lists' ceiling, as the parent's own events list asks it.
+        var roots = RootsOf(target!);
+        var ceiling = await WorkforceRoleCeilingGate.CeilingForAsync(callerContext, privileges, ct);
+        if (ceiling is { IsAvailable: false })
+            return EventUnavailable();
+        foreach (var (kind, _) in roots)
+        {
+            if (!await WorkforceRoleCeilingGate.AdmitsAsync(callerContext, privileges, ReadEventsCeiling(kind), ct))
+            {
+                logger.LogInformation("[EXT-EVENT] Event {Id} withheld: the workforce role does not read its {ParentKind}", id, kind);
+                return Sprk.Bff.Api.Infrastructure.Errors.ProblemDetailsHelper.UniformRecordNotFound(httpContext);
+            }
+        }
+
         var read = await dataService.GetEventByIdAsync(id, callerContext, ct);
         if (read.Truncated)
             return EventUnavailable();
@@ -3205,12 +3247,19 @@ public static class ExternalProjectDataEndpoints
             return shown.Truncated
                 ? EventUnavailable()
                 : Sprk.Bff.Api.Infrastructure.Errors.ProblemDetailsHelper.UniformRecordNotFound(httpContext);
-        read = shown;
+        // uac-r2 gate F2: the parents were checked from one read and the row is served from another; a row re-filed in between
+        // would name a parent nobody checked in `regarding`. Served only when it is filed under exactly the parents checked.
+        var served = shown.Value[0];
+        if (!roots.ToHashSet().SetEquals(served.Parents.Select(p => (p.Kind, p.Id))))
+        {
+            logger.LogInformation("[EXT-EVENT] Event {Id} withheld: its parents changed between the check and the read", id);
+            return Sprk.Bff.Api.Infrastructure.Errors.ProblemDetailsHelper.UniformRecordNotFound(httpContext);
+        }
 
         var canEdit = await WorkforceRoleCeilingGate.AdmitsAsync(callerContext, privileges, WorkforceRoleCeilingGate.UpdateEvent, ct)
-            && await EventEditDecisionAsync(callerContext, id, RootsOf(target!), CallerRightsReader(probe, httpContext), logger, ct,
+            && await EventEditDecisionAsync(callerContext, id, roots, CallerRightsReader(probe, httpContext), logger, ct,
                 httpContext: httpContext) == EventEditDecision.Allowed;
-        return Results.Ok(WithAffordances(read.Value[0], canEdit, withRegarding: true));
+        return Results.Ok(WithAffordances(served, canEdit, withRegarding: true));
     }
 
     /// <summary>

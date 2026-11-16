@@ -3489,7 +3489,9 @@ public class ExternalDataService
     /// THE readable columns of the external event read — the lists and <c>GET /events/{id}</c> (R4 task 014b). <c>sprk_event</c>
     /// has no external module, so this list (not <c>ExternalAccessModule</c>'s <c>ReadableColumns</c>, which would open the
     /// generic grid and record seam to <c>sprk_event</c>) is the allow-list this plane reads events through, each entry with its
-    /// review. Pinned by <c>ExternalEventReadColumnsTests</c>.
+    /// review. Pinned by <c>ExternalEventFormsContractTests.EventReadColumns_AddTheFormFields_AndNoSecurityOrPersonColumn</c> (the
+    /// allow-list) and <c>ExternalRootEventReadTests.BuildEventsQuery_ForTheProject_IsTheShippedQueryPlusTheTwoOtherLookups</c> (the
+    /// exact select); the single read's withholding runs for real in <c>ExternalRootEventReadTests.GetEventById_*</c>.
     /// </summary>
     /// <remarks>
     /// <list type="bullet">

@@ -141,6 +141,10 @@ internal static class WorkforceRoleCeilingGate
     internal static readonly IReadOnlyList<WorkforceCeilingRequirement> ReadWorkAssignmentAssignablePeople = Set(
         (WorkAssignmentTable, AccessRights.Read), (ContactTable, AccessRights.Read));
 
+    /// <summary>An event create that names an assignee (R4 task 014b, uac-r2 gate F3): it asks the record's assignable set, so the
+    /// role reads contacts — the contact half of the assignable-people sets above. Asked by the handler, not the route.</summary>
+    internal static readonly IReadOnlyList<WorkforceCeilingRequirement> AssignEventContact = Set((ContactTable, AccessRights.Read));
+
     /// <summary><c>PATCH /todos/{id}</c>: Write on the to-do (its root is read only to gate it; nothing of it is returned).</summary>
     internal static readonly IReadOnlyList<WorkforceCeilingRequirement> UpdateTodo = Set((TodoTable, AccessRights.Write));
 

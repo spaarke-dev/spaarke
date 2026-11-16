@@ -270,6 +270,44 @@ public sealed class ExternalRootEventReadTests : IClassFixture<ExternalRootEvent
         body!.Value.Select(e => e.SprkName).Should().Equal("Matter and readable project");
     }
 
+    // =====================================================================
+    // R4 task 014b (uac-r2 gate F4): the single read GET /events/{id} serves from, the REAL GetEventByIdAsync over this transport —
+    // the same withholding as the lists, which the route tests (which substitute the read) cannot see.
+    // =====================================================================
+
+    [Theory]
+    [InlineData(true, 0)]  // must fire: also filed to a SECURE matter the caller cannot read — withheld
+    [InlineData(false, 1)] // must not fire: the same matter, not secure — an open second root needs no Read
+    public async Task GetEventById_AnEventAlsoFiledToASecureRootTheCallerCannotRead_IsWithheld_NotTruncated(bool secure, int served)
+    {
+        if (secure)
+            _fixture.Data.AddSecureRoot(ExternalGrantRootType.Matter, Hidden);
+        else
+            _fixture.Data.AddOpenRoot(ExternalGrantRootType.Matter, Hidden);
+        var id = Guid.Parse(_fixture.Data.Add("projects", RecordA, "Project and second matter", matter: Hidden));
+
+        var read = await _fixture.Data.NewService().GetEventByIdAsync(
+            id, Principal("projects", ExternalAccessLevel.Collaborate, RecordA), CancellationToken.None);
+
+        read.Value.Should().HaveCount(served);
+        read.Truncated.Should().BeFalse("a withheld event is an answer, not a fault");
+        _fixture.Data.Urls.Should().Contain(u => u.Contains($"sprk_eventid eq {id}", StringComparison.Ordinal), "the by-id query ran");
+    }
+
+    [Fact]
+    public async Task GetEventById_WhenTheSecureFlagsCannotBeRead_IsTruncated_AndServesNothing()
+    {
+        _fixture.Data.AddOpenRoot(ExternalGrantRootType.Matter, Hidden);
+        var id = Guid.Parse(_fixture.Data.Add("projects", RecordA, "Project and undecided matter", matter: Hidden));
+        _fixture.Data.FlagFault = HttpStatusCode.InternalServerError;
+
+        var read = await _fixture.Data.NewService().GetEventByIdAsync(
+            id, Principal("projects", ExternalAccessLevel.Collaborate, RecordA), CancellationToken.None);
+
+        read.Value.Should().BeEmpty();
+        read.Truncated.Should().BeTrue("an undecided row is the route's 503, never a clean 404 or a 200");
+    }
+
     [Fact]
     public async Task Events_FiledToAMalformedLookup_AreWithheld_FailClosed()
     {

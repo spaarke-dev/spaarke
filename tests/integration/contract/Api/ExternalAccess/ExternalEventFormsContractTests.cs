@@ -5,6 +5,7 @@ using System.Text.Json;
 using FluentAssertions;
 using Microsoft.Extensions.Configuration;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Api.ExternalAccess;
 using Sprk.Bff.Api.Api.ExternalAccess.Dtos;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Tests.AccessControl;
@@ -603,6 +604,131 @@ public sealed class ExternalEventFormsContractTests : IClassFixture<ExternalTodo
 
         response.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable);
         (await Code(response, "reasonCode")).Should().Be("sdap.event.unavailable");
+    }
+
+    // uac-r2 gate (PR #2869) F1: the GET applies the parent table's workforce ceiling (Read on the parent table and on sprk_event),
+    // as the event lists do — the route's own ceiling is sprk_event Read only. Refused is the uniform 404, the same as an unknown id.
+
+    /// <summary>A workforce contact (no systemuser, so the role ceiling applies) holding <paramref name="level"/> on <see cref="Matter"/>.</summary>
+    private static CallerPrincipal WorkforceContact(ExternalAccessLevel level) => new()
+    {
+        Plane = CallerPrincipalPlane.Workforce, // no SystemUserId: the role ceiling applies (CeilingRouteTestData.WorkforceContact)
+        ContactId = ContactId,
+        Email = "staff@customer.test",
+        ProjectAccess = Array.Empty<CallerProjectAccess>(),
+        MatterAccess = new Dictionary<Guid, AccessRights> { [Matter] = ExternalAccessLevels.ToAccessRights(level) },
+        WorkAssignmentAccess = new Dictionary<Guid, AccessRights>(),
+    };
+
+    [Fact]
+    public async Task Get_AWorkforceContactWhoseRoleCannotReadTheParentTable_IsTheUniform404_TheSameAsAnUnknownId()
+    {
+        _fixture.Principal = WorkforceContact(ExternalAccessLevel.FullAccess);
+        _fixture.WorkforceCeiling.Ceiling = CeilingRouteTestData.Without(WorkforceRoleCeilingGate.MatterTable, AccessRights.Read);
+        EventFiledUnder(EventTypeRef.Task, EventStatusCode.Open, Matter);
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        using var refused = await client.GetAsync($"/api/v1/external/events/{Event}");
+        using var unknown = await client.GetAsync($"/api/v1/external/events/{UnknownEvent}");
+
+        refused.StatusCode.Should().Be(HttpStatusCode.NotFound, await refused.Content.ReadAsStringAsync());
+        await ShouldBeTheSame404(refused, unknown);
+    }
+
+    [Fact]
+    public async Task Get_AWorkforceContactWhoseRoleReadsTheParentTable_Is200()
+    {
+        // Must-not-fire: the owner's prerequisite role.
+        _fixture.Principal = WorkforceContact(ExternalAccessLevel.FullAccess);
+        EventFiledUnder(EventTypeRef.Task, EventStatusCode.Open, Matter);
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        using var response = await client.GetAsync($"/api/v1/external/events/{Event}");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+    }
+
+    // uac-r2 gate F2: the row served must be the row checked — its parents set-equal to the parents the read gate checked.
+
+    [Theory]
+    [InlineData(true)]  // the served row names a parent the gate never checked
+    [InlineData(false)] // the served row drops a parent the gate checked
+    public async Task Get_WhenTheServedRowsParentsDifferFromTheCheckedParents_IsTheUniform404(bool extra)
+    {
+        _fixture.Principal = Contact((Matter, ExternalAccessLevel.FullAccess), (OtherMatter, ExternalAccessLevel.FullAccess));
+        if (extra)
+        {
+            EventFiledUnder(EventTypeRef.Task, EventStatusCode.Open, Matter);
+            _fixture.Data.EventsById[Event] = Dto(EventTypeRef.Task, EventStatusCode.Open, Matter, OtherMatter);
+        }
+        else
+        {
+            EventFiledUnder(EventTypeRef.Task, EventStatusCode.Open, Matter, OtherMatter);
+            _fixture.Data.EventsById[Event] = Dto(EventTypeRef.Task, EventStatusCode.Open, Matter);
+        }
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        using var mismatched = await client.GetAsync($"/api/v1/external/events/{Event}");
+        using var unknown = await client.GetAsync($"/api/v1/external/events/{UnknownEvent}");
+
+        mismatched.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        await ShouldBeTheSame404(mismatched, unknown);
+    }
+
+    [Fact]
+    public async Task Get_WhenTheServedRowsParentsMatchTheCheckedParents_InAnyOrder_Is200()
+    {
+        // Must-not-fire: the same set, listed in another order.
+        _fixture.Principal = Contact((Matter, ExternalAccessLevel.FullAccess), (OtherMatter, ExternalAccessLevel.FullAccess));
+        EventFiledUnder(EventTypeRef.Task, EventStatusCode.Open, Matter, OtherMatter);
+        _fixture.Data.EventsById[Event] = Dto(EventTypeRef.Task, EventStatusCode.Open, OtherMatter, Matter);
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        using var response = await client.GetAsync($"/api/v1/external/events/{Event}");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+    }
+
+    // uac-r2 gate F3: naming an assignee reads contacts, so the create needs the contact table's Read on the workforce role
+    // ceiling — checked BEFORE the assignable set is read.
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Create_ByAWorkforceContactWhoseRoleCannotReadContacts_WithAnAssignee_Is403_AndReadsNoAssignableSet(bool inTheSet)
+    {
+        _fixture.Principal = WorkforceContact(ExternalAccessLevel.Collaborate);
+        _fixture.WorkforceCeiling.Ceiling = CeilingRouteTestData.Without(WorkforceRoleCeilingGate.ContactTable, AccessRights.Read);
+        _fixture.ContactAccess.Answer = new RecordContactAccess.Known(new[] { new RecordAccessContact(Colleague, "Col League") });
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        using var response = await Create(client, new { sprk_name = "x", eventType = "task", assignedToContactId = inTheSet ? Colleague : Stranger });
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden, await response.Content.ReadAsStringAsync());
+        (await Code(response, "reasonCode")).Should().Be(ExternalProjectDataEndpoints.EventAssignDeniedReasonCode);
+        _fixture.ContactAccess.Calls.Should().BeEmpty("the ceiling refuses before the assignable set is read");
+        _fixture.Data.CreateEventCallCount.Should().Be(0);
+        _fixture.Ownership.Requests.Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData(true)]  // must not fire: the owner's prerequisite role, an assignee in the set
+    [InlineData(false)] // must not fire: no Read on contacts, but no assignee named
+    public async Task Create_ByAWorkforceContact_WithoutTheContactCheckApplying_Is201(bool withAssignee)
+    {
+        _fixture.Principal = WorkforceContact(ExternalAccessLevel.Collaborate);
+        if (!withAssignee)
+            _fixture.WorkforceCeiling.Ceiling = CeilingRouteTestData.Without(WorkforceRoleCeilingGate.ContactTable, AccessRights.Read);
+        _fixture.ContactAccess.Answer = new RecordContactAccess.Known(new[] { new RecordAccessContact(Colleague, "Col League") });
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        using var response = withAssignee
+            ? await Create(client, new { sprk_name = "x", eventType = "task", assignedToContactId = Colleague })
+            : await Create(client, new { sprk_name = "x", eventType = "task" });
+
+        response.StatusCode.Should().Be(HttpStatusCode.Created, await response.Content.ReadAsStringAsync());
+        _fixture.Data.CreateEventCallCount.Should().Be(1);
+        _fixture.ContactAccess.Calls.Should().HaveCount(withAssignee ? 1 : 0);
     }
 
     private static async Task ShouldBeTheSame404(HttpResponseMessage a, HttpResponseMessage b)
