@@ -522,6 +522,33 @@ Criterion 89 (blank the writer client id, expect the writer-failure alert to fir
   - The owner gave the 176 deploy go in the ontology session (2026-11-10).
 - **Smoke:** a live inquiry send needs the owner (UAT). After one Budget inquiry from Revise budget, verify by query: the communication carries `sprk_regardingservicerequest` + `sprk_regardingmatter` + `sprk_isinternalonly` = true; its thread is Private; an .eml Document is archived on the matter.
 
+## 2026-11-16 ~13:40–13:42Z — tasks 194 + 195: Email documents lookup and Summary on dev (master `04f5c943f9`)
+- **Owner go:** "Yes proceed" (2026-11-16, ontology session).
+- **Source:** detached worktree `C:\wtdep195` at master `04f5c943f9`, which contains 194 `e476e9b61b` and 195 `04f5c943f9`. Caches were cleared before building.
+  - Build order: `Spaarke.SdapClient` → `Spaarke.Auth` → `Spaarke.UI.Components`.
+  - Then each PCF with `build:prod`, judged by its output ("[build] Succeeded").
+  - Then the DRV code page: `rm -rf out; npm run build; build-webresource.ps1`.
+  - The builds ran one at a time.
+- **D-126 clobber check (before any write):**
+  - Live SpaarkeSemanticSearch was 1.1.86 and SpaarkeRelatedDocumentCount 1.21.6, both older than master (1.1.87 / 1.21.7).
+  - Live `sprk_documentrelationshipviewer` was last modified 2026-11-15 14:49Z, by the 185 deploy. Its user-facing strings are a subset of the master build's. The three that looked live-only ("(no summary available)", "Compose email", "Generating combined summary…") are in master source and in the build.
+- **Markers in the built bundles:**
+  - SemanticSearchControl: `yieldToFrameSidePane`, `summary-tldr`, `TL;DR`.
+  - DRV: `sidePaneFrameSignal`, `summary-tldr`, `TL;DR`.
+  - RelatedDocumentCount: `yieldToFrameSidePane` only. It does not import `DocumentEmailWizard`, so it carries 194 only.
+- **PCFs:** packed and imported with `Import-SolutionScoped.ps1` (no `--publish-changes`; scoped publish only).
+  - SpaarkeSemanticSearch 1.1.86 → **1.1.87**, importjob progress 100.
+  - SpaarkeRelatedDocumentCount 1.21.6 → **1.21.7**, importjob progress 100.
+  - **Read-back:** the served `cc_…/bundle.js` SHA-256 matches each build (`13a0a742d443`, `b84a19216b0c`).
+  - **Main-session check:** solution versions and modifiedon (13:40–13:42Z) confirmed by query.
+- **Code page:** `sprk_documentrelationshipviewer` was deployed by PATCH (base64) by id, then PublishXml naming only that web resource id.
+  - **Read-back:** the API content and the served `/WebResources/…` both match the build SHA-256 (`b0a8741ee9fc`).
+- **Bundle drift:** the SemanticSearchControl bundle committed by 194 differs from the deployed build. It is recorded to master in chore PR #2868. RelatedDocumentCount's committed bundle equals the deployed one apart from line endings.
+- **No tenant-wide publish was run.** The BFF and Console were not touched, and no other code page or PCF was deployed.
+  - The Console auto-deployed `04f5c943f9` from master separately (`deploy-spaarke-ai.yml`).
+  - 195's BFF part (template render) reaches dev only with uac-r2's next dev BFF build.
+- **ui-tests for 194 and 195:** owner checks on dev, hard reload first. Results: pending.
+
 ## 2026-11-15 ~14:48–14:52Z — task 185: create-wizard lookup and composer set on dev (master `acc96e1927`)
 - **Owner go:** "Yes proceed" (2026-11-14, ontology session).
 - **Source:** detached worktree `C:\wtdep185` at master `acc96e1927`, which contains 178–184, 186–188 and 192. Caches were cleared, and every host was rebuilt from that tree (shared libs: `Spaarke.SdapClient` → `Spaarke.UI.Components`; `Spaarke.Communication.Components` installed for CommunicationActions).
