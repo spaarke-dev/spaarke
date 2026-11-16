@@ -3630,7 +3630,10 @@ public class ExternalDataService
 
         // R4 task 014b (owner Q-4, S-2): priority (Normal when not sent), description, and the first assignee — a plain bind of
         // the contact the route found in the record's assignable set (setting the first assignee is not a reassign).
-        body[EventPriorityColumn] = priority;
+        // LEGACY-EVENT-CREATE-R4 (CreateExternalEventRequest.IsLegacyUntypedCreate): the legacy untyped body writes exactly the
+        // pre-014b payload, so no priority; when the legacy shapes are removed in R5, write the priority unconditionally.
+        if (!request.IsLegacyUntypedCreate)
+            body[EventPriorityColumn] = priority;
         if (!string.IsNullOrEmpty(request.SprkDescription))
             body[EventDescriptionColumn] = request.SprkDescription;
         if (request.AssignedToContactId is { } assignee && assignee != Guid.Empty)
@@ -3645,6 +3648,8 @@ public class ExternalDataService
     /// </summary>
     internal static Guid? EventTypeIdOf(CreateExternalEventRequest request)
     {
+        // LEGACY-EVENT-CREATE-R4 (CreateExternalEventRequest.IsLegacyUntypedCreate): the "task" alias; remove in R5 with the
+        // legacy untyped body.
         var legacy = request.EventType is TaskEventType ? EventTypeRef.Task : (Guid?)null;
         if (request.EventTypeId is { } id && id != Guid.Empty)
         {

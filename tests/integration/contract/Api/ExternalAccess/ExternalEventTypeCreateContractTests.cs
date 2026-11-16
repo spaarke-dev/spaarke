@@ -136,23 +136,23 @@ public sealed class ExternalEventTypeCreateContractTests : IClassFixture<Externa
 
     [Theory]
     [MemberData(nameof(Roots))]
-    public async Task CreateEvent_WithoutAnyType_Is400TypeRequired_AndCreatesNothing(
+    public async Task CreateEvent_WithoutEventType_Is201_AndBindsNoType(
         string segment, ExternalDataService.TodoRootKind kind, Guid rootId)
     {
-        // R4 task 014b (FR-35, owner Q-1): the type is required now — eventTypeId, or "task" for one release.
         _fixture.Principal = Collaborator(kind, rootId);
 
         using var client = _fixture.CreateAuthenticatedClient();
         using var omitted = await client.PostAsJsonAsync($"/api/v1/external/{segment}/{rootId}/events", Event());
+        omitted.StatusCode.Should().Be(HttpStatusCode.Created, await omitted.Content.ReadAsStringAsync());
+        SentPayload().Should().NotContainKey(EventTypeBind, "omitted is today's create exactly: no type");
+
         using var explicitNull = await client.PostAsync($"/api/v1/external/{segment}/{rootId}/events",
             JsonContent.Create(new { sprk_name = "Send the draft", eventType = (string?)null }));
+        explicitNull.StatusCode.Should().Be(HttpStatusCode.Created, await explicitNull.Content.ReadAsStringAsync());
+        SentPayload().Should().NotContainKey(EventTypeBind, "an explicit null is the same as omitted");
+        SentPayload().Keys.Count(k => k.EndsWith("@odata.bind", StringComparison.Ordinal)).Should().Be(2);
 
-        omitted.StatusCode.Should().Be(HttpStatusCode.BadRequest);
-        (await ExtensionOf(omitted, "errorCode")).Should().Be("sdap.event.type_required");
-        explicitNull.StatusCode.Should().Be(HttpStatusCode.BadRequest);
-        (await ExtensionOf(explicitNull, "errorCode")).Should().Be("sdap.event.type_required");
-        _fixture.Data.CreateEventCallCount.Should().Be(0);
-        _fixture.Ownership.Requests.Should().BeEmpty();
+        _fixture.Data.CreateEventCallCount.Should().Be(2);
     }
 
     [Fact]
@@ -260,20 +260,19 @@ public sealed class ExternalEventTypeCreateContractTests : IClassFixture<Externa
 
     [Theory]
     [MemberData(nameof(Roots))]
-    public async Task CreateEvent_UntypedByADataverseDecidedCaller_Is400_AndDoesNotAskAboutTheTaskType(
+    public async Task CreateEvent_UntypedByADataverseDecidedCaller_DoesNotAskAboutTheTaskType(
         string segment, ExternalDataService.TodoRootKind kind, Guid rootId)
     {
-        // Must-not-fire: an untyped body is refused on its shape (task 014b), before any type row is asked about.
+        // Must-not-fire: without "task" nothing binds the type row, so the row is not asked about — even if it would say no.
         _fixture.Principal = DataverseDecidedCreator(kind, rootId);
         _fixture.Probe.AnswerAppOnly(SystemUserId, EventTypeRef.EntitySet, EventTypeRef.Task, AccessRights.Read);
 
         using var client = _fixture.CreateAuthenticatedClient();
         using var response = await client.PostAsJsonAsync($"/api/v1/external/{segment}/{rootId}/events", Event());
 
-        response.StatusCode.Should().Be(HttpStatusCode.BadRequest, await response.Content.ReadAsStringAsync());
+        response.StatusCode.Should().Be(HttpStatusCode.Created, await response.Content.ReadAsStringAsync());
         TaskRowWasProbed().Should().BeFalse();
-        _fixture.Probe.AppOnlyCalls.Should().ContainSingle("only the target root's create gate");
-        _fixture.Data.CreateEventCallCount.Should().Be(0);
+        _fixture.Probe.AppOnlyCalls.Should().ContainSingle("only the target root, as before task 008");
     }
 
     [Theory]

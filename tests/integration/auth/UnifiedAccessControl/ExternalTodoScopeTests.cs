@@ -2180,10 +2180,24 @@ public sealed class ExternalTodoScopeTestFixture : ExternalCollaborationTestFixt
             return Task.FromResult<IReadOnlyList<ExternalDataService.EventTypeOption>>(EventTypes.ToList());
         }
 
+        /// <summary>R4 task 014b (uac-r2, the Dataverse read gate): when set, the event PATCH runs the REAL
+        /// <see cref="ExternalDataService.UpdateEventAsync"/> over this transport, so a test pins how a throttled or failed
+        /// Dataverse answer reaches the route.</summary>
+        public HttpMessageHandler? UpdateEventTransport { get; set; }
+
         public override Task<bool> UpdateEventAsync(
             Guid eventId, IReadOnlyDictionary<string, object?> payload, CancellationToken ct = default)
         {
             EventUpdates.Add((eventId, payload));
+            if (UpdateEventTransport is { } transport)
+                return new ExternalDataService(
+                        new HttpClient(transport, disposeHandler: false),
+                        new ConfigurationBuilder()
+                            .AddInMemoryCollection(new Dictionary<string, string?> { ["Dataverse:ServiceUrl"] = "https://org.test" })
+                            .Build(),
+                        new Credential(),
+                        NullLogger<ExternalDataService>.Instance)
+                    .UpdateEventAsync(eventId, payload, ct);
             return Task.FromResult(UpdateEventFound);
         }
 
@@ -2240,6 +2254,7 @@ public sealed class ExternalTodoScopeTestFixture : ExternalCollaborationTestFixt
             EventTypeReads = 0;
             EventUpdates.Clear();
             UpdateEventFound = true;
+            UpdateEventTransport = null;
         }
 
         /// <summary>R4 task 002: what the route handed the event create (root kind and id from the ROUTE, the owner team).</summary>

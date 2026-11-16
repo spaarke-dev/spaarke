@@ -627,26 +627,47 @@ public sealed class CreateExternalEventRequest
     [JsonPropertyName("eventType")]
     public string? EventType { get; init; }
 
+    // Each NEW-shape member records that it was SENT (an explicit JSON null included): see IsLegacyUntypedCreate.
+    private Guid? _eventTypeId, _assignedTo;
+    private int? _priority;
+    private string? _description;
+    private bool _newShapeSent;
+
     /// <summary>
-    /// R4 task 014b (FR-35, owner Q-2): the event's type, REQUIRED — an ACTIVE <c>sprk_eventtype_ref</c> row the caller may pick
-    /// (<c>creatableEventTypes</c>). Missing is 400 <c>sdap.event.type_required</c>; outside the set is 400
-    /// <c>sdap.event.type_not_allowed</c>. <see cref="EventType"/> = <c>"task"</c> is still accepted for one release in its place.
+    /// R4 task 014b (FR-35, owner Q-2): the event's type, REQUIRED in the new shape — an ACTIVE <c>sprk_eventtype_ref</c> row the
+    /// caller may pick (<c>creatableEventTypes</c>). Missing from a new-shape body is 400 <c>sdap.event.type_required</c>; outside
+    /// the set is 400 <c>sdap.event.type_not_allowed</c>. <see cref="EventType"/> = <c>"task"</c> is still accepted in its place,
+    /// and a legacy body may still omit both (LEGACY-EVENT-CREATE-R4, see <see cref="IsLegacyUntypedCreate"/>).
     /// </summary>
     [JsonPropertyName("eventTypeId")]
-    public Guid? EventTypeId { get; init; }
+    public Guid? EventTypeId { get => _eventTypeId; init { _eventTypeId = value; _newShapeSent = true; } }
 
     /// <summary>R4 task 014b (owner Q-4): Low 100000000, Normal 100000001 (the default), High 100000002, Urgent 100000003.</summary>
     [JsonPropertyName("sprk_priority")]
-    public int? SprkPriority { get; init; }
+    public int? SprkPriority { get => _priority; init { _priority = value; _newShapeSent = true; } }
 
     /// <summary>R4 task 014b: plain text, up to 2,000 characters.</summary>
     [JsonPropertyName("sprk_description")]
-    public string? SprkDescription { get; init; }
+    public string? SprkDescription { get => _description; init { _description = value; _newShapeSent = true; } }
 
     /// <summary>R4 task 014b (owner S-2, uac-r2 Q2): a contact from the record's assignable set
     /// (<c>GET /{root}/{id}/assignable-people</c>); anyone else is 400 <c>sdap.event.assignee_not_allowed</c>.</summary>
     [JsonPropertyName("assignedToContactId")]
-    public Guid? AssignedToContactId { get; init; }
+    public Guid? AssignedToContactId { get => _assignedTo; init { _assignedTo = value; _newShapeSent = true; } }
+
+    /// <summary>
+    /// LEGACY-EVENT-CREATE-R4 — the pre-014b create shapes, kept for ONE release so the SPA deployed before task 015 keeps
+    /// working against a master-built BFF. Both come out TOGETHER in R5, once task 015's SPA is live in every environment:
+    /// (1) <c>eventType: "task"</c> mapped to the Task row (<c>ExternalDataService.EventTypeIdOf</c>), and (2) this legacy
+    /// UNTYPED body. Remove every site tagged LEGACY-EVENT-CREATE-R4.
+    /// <para>The rule: a body is the NEW shape when it SENDS any of <c>eventTypeId</c>, <c>sprk_priority</c>,
+    /// <c>sprk_description</c> or <c>assignedToContactId</c> (an explicit JSON <c>null</c> counts as sent). A new-shape body must
+    /// name its type (400 <c>sdap.event.type_required</c> otherwise). A body that sends none of the four AND no
+    /// <c>eventType</c> is the legacy untyped create — the old SPA's "Event" (<c>sprk_name</c>, <c>sprk_duedate</c>,
+    /// <c>sprk_status</c> only) — and creates an untyped event exactly as before 014b.</para>
+    /// </summary>
+    [JsonIgnore]
+    public bool IsLegacyUntypedCreate => !_newShapeSent && EventType is null;
 }
 
 /// <summary>

@@ -363,6 +363,73 @@ public sealed class ExternalEventFormsContractTests : IClassFixture<ExternalTodo
         _fixture.Data.CreateEventCallCount.Should().Be(0);
     }
 
+    // LEGACY-EVENT-CREATE-R4 (CreateExternalEventRequest.IsLegacyUntypedCreate): the SPA deployed before task 015 sends no type for
+    // an "Event". Its bodies keep creating an untyped event, exactly as before 014b, for one release; a NEW-shape body (one that sends
+    // eventTypeId, sprk_priority, sprk_description or assignedToContactId, an explicit null included) must name its type.
+
+    [Theory]
+    [InlineData("{\"sprk_name\":\"Hearing\"}")]
+    [InlineData("{\"sprk_name\":\"Hearing\",\"sprk_duedate\":\"2026-12-01\"}")]
+    [InlineData("{\"sprk_name\":\"Hearing\",\"sprk_status\":1}")]
+    [InlineData("{\"sprk_name\":\"Hearing\",\"eventType\":null}")]
+    public async Task Create_ALegacyUntypedBody_Is201_Untyped_ExactlyAsBefore014b(string body)
+    {
+        _fixture.Principal = Contact((Matter, ExternalAccessLevel.Collaborate));
+        _fixture.Data.EventTypesFault = true; // a type read would be a 503: the legacy body must not read the types at all
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        using var response = await client.PostAsync($"/api/v1/external/matters/{Matter}/events",
+            new StringContent(body, Encoding.UTF8, "application/json"));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Created, await response.Content.ReadAsStringAsync());
+        _fixture.Data.EventTypeReads.Should().Be(0);
+        _fixture.ContactAccess.Calls.Should().BeEmpty();
+        var args = _fixture.Data.LastCreateEventArgs!.Value;
+        var payload = ExternalDataService.BuildEventCreatePayload(args.Kind, args.RootId, args.Request, args.OwningTeamId);
+        payload.Keys.Should().NotContain(new[] { "sprk_eventtype_ref@odata.bind", "sprk_priority", "sprk_description", "sprk_AssignedTo@odata.bind" },
+            "the pre-014b payload: no type, no priority, no description, no assignee");
+        payload.Keys.Count(k => k.EndsWith("@odata.bind", StringComparison.Ordinal)).Should().Be(2, "the root and the owner only");
+    }
+
+    [Theory]
+    [InlineData("{\"sprk_name\":\"x\",\"eventTypeId\":null}")]
+    [InlineData("{\"sprk_name\":\"x\",\"eventTypeId\":\"00000000-0000-0000-0000-000000000000\"}")]
+    [InlineData("{\"sprk_name\":\"x\",\"sprk_priority\":100000002}")]
+    [InlineData("{\"sprk_name\":\"x\",\"sprk_priority\":null}")]
+    [InlineData("{\"sprk_name\":\"x\",\"sprk_description\":\"d\"}")]
+    [InlineData("{\"sprk_name\":\"x\",\"assignedToContactId\":\"a0140000-0000-4000-8000-00000000e0c2\"}")]
+    public async Task Create_ANewShapeBodyWithoutAType_Is400TypeRequired_AndReadsAndCreatesNothing(string body)
+    {
+        _fixture.Principal = Contact((Matter, ExternalAccessLevel.Collaborate));
+        _fixture.ContactAccess.Answer = new RecordContactAccess.Known(new[] { new RecordAccessContact(Colleague, "Col League") });
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        using var response = await client.PostAsync($"/api/v1/external/matters/{Matter}/events",
+            new StringContent(body, Encoding.UTF8, "application/json"));
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        (await Code(response)).Should().Be("sdap.event.type_required");
+        _fixture.Data.EventTypeReads.Should().Be(0);
+        _fixture.ContactAccess.Calls.Should().BeEmpty();
+        _fixture.Data.CreateEventCallCount.Should().Be(0);
+        _fixture.Ownership.Requests.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Create_TheTaskAlias_StillBindsTheTaskRow()
+    {
+        // LEGACY-EVENT-CREATE-R4, its other half: "task" alone maps to the Task row (and is typed: the creatable rules apply).
+        _fixture.Principal = Contact((Matter, ExternalAccessLevel.Collaborate));
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        using var response = await Create(client, new { sprk_name = "x", eventType = "task" });
+
+        response.StatusCode.Should().Be(HttpStatusCode.Created, await response.Content.ReadAsStringAsync());
+        var args = _fixture.Data.LastCreateEventArgs!.Value;
+        ExternalDataService.BuildEventCreatePayload(args.Kind, args.RootId, args.Request, args.OwningTeamId)
+            ["sprk_eventtype_ref@odata.bind"].Should().Be($"/sprk_eventtype_refs({EventTypeRef.Task})");
+    }
+
     [Theory]
     [InlineData(true, HttpStatusCode.Created)]
     [InlineData(false, HttpStatusCode.Forbidden)]
@@ -636,6 +703,43 @@ public sealed class ExternalEventFormsContractTests : IClassFixture<ExternalTodo
         hidden.StatusCode.Should().Be(HttpStatusCode.NotFound);
         undecided.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable);
         _fixture.Data.EventUpdates.Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData(429, HttpStatusCode.ServiceUnavailable)]
+    [InlineData(503, HttpStatusCode.ServiceUnavailable)]
+    [InlineData(500, HttpStatusCode.ServiceUnavailable)]
+    [InlineData(412, HttpStatusCode.ServiceUnavailable)]
+    [InlineData(404, HttpStatusCode.NotFound)]
+    [InlineData(204, HttpStatusCode.NoContent)]
+    public async Task Patch_WhenDataverseAnswersTheWriteWithAFailure_IsNeverASuccess(int dataverseStatus, HttpStatusCode expected)
+    {
+        // uac-r2 (the Dataverse read gate retries GET/HEAD only and hands a throttled PATCH back as 429/503): the REAL
+        // UpdateEventAsync over a transport answering the PATCH; any non-success is the retry-able 503, a gone row the uniform 404.
+        _fixture.Principal = Contact((Matter, ExternalAccessLevel.Collaborate));
+        EventFiledUnder(EventTypeRef.Task, EventStatusCode.Open, Matter);
+        var transport = new PatchStatusHandler((HttpStatusCode)dataverseStatus);
+        _fixture.Data.UpdateEventTransport = transport;
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        using var response = await Patch(client, Event, new { sprk_name = "x" });
+
+        response.StatusCode.Should().Be(expected, await response.Content.ReadAsStringAsync());
+        if (expected == HttpStatusCode.ServiceUnavailable)
+            (await Code(response, "reasonCode")).Should().Be("sdap.event.unavailable");
+        transport.Requests.Should().Equal(new[] { $"PATCH https://org.test/api/data/v9.2/{EventSet}({Event})" }, "sent once, never retried here");
+    }
+
+    /// <summary>Answers every request with <paramref name="status"/> and records it (ADR-038 B1: a hand-written handler).</summary>
+    private sealed class PatchStatusHandler(HttpStatusCode status) : HttpMessageHandler
+    {
+        public List<string> Requests { get; } = new();
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
+        {
+            Requests.Add($"{request.Method} {request.RequestUri}");
+            return Task.FromResult(new HttpResponseMessage(status));
+        }
     }
 
     [Theory]

@@ -2565,12 +2565,14 @@ public static class ExternalProjectDataEndpoints
                     ["errorCode"] = ExternalDataService.EventTypeNotAllowedErrorCode
                 });
 
-        // R4 task 014b (FR-35, owner Q-1): the type is REQUIRED — eventTypeId, or eventType "task" (one release). Both sent and
-        // naming different types is the same 400.
+        // R4 task 014b (FR-35, owner Q-1): a new-shape body names its type — eventTypeId, or eventType "task" (one release).
+        // Both sent and naming different types is the same 400. LEGACY-EVENT-CREATE-R4: a legacy untyped body
+        // (CreateExternalEventRequest.IsLegacyUntypedCreate) names none and is not refused for it.
         if (request.EventTypeId is { } namedType && namedType != Guid.Empty
             && request.EventType is ExternalDataService.TaskEventType && namedType != Spaarke.Dataverse.EventTypeRef.Task)
             return EventBadRequest("eventType and eventTypeId name different types.", ExternalDataService.EventTypeNotAllowedErrorCode);
-        if (ExternalDataService.EventTypeIdOf(request) is not { } eventTypeId)
+        var namedEventTypeId = ExternalDataService.EventTypeIdOf(request);
+        if (namedEventTypeId is null && !request.IsLegacyUntypedCreate)
             return EventBadRequest("eventTypeId is required.", ExternalDataService.EventTypeRequiredErrorCode);
 
         // R4 task 014b (owner Q-4): priority is one of the four, description at most 2,000 characters.
@@ -2583,6 +2585,12 @@ public static class ExternalProjectDataEndpoints
         // Dataverse answer 400 behind a 500.
         if (DueDateProblem(request.SprkDuedate) is { } badDueDate)
             return badDueDate;
+
+        // LEGACY-EVENT-CREATE-R4 (CreateExternalEventRequest.IsLegacyUntypedCreate; remove in R5 with the "task" alias): the old
+        // SPA's untyped "Event" body, having passed every check it had before 014b, creates an untyped event exactly as before —
+        // no type read, no type rule, no assignee.
+        if (namedEventTypeId is not { } eventTypeId)
+            return await CreateEventAfterOwnerAsync(rootKind, id, binding, request, callerContext, dataService, ownership, ct);
 
         // R4 task 014b (FR-35, uac-r2 Q3): the type must be in the CREATABLE set — active, allowed by configuration. A type read
         // that could not be completed is a 503 and nothing is written; an unknown, inactive or not-allowed id is the same 400.
@@ -2623,10 +2631,20 @@ public static class ExternalProjectDataEndpoints
         // the root's set is every parent's. Unknown is the 503 and nothing is written; outside the set is the 400.
         if (request.AssignedToContactId is { } assignee)
         {
+            // A create is filed under the route root only, so checking the root's assignable set is sufficient (coordinator, 2026-11-16).
             if (await AssigneeDecisionAsync(contactAccess, rootKind, id, assignee, ct) is { } assigneeRefusal)
                 return assigneeRefusal;
         }
 
+        return await CreateEventAfterOwnerAsync(rootKind, id, binding, request, callerContext, dataService, ownership, ct);
+    }
+
+    /// <summary>The tail every event create shares, once its body has passed its rules: the owner, then the write.</summary>
+    private static async Task<IResult> CreateEventAfterOwnerAsync(
+        ExternalDataService.TodoRootKind rootKind, Guid id, ExternalDataService.TodoRootBinding binding,
+        CreateExternalEventRequest request, CallerPrincipal callerContext, ExternalDataService dataService,
+        IRecordOwnershipResolver ownership, CancellationToken ct)
+    {
         // Task 146: owned by the ROOT's team (the named Secure team for a secure root), or refused.
         var (owningTeamId, ownerRefusal) = await ResolveChildOwnerAsync(ownership, binding.EntityLogicalName, id, "event", ct);
         if (ownerRefusal is not null)
