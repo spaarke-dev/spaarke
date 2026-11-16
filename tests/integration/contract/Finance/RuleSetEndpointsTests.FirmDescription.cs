@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Json;
+using Microsoft.AspNetCore.Http;
 using FluentAssertions;
 using Moq;
 using Sprk.Bff.Api.Services.Finance;
@@ -33,6 +34,32 @@ public sealed partial class RuleSetEndpointsTests
         seen.Should().NotBeNull();
         seen!.FirmDescription.Should().Be(expected);
     }
+
+    [Theory(DisplayName = "130e-1 fix round 2 F4: the routes that can answer a refused firm description declare 422 in their contract; reject does not")]
+    [InlineData("EditRuleSetProposal", true)]
+    [InlineData("AcceptRuleSetProposal", true)]
+    [InlineData("PublishRuleSet", true)]
+    [InlineData("RejectRuleSetProposal", false)]
+    public async Task TheRoutesThatCanRefuseAFirmDescription_Declare422(string endpointName, bool declares)
+    {
+        await using var host = await Host.StartAsync();
+
+        var endpoint = host.Endpoints.Single(e =>
+            e.Metadata.GetMetadata<Microsoft.AspNetCore.Routing.IEndpointNameMetadata>()?.EndpointName == endpointName);
+        var codes = endpoint.Metadata.GetOrderedMetadata<Microsoft.AspNetCore.Http.Metadata.IProducesResponseTypeMetadata>().Select(m => m.StatusCode).ToList();
+
+        codes.Should().Contain(StatusCodes400To409, "the setup: the route's other problem responses are declared");
+        if (declares)
+        {
+            codes.Should().Contain(StatusCodes.Status422UnprocessableEntity);
+        }
+        else
+        {
+            codes.Should().NotContain(StatusCodes.Status422UnprocessableEntity);
+        }
+    }
+
+    private static readonly int[] StatusCodes400To409 = [StatusCodes.Status400BadRequest, StatusCodes.Status409Conflict];
 
     [Fact(DisplayName = "130e-1 contract: a refused firm description is 422 with field firmDescription and its reason; another invalid edit stays 400")]
     public async Task Edit_ARefusedFirmDescription_Is422()

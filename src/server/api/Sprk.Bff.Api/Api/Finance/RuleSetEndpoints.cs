@@ -107,6 +107,7 @@ public static class RuleSetEndpoints
             .ProducesProblem(StatusCodes.Status403Forbidden)
             .ProducesProblem(StatusCodes.Status404NotFound)
             .ProducesProblem(StatusCodes.Status409Conflict)
+            .ProducesProblem(StatusCodes.Status422UnprocessableEntity) // 130e-1 fix round 2 (F4): a refused firm description
             .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
 
         group.MapPost("/{ruleSetId:guid}/proposals/{policyId:guid}/accept", AcceptProposal)
@@ -122,6 +123,7 @@ public static class RuleSetEndpoints
             .ProducesProblem(StatusCodes.Status403Forbidden)
             .ProducesProblem(StatusCodes.Status404NotFound)
             .ProducesProblem(StatusCodes.Status409Conflict)
+            .ProducesProblem(StatusCodes.Status422UnprocessableEntity) // 130e-1 fix round 2 (F4): a refused firm description
             .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
 
         group.MapPost("/{ruleSetId:guid}/proposals/{policyId:guid}/reject", RejectProposal)
@@ -154,6 +156,7 @@ public static class RuleSetEndpoints
             .ProducesProblem(StatusCodes.Status403Forbidden)
             .ProducesProblem(StatusCodes.Status404NotFound)
             .ProducesProblem(StatusCodes.Status409Conflict)
+            .ProducesProblem(StatusCodes.Status422UnprocessableEntity) // 130e-1 fix round 2 (F4): a refused firm description
             .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
 
         group.MapPut("/{ruleSetId:guid}/assignment", AssignRuleSet)

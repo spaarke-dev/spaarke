@@ -73,6 +73,10 @@ public sealed partial class RuleSetEndpointsTests
         private WebApplication _app = null!;
         public HttpClient Client = null!;
 
+        /// <summary>130e-1 fix round 2 (F4): the host's endpoints, for the route metadata (the OpenAPI contract) checks.</summary>
+        public IEnumerable<Microsoft.AspNetCore.Routing.RouteEndpoint> Endpoints =>
+            _app.Services.GetRequiredService<Microsoft.AspNetCore.Routing.EndpointDataSource>().Endpoints.OfType<Microsoft.AspNetCore.Routing.RouteEndpoint>();
+
         public Host()
         {
             var entities = Mock.Of<IGenericEntityService>();
