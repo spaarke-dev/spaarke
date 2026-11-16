@@ -84,6 +84,6 @@ Questions:
   - **014a**: the "contacts with access to root R" computation in `Infrastructure/ExternalAccess`. uac-r2 reviews that PR as a gate, and must be told before work starts.
   - **014b**: everything else.
 - The assignee write must reuse the service path behind `EventEndpoints.cs:~193` (verify it and cite it here). The internal route runs OBO, which is barred on the external plane, so only the shared service write is reused, not the endpoint.
-- Owner input needed:
-  - **Q5**: explicit OK to show the creator's name (its own column).
-  - **Q2.9**: tell the owner once that contact callers will see the names of other organisations' contacts who are on the record.
+- Owner input:
+  - **Q5 — approved (owner, 2026-11-16: "Yes, show it").** The creator's name shows on the event (FormattedValue name only, never an id or email).
+  - **Q2.9 — told to the owner 2026-11-16:** contact callers will see the names of other organisations' contacts who are on the record.
