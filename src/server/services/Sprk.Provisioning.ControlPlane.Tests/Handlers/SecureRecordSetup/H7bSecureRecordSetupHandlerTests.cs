@@ -83,11 +83,14 @@ public sealed class H7bSecureRecordSetupHandlerTests
             .Concat(SecureRecordSetupProcedure.BffOnlyColumns)
             .Append(SecureRecordSetupProcedure.AccessRemovedOnColumn)
             .ToArray();
-        recorded.Should().HaveCount(absentColumns.Length);
+        // Task 270 (S28): plus the direct recipient, which provisioning never creates — the Direct-message feature stays off.
+        recorded.Should().HaveCount(absentColumns.Length + 1);
         foreach (var column in absentColumns)
         {
             recorded.Should().ContainSingle(n => n.Contains(column) && n.Contains("absent"));
         }
+        recorded.Should().ContainSingle(n => n.Contains("sprk_communication.sprk_directrecipient: not in this environment")
+                                             && n.Contains("the Direct-message feature stays off: leave DirectMessage:BusinessUnitName and DirectMessage:OwnerTeamName unset"));
     }
 
     [Fact]
