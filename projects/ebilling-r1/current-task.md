@@ -35,19 +35,7 @@
 
 ### Open owner questions
 
-1. **Ten design answers** (asked 2026-11-15; "as recommended" offered for all):
-   - 084h:
-     1. Pin-to-Follow → two records.
-     2. Accept the §8 classes and tiers.
-     3. DELETE note in a JSON body.
-     4. No control-character rule on the existing `reason`.
-     5. Ship the NotRecorded warning to the UI.
-   - 095f part 2:
-     6. With no note, the column takes the required reason.
-     7. A separate internal `sprk_decisionnote` column.
-     8. Adjustments get Decision Records (option A).
-     9. Correct/confirm get a note on the correction row (option B).
-     10. Create Invoice: server-only for R1 (option C).
+1. ~~Ten design answers~~ ANSWERED 2026-11-16: EB-D-239 to EB-D-243 (decisions-log). POMLs written: 084h-2/3/4, 095f-2s/2a/2c/2d1/2e1/2b/2d2/2ui. **Open:** the owner picks the internal Correction path for 095f-2e2 (design §16 recommends B′: Correction on the internal multipart route, reached from Invoice Review), and gives the go for the dev apply of 095f-2s's two columns.
 2. ~~Second `word-add-in-r1` session~~ RESOLVED 2026-11-16 (owner): word-add-in-r1 runs on the Ryzen desktop, which is this machine (RGS_RYZEN9950X). The local `word-add-in-r1` session is the right one; the remote one is no longer listed.
 
 **Premise correction to log with EB-D-239+:**
@@ -63,10 +51,7 @@
 ## Next actions (in order)
 
 1. 130e-2 (above).
-2. When the owner answers the ten:
-   1. Log EB-D-239+ and the premise correction.
-   2. Write the POMLs for 095f-2a…2e and 084h-2/3/4.
-   3. Build 095f-2a with 084h-2 + 084h-3 (max 4 agents). 084h-2 enforces the 2000-character note cap at the service (H-3); it never deploys without 084h-3.
+2. Build in waves (max 4 agents): W1 = 084h-2, 095f-2s, 095f-2e1; then 084h-3 + 095f-2a; then 084h-4, 095f-2c, 095f-2d1, 095f-2d2; then 095f-2b (ontology-r1 amendment review), 095f-2ui; 095f-2e2 after the owner's pick. 084h-2 never deploys without 084h-3.
 3. Task 112 (deploy; owner go here plus uac-r2 notices):
    - the 084f role apply;
    - the first create of `sprk_recordprocedures` plus the SpaarkeMaster component;
