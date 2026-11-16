@@ -1,0 +1,102 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="193" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>New rule wizard asks for a test instead of showing a raw schema error; Console Send Email recipients and Related to use the side pane</title>
+    <phase>12 Create-wizard lookups and composer (185 dev check fixes)</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies shared client code (.ts/.tsx) in @spaarke/ui-components and the Console.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Two small, fully located client fixes, each with an existing reference implementation in the same codebase.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>185-fixes</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>No file overlap with 194 (WizardShell, SendEmailFollowOnStep, DocumentEmailWizard, PCF) or 195 (EmailTemplateService, DocumentEmailWizard).</parallel-reason>
+    <deps>none</deps>
+    <tags>frontend, react, fluent-ui, testing</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+  <prompt>Two failures from the owner's task 185 dev checks (2026-11-15/16; notes/task-185-notes.md "ui-test results" and both "Triage" sections). A7: Ontology admin → New rule, Condition step, Kind = Existence, a table chosen and no tests added: pressing Next shows the raw BFF schema error `: Required properties ["when"] are not present`. D1: Console Quick Start → Send Email: To/Cc/Bcc do not open the Dataverse side pane and "Related to" has no picker ("Not related to any record yet"). The owner approved both fixes on 2026-11-16 ("All three").</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. Expert in React, Fluent UI v9, the @spaarke/ui-components EmailComposer and the Ontology admin RuleWizard.</role>
+  <goal>(1) The rule wizard never sends a body the schema must refuse for "no tests": an Existence rule with no record test and no related-record test keeps Next disabled with a plain problem line, and any BFF validation message shown on the Condition step has no leading ": ". (2) The Console Send Email dialog passes the recipient side-pane lookup and the Related-to record lookup handlers it already builds, so To/Cc/Bcc open the side pane and Related to offers a picker.</goal>
+  <context>
+    <background>
+- A7 root cause (task 102b, not 187): `buildRuleBody` in ruleDraft.ts (~line 321, problems built ~352-366) returns `{type, subject, all: []}` with no problem when the rule is Existence and neither `when` nor clauses exist, so `canLeave('condition')` (RuleWizard.tsx ~366-369) lets Next through; `validateFor` (RuleWizard.tsx ~384-416) gets the BFF refusal from `RuleBodySchemaValidator` (existence-rule.schema.json root if/then requires a non-empty `when` when `all` is empty) and ConditionStep.tsx ~267-270 prints it verbatim. The error sits at the schema root, so its path is empty and the text starts with ": ".
+- D1 root cause: ConversationPane.tsx ~3597-3612 mounts `SendEmailDialog` with only the template, AI and upload handlers (task 186 did D-219 Q3 only). The same handler object built at ~923-926 already has `onLookupRecipients`, `recordLookupCatalog`, `onLookupRecord` and `onAddRelationship`. EmailComposer shows the side-pane To/Cc/Bcc buttons only when `onLookupRecipients` is set (EmailComposer.tsx ~1361-1379) and the Related-to picker only when `onAddRelationship` is set (~752; empty text ~1485). The Console is an iframe, so the lookup opens in the top window above it; `SendEmailDialog` already wraps lookups with `yieldToSidePane` (SendEmailDialog.tsx ~314-361) — do not remove that.
+- Owner D-219 Q1 (notes/decisions.md, 2026-11-12): any Dataverse lookup in these surfaces uses the side pane.
+- All line numbers are at origin/master `ce6c241964`; re-grep before editing.
+    </background>
+    <relevant-files>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/OntologyAdmin/RuleWizard/ruleDraft.ts</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/OntologyAdmin/RuleWizard/steps/ConditionStep.tsx</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/OntologyAdmin/RuleWizard/__tests__/ruleDraft.test.ts</file>
+      <file role="modify">src/solutions/SpaarkeAi/src/components/conversation/ConversationPane.tsx</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/wrappers/SendEmailDialog.tsx</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/OntologyAdmin/RuleWizard/RuleWizard.tsx</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="owner">Owner directive 2026-11-12, applies to every file this task touches: reuse the existing side-pane lookup and the existing `EmailComposer`; never re-create either.</constraint>
+    <constraint source="project">The rule-body grammar and the BFF schema are unchanged. The client stops a no-test Existence body before sending it; the BFF stays the authority and still refuses it.</constraint>
+    <constraint source="project">Threshold rules and Existence rules that have at least one record test or one related-record test behave exactly as today.</constraint>
+    <constraint source="project">ConversationPane passes the handlers from the existing handler object; it creates no second `createXrmEmailComposeHandlers` instance.</constraint>
+    <constraint source="ADR-021">Every UI change in this task uses Fluent v9 and semantic tokens only; light and dark both fully themed.</constraint>
+    <constraint source="ADR-038">Tests cover the stated contract plus the edge cases named in the acceptance criteria; anything beyond needs a one-line justification in the task notes. No numeric test target.</constraint>
+    <constraint source="project">ConversationPane.tsx is a Console hot path: run /conflict-check before the PR. The Console auto-deploys to dev from master on merge (project CLAUDE.md §6).</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>.claude/patterns/testing/mocking-patterns.md</file>
+      <file>.claude/adr/ADR-012-shared-component-library.md</file>
+      <file>.claude/adr/ADR-021-fluent-ui-design-system.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/patterns/ui/wizard-side-pane-lookup-and-email-compose.md</file>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/task-185-notes.md</file>
+    </files>
+  </knowledge>
+  <steps mode="directional">
+    <step order="1">Read buildRuleBody, canLeave/validateFor and the ConditionStep error line; confirm the no-test path end to end.</step>
+    <step order="2">Add the problem "Add at least one test on the record or one related-record test." to buildRuleBody when the kind is not Threshold and the body has neither a non-empty `when` nor any clause.</step>
+    <step order="3">In ConditionStep, strip a leading ": " (and surrounding whitespace) from a shown BFF validation message.</step>
+    <step order="4">In ConversationPane, pass onLookupRecipients, recordLookupCatalog, onLookupRecord and onAddRelationship to SendEmailDialog from the existing handler object.</step>
+    <step order="5">Write the tests in the acceptance criteria; run them, the RuleWizard and EmailComposer folders' suites, `npx tsc --noEmit -p .` in Spaarke.UI.Components and SpaarkeAi, and `node scripts/quality/client-lint/client-lint.mjs check`.</step>
+    <step order="6">Update tasks/TASK-INDEX.md status to `✅ [done]` AND this POML's status to completed; run `pwsh scripts/check-task-status-drift.ps1 -Project spaarke-ontology-platform-r1`. Record deviations in notes/task-193-notes.md.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion testable="true">ruleDraft test: an Existence draft with a table and no record or related-record test returns the "Add at least one test…" problem, and the wizard cannot leave the Condition step.</criterion>
+    <criterion testable="true">ruleDraft tests: an Existence draft with one record test, and one with only a related-record test, return no such problem (unchanged); a Threshold draft is unchanged.</criterion>
+    <criterion testable="true">A BFF validation message ": Required properties [...]" is shown without the leading ": "; a message without that prefix is shown unchanged.</criterion>
+    <criterion testable="true">The Console SendEmailDialog receives onLookupRecipients, recordLookupCatalog, onLookupRecord and onAddRelationship (test where SpaarkeAi has a runner, otherwise a recorded manual check); the composer then shows the side-pane To/Cc/Bcc buttons and the Related-to picker.</criterion>
+    <criterion testable="true">Templates, AI drafting and attachment upload in the Console Send Email dialog still work (186 tests unchanged and passing).</criterion>
+    <criterion testable="true">wizardLookupPatternGuard.test.ts passes with its baseline unchanged; tsc and the client-lint ratchet pass.</criterion>
+  </acceptance-criteria>
+  <escalation>
+    <trigger>If the ConversationPane handler object does not build onLookupRecipients/onAddRelationship, STOP and report rather than writing a new lookup.</trigger>
+    <trigger>If the rule grammar allows a valid Existence rule with neither `when` nor clauses, STOP and report (the problem line would block a valid rule).</trigger>
+  </escalation>
+  <ui-tests>
+    <test name="New rule with no tests">
+      <steps>
+        <step>Console → Ontology admin → New rule; Kind Existence; choose sprk_communication; add no tests</step>
+      </steps>
+      <expected>Next stays disabled and the step says to add at least one test; no raw schema text. Adding one test enables Next.</expected>
+    </test>
+    <test name="Console Send Email lookups">
+      <steps>
+        <step>Console → Quick Start → Send Email; click To, Cc, Bcc; open Related to</step>
+      </steps>
+      <expected>Each opens the Dataverse side pane above the dialog; picks show as chips; Related to records a relationship. Light and dark themed.</expected>
+    </test>
+  </ui-tests>
+  <tools>
+    <tool name="npm">jest, tsc and ESLint in src/client/shared/Spaarke.UI.Components and src/solutions/SpaarkeAi (npm install --legacy-peer-deps --no-audit --no-fund; in a fresh worktree build ../Spaarke.SdapClient and ../Spaarke.Auth first)</tool>
+  </tools>
+  <execution>
+    <protocol>Run through task-execute. Fresh worktree from origin/master; PR to master. Dev check rides the next Console auto-deploy.</protocol>
+  </execution>
+</task>
