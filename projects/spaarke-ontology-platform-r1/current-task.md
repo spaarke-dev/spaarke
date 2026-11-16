@@ -1,6 +1,6 @@
 # Current Task State — Spaarke Ontology Platform R1
 
-> **Last Updated**: 2026-11-15 ~16:10Z (by context-handoff, at 86% context). State only; history in git log, task `<completion>` blocks and
+> **Last Updated**: 2026-11-16 (by context-handoff, at 86% context). State only; history in git log, task `<completion>` blocks and
 > `notes/handoff-history/2026-11.md` (previous checkpoint archived there verbatim). Standing rules: [`CLAUDE.md`](CLAUDE.md) §3 and §6.
 > Decisions: [`notes/decisions.md`](notes/decisions.md) (D-1..**D-224**). Deferred work: one GitHub issue per item, label `ontology-deferred`,
 > plus a DI-nn row in both tables of `notes/defer-issues.md` (next free: **DI-156**). Sub-agents never edit this file.
@@ -11,19 +11,20 @@
 |---|---|
 | **Role** | Main session `ontology-r1`: orchestrate R1; review every PR touching ontology-owned files (`Services/Signals/**`, `Api/Signals/**`, `FinanceBaseValues.cs`, `Services/Signals/Billing/**`, the DecisionWizard UI); answer peers; hold wrap-up 090 until owner UAT done. Peer messages are not owner approvals. |
 | **Working dir** | `C:\code_files\spaarke-wt-spaarke-ontology-platform-r1`, branch `docs/ontology-platform-design` (pushed). |
-| **Active** | **Task 185 🔄 [wip]: DEPLOYED to dev 2026-11-15 14:48–14:52Z from master `acc96e1927`** (owner go "Yes proceed"): Console auto-deploy `f7174f6fc1`; 13 code-page web resources (9 create/document wizards + wizard_commands, SmartTodo, SpeAdmin, DocumentRelationshipViewer) and PCFs SemanticSearch 1.1.86 / CommunicationActions 1.3.22 / TrackingFieldTrio 1.0.64, all read back by SHA-256, scoped publishes only. Rebuilt PCF bundles recorded on master by #2836 (`d03537e133`). Evidence: `notes/deploy-log.md` (2026-11-15), `notes/task-185-notes.md`. |
-| **Running** | Nothing. |
-| **Next Action** | (1) **Owner runs `notes/dev-test-checklist-185.md` A–D** → record results in deploy-log + task-185-notes, then close 185 (POML completed + TASK-INDEX ✅ + `check-task-status-drift.ps1`). (2) Owner checks still owed: 192 default text, `notes/dev-test-checklist-190-191.md`, 160 visual checks (ride the 176 test). (3) Peers below. |
+| **Active** | **185 🔄 [wip]** deployed to dev 2026-11-15 (master `acc96e1927`); owner ran checks A–D 2026-11-16, results + triage in `notes/task-185-notes.md`. Fix tasks (owner "All three"): **193 ✅** #2855 `c0d8a5b74f` (Console auto-deployed 04:32Z); **194 ✅** #2856 `e476e9b61b` (SemanticSearch 1.1.87, RelatedDocumentCount 1.21.7, NOT deployed); **195 🔄** implementer agent (Sonnet) running in `C:\wt195`, branch `fix/ontology-195-template-render-summary` (template render finished text + summary JSON + summary setState-in-render warning). |
+| **Running** | Task 195 implementer agent (background). On its report: main-session review + independent Opus adversarial review → fix round → scoped re-check → sign-off comment + `gh pr merge --squash --auto` → mark 195 done (POML completion + TASK-INDEX + drift check) + `notes/task-195-notes.md`. |
+| **Next Action** | (1) Finish 195 as above. (2) Then ask the owner's go for ONE dev deploy from master (D-126, scoped publish): SemanticSearchControl 1.1.87, RelatedDocumentCount 1.21.7, DocumentRelationshipViewer code page, plus any 195 client part; 195's BFF part goes via uac-r2's next dev BFF build (tell uac-r2 the SHA). (3) Owner open questions: send invoice `lockedRecord` one-line fix to ebilling-r1? (`CreateInvoiceWizard.tsx:139`); F12 check during Create Matter repro (A2/B5 unexplained: deployed bundles identical to Project); section A new requests (Project Draft with AI, To Do wizard launch + "New To Do" rename, invoice Quick Start/lookup/firm choice). (4) Close 185 when owner rechecks pass. |
 
 ## Open items
 
 **Owner**
-- 185 checks (above). 192 / 190 / 191 checks. 160 open (visual checks ride the 176 test; zz- comm "zz- UAT 176 fee or scope change (budget inquiry) - MAT-34929-0040" exists; delete it after).
+- 185 rechecks after 193–195 + deploy (above). 192 / 190 / 191 checks. 160 open (visual checks ride the 176 test; zz- comm "zz- UAT 176 fee or scope change (budget inquiry) - MAT-34929-0040" exists; delete it after).
 - Owner's half-done 176 decision (budget revised + SR created, no email/DR, Signal closed, 2026-11-13): needs owner choice on clean-up — ask, do not act.
 - ebilling 095f part 2 options (adjustments A/B, correct/confirm A/B/C, Create Invoice path) are the owner's.
 - Temp folders `C:\t191m`, `C:\t191p` for owner to delete. 105 (v4 UAT checklist) open; 189 (Office add-in templates route) not written. **090 held.**
 
 **ebilling-r1**
+- **130e-1** (DEF-060 firm reason, branch `task/ebilling-130e-1` tip `99e380f997`): ontology O6 review **PASS** 2026-11-16 (K2 writer preflight uses 1-arg Validate; K4 replay writes current version text, C1). Later Signals pushes → re-glance. O2 = (a) (held fallback never carries a firm reason). Column apply + smoke Signal on their owner's go; notices before/after.
 - **#2839** (work→master, head `ced184c79a`): ontology sign-off POSTED (comment 6897983607) for writer/catalog/RecordProcedure tests/immutability test/BillingJudgedDates+evaluator, byte-identical to reviewed `4356eef89b` / `84e708682c`; **conditional on CI green**; any later push touching Signals → re-glance.
 - 084h design PASSED (73ce24172c). 084h-1 reviewed in 2 rounds (PASS). Carried: **K1** — 084h-3 repair job retry list must classify BillingRecordLookupFailed, OwnerRefused (deleted core; needs a test), OwnerResolutionFailed, CreateFailed; **H-3** — 084h-2 service enforces the 2000-char note cap. Review both when 084h-2/3 arrive.
 - 095f part 2 design PASS (fixes 1–3, Q6–Q8); catalog/exact-set changes come to us in its PR.
