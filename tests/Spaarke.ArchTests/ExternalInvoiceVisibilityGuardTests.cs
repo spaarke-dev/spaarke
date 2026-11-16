@@ -187,6 +187,9 @@ public class ExternalInvoiceVisibilityGuardTests
         ["Sprk.Bff.Api.Services.Finance.FirmFindingsProjection::ReadRejectionSignalsAsync"] =
             "Reviewed 130c. Reads the firm reasons of Signals the BFF writer created (WriterCreatedRecord) for the derived invoice the caller "
             + "decided, only after BuildRejectionItemsAsync's invoiceDecided check; a Signal naming another invoice is dropped.",
+        ["Sprk.Bff.Api.Services.Finance.FirmFindingsProjection::NamesTheFindingsReason"] =
+            "Reviewed 130e-1. A private predicate over a Signal row ReadRejectionSignalsAsync already read: true when the row's stored "
+            + "evidence names the finding's reason code (ReasonCodesOf parses the JSON). Reads nothing.",
     };
 
     /// <summary>
