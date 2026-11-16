@@ -926,21 +926,33 @@ public class ExternalParticipationService
     /// once every started chunk has finished (Task.WhenAll), so the caller's fail-closed catch sees it and nothing is left
     /// unobserved.
     /// </summary>
-    private static async Task<T[]> ForEachChunkAsync<T>(IReadOnlyList<Guid> ids, Func<List<Guid>, Task<T>> read)
+    /// <remarks>#2845 F-R3: the first chunk that THROWS cancels its siblings (a token linked to <paramref name="ct"/>, passed
+    /// to the fan-out wait and to every read), because a throw already fails every id of the batch closed in the caller's
+    /// catch: the siblings' answers would be discarded, so they stop instead of loading Dataverse. The outcome is unchanged.
+    /// A chunk that ANSWERS with its own fail-closed values (a non-success status) does not cancel anything: the other
+    /// chunks' answers still stand.</remarks>
+    internal static async Task<T[]> ForEachChunkAsync<T>(
+        IReadOnlyList<Guid> ids, Func<List<Guid>, CancellationToken, Task<T>> read, CancellationToken ct)
     {
         var chunks = ids.Chunk(FlagQueryChunkSize).Select(c => c.ToList()).ToList();
         if (chunks.Count == 1)
         {
-            return new[] { await read(chunks[0]).ConfigureAwait(false) };
+            return new[] { await read(chunks[0], ct).ConfigureAwait(false) };
         }
 
+        using var siblings = CancellationTokenSource.CreateLinkedTokenSource(ct);
         using var gate = new SemaphoreSlim(MaxConcurrentChunkQueries, MaxConcurrentChunkQueries);
         return await Task.WhenAll(chunks.Select(async chunk =>
         {
-            await gate.WaitAsync().ConfigureAwait(false);
+            await gate.WaitAsync(siblings.Token).ConfigureAwait(false);
             try
             {
-                return await read(chunk).ConfigureAwait(false);
+                return await read(chunk, siblings.Token).ConfigureAwait(false);
+            }
+            catch
+            {
+                siblings.Cancel(); // the batch is failed closed already: stop the rest
+                throw;
             }
             finally
             {
@@ -994,7 +1006,7 @@ public class ExternalParticipationService
 
             // #2845 round 2: the chunks are independent queries — sent concurrently (bounded, ForEachChunkAsync), each decided
             // exactly as before; a chunk that throws still fails every id closed (the catch below), once every chunk has finished.
-            foreach (var chunkAnswer in await ForEachChunkAsync(distinct, ReadChunkAsync).ConfigureAwait(false))
+            foreach (var chunkAnswer in await ForEachChunkAsync(distinct, ReadChunkAsync, ct).ConfigureAwait(false))
             {
                 foreach (var (id, value) in chunkAnswer)
                 {
@@ -1002,7 +1014,7 @@ public class ExternalParticipationService
                 }
             }
 
-            async Task<Dictionary<Guid, RootRecordFlags>> ReadChunkAsync(List<Guid> chunk)
+            async Task<Dictionary<Guid, RootRecordFlags>> ReadChunkAsync(List<Guid> chunk, CancellationToken chunkCt)
             {
                 var part = new Dictionary<Guid, RootRecordFlags>();
                 var idFilter = string.Join(" or ", chunk.Select(id => $"{source.IdAttribute} eq {id}"));
@@ -1016,7 +1028,7 @@ public class ExternalParticipationService
                 request.Headers.Add("OData-Version", "4.0");
                 request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
 
-                var response = await _httpClient.SendAsync(request, ct);
+                var response = await _httpClient.SendAsync(request, chunkCt);
                 if (!response.IsSuccessStatusCode)
                 {
                     _logger.LogError(
@@ -1030,7 +1042,7 @@ public class ExternalParticipationService
                     return part;
                 }
 
-                var result = await response.Content.ReadFromJsonAsync<DataverseQueryResult<RootFlagRow>>(ct);
+                var result = await response.Content.ReadFromJsonAsync<DataverseQueryResult<RootFlagRow>>(chunkCt);
                 var byId = (result?.Value ?? new List<RootFlagRow>())
                     .GroupBy(r => r.GetId(source.IdAttribute))
                     .ToDictionary(g => g.Key, g => g.First());
@@ -1311,7 +1323,7 @@ public class ExternalParticipationService
 
             // #2845 round 2: the chunks are independent queries — sent concurrently (bounded, ForEachChunkAsync), each decided
             // exactly as before; a chunk that throws still fails every id closed (the catch below), once every chunk has finished.
-            foreach (var chunkAnswer in await ForEachChunkAsync(distinct, ReadChunkAsync).ConfigureAwait(false))
+            foreach (var chunkAnswer in await ForEachChunkAsync(distinct, ReadChunkAsync, ct).ConfigureAwait(false))
             {
                 foreach (var (id, value) in chunkAnswer)
                 {
@@ -1319,7 +1331,7 @@ public class ExternalParticipationService
                 }
             }
 
-            async Task<Dictionary<Guid, ReferencedOrganizations>> ReadChunkAsync(List<Guid> chunk)
+            async Task<Dictionary<Guid, ReferencedOrganizations>> ReadChunkAsync(List<Guid> chunk, CancellationToken chunkCt)
             {
                 var part = new Dictionary<Guid, ReferencedOrganizations>();
                 var idFilter = string.Join(" or ", chunk.Select(id => $"{source.IdAttribute} eq {id}"));
@@ -1333,7 +1345,7 @@ public class ExternalParticipationService
                 request.Headers.Add("OData-Version", "4.0");
                 request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
 
-                var response = await _httpClient.SendAsync(request, ct);
+                var response = await _httpClient.SendAsync(request, chunkCt);
                 if (!response.IsSuccessStatusCode)
                 {
                     _logger.LogError(
@@ -1347,7 +1359,7 @@ public class ExternalParticipationService
                     return part;
                 }
 
-                var payload = await response.Content.ReadFromJsonAsync<DataverseQueryResult<OrganizationReferenceRow>>(ct);
+                var payload = await response.Content.ReadFromJsonAsync<DataverseQueryResult<OrganizationReferenceRow>>(chunkCt);
                 var byId = (payload?.Value ?? new List<OrganizationReferenceRow>())
                     .GroupBy(r => r.GetId(source.IdAttribute))
                     .ToDictionary(g => g.Key, g => g.First());

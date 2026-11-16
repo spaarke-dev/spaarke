@@ -579,17 +579,41 @@ public class NoAccessListReader : INoAccessListReader
         // #2851: the request's memo exists before the queries fan out (RequestAccessMemo.For must first run single-threaded).
         RequestAccessMemo.For(_httpContextAccessor?.HttpContext);
 
+        // #2845 F-R3: the first query that answers "unreadable" (null) or throws cancels its siblings: the evaluation fails
+        // closed on it whatever the others answer, so they stop instead of loading Dataverse. A sibling stopped this way
+        // answers null (never "no denials"), so the outcome is exactly today's: a null fails the evaluation closed, a throw
+        // propagates (the only faulted task is the one that threw). The caller's own cancellation still propagates.
+        using var siblings = CancellationTokenSource.CreateLinkedTokenSource(ct);
         using var gate = new SemaphoreSlim(MaxConcurrentChunkQueries, MaxConcurrentChunkQueries);
         var tasks = queries.Select(async (query, index) =>
         {
-            await gate.WaitAsync(ct).ConfigureAwait(false);
             try
             {
-                answers[index] = await QueryChunkOncePerRequestAsync(query.Subject, query.Object, ct).ConfigureAwait(false);
+                await gate.WaitAsync(siblings.Token).ConfigureAwait(false);
+                try
+                {
+                    var rows = await QueryChunkOncePerRequestAsync(query.Subject, query.Object, siblings.Token).ConfigureAwait(false);
+                    answers[index] = rows;
+                    if (rows is null)
+                    {
+                        siblings.Cancel();
+                    }
+                }
+                finally
+                {
+                    gate.Release();
+                }
             }
-            finally
+            catch (OperationCanceledException) when (siblings.IsCancellationRequested && !ct.IsCancellationRequested)
             {
-                gate.Release();
+                // Stopped because a sibling failed (or this query's own cancellation coincided with it): unknown, never
+                // "no denials". The evaluation fails closed on the sibling's null or throw.
+                answers[index] = null;
+            }
+            catch
+            {
+                siblings.Cancel();
+                throw;
             }
         }).ToList();
 
