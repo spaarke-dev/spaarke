@@ -37,7 +37,8 @@ public class PolicyVersionColumnsGuardTests
             + "before the BFF build that selects it; the solution export (task 079) then carries it.",
         ["sprk_rejectionreason"] =
             "scripts/ebilling/Deploy-EbillingRuleRejectionReasonSchema.ps1 (task 077 follow-up, D-113): the reason a drafted rule was rejected. "
-            + "Deployed; not yet exported into the solution source (task 079).",
+            + "NOT yet applied: dev does not have the column (read-only check 2026-11-16) and SpaarkeMaster does not carry it; tracked as ISS-024 "
+            + "(#2858). Run the script with -Apply on each environment before a BFF build that selects it is deployed there.",
     };
 
     /// <summary>Platform attributes every table has that a solution export does not list.</summary>
@@ -105,6 +106,19 @@ public class PolicyVersionColumnsGuardTests
                 $"{column}: the entry must start with its deploy script path.");
             Assert.True(File.Exists(Path.Combine(SourceScan.RepoRoot, script)), $"{column}: {script} does not exist.");
         }
+    }
+
+    /// <summary>An entry that says its column is deployed (pure). A pending entry is a column this repo cannot show exists anywhere, so the
+    /// claim is unverifiable here and was wrong once (fix round 2 F3b: sprk_rejectionreason, ISS-024).</summary>
+    internal static IReadOnlyList<string> ClaimsDeployed(IReadOnlyDictionary<string, string> pending) =>
+        pending.Where(p => System.Text.RegularExpressions.Regex.IsMatch(p.Value, @"\bDeployed\b|\balready (deployed|applied)\b"))
+            .Select(p => p.Key).OrderBy(c => c, StringComparer.Ordinal).ToList();
+
+    [Fact(DisplayName = "130e-1 fix round 2 F3b: no pending-schema entry claims its column is deployed; each says what still has to run")]
+    public void PendingSchema_ClaimsNoDeployment()
+    {
+        Assert.Empty(ClaimsDeployed(PendingSchema));
+        Assert.Equal(["x"], ClaimsDeployed(new Dictionary<string, string> { ["x"] = "scripts/a.ps1: Deployed; not exported.", ["y"] = "scripts/b.ps1: NOT yet applied." }));
     }
 
     [Fact(DisplayName = "130e-1 F2a controls: an unknown column is reported (must fire); the real sets are not (must not fire); a carried pending entry is stale")]
