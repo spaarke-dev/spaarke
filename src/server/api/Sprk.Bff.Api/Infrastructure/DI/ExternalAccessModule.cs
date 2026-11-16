@@ -111,7 +111,8 @@ public static class ExternalAccessModule
                 client.DefaultRequestHeaders.Add("OData-Version", "4.0");
             }
             client.Timeout = TimeSpan.FromSeconds(15);
-        });
+        }).AddHttpMessageHandler<DataverseThrottlingHandler>(); // #2845 F1 (round 2 follow-up, r4 014b): the same process-wide gate;
+                                                                // a throttled GET is retried, a write is sent once and its 429/503 returned
 
         // unified-access-control-r2 task 188 (main-session decision 2026-10-20): the assistant's dataverse.* tools decide a
         // document with THE external document narrowing APP-ONLY, through the reader above, so a link field security masks
