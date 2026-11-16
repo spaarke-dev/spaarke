@@ -48,7 +48,7 @@
      8. Adjustments get Decision Records (option A).
      9. Correct/confirm get a note on the correction row (option B).
      10. Create Invoice: server-only for R1 (option C).
-2. **Second `word-add-in-r1` session.** A session ON THIS MACHINE now claims the name `word-add-in-r1`. The confirmed one is remote (bridge). I did not confirm the local one. Ask the owner whether they started it; until then, message only the remote one.
+2. ~~Second `word-add-in-r1` session~~ RESOLVED 2026-11-16 (owner): word-add-in-r1 runs on the Ryzen desktop, which is this machine (RGS_RYZEN9950X). The local `word-add-in-r1` session is the right one; the remote one is no longer listed.
 
 **Premise correction to log with EB-D-239+:**
 - EB-D-237 assumed the Create Invoice wizard has a Correction path; it has none.
