@@ -24,7 +24,7 @@
 
 ## Active Lanes
 - **Dev BFF live `aa7d6345f3`** (uac-r2, since 2026-11-15 18:32Z): master `c1eb6e4a8e` + spike `d7369fecf1` (ledger 155); healthz 200, anon POST `/mcp` and `/api/mcp/spike` 401; rollback `5a9b687a0b`. Every uac-r2 dev deploy includes the spike until Phase 0 is done; never this branch.
-- Spike `spike/spaarkeai-mcp-phase0` tip `d7369fecf1` (never merged; worktree `C:\code_files\spaarke-wt-spaarkeai-mcp-phase0-spike`).
+- Spike `spike/spaarkeai-mcp-phase0` tip **`973776a5a6` (spike-v2, pushed 2026-11-16)** (never merged; worktree `C:\code_files\spaarke-wt-spaarkeai-mcp-phase0-spike`). **Dev defect from our spike:** `d7369fecf1` carried MCP 2.3.1 (needs M.E.AI.Abstractions 10.11.0) without task 020's M.E.AI/OpenAI bump, so dev builds since ~2026-11-13 mixed Abstractions 10.11.0 with M.E.AI 10.3.0, and `POST /api/communications/draft` returned 503 TypeLoadException (found by ontology-r1, confirmed by uac-r2). spike-v2 = `d7369fecf1` + cherry-pick of `a940d5b2b7` (3 csproj files only; spike widget embedding kept). Build: 0 warnings. `~.Ai.` unit: 6931 passed, 1 skipped. uac-r2 builds the next dev merge as master + spike-v2 and puts that SHA to the owner. AI draft stays broken on dev until that deploy. Lesson: any package change on this branch must also go on the spike while the spike is in dev builds.
 - Task 003: every test-user test is recorded in `notes/phase0-results.md`; remaining owner-only items: T10 skill, T13 second connector, T2/T14 package, T5 consent memory, "Always allow"; then owner review.
 
 ## Open Owner Questions
