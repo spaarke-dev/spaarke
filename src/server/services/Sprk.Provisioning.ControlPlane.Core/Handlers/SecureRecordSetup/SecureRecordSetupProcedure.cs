@@ -202,17 +202,18 @@ public sealed class SecureRecordSetupProcedure
 
     /// <summary>S26: the remedy an incomplete invoice money lock names.</summary>
     internal const string InvoiceMoneyLockRemedy =
-        "The published SpaarkeMaster 1.3.0.0 predates ebilling task 166 and H6 skips an installed version: either import a " +
-        "SpaarkeMaster release ABOVE 1.3.0.0 that carries task 166 (a new run, H6), or run " +
-        "scripts/ebilling/Set-EbillingInvoiceMoneyFieldSecurity.ps1 (apply, then -Verify) on this environment with the " +
-        "owner's OK, then resume. Nothing was written.";
+        "The published SpaarkeMaster 1.3.0.0 predates ebilling task 166 and H6 skips an installed version: import a " +
+        "SpaarkeMaster release ABOVE 1.3.0.0 that carries task 166 (a new run, H6). Only where H7b has completed on this " +
+        "environment before (the BFF-managed profiles have their members; on a stamp's first H7b run they do not, and the " +
+        "script refuses) may the operator instead run scripts/ebilling/Set-EbillingInvoiceMoneyFieldSecurity.ps1 (apply, " +
+        "then -Verify) with the owner's OK, then resume. Nothing was written.";
 
     /// <summary>
     /// S27 (task 270; unified-access-control-r2 #2799): the invoice family's core-record lookups and invoice links, as
     /// (table, column), that only the BFF application user writes — field-secured, readable by everyone through
     /// <see cref="ReaderProfileName"/>, settable only through <see cref="WriterProfileName"/>. Exactly
     /// scripts/common/InvoiceFamilyLockedColumns.psd1 (the ONE list, which InvoiceFamilyFieldLockGuardTests pins to the BFF's
-    /// InvoiceFamilyLockedWrite.LockedColumns); InvoiceFamilyLinkColumnLockListTests pins this list to that file.
+    /// InvoiceFamilyLockedWrite.LockedColumns); BffManagedLinkColumnLockListTests pins this list to that file.
     /// </summary>
     public static readonly IReadOnlyList<(string Table, string Column)> InvoiceFamilyLinkColumns =
     [
@@ -245,15 +246,16 @@ public sealed class SecureRecordSetupProcedure
     /// <summary>S27: the remedy an incomplete invoice-family lock names.</summary>
     internal const string InvoiceFamilyLockRemedy =
         "SpaarkeMaster 1.3.1.0 and earlier do not carry the #2799 lock (unified-access-control-r2 packages it in a later " +
-        "release): import a SpaarkeMaster release that carries it (a new run, H6), or run scripts/Set-InvoiceFamilyFieldSecurity.ps1 " +
-        "(dry run, then -BffWritesInvoiceFamilyLinksAsApp -Apply, then -Verify) on this environment with the owner's OK, then " +
-        "resume. Nothing was written.";
+        "release): import a SpaarkeMaster release that carries it (a new run, H6). Only where H7b has completed on this " +
+        "environment before (the BFF-managed profiles have their members; on a stamp's first H7b run they do not, and the " +
+        "script refuses) may the operator instead run scripts/Set-InvoiceFamilyFieldSecurity.ps1 (dry run, then " +
+        "-BffWritesInvoiceFamilyLinksAsApp -Apply, then -Verify) with the owner's OK, then resume. Nothing was written.";
 
     /// <summary>
     /// S28 (task 270; field-mapping-server-write-path-r1 task 054b): the message-access columns that decide who may read a
     /// message, as (table, column) — field-secured with the BFF-managed Readers/Writers grants in SpaarkeMaster (1.3.1.0 on).
     /// Exactly the packaged four of scripts/Set-ThreadFlagFieldSecurity.ps1's $Targets; the fifth, <see cref="DirectRecipientColumn"/>,
-    /// is not in the package. MessageAccessColumnLockPackagedTests pins this list to the script and the package.
+    /// is not in the package. BffManagedLinkColumnLockListTests pins this list to the script and the package.
     /// </summary>
     public static readonly IReadOnlyList<(string Table, string Column)> MessageAccessColumns =
     [
@@ -273,8 +275,10 @@ public sealed class SecureRecordSetupProcedure
     /// <summary>S28: the remedy an incomplete message-access lock names.</summary>
     internal const string MessageAccessLockRemedy =
         "SpaarkeMaster 1.3.1.0 carries the lock on the four packaged columns (field-mapping task 054b): import it or a later " +
-        "release (a new run, H6), or run scripts/Set-ThreadFlagFieldSecurity.ps1 (apply, then -Verify) on this environment with " +
-        "the owner's OK, then resume. Nothing was written.";
+        "release (a new run, H6). scripts/Set-ThreadFlagFieldSecurity.ps1 is the remedy only where " +
+        "sprk_communication.sprk_directrecipient exists (scripts/Set-DirectRecipientSchema.ps1 ran) and H7b has completed on " +
+        "this environment before; anywhere else, a stamp included, it refuses. There, with the owner's OK, run it with " +
+        "-SolutionUniqueName SpaarkeMaster (dry run, then -Apply, then -Verify), then resume. Nothing was written.";
 
     /// <summary>
     /// S19/S20 (ISS-020 / #1565): the profile whose membership lets an identity READ the field-secured

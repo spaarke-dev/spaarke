@@ -450,6 +450,36 @@ public sealed class H7bSecureRecordSetupHandlerTests
         dv.Writes.Should().BeEmpty();
     }
 
+    [Fact]
+    public async Task ARunCompletedUnderProcedureVersion9_DoesNotShortCircuit_AndChecksTheInvoiceFamilyLock()
+    {
+        // Task 270: an environment H7b configured before S27, whose package predates the #2799 lock: the run row records the
+        // phase under the v9 key, and sprk_billingevent.sprk_invoice is not secured. The re-run reaches S27 and refuses.
+        var dv = FakeSecureRecordSetupDataverse.NewEnvironment(Set);
+        (await BuildHandler(new FakeRepository(BuildRun(dv)), dv).HandleAsync(Envelope(), CancellationToken.None))
+            .Should().BeOfType<HandlerResult.Success>();
+        dv.SecuredColumns[FakeSecureRecordSetupDataverse.ColumnKey("sprk_billingevent", "sprk_invoice")] = false;
+        dv.Writes.Clear();
+        var v9Hash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(
+            "secure-setup-procedure=9\n" + Set.RoleName + "\n" + Set.BusinessUnitName + "\n" + Set.SetHash()))).ToLowerInvariant();
+        var run = BuildRun(dv);
+        run.CompletedPhases.Add(new CompletedPhase
+        {
+            Phase = "H7b",
+            IdempotencyKey = H7bSecureRecordSetupHandler.BuildIdempotencyKey(CustomerId, v9Hash),
+            StartedAt = DateTimeOffset.UtcNow,
+            CompletedAt = DateTimeOffset.UtcNow,
+            JobId = RunId,
+        });
+
+        var result = await BuildHandler(new FakeRepository(run), dv).HandleAsync(Envelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.Class.Should().Be(FailureClass.Resumable);
+        failure.RejectionCode.Should().Be(SecureRecordSetupRejectionCodes.InvoiceFamilyLockIncomplete);
+        dv.Writes.Should().BeEmpty();
+    }
+
     [Theory]
     [InlineData(null)]
     [InlineData("not-a-guid")]

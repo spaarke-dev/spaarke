@@ -147,8 +147,8 @@ public static class SecureRecordSetupRejectionCodes
     /// <summary>
     /// S26: the shipped lock on a column of <see cref="SecureRecordSetupProcedure.InvoiceMoneyColumns"/> is incomplete — the
     /// column absent or not secured, or the BFF-managed Readers (read 4) / Writers (4/4/4) grant missing (Resumable: import a
-    /// SpaarkeMaster release ABOVE 1.3.0.0 carrying ebilling task 166, H6 — the published 1.3.0.0 predates it — or run
-    /// scripts/ebilling/Set-EbillingInvoiceMoneyFieldSecurity.ps1 on the environment).
+    /// SpaarkeMaster release ABOVE 1.3.0.0 carrying ebilling task 166, H6 — the published 1.3.0.0 predates it — or, only where
+    /// H7b completed before, run scripts/ebilling/Set-EbillingInvoiceMoneyFieldSecurity.ps1 on the environment).
     /// </summary>
     public const string InvoiceMoneyLockIncomplete = "secure_setup.invoice_money_lock_incomplete";
 
@@ -163,8 +163,8 @@ public static class SecureRecordSetupRejectionCodes
     /// <summary>
     /// S27: the shipped lock on a column of <see cref="SecureRecordSetupProcedure.InvoiceFamilyLinkColumns"/> is incomplete —
     /// the column absent or not secured, or the BFF-managed Readers (read 4) / Writers (4/4/4) grant missing (Resumable: import a
-    /// SpaarkeMaster release that carries the #2799 lock — 1.3.1.0 and earlier do not — or run
-    /// scripts/Set-InvoiceFamilyFieldSecurity.ps1 on the environment).
+    /// SpaarkeMaster release that carries the #2799 lock — 1.3.1.0 and earlier do not — or, only where H7b completed before,
+    /// run scripts/Set-InvoiceFamilyFieldSecurity.ps1 on the environment).
     /// </summary>
     public const string InvoiceFamilyLockIncomplete = "secure_setup.invoice_family_lock_incomplete";
 
@@ -178,8 +178,8 @@ public static class SecureRecordSetupRejectionCodes
 
     /// <summary>
     /// S28: the shipped lock on a column of <see cref="SecureRecordSetupProcedure.MessageAccessColumns"/> (or on the direct
-    /// recipient, where it exists) is incomplete (Resumable: import SpaarkeMaster 1.3.1.0 or later, or run
-    /// scripts/Set-ThreadFlagFieldSecurity.ps1 on the environment).
+    /// recipient, where it exists) is incomplete (Resumable: import SpaarkeMaster 1.3.1.0 or later, or, only where the direct
+    /// recipient exists and H7b completed before, run scripts/Set-ThreadFlagFieldSecurity.ps1 on the environment).
     /// </summary>
     public const string MessageAccessLockIncomplete = "secure_setup.message_access_lock_incomplete";
 

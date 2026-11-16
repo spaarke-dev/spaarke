@@ -1185,7 +1185,8 @@ public sealed class SecureRecordSetupProcedureTests
         var refused = Refused(await RunAsync(dv), SecureRecordSetupRejectionCodes.InvoiceMoneyLockIncomplete, FailureClass.Resumable);
 
         refused.Diagnostic.Should().Contain("sprk_invoice.sprk_totalamount").And.Contain("IsSecured=False")
-            .And.Contain("scripts/ebilling/Set-EbillingInvoiceMoneyFieldSecurity.ps1").And.Contain("Nothing was written");
+            .And.Contain("scripts/ebilling/Set-EbillingInvoiceMoneyFieldSecurity.ps1").And.Contain("Nothing was written")
+            .And.Contain("Only where H7b has completed on this environment before");
         dv.Writes.Should().BeEmpty();
     }
 
@@ -1234,6 +1235,7 @@ public sealed class SecureRecordSetupProcedureTests
 
         refused.Diagnostic.Should().Contain("sprk_billingevent.sprk_invoice").And.Contain("IsSecured=False")
             .And.Contain("re-file an invoice-family row").And.Contain("scripts/Set-InvoiceFamilyFieldSecurity.ps1")
+            .And.Contain("Only where H7b has completed on this environment before")
             .And.Contain("Nothing was written");
         dv.Writes.Should().BeEmpty();
     }
@@ -1299,7 +1301,8 @@ public sealed class SecureRecordSetupProcedureTests
         var refused = Refused(await RunAsync(dv), SecureRecordSetupRejectionCodes.MessageAccessLockIncomplete, FailureClass.Resumable);
 
         refused.Diagnostic.Should().Contain("sprk_communication.sprk_directrecipient").And.Contain("IsSecured=False")
-            .And.Contain("scripts/Set-ThreadFlagFieldSecurity.ps1");
+            .And.Contain("scripts/Set-ThreadFlagFieldSecurity.ps1").And.Contain("-SolutionUniqueName SpaarkeMaster")
+            .And.Contain("only where sprk_communication.sprk_directrecipient exists").And.Contain("Nothing was written");
     }
 
     // ------------------------------------------------------------ S18/S19: an environment on SpaarkeMaster 1.2.3.1
