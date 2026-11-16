@@ -29,6 +29,7 @@ using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.ExternalAccess;
 using Sprk.Bff.Api.Api.ExternalAccess.Dtos;
+using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Services.Dataverse;
@@ -3369,8 +3370,9 @@ public sealed partial class SecureRootInheritance
 
     /// <summary>
     /// #2845 round 2: <see cref="ReadFactsIntoAsync"/>'s batched read through the request memo — each row's filing is read
-    /// once per request (a later climb, in this composition or another, reads only the rows not yet read), every chunk is
-    /// started at once, and the outcome per chunk is what the batched read decides: a chunk that throws leaves every row it
+    /// once per request (a later climb, in this composition or another, reads only the rows not yet read), at most
+    /// <see cref="MaxConcurrentChunkReads"/> chunks in flight (each read holding a permit of the process-wide Dataverse gate,
+    /// #2845 F1), and the outcome per chunk is what the batched read decides: a chunk that throws leaves every row it
     /// needed faulted (and is remembered for none). The query shapes are the walk's own: the many-row read, or the one-row
     /// read when a single row is left to read.
     /// </summary>
@@ -3378,24 +3380,25 @@ public sealed partial class SecureRootInheritance
         IGenericEntityService dataverse, ILogger logger, IReadOnlyList<(string Table, Guid Id)> rows,
         Dictionary<(string Table, Guid Id), FactsRead> into, RequestAccessMemo requestMemo, CancellationToken ct)
     {
+        var fanOut = new SemaphoreSlim(MaxConcurrentChunkReads, MaxConcurrentChunkReads); // not disposed: see BoundedAsync
         var reads = rows.GroupBy(r => r.Table)
             .SelectMany(group => group.Chunk(IdsPerQuery).Select(chunk => (Table: group.Key, Chunk: chunk)))
-            .Select(c => (c.Table, c.Chunk, Read: requestMemo.GetOrReadManyAsync(
+            .Select(c => (c.Table, c.Chunk, Read: BoundedAsync(fanOut, () => requestMemo.GetOrReadManyAsync(
                 RequestAccessMemo.FilingFactsReader(c.Table),
                 c.Chunk.Select(r => r.Id).ToList(),
-                async (missing, token) =>
+                (missing, token) => GatedAsync(requestMemo, async gated =>
                 {
                     if (missing.Count == 1)
                     {
-                        var one = await ReadFactsAsync(dataverse, c.Table, missing[0], token).ConfigureAwait(false);
+                        var one = await ReadFactsAsync(dataverse, c.Table, missing[0], gated).ConfigureAwait(false);
                         return (IReadOnlyDictionary<Guid, FactsRead>)new Dictionary<Guid, FactsRead> { [missing[0]] = new(one, false) };
                     }
 
-                    var found = await ReadFactsOfManyAsync(dataverse, c.Table, missing.ToArray(), token).ConfigureAwait(false);
+                    var found = await ReadFactsOfManyAsync(dataverse, c.Table, missing.ToArray(), gated).ConfigureAwait(false);
                     return missing.ToDictionary(id => id, id => new FactsRead(found.TryGetValue(id, out var f) ? f : null, false));
-                },
+                }, token),
                 read => !read.Faulted,
-                ct)))
+                ct), ct)))
             .ToList();
 
         foreach (var (table, chunk, read) in reads)
@@ -3417,26 +3420,28 @@ public sealed partial class SecureRootInheritance
 
     /// <summary>
     /// #2845 round 2: the batched parent read (<see cref="ReadParentsOfManyAsync"/>) through the request memo — each
-    /// parent's flag, name and Access Permission read once per request, every chunk started at once; a chunk that throws
-    /// leaves its parents faulted, exactly as the batched read does, and is remembered for none.
+    /// parent's flag, name and Access Permission read once per request, at most <see cref="MaxConcurrentChunkReads"/> chunks
+    /// in flight, each read holding a permit of the process-wide Dataverse gate (#2845 F1); a chunk that throws leaves its
+    /// parents faulted, exactly as the batched read does, and is remembered for none.
     /// </summary>
     private static async Task<Dictionary<(string Table, Guid Id), ParentRead>> ReadParentsThroughMemoAsync(
         IGenericEntityService dataverse, ILogger logger, IEnumerable<(string Table, Guid Id)> parents,
         RequestAccessMemo requestMemo, CancellationToken ct)
     {
+        var fanOut = new SemaphoreSlim(MaxConcurrentChunkReads, MaxConcurrentChunkReads); // not disposed: see BoundedAsync
         var reads = parents.Distinct().GroupBy(p => p.Table)
             .SelectMany(group => group.Chunk(IdsPerQuery).Select(chunk => (Table: group.Key, Chunk: chunk)))
-            .Select(c => (c.Table, c.Chunk, Read: requestMemo.GetOrReadManyAsync(
+            .Select(c => (c.Table, c.Chunk, Read: BoundedAsync(fanOut, () => requestMemo.GetOrReadManyAsync(
                 RequestAccessMemo.FilingParentReader(c.Table),
                 c.Chunk.Select(p => p.Id).ToList(),
-                async (missing, token) =>
+                (missing, token) => GatedAsync(requestMemo, async gated =>
                 {
-                    var found = await ReadParentsOfManyAsync(dataverse, c.Table, missing.ToArray(), token).ConfigureAwait(false);
+                    var found = await ReadParentsOfManyAsync(dataverse, c.Table, missing.ToArray(), gated).ConfigureAwait(false);
                     return (IReadOnlyDictionary<Guid, ParentRead>)missing.ToDictionary(
                         id => id, id => new ParentRead(found.TryGetValue(id, out var p) ? p : (ParentRow?)null, false));
-                },
+                }, token),
                 read => !read.Faulted,
-                ct)))
+                ct), ct)))
             .ToList();
 
         var result = new Dictionary<(string Table, Guid Id), ParentRead>();
@@ -3458,6 +3463,36 @@ public sealed partial class SecureRootInheritance
 
         return result;
     }
+
+    /// <summary>
+    /// #2845 F1: most chunk reads ONE memoized walk step keeps in flight (the same bound as the participation and deny-list
+    /// readers' chunk fan-out). Each read also holds a permit of the process-wide <see cref="DataverseConcurrencyGate"/>.
+    /// </summary>
+    internal const int MaxConcurrentChunkReads = 6;
+
+    /// <summary>
+    /// #2845 F1: <paramref name="read"/> once <paramref name="fanOut"/> has a permit. The permit is held while the memo read
+    /// waits on ids other callers own, which cannot deadlock: a caller registers the ids it owns only after it has a permit,
+    /// and reads them before it waits on anyone. The semaphore is never disposed: a read still running when its walk step
+    /// is cancelled releases into it later (it holds no wait handle, so there is nothing to dispose).
+    /// </summary>
+    private static async Task<T> BoundedAsync<T>(SemaphoreSlim fanOut, Func<Task<T>> read, CancellationToken ct)
+    {
+        await fanOut.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            return await read().ConfigureAwait(false);
+        }
+        finally
+        {
+            fanOut.Release();
+        }
+    }
+
+    /// <summary>#2845 F1: one Dataverse read holding a permit of the request's process-wide gate (ungated when the memo has
+    /// none: a test without a service provider). ServiceClient retries a 429 itself; the gate only bounds concurrency.</summary>
+    private static Task<T> GatedAsync<T>(RequestAccessMemo requestMemo, Func<CancellationToken, Task<T>> read, CancellationToken ct)
+        => requestMemo.DataverseGate is { } gate ? gate.RunAsync(read, ct) : read(ct);
 
     /// <summary>Decides what each of <paramref name="rows"/> is filed under, into <paramref name="into"/>: the one-record
     /// decision (<see cref="DecideParentsCoreAsync"/>) per row, or — batched — the same decision

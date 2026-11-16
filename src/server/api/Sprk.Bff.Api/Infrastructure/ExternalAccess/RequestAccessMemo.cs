@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using Sprk.Bff.Api.Infrastructure.Dataverse;
 
 namespace Sprk.Bff.Api.Infrastructure.ExternalAccess;
 
@@ -37,6 +38,15 @@ internal sealed class RequestAccessMemo
 
     private readonly ConcurrentDictionary<string, object> _entries = new(StringComparer.Ordinal);
 
+    internal RequestAccessMemo(DataverseConcurrencyGate? dataverseGate = null) => DataverseGate = dataverseGate;
+
+    /// <summary>
+    /// #2845 F1: the process-wide gate on concurrent app-only Dataverse reads (<see cref="DataverseConcurrencyGate"/>), for
+    /// the reads made through this memo that do not go through the gated Web API clients (the filing walk's
+    /// <c>RetrieveMultipleAsync</c>). <c>null</c> when the request has no service provider (a test): those reads are ungated.
+    /// </summary>
+    internal DataverseConcurrencyGate? DataverseGate { get; }
+
     /// <summary>
     /// The memo of the request <paramref name="context"/> belongs to, created on first use; <c>null</c> when there is no
     /// request (no memo: every read is live).
@@ -68,7 +78,8 @@ internal sealed class RequestAccessMemo
                 return memo;
             }
 
-            var created = new RequestAccessMemo();
+            // #2845 F1: the process-wide Dataverse read gate travels with the memo to the filing walk's reads.
+            var created = new RequestAccessMemo(context.RequestServices?.GetService<DataverseConcurrencyGate>());
             context.Items[HttpContextItemsKey] = created;
             return created;
         }
