@@ -16,8 +16,13 @@ namespace Spaarke.ArchTests;
 /// <para><b>Rule 2 (3.3 (c)).</b> In <c>SignalWriter.cs</c> the column name <c>"sprk_firmreason"</c> appears in code only inside
 /// <c>BuildEntity</c>, the create payload: no update, refresh or reconcile path can send it.</para>
 /// <para><b>Rule 3 (3.3 (a)(b)).</b> Nowhere else in the BFF is <c>"sprk_firmreason"</c> written: no indexer assignment
-/// (<c>row["sprk_firmreason"] = ...</c>, a dictionary initializer) and no <c>Add("sprk_firmreason", ...)</c>. Reading it (a column list,
-/// <c>GetAttributeValue</c>) is allowed.</para>
+/// (<c>row["sprk_firmreason"] = ...</c>, a dictionary initializer), no <c>Add("sprk_firmreason", ...)</c> and no
+/// <c>SetAttributeValue("sprk_firmreason", ...)</c>, with the literal or through a constant that holds it (fix round 1 (e): every
+/// <c>const string</c> or <c>static readonly string</c> of the BFF whose value is the column name is followed, qualified or not). Reading it
+/// (a column list, <c>GetAttributeValue</c>) is allowed.</para>
+/// <para><b>Rule 1 matches by name, not type</b> (fix round 1 (e)): any member named <c>FirmReason</c> is checked, which can only over-report;
+/// the allowlist is by repo path (not file name), so a same-named file elsewhere does not pass. Resolving the assigned member's type would
+/// need a compiler model; the name match is stricter.</para>
 /// <para><b>Maintenance.</b> If this fails, do not widen the allowlist to make a new path pass: a new source of the firm reason needs the
 /// same review as DEF-060 (the design note's C1-C4 and O1-O6). A file that moves keeps its entry only if it keeps the same role; update
 /// <see cref="FirmReasonAssigners"/> with the new path and its reason. Rules 2 and 3 have no allowlist.</para>
@@ -26,11 +31,12 @@ namespace Spaarke.ArchTests;
 /// </remarks>
 public sealed class FirmReasonWriteSitesGuardTests
 {
-    /// <summary>The files that may assign <c>FirmReason</c>, each with its reason (ADR citation: design note 130e / DEF-060 O3).</summary>
+    /// <summary>The files (repo paths under the BFF, '/'-separated) that may assign <c>FirmReason</c>, each with its reason (design note 130e /
+    /// DEF-060 O3).</summary>
     private static readonly IReadOnlyDictionary<string, string> FirmReasonAssigners = new Dictionary<string, string>(StringComparer.Ordinal)
     {
-        ["BillingFindingSignalMapper.cs"] = "DEF-060 O3: the mapper copies the cited version's description after FirmDescriptionRules (C3, C4).",
-        ["BillingFirmReasonReplay.cs"] = "DEF-060 C1: the plan replay re-reads the version's description and validates it; the plan never carries it.",
+        ["Services/Signals/Billing/BillingFindingSignalMapper.cs"] = "DEF-060 O3: the mapper copies the cited version's description after FirmDescriptionRules (C3, C4).",
+        ["Services/Signals/Billing/BillingFirmReasonReplay.cs"] = "DEF-060 C1: the plan replay re-reads the version's description and validates it; the plan never carries it.",
     };
 
     private const string Column = "\"sprk_firmreason\"";
@@ -38,9 +44,20 @@ public sealed class FirmReasonWriteSitesGuardTests
     /// <summary>An assignment to a member named FirmReason (not <c>==</c>, not <c>=&gt;</c>).</summary>
     private static readonly Regex FirmReasonAssignment = new(@"\bFirmReason\s*=(?![=>])", RegexOptions.CultureInvariant);
 
-    /// <summary>A write of the column: an indexer assignment or an <c>Add("sprk_firmreason", ...)</c>.</summary>
-    private static readonly Regex ColumnWrite = new(
-        @"\[\s*""sprk_firmreason""\s*\]\s*=(?![=>])|\bAdd\s*\(\s*""sprk_firmreason""\s*,", RegexOptions.CultureInvariant);
+    /// <summary>A string constant (or static readonly string) whose value is the column name: group <c>name</c> is its identifier.</summary>
+    private static readonly Regex ColumnConstant = new(
+        @"\b(?:const\s+string|static\s+readonly\s+string)\s+(?<name>\w+)\s*=\s*""sprk_firmreason""", RegexOptions.CultureInvariant);
+
+    /// <summary>A write of the column named by <paramref name="key"/> (a regex for the literal or a constant): an indexer assignment, an
+    /// <c>Add(key, ...)</c> or a <c>SetAttributeValue(key, ...)</c>.</summary>
+    private static Regex ColumnWrite(string key) => new(
+        $@"\[\s*{key}\s*\]\s*=(?![=>])|\b(?:Add|SetAttributeValue)\s*\(\s*{key}\s*,", RegexOptions.CultureInvariant);
+
+    private static readonly Regex LiteralWrite = ColumnWrite(@"""sprk_firmreason""");
+
+    /// <summary>The identifiers of every constant in <paramref name="sources"/> whose value is the column name (Rule 3 follows them).</summary>
+    internal static IReadOnlySet<string> ColumnConstants(IEnumerable<string> sources) =>
+        sources.SelectMany(s => ColumnConstant.Matches(MaskCommentsOnly(s)).Select(m => m.Groups["name"].Value)).ToHashSet(StringComparer.Ordinal);
 
     private static readonly Regex BuildEntityDeclaration = new(@"\bEntity\s+BuildEntity\s*\(", RegexOptions.CultureInvariant);
 
@@ -51,7 +68,8 @@ public sealed class FirmReasonWriteSitesGuardTests
     /// <summary>Rule 1: assignments of FirmReason in code (comments and strings are not code) in a file not on the allowlist.</summary>
     internal static IReadOnlyList<Finding> ScanAssignments(string file, string source)
     {
-        if (FirmReasonAssigners.ContainsKey(Path.GetFileName(file)))
+        if (FirmReasonAssigners.Keys.Any(allowed => file.Replace('\\', '/').EndsWith("Sprk.Bff.Api/" + allowed, StringComparison.Ordinal)
+                                                    || file.Replace('\\', '/') == allowed))
         {
             return [];
         }
@@ -79,11 +97,19 @@ public sealed class FirmReasonWriteSitesGuardTests
             .ToList();
     }
 
-    /// <summary>Rule 3: a write of the column anywhere else in the BFF.</summary>
-    internal static IReadOnlyList<Finding> ScanColumnWrites(string file, string source)
+    /// <summary>Rule 3: a write of the column anywhere else in the BFF, by the literal or through one of <paramref name="constants"/>
+    /// (qualified or not).</summary>
+    internal static IReadOnlyList<Finding> ScanColumnWrites(string file, string source, IReadOnlySet<string>? constants = null)
     {
         var code = MaskCommentsOnly(source);
-        return ColumnWrite.Matches(code).Select(m => new Finding(file, LineOf(source, m.Index), "sprk_firmreason written outside SignalWriter.BuildEntity")).ToList();
+        var patterns = new List<Regex> { LiteralWrite };
+        patterns.AddRange((constants ?? new HashSet<string>()).Select(name => ColumnWrite($@"(?:[\w.]+\.)?{Regex.Escape(name)}\b")));
+        return patterns
+            .SelectMany(p => p.Matches(code).Select(m => m.Index))
+            .Distinct()
+            .Order()
+            .Select(i => new Finding(file, LineOf(source, i), "sprk_firmreason written outside SignalWriter.BuildEntity"))
+            .ToList();
     }
 
     // ── The tree ──
@@ -112,7 +138,7 @@ public sealed class FirmReasonWriteSitesGuardTests
         // Non-vacuity: both allowed sites exist and assign it.
         foreach (var allowed in FirmReasonAssigners.Keys)
         {
-            var site = sources.Single(s => Path.GetFileName(s.File) == allowed);
+            var site = sources.Single(s => s.File.Replace('\\', '/').EndsWith("Sprk.Bff.Api/" + allowed, StringComparison.Ordinal));
             Assert.Matches(FirmReasonAssignment, DraftPolicyVersionStatecodeGuardTests.Mask(site.Source));
         }
     }
@@ -135,9 +161,11 @@ public sealed class FirmReasonWriteSitesGuardTests
     [Fact(DisplayName = "130e-1 3.3(a)(b): no other BFF file writes sprk_firmreason (reading it is allowed)")]
     public void NoOtherFile_WritesTheColumn()
     {
-        var findings = BffSources()
+        var sources = BffSources();
+        var constants = ColumnConstants(sources.Select(s => s.Source));
+        var findings = sources
             .Where(s => !s.File.EndsWith(Path.Combine("Services", "Signals", "SignalWriter.cs"), StringComparison.Ordinal))
-            .SelectMany(s => ScanColumnWrites(s.File, s.Source))
+            .SelectMany(s => ScanColumnWrites(s.File, s.Source, constants))
             .ToList();
         Assert.True(findings.Count == 0,
             "sprk_firmreason is written only by SignalWriter.BuildEntity, through the one writer client (design 3.3 (a)(b)):\n"
@@ -238,6 +266,44 @@ public sealed class FirmReasonWriteSitesGuardTests
 
         Assert.Equal(3, ScanColumnWrites("Services/Finance/SomethingElse.cs", writes).Count);
         Assert.Empty(ScanColumnWrites("Services/Finance/SomethingElse.cs", reads));
+    }
+
+    [Fact(DisplayName = "130e-1 F1(e) guard control (must-fire / must-not-fire): a write through SetAttributeValue or a constant holding the column is reported; a read through it is not")]
+    public void Control_WritesThroughAConstantOrSetAttributeValue()
+    {
+        const string declares = """
+            internal const string FirmReasonColumn = "sprk_firmreason";
+            private static readonly string OtherName = "sprk_firmreason";
+            private const string NotIt = "sprk_firmreasonx";
+            // const string Commented = "sprk_firmreason";
+            """;
+        var constants = ColumnConstants([declares]);
+        Assert.Equal(new HashSet<string> { "FirmReasonColumn", "OtherName" }, constants);
+
+        const string writes = """
+            signal.SetAttributeValue("sprk_firmreason", text);
+            row[FirmReasonColumn] = text;
+            row[SomeType.FirmReasonColumn] = text;
+            fields.Add(OtherName, text);
+            entity.SetAttributeValue(Sprk.Finance.SomeType.OtherName, text);
+            """;
+        const string reads = """
+            var text = signal.GetAttributeValue<string>(FirmReasonColumn);
+            if (row[FirmReasonColumn] == null) { }
+            var columns = new[] { FirmReasonColumn, "createdon" };
+            row[FirmReasonColumnX] = text;
+            """;
+
+        Assert.Equal(5, ScanColumnWrites("Services/Finance/SomethingElse.cs", writes, constants).Count);
+        Assert.Empty(ScanColumnWrites("Services/Finance/SomethingElse.cs", reads, constants));
+    }
+
+    [Fact(DisplayName = "130e-1 F1(e) guard control: the Rule 1 allowlist is by repo path; a same-named file elsewhere is still reported")]
+    public void Control_TheAllowlistIsByPath()
+    {
+        const string assign = "request = request with { FirmReason = text };";
+        Assert.Empty(ScanAssignments("src/server/api/Sprk.Bff.Api/Services/Signals/Billing/BillingFirmReasonReplay.cs", assign));
+        Assert.Single(ScanAssignments("src/server/api/Sprk.Bff.Api/Services/Finance/BillingFirmReasonReplay.cs", assign));
     }
 
     // ── Helpers ──
