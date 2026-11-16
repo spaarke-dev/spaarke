@@ -24,8 +24,8 @@ namespace Sprk.Bff.Api.Infrastructure.ExternalAccess;
 // Round 2 (GetOrReadManyAsync): the BATCH reads are memoized PER ID — a record's own flags, its referenced organizations, the
 // filing walk's row and parent reads, and the systemuser veto's secure-record subjects — so a project's or work assignment's
 // secure ancestor (a matter the matter composition already read) is not read again. Only the read-time compositions use
-// them (AccessibleRecordSetService / EffectiveRootFlags); the write-time checks read live, as before. A batch is
-// remembered only when it is complete and every answer in it is proven (rule 2, per id).
+// them (AccessibleRecordSetService / EffectiveRootFlags); the write-time checks read live, as before. Rule 2 applies per id:
+// a batch that throws is remembered for no id; a batch that answers is remembered for each id whose own answer is proven.
 
 /// <summary>
 /// The per-request memo of the access evaluator's subject-level reads (#2845). Thread-safe: the three per-type compositions
@@ -181,11 +181,12 @@ internal sealed class RequestAccessMemo
     /// reads only the ids not yet answered, and joins any id another caller is reading right now.
     /// </summary>
     /// <remarks>
-    /// <para><b>Only a COMPLETE, successful batch is remembered.</b> When <paramref name="readMissing"/> throws, leaves out
-    /// an id it was asked for, or answers any id with a value <paramref name="remember"/> refuses (a chunk that failed
-    /// closed, an unreadable row), NOTHING from that batch is remembered: every id it owned is forgotten, and a caller that
-    /// was waiting on one of those ids reads it again itself. The caller that made the read is answered with exactly what
-    /// the read returned (its own fail-closed values included), as it would be without the memo.</para>
+    /// <para><b>A batch that throws (or is cancelled) is remembered for NO id</b>: every id it owned is forgotten, and a
+    /// caller that was waiting on one of those ids reads it again itself. <b>A batch that answers</b> is remembered PER ID
+    /// (#2845 F-R1): each id answered with a value <paramref name="remember"/> accepts is remembered; an id the read left
+    /// out, or answered with a value <paramref name="remember"/> refuses (a chunk that failed closed, an unreadable row), is
+    /// forgotten on its own, and a caller waiting on it reads only that id again. The caller that made the read is answered
+    /// with exactly what the read returned (its own fail-closed values included), as it would be without the memo.</para>
     /// <para>No deadlock: a caller makes its own read before it waits on ids other callers own, so every owned read
     /// completes without waiting on anyone.</para>
     /// </remarks>
@@ -252,15 +253,15 @@ internal sealed class RequestAccessMemo
                     throw;
                 }
 
-                // Remembered only when the batch answered EVERY id it owned, each with a provable answer.
-                var complete = read is not null
-                               && owned.All(o => read.TryGetValue(o.Id, out var value) && remember(value));
+                // #2845 F-R1: the batch did not throw, so each id stands on its own answer: an id answered with a provable
+                // value is remembered; an id left out, or answered with a value `remember` refuses, is forgotten (and only
+                // that id is read again by whoever asks next).
                 foreach (var (id, key, answer) in owned)
                 {
                     if (read is not null && read.TryGetValue(id, out var value))
                     {
                         answers[id] = value;
-                        if (complete)
+                        if (remember(value))
                         {
                             answer.TrySetResult(value);
                             continue;

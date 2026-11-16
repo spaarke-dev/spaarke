@@ -1,8 +1,9 @@
 // GitHub #2845 round 2 — RequestAccessMemo.GetOrReadManyAsync: the per-ID memo of a batch read.
 //
-// Contracts: overlapping id sets read only the missing ids; a batch that throws, leaves an id out, or answers any id with an
-// unprovable value stores NOTHING (the next ask reads again); a caller waiting on an id of such a batch reads it itself; keys of
-// different readers (and principals) never meet; Clear() forgets per-id answers too.
+// Contracts: overlapping id sets read only the missing ids; a batch that throws or is cancelled stores NOTHING (the next ask
+// reads again); a batch that answers stores each proven id and forgets only an id it left out or could not prove (#2845 F-R1);
+// a caller waiting on a forgotten id reads only that id itself; keys of different readers (and principals) never meet;
+// Clear() forgets per-id answers too.
 
 using FluentAssertions;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
@@ -82,17 +83,19 @@ public sealed class RequestAccessMemoPerIdTests
     [Theory]
     [InlineData("an id left out")]
     [InlineData("an unprovable answer")]
-    public async Task APartialBatch_StoresNothing_TheCallerGetsWhatWasRead_AndTheNextAskReadsAgain(string partial)
+    public async Task APartialBatch_RemembersEachProvenId_ForgetsOnlyTheOthers_AndTheNextAskReadsOnlyThose(string partial)
     {
+        // #2845 F-R1 (was: a partial batch stored nothing, and every later ask re-read all of it).
         var memo = new RequestAccessMemo();
         var batch = new Batch
         {
             Answer = id => id == B ? (partial == "an id left out" ? null : "unknown") : id.ToString("N")[^1..],
         };
 
-        var first = await Ask(memo, batch, A, B);
+        var first = await Ask(memo, batch, A, B, C);
 
         first[A].Should().Be("a", "the caller that read is answered with exactly what the read returned");
+        first[C].Should().Be("c");
         if (partial == "an id left out")
         {
             first.Should().NotContainKey(B);
@@ -102,11 +105,54 @@ public sealed class RequestAccessMemoPerIdTests
             first[B].Should().Be("unknown");
         }
 
-        memo.Count.Should().Be(0, $"a batch with {partial} is remembered for NO id — not even A");
+        memo.Count.Should().Be(2, $"a batch with {partial} is remembered for its proven ids (A, C), never for B");
 
         batch.Answer = id => id.ToString("N")[^1..];
-        (await Ask(memo, batch, A)).Should().Equal(new Dictionary<Guid, string> { [A] = "a" });
-        batch.Asked.Should().HaveCount(2, "A was read again: the partial batch stored nothing");
+        (await Ask(memo, batch, A, B, C)).Should().Equal(new Dictionary<Guid, string> { [A] = "a", [B] = "b", [C] = "c" });
+        batch.Asked.Should().HaveCount(2);
+        batch.Asked[1].Should().Equal(new[] { B }, "only the unproven id is read again");
+    }
+
+    [Fact]
+    public async Task ACallerWaitingOnAnUnprovenIdOfAnAnsweredBatch_ReadsOnlyThatId()
+    {
+        var memo = new RequestAccessMemo();
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var reads = new List<IReadOnlyList<Guid>>();
+
+        var owner = memo.GetOrReadManyAsync<string>(Reader, new[] { A, B }, async (ids, _) =>
+        {
+            lock (reads) reads.Add(ids.ToList());
+            await release.Task;
+            return new Dictionary<Guid, string> { [A] = "a", [B] = "unknown" };
+        }, value => value != "unknown", CancellationToken.None);
+
+        var waiter = memo.GetOrReadManyAsync<string>(Reader, new[] { A, B }, (ids, _) =>
+        {
+            lock (reads) reads.Add(ids.ToList());
+            return Task.FromResult<IReadOnlyDictionary<Guid, string>>(ids.ToDictionary(id => id, id => id.ToString("N")[^1..]));
+        }, value => value != "unknown", CancellationToken.None);
+
+        release.SetResult();
+
+        (await owner).Should().Equal(new Dictionary<Guid, string> { [A] = "a", [B] = "unknown" });
+        (await waiter).Should().Equal(new Dictionary<Guid, string> { [A] = "a", [B] = "b" },
+            "the waiter is served A (proven) and reads B itself");
+        reads.Should().HaveCount(2);
+        reads[1].Should().Equal(new[] { B }, "the waiter re-reads only the id the batch could not prove");
+    }
+
+    [Fact]
+    public async Task ACancelledBatch_StoresNothing()
+    {
+        var memo = new RequestAccessMemo();
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+
+        await FluentActions.Awaiting(() => memo.GetOrReadManyAsync<string>(Reader, new[] { A, B },
+                (_, token) => Task.FromCanceled<IReadOnlyDictionary<Guid, string>>(token), _ => true, cts.Token))
+            .Should().ThrowAsync<OperationCanceledException>();
+        memo.Count.Should().Be(0, "a cancelled batch is remembered for no id");
     }
 
     [Fact]

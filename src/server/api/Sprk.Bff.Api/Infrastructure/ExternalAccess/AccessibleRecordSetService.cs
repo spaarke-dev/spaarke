@@ -2807,8 +2807,8 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
 
     /// <summary>
     /// #2845 round 2: the root records' own flags, per id once per request (<see cref="RequestAccessMemo.GetOrReadManyAsync{T}"/>):
-    /// an id another composition of this request already read is not read again, and a batch with any unreadable id is not
-    /// remembered at all. The answer for each id is exactly <see cref="ExternalParticipationService.GetRootRecordFlagsAsync"/>'s.
+    /// an id another composition of this request already read is not read again, and an unreadable id is never remembered
+    /// (only that id is read again; #2845 F-R1). The answer for each id is exactly <see cref="ExternalParticipationService.GetRootRecordFlagsAsync"/>'s.
     /// </summary>
     private Task<IReadOnlyDictionary<Guid, RootRecordFlags>> ReadRootFlagsAsync(
         string entityType, IReadOnlyCollection<Guid> ids, CancellationToken ct)
@@ -2828,7 +2828,7 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
     /// <summary>
     /// #2845 round 2: the records' referenced organizations, per id once per request — shared between a composition's own
     /// candidates and another composition's secure ancestors (a project's or work assignment's secure matter is the matter
-    /// composition's candidate). An unresolved id is never remembered; nor is anything from a batch that had one.
+    /// composition's candidate). An unresolved id is never remembered (only that id is read again; #2845 F-R1).
     /// </summary>
     private Task<IReadOnlyDictionary<Guid, ReferencedOrganizations>> ReadReferencedOrganizationsAsync(
         string entityType, IReadOnlyCollection<Guid> ids, CancellationToken ct)
