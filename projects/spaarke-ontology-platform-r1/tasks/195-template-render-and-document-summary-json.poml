@@ -4,7 +4,7 @@
     <title>Applying a Dataverse email template fills Subject and body with finished text (no XSL, no CDATA debris); Email documents Summary shows the summary once, not raw JSON</title>
     <phase>12 Create-wizard lookups and composer (185 dev check fixes)</phase>
     <gate>startable</gate>
-    <status>in-progress</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Tags include bff-api; modifies .cs and .tsx code.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -96,6 +96,7 @@
     <tool name="dotnet">Build the BFF; filtered dotnet test on the touched classes; ArchTests</tool>
     <tool name="npm">jest, tsc and ESLint in src/client/shared/Spaarke.UI.Components</tool>
   </tools>
+  <completion>Done 2026-11-16: PR #2861 merged to master (04f5c943f9). Template render reads subjectsafehtml/safehtml with caller-formatted merge values (first non-empty field, fallback, empty); Summary step shows tldr+summary once via the shared normalizeResult; render-time setState fixed. Independent adversarial review (Opus) found 3 F (formatted values, multi-field join, stale parity test), all fixed in 3c697d68d6 and re-checked. Publish delta +1,727 bytes. Not deployed: BFF via uac-r2 next dev build; client via the next PCF/code-page deploy (owner go). Notes: notes/task-195-notes.md. rework: fix-round-2 task 195</completion>
   <execution>
     <protocol>Run through task-execute. Fresh worktree from origin/master; PR to master. Not in parallel with 194.</protocol>
   </execution>
