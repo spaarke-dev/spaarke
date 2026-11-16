@@ -252,5 +252,24 @@ Questions:
   - Open work only (400 otherwise).
   - uac-r2's conditions apply.
   - This is **014c**: branch `work/r4-014c-patch-assignee` from `fc9803419c`. An Opus implementer is running (commit only).
+- **014c implementer result: local commit `2d6ac5b312`.**
+  - **Internal semantics reproduced:**
+    - null = no reassign (there's no clear);
+    - the same assignee again still counts as a reassign;
+    - a systemuser's reassigned-by = its linked contact, omitted if it has none;
+    - open work is judged on the CURRENT status.
+  - **Order:**
+    1. shape;
+    2. readable (404/503);
+    3. edit right (G5);
+    4. `AssignEventContact` → 403;
+    5. one app-only read → 400 `reassign_not_open`;
+    6. every parent's Known set (any Unknown → 503, otherwise 400 `assignee_not_allowed`);
+    7. write.
+  - The columns come from the extracted `EventDueAssigneeWrite.AddReassignColumns` (`BuildPatchJson` calls it; a byte pin confirms the internal output is unchanged). An explicit status overwrites Reassigned.
+  - The allow-list gains 3 columns. `assignee_update_unsupported` is removed.
+  - Tests: forms 129/129 (29 failed before); event/create/internal set 1,684; ExternalAccess 6,743; ArchTests 2,635; the OBO guard 26.
+  - Leftovers: the ledger text for PATCH and the OpenAPI summary.
+  - An Opus adversarial review of the diff and the publish-size/CVE check are running.
 - **uac-r2 re-check PASS; UAC gate cleared for 014b at `67b99e2126`** (its own run: 170/170). Merge on Router + Client lint green, then send it the merge SHA for the next dev BFF candidate. #2867 is in CI; whoever merges second rebuilds.
 - **PR #2869 opened 2026-11-16** (head `9719d2f594`, base master `16771d1051`) and sent to uac-r2 for review. Next: uac-r2 OK + CI → merge (owner go) → hand uac-r2 the SHA for the dev BFF deploy → task 015 (SPA). The PATCH-assignee owner decision (a/b/c) is still open. **Publish size:** master `16771d1051` 42,349,704 B vs 014b `c28b4b1478` 42,374,782 B, **+25,078 B** (Compress-Archive, 191 files each, counts match). No CVEs (implementer check).: stated in the PR; the owner is told in this session's report.
