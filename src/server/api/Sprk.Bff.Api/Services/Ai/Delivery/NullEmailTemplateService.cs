@@ -29,6 +29,7 @@ public sealed class NullEmailTemplateService : IEmailTemplateService
     public Task<EmailTemplateResult> FetchAndRenderAsync(
         Guid templateId,
         Dictionary<string, object?> variables,
+        string? regardingEntityType,
         string dataverseUrl,
         string accessToken,
         CancellationToken cancellationToken)
@@ -42,6 +43,7 @@ public sealed class NullEmailTemplateService : IEmailTemplateService
     public Task<EmailTemplateResult> FetchAndRenderByNameAsync(
         string templateName,
         Dictionary<string, object?> variables,
+        string? regardingEntityType,
         string dataverseUrl,
         string accessToken,
         CancellationToken cancellationToken)

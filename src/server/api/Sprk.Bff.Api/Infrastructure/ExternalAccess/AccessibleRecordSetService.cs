@@ -1280,36 +1280,8 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
         }
 
         // #2845: once per request — an Unreadable (Failed) answer is never shared; the next composition reads again.
-        var memo = RequestMemo;
-        return memo is null
-            ? ReadActiveOrgMembershipsLiveAsync(contactId, ct)
-            : memo.GetOrReadAsync(
-                RequestAccessMemo.OrganizationMembershipsKey(contactId),
-                token => ReadActiveOrgMembershipsLiveAsync(contactId, token),
-                orgs => !orgs.Unreadable,
-                ct);
-    }
-
-    private async Task<ActiveOrgMemberships> ReadActiveOrgMembershipsLiveAsync(Guid contactId, CancellationToken ct)
-    {
-        try
-        {
-            return await _participations
-                .ReadOrganizationMembershipsAsync(contactId, ct).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException) when (ct.IsCancellationRequested)
-        {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex,
-                "[WF-AUTHZ] Active-organization read FAILED for contact {ContactId}. The org-expansion " +
-                "term will contribute NOTHING, and the deny veto will deny every queried candidate — " +
-                "the two consumers fail in opposite, deliberate directions (NFR-01).",
-                contactId);
-            return ActiveOrgMemberships.Failed;
-        }
+        // r4 014a: the ONE shared read (key, remember rule, fault mapping), also used by RecordContactAccessService.
+        return RequestAccessMemo.ReadOrganizationMembershipsAsync(RequestMemo, _participations, _logger, contactId, ct);
     }
 
     /// <summary>
@@ -2739,33 +2711,8 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
     private Task<RemovedMarkerRead> ReadRemovedMarkerAsync(Guid contactId, CancellationToken ct)
     {
         // #2845: once per request — only a PROVEN answer (removed, or proven not removed) is shared; Unreadable is read again.
-        var memo = RequestMemo;
-        return memo is null
-            ? ReadRemovedMarkerLiveAsync(contactId, ct)
-            : memo.GetOrReadAsync(
-                RequestAccessMemo.RemovedMarkerKey(contactId),
-                token => ReadRemovedMarkerLiveAsync(contactId, token),
-                marker => marker is RemovedMarkerRead.NotRemoved or RemovedMarkerRead.Removed,
-                ct);
-    }
-
-    private async Task<RemovedMarkerRead> ReadRemovedMarkerLiveAsync(Guid contactId, CancellationToken ct)
-    {
-        try
-        {
-            return await _identityStore.ReadRemovedMarkerAsync(contactId, ct).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException) when (ct.IsCancellationRequested)
-        {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex,
-                "[WF-AUTHZ] The removed marker of Contact {ContactId} could not be read. Failing CLOSED — it confers nothing " +
-                "on this request.", contactId);
-            return RemovedMarkerRead.Unreadable;
-        }
+        // r4 014a: the ONE shared read (key, remember rule, fault mapping), also used by RecordContactAccessService.
+        return RequestAccessMemo.ReadRemovedMarkerAsync(RequestMemo, _identityStore, _logger, contactId, ct);
     }
 
     // ── workforce contact plane: grants ∪ (standing membership IFF flag set) ∪ org expansion ─────
