@@ -17,12 +17,9 @@
 
 **Done (17/19)**: + 043 (2026-11-16). C# LSP trial: all three gates passed, but there was no gain over Grep (both 10/10); the plugin cost 1.6× as much, took 6× as long and used about 1.9 GB per session. **Owner decision: do not adopt.** Uninstalled; no repo config. Recorded in `notes/csharp-lsp-trial.md` (harness + re-evaluation triggers), `notes/decisions.md`, design.md §10 item 6, `docs/procedures/testing-and-code-quality.md` "Agent Code-Navigation Tools". These ride the next project PR (owner OK first).
 
-**Also in progress: task 040 (STANDARD)** — Learn MCP for the researcher. Committed + pushed in `cb613e3098` (`.mcp.json` `microsoft-learn` http server; `researcher.md` tool allow-list + research order + privacy line; `knowledge/README.md` approval note). Endpoint confirmed: no auth, streamable HTTP, three tools; escalation trigger not fired. Known limit (K): tool names may change → allow-list update.
-- NEXT for 040: the owner approves the `microsoft-learn` project MCP server on this machine (it loads at session start — open a new session in this worktree, or run `claude` here and approve in `/mcp`). Then: one `researcher` run whose answer cites a Learn MCP result → `notes/040-learn-mcp.md` → POML completed + TASK-INDEX ✅ → board 16 → owner OK → own PR from a temp worktree off origin/master + cherry-pick `cb613e3098` (only 040's files).
+**Done (18/19)**: + 040 (2026-11-16). Learn MCP live for the researcher (config `cb613e3098`); verification run cited three Learn pages, no auth, escalation not fired (`notes/040-learn-mcp.md`). Own PR still to open with the owner's OK: temp worktree off origin/master + cherry-pick `cb613e3098` and the 040 note/POML/researcher-memory commit (only 040's files).
 
-- 2026-11-16: the `microsoft-learn` tools now appear in this worktree's session (deferred tool list), so the per-machine approval looks done. Confirm with one researcher run.
-
-**Remaining**: 040 (above), then 090 (wrap-up incl. `/test-diet`). PR #2843 (item 4) is open and green, waiting for the owner's merge decision.
+**Remaining**: 090 (wrap-up incl. `/test-diet`), after the 040 PR decision. PR #2843 (item 4) is open and green, waiting for the owner's merge decision.
 
 **Open, reported to owner**
 - ISS-001 #2683 — closed 2026-11-15 (`71df6a2f44`); three docs outside `.claude/` still say `ActionType` (listed in `notes/defer-issues.md`).
