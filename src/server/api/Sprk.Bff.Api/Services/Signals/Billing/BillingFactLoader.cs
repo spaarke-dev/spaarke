@@ -154,6 +154,18 @@ public sealed record BillingRuleCandidate
     /// <summary><c>sprk_policyversion.sprk_consequence</c> (task 073 reads it).</summary>
     public int? Consequence { get; init; }
 
+    /// <summary>ebilling-r1 task 130e-1 (DEF-060): <c>sprk_policyversion.sprk_firmdescription</c> as stored, raw. The mapper copies it onto the
+    /// Signal only after <see cref="Sprk.Bff.Api.Services.Finance.FirmDescriptionRules"/> passes with <see cref="RuleSetName"/> and
+    /// <see cref="PolicyName"/>.</summary>
+    public string? FirmDescription { get; init; }
+
+    /// <summary>ebilling-r1 task 130e-1 (uac-r2 C4): <c>sprk_policy.sprk_name</c>, read only for the firm description's name check.</summary>
+    public string? PolicyName { get; init; }
+
+    /// <summary>ebilling-r1 task 130e-1 (uac-r2 C4): the rule set's <c>sprk_name</c>, read only for the firm description's name check; <c>null</c>
+    /// for the system policy, which has no rule set.</summary>
+    public string? RuleSetName { get; init; }
+
     /// <summary>
     /// A version that can ever be in force (task 076 K3): the policy's current version, or a version that carries an end date (a
     /// superseded one). Anything else is a draft, a rejected draft or an abandoned edit, and is never evaluated, whatever its
@@ -264,6 +276,21 @@ public sealed class BillingFactLoader
     /// <summary>ebilling-r1 task 081: <c>sprk_ruleset.sprk_procedure</c>, set on a Procedure's rule set. 082c: the legacy read's partition (a set
     /// that names a Procedure is the resolver's).</summary>
     internal const string ProcedureColumn = "sprk_procedure";
+
+    /// <summary>ebilling-r1 task 130e-1 (DEF-060): <c>sprk_policyversion.sprk_firmdescription</c>, the firm-facing description of a rule version
+    /// (Memo 2000, unsecured, EB-D-213; the cap applied is <see cref="Sprk.Bff.Api.Services.Finance.FirmDescriptionRules.MaxRunes"/>).</summary>
+    internal const string FirmDescriptionColumn = "sprk_firmdescription";
+
+    /// <summary>The <c>sprk_policyversion</c> columns the rule read selects (task 130e-1 fix round 1 F2a: every one must exist in the solution
+    /// source or be listed as pending schema, <c>PolicyVersionColumnsGuardTests</c>).</summary>
+    internal static readonly string[] VersionColumns =
+    [
+        "sprk_policy", "sprk_versionnumber", "sprk_ruletype", "sprk_rulebody", "sprk_messagetemplate", "sprk_shortheadline",
+        "sprk_consequence", "sprk_clausereference", "sprk_clauselocation", "sprk_inforcefrom", "sprk_inforceto", FirmDescriptionColumn,
+    ];
+
+    /// <summary>The primary name column of <c>sprk_ruleset</c> and <c>sprk_policy</c> (read for the firm description's name check).</summary>
+    internal const string NameColumn = "sprk_name";
 
     private const int RuleSetPublished = 659490000;
     private const int StateActive = 0;
@@ -381,6 +408,9 @@ public sealed class BillingFactLoader
             Lane = version.Lane,
             Severity = version.Severity,
             Consequence = version.Consequence,
+            FirmDescription = version.FirmDescription,
+            PolicyName = version.PolicyName,
+            RuleSetName = version.RuleSetName,
         };
     }
 
@@ -442,7 +472,7 @@ public sealed class BillingFactLoader
     {
         var setQuery = new QueryExpression(RuleSetEntity)
         {
-            ColumnSet = new ColumnSet("sprk_scope", "sprk_firm", "statuscode", RuleDomains.PolicyDomainColumn, ProcedureColumn),
+            ColumnSet = new ColumnSet("sprk_scope", "sprk_firm", "statuscode", RuleDomains.PolicyDomainColumn, ProcedureColumn, NameColumn),
             NoLock = true,
         };
         RuleDomains.AddBillingFilter(setQuery);
@@ -463,8 +493,10 @@ public sealed class BillingFactLoader
 
         // Second layer, as task 076 does: a row the query should not have returned is dropped here (a Procedure's set included: the partition).
         var sets = new Dictionary<Guid, RuleSetScope>();
+        var setNames = new Dictionary<Guid, string?>();
         foreach (var row in await AllAsync(setQuery, ct).ConfigureAwait(false))
         {
+            setNames[row.Id] = row.GetAttributeValue<string>(NameColumn);
             if (!RuleDomains.IsBillingRow(row) || row.GetAttributeValue<OptionSetValue>("statuscode")?.Value != RuleSetPublished
                 || row.GetAttributeValue<EntityReference>(ProcedureColumn) is not null)
             {
@@ -494,7 +526,7 @@ public sealed class BillingFactLoader
             {
                 ColumnSet = new ColumnSet(
                     "sprk_policycode", "sprk_currentversion", "sprk_ruleset", "sprk_lane", "sprk_severity", "sprk_enabled", "statecode",
-                    RuleDomains.PolicyDomainColumn),
+                    RuleDomains.PolicyDomainColumn, NameColumn),
                 NoLock = true,
             };
             RuleDomains.AddBillingFilter(policyQuery);
@@ -519,9 +551,7 @@ public sealed class BillingFactLoader
         {
             var versionQuery = new QueryExpression(VersionEntity)
             {
-                ColumnSet = new ColumnSet(
-                    "sprk_policy", "sprk_versionnumber", "sprk_ruletype", "sprk_rulebody", "sprk_messagetemplate", "sprk_shortheadline",
-                    "sprk_consequence", "sprk_clausereference", "sprk_clauselocation", "sprk_inforcefrom", "sprk_inforceto"),
+                ColumnSet = new ColumnSet(VersionColumns),
                 NoLock = true,
             };
             versionQuery.Criteria.AddCondition("sprk_policy", ConditionOperator.In, chunk.Cast<object>().ToArray());
@@ -555,6 +585,9 @@ public sealed class BillingFactLoader
                     Lane = policy.GetAttributeValue<OptionSetValue>("sprk_lane")?.Value,
                     Severity = policy.GetAttributeValue<OptionSetValue>("sprk_severity")?.Value,
                     Consequence = row.GetAttributeValue<OptionSetValue>("sprk_consequence")?.Value,
+                    FirmDescription = row.GetAttributeValue<string>(FirmDescriptionColumn),
+                    PolicyName = policy.GetAttributeValue<string>(NameColumn),
+                    RuleSetName = setNames.GetValueOrDefault(policy.GetAttributeValue<EntityReference>("sprk_ruleset").Id),
                 };
 
                 // K3 (task 076): a draft, a rejected draft or an abandoned edit is never in force; it is not even returned.

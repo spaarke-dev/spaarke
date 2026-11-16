@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
@@ -6,6 +7,7 @@ using Spaarke.Dataverse;
 using Sprk.Bff.Api.Services.Finance.Procedures;
 using Sprk.Bff.Api.Services.Finance.Submission;
 using Sprk.Bff.Api.Services.Signals;
+using Sprk.Bff.Api.Services.Signals.Billing;
 
 namespace Sprk.Bff.Api.Services.Finance;
 
@@ -865,8 +867,59 @@ public sealed class FirmFindingsProjection
 
     private static readonly string[] RejectionSignalColumns =
     [
-        "sprk_policyversion", "sprk_firmreason", "sprk_regardinginvoice", "sprk_regardinginvoiceline", "createdon",
+        "sprk_policyversion", "sprk_firmreason", "sprk_regardinginvoice", "sprk_regardinginvoiceline", "createdon", "sprk_evidencerefs",
     ];
+
+    /// <summary>
+    /// The reason codes a Signal's own <c>billing.reason</c> evidence lists (task 130e-1, uac-r2 K1/Q2): an allow-list parse of
+    /// <c>sprk_evidencerefs</c> that reads ONLY the <c>ref</c> of entries whose <c>kind</c> is exactly <see cref="BillingFindingSignalMapper.ReasonEvidenceKind"/>
+    /// (any other kind can carry values and is never read here). Empty for a missing, malformed or non-array value. The caller keeps a code only
+    /// when the closed catalogue (<see cref="BillingRuleCatalogue.IsRejectCapableReason"/>) knows it for the finding's type.
+    /// </summary>
+    internal static IReadOnlySet<string> ReasonCodesOf(string? evidenceJson)
+    {
+        var codes = new HashSet<string>(StringComparer.Ordinal);
+        if (string.IsNullOrWhiteSpace(evidenceJson))
+        {
+            return codes;
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(evidenceJson);
+            if (document.RootElement.ValueKind != JsonValueKind.Array)
+            {
+                return codes;
+            }
+
+            foreach (var entry in document.RootElement.EnumerateArray())
+            {
+                if (entry.ValueKind == JsonValueKind.Object
+                    && entry.TryGetProperty("kind", out var kind) && kind.ValueKind == JsonValueKind.String
+                    && string.Equals(kind.GetString(), BillingFindingSignalMapper.ReasonEvidenceKind, StringComparison.Ordinal)
+                    && entry.TryGetProperty("ref", out var code) && code.ValueKind == JsonValueKind.String
+                    && code.GetString() is { Length: > 0 } value)
+                {
+                    codes.Add(value);
+                }
+            }
+        }
+        catch (JsonException)
+        {
+            codes.Clear();
+        }
+
+        return codes;
+    }
+
+    /// <summary>
+    /// Task 130e-1 (uac-r2 K1): the override is taken only from a Signal whose own reason evidence names THIS finding's reason code, and only
+    /// when the closed catalogue knows that code for the finding's rule type. Any other Signal of the same version and line (another reason of a
+    /// merged rule) never gives this finding its text.
+    /// </summary>
+    private static bool NamesTheFindingsReason(Entity signal, FirmRejectionFindings.Finding finding) =>
+        BillingRuleCatalogue.IsRejectCapableReason(finding.RuleType, finding.ReasonCode)
+        && ReasonCodesOf(signal.GetAttributeValue<string>("sprk_evidencerefs")).Contains(finding.ReasonCode);
 
     /// <summary>
     /// A Rejected submission's outcome: the findings that rejected it, from the submission's OWN stored findings. A fault reading them, or
@@ -965,7 +1018,8 @@ public sealed class FirmFindingsProjection
                 ? null
                 : signals
                     .Where(s => s.GetAttributeValue<EntityReference>("sprk_policyversion")?.Id == version
-                        && s.GetAttributeValue<EntityReference>("sprk_regardinginvoiceline")?.Id == lineId)
+                        && s.GetAttributeValue<EntityReference>("sprk_regardinginvoiceline")?.Id == lineId
+                        && NamesTheFindingsReason(s, finding))
                     .OrderBy(s => s.GetAttributeValue<DateTime?>("createdon")).ThenBy(s => s.Id)
                     .Select(s => FirmRejectionFindings.ShownFirmReason(s.GetAttributeValue<string>("sprk_firmreason")))
                     .FirstOrDefault(r => r is not null);

@@ -669,7 +669,7 @@ public static class ProcedureAssignmentEndpoints
         {
             RuleSetOutcomeKind.Done => Results.Ok(outcome.Value),
             RuleSetOutcomeKind.Invalid => Results.Problem(
-                statusCode: StatusCodes.Status400BadRequest,
+                statusCode: outcome.StatusCode,
                 title: "Override request is not valid",
                 detail: $"{outcome.Errors.Count} problem(s) found; nothing was written.",
                 extensions: new Dictionary<string, object?>

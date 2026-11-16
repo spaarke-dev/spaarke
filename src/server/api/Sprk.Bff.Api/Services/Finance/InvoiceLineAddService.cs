@@ -1041,7 +1041,7 @@ public sealed class InvoiceLineAddService
         var original = root.ToJsonString();
         var pending = root[InvoiceCorrectionReevaluation.PendingSignalChangesMember] as JsonObject;
         var ruleChanges = (pending?["rule"] as JsonArray ?? []).OfType<JsonObject>().ToList();
-        var signals = new InvoiceRuleSignalReconciler(_lifecycle, _closeSignal, _logger, SignalLogContext.AddLine, invoiceId, field: null);
+        var signals = new InvoiceRuleSignalReconciler(_entities, _lifecycle, _closeSignal, _logger, SignalLogContext.AddLine, invoiceId, field: null);
         foreach (var change in ruleChanges)
         {
             await signals.ReconcileRuleAsync(root, change, ct).ConfigureAwait(false);

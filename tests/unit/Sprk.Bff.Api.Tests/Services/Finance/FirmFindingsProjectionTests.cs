@@ -29,6 +29,13 @@ public sealed class FirmFindingsProjectionTests
     private static readonly Guid SubmissionId = Guid.Parse("20000000-0000-4000-8000-0000000000b1");
     private static readonly Guid InvoiceId = InvoiceSubmissionPersister.InvoiceIdFor(SubmissionId);
     private static readonly Guid OtherInvoiceId = Guid.Parse("20000000-0000-4000-8000-0000000000b9");
+
+    /// <summary>The options <c>SignalWriter</c> stores <c>sprk_evidencerefs</c> with (camelCase, nulls left out).</summary>
+    private static readonly JsonSerializerOptions WriterEvidenceJson = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull,
+    };
     private static readonly Guid PolicyA = Guid.Parse("20000000-0000-4000-8000-0000000000d1");
     private static readonly Guid PolicyB = Guid.Parse("20000000-0000-4000-8000-0000000000d3");
     private static readonly Guid VersionA = Guid.Parse("20000000-0000-4000-8000-0000000000d2");
@@ -373,12 +380,18 @@ public sealed class FirmFindingsProjectionTests
         }
 
         /// <summary>A Signal raised for a rejection finding (130c): on the derived invoice (and the finding's line), by the BFF writer unless told otherwise.</summary>
+        /// <remarks>130e-1 (uac-r2 Q2): <paramref name="reasonCodes"/> are the Signal's <c>billing.reason</c> evidence lines, in the shape the
+        /// writer stores them (camelCase, nulls left out). The override is code-matched against them; a Signal with none overrides nothing.</remarks>
         public Entity AddRejectionSignal(
-            Guid version, int? lineIndex, string? firmReason, Guid? createdBy = null, Guid? onBehalfOf = null, Guid? invoice = null)
+            Guid version, int? lineIndex, string? firmReason, Guid? createdBy = null, Guid? onBehalfOf = null, Guid? invoice = null,
+            params string[] reasonCodes)
         {
             var signal = new Entity("sprk_signal", Guid.NewGuid())
             {
                 ["sprk_firmreason"] = firmReason,
+                ["sprk_evidencerefs"] = JsonSerializer.Serialize(
+                    reasonCodes.Select(code => new SignalEvidenceRef(BillingFindingSignalMapper.ReasonEvidenceKind, code, "Fact") { Text = "Reason text." }),
+                    WriterEvidenceJson),
                 ["createdon"] = new DateTime(2026, 9, 2, 0, 0, 0, DateTimeKind.Utc),
                 ["sprk_policyversion"] = new EntityReference("sprk_policyversion", version),
                 ["sprk_regardinginvoice"] = new EntityReference("sprk_invoice", invoice ?? InvoiceId),
@@ -1458,7 +1471,7 @@ public sealed class FirmFindingsProjectionTests
             Stored("ApprovedRate", VersionA, 2, values: [("line.rate", "450.00"), ("line.hours", "2.5"), ("approvedRate", "400.00")]),
             Stored("ApprovedRate", VersionA, 5, rejects: false, reason: BillingReasonCodes.RateUnresolved)));
         world.Clause = _ => FlagOnText;
-        world.AddRejectionSignal(VersionA, 2, "Your rate is above the agreed rate.");
+        world.AddRejectionSignal(VersionA, 2, "Your rate is above the agreed rate.", reasonCodes: BillingReasonCodes.RateAboveApproved);
 
         var outcome = await world.Projection().GetForSubmissionAsync(SubmissionId, invoiceDecided: true, CancellationToken.None);
         var json = JsonSerializer.Serialize(outcome);
@@ -1480,7 +1493,7 @@ public sealed class FirmFindingsProjectionTests
     {
         var world = TwoFindingsWorld();
         world.Clause = _ => FirmClauseText.None;
-        world.AddRejectionSignal(VersionA, 2, "Your rate is above the agreed rate.");
+        world.AddRejectionSignal(VersionA, 2, "Your rate is above the agreed rate.", reasonCodes: BillingReasonCodes.RateAboveApproved);
 
         var outcome = await world.Projection().GetForSubmissionAsync(SubmissionId, invoiceDecided: true, CancellationToken.None);
 
@@ -1500,7 +1513,7 @@ public sealed class FirmFindingsProjectionTests
         var world = TwoFindingsWorld();
         world.Clause = _ => FlagOnText;
         world.Procedures[0]["sprk_proceduretype"] = new OptionSetValue((int)ProcedureType.InternalStandard);
-        world.AddRejectionSignal(VersionA, 2, "Your rate is above the agreed rate.");
+        world.AddRejectionSignal(VersionA, 2, "Your rate is above the agreed rate.", reasonCodes: BillingReasonCodes.RateAboveApproved);
 
         var outcome = await world.Projection().GetForSubmissionAsync(SubmissionId, invoiceDecided: true, CancellationToken.None);
 
@@ -1541,7 +1554,7 @@ public sealed class FirmFindingsProjectionTests
     {
         var world = TwoFindingsWorld();
         world.Clause = _ => FlagOnText;
-        world.AddRejectionSignal(VersionA, 2, "Your rate is above the agreed rate.");
+        world.AddRejectionSignal(VersionA, 2, "Your rate is above the agreed rate.", reasonCodes: BillingReasonCodes.RateAboveApproved);
 
         var outcome = await world.Projection().GetForSubmissionAsync(SubmissionId, invoiceDecided: false, CancellationToken.None);
 
@@ -1775,15 +1788,15 @@ public sealed class FirmFindingsProjectionTests
         var world = TwoFindingsWorld();
         world.Clause = _ => FlagOnText;
         var user = Guid.Parse("20000000-0000-4000-8000-0000000000c9");
-        world.AddRejectionSignal(VersionA, 2, "A USER's reason.", createdBy: user);
-        world.AddRejectionSignal(VersionA, 2, "ON BEHALF reason.", onBehalfOf: user);
-        world.AddRejectionSignal(VersionA, 2, "ANOTHER INVOICE reason.", invoice: OtherInvoiceId);
-        world.AddRejectionSignal(VersionA, 3, "ANOTHER LINE reason.");
-        world.AddRejectionSignal(VersionA, null, "INVOICE-LEVEL signal on a line finding.");
-        world.AddRejectionSignal(VersionB, 2, "ANOTHER RULE reason.");
-        world.AddRejectionSignal(VersionA, 2, "   ");
-        world.AddRejectionSignal(VersionA, 2, "The writer's reason.");
-        world.AddRejectionSignal(VersionB, null, "The invoice-level reason.");
+        world.AddRejectionSignal(VersionA, 2, "A USER's reason.", createdBy: user, reasonCodes: BillingReasonCodes.RateAboveApproved);
+        world.AddRejectionSignal(VersionA, 2, "ON BEHALF reason.", onBehalfOf: user, reasonCodes: BillingReasonCodes.RateAboveApproved);
+        world.AddRejectionSignal(VersionA, 2, "ANOTHER INVOICE reason.", invoice: OtherInvoiceId, reasonCodes: BillingReasonCodes.RateAboveApproved);
+        world.AddRejectionSignal(VersionA, 3, "ANOTHER LINE reason.", reasonCodes: BillingReasonCodes.RateAboveApproved);
+        world.AddRejectionSignal(VersionA, null, "INVOICE-LEVEL signal on a line finding.", reasonCodes: BillingReasonCodes.RateAboveApproved);
+        world.AddRejectionSignal(VersionB, 2, "ANOTHER RULE reason.", reasonCodes: BillingReasonCodes.RateAboveApproved);
+        world.AddRejectionSignal(VersionA, 2, "   ", reasonCodes: BillingReasonCodes.RateAboveApproved);
+        world.AddRejectionSignal(VersionA, 2, "The writer's reason.", reasonCodes: BillingReasonCodes.RateAboveApproved);
+        world.AddRejectionSignal(VersionB, null, "The invoice-level reason.", reasonCodes: BillingReasonCodes.RequiredFieldMissing);
 
         var outcome = await world.Projection().GetForSubmissionAsync(SubmissionId, invoiceDecided: true, CancellationToken.None);
 
@@ -1799,7 +1812,7 @@ public sealed class FirmFindingsProjectionTests
     {
         var world = TwoFindingsWorld();
         world.Clause = _ => FlagOnText;
-        world.AddRejectionSignal(VersionA, 2, "The writer's reason.");
+        world.AddRejectionSignal(VersionA, 2, "The writer's reason.", reasonCodes: BillingReasonCodes.RateAboveApproved);
         if (fault)
         {
             world.WriterFault = new InvalidOperationException("writer connection down");
@@ -1835,7 +1848,7 @@ public sealed class FirmFindingsProjectionTests
     {
         var world = TwoFindingsWorld();
         world.Clause = _ => FlagOnText;
-        world.AddRejectionSignal(VersionA, 2, "The writer's reason.");
+        world.AddRejectionSignal(VersionA, 2, "The writer's reason.", reasonCodes: BillingReasonCodes.RateAboveApproved);
 
         var outcome = await world.Projection().GetForSubmissionAsync(SubmissionId, invoiceDecided: true, CancellationToken.None);
 
@@ -2463,8 +2476,8 @@ public sealed class FirmFindingsProjectionTests
     public async Task Rejected_ANonBlankFirmReason_ReplacesTheDefault_TrimmedAndCut()
     {
         var world = TwoFindingsWorld();
-        world.AddRejectionSignal(VersionA, 2, "   Your rate is above the agreed rate.  ");
-        world.AddRejectionSignal(VersionB, null, new string('x', 199) + "\U0001F600" + new string('y', 100)); // the emoji straddles the cut
+        world.AddRejectionSignal(VersionA, 2, "   Your rate is above the agreed rate.  ", reasonCodes: BillingReasonCodes.RateAboveApproved);
+        world.AddRejectionSignal(VersionB, null, new string('x', 199) + "\U0001F600" + new string('y', 100), reasonCodes: BillingReasonCodes.RequiredFieldMissing); // the emoji straddles the cut
 
         var outcome = await world.Projection().GetForSubmissionAsync(SubmissionId, invoiceDecided: true, CancellationToken.None);
 
@@ -2484,7 +2497,7 @@ public sealed class FirmFindingsProjectionTests
     public async Task Rejected_ABlankFirmReason_FallsBackToTheDefault(string? written)
     {
         var world = TwoFindingsWorld();
-        world.AddRejectionSignal(VersionA, 2, written);
+        world.AddRejectionSignal(VersionA, 2, written, reasonCodes: BillingReasonCodes.RateAboveApproved);
 
         var outcome = await world.Projection().GetForSubmissionAsync(SubmissionId, invoiceDecided: true, CancellationToken.None);
 
@@ -2565,7 +2578,7 @@ public sealed class FirmFindingsProjectionTests
             var world = new World();
             if (signalText is not null)
             {
-                world.AddRejectionSignal(VersionA, null, signalText); // the writer's Signal for this finding
+                world.AddRejectionSignal(VersionA, null, signalText, reasonCodes: BillingReasonCodes.DuplicateInvoiceNumber); // the writer's Signal for this finding
             }
 
             // The writer's real difference between the two: a withheld group stores its values without text; an in-scope one stores them with it.
@@ -2608,8 +2621,8 @@ public sealed class FirmFindingsProjectionTests
         world.AddRejectedSubmission(RejectedDocument(
             Stored("Duplicate", VersionA, null, reason: BillingReasonCodes.DuplicateInvoiceNumber),
             Stored("ApprovedRate", VersionB, 1, reason: BillingReasonCodes.RateAboveApproved)));
-        world.AddRejectionSignal(VersionA, null, "Override text for the Duplicate.");
-        world.AddRejectionSignal(VersionB, 1, "Override text for the rate.");
+        world.AddRejectionSignal(VersionA, null, "Override text for the Duplicate.", reasonCodes: BillingReasonCodes.DuplicateInvoiceNumber);
+        world.AddRejectionSignal(VersionB, 1, "Override text for the rate.", reasonCodes: BillingReasonCodes.RateAboveApproved);
 
         var outcome = await world.Projection().GetForSubmissionAsync(SubmissionId, invoiceDecided: true, CancellationToken.None);
 
@@ -2626,8 +2639,8 @@ public sealed class FirmFindingsProjectionTests
     public async Task Rejected_TheFirmReason_HasControlAndBidiCharactersStripped_AndControlOnlyFallsBack()
     {
         var world = TwoFindingsWorld();
-        world.AddRejectionSignal(VersionA, 2, DirtyReason);                       // the rate finding
-        world.AddRejectionSignal(VersionB, null, "\u0001\u202E\u2069\u200F  \u0085"); // the required-data finding: nothing printable
+        world.AddRejectionSignal(VersionA, 2, DirtyReason, reasonCodes: BillingReasonCodes.RateAboveApproved);                       // the rate finding
+        world.AddRejectionSignal(VersionB, null, "\u0001\u202E\u2069\u200F  \u0085", reasonCodes: BillingReasonCodes.RequiredFieldMissing); // the required-data finding: nothing printable
 
         var outcome = await world.Projection().GetForSubmissionAsync(SubmissionId, invoiceDecided: true, CancellationToken.None);
 
@@ -2683,5 +2696,92 @@ public sealed class FirmFindingsProjectionTests
         FirmRejectionFindings.ShownFirmReason("a\uD800b").Should().Be("a\uFFFDb", "EnumerateRunes reads a malformed lone surrogate as U+FFFD, which is kept");
         FirmRejectionFindings.ShownFirmReason("Rate\U000E0001\U000E0068\U000E0069 high.").Should().Be("Rate high.", "a hidden tag-character payload is removed whole");
         FirmRejectionFindings.ShownFirmReason("\U000E0041\U000E007F").Should().BeNull();
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════════════════════
+    // 130e-1 (DEF-060, uac-r2 Q2): the rejection override is code-matched against the Signal's billing.reason evidence
+    // ═══════════════════════════════════════════════════════════════════════════════════════════
+
+    [Fact(DisplayName = "130e-1 Q2 must-fire: a writer Signal whose billing.reason evidence names the finding's code overrides that finding's text")]
+    public async Task Rejected_TheOverride_ShowsForTheFindingsOwnReasonCode()
+    {
+        var world = TwoFindingsWorld();
+        world.AddRejectionSignal(VersionA, 2, "Your rate is above the agreed rate.", reasonCodes: BillingReasonCodes.RateAboveApproved);
+
+        var outcome = await world.Projection().GetForSubmissionAsync(SubmissionId, invoiceDecided: true, CancellationToken.None);
+
+        outcome!.Items[0].ReasonCode.Should().Be(BillingReasonCodes.RateAboveApproved);
+        outcome.Items[0].FirmReasons.Should().Equal("Your rate is above the agreed rate.");
+    }
+
+    [Theory(DisplayName = "130e-1 Q2 must-not-fire: a Signal whose evidence names another code, an unknown code, no code, or is unreadable never overrides; the table text shows")]
+    [InlineData("another")]
+    [InlineData("unknown")]
+    [InlineData("none")]
+    [InlineData("other-kind")]
+    [InlineData("malformed")]
+    [InlineData("not-an-array")]
+    public async Task Rejected_TheOverride_NeverShowsForASignalThatDoesNotNameTheFindingsCode(string evidence)
+    {
+        var world = TwoFindingsWorld();
+        var signal = world.AddRejectionSignal(VersionA, 2, "OVERRIDE that must not show.");
+        signal["sprk_evidencerefs"] = evidence switch
+        {
+            "another" => JsonSerializer.Serialize(new[] { new SignalEvidenceRef(BillingFindingSignalMapper.ReasonEvidenceKind, BillingReasonCodes.RequiredFieldMissing, "Fact") }, WriterEvidenceJson),
+            "unknown" => JsonSerializer.Serialize(new[] { new SignalEvidenceRef(BillingFindingSignalMapper.ReasonEvidenceKind, "not.a.catalogue.code", "Fact") }, WriterEvidenceJson),
+            "none" => "[]",
+            // Only billing.reason lines are read (allow-list): a different kind carrying the right code is not a reason line.
+            "other-kind" => JsonSerializer.Serialize(new[] { new SignalEvidenceRef("billing.value", BillingReasonCodes.RateAboveApproved, "Fact") }, WriterEvidenceJson),
+            "malformed" => "[{\"kind\":\"billing.reason\",\"ref\":",
+            _ => "{\"kind\":\"billing.reason\",\"ref\":\"" + BillingReasonCodes.RateAboveApproved + "\"}",
+        };
+
+        var outcome = await world.Projection().GetForSubmissionAsync(SubmissionId, invoiceDecided: true, CancellationToken.None);
+
+        outcome!.Items[0].FirmReasons.Should().Equal(FirmRejectionReasonText.Table[BillingReasonCodes.RateAboveApproved]);
+        JsonSerializer.Serialize(outcome).Should().NotContain("OVERRIDE");
+    }
+
+    [Fact(DisplayName = "130e-1 Q2: one Signal naming two codes overrides each matching finding; a finding whose code it does not name keeps the table text")]
+    public async Task Rejected_ASignalNamingSeveralCodes_OverridesOnlyTheFindingsItNames()
+    {
+        var world = new World();
+        world.AddRejectedSubmission(RejectedDocument(
+            Stored("ApprovedRate", VersionA, 2, reason: BillingReasonCodes.RateAboveApproved),
+            Stored("RequiredData", VersionB, null, reason: BillingReasonCodes.RequiredFieldMissing)));
+        world.AddRejectionSignal(VersionA, 2, "The rate text.", reasonCodes: [BillingReasonCodes.RateAboveApproved, BillingReasonCodes.RateUnresolved]);
+        world.AddRejectionSignal(VersionB, null, "The required-data text.", reasonCodes: BillingReasonCodes.RateAboveApproved); // names another code
+
+        var outcome = await world.Projection().GetForSubmissionAsync(SubmissionId, invoiceDecided: true, CancellationToken.None);
+
+        outcome!.Items.Single(i => i.ReasonCode == BillingReasonCodes.RateAboveApproved).FirmReasons.Should().Equal("The rate text.");
+        outcome.Items.Single(i => i.ReasonCode == BillingReasonCodes.RequiredFieldMissing).FirmReasons
+            .Should().Equal(FirmRejectionReasonText.Table[BillingReasonCodes.RequiredFieldMissing]);
+    }
+
+    [Fact(DisplayName = "130e-1 Q2: the reason-code reader takes only billing.reason refs, ignores every other member and kind, and reads unreadable JSON as no codes")]
+    public void ReasonCodesOf_IsAnAllowListOfBillingReasonRefs()
+    {
+        var json = "[{\"kind\":\"billing.reason\",\"ref\":\"a.code\",\"tier\":\"Fact\",\"text\":\"b.code\"},"
+            + "{\"kind\":\"billing.value\",\"ref\":\"c.code\"},{\"kind\":\"billing.reason\",\"ref\":7},{\"kind\":\"billing.reason\"},"
+            + "{\"kind\":\"BILLING.REASON\",\"ref\":\"d.code\"},\"billing.reason\",{\"kind\":\"billing.reason\",\"ref\":\"\"}]";
+
+        FirmFindingsProjection.ReasonCodesOf(json).Should().BeEquivalentTo(["a.code"]);
+        FirmFindingsProjection.ReasonCodesOf(null).Should().BeEmpty();
+        FirmFindingsProjection.ReasonCodesOf("not json").Should().BeEmpty();
+        FirmFindingsProjection.ReasonCodesOf("{\"kind\":\"billing.reason\",\"ref\":\"a.code\"}").Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "130e-1 Q3: a decided item's firm reason still comes from the Signals its decision resolved (no evidence read); an unresolved Signal never shows")]
+    public async Task DecidedItems_TakeTheFirmReasonFromTheResolvedSignalsOnly()
+    {
+        var world = new World();
+        var pair = world.AddReducedWithCitation(1, "Reason.", VersionA, "Resolved Signal's reason.");
+        world.AddSignal(null, VersionA, "UNRESOLVED Signal on the line.", pair.Line.Id, InvoiceId);
+
+        var items = (await world.Projection().GetForInvoiceAsync(InvoiceId, CancellationToken.None))!.Items;
+
+        items.Should().ContainSingle().Which.FirmReasons.Should().Equal("Resolved Signal's reason.");
+        JsonSerializer.Serialize(items).Should().NotContain("UNRESOLVED");
     }
 }

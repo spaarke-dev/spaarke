@@ -376,10 +376,12 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
         }
 
         // ── 1. Signals ──
+        // Task 130e-1 (C1): each plan entry's firm reason is re-derived from its policy version, never taken from the plan.
         var requests = new List<(SignalWriteRequest Request, string Fingerprint)>();
+        var firmReasons = new BillingFirmReasonReplay(_entities, _logger);
         foreach (var entry in stored.Plan)
         {
-            requests.Add((entry.Request, entry.Fingerprint));
+            requests.Add((await firmReasons.ApplyAsync(entry.Request, entry.HeldFallback, ct).ConfigureAwait(false), entry.Fingerprint));
         }
 
         var (systemRequests, wroteAttention) = await SystemSignalsAsync(stored, submissionId, invoiceId, ct).ConfigureAwait(false);
@@ -1326,7 +1328,7 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
             stored.InvoiceName,
             lines.ToDictionary(i => i, i => InvoiceSubmissionPersister.LineIdFor(submissionId, i)),
             lines.ToDictionary(i => i, i => InvoiceSubmissionPersister.LineNameFor(stored.TrackingNumber, i)));
-        return (BillingFindingSignalMapper.MapAll(findings, new Dictionary<Guid, BillingRuleCandidate> { [rule.PolicyVersionId] = rule }, subjects)
+        return (BillingFindingSignalMapper.MapAll(findings, new Dictionary<Guid, BillingRuleCandidate> { [rule.PolicyVersionId] = rule }, subjects, logger: _logger)
             .Select(m => (m.Request, m.Fingerprint))
             .ToList(), false);
     }
@@ -1535,7 +1537,15 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
 
     /// <summary>One stored plan entry: the request to write and what the record's fact snapshot lists.</summary>
     internal sealed record StoredPlanEntry(
-        SignalWriteRequest Request, string Fingerprint, IReadOnlyList<string> ReasonCodes, string? Consequence, string? Decision, string? Sentence);
+        SignalWriteRequest Request, string Fingerprint, IReadOnlyList<string> ReasonCodes, string? Consequence, string? Decision, string? Sentence)
+    {
+        /// <summary>
+        /// Task 130e-1 fix round 1 (O2, ontology-r1 (a)): the entry is the held group's preflight fallback, so its Signal never carries a firm
+        /// reason and the replay never re-derives one. Read from the entry's <c>heldFallback</c> member; a plan written before that member
+        /// existed is read by its template, the fallback's own fixed sentence (<see cref="BillingFindingSignalMapper.HeldSentenceNoValue"/>).
+        /// </summary>
+        public bool HeldFallback { get; init; }
+    }
 
     /// <summary>The prefix of every Duplicate reason code (<see cref="BillingReasonCodes"/>: <c>duplicate.invoice_number</c>, ...), the
     /// same key <c>SignalReadService</c> uses to tell a Duplicate.</summary>
@@ -1810,7 +1820,11 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
                 (entry["reasonCodes"] as JsonArray ?? []).Select(n => n!.GetValue<string>()).ToList(),
                 Text(entry, "consequence"),
                 Text(entry, "decision"),
-                Text(entry, "sentence"));
+                Text(entry, "sentence"))
+            {
+                HeldFallback = entry[InvoiceSubmissionPersister.HeldFallbackMember]?.GetValueKind() == JsonValueKind.True
+                    || string.Equals(request.MessageTemplate, BillingFindingSignalMapper.HeldSentenceNoValue, StringComparison.Ordinal),
+            };
         }
     }
 }

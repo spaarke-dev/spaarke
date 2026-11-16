@@ -48,7 +48,7 @@ public sealed class InvoiceRuleSignalReconcilerTests
             (_, _, _, _) => throw new InvalidOperationException("no close is expected"),
             logger);
         var reconciler = new InvoiceRuleSignalReconciler(
-            lifecycle, (_, _, _, _, _) => throw new InvalidOperationException("no close is expected"), logger, context, InvoiceId, field);
+            entities.Object, lifecycle, (_, _, _, _, _) => throw new InvalidOperationException("no close is expected"), logger, context, InvoiceId, field);
         return (reconciler, logger);
     }
 
