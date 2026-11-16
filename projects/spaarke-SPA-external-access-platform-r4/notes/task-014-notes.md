@@ -218,4 +218,15 @@ Questions:
   - **K3:** `canCreate` can be true while `creatableEventTypes` is empty. **Task 015 must hide Add event when the list is empty**; from R5, tie `canCreate` to a non-empty set.
   - **K4:** the legacy paths are now stricter, never looser.
   - Verified clean: the allow-list (enforced twice), statecode pairing, type immutability, the assignee Unknown → 503, throttled write → 503, the memo key, no PII on the wire or in logs, and the deployed SPA's compatibility.
-  - Fixes (F1, F3, F4, plus K2) sent to the implementer. **Publish size:** master `16771d1051` 42,349,704 B vs 014b `c28b4b1478` 42,374,782 B, **+25,078 B** (Compress-Archive, 191 files each, counts match). No CVEs (implementer check).: stated in the PR; the owner is told in this session's report.
+  - Fixes (F1, F3, F4, plus K2) sent to the implementer.
+- **Pass-2 fixes: local commit `9719d2f594`.**
+  - F1: GET runs the list's `HideInvoiceLinkedAsync` (:3203): hidden → uniform 404; fault → 503.
+  - F3: row probes run at most 4 in flight (`EventRowProbeConcurrency`) and are memoized per row (`EventRowRightsAsync`). Above 100 rows a systemuser gets `canEdit` false.
+  - F4: a `NotReadable` outcome → PATCH 404; the list and GET show `canEdit` false.
+  - K2: `sdap.event.name_too_long` above 850 characters, on create and PATCH.
+  - Tests: forms 92/92; create/event set 1,596; service + probe 111; ArchTests 2,635. 8 tests failed before the fixes. The timing test passed 5 repeat runs.
+  - Scoped Sonnet re-check: **no F-class findings**. Its K items:
+    - an unreadable invoice link gives 503 on GET but 404 on PATCH;
+    - the create name check runs after the right probe;
+    - no GET pin for a systemuser whose row rights are None.
+- **PR #2869 opened 2026-11-16** (head `9719d2f594`, base master `16771d1051`) and sent to uac-r2 for review. Next: uac-r2 OK + CI → merge (owner go) → hand uac-r2 the SHA for the dev BFF deploy → task 015 (SPA). The PATCH-assignee owner decision (a/b/c) is still open. **Publish size:** master `16771d1051` 42,349,704 B vs 014b `c28b4b1478` 42,374,782 B, **+25,078 B** (Compress-Archive, 191 files each, counts match). No CVEs (implementer check).: stated in the PR; the owner is told in this session's report.
