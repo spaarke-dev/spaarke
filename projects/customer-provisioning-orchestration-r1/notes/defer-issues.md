@@ -10,6 +10,15 @@
 
 ## Open (in priority order)
 
+### ISS-029 — New stamps lack the invoice-family (#2799) and message-access field locks; H7b does not check them (#2859)
+
+| Field | Value |
+|---|---|
+| Found | 2026-11-15, master review (`9fef284de0`..`ce6c241964`) |
+| Issue | https://github.com/spaarke-dev/spaarke/issues/2859 |
+| Fails without it | On a new stamp, users can write the 24 invoice-family lookups (#2799: `Set-InvoiceFamilyFieldSecurity.ps1`; not secured in SpaarkeMaster 1.3.1.0) and so re-file invoice records past the BFF's checks. The message-access lock (`Set-ThreadFlagFieldSecurity.ps1`) is described in guide §7.4 as run by provisioning, but nothing runs it. H7b checks only S14 and S26. |
+| Owner | This project: task 270 (owner go 2026-11-16). The decision between path A (lock packaged in SpaarkeMaster by uac-r2, H7b verifies) and path B (H7b writes the lock) is open. |
+
 ### ISS-028 — Operator scripts excuse the System Administrator field-security profile by name (#2725)
 
 | Field | Value |
