@@ -135,5 +135,14 @@ Questions:
     - K5: one faulted candidate doesn't cancel the others.
   - Optional: make the #2851 regression test deterministic.
   - **On a clean fix diff, uac-r2's gate go for 014b.**
+  - **Fix 1's premise doesn't hold.** `QueryActiveRowsForRootAsync` returns `DataverseWebApiClient.QueryAsync<T>`, which maps a missing or null `value` to an empty list (`DataverseWebApiClient.cs:381-382`). #2847's `ReadIdColumnAsync` parsed raw JSON instead. Caller audit (all fail closed on a throw): `ExternalGrantRevocationService:879` → null; `RecordGrantsEndpoint:105` → 503; `SetRecordShareExpiryEndpoint:155` → 500 with no change; the service → Unknown; `GrantRowWireTests.cs:161` is test-only.
+    - **uac-r2 recommends (A)**, on these terms:
+      - add `DataverseWebApiClient.QueryStrictAsync<T>` (virtual, same signature) sharing one core with a `strict` flag; a missing or null `value` → `InvalidOperationException` with a fixed message;
+      - use it only in `QueryActiveRowsForRootAsync`, and move the ~15 mocks;
+      - answer §11 in the PR;
+      - tests at client and service level, with `{"value":[]}` as the control;
+      - file a systemic issue owned by uac-r2.
+    - It rejects (B) for now: 87 callers, some without a catch, would turn into 500s. It rejects (C) because "empty" is a believable lie in a picker, but would accept (C) if the owner chooses it.
+    - **Owner chose (A) on 2026-11-16** ("Strict method, grant reader"). Sent to the implementer on uac-r2's terms. Systemic issue filed: **D-20 #2860** (owner uac-r2). `Spaarke.Dataverse` is now touched, so re-measure the publish size before the push.
   - Fixes delegated to an implementer (Opus) on `work/r4-014a-record-contact-access`. Commit only; the main session pushes once after a re-check.
 - **NFR-05 deviation** (one DI registration, requested by uac-r2 Q2.8): stated in the PR; the owner is told in this session's report.

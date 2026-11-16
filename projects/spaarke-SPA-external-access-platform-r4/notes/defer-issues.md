@@ -300,4 +300,16 @@ This under-lists, which fails closed.
 
 **Why deferred.** The service can't tell which plane a contact signs in on. Including the terms for every contact would over-list CIAM sign-ins.
 
-**Fix shape.** A way to know a contact's sign-in plane (for example a workforce-bound marker). Then add the standing-grant / derived-member terms for those contacts only. Needs uac-r2's review.
+**Fix shape (D-19).** A way to know a contact's sign-in plane (for example a workforce-bound marker). Then add the standing-grant / derived-member terms for those contacts only. Needs uac-r2's review.
+
+## D-20 — QueryAsync turns a malformed 2xx into an empty list (#2860)
+
+**Status.** Handed off → `unified-access-control-r2`, which proposed it and owns the follow-up (2026-11-16). Filed as an issue, not deferred R4 scope.
+
+**Where.** `Spaarke.Dataverse/DataverseWebApiClient.cs`, `QueryAsync<T>` (`result?.Value ?? new`). It has 87 callers.
+
+**Effect.** A 2xx response whose `value` is missing or null reads as "no rows". An access-relevant read can then give a believable wrong answer instead of an error.
+
+**R4 part.** 014a adds `QueryStrictAsync<T>` and moves only `ExternalGrantLifecycle.QueryActiveRowsForRootAsync` to it. The owner chose this option (A) on 2026-11-16.
+
+**Fix shape.** Audit the remaining callers. Move the access-relevant ones to the strict method, checking that each fails closed on a throw.
