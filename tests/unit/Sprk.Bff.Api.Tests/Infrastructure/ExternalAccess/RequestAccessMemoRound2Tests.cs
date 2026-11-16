@@ -113,7 +113,18 @@ public sealed class RequestAccessMemoRound2Tests
     [Fact]
     public async Task EveryComposedAnswer_EqualsTheSameCompositionMadeAloneInAFreshRequest()
     {
-        var shared = new World();
+        // #2845 review T2: with a wall (ContactOfA off the secure matter) and unprovable answers (a project whose flags are
+        // unreadable, a matter whose organizations are unresolved), so the veto and the fail-closed paths are compared too.
+        static World Walled()
+        {
+            var world = new World();
+            world.WalledContacts[ContactOfA] = SecureMatter;
+            world.Participations.UnreadableFlags.Add(ProjectP2);
+            world.Participations.UnresolvedReferences.Add(OpenMatter);
+            return world;
+        }
+
+        var shared = Walled();
         var service = shared.Service(shared.NewRequest());
         var together = new List<IReadOnlyDictionary<Guid, AccessRights>>();
         foreach (var entity in new[] { WorkAssignmentEntity, ProjectEntity, MatterEntity })
@@ -124,7 +135,7 @@ public sealed class RequestAccessMemoRound2Tests
         var alone = new List<IReadOnlyDictionary<Guid, AccessRights>>();
         foreach (var entity in new[] { WorkAssignmentEntity, ProjectEntity, MatterEntity })
         {
-            var fresh = new World();
+            var fresh = Walled();
             alone.Add((await fresh.Service(fresh.NewRequest()).ComposeAsync(SystemUser(UserA), entity, CancellationToken.None)).Rights);
         }
 
@@ -132,6 +143,163 @@ public sealed class RequestAccessMemoRound2Tests
         for (var i = 0; i < 3; i++)
         {
             together[i].Should().Equal(alone[i]);
+        }
+
+        together[2].Should().NotContainKey(SecureMatter, "the wall applies to the composed answer as it does alone");
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // T1. Write-time checks read live: never a per-id memo entry
+    // ─────────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task WriteTimeCheck_AfterAComposition_SeesAChangedReferencedOrganization_NotTheMemoizedOne()
+    {
+        var world = new World();
+        var service = world.Service(world.NewRequest());
+
+        // The composition fills the memo: the secure matter references no organization.
+        (await service.ComposeAsync(SystemUser(UserA), MatterEntity, CancellationToken.None)).Rights.Keys
+            .Should().Contain(SecureMatter);
+        var readsByTheComposition = world.Participations.ReferenceReadsOf(SecureMatter);
+        readsByTheComposition.Should().Be(1);
+
+        // Dataverse changes: the matter now references a walled organization.
+        world.Participations.References[SecureMatter] = new[] { Firm };
+        world.WalledOrganizations[Firm] = true;
+
+        var answer = await service.CheckGranteeNoAccessAsync(MatterEntity, SecureMatter, CiamContact, Array.Empty<Guid>(), CancellationToken.None);
+
+        answer.Should().Be(NoAccessCheckAnswer.Denied, "the write-time check reads the organizations live, never from the memo");
+        world.Participations.ReferenceReadsOf(SecureMatter).Should().Be(readsByTheComposition + 1);
+    }
+
+    [Fact]
+    public async Task WriteTimeCheck_AfterAComposition_SeesAParentReadThatNowFaults_NotTheMemoizedParent()
+    {
+        var world = new World();
+        var service = world.Service(world.NewRequest());
+
+        // The composition fills the memo with the work assignment's secure parent (read once, proven).
+        await service.ComposeAsync(SystemUser(UserA), WorkAssignmentEntity, CancellationToken.None);
+        world.Filing.ParentReadsOf(MatterEntity, SecureMatter).Should().Be(1);
+
+        world.Filing.ParentReadsFault = true;
+
+        var answer = await service.CheckGranteeNoAccessAsync(
+            WorkAssignmentEntity, WorkUnderSecureMatter, CiamContact, Array.Empty<Guid>(), CancellationToken.None);
+
+        answer.Should().Be(NoAccessCheckAnswer.Unverifiable, "the write-time walk reads the parent live; its fault is reported");
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // T3. Overlapping compositions: the join-in-flight path and a cancelled in-flight read
+    // ─────────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task CiamPlane_OverlappingCompositions_JoinTheInFlightRead_AndReadEachIdOnce()
+    {
+        var world = new World();
+        var http = world.NewRequest();
+        var service = world.Service(http);
+        world.Participations.Hold = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        world.Participations.HeldId = SecureMatter;
+
+        var composing = CiamContactPrincipalStrategy.ComposeAsync(service, CiamContact, null, null, CancellationToken.None);
+
+        // The secure matter's organizations: one composition reads them (held), the other — the work assignment's secure
+        // ancestor, or the matter's own candidate — joins that read while it is still in flight.
+        await world.Participations.HeldReadStarted.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        var memo = RequestAccessMemo.For(http.HttpContext)!;
+        await WaitUntil(() => memo.InFlightJoins >= 1, "a second composition joins the held read");
+        world.Participations.Hold.SetResult();
+
+        var composed = (await composing).Principal;
+        composed.MatterAccess.Keys.Should().BeEquivalentTo(new[] { SecureMatter });
+        composed.WorkAssignmentAccess.Keys.Should().BeEquivalentTo(new[] { WorkUnderSecureMatter });
+        world.Participations.ReferenceReadsOf(SecureMatter).Should().Be(1, "the joiner was served the in-flight read");
+    }
+
+    [Fact]
+    public async Task ACancelledInFlightRead_IsReadAgainByTheCompositionThatJoinedIt()
+    {
+        var world = new World();
+        var http = world.NewRequest();
+        var service = world.Service(http);
+        world.Participations.Hold = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        world.Participations.HeldId = SecureMatter;
+
+        // The matter composition owns the secure matter's organizations read (held) and is then cancelled by its caller.
+        using var cancelMatter = new CancellationTokenSource();
+        var matter = service.ComposeAsync(SystemUser(UserA), MatterEntity, cancelMatter.Token);
+        await world.Participations.HeldReadStarted.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        // The work-assignment composition reaches the same read (its secure ancestor) and joins it in flight.
+        var memo = RequestAccessMemo.For(http.HttpContext)!;
+        var workAssignments = service.ComposeAsync(SystemUser(UserA), WorkAssignmentEntity, CancellationToken.None);
+        await WaitUntil(() => memo.InFlightJoins >= 1, "the work-assignment composition joins the held read");
+
+        cancelMatter.Cancel();
+
+        await FluentActions.Awaiting(() => matter).Should().ThrowAsync<OperationCanceledException>();
+        var composed = await workAssignments;
+
+        var fresh = new World();
+        var alone = await fresh.Service(fresh.NewRequest()).ComposeAsync(SystemUser(UserA), WorkAssignmentEntity, CancellationToken.None);
+        composed.Rights.Should().Equal(alone.Rights, "the joiner read the cancelled id itself and answered as it would alone");
+        world.Participations.ReferenceReadsOf(SecureMatter).Should().Be(2, "the cancelled read, then the joiner's own");
+    }
+
+    [Fact]
+    public async Task ConcurrentFirstTouches_ThroughTheRealComposer_ShareOneMemo_AndAnswerAsAlone()
+    {
+        const int threadsPerType = 6;
+        var expected = new Dictionary<string, IReadOnlyDictionary<Guid, AccessRights>>();
+        foreach (var entity in new[] { ProjectEntity, MatterEntity, WorkAssignmentEntity })
+        {
+            var fresh = new World();
+            expected[entity] = (await fresh.Service(fresh.NewRequest()).ComposeAsync(SystemUser(UserA), entity, CancellationToken.None)).Rights;
+        }
+
+        for (var repetition = 0; repetition < 20; repetition++)
+        {
+            var world = new World();
+            var http = world.NewRequest(); // nothing has touched Items; the test pre-creates nothing
+            var service = world.Service(http);
+            using var barrier = new Barrier(3 * threadsPerType);
+            var entities = new[] { ProjectEntity, MatterEntity, WorkAssignmentEntity }
+                .SelectMany(entity => Enumerable.Repeat(entity, threadsPerType)).ToList();
+
+            var runs = entities.Select(entity => Task.Factory.StartNew(
+                    () =>
+                    {
+                        barrier.SignalAndWait(TimeSpan.FromSeconds(30));
+                        return service.ComposeAsync(SystemUser(UserA), entity, CancellationToken.None);
+                    },
+                    CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default).Unwrap())
+                .ToList();
+            var sets = await Task.WhenAll(runs);
+
+            for (var i = 0; i < sets.Length; i++)
+            {
+                sets[i].Rights.Should().Equal(expected[entities[i]], $"repetition {repetition}: {entities[i]} answers as it does alone");
+            }
+
+            http.HttpContext!.Items.Values.OfType<RequestAccessMemo>().Should().ContainSingle($"one memo for the request (repetition {repetition})");
+        }
+    }
+
+    private static async Task WaitUntil(Func<bool> condition, string because)
+    {
+        var deadline = DateTime.UtcNow.AddSeconds(10);
+        while (!condition())
+        {
+            if (DateTime.UtcNow > deadline)
+            {
+                throw new TimeoutException($"Timed out waiting: {because}.");
+            }
+
+            await Task.Delay(5);
         }
     }
 
@@ -201,6 +369,9 @@ public sealed class RequestAccessMemoRound2Tests
         /// <summary>A contact → the record a No Access row walls it off.</summary>
         public ConcurrentDictionary<Guid, Guid> WalledContacts { get; } = new();
 
+        /// <summary>Organizations a No Access row walls off: a candidate referencing one is denied (T1).</summary>
+        public ConcurrentDictionary<Guid, bool> WalledOrganizations { get; } = new();
+
         public ConcurrentDictionary<Guid, Guid[]> ImpersonatedMatters { get; } = new();
 
         public ConcurrentQueue<(Guid, string)> ImpersonatedReads { get; } = new();
@@ -246,7 +417,7 @@ public sealed class RequestAccessMemoRound2Tests
                 new Mock<IMembershipResolverService>(MockBehavior.Strict).Object,
                 Participations,
                 new Mock<ISubjectStandingGrantReader>(MockBehavior.Strict).Object,
-                new WallingReader(WalledContacts),
+                new WallingReader(WalledContacts, WalledOrganizations),
                 store.Object,
                 InternalSystemUsers(),
                 Filing.Object,
@@ -315,6 +486,9 @@ public sealed class RequestAccessMemoRound2Tests
 
         public int ParentReadsOf(string table, Guid id) => _reads.GetValueOrDefault(("parent", table, id));
 
+        /// <summary>When set, every parent (flag / name / Access Permission) read faults (T1).</summary>
+        public bool ParentReadsFault { get; set; }
+
         private Task<EntityCollection> RetrieveMultipleAsync(QueryExpression query)
         {
             var ids = query.Criteria.Conditions
@@ -322,6 +496,11 @@ public sealed class RequestAccessMemoRound2Tests
                 .SelectMany(c => c.Values.Select(v => (Guid)v))
                 .ToHashSet();
             var kind = query.ColumnSet.Columns.Contains("sprk_accesspermission") ? "parent" : "facts";
+            if (kind == "parent" && ParentReadsFault)
+            {
+                return Task.FromException<EntityCollection>(new HttpRequestException("parent read faulted"));
+            }
+
             foreach (var id in ids)
             {
                 _reads.AddOrUpdate((kind, query.EntityName, id), 1, (_, n) => n + 1);
@@ -347,7 +526,8 @@ public sealed class RequestAccessMemoRound2Tests
     }
 
     /// <summary>A deny-list reader that walls a contact off one record; anything else is not denied.</summary>
-    private sealed class WallingReader(ConcurrentDictionary<Guid, Guid> walled) : INoAccessListReader
+    private sealed class WallingReader(ConcurrentDictionary<Guid, Guid> walled, ConcurrentDictionary<Guid, bool> walledOrganizations)
+        : INoAccessListReader
     {
         public Task<NoAccessListResult> GetDeniedRecordsAsync(
             Guid? contactId, IReadOnlyCollection<Guid> organizationIds, IReadOnlyCollection<NoAccessCandidateRecord> candidates,
@@ -358,7 +538,8 @@ public sealed class RequestAccessMemoRound2Tests
             NoAccessSubjects subjects, IReadOnlyCollection<NoAccessCandidateRecord> candidates, CancellationToken ct = default)
         {
             var denied = candidates
-                .Where(c => subjects.Contacts.Any(contact => walled.TryGetValue(contact, out var record) && record == c.RecordId))
+                .Where(c => subjects.Contacts.Any(contact => walled.TryGetValue(contact, out var record) && record == c.RecordId)
+                            || (c.ReferencedOrganizationIds ?? Array.Empty<Guid>()).Any(walledOrganizations.ContainsKey))
                 .Select(c => c.RecordId)
                 .ToHashSet();
             return Task.FromResult(new NoAccessListResult
@@ -436,6 +617,26 @@ public sealed class RequestAccessMemoRound2Tests
             return Task.FromResult(new ActiveOrgMemberships(new[] { Firm }, new[] { Firm }, Unreadable: false));
         }
 
+        /// <summary>Ids whose own flags read as unreadable (T2).</summary>
+        public HashSet<Guid> UnreadableFlags { get; } = new();
+
+        /// <summary>Ids whose referenced organizations read as unresolved (T2).</summary>
+        public HashSet<Guid> UnresolvedReferences { get; } = new();
+
+        /// <summary>Each id's referenced organizations (default none); changeable between reads (T1).</summary>
+        public ConcurrentDictionary<Guid, Guid[]> References { get; } = new();
+
+        /// <summary>T3: when set, the FIRST referenced-organization read that names <see cref="HeldId"/> waits on this gate
+        /// (honoring its token); later reads answer at once.</summary>
+        public TaskCompletionSource? Hold { get; set; }
+
+        public Guid HeldId { get; set; }
+
+        /// <summary>Signalled when the held read has started.</summary>
+        public TaskCompletionSource HeldReadStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        private int _heldOnce;
+
         public override Task<IReadOnlyDictionary<Guid, RootRecordFlags>> GetRootRecordFlagsAsync(
             string entityType, IReadOnlyCollection<Guid> recordIds, CancellationToken ct = default)
         {
@@ -445,11 +646,13 @@ public sealed class RequestAccessMemoRound2Tests
             }
 
             IReadOnlyDictionary<Guid, RootRecordFlags> answer = recordIds.Distinct().ToDictionary(
-                id => id, id => id == SecureMatter ? new RootRecordFlags(IsSecure: true, IsRestricted: false) : RootRecordFlags.None);
+                id => id, id => UnreadableFlags.Contains(id)
+                    ? RootRecordFlags.Unreadable
+                    : id == SecureMatter ? new RootRecordFlags(IsSecure: true, IsRestricted: false) : RootRecordFlags.None);
             return Task.FromResult(answer);
         }
 
-        public override Task<IReadOnlyDictionary<Guid, ReferencedOrganizations>> GetReferencedOrganizationIdsAsync(
+        public override async Task<IReadOnlyDictionary<Guid, ReferencedOrganizations>> GetReferencedOrganizationIdsAsync(
             string entityType, IReadOnlyCollection<Guid> recordIds, CancellationToken ct = default)
         {
             foreach (var id in recordIds.Distinct())
@@ -457,9 +660,15 @@ public sealed class RequestAccessMemoRound2Tests
                 _referenceReads.AddOrUpdate(id, 1, (_, n) => n + 1);
             }
 
-            IReadOnlyDictionary<Guid, ReferencedOrganizations> answer = recordIds.Distinct()
-                .ToDictionary(id => id, _ => new ReferencedOrganizations(Array.Empty<Guid>(), Unreadable: false));
-            return Task.FromResult(answer);
+            if (Hold is { } hold && recordIds.Contains(HeldId) && Interlocked.Exchange(ref _heldOnce, 1) == 0)
+            {
+                HeldReadStarted.TrySetResult();
+                await hold.Task.WaitAsync(ct);
+            }
+
+            return recordIds.Distinct().ToDictionary(id => id, id => UnresolvedReferences.Contains(id)
+                ? ReferencedOrganizations.Unresolved
+                : new ReferencedOrganizations(References.TryGetValue(id, out var orgs) ? orgs : Array.Empty<Guid>(), Unreadable: false));
         }
     }
 }

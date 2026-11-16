@@ -26,6 +26,16 @@ namespace Sprk.Bff.Api.Infrastructure.ExternalAccess;
 // secure ancestor (a matter the matter composition already read) is not read again. Only the read-time compositions use
 // them (AccessibleRecordSetService / EffectiveRootFlags); the write-time checks read live, as before. Rule 2 applies per id:
 // a batch that throws is remembered for no id; a batch that answers is remembered for each id whose own answer is proven.
+//
+// Known limits (#2845 round 2 review; accepted, none reaches an access answer today):
+//   K1. The systemuser veto's cached secure-record subjects (SecureVetoSubjectsKey) also hold the memberships of the linked /
+//       oid-bound contacts the guard resolves, which are NOT in the key. A membership write in the request must therefore
+//       forget the memo (ExternalParticipationService.ForgetRequestAccessReads -> Clear()); no in-request
+//       membership-write-then-compose path exists today.
+//   K2. The RecordTypes cache can be re-filled after Clear() by a filing-walk read that was already in flight. They are
+//       configuration rows (sprk_recordtype_ref), and nothing writes them inside a request.
+//   K3. A read started early (concurrently, before the composition knew it would need it) that turns out unused keeps
+//       running briefly after the composition returns; it is bounded by the client timeout and its result is discarded.
 
 /// <summary>
 /// The per-request memo of the access evaluator's subject-level reads (#2845). Thread-safe: the three per-type compositions
@@ -93,11 +103,25 @@ internal sealed class RequestAccessMemo
     /// <summary>The number of remembered (or in-flight) reads. Diagnostics and tests only.</summary>
     internal int Count => _entries.Count;
 
+    private int _inFlightJoins;
+
+    /// <summary>How many times a caller joined a read that was still IN FLIGHT (rather than served a remembered answer).
+    /// Diagnostics and tests only (#2845 T3: proves concurrent compositions really overlap).</summary>
+    internal int InFlightJoins => Volatile.Read(ref _inFlightJoins);
+
     /// <summary>
     /// Forgets every remembered read. Called by each in-request writer of a remembered answer (contract: a read after a
     /// write in the same request goes back to Dataverse). A read in flight when this runs is not served to anyone who asks
     /// after it.
     /// </summary>
+    /// <remarks>
+    /// <b>Contract for membership writers (#2845 K1).</b> The cached secure-veto subjects include the memberships of contacts
+    /// that are not in their key (a systemuser's linked and oid-bound contacts), so ANY in-request write of an organization
+    /// membership, a contact link or a grant must call <c>ExternalParticipationService.ForgetRequestAccessReads</c> (which
+    /// calls this) before a later composition in the same request. No such write-then-compose path exists today.
+    /// <b>K2.</b> <see cref="RecordTypes"/> can be re-filled by a filing-walk read already in flight when this runs
+    /// (configuration rows that nothing writes in a request).
+    /// </remarks>
     internal void Clear()
     {
         _entries.Clear();
@@ -159,6 +183,8 @@ internal sealed class RequestAccessMemo
                 // Two readers used one key for different answer types: a caller bug. Never serve a mismatched answer.
                 throw new InvalidOperationException($"Request access memo key '{key}' is used for more than one answer type.");
             }
+
+            CountJoin(shared);
 
             T answer;
             try
@@ -231,6 +257,7 @@ internal sealed class RequestAccessMemo
                 }
                 else if (entry is Task<T> shared)
                 {
+                    CountJoin(shared);
                     joined.Add((id, shared));
                 }
                 else
@@ -305,6 +332,14 @@ internal sealed class RequestAccessMemo
     /// completed read (a fault throws before it stores), exactly as its per-call cache did. Emptied by <see cref="Clear"/>.
     /// </summary>
     internal ConcurrentDictionary<Guid, string?> RecordTypes { get; } = new();
+
+    private void CountJoin(Task shared)
+    {
+        if (!shared.IsCompleted)
+        {
+            Interlocked.Increment(ref _inFlightJoins);
+        }
+    }
 
     private static string PerIdKey(string readerKey, Guid id) => $"{readerKey}#{id:N}";
 
