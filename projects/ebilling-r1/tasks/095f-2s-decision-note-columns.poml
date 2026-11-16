@@ -4,7 +4,7 @@
     <title>Two additive note columns: sprk_invoice.sprk_decisionnote (internal decision note, EB-D-240) and sprk_invoicecorrection.sprk_note (EB-D-242); idempotent scripts and the deploy-order guard</title>
     <phase>5 Partner surfaces — 095f part 2 (decision notes)</phase>
     <gate>Branch from work/ebilling-r1 at the sha named in the agent brief. The dev apply runs only with the owner's OK typed in the ebilling-r1 session, with uac-r2 notices before and after.</gate>
-    <status>open</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Schema scripts and a guard; no BFF behaviour.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -37,6 +37,12 @@
     <extension>The owner ruled the decision note must not share sprk_correctionnote (EB-D-240), and the correction row has no note column (EB-D-242).</extension>
     <cost-of-doing-nothing>Decision notes would overwrite the firm's correction text, or correct/confirm notes would have nowhere to go.</cost-of-doing-nothing>
   </justification>
+
+  <notes>
+    Built 2026-11-16 on task/ebilling-095f-2s. scripts/ebilling/Deploy-EbillingDecisionNoteColumns.ps1 (two tables, one entity-scoped PublishXml, -SolutionUniqueName default SpaarkeMaster, must contain both tables); tests/scripts/Deploy-EbillingDecisionNoteColumns.Tests.ps1 (Pester 5.7.1, 32 tests, runs the module's real Add-Column against mocks); tests/Spaarke.ArchTests/InvoiceNoteColumnsGuardTests.cs (deploy-order guard with a ratcheting PendingSchema for both columns, plus the EB-D-240 external must-not-fire guard).
+    NOT done, by design: no -Apply or -Verify against any environment (the dev apply needs the owner's go in the ebilling-r1 session, with uac-r2 notices before and after); no SpaarkeMaster edit (the deploy task that syncs the solution must also delete both PendingSchema entries).
+    rework: none task 095f-2s
+  </notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
