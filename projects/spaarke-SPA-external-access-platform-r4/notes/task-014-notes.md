@@ -229,4 +229,15 @@ Questions:
     - an unreadable invoice link gives 503 on GET but 404 on PATCH;
     - the create name check runs after the right probe;
     - no GET pin for a systemuser whose row rights are None.
+- **uac-r2 review of #2869 @ `9719d2f594`: PASS-WITH-FIXES.** No path lets a caller write what it can't read, and no oracle beyond K1. Required:
+  - **F1 (medium):** GET skips the parent-table workforce ceiling `ReadChildrenOf(root, event)`, yet returns `regarding`. Fix: check each parent via `AdmitsAsync`; refusal → uniform 404.
+  - **F2:** the parents are checked from `GetDeleteTargetAsync` but served from `GetEventByIdAsync`. Fix: require the parents to set-equal, else 404.
+  - **F3:** create's assignee skips the Contact Read ceiling, which makes 400 vs 201 an oracle. Fix: require `(ContactTable, Read)` first → 403 `event_assign`.
+  - **F4 (test):** the real `GetEventByIdAsync` withholding is never exercised. Fix: HTTP-handler-double tests, and correct the `EventSelect` doc citation.
+
+  Accepted limits:
+  - **K5:** an event on a readable project and an unreadable non-secure matter shows in the project list but 404s on GET. **Decision for 015: open row details from the list row's data; use GET only for deep links.** Noted in the PR.
+  - **K6:** a systemuser with row Read None gets GET 200 but PATCH 404. Documented as deliberate: GET follows the parent rule (Q-7), PATCH follows Q1.
+
+  Fixes sent to the implementer, who pushes once they're green.
 - **PR #2869 opened 2026-11-16** (head `9719d2f594`, base master `16771d1051`) and sent to uac-r2 for review. Next: uac-r2 OK + CI → merge (owner go) → hand uac-r2 the SHA for the dev BFF deploy → task 015 (SPA). The PATCH-assignee owner decision (a/b/c) is still open. **Publish size:** master `16771d1051` 42,349,704 B vs 014b `c28b4b1478` 42,374,782 B, **+25,078 B** (Compress-Archive, 191 files each, counts match). No CVEs (implementer check).: stated in the PR; the owner is told in this session's report.
