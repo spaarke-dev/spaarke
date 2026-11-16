@@ -2009,3 +2009,30 @@ With `sprk_document` gone, all 12 sweep jobs failed with a 400 from AI Search: `
 - K3: `documentId` is now always null. The index field and `InvoiceSearchDocument.DocumentId` could later be removed with a schema change.
 
 ---
+
+### ISS-023 — BFF deploy should verify live AI Search indexes match their checked-in definitions
+
+| Field | Value |
+|---|---|
+| **Status** | Open. Interim: uac-r2's post-deploy gate on dev runs `Deploy-AllIndexes.ps1 -VerifyOnly` (2026-11-16) |
+| **Urgency** | next-round |
+| **Filed** | 2026-11-16 |
+| **Source** | ISS-022's second fault: the dev invoice index lacked task 152's fields while the BFF wrote them |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2849 |
+
+**Description**
+
+A BFF deploy can ship code that writes index fields the live index doesn't have. Task 152's code reached dev through master, but its additive fields waited for task 153's index deploy, so every invoice index write failed with a 400. Repo-side consistency is already tested; the gap is between the repo and the live service, which no offline test can see.
+
+**Entry-points**
+
+- `scripts/Deploy-BffApi.ps1`
+- `scripts/ai-search/Deploy-AllIndexes.ps1 -Environment <env> -VerifyOnly` (read-only; exit 0 = pass, 6 = drift)
+
+**Suggested fix**: call `-VerifyOnly` from `Deploy-BffApi.ps1` before the swap, with must-fire and must-not-fire controls.
+
+**Estimated effort**: about half a day.
+**Blockers**: none.
+**Related**: ISS-022 / #2844; task 153.
+
+---
