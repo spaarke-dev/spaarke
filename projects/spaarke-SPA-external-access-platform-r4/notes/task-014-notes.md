@@ -245,4 +245,12 @@ Questions:
   - Event set 1,608; ceiling families 289; ArchTests 2,635.
   - PR body updated (K5, K6).
   - Sent to uac-r2 for its fix-diff re-check.
+- **MERGED 2026-11-16 22:20Z:** #2869, squash `fc9803419c`, on the owner's go ("#2869 yes auto merge"; the PR was already clean, so it was merged directly), with Router and Client lint green. uac-r2 was sent the SHA for the next dev BFF candidate.
+- **Owner decision 2026-11-16: PATCH assignee = (a), "match internal reassign".**
+  - The write is app-only, reusing `BuildPatchJson` (Reassigned, the reassigned date, reassigned-by = the caller's contact).
+  - An explicit status in the same PATCH wins.
+  - Open work only (400 otherwise).
+  - uac-r2's conditions apply.
+  - This is **014c**: branch `work/r4-014c-patch-assignee` from `fc9803419c`. An Opus implementer is running (commit only).
+- **uac-r2 re-check PASS; UAC gate cleared for 014b at `67b99e2126`** (its own run: 170/170). Merge on Router + Client lint green, then send it the merge SHA for the next dev BFF candidate. #2867 is in CI; whoever merges second rebuilds.
 - **PR #2869 opened 2026-11-16** (head `9719d2f594`, base master `16771d1051`) and sent to uac-r2 for review. Next: uac-r2 OK + CI → merge (owner go) → hand uac-r2 the SHA for the dev BFF deploy → task 015 (SPA). The PATCH-assignee owner decision (a/b/c) is still open. **Publish size:** master `16771d1051` 42,349,704 B vs 014b `c28b4b1478` 42,374,782 B, **+25,078 B** (Compress-Archive, 191 files each, counts match). No CVEs (implementer check).: stated in the PR; the owner is told in this session's report.
