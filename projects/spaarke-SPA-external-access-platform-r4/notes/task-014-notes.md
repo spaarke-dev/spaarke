@@ -240,4 +240,9 @@ Questions:
   - **K6:** a systemuser with row Read None gets GET 200 but PATCH 404. Documented as deliberate: GET follows the parent rule (Q-7), PATCH follows Q1.
 
   Fixes sent to the implementer, who pushes once they're green.
+- **uac-r2 fixes pushed at `67b99e2126`** (`ReadEventsCeiling` per parent; parents set-equal check; `AssignEventContact` before the set lookup; real `GetEventByIdAsync` tests; K6 remarks).
+  - 12 new tests; 5 failed before the fixes.
+  - Event set 1,608; ceiling families 289; ArchTests 2,635.
+  - PR body updated (K5, K6).
+  - Sent to uac-r2 for its fix-diff re-check.
 - **PR #2869 opened 2026-11-16** (head `9719d2f594`, base master `16771d1051`) and sent to uac-r2 for review. Next: uac-r2 OK + CI → merge (owner go) → hand uac-r2 the SHA for the dev BFF deploy → task 015 (SPA). The PATCH-assignee owner decision (a/b/c) is still open. **Publish size:** master `16771d1051` 42,349,704 B vs 014b `c28b4b1478` 42,374,782 B, **+25,078 B** (Compress-Archive, 191 files each, counts match). No CVEs (implementer check).: stated in the PR; the owner is told in this session's report.
