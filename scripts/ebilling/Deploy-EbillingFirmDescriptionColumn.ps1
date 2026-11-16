@@ -5,8 +5,8 @@
 
 .DESCRIPTION
     WHY. A billing Signal's firm reason (sprk_signal.sprk_firmreason) is the one sentence the firm reads about why a rule fired. It is
-    copied from the policy version the Signal cites, so the text is fixed with that version: a published version's description cannot
-    change under a Signal that already cites it (the BFF refuses the change, ruleset.firm_description_frozen).
+    copied from the policy version the Signal cites, so the text is fixed with that version: a published version's row is never edited
+    (the BFF puts a change on a new draft version), so the description cannot change under a Signal that already cites it.
 
     THE COLUMN. sprk_policyversion.sprk_firmdescription ("Firm Description"), Memo, MaxLength 2000 (storage), optional, NOT field-secured
     (EB-D-213: unsecured, like sprk_messagetemplate). The length actually allowed is 200 characters, checked by the BFF
@@ -27,7 +27,9 @@
 
     -VERIFY (read only; exit 0 = pass, 1 = a gap, each one named): the column exists, is Memo, has MaxLength 2000 and is not field-secured.
 
-    Publish is entity-scoped (PublishXml for sprk_policyversion only, never the tenant-wide publish), and only when this run wrote metadata.
+    Publish is entity-scoped (PublishXml for sprk_policyversion only, never the tenant-wide publish). Every -Apply run publishes, also when
+    the column already exists: a first run that created the column but stopped before its publish finished (a timeout) is healed by a
+    re-run. Publishing a table that has nothing unpublished changes nothing.
 
 .PARAMETER EnvironmentUrl
     Dataverse environment URL. Defaults to $env:DATAVERSE_URL, else the dev environment.
@@ -100,6 +102,14 @@ function Select-OwningSolution($Solutions, [string]$Requested) {
         throw [EscalationException]::new("No unmanaged solution other than $($SystemSolutions -join '/') contains $Table. Pass -SolutionUniqueName (owner decision).")
     }
     throw [EscalationException]::new("More than one unmanaged solution contains ${Table}: $($candidates -join ', '). Pass -SolutionUniqueName (owner decision).")
+}
+
+# What the Publish step does (pure): 'whatif' on a dry run; otherwise 'publish' when this run wrote metadata and 'republish' when it did
+# not. A re-run publishes too, so a column a timed-out first run created but never published becomes readable. PublishXml is idempotent.
+function Get-PublishStep([bool]$DryRun, [int]$Wrote) {
+    if ($DryRun) { return 'whatif' }
+    if ($Wrote -gt 0) { return 'publish' }
+    return 'republish'
 }
 
 # Every solution that contains the table as a component. Read only.
@@ -179,17 +189,19 @@ try {
     }
 
     Write-Host "Publish" -ForegroundColor Cyan
-    $wrote = ($script:Created.Count + $script:Changed.Count) -gt 0
-    if ($DryRun) {
+    $publishStep = Get-PublishStep $DryRun ($script:Created.Count + $script:Changed.Count)
+    if ($publishStep -eq 'whatif') {
         Write-Host "  WhatIf: publish skipped" -ForegroundColor Cyan
-    } elseif (-not $wrote) {
-        Write-Host "  nothing changed - no publish" -ForegroundColor Yellow
     } else {
-        # Entity-scoped (never the tenant-wide publish).
+        # Entity-scoped (never the tenant-wide publish). Also on a re-run that wrote nothing: an earlier run's publish may not have finished.
         Invoke-Dv -Path 'PublishXml' -Method POST -Body @{
             ParameterXml = "<importexportxml><entities><entity>$Table</entity></entities></importexportxml>"
         } | Out-Null
-        Write-Host "  published $Table" -ForegroundColor Green
+        if ($publishStep -eq 'publish') {
+            Write-Host "  published $Table" -ForegroundColor Green
+        } else {
+            Write-Host "  nothing changed - published $Table again (heals a first run whose publish did not finish)" -ForegroundColor Green
+        }
     }
 }
 catch [EscalationException] {

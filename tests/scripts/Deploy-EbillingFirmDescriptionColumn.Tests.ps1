@@ -14,7 +14,7 @@ BeforeAll {
     if ($errors.Count -gt 0) { throw "The script does not parse: $($errors[0].Message)" }
 
     $wantedVariables = 'Table', 'Column', 'ColumnSchemaName', 'ColumnMaxLength', 'EntityComponentType', 'SystemSolutions', 'Description'
-    $wantedFunctions = 'New-FirmDescriptionDef', 'Select-OwningSolution', 'Get-TableSolutions', 'Get-ColumnGaps'
+    $wantedFunctions = 'New-FirmDescriptionDef', 'Select-OwningSolution', 'Get-TableSolutions', 'Get-ColumnGaps', 'Get-PublishStep'
 
     $pieces = [System.Collections.Generic.List[string]]::new()
     $found = [System.Collections.Generic.List[string]]::new()
@@ -182,6 +182,26 @@ Describe 'Get-ColumnGaps: the -Verify check (column, Memo, MaxLength 2000, not s
         $null = Get-ColumnGaps
         $script:Paths | Should -Contain "EntityDefinitions(LogicalName='sprk_policyversion')/Attributes(LogicalName='sprk_firmdescription')/Microsoft.Dynamics.CRM.MemoAttributeMetadata?`$select=MaxLength"
         ($script:Paths -join '|') | Should -BeLike '*IsSecured*'
+    }
+}
+
+Describe 'Get-PublishStep: every -Apply run publishes the table (130e-1 fix round 1 (f))' {
+    It 'publishes after a run that wrote the column' {
+        Get-PublishStep $false 1 | Should -Be 'publish'
+    }
+
+    It 'publishes again on a re-run that wrote nothing (must fire: a first run whose publish did not finish is healed)' {
+        Get-PublishStep $false 0 | Should -Be 'republish'
+    }
+
+    It 'never publishes on a dry run (must not fire)' {
+        Get-PublishStep $true 0 | Should -Be 'whatif'
+        Get-PublishStep $true 1 | Should -Be 'whatif'
+    }
+
+    It 'the script sends the PublishXml for every step but whatif (no "no publish" branch is left)' {
+        $script:Text | Should -Not -Match 'no publish'
+        $script:Text | Should -Match "if \(\`$publishStep -eq 'whatif'\)"
     }
 }
 
