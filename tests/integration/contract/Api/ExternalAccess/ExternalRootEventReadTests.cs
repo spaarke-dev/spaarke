@@ -90,7 +90,9 @@ public sealed class ExternalRootEventReadTests : IClassFixture<ExternalRootEvent
             e.SprkDuedate == "2026-10-21" && e.SprkStatus == 659490001 && e.SprkCreatedbycontactValue == CallerContact.ToString());
 
         // The query asked for THIS root through THIS root's own lookup, and no other column filtered it.
-        _fixture.Data.Urls.Should().ContainSingle().Which.Should().Contain($"{LookupOf(segment)} eq {RecordA}");
+        // (R4 task 014b: an editor's list also reads the event-type rows for creatableEventTypes — not an events query.)
+        _fixture.Data.Urls.Where(u => u.Contains("/sprk_events?", StringComparison.Ordinal))
+            .Should().ContainSingle().Which.Should().Contain($"{LookupOf(segment)} eq {RecordA}");
     }
 
     [Theory]
@@ -105,12 +107,15 @@ public sealed class ExternalRootEventReadTests : IClassFixture<ExternalRootEvent
 
         // The wire shape is the project route's: one envelope, one row shape, the creator stamps for Delete, and no
         // member that names another root (the extra lookups are read to withhold rows, never returned). R4 task 008 (uac-r2 C):
-        // plus isTask, the ONLY trace of the event type on the wire (never the lookup id).
+        // plus isTask. R4 task 014b (FR-36): plus the form fields — the type id and name, description, priority, the assignee's
+        // and creator's NAMES (never an id or email), and the row's edit affordances. Still no member that names another root.
         using var doc = JsonDocument.Parse(raw);
         var row = doc.RootElement.GetProperty("value")[0];
         row.EnumerateObject().Select(p => p.Name).Should().BeEquivalentTo(
             "sprk_eventid", "sprk_name", "sprk_duedate", "sprk_status", "createdon", "_sprk_regardingproject_value",
-            "_sprk_createdbyperson_value", "_sprk_createdbycontact_value", "isTask");
+            "_sprk_createdbyperson_value", "_sprk_createdbycontact_value", "isTask",
+            "eventTypeId", "eventTypeName", "sprk_description", "sprk_priority", "assignedToName", "createdByName",
+            "canEdit", "canChangeStatus", "allowedStatuses");
     }
 
     // =====================================================================
@@ -347,6 +352,8 @@ public sealed class ExternalRootEventReadTests : IClassFixture<ExternalRootEvent
             + ",_sprk_createdbyperson_value,_sprk_createdbycontact_value"
             // R4 task 008 (uac-r2 C): the event type, read server-side only to derive isTask.
             + ",_sprk_eventtype_ref_value"
+            // R4 task 014b (FR-36): the form fields (the assignee's name is the lookup's FormattedValue).
+            + ",sprk_description,sprk_priority,_sprk_assignedto_value"
             // Task 187: the event's other parents, whose LIVE roots the rule takes in.
             + ",_sprk_regardingagreement_value,_sprk_regardinganalysis_value,_sprk_regardingbudget_value"
             + ",_sprk_regardingcommunication_value,_sprk_regardingevent_value,_sprk_regardinginvoice_value"
