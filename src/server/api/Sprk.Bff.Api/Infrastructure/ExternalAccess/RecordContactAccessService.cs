@@ -141,7 +141,7 @@ public abstract record RecordContactAccess
 /// nothing</i>: the assignable-people route (014b) would compute it route-locally from raw grant rows and offer a walled,
 /// removed, inactive or expired contact as an assignee (uac-r2 Q2.8 asks for one owner here).</para>
 /// </remarks>
-public sealed class RecordContactAccessService
+public class RecordContactAccessService
 {
     /// <summary>
     /// The most active grant rows one answer reads — the bound <c>SetRecordShareExpiryEndpoint.MaxSharesPerRecord</c> and
@@ -209,8 +209,10 @@ public sealed class RecordContactAccessService
     /// The contacts with effective external access to <paramref name="rootId"/> of <paramref name="rootType"/> now, or
     /// <see cref="RecordContactAccess.Unknown"/> when any read could not be completed.
     /// </summary>
-    /// <remarks>Never throws for a read fault; only the caller's cancellation propagates. An empty id is a caller bug.</remarks>
-    public async Task<RecordContactAccess> GetContactsWithAccessAsync(
+    /// <remarks>Never throws for a read fault; only the caller's cancellation propagates. An empty id is a caller bug.
+    /// <c>virtual</c> per ADR-038 section 4 (substitution seam): the external event routes' contract tests (R4 task 014b) answer it
+    /// at this module boundary; the rules themselves are pinned here by <c>RecordContactAccessServiceTests</c>.</remarks>
+    public virtual async Task<RecordContactAccess> GetContactsWithAccessAsync(
         ExternalGrantRootType rootType, Guid rootId, CancellationToken ct)
     {
         if (rootId == Guid.Empty)

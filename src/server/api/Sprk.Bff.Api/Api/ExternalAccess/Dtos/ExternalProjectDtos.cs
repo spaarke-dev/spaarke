@@ -50,6 +50,49 @@ public sealed class ExternalCollectionResponse<T>
     [JsonPropertyName("canCreateTask")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public bool? CanCreateTask { get; init; }
+
+    /// <summary>
+    /// The event lists of a project, matter or work assignment only (spaarke-SPA-external-access-platform-r4 task 014b, FR-35;
+    /// owner Q-1, uac-r2 Q3): the event types the create route would accept from this caller here — every ACTIVE
+    /// <c>sprk_eventtype_ref</c> row, narrowed by <c>ExternalAccess:EventTypes:Allowed</c> when set, and for a caller whose
+    /// access Dataverse decides, only the rows Dataverse grants it AppendTo on. Empty when <see cref="CanCreate"/> is false or
+    /// the types could not be read. Omitted (<c>null</c>) on every other list. A UI affordance only: the route still decides.
+    /// </summary>
+    [JsonPropertyName("creatableEventTypes")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<ExternalEventTypeOptionDto>? CreatableEventTypes { get; init; }
+}
+
+/// <summary>One event type the caller may pick on create (R4 task 014b, FR-35): the type row's id and name, and whether an
+/// event of that type needs a due date (<c>sprk_requiredduedate</c>).</summary>
+public sealed class ExternalEventTypeOptionDto
+{
+    [JsonPropertyName("id")]
+    public string Id { get; init; } = "";
+
+    [JsonPropertyName("name")]
+    public string Name { get; init; } = "";
+
+    [JsonPropertyName("requiresDueDate")]
+    public bool RequiresDueDate { get; init; }
+}
+
+/// <summary>
+/// One person an event on a record may be assigned to (R4 task 014b, FR-37; uac-r2 Q2.7): a contact with effective external
+/// access to the record now. Name and id only — never an email or a UPN. <c>GET /{root}/{id}/assignable-people</c> is the
+/// ONLY external route that returns contact ids for this purpose.
+/// </summary>
+public sealed class ExternalAssignablePersonDto
+{
+    [JsonPropertyName("contactId")]
+    public string ContactId { get; init; } = "";
+
+    [JsonPropertyName("name")]
+    public string Name { get; init; } = "";
+
+    /// <summary>The caller's own contact.</summary>
+    [JsonPropertyName("isMe")]
+    public bool IsMe { get; init; }
 }
 
 // ---------------------------------------------------------------------------
@@ -475,6 +518,62 @@ public sealed class ExternalEventDto
     [JsonPropertyName("isTask")]
     public bool IsTask { get; init; }
 
+    // ── R4 task 014b (FR-35/FR-36; uac-r2 review of task 014, C and Q5; owner 2026-11-16 for the creator name) ─────────────
+    // Names are Dataverse FormattedValues of the lookups, never a person's id or email. See ExternalDataService.EventReadColumns.
+
+    /// <summary>The event's <c>sprk_eventtype_ref</c> row id (a type row, not a person); null when the event has no type.</summary>
+    [JsonPropertyName("eventTypeId")]
+    public string? EventTypeId { get; init; }
+
+    /// <summary>The event type's name (the lookup's FormattedValue); null when the event has no type.</summary>
+    [JsonPropertyName("eventTypeName")]
+    public string? EventTypeName { get; init; }
+
+    /// <summary><c>sprk_description</c> (plain text, up to 2,000 characters).</summary>
+    [JsonPropertyName("sprk_description")]
+    public string? SprkDescription { get; init; }
+
+    /// <summary><c>sprk_priority</c>: Low 100000000, Normal 100000001, High 100000002, Urgent 100000003.</summary>
+    [JsonPropertyName("sprk_priority")]
+    public int? SprkPriority { get; init; }
+
+    /// <summary>The assignee's name (<c>sprk_assignedto</c>'s FormattedValue). Never the contact id or email.</summary>
+    [JsonPropertyName("assignedToName")]
+    public string? AssignedToName { get; init; }
+
+    /// <summary>The creator's name (the task-030 creator stamp's FormattedValue; owner-approved 2026-11-16, uac-r2 Q5).</summary>
+    [JsonPropertyName("createdByName")]
+    public string? CreatedByName { get; init; }
+
+    /// <summary>Whether <c>PATCH /events/{id}</c> would admit this caller's edit (the SAME check, owner S-1, uac-r2 Q1). Set on
+    /// the events lists and <c>GET /events/{id}</c>; omitted elsewhere. An unanswered Dataverse question is <c>false</c>.</summary>
+    [JsonPropertyName("canEdit")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? CanEdit { get; set; }
+
+    /// <summary>Whether the PATCH would admit a status change (the same right as <see cref="CanEdit"/>, uac-r2 Q1).</summary>
+    [JsonPropertyName("canChangeStatus")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? CanChangeStatus { get; set; }
+
+    /// <summary>The <c>statuscode</c> values the PATCH would accept here: every <c>sprk_event</c> status except the current one
+    /// (owner S-3) when <see cref="CanChangeStatus"/>, else empty.</summary>
+    [JsonPropertyName("allowedStatuses")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<int>? AllowedStatuses { get; set; }
+
+    /// <summary>The record the event is regarding (kind, id, name). Set by <c>GET /events/{id}</c> only.</summary>
+    [JsonPropertyName("regarding")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public ExternalEventRegardingDto? Regarding { get; set; }
+
+    /// <summary>
+    /// R4 task 014b: the roots the event is filed under (its three regarding lookups), with their names, so the route can apply
+    /// the edit right on EVERY parent and name the regarding record. Server-side only, never on the wire.
+    /// </summary>
+    [JsonIgnore]
+    internal IReadOnlyList<ExternalEventParent> Parents { get; init; } = Array.Empty<ExternalEventParent>();
+
     /// <summary>
     /// ebilling-r1 task 130-0 fix round 1: the invoices this row links to (<c>InvoiceLinks</c>), so the route can hide a row whose
     /// invoice the caller may not see. Server-side only: internal and <see cref="JsonIgnoreAttribute"/>, never on the wire.
@@ -483,6 +582,24 @@ public sealed class ExternalEventDto
     /// </summary>
     [JsonIgnore]
     internal IReadOnlyList<Guid>? InvoiceLinks { get; init; }
+}
+
+/// <summary>A root an event is filed under (server-side only; R4 task 014b).</summary>
+internal sealed record ExternalEventParent(
+    Sprk.Bff.Api.Infrastructure.ExternalAccess.ExternalDataService.TodoRootKind Kind, Guid Id, string? Name);
+
+/// <summary>The record an event is regarding, on <c>GET /events/{id}</c> (R4 task 014b, owner Q-7).</summary>
+public sealed class ExternalEventRegardingDto
+{
+    /// <summary><c>project</c>, <c>matter</c> or <c>workassignment</c>.</summary>
+    [JsonPropertyName("kind")]
+    public string Kind { get; init; } = "";
+
+    [JsonPropertyName("id")]
+    public string Id { get; init; } = "";
+
+    [JsonPropertyName("name")]
+    public string? Name { get; init; }
 }
 
 public sealed class CreateExternalEventRequest
@@ -509,6 +626,96 @@ public sealed class CreateExternalEventRequest
     /// </summary>
     [JsonPropertyName("eventType")]
     public string? EventType { get; init; }
+
+    // Each NEW-shape member records that it was SENT (an explicit JSON null included): see IsLegacyUntypedCreate.
+    private Guid? _eventTypeId, _assignedTo;
+    private int? _priority;
+    private string? _description;
+    private bool _newShapeSent;
+
+    /// <summary>
+    /// R4 task 014b (FR-35, owner Q-2): the event's type, REQUIRED in the new shape — an ACTIVE <c>sprk_eventtype_ref</c> row the
+    /// caller may pick (<c>creatableEventTypes</c>). Missing from a new-shape body is 400 <c>sdap.event.type_required</c>; outside
+    /// the set is 400 <c>sdap.event.type_not_allowed</c>. <see cref="EventType"/> = <c>"task"</c> is still accepted in its place,
+    /// and a legacy body may still omit both (LEGACY-EVENT-CREATE-R4, see <see cref="IsLegacyUntypedCreate"/>).
+    /// </summary>
+    [JsonPropertyName("eventTypeId")]
+    public Guid? EventTypeId { get => _eventTypeId; init { _eventTypeId = value; _newShapeSent = true; } }
+
+    /// <summary>R4 task 014b (owner Q-4): Low 100000000, Normal 100000001 (the default), High 100000002, Urgent 100000003.</summary>
+    [JsonPropertyName("sprk_priority")]
+    public int? SprkPriority { get => _priority; init { _priority = value; _newShapeSent = true; } }
+
+    /// <summary>R4 task 014b: plain text, up to 2,000 characters.</summary>
+    [JsonPropertyName("sprk_description")]
+    public string? SprkDescription { get => _description; init { _description = value; _newShapeSent = true; } }
+
+    /// <summary>R4 task 014b (owner S-2, uac-r2 Q2): a contact from the record's assignable set
+    /// (<c>GET /{root}/{id}/assignable-people</c>); anyone else is 400 <c>sdap.event.assignee_not_allowed</c>.</summary>
+    [JsonPropertyName("assignedToContactId")]
+    public Guid? AssignedToContactId { get => _assignedTo; init { _assignedTo = value; _newShapeSent = true; } }
+
+    /// <summary>
+    /// LEGACY-EVENT-CREATE-R4 — the pre-014b create shapes, kept for ONE release so the SPA deployed before task 015 keeps
+    /// working against a master-built BFF. Both come out TOGETHER in R5, once task 015's SPA is live in every environment:
+    /// (1) <c>eventType: "task"</c> mapped to the Task row (<c>ExternalDataService.EventTypeIdOf</c>), and (2) this legacy
+    /// UNTYPED body. Remove every site tagged LEGACY-EVENT-CREATE-R4.
+    /// <para>The rule: a body is the NEW shape when it SENDS any of <c>eventTypeId</c>, <c>sprk_priority</c>,
+    /// <c>sprk_description</c> or <c>assignedToContactId</c> (an explicit JSON <c>null</c> counts as sent). A new-shape body must
+    /// name its type (400 <c>sdap.event.type_required</c> otherwise). A body that sends none of the four AND no
+    /// <c>eventType</c> is the legacy untyped create — the old SPA's "Event" (<c>sprk_name</c>, <c>sprk_duedate</c>,
+    /// <c>sprk_status</c> only) — and creates an untyped event exactly as before 014b.</para>
+    /// </summary>
+    [JsonIgnore]
+    public bool IsLegacyUntypedCreate => !_newShapeSent && EventType is null;
+}
+
+/// <summary>
+/// Body of <c>PATCH /api/v1/external/events/{id}</c> (R4 task 014b, FR-36): partial — a member that is not sent is not
+/// changed. Each setter records that its member was SENT (an explicit JSON <c>null</c> included), so "clear the due date"
+/// and "leave the due date" are different requests. Any member this type does not declare is ignored by the binder and never
+/// reaches Dataverse (the column allow-list is <c>ExternalDataService.BuildEventUpdatePayload</c>).
+/// </summary>
+public sealed class UpdateExternalEventRequest
+{
+    private string? _name, _dueDate, _description;
+    private int? _priority, _status;
+    private Guid? _eventTypeId, _assignedTo;
+
+    [JsonPropertyName("sprk_name")]
+    public string? SprkName { get => _name; init { _name = value; NameSent = true; } }
+
+    /// <summary>A calendar date <c>yyyy-MM-dd</c>; an explicit null clears it (400 when the event's type requires one).</summary>
+    [JsonPropertyName("sprk_duedate")]
+    public string? SprkDuedate { get => _dueDate; init { _dueDate = value; DueDateSent = true; } }
+
+    [JsonPropertyName("sprk_priority")]
+    public int? SprkPriority { get => _priority; init { _priority = value; PrioritySent = true; } }
+
+    /// <summary>Plain text up to 2,000 characters; an explicit null or empty string clears it.</summary>
+    [JsonPropertyName("sprk_description")]
+    public string? SprkDescription { get => _description; init { _description = value; DescriptionSent = true; } }
+
+    /// <summary>Any <c>sprk_event</c> statuscode (owner S-3); the matching statecode is written with it.</summary>
+    [JsonPropertyName("sprk_status")]
+    public int? SprkStatus { get => _status; init { _status = value; StatusSent = true; } }
+
+    /// <summary>Never accepted (owner S-4): any value is 400 <c>sdap.event.type_immutable</c>.</summary>
+    [JsonPropertyName("eventTypeId")]
+    public Guid? EventTypeId { get => _eventTypeId; init { _eventTypeId = value; EventTypeIdSent = true; } }
+
+    /// <summary>Not accepted yet (the assignee write path is with the owner): any value is 400
+    /// <c>sdap.event.assignee_update_unsupported</c> and nothing is written.</summary>
+    [JsonPropertyName("assignedToContactId")]
+    public Guid? AssignedToContactId { get => _assignedTo; init { _assignedTo = value; AssigneeSent = true; } }
+
+    [JsonIgnore] public bool NameSent { get; private set; }
+    [JsonIgnore] public bool DueDateSent { get; private set; }
+    [JsonIgnore] public bool PrioritySent { get; private set; }
+    [JsonIgnore] public bool DescriptionSent { get; private set; }
+    [JsonIgnore] public bool StatusSent { get; private set; }
+    [JsonIgnore] public bool EventTypeIdSent { get; private set; }
+    [JsonIgnore] public bool AssigneeSent { get; private set; }
 }
 
 // ---------------------------------------------------------------------------

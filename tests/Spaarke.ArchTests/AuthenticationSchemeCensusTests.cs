@@ -80,10 +80,14 @@ public sealed class AuthenticationSchemeCensusTests
         // caller's active firms, Read on its core record, not hidden by the (a') predicate; every refusal the same 403).
         "GET /api/v1/external/ebilling/invoices/{invoiceId:guid}/outcome",
         "GET /api/v1/external/ebilling/submissions/{submissionId:guid}/outcome",
+        // R4 task 014b (FR-35/FR-36): the event record read and edit, and the assignable-people lists, on the collaboration
+        // group behind CallerPrincipalAuthorizationFilter with workforce ceilings; every parent must be readable (uniform 404).
+        "GET /api/v1/external/events/{id:guid}",
         // ebilling-r1 task 093: the firm file routes (the four invoice document routes retired), behind CallerPrincipalAuthorizationFilter
         // and ExternalInvoiceSubmissionAuthorizationFilter's InvoiceFiles gate (every refusal the uniform 404).
         "GET /api/v1/external/invoices/{id:guid}/files",
         "GET /api/v1/external/invoices/{id:guid}/files/{fileId:guid}/content",
+        "GET /api/v1/external/matters/{id:guid}/assignable-people",   // R4 task 014b
         "GET /api/v1/external/matters/{id:guid}/documents",
         "GET /api/v1/external/matters/{id:guid}/documents/{documentId:guid}/content",
         "GET /api/v1/external/matters/{id:guid}/documents/{documentId:guid}/versions",
@@ -94,6 +98,7 @@ public sealed class AuthenticationSchemeCensusTests
         "GET /api/v1/external/notifications",
         "GET /api/v1/external/projects",
         "GET /api/v1/external/projects/{id:guid}",
+        "GET /api/v1/external/projects/{id:guid}/assignable-people",   // R4 task 014b
         "GET /api/v1/external/projects/{id:guid}/contacts",
         "GET /api/v1/external/projects/{id:guid}/documents",
         "GET /api/v1/external/projects/{id:guid}/documents/{documentId:guid}/content",
@@ -104,12 +109,14 @@ public sealed class AuthenticationSchemeCensusTests
         "GET /api/v1/external/servicerequests/{id:guid}/documents",
         "GET /api/v1/external/servicerequests/{id:guid}/documents/{documentId:guid}/content",
         "GET /api/v1/external/servicerequests/{id:guid}/documents/{documentId:guid}/versions",
+        "GET /api/v1/external/workassignments/{id:guid}/assignable-people",   // R4 task 014b
         "GET /api/v1/external/workassignments/{id:guid}/documents",
         "GET /api/v1/external/workassignments/{id:guid}/documents/{documentId:guid}/content",
         "GET /api/v1/external/workassignments/{id:guid}/documents/{documentId:guid}/versions",
         "GET /api/v1/external/workassignments/{id:guid}/events",
         "GET /api/v1/external/workassignments/{id:guid}/todos",
         "GET /api/v1/external/{root}/{id:guid}/messages",
+        "PATCH /api/v1/external/events/{id:guid}",   // R4 task 014b
         "PATCH /api/v1/external/todos/{id:guid}",
         "POST /api/v1/external/api/dataverse/fetch",
         "POST /api/v1/external/contact-grants",   // owner-allowed management route (2026-10-13, option A)

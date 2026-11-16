@@ -127,6 +127,24 @@ internal static class WorkforceRoleCeilingGate
     internal static readonly IReadOnlyList<WorkforceCeilingRequirement> CreateMatterEvent = CreateChildUnder(MatterTable, EventTable);
     internal static readonly IReadOnlyList<WorkforceCeilingRequirement> CreateWorkAssignmentEvent = CreateChildUnder(WorkAssignmentTable, EventTable);
 
+    /// <summary><c>GET /events/{id}</c> (R4 task 014b): Read on the event (its parents are read only to gate it).</summary>
+    internal static readonly IReadOnlyList<WorkforceCeilingRequirement> ReadEvent = Set((EventTable, AccessRights.Read));
+
+    /// <summary><c>PATCH /events/{id}</c> (R4 task 014b): Write on the event.</summary>
+    internal static readonly IReadOnlyList<WorkforceCeilingRequirement> UpdateEvent = Set((EventTable, AccessRights.Write));
+
+    /// <summary><c>GET /{root}/{id}/assignable-people</c> (R4 task 014b): the record and the contacts it returns (names).</summary>
+    internal static readonly IReadOnlyList<WorkforceCeilingRequirement> ReadProjectAssignablePeople = Set(
+        (ProjectTable, AccessRights.Read), (ContactTable, AccessRights.Read));
+    internal static readonly IReadOnlyList<WorkforceCeilingRequirement> ReadMatterAssignablePeople = Set(
+        (MatterTable, AccessRights.Read), (ContactTable, AccessRights.Read));
+    internal static readonly IReadOnlyList<WorkforceCeilingRequirement> ReadWorkAssignmentAssignablePeople = Set(
+        (WorkAssignmentTable, AccessRights.Read), (ContactTable, AccessRights.Read));
+
+    /// <summary>An event create that names an assignee (R4 task 014b, uac-r2 gate F3): it asks the record's assignable set, so the
+    /// role reads contacts — the contact half of the assignable-people sets above. Asked by the handler, not the route.</summary>
+    internal static readonly IReadOnlyList<WorkforceCeilingRequirement> AssignEventContact = Set((ContactTable, AccessRights.Read));
+
     /// <summary><c>PATCH /todos/{id}</c>: Write on the to-do (its root is read only to gate it; nothing of it is returned).</summary>
     internal static readonly IReadOnlyList<WorkforceCeilingRequirement> UpdateTodo = Set((TodoTable, AccessRights.Write));
 
