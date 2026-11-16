@@ -145,6 +145,12 @@ public class SpeRevokeMatcherTests
                 It.IsAny<int?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<ExternalGrantRow> { grantRow });
 
+        // The grant core's root-row read (the remaining-grants overlap check) is strict (#2852).
+        mock.Setup(c => c.QueryStrictAsync<ExternalGrantRow>(
+                GrantEntitySet, It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<int?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<ExternalGrantRow> { grantRow });
+
         mock.Setup(c => c.UpdateAsync(
                 GrantEntitySet, It.IsAny<Guid>(), It.IsAny<object>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
@@ -864,6 +870,13 @@ public class SpeRevokeMatcherTests
             // Interprets the production filter from ExternalGrantKey.ToActiveRowsFilter rather than
             // returning a fixed set — otherwise the task-010 isolation assertion below would be vacuous.
             Dataverse.Setup(c => c.QueryAsync<ExternalGrantRow>(
+                    GrantEntitySet, It.IsAny<string>(), It.IsAny<string>(),
+                    It.IsAny<int?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((string _, string? filter, string? _, int? _, int? _, CancellationToken _) =>
+                    MatchGrantRows(filter));
+
+            // The grant core's root-row read (the remaining-grants overlap check) is strict (#2852).
+            Dataverse.Setup(c => c.QueryStrictAsync<ExternalGrantRow>(
                     GrantEntitySet, It.IsAny<string>(), It.IsAny<string>(),
                     It.IsAny<int?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync((string _, string? filter, string? _, int? _, int? _, CancellationToken _) =>

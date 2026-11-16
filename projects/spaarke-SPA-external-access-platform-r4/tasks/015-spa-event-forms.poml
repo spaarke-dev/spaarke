@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="015" project="spaarke-SPA-external-access-platform-r4">
+  <metadata>
+    <title>SPA: Add event with type/priority/assignee/description; Event record template (child record + deep link) with Edit and Change status (FR-35, FR-36, FR-37)</title>
+    <phase>1 Record template and actions (post-E2E rework, round 3)</phase>
+    <gate>014 merged (its contract is the source of truth; build against the merged DTOs, not the design)</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>.tsx in the SPA; a new record template; nested child dialogs; hide-don't-disable rules</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Reuses the record template, ChildRecordModal, FormModal and recordAccess patterns already in the SPA</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches EventsCalendar.tsx, recordTemplates.ts and web-api-client.ts</parallel-reason>
+    <deps>014</deps>
+    <tags>frontend, react, fluent-ui, testing</tags>
+    <estimated-effort>1.5-2 days</estimated-effort>
+  </metadata>
+
+  <prompt>Owner retest round 3 (2026-11-15) and decisions Q-1–Q-8, S-1–S-4: an Event Type lookup and the missing fields on Add event, and an Event record that opens, links, edits and changes status.</prompt>
+  <goal>Add event offers Event Type (required, from `creatableEventTypes`), Due Date (required by type), Priority, Assigned To (from assignable people) and Description; clicking an Events row opens a `sprk_event` record as a child record over the current record; `?record=sprk_event:{id}` opens it top-level; the toolbar shows Edit, Change status, Copy link and Delete exactly when the BFF allows each.</goal>
+
+  <context>
+    <background>Design: `notes/event-forms-design.md` §2–§3. SPA today: `EventsCalendar.tsx` create dialog `:388-575` (Event/Task radio `:547`), rows `:326-382` (no open); `web-api-client.ts` events `:114`, `:558-773` (`createRootEvent` `:718`, no update). Child record: `record/ChildRecordModal.tsx`, `record/childRecord.ts` (task 013, one level). Deep link: `RecordDeepLink` + `RouterRecordOpener` (project CLAUDE.md §6, task 007 gotcha: `?record=` is the app-wide deep link). Templates: `record/recordTemplates.ts`; access helpers: `record/recordAccess.ts` (add to it, don't re-derive). Child dialogs: `useChildDialog`; tests wait ~350 ms after open and install `tests/jsdomLayout.ts` (D-8).</background>
+    <relevant-files>
+      <file role="modify">src/client/external-spa/src/components/EventsCalendar.tsx</file>
+      <file role="modify">src/client/external-spa/src/api/web-api-client.ts</file>
+      <file role="modify">src/client/external-spa/src/components/record/recordTemplates.ts</file>
+      <file role="modify">src/client/external-spa/src/components/record/recordAccess.ts</file>
+      <file role="create">src/client/external-spa/src/components/record/actions/EventEditAction.tsx</file>
+      <file role="create">src/client/external-spa/src/components/record/actions/EventStatusAction.tsx</file>
+      <file role="canonical-reference">src/client/external-spa/src/components/record/ChildRecordModal.tsx</file>
+      <file role="canonical-reference">src/client/external-spa/src/components/record/actions/SubmitInvoiceAction.tsx</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="FR-35">The Event/Task radio is removed; Event Type is a required dropdown fed only by `creatableEventTypes`; no client-side type list or GUID literal. Due Date is required when the chosen type says `requiresDueDate`.</constraint>
+    <constraint source="FR-36 / owner S-1, S-3, S-4">Edit and Change status show only when the row's `canEdit` / `canChangeStatus` is true (hide, don't disable); Change status lists `allowedStatuses`; Event Type is read-only in Edit. No action the UI offers may answer 403.</constraint>
+    <constraint source="FR-37">Assigned To options come only from `assignable-people`, "Me" first; asked only when the caller may create or edit; a failed load hides the field with a short message, never blocks create.</constraint>
+    <constraint source="FR-03 / ADR-050">Edit and Change status are SprkModal FormModal children of the event record; Cancel left; Esc follows the modal standard (project CLAUDE.md §3, 2026-11-11). One child-record level: an event opened as a child does not open a further record from its Regarding link (it navigates the top-level record instead, or is plain text — pick one, test it, note it).</constraint>
+    <constraint source="FR-36 deep link">`?record=sprk_event:{id}` uses `GET /events/{id}`; a 404 shows the existing uniform not-found state.</constraint>
+    <constraint source="FR-05">Toolbar icons from the icon map only.</constraint>
+    <constraint source="ADR-038">KEEP paths; banned mocks per ADR-038.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-SPA-external-access-platform-r4/notes/event-forms-design.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r4/CLAUDE.md</file>
+      <file>.claude/constraints/pcf.md</file>
+      <file>docs/standards/MODAL-DESIGN-SYSTEM.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Client types and functions for the 014 contract (list fields, `creatableEventTypes`, get event, patch event, assignable people).</step>
+    <step order="2">Add event dialog: type dropdown, required-by-type due date, priority, assignee, description; remove the radio.</step>
+    <step order="3">`sprk_event` record template; open from an Events row via ChildRecordModal; deep link.</step>
+    <step order="4">Edit and Change status child dialogs; refresh the record and the parent Events list after save.</step>
+    <step order="5">Tests: type required; due date by type; options only from the BFF; View Only sees no Edit/Change status; Collaborate sees both; focus returns to the row; one-level rule; deep link reader vs not-found.</step>
+    <step order="6">typecheck, lint, vitest, build; TASK-INDEX, POML status, drift check, notes.</step>
+  </steps>
+
+  <justification>
+    <existing>EventsCalendar create dialog; record template + ChildRecordModal; FormModal child-dialog hosts in `record/actions/`.</existing>
+    <extension>Yes: a seventh template config entry and two action hosts following the existing pattern; no new shared component.</extension>
+    <cost-of-doing-nothing>Events cannot be typed, opened, linked, edited or completed by external users (owner Q-1–Q-7).</cost-of-doing-nothing>
+  </justification>
+
+  <acceptance-criteria>
+    <criterion testable="true">Add event cannot be submitted without a type; the type options are exactly `creatableEventTypes`; a type that requires a due date blocks submit without one.</criterion>
+    <criterion testable="true">A created event shows its type, priority, assignee and description in the list and on its record.</criterion>
+    <criterion testable="true">Clicking an Events row opens the event over the record (the record stays mounted); Close returns focus to the row; `?record=sprk_event:{id}` opens it top-level, and a non-readable id shows the not-found state.</criterion>
+    <criterion testable="true">A View Only caller sees no Edit or Change status; a Collaborate caller sees both; Edit shows the type read-only; Change status offers `allowedStatuses`; after a save the record and the Events list show the new values.</criterion>
+    <criterion testable="true">typecheck, lint, vitest and build pass.</criterion>
+  </acceptance-criteria>
+
+  <notes></notes>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

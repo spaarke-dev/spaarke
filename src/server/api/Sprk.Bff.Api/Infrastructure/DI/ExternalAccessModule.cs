@@ -686,6 +686,13 @@ public static class ExternalAccessModule
         // HttpClient (scoped), so this composer is scoped too.
         services.AddScoped<IAccessibleRecordSetService, AccessibleRecordSetService>();
 
+        // spaarke-SPA-external-access-platform-r4 task 014a (uac-r2 review of task 014, Q2.8: one owner, beside the evaluator)
+        // — the contacts with EFFECTIVE external access to one root record, over the evaluator's own readers (grant rows,
+        // effective flags, organization members and memberships, contact state, removed marker, the No Access check). The
+        // assignable-people route (014b) consumes it. Concrete (ADR-010): its tests run it over the readers' existing seams.
+        // Scoped, like the evaluator it calls; every dependency is registered unconditionally (ADR-032).
+        services.AddScoped<RecordContactAccessService>();
+
         // Cross-tenant CIAM Graph client (app-only) for admin-initiated external-user provisioning
         // (task 022; consumed by the provisioner in task 025). Singleton: caches a per-authority MSAL
         // confidential client (one Key Vault certificate fetch); stateless otherwise.

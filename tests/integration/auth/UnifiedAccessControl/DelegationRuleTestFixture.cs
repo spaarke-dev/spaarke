@@ -201,9 +201,10 @@ public class DelegationRuleTestFixture : WorkspaceTestFixture
                 .ReturnsAsync((string _, Guid id, string? _, CancellationToken _) =>
                     _grantRows.TryGetValue(id, out var row) ? row : null);
 
-            // Task 099a: GET /record-grants' one row read — answered only for a seeded (or faulting) root.
+            // Task 099a: GET /record-grants' one row read — answered only for a seeded (or faulting) root. The grant core's
+            // root-row read is strict (#2852: QueryStrictAsync).
             clientMock
-                .Setup(c => c.QueryAsync<ExternalGrantRow>(
+                .Setup(c => c.QueryStrictAsync<ExternalGrantRow>(
                     GrantEntitySet, It.Is<string?>(f => AnswersRootGrantQuery(f)), It.IsAny<string?>(),
                     It.IsAny<int?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync((string _, string? filter, string? select, int? top, int? _, CancellationToken _) =>

@@ -1,55 +1,39 @@
 # Current Task State
 
-> **Last Updated**: 2026-11-15 (context checkpoint)
+> **Last Updated**: 2026-11-15 (checkpoint after the Event forms decisions)
 > **Format**: CURRENT state only. Each checkpoint REWRITES this file. Target ≤ 10 KB.
 
 ## Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
 |-------|-------|
-| **Task** | 021: invoice Files section on ebilling 093's routes (FR-13). FULL, sonnet high, directional. The owner pulled it ahead of 020/022/023 on 2026-11-15. |
-| **Step** | 021 ✅ in PR #2840 (CI running). Waiting on the owner go to merge |
-| **Status** | 021 committed and pushed; notes in notes/task-021-notes.md; vitest 1715, build OK |
-| **Next Action** | On the owner go: merge #2840 after CI and send the SHA to uac-r2 and ebilling-r1. uac-r2 swaps the BFF (master with #2839 + #2840) on its owner go and sends "BFF live"; I deploy the SPA straight after (rollback 04dbd8df05), then the owner retests invoice Files. NO SPA deploy between merging #2840 and the BFF swap. |
+| **Task** | **014** IN PROGRESS: BFF Event forms (FR-35–FR-37), `tasks/014-bff-event-forms.poml`. FULL, opus high, two adversarial passes |
+| **Step** | Step 1 (gates): master merged at `5eb257a40d` (incl. #2847); conflict check clean; proposal + Q1–Q6 sent to uac-r2 2026-11-16 — **waiting on its review; no BFF code before it** |
+| **Status** | 018 ✅ (retest round 3 passed). Event forms: owner decided Q-1–Q-8, S-1–S-4; spec FR-35–FR-37 written; tasks 014/015/016 created; 036 superseded |
+| **Next Action** | On uac-r2's review: record it verbatim in `notes/task-014-notes.md`, adjust the design if asked, then load knowledge (Step 4) and implement. Phase 2 (020/022/023/024/028) still open |
 
-## Task 021 facts
-- **Contract (not on master; ebilling PR #2839, head `3b33a8d8cc`, local ref `pr/2839`):**
-  - `Services/Finance/Files/StoredFileContracts.cs:628/632`
-  - `Api/ExternalAccess/ExternalInvoiceSubmissionEndpoints.cs:106` (list), `:122` (content), handlers `:148`/`:169`
-  - `Api/Finance/StoredFileEndpoints.cs:31/34`, 409 body `:479`, 503 body `:491`
-  - `ExternalProjectDtos.cs:13` (envelope `value`)
-- **Gate deviation (owner, 2026-11-15):** the POML escalation said "routes not on master → stop". The owner chose to build against #2839 because the agreed order is that 021 merges first.
-- **Files (uncommitted):**
-  - `api/web-api-client.ts` (client; `'invoices'` removed from DocumentRoot)
-  - new `components/record/sections/InvoiceFilesList.tsx`
-  - `FilesSection.tsx`
-  - `DocumentLibrary.tsx` (invoices noun and onUploadRightChange removed; formatFileSize/formatDate exported; `saveBlobAs` extracted)
-  - `RecordDetailFields.tsx`
-  - filesUpload plumbing removed from DocumentsSection, RecordTemplateModal, recordAccess and recordTemplate.types
-  - `ChildRecordModal.tsx` (comment)
-  - tests: new `tests/InvoiceFiles.test.tsx` (25); updated DetailDocumentsDelete, DetailEventsRoots, RecordTemplateAccess, RecordTemplateSections. 7 invoice-documents tests deleted (not KEEP paths).
-- **Review K items:**
-  - the shared download guard silently ignores a second row's click;
-  - deploy-order and mock mode (no /files mock) give a 404 message;
-  - a 403 `workforce_baseline_unavailable` shows "no access".
-
-## Deploy chain (strict)
-1. 021 is merged to master.
-2. uac-r2 swaps the dev BFF with 093 (#2839 merged), with its owner's go.
-3. The SPA deploys right after.
-
-uac-r2 holds any 093 BFF until I confirm 021 is merged. **No SPA deploy between merging 021 and that swap.**
+## Event forms (decided 2026-11-15)
+- Design and every file:line: `notes/event-forms-design.md`. Spec: FR-35 (create), FR-36 (event record: read, deep link, edit, status), FR-37 (assignable people); FR-23 superseded; out-of-scope line narrowed (events are editable).
+- **Owner decisions:**
+  - all active event types the caller has AppendTo on (fallback config: Task + Reminder);
+  - type required, and **not editable** after create;
+  - priority, assignee and description on create;
+  - edit and **any** status by Collaborate/Full Access on every parent;
+  - assignees = contacts granted on the record (incl. me);
+  - deep link yes;
+  - assignee column `sprk_assignedto`.
+  - Q-9 (existing type-less events) not answered → leave as "—".
+- **BFF builds on `RequestAccessMemo`** (`Infrastructure/ExternalAccess/RequestAccessMemo.cs`, #2847):
+  - get-or-add with a `remember` predicate; own key prefix covering every input;
+  - lock `context.Items` inside a composition;
+  - clear on any in-request access-state write (the PATCH).
 
 ## Live state
-- **Dev BFF:** `5a9b687a0b` (master `2747977f47` + mcp spike). BFF rollback `0173e1486e`.
-- **Dev SPA:** master `04dbd8df05` (run 43735968667; tasks 012/013). SPA rollback: `2747977f47`.
-- The owner is retesting 012/013 on dev (no results yet).
-
-## Done this stretch
-- 012 ✅ `5a0d8e8771` and 013 ✅ (#2837, merged `04dbd8df05`), deployed.
-- ebilling consumer review of 093 done. Agreed in principle to their optional `correction` wizard prop (conditions sent).
+- **Dev BFF:** **`f451e0874d`** (master `ce6c241964` incl. #2845 latency fix + ebilling #2846, + spike), live about 00:45Z 2026-11-16. Rollback: BFF `aa7d6345f3` alone (still pairs with the current SPA). uac-r2's 30-minute gate with request timings is running.
+- **Dev SPA:** master `c1eb6e4a8e` (run 43747335450; tasks 012/013/021). SPA rollback `04dbd8df05` only together with BFF rollback `5a9b687a0b` (the old SPA calls the retired invoice-document routes).
 
 ## Open items / issues
-- D-13 #2800, D-14 #2809, D-15 #2810, D-16 #2823 (silent DataGrid failures).
+- D-17 #2845: fixed by uac-r2 (#2847 merged); expect each external request to drop from 3–4 s once `f451e0874d` is live. Ask the owner to recheck speed.
+- D-13 #2800, D-14 #2809, D-15 #2810, D-16 #2823.
 - Older owner questions: D-1 #2686, D-2 #2687, D-4 #2693, #2786 backfill (uac-r2).
-- 018 is closed only after the owner retest results (`notes/task-018-notes.md`).
+- Preview not loading = by design until task 022 (FR-14).
