@@ -1970,7 +1970,7 @@ K1 (ontology): a D-96 re-file across core records withholds line Duplicates perm
 
 | Field | Value |
 |---|---|
-| **Status** | In Progress: fix merged (#2846, c88ed7105a), live on dev BFF f451e0874d, sweep ran 2026-11-16 (12 queued, 0 failed). All 12 jobs then failed on a second fault: the live dev index lacks task 152's fields (see "Second fault"). Closes when the jobs run clean |
+| **Status** | Done (2026-11-16). Fix #2846 (c88ed7105a) live on dev BFF f451e0874d; the dev index got task 152's fields; the sweep re-run indexed all 12 invoices (uac-r2: 12 "Indexed invoice" traces, 12 distinct invoices, no exceptions). #2844 closed |
 | **Urgency** | now |
 | **Filed** | 2026-11-15, by uac-r2 (its 30-minute gate on dev BFF aa7d6345f3) |
 | **Source** | `InvoiceIndexingJobHandler` faulted on dev at 18:51:58Z |
@@ -2002,7 +2002,7 @@ With `sprk_document` gone, all 12 sweep jobs failed with a 400 from AI Search: `
 
 - Fix (needs the owner's go here; uac-r2 notified before and after): run `Deploy-AllIndexes.ps1 -Environment dev -Indexes invoices-index` (an in-place PUT, no recreate), then `-VerifyOnly`, then re-run the sweep.
 - Guard for live vs code: no offline test can see the live index. uac-r2's post-deploy gate now runs `-VerifyOnly` across all indexes; the stronger place, inside `Deploy-BffApi.ps1`, is ISS-023 / #2849.
-- Done 2026-11-16 ~01:16Z on the owner's go: the index PUT succeeded in place, `-VerifyOnly` passes, and the sweep re-run queued 12 with 0 failed (correlation `ebilling-iss022-sweep-20261116T011634Z`). Waiting on uac-r2 to confirm the jobs ran clean.
+- Done 2026-11-16 ~01:16Z on the owner's go: the index PUT succeeded in place, `-VerifyOnly` passes, and the sweep re-run queued 12 with 0 failed (correlation `ebilling-iss022-sweep-20261116T011634Z`). uac-r2 confirmed all 12 ran clean: 12 handler traces for 12 distinct invoices, sum(itemCount) 12, no exceptions. The search dependency telemetry shows only 3 rows because it under-counts the SDK calls; the handler traces are the authoritative count.
 
 **Known limits**
 
