@@ -2363,7 +2363,7 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
     };
 
     /// <summary>
-    /// The Signal plan (notes section 5; part D): the billing findings mapped by <see cref="BillingFindingSignalMapper.MapAll(BillingEvaluationResult, BillingSignalSubjects, IReadOnlyList{FindingDecision}, SubmissionEvaluationKind?)"/>
+    /// The Signal plan (notes section 5; part D): the billing findings mapped by <see cref="BillingFindingSignalMapper.MapAll(BillingEvaluationResult, BillingSignalSubjects, IReadOnlyList{FindingDecision}, SubmissionEvaluationKind?, ILogger?)"/>
     /// with 073's decisions and the outcome kind (the deciding reason is the primary one; a held Reject group carries the Held line; under a
     /// Blocked outcome a deciding group is presented as held for review), one entry per
     /// (policy, subject): the merged, scrubbed request (headline, lane, severity, template, facts, evidence), its rendered sentence, its

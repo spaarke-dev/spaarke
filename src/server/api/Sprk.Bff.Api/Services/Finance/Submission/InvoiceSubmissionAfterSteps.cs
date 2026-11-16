@@ -376,10 +376,12 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
         }
 
         // ── 1. Signals ──
+        // Task 130e-1 (C1): each plan entry's firm reason is re-derived from its policy version, never taken from the plan.
         var requests = new List<(SignalWriteRequest Request, string Fingerprint)>();
+        var firmReasons = new BillingFirmReasonReplay(_entities, _logger);
         foreach (var entry in stored.Plan)
         {
-            requests.Add((entry.Request, entry.Fingerprint));
+            requests.Add((await firmReasons.ApplyAsync(entry.Request, ct).ConfigureAwait(false), entry.Fingerprint));
         }
 
         var (systemRequests, wroteAttention) = await SystemSignalsAsync(stored, submissionId, invoiceId, ct).ConfigureAwait(false);

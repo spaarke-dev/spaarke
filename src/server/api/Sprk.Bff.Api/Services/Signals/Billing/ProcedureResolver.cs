@@ -133,6 +133,15 @@ public sealed record ResolvedPolicyVersion
     /// <summary><c>sprk_basedonversion</c>: on a record rule's version, the base rule's version it was copied from.</summary>
     public Guid? BasedOnVersionId { get; init; }
 
+    /// <summary>ebilling-r1 task 130e-1 (DEF-060): <c>sprk_firmdescription</c> as stored, raw (validated by the mapper before any use).</summary>
+    public string? FirmDescription { get; init; }
+
+    /// <summary>ebilling-r1 task 130e-1 (uac-r2 C4): the policy's <c>sprk_name</c>, for the firm description's name check only.</summary>
+    public string? PolicyName { get; init; }
+
+    /// <summary>ebilling-r1 task 130e-1 (uac-r2 C4): the rule set's <c>sprk_name</c>, for the firm description's name check only.</summary>
+    public string? RuleSetName { get; init; }
+
     /// <summary><c>createdon</c> (UTC): which episode of a change a record rule's version belongs to. Internal: it is not part of the snapshot.</summary>
     internal DateTime? CreatedOn { get; init; }
 
@@ -913,7 +922,7 @@ public static class ProcedureResolver
         var sets = (await ReadProcedureSetsAsync(entities, procedureIds, ct).ConfigureAwait(false))
             .Concat(chain.Count == 0 ? [] : await ReadRecordSetsAsync(entities, chain, firmId, ct).ConfigureAwait(false))
             .ToList();
-        var policies = await ReadPoliciesAsync(entities, sets.Select(s => s.Id).ToList(), ct).ConfigureAwait(false);
+        var policies = await ReadPoliciesAsync(entities, sets.Select(s => s.Id).ToList(), sets.GroupBy(s => s.Id).ToDictionary(g => g.Key, g => g.First().Name), ct).ConfigureAwait(false);
         var policyVersions = await ReadPolicyVersionsAsync(entities, policies, ct).ConfigureAwait(false);
         return new ProcedureRows(firmId, chain, overrides, procedures, versions, sets, policies, policyVersions);
     }
@@ -1136,7 +1145,7 @@ public static class ProcedureResolver
         {
             var query = new QueryExpression(BillingFactLoader.RuleSetEntity)
             {
-                ColumnSet = new ColumnSet(BillingFactLoader.ProcedureColumn, RuleDomains.PolicyDomainColumn, "statecode"),
+                ColumnSet = new ColumnSet(BillingFactLoader.ProcedureColumn, RuleDomains.PolicyDomainColumn, "statecode", BillingFactLoader.NameColumn),
                 NoLock = true,
             };
             RuleDomains.AddBillingFilter(query);
@@ -1149,7 +1158,7 @@ public static class ProcedureResolver
                     && row.GetAttributeValue<EntityReference>(BillingFactLoader.ProcedureColumn)?.Id is { } procedureId
                     && chunk.Contains(procedureId))
                 {
-                    sets.Add(new RuleSetRow(row.Id, procedureId, null, null));
+                    sets.Add(new RuleSetRow(row.Id, procedureId, null, null, row.GetAttributeValue<string>(BillingFactLoader.NameColumn)));
                 }
             }
         }
@@ -1164,7 +1173,7 @@ public static class ProcedureResolver
         {
             ColumnSet = new ColumnSet(CoreTables.Concat(new[]
             {
-                ScopeColumn, FirmColumn, BillingFactLoader.ProcedureColumn, RuleDomains.PolicyDomainColumn, "statecode",
+                ScopeColumn, FirmColumn, BillingFactLoader.ProcedureColumn, RuleDomains.PolicyDomainColumn, "statecode", BillingFactLoader.NameColumn,
             }).ToArray()),
             NoLock = true,
         };
@@ -1191,20 +1200,23 @@ public static class ProcedureResolver
                 continue;
             }
 
-            sets.Add(new RuleSetRow(row.Id, null, link, firm));
+            sets.Add(new RuleSetRow(row.Id, null, link, firm, row.GetAttributeValue<string>(BillingFactLoader.NameColumn)));
         }
 
         return sets;
     }
 
-    private static async Task<IReadOnlyList<PolicyRow>> ReadPoliciesAsync(IGenericEntityService entities, IReadOnlyList<Guid> setIds, CancellationToken ct)
+    private static async Task<IReadOnlyList<PolicyRow>> ReadPoliciesAsync(
+        IGenericEntityService entities, IReadOnlyList<Guid> setIds, IReadOnlyDictionary<Guid, string?> setNames, CancellationToken ct)
     {
         var policies = new List<PolicyRow>();
         foreach (var chunk in setIds.Distinct().Order().Chunk(BillingFactLoader.MaxInValues))
         {
             var query = new QueryExpression(BillingFactLoader.PolicyEntity)
             {
-                ColumnSet = new ColumnSet(PolicyCodeColumn, RuleSetColumn, "sprk_lane", "sprk_severity", "sprk_enabled", "statecode", RuleDomains.PolicyDomainColumn),
+                ColumnSet = new ColumnSet(
+                    PolicyCodeColumn, RuleSetColumn, "sprk_lane", "sprk_severity", "sprk_enabled", "statecode", RuleDomains.PolicyDomainColumn,
+                    BillingFactLoader.NameColumn),
                 NoLock = true,
             };
             RuleDomains.AddBillingFilter(query);
@@ -1223,7 +1235,8 @@ public static class ProcedureResolver
                     && !string.Equals(code, BillingRuleCatalogue.SystemPolicyCode, StringComparison.Ordinal))
                 {
                     policies.Add(new PolicyRow(row.Id, code, setId,
-                        row.GetAttributeValue<OptionSetValue>("sprk_lane")?.Value, row.GetAttributeValue<OptionSetValue>("sprk_severity")?.Value));
+                        row.GetAttributeValue<OptionSetValue>("sprk_lane")?.Value, row.GetAttributeValue<OptionSetValue>("sprk_severity")?.Value,
+                        row.GetAttributeValue<string>(BillingFactLoader.NameColumn), setNames.GetValueOrDefault(setId)));
                 }
             }
         }
@@ -1245,7 +1258,8 @@ public static class ProcedureResolver
                 ColumnSet = new ColumnSet(
                     "sprk_policy", "sprk_versionnumber", "sprk_ruletype", "sprk_rulebody", "sprk_messagetemplate", "sprk_shortheadline",
                     "sprk_consequence", "sprk_clausereference", "sprk_clauselocation", "sprk_inforcefrom", RuleSetService.ProcedureVersionColumn,
-                    RuleSetService.PublishStateColumn, ProcedureAssignmentService.BasedOnVersionColumn, CreatedOnColumn),
+                    RuleSetService.PublishStateColumn, ProcedureAssignmentService.BasedOnVersionColumn, CreatedOnColumn,
+                    BillingFactLoader.FirmDescriptionColumn),
                 NoLock = true,
             };
             query.Criteria.AddCondition("sprk_policy", ConditionOperator.In, chunk.Cast<object>().ToArray());
@@ -1280,6 +1294,9 @@ public static class ProcedureResolver
                     ProcedureVersionId = row.GetAttributeValue<EntityReference>(RuleSetService.ProcedureVersionColumn)?.Id,
                     BasedOnVersionId = row.GetAttributeValue<EntityReference>(ProcedureAssignmentService.BasedOnVersionColumn)?.Id,
                     CreatedOn = row.GetAttributeValue<DateTime?>(CreatedOnColumn),
+                    FirmDescription = row.GetAttributeValue<string>(BillingFactLoader.FirmDescriptionColumn),
+                    PolicyName = policy.Name,
+                    RuleSetName = policy.RuleSetName,
                 });
             }
         }
@@ -1383,6 +1400,9 @@ internal sealed record ProcedureVersionRow(Guid Id, Guid ProcedureId, int Number
 }
 
 /// <summary>A Procedure's rule set (<see cref="ProcedureId"/>) or a chain record's record-scoped set (<see cref="Record"/>, <see cref="FirmId"/>).</summary>
-internal sealed record RuleSetRow(Guid Id, Guid? ProcedureId, CoreRecordLink? Record, Guid? FirmId);
+/// <param name="Name">ebilling-r1 task 130e-1: the set's <c>sprk_name</c>, for the firm description's name check only.</param>
+internal sealed record RuleSetRow(Guid Id, Guid? ProcedureId, CoreRecordLink? Record, Guid? FirmId, string? Name = null);
 
-internal sealed record PolicyRow(Guid Id, string Code, Guid RuleSetId, int? Lane, int? Severity);
+/// <param name="Name">ebilling-r1 task 130e-1: the policy's <c>sprk_name</c>, for the firm description's name check only.</param>
+/// <param name="RuleSetName">ebilling-r1 task 130e-1: its rule set's <c>sprk_name</c>, for the same check.</param>
+internal sealed record PolicyRow(Guid Id, string Code, Guid RuleSetId, int? Lane, int? Severity, string? Name = null, string? RuleSetName = null);

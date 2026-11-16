@@ -181,6 +181,14 @@ public partial class InvoiceSubmissionAfterStepsTests
         public Action<string>? OnSignalRead { get; set; }
 
         public Mock<IGenericEntityService> Entities { get; } = new(MockBehavior.Strict);
+
+        /// <summary>130e-1: the firm description each policy version holds now (none when absent). The replay reads it, never the plan.</summary>
+        public Dictionary<Guid, string> FirmDescriptions { get; } = [];
+        public static readonly Guid FirmPolicyRow = Guid.Parse("130e0000-0000-4000-8000-00000000a001");
+        public static readonly Guid FirmRuleSetRow = Guid.Parse("130e0000-0000-4000-8000-00000000a002");
+        public const string FirmPolicyName = "Travel Expenses";
+        public const string FirmRuleSetName = "Outside Counsel Guidelines";
+
         public DecisionRecordWriterTests.Harness Records { get; }
         public BillingDecisionRecorder Recorder { get; }
         public Logger Log { get; } = new();
@@ -206,6 +214,21 @@ public partial class InvoiceSubmissionAfterStepsTests
             // R7: a read returns only the columns it asks for (as Dataverse does), so a column the code needs must be in its column list.
             Entities.Setup(e => e.RetrieveAsync(FinanceBaseValues.SubmissionEntity, Submission, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync((string _, Guid _, string[] columns, CancellationToken _) => Copy(Row, columns));
+            // 130e-1 (C1): the replay re-reads each plan entry's policy version for its firm description, then its policy and rule set names.
+            Entities.Setup(e => e.RetrieveAsync("sprk_policyversion", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((string _, Guid id, string[] _, CancellationToken _) => new Entity("sprk_policyversion", id)
+                {
+                    ["sprk_firmdescription"] = FirmDescriptions.GetValueOrDefault(id),
+                    ["sprk_policy"] = new EntityReference("sprk_policy", FirmPolicyRow),
+                });
+            Entities.Setup(e => e.RetrieveAsync("sprk_policy", FirmPolicyRow, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(() => new Entity("sprk_policy", FirmPolicyRow)
+                {
+                    ["sprk_name"] = FirmPolicyName,
+                    ["sprk_ruleset"] = new EntityReference("sprk_ruleset", FirmRuleSetRow),
+                });
+            Entities.Setup(e => e.RetrieveAsync("sprk_ruleset", FirmRuleSetRow, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(() => new Entity("sprk_ruleset", FirmRuleSetRow) { ["sprk_name"] = FirmRuleSetName });
             Entities.Setup(e => e.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync((QueryExpression q, CancellationToken _) => q.EntityName switch
                 {

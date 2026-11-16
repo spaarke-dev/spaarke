@@ -177,9 +177,11 @@ public sealed partial class InvoiceSubmissionRerun
         try
         {
             // ── 1. Rule Signals: the committed plan (EB-D-187: a new hold raises its Signal through the writer, D-13 key) ──
+            // Task 130e-1 (C1): each plan entry's firm reason is re-derived from its policy version, never taken from the plan.
+            var firmReasons = new BillingFirmReasonReplay(_entities, _logger);
             foreach (var entry in stored.Plan)
             {
-                await WriteSignalAsync(run, entry.Request, entry.Fingerprint, ct).ConfigureAwait(false);
+                await WriteSignalAsync(run, await firmReasons.ApplyAsync(entry.Request, ct).ConfigureAwait(false), entry.Fingerprint, ct).ConfigureAwait(false);
             }
 
             // ── 2 and 3. The system Signals (049's policy read) ──
@@ -284,7 +286,7 @@ public sealed partial class InvoiceSubmissionRerun
     }
 
     /// <summary>
-    /// The committed system findings under <paramref name="rule"/>, one Signal per (policy, subject) (<see cref="BillingFindingSignalMapper.MapAll(IReadOnlyList{BillingFinding}, IReadOnlyDictionary{Guid, BillingRuleCandidate}, BillingSignalSubjects, IReadOnlyList{FindingDecision}, SubmissionEvaluationKind?)"/>,
+    /// The committed system findings under <paramref name="rule"/>, one Signal per (policy, subject) (<see cref="BillingFindingSignalMapper.MapAll(IReadOnlyList{BillingFinding}, IReadOnlyDictionary{Guid, BillingRuleCandidate}, BillingSignalSubjects, IReadOnlyList{FindingDecision}, SubmissionEvaluationKind?, ILogger?)"/>,
     /// the subjects as 049 names them). Each line's is written; an open system Signal on a line of the invoice with no finding left is closed
     /// ConditionCleared (record-free, as <c>SignalReevaluationJob</c> and 101 close a cleared condition). The invoice's group is written when
     /// it is not empty; when it is empty the shared Signal is left to <see cref="CloseSharedSignalIfClearedAsync"/>.
