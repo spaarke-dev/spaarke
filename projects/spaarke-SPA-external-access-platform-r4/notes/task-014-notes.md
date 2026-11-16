@@ -199,4 +199,23 @@ Questions:
     - `canCreateTask` now comes from the creatable set;
     - `RecordContactAccessService` is unsealed, with a virtual method, for test stubs.
 - **Compatibility fix requested:** the deployed SPA sends no type for "Event", so a blanket `type_required` would break it until 015 ships. Legacy untyped and `"task"` bodies keep working for one release; `type_required` applies to new-shape bodies only.
-- **New readers reported to uac-r2** for the #2867 gate decision: `GetEventTypesAsync`, `GetEventByIdAsync`, and the writer `UpdateEventAsync`.: stated in the PR; the owner is told in this session's report.
+- **New readers reported to uac-r2** for the #2867 gate decision: `GetEventTypesAsync`, `GetEventByIdAsync`, and the writer `UpdateEventAsync`.
+  - **uac-r2's decision: R4 wires nothing.** #2867 adds `DataverseThrottlingHandler` to `ExternalDataService`'s HttpClient registration (one line), and 014b's reads are then gated automatically.
+  - The handler holds a permit for one send only, so it can't deadlock with the memo or the fan-out. The probe path stays ungated.
+  - It retries GET/HEAD only. A throttled PATCH comes back as 429/503 and must map to a failure (503), never to success. A test for this was requested from the implementer.
+  - Registration edits shouldn't conflict (ReadableColumns vs `.AddHttpMessageHandler`); whoever merges second resolves any conflict.
+- **Follow-up commit `c28b4b1478`:**
+  - **Legacy rule `IsLegacyUntypedCreate` (`ExternalProjectDtos.cs:659`):** a body with none of `eventTypeId`/`sprk_priority`/`sprk_description`/`assignedToContactId` and no `eventType` creates an untyped event, after all the pre-014b checks, with the pre-014b payload. A new-shape body without a type → 400 `type_required`. Both legacy paths are tagged `LEGACY-EVENT-CREATE-R4`, to remove in R5.
+  - Assignee root-only comment added.
+  - Throttled PATCH: no code change was needed (`UpdateEventAsync` maps non-success responses to `DataverseUnavailableException` → 503). Pinned for 429/503/500/412 → 503 and 404 → the uniform 404, sent once.
+  - Tests: forms 80/80; the create-related set 1,584/1,584; ArchTests 2,635. 10 tests failed before the fix.
+- **Adversarial pass 2 (Opus)** on `16771d1051..c28b4b1478`: **NOT READY**.
+  - **F1:** `GET /events/{id}` skips the invoice-link hiding the list applies (`HideInvoiceLinkedAsync`), so a hidden event is readable by id, and GET and PATCH disagree.
+  - **F3:** per-row `canEdit` costs one sequential Dataverse rights probe per event for systemusers (up to 5,000).
+  - **F4:** a systemuser with row Read None gets 403 from PATCH, not the uniform 404 (Q1 table).
+  - **K1:** unknown vs denied differ in timing and under a chain fault (the delete-own precedent).
+  - **K2:** a too-long name becomes a Dataverse 400 → 503. A fix was requested anyway.
+  - **K3:** `canCreate` can be true while `creatableEventTypes` is empty. **Task 015 must hide Add event when the list is empty**; from R5, tie `canCreate` to a non-empty set.
+  - **K4:** the legacy paths are now stricter, never looser.
+  - Verified clean: the allow-list (enforced twice), statecode pairing, type immutability, the assignee Unknown → 503, throttled write → 503, the memo key, no PII on the wire or in logs, and the deployed SPA's compatibility.
+  - Fixes (F1, F3, F4, plus K2) sent to the implementer. **Publish size:** master `16771d1051` 42,349,704 B vs 014b `c28b4b1478` 42,374,782 B, **+25,078 B** (Compress-Archive, 191 files each, counts match). No CVEs (implementer check).: stated in the PR; the owner is told in this session's report.
