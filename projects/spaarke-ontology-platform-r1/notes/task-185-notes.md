@@ -41,3 +41,11 @@ The deploy log has the entry, the hashes and the D-126 clobber check (`notes/dep
 - **A5 locked record:** defect in eBilling's `CreateInvoiceWizard.tsx:139`: it passes `initialRecord` but not `lockedRecord`, so a record launch shows a one-item radio list. Size S.
 - **A4 Assigned To:** the Console To Do widget "+" opens the in-app wizard with the side pane. The failing paths are not the wizard: Smart To Do "+ New Task" opens the Dataverse To Do form (`newTaskLauncher.ts:276-300`, by design since smart-todo-r5 030) and the Assistant `create-todo` is `kind: 'oob-form'`. Not a 185 defect.
 - **New requests (owner decides):** Project "Draft with AI" (M, BFF); Smart To Do + Assistant open the To Do wizard and "New Task" → "New To Do" (`Header.tsx:306`) (S-M); invoice Quick Start entry + in-app launch (M), lookup for unlocked launches (M), firm choice when the record has no linked firm (M-L, server requires a linked firm, needs a decision; no external-SPA code to reuse).
+
+## ui-test results — owner, 2026-11-16 (sections B–D)
+- **B1–B4 Create Project Send Email:** PASS.
+- **B5 Create Matter opened as a code page:** FAIL, same as A2 (the follow-on is not the new email composer). This weakens the stale-Console-bundle explanation for A2: the code page was deployed 2026-11-15 from `acc96e1927`.
+- **C1 Semantic Search → Email documents** (PCF 1.1.86, white-header dialog): the compose step opens, but **To/Cc/Bcc open the Dataverse lookup BEHIND the modal** (visible top-right as "Lookup Records"). Applying a Dataverse email template puts **raw XSL (`<?xml … xsl:stylesheet …`) in Subject** and leaves **`]]>` CDATA debris in the body** ("Dear ]]>Valued Customer"); the sent email carried that debris. The Summary step shows the playbook's **raw JSON, twice**. "AI drafting is unavailable right now." Owner: the Semantic Search wizard does not use the new modal.
+- **C2 Document Relationship Viewer:** same as C1.
+- **C3:** not testable yet.
+- **D1 Console Quick Start → Send Email ("New Email", Send split button, External/Internal Only):** To/Cc/Bcc do not open the side pane; **Related to has no lookup**. Template, AI draft and attachments work.
