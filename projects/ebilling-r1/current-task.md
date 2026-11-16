@@ -9,32 +9,15 @@
 
 ## NOW — read this first
 
-### Active: task 130e-1 (DEF-060 writer, server side)
+### Active: none running. Next available: 130e-2
 
-- **Branch `task/ebilling-130e-1`**, base work 4e26b3000f. The build agent `ebill-130e1` (Opus implementer) works in `C:\code_files\spaarke\.claude\worktrees\agent-a26a8f842e71ef60b`. Never cd there. Remove it after merge with `git worktree unlock` then `Remove-WorktreeSafe.ps1`.
-- POML: `tasks/130e-firm-description-writer.poml`. Design: `notes/def-060-firm-description-design.md` (§11 C1-C4, O1-O6, EB-D-213 unsecured). Implementer notes: `notes/130e-firm-description-writer.md` on the branch.
-- **History:**
-  - Built at 89ddc86188. Opus adversarial review, then fix round 1 → 99e380f997.
-  - Sonnet re-check: PASS. ontology-r1 O6: PASS, for 99e380f997 only (a later push touching `Services/Signals/**` needs its re-glance).
-  - uac-r2 (access and disclosure): PASS-WITH-FIXES.
-- **Fix round 2 (sent to `ebill-130e1`, RUNNING):**
-  - F1: the record-rule copy passes the base rule set name (`ProcedureAssignmentService.cs:821`).
-  - F3: the C4 name check normalises with NFKC and collapses whitespace.
-  - F3b: the guard entry for `sprk_rejectionreason` must say it is not yet in SpaarkeMaster (ISS-024).
-  - F4: `.ProducesProblem(422)` on the RuleSetEndpoints routes.
-  - Notes K1/K2 (uac-r2) and K2/K4 (ontology-r1).
-- **Next when the agent reports:**
-  1. Check its diff.
-  2. Send the fix SHA to uac-r2 for a fix-diff re-check. If `Services/Signals/**` changed, ontology-r1 gets a re-glance.
-  3. On PASS, merge `task/ebilling-130e-1` into work. The dev column is in place, so the merge is safe. Run the script's `-Verify` on dev as a merge-step check.
-  4. Add K2/K4 to the notes if the agent didn't, mark TASK-INDEX 130e-1 ✅, and remove the agent worktree.
-- **Then 130e-2:** the Rule Review editor field for `firmDescription`.
-  - Render as plain text.
-  - Show the "firms see this" notice.
+- **130e-1 ✅ merged into work `a6f1363070`** (from `56bf6dce82`). ontology-r1 O6 PASS and uac-r2 PASS on that tip. Column-first met: `sprk_firmdescription` was live on dev and `-Verify` passed before the merge. Any later push touching `Services/Signals/**` needs ontology-r1's re-glance.
+- **Next: 130e-2**, the Rule Review editor field (`src/solutions/RuleReview`). The contract is in `notes/130e-firm-description-writer.md`.
+  - Render the description as plain text, never HTML or markdown (ontology-r1).
+  - Show the "firms see this even when the rule set is hidden; do not quote the guideline or name the rule set" notice.
   - Explain that a re-sent invalid published text is dropped, and that short names can over-refuse.
-  - The contract is in the 130e notes.
-- **Deploy order:** every `sprk_policyversion` read selects `sprk_firmdescription`. Any environment needs the column before a BFF carrying 130e-1. `PolicyVersionColumnsGuardTests` keeps `sprk_firmdescription` and `sprk_rejectionreason` on its pending list until task 079 syncs both into SpaarkeMaster `Entity.xml` (ontology-r1 agreed: 079, not sooner).
-
+  - There's no POML yet. Write it (STANDARD, sonnet) before building.
+- **Deploy order elsewhere:** the column first (task 079 syncs `sprk_firmdescription` and `sprk_rejectionreason` into SpaarkeMaster and empties `PolicyVersionColumnsGuardTests`' pending list), then a BFF carrying 130e-1. uac-r2's pre-deploy gate checks the column on dev.
 ### Done 2026-11-16 (pushed)
 
 - **ISS-022 / #2844 DONE.**
@@ -79,7 +62,7 @@
 
 ## Next actions (in order)
 
-1. Finish 130e-1 (above), then 130e-2.
+1. 130e-2 (above).
 2. When the owner answers the ten:
    1. Log EB-D-239+ and the premise correction.
    2. Write the POMLs for 095f-2a…2e and 084h-2/3/4.

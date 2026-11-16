@@ -199,3 +199,10 @@ No file under `Services/Signals/**` changed in this round. F3's normalisation is
 - **Replay read faults:** only a missing row drops the text; any other read fault fails the replay, as every other replay read does.
 - **Published predicate:** C2 uses `VersionRow.IsDraft` (the rule set editor's own draft test). DEF-061's `VersionWasPublished` is for Procedure versions, not policy versions.
 - **Decided items are not evidence-gated** (Q3, unchanged): they read the Signals the decision resolved.
+
+## Merge (2026-11-16)
+
+- Merged into work at `a6f1363070` from tip `56bf6dce82`. Verdicts: Sonnet re-check PASS (fix round 1); ontology-r1 O6 PASS (extended to `56bf6dce82`); uac-r2 access and disclosure PASS (fix round 2).
+- Column-first order met: `sprk_firmdescription` was created on dev before the merge (owner go 2026-11-16), and the script's `-Verify` passed again as the merge-step check.
+- Known limit added by ontology-r1's re-glance (K): a rule set or policy name that itself contains a Format character (for example U+200B) can never match the C4 check, because a description holding one is refused earlier as an invisible character. It matters only if an admin types such a name.
+- Deploy order for every other environment: the column first (SpaarkeMaster through task 079, which also empties `PolicyVersionColumnsGuardTests`' pending list), then a BFF carrying this change. uac-r2's pre-deploy gate checks the column on dev.
