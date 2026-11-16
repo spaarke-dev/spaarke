@@ -25,5 +25,12 @@ The deploy log has the entry, the hashes and the D-126 clobber check (`notes/dep
   - Running PCF builds in parallel with a shared-lib build races `ensure-dist-fresh`.
 - **`customcontrols.version` still reads the old version** after the scoped import. pcf-deploy documents this as harmless; the served bundles are new.
 
-## ui-test results
-Pending: the owner runs `notes/dev-test-checklist-185.md` sections A–D.
+## ui-test results — owner, 2026-11-15 (section A; B–D not yet run; A8 later)
+- **A1 Create Project:** Associate To, Add file(s) PASS. Enter Info: Project Type + Practice Area side pane PASS; **Description has no "Draft with AI"** (the Matter wizard's Enter Info has it) — gap. Assign Work: all lookups side pane PASS. Create Event: side pane PASS. Send Email: new composer PASS.
+- **A2 Create Matter (Console, dark header):** Associate To, Add file(s), Enter Info (Matter Type + Practice Area side pane) PASS. **FAIL:** Assign Work — Matter Type / Practice Area use an inline search dropdown, not the side pane (seen after clearing the value), and the Assigned fields are not side pane. **FAIL:** Create Event follow-on — Event Type and Assigned To not side pane. **FAIL:** Send Email follow-on is not the new EmailComposer (Project's is).
+- **A3 Create Event:** side pane PASS.
+- **A4 Create To Do:** **FAIL** Assigned To not side pane; opens in the old dialog chrome (white header) rather than the in-app wizard; the Smart To Do kanban also opens in the white-header dialog; owner asks to rename "New Task" → "New To Do" (avoid confusion with Event Task).
+- **A5 Create Invoice:** **FAIL/requests:** no Console Quick Start entry (only New Invoice on a matter/project); the record step uses an option list, not a lookup — and in record context it should default to that record and not be changeable; white-header dialog; when the record has no associated firm the required Firm step is not shown — must allow choosing a firm (owner thinks the SPA project did this).
+- **A6 Create Work Assignment:** side pane PASS.
+- **A7 Ontology admin → New rule:** **FAIL** — Condition step (Existence, about sprk_communication, no tests yet) shows the raw error `: Required properties ["when"] are not present`.
+- **A8:** later. **A9 SPE Admin:** uses a dropdown; owner accepts. **A10:** picks cleared on reopen PASS.
