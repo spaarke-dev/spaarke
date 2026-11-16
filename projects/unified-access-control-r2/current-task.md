@@ -5,7 +5,7 @@
 > - **History:** git log of this file. **Earlier checkpoints:** `notes/handoff-history/2026-11.md`.
 > - **NOTE:** master is ahead of this work branch on project files. Read master's TASK-INDEX and README for task status.
 
-> **Last Updated**: 2026-11-16 ~22:55Z (checkpoint #147, desktop session `uac-r2`). Private: `~/.claude/projects/c--code-files-spaarke-wt-unified-access-control-r2/private-*.md` (never copy into repo text).
+> **Last Updated**: 2026-11-16 ~23:10Z (checkpoint #148, desktop session `uac-r2`). Private: `~/.claude/projects/c--code-files-spaarke-wt-unified-access-control-r2/private-*.md` (never copy into repo text).
 
 ## Quick Recovery (READ THIS FIRST)
 
@@ -19,7 +19,7 @@
 ## Active work
 - **#2845 round 2 — PR #2867** (`C:\wt2845b`, branch `perf/2845-round2`). Per-id request memo, concurrent reads, #2851 fix, review F1 (process-wide `DataverseConcurrencyGate` 24 + `DataverseThrottlingHandler` 429/503 GET retry; on participation, deny-list AND ExternalDataService clients + walk reads), R1-R3, T1-T3, wiring test (perturbed). Two Opus reviews PASS-WITH-FIXES, fixes in; fix diff re-checked by me. Tests at `3f22470d8e`: scoped unit 7721/0, ArchTests 2639/0, integration 212/0 + Spe 353/0. Publish +52,560 B vs fresh master. Previous push: Router + Client lint green. Open item in PR: CallerRecordAccessProbe, impersonated root-set reads and the one-record walk stay ungated. Local FULL unit runs are unusable under machine load (WAF timeouts; sampled failures pass alone) — CI is the full-suite verdict.
 - **SpaarkeMaster 1.3.2.0 — #2865 MERGED `57431c8e6a`** (invoice-family 24-column lock in source; Billing Admin reads; bundles rebuilt). provisioning-r1 told (its follow-up PR #2871 waits on the owner). **Not published, not imported anywhere: publish + every import need the owner's go.** Publishing lifts provisioning-r1's L2 Worker rule (tell them).
-- **r4 014b — #2869 MERGED `fc9803419c`** after my review (PASS-WITH-FIXES → fix re-check PASS at `67b99e2126`). **014c (PATCH assignee, owner chose option (a))** comes next from spa-r4 for review: G5 order; Contact Read ceiling before the set lookup; assignee must have effective access to EVERY parent; allow-list + reassigned-by/date only; fail closed.
+- **r4 014b — #2869 MERGED `fc9803419c`** after my review (PASS-WITH-FIXES → fix re-check PASS at `67b99e2126`). **014c (PATCH assignee, owner option (a)) = PR #2872 @ `32c32cb890`: my review PASS (349/349 tests); spa-r4 merges on green and sends the SHA** → fold into the next dev candidate.
 - **#2860** (lenient QueryAsync, 87 callers): assigned to me; follow-up after round 2.
 
 ## Peer state
