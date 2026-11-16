@@ -145,4 +145,12 @@ Questions:
     - It rejects (B) for now: 87 callers, some without a catch, would turn into 500s. It rejects (C) because "empty" is a believable lie in a picker, but would accept (C) if the owner chooses it.
     - **Owner chose (A) on 2026-11-16** ("Strict method, grant reader"). Sent to the implementer on uac-r2's terms. Systemic issue filed: **D-20 #2860** (owner uac-r2). `Spaarke.Dataverse` is now touched, so re-measure the publish size before the push.
   - Fixes delegated to an implementer (Opus) on `work/r4-014a-record-contact-access`. Commit only; the main session pushes once after a re-check.
+- **Gate fixes pushed at `a866dad1be` (2026-11-16):**
+  - `QueryStrictAsync<T>` (one shared core with a `strict` flag; one caller); cancel propagates; per-call firm cache; doc remark; the #2851 test is deterministic (failed 3/3 without the pre-create).
+  - 12 mock files moved or extended.
+  - Tests: service 38, strict client 9, RecordGrants 16, broad suites 15,034 with 1 unrelated load timeout, ArchTests 2,635.
+  - Publish size +10,741 B.
+  - Scoped Sonnet re-check: no F-class findings. New K items: a firm point read with an empty 2xx body → inactive (shared ISS-026 definition, under-lists); the concurrency test's timing coupling.
+  - The PR body was updated with §11 for `QueryStrictAsync`, K1–K5 and the merge order.
+  - Sent to uac-r2 for its re-check.
 - **NFR-05 deviation** (one DI registration, requested by uac-r2 Q2.8): stated in the PR; the owner is told in this session's report.
