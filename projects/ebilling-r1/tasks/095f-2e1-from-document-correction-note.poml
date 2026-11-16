@@ -4,7 +4,7 @@
     <title>Decision notes, part 2e-1: from-document requires a note on a Correction (EB-D-237)</title>
     <phase>5 Partner surfaces — 095f part 2</phase>
     <gate>Branch from work/ebilling-r1 at the sha named in the agent brief. Independent of 2a.</gate>
-    <status>open</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>BFF C#: a contract change (a Correction without a note becomes a 400) on a submission route.</rigor-reason>
     <model-tier>sonnet</model-tier>
