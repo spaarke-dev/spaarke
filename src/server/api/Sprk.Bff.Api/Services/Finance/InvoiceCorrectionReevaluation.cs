@@ -963,7 +963,7 @@ public sealed class InvoiceCorrectionReevaluation
                 continue;
             }
 
-            var mapping = BillingFindingSignalMapper.MapAll(left, rules, subjects).Single();
+            var mapping = BillingFindingSignalMapper.MapAll(left, rules, subjects, logger: _logger).Single();
             await signals.WriteAsync(mapping.Request, mapping.Fingerprint, ct).ConfigureAwait(false);
         }
     }

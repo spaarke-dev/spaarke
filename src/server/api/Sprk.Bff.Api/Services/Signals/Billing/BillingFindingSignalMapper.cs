@@ -87,6 +87,13 @@ public sealed record BillingSignalMapping(SignalWriteRequest Request, BillingMes
 
     /// <summary>How 073 decided the group (task 049 part D); <see cref="BillingGroupDecision.NotDecided"/> when no decisions were given.</summary>
     public BillingGroupDecision Decision { get; init; } = BillingGroupDecision.NotDecided;
+
+    /// <summary>
+    /// Task 130e-1 fix round 1 (O2, ontology-r1 decision (a)): true when the request is the held group's preflight fallback (the no-value held
+    /// sentence, <c>HeldSentenceNoValue</c>). Such a Signal never carries a firm reason; the plan records it (<c>heldFallback</c>) so the replay
+    /// writes the same Signal and never re-derives one.
+    /// </summary>
+    public bool HeldFallback { get; init; }
 }
 
 /// <summary>
@@ -420,17 +427,18 @@ public static class BillingFindingSignalMapper
             Consequence = consequence,
             Fingerprint = fingerprint,
             Decision = groupDecision,
+            HeldFallback = tookPreflightFallback,
         };
     }
 
     /// <summary>
     /// The firm reason a Signal of <paramref name="rule"/> carries (task 130e-1): its stored firm description after
-    /// <see cref="FirmDescriptionRules.Validate(string?, string?, string?)"/> with the version's rule set and policy names; <c>null</c> when it is
+    /// <see cref="FirmDescriptionRules.Validate(string?, string?, string?, string?)"/> with the version's rule set and policy names and its rule type (a Duplicate takes none, F4); <c>null</c> when it is
     /// blank or fails, and a failure is logged as a Warning with the stable code and the policy version id only, never the text.
     /// </summary>
     internal static string? FirmReasonOf(BillingRuleCandidate rule, ILogger? logger)
     {
-        var check = FirmDescriptionRules.Validate(rule.FirmDescription, rule.RuleSetName, rule.PolicyName);
+        var check = FirmDescriptionRules.Validate(rule.FirmDescription, rule.RuleSetName, rule.PolicyName, rule.RuleType);
         if (!check.IsValid)
         {
             logger?.LogWarning("[{Code}] The firm description of policy version {PolicyVersionId} was not copied to its Signal ({Reason}); the Signal is written without one.",

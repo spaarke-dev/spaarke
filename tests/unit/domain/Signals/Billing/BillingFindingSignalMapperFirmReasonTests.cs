@@ -146,4 +146,73 @@ public class BillingFindingSignalMapperFirmReasonTests
         entry["firmReason"] = "PLANTED text.";
         InvoiceSubmissionAfterSteps.StoredFindings.ParsePlanEntry(entry).Request.FirmReason.Should().BeNull("the replay sets it from the version (BillingFirmReasonReplay)");
     }
+
+    private static readonly string TooLong = new('a', 2000 - HeldPrefix.Length + 1);
+
+    private static string TypeOf(RuleType type) => ((int)type).ToString(System.Globalization.CultureInfo.InvariantCulture);
+
+    [Fact(DisplayName = "130e-1 fix round 1 O2 (ontology test 1): a held group with an invalid description whose reason does not fit takes the fallback with no firm reason; the description never caused it")]
+    public void AnInvalidDescription_WithAReasonThatDoesNotFit_GivesAFallbackWithNoFirmReason()
+    {
+        var withoutDescription = Map(ExpenseRule(null, template: TooLong), SubmissionEvaluationKind.Blocked);
+
+        var held = Map(ExpenseRule("Rate {x} too high.", template: TooLong), SubmissionEvaluationKind.Blocked);
+
+        held.HeldFallback.Should().BeTrue();
+        withoutDescription.HeldFallback.Should().BeTrue("the fallback is decided by the reason's length alone; the description plays no part");
+        Sentence(held).Should().Be(BillingFindingSignalMapper.HeldSentenceNoValue);
+        held.Request.FirmReason.Should().BeNull();
+        held.Request.Should().BeEquivalentTo(withoutDescription.Request);
+        Map(ExpenseRule("Rate {x} too high."), SubmissionEvaluationKind.Blocked).HeldFallback.Should().BeFalse("an invalid description alone never takes the fallback");
+    }
+
+    [Fact(DisplayName = "130e-1 fix round 1 O2 (ontology test 2): a fallback for another reason, with a valid description, carries no firm reason and is recorded in the plan entry")]
+    public void AFallback_WithAValidDescription_IsRecordedInThePlan()
+    {
+        var held = Map(ExpenseRule(FirmText, template: TooLong), SubmissionEvaluationKind.Blocked);
+
+        held.HeldFallback.Should().BeTrue();
+        held.Request.FirmReason.Should().BeNull();
+        var entry = InvoiceSubmissionPersister.SignalPlanEntryJson(held);
+        entry[InvoiceSubmissionPersister.HeldFallbackMember]!.GetValue<bool>().Should().BeTrue();
+        InvoiceSubmissionAfterSteps.StoredFindings.ParsePlanEntry(entry).HeldFallback.Should().BeTrue();
+    }
+
+    [Fact(DisplayName = "130e-1 fix round 1 O2 must-not-fire: a normal entry has no heldFallback member and parses as not held")]
+    public void ANormalEntry_IsNotMarkedHeldFallback()
+    {
+        foreach (var kind in new[] { SubmissionEvaluationKind.AutoRejected, SubmissionEvaluationKind.Blocked })
+        {
+            var mapping = Map(ExpenseRule(FirmText), kind);
+
+            mapping.HeldFallback.Should().BeFalse();
+            var entry = InvoiceSubmissionPersister.SignalPlanEntryJson(mapping);
+            entry.ContainsKey(InvoiceSubmissionPersister.HeldFallbackMember).Should().BeFalse("a normal entry's JSON is unchanged by the flag");
+            InvoiceSubmissionAfterSteps.StoredFindings.ParsePlanEntry(entry).HeldFallback.Should().BeFalse();
+        }
+    }
+
+    [Fact(DisplayName = "130e-1 fix round 1 O2: a plan written before the flag existed is read as held fallback by its fallback sentence, so its replay is deterministic too")]
+    public void AnOldPlansFallbackEntry_IsReadAsHeldFallback()
+    {
+        var entry = InvoiceSubmissionPersister.SignalPlanEntryJson(Map(ExpenseRule(FirmText, template: TooLong), SubmissionEvaluationKind.Blocked));
+        entry.Remove(InvoiceSubmissionPersister.HeldFallbackMember);
+
+        InvoiceSubmissionAfterSteps.StoredFindings.ParsePlanEntry(entry).HeldFallback.Should().BeTrue();
+    }
+
+    [Fact(DisplayName = "130e-1 fix round 1 F4: a Duplicate version's stored description is dropped at copy time (firm_description_duplicate), code-only")]
+    public void ADuplicateVersionsDescription_IsDropped()
+    {
+        var logger = new CapturingLogger<BillingFindingSignalMapperFirmReasonTests>();
+        var baseline = Map(ExpenseRule(null) with { RuleType = TypeOf(RuleType.Duplicate) });
+
+        var mapped = Map(ExpenseRule(FirmText) with { RuleType = TypeOf(RuleType.Duplicate) }, logger: logger);
+
+        mapped.Request.FirmReason.Should().BeNull();
+        mapped.Request.Should().BeEquivalentTo(baseline.Request);
+        var entry = logger.Entries.Should().ContainSingle().Subject;
+        entry.Level.Should().Be(LogLevel.Warning);
+        entry.Message.Should().Contain(FirmDescriptionRules.OnDuplicate).And.NotContain(FirmText);
+    }
 }

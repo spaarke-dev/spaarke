@@ -68,8 +68,68 @@ public partial class InvoiceSubmissionAfterStepsTests
 
         result.Status.Should().Be(SubmissionAfterStepsStatus.Completed, result.ReasonCode);
         world.Writes.Should().ContainSingle().Which.FirmReason.Should().BeNull();
+        world.Log.Entries.Where(e => e.Message.Contains(Sprk.Bff.Api.Services.Finance.FirmDescriptionRules.DroppedLogCode)).Should().ContainSingle(
+            "fix round 1 F2b: the drop is logged once per entry (by the replay; the persister's mapping passes no logger)");
         world.Log.Entries.Should().Contain(e => e.Level == Microsoft.Extensions.Logging.LogLevel.Warning
             && e.Message.Contains(Sprk.Bff.Api.Services.Finance.FirmDescriptionRules.DroppedLogCode) && e.Message.Contains(reason) && !e.Message.Contains(stored));
+    }
+
+    /// <summary>The Blocked world, its one entry turned into a held group's preflight fallback: the no-value sentence, and the flag when
+    /// <paramref name="flag"/> (a plan written before the flag existed carries the sentence only).</summary>
+    private static async Task<(World World, Guid Version, SubmissionEvaluationOutcome Outcome)> HeldFallbackWorldAsync(bool flag)
+    {
+        var outcome = await Blocked();
+        var version = Guid.Empty;
+        var world = new World(outcome, json =>
+        {
+            var entry = (JsonObject)json["signalPlan"]!.AsArray().Single()!;
+            version = Guid.Parse(entry["policyVersionId"]!.GetValue<string>());
+            entry["template"] = BillingFindingSignalMapper.HeldSentenceNoValue;
+            entry["sentence"] = BillingFindingSignalMapper.HeldSentenceNoValue;
+            if (flag)
+            {
+                entry[InvoiceSubmissionPersister.HeldFallbackMember] = true;
+            }
+
+            return json;
+        });
+        return (world, version, outcome);
+    }
+
+    [Theory(DisplayName = "130e-1 fix round 1 O2 (ontology test 3): a held-fallback plan entry is written with no firm reason although its version has a valid one; old plans too")]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Replay_OfAHeldFallbackEntry_WritesNoFirmReason(bool flag)
+    {
+        var (world, version, outcome) = await HeldFallbackWorldAsync(flag);
+        world.FirmDescriptions[version] = "Late entries are not billable.";
+
+        var result = await world.Build().RunAsync(Persisted(outcome), "corr-130e");
+
+        result.Status.Should().Be(SubmissionAfterStepsStatus.Completed, result.ReasonCode);
+        var written = world.Writes.Should().ContainSingle().Subject;
+        written.FirmReason.Should().BeNull("the first write of a held fallback carried none; the replay writes the same Signal");
+        written.MessageTemplate.Should().Be(BillingFindingSignalMapper.HeldSentenceNoValue);
+        world.Entities.Invocations.Should().NotContain(i => i.Method.Name == "RetrieveAsync" && (string)i.Arguments[0] == BillingFactLoader.VersionEntity,
+            "a held fallback never reads its version");
+    }
+
+    [Fact(DisplayName = "130e-1 fix round 1 O2 (ontology test 4) control: the same Blocked world's normal held entry still takes the version's text")]
+    public async Task Replay_OfANormalHeldEntry_TakesTheVersionsText()
+    {
+        var outcome = await Blocked();
+        var version = Guid.Empty;
+        var world = new World(outcome, json =>
+        {
+            version = Guid.Parse(((JsonObject)json["signalPlan"]!.AsArray().Single()!)["policyVersionId"]!.GetValue<string>());
+            return json;
+        });
+        world.FirmDescriptions[version] = "Late entries are not billable.";
+
+        var result = await world.Build().RunAsync(Persisted(outcome), "corr-130e");
+
+        result.Status.Should().Be(SubmissionAfterStepsStatus.Completed, result.ReasonCode);
+        world.Writes.Should().ContainSingle().Which.FirmReason.Should().Be("Late entries are not billable.");
     }
 
     [Fact(DisplayName = "130e-1: the replay reads the version once per run, and the names only when there is a text to check")]

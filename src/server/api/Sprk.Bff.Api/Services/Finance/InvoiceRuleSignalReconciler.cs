@@ -119,7 +119,7 @@ internal sealed class InvoiceRuleSignalReconciler
 
         // Task 130e-1 (C1): the firm reason is re-derived from the entry's policy version, never taken from the plan.
         var planned = InvoiceSubmissionAfterSteps.StoredFindings.ParsePlanEntry(entry);
-        await WriteAsync(await _firmReasons.ApplyAsync(planned.Request, ct).ConfigureAwait(false), planned.Fingerprint, ct).ConfigureAwait(false);
+        await WriteAsync(await _firmReasons.ApplyAsync(planned.Request, planned.HeldFallback, ct).ConfigureAwait(false), planned.Fingerprint, ct).ConfigureAwait(false);
     }
 
     /// <summary>

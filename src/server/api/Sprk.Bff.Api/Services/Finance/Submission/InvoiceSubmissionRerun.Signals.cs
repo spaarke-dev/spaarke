@@ -181,7 +181,7 @@ public sealed partial class InvoiceSubmissionRerun
             var firmReasons = new BillingFirmReasonReplay(_entities, _logger);
             foreach (var entry in stored.Plan)
             {
-                await WriteSignalAsync(run, await firmReasons.ApplyAsync(entry.Request, ct).ConfigureAwait(false), entry.Fingerprint, ct).ConfigureAwait(false);
+                await WriteSignalAsync(run, await firmReasons.ApplyAsync(entry.Request, entry.HeldFallback, ct).ConfigureAwait(false), entry.Fingerprint, ct).ConfigureAwait(false);
             }
 
             // ── 2 and 3. The system Signals (049's policy read) ──
@@ -300,7 +300,7 @@ public sealed partial class InvoiceSubmissionRerun
             stored.InvoiceName,
             lines.ToDictionary(i => i, i => InvoiceSubmissionPersister.LineIdFor(run.SubmissionId, i)),
             lines.ToDictionary(i => i, i => InvoiceSubmissionPersister.LineNameFor(stored.TrackingNumber, i)));
-        var mappings = BillingFindingSignalMapper.MapAll(findings, new Dictionary<Guid, BillingRuleCandidate> { [rule.PolicyVersionId] = rule }, subjects);
+        var mappings = BillingFindingSignalMapper.MapAll(findings, new Dictionary<Guid, BillingRuleCandidate> { [rule.PolicyVersionId] = rule }, subjects, logger: _logger);
 
         var mappedLines = new HashSet<Guid>();
         foreach (var mapping in mappings)

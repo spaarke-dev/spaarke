@@ -2393,6 +2393,9 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
         var presentAs = outcome.HasProcedureGap && outcome.Decision is { Outcome: SubmissionOutcome.Rejected }
             ? SubmissionEvaluationKind.Blocked
             : outcome.Kind;
+        // No logger on purpose (task 130e-1 fix round 1 F2b): the plan never keeps the firm reason (C1), so a text dropped here is dropped
+        // again, and logged once with its code, by the replay that writes the Signal (BillingFirmReasonReplay). Logging it here too would
+        // log one drop twice.
         var mappings = BillingFindingSignalMapper.MapAll(evaluation, SignalSubjectsFor(outcome, invoiceId), outcome.Decision?.Findings, presentAs);
         foreach (var mapping in mappings)
         {
@@ -2422,7 +2425,7 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
             facts[name] = value?.ToString();
         }
 
-        return new JsonObject
+        var entry = new JsonObject
         {
             ["policyId"] = request.PolicyId.ToString("D"),
             ["policyCode"] = request.PolicyCode,
@@ -2452,7 +2455,19 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
             ["fingerprint"] = mapping.Fingerprint,
             ["decision"] = mapping.Decision.ToString(),
         };
+
+        // Task 130e-1 fix round 1 (O2, ontology-r1 (a)): the held group's preflight fallback is recorded, so every replay writes it as the first
+        // write did: with no firm reason. Written only when true; an entry without it (every other entry) reads as false.
+        if (mapping.HeldFallback)
+        {
+            entry[HeldFallbackMember] = true;
+        }
+
+        return entry;
     }
+
+    /// <summary>Task 130e-1 fix round 1 (O2): the <c>signalPlan[]</c> member that marks a held group's preflight fallback entry.</summary>
+    internal const string HeldFallbackMember = "heldFallback";
 
     /// <summary>
     /// One <c>findings[]</c> entry (B2a: a per-entry builder so a correction's re-evaluation can patch ONE entry of the stored copy). <paramref name="scrub"/>

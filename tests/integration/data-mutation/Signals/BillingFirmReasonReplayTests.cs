@@ -30,7 +30,7 @@ public class BillingFirmReasonReplayTests
         public CapturingLogger<BillingFirmReasonReplayTests> Log { get; } = new();
 
         public Store(string? text, string? policyName = "Expense Codes", string? ruleSetName = "Acme Billing Guidelines", bool policyLinked = true,
-            Exception? versionFault = null)
+            Exception? versionFault = null, int? ruleType = null)
         {
             var versionRead = Entities.Setup(e => e.RetrieveAsync(BillingFactLoader.VersionEntity, VersionId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()));
             if (versionFault is not null)
@@ -43,6 +43,11 @@ public class BillingFirmReasonReplayTests
                 if (policyLinked)
                 {
                     version["sprk_policy"] = new EntityReference(BillingFactLoader.PolicyEntity, PolicyId);
+                }
+
+                if (ruleType is { } type)
+                {
+                    version["sprk_ruletype"] = new OptionSetValue(type);
                 }
 
                 versionRead.ReturnsAsync(version);
@@ -76,7 +81,7 @@ public class BillingFirmReasonReplayTests
         var store = new Store("  Expenses of this kind are not reimbursed. ");
         var planned = Planned("PLANTED text.");
 
-        var replayed = await store.Replay().ApplyAsync(planned, default);
+        var replayed = await store.Replay().ApplyAsync(planned, false, default);
 
         replayed.FirmReason.Should().Be("Expenses of this kind are not reimbursed.");
         replayed.Should().BeEquivalentTo(planned, o => o.Excluding(r => r.FirmReason));
@@ -90,7 +95,7 @@ public class BillingFirmReasonReplayTests
     {
         var store = new Store(text);
 
-        (await store.Replay().ApplyAsync(Planned("PLANTED text."), default)).FirmReason.Should().BeNull();
+        (await store.Replay().ApplyAsync(Planned("PLANTED text."), false, default)).FirmReason.Should().BeNull();
 
         store.Reads(BillingFactLoader.PolicyEntity).Should().Be(0);
         store.Log.Entries.Should().BeEmpty();
@@ -105,7 +110,7 @@ public class BillingFirmReasonReplayTests
     {
         var store = new Store(text);
 
-        (await store.Replay().ApplyAsync(Planned(), default)).FirmReason.Should().BeNull();
+        (await store.Replay().ApplyAsync(Planned(), false, default)).FirmReason.Should().BeNull();
 
         var entry = store.Log.Entries.Should().ContainSingle().Subject;
         entry.Level.Should().Be(LogLevel.Warning);
@@ -117,7 +122,7 @@ public class BillingFirmReasonReplayTests
     {
         var store = new Store("Expenses of this kind are not reimbursed.", policyLinked: false);
 
-        (await store.Replay().ApplyAsync(Planned(), default)).FirmReason.Should().BeNull();
+        (await store.Replay().ApplyAsync(Planned(), false, default)).FirmReason.Should().BeNull();
 
         store.Log.Entries.Should().ContainSingle().Which.Message.Should().Contain(BillingFirmReasonReplay.NamesUnreadReason);
     }
@@ -127,12 +132,48 @@ public class BillingFirmReasonReplayTests
     {
         var gone = new FaultException<OrganizationServiceFault>(new OrganizationServiceFault { ErrorCode = unchecked((int)0x80040217) }, "Does Not Exist");
         var goneStore = new Store(null, versionFault: gone);
-        (await goneStore.Replay().ApplyAsync(Planned("PLANTED text."), default)).FirmReason.Should().BeNull();
+        (await goneStore.Replay().ApplyAsync(Planned("PLANTED text."), false, default)).FirmReason.Should().BeNull();
         goneStore.Log.Entries.Should().ContainSingle().Which.Message.Should().Contain(BillingFirmReasonReplay.RowGoneReason);
 
         var faulting = new Store(null, versionFault: new TimeoutException("transient"));
-        var act = async () => await faulting.Replay().ApplyAsync(Planned(), default);
+        var act = async () => await faulting.Replay().ApplyAsync(Planned(), false, default);
         await act.Should().ThrowAsync<TimeoutException>("a transient read is retried by the step, never read as no text");
+    }
+
+    [Fact(DisplayName = "130e-1 fix round 1 O2 (ontology test 3): a held-fallback plan entry is replayed with no firm reason, reads nothing, and changes nothing else")]
+    public async Task AHeldFallbackEntry_GetsNoFirmReason_AndReadsNothing()
+    {
+        var store = new Store("Expenses of this kind are not reimbursed.");
+        var planned = Planned("PLANTED text.") with { MessageTemplate = BillingFindingSignalMapper.HeldSentenceNoValue };
+
+        var replayed = await store.Replay().ApplyAsync(planned, true, default);
+
+        replayed.FirmReason.Should().BeNull("the first write of a held fallback carried none, so the replay writes the same Signal");
+        replayed.Should().BeEquivalentTo(planned, o => o.Excluding(r => r.FirmReason));
+        store.Entities.Invocations.Should().BeEmpty("a held fallback never reads its version");
+        store.Log.Entries.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "130e-1 fix round 1 O2 (ontology test 4, C1): a normal entry of the same version still takes the version's text")]
+    public async Task ANormalEntry_StillTakesTheVersionsText()
+    {
+        var store = new Store("Expenses of this kind are not reimbursed.");
+
+        (await store.Replay().ApplyAsync(Planned("PLANTED text."), false, default)).FirmReason.Should().Be("Expenses of this kind are not reimbursed.");
+    }
+
+    [Fact(DisplayName = "130e-1 fix round 1 F4: a Duplicate version's stored text is dropped at replay (firm_description_duplicate); another type keeps it")]
+    public async Task ADuplicateVersionsText_IsDropped()
+    {
+        var duplicate = new Store("Expenses of this kind are not reimbursed.", ruleType: (int)RuleType.Duplicate);
+        (await duplicate.Replay().ApplyAsync(Planned(), false, default)).FirmReason.Should().BeNull();
+        var entry = duplicate.Log.Entries.Should().ContainSingle().Subject;
+        entry.Level.Should().Be(LogLevel.Warning);
+        entry.Message.Should().Contain(FirmDescriptionRules.OnDuplicate).And.NotContain("Expenses of this kind");
+
+        var expense = new Store("Expenses of this kind are not reimbursed.", ruleType: (int)RuleType.ExpenseRule);
+        (await expense.Replay().ApplyAsync(Planned(), false, default)).FirmReason.Should().Be("Expenses of this kind are not reimbursed.");
+        expense.Log.Entries.Should().BeEmpty();
     }
 
     [Fact(DisplayName = "130e-1: one replay reads a version once, however many entries cite it")]
@@ -141,8 +182,8 @@ public class BillingFirmReasonReplayTests
         var store = new Store("Expenses of this kind are not reimbursed.");
         var replay = store.Replay();
 
-        await replay.ApplyAsync(Planned(), default);
-        await replay.ApplyAsync(Planned("PLANTED text."), default);
+        await replay.ApplyAsync(Planned(), false, default);
+        await replay.ApplyAsync(Planned("PLANTED text."), false, default);
 
         store.Reads(BillingFactLoader.VersionEntity).Should().Be(1);
         store.Reads(BillingFactLoader.PolicyEntity).Should().Be(1);

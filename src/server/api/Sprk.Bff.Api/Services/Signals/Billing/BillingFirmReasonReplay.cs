@@ -43,10 +43,23 @@ internal sealed class BillingFirmReasonReplay
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
-    /// <summary><paramref name="planned"/> with the firm reason its policy version allows now (or none).</summary>
-    internal async Task<SignalWriteRequest> ApplyAsync(SignalWriteRequest planned, CancellationToken ct)
+    /// <summary>The columns of <c>sprk_policyversion</c> the replay reads (fix round 1 F2a: pinned against the solution by
+    /// <c>PolicyVersionColumnsGuardTests</c>; F4: the rule type, so a Duplicate's stored text is never copied).</summary>
+    internal static readonly string[] VersionColumns = [BillingFactLoader.FirmDescriptionColumn, "sprk_policy", "sprk_ruletype"];
+
+    /// <summary>
+    /// <paramref name="planned"/> with the firm reason its policy version allows now (or none). A held group's preflight fallback entry
+    /// (<paramref name="heldFallback"/>, fix round 1 O2, ontology-r1 (a)) never carries one and reads nothing: the replay writes the same
+    /// Signal the first write did.
+    /// </summary>
+    internal async Task<SignalWriteRequest> ApplyAsync(SignalWriteRequest planned, bool heldFallback, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(planned);
+        if (heldFallback)
+        {
+            return planned with { FirmReason = null };
+        }
+
         if (!_textByVersion.TryGetValue(planned.PolicyVersionId, out var text))
         {
             text = await ReadAsync(planned.PolicyVersionId, ct).ConfigureAwait(false);
@@ -72,8 +85,7 @@ internal sealed class BillingFirmReasonReplay
 
     private async Task<string?> ReadCheckedAsync(Guid versionId, CancellationToken ct)
     {
-        var version = await _entities.RetrieveAsync(
-            BillingFactLoader.VersionEntity, versionId, [BillingFactLoader.FirmDescriptionColumn, "sprk_policy"], ct).ConfigureAwait(false);
+        var version = await _entities.RetrieveAsync(BillingFactLoader.VersionEntity, versionId, VersionColumns, ct).ConfigureAwait(false);
         var raw = version.GetAttributeValue<string>(BillingFactLoader.FirmDescriptionColumn);
         if (string.IsNullOrWhiteSpace(raw))
         {
@@ -95,7 +107,8 @@ internal sealed class BillingFirmReasonReplay
                 .GetAttributeValue<string>(BillingFactLoader.NameColumn);
         }
 
-        var check = FirmDescriptionRules.Validate(raw, ruleSetName, policy.GetAttributeValue<string>(BillingFactLoader.NameColumn));
+        var ruleType = version.GetAttributeValue<OptionSetValue>("sprk_ruletype")?.Value.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        var check = FirmDescriptionRules.Validate(raw, ruleSetName, policy.GetAttributeValue<string>(BillingFactLoader.NameColumn), ruleType);
         if (!check.IsValid)
         {
             LogDropped(versionId, check.RefusalCode!);
