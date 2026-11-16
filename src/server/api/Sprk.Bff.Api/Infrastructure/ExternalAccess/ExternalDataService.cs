@@ -339,6 +339,10 @@ public class ExternalDataService
     /// <summary>The longest <c>sprk_description</c> an event accepts (the column's max length).</summary>
     internal const int EventDescriptionMaxLength = 2000;
 
+    /// <summary>R4 task 014b review pass 2 (K2): the length of <c>sprk_event.sprk_eventname</c> (Text, max 850;
+    /// docs/data-model/sprk_event-related-tables.md).</summary>
+    internal const int EventNameMaxLength = 850;
+
     /// <summary>Normal: the priority an event is created with when none is sent (owner Q-4).</summary>
     internal const int EventPriorityNormal = 100000001;
 
@@ -355,6 +359,7 @@ public class ExternalDataService
     internal const string EventDescriptionTooLongErrorCode = "sdap.event.description_too_long";
     internal const string EventStatusInvalidErrorCode = "sdap.event.status_invalid";
     internal const string EventNameRequiredErrorCode = "sdap.event.name_required";
+    internal const string EventNameTooLongErrorCode = "sdap.event.name_too_long";
 
     /// <summary>
     /// One <c>sprk_eventtype_ref</c> row (R4 task 014b, FR-35): its id, name, whether an event of it needs a due date
@@ -2189,11 +2194,12 @@ public class ExternalDataService
     }
 
     /// <summary>
-    /// R4 task 014b (FR-36, owner Q-7): ONE event by id, through the SAME read and the SAME withholding rules as the events
-    /// lists (<see cref="GetEventsAsync"/>: the multi-root rule, THE external visibility predicate, the invoice chain), so a
-    /// deep link never shows an event a list would hide. The value is empty when the event does not exist or is withheld;
-    /// <c>Truncated</c> when a rule could not be decided (the route's 503, never a 200). The route has ALREADY checked the
-    /// caller's Read on every parent (the delete rule's parent check).
+    /// R4 task 014b (FR-36, owner Q-7): ONE event by id, through the SAME read and the SAME withholding as the events lists
+    /// (<see cref="GetEventsAsync"/>: the multi-root rule and THE external visibility predicate). Like the lists it only READS the
+    /// row's invoice links (<see cref="ExternalEventDto.InvoiceLinks"/>): it does NOT hide an invoice-linked event — the route
+    /// applies the caller-aware invoice hiding, the same call the lists make (review pass 2, F1). The value is empty when the event
+    /// does not exist or is withheld; <c>Truncated</c> when a rule could not be decided (the route's 503, never a 200). The route
+    /// has ALREADY checked the caller's Read on every parent (the delete rule's parent check).
     /// </summary>
     // `virtual` per ADR-038 section 4 (substitution seam), as GetEventsAsync.
     public virtual async Task<ExternalCollectionResponse<ExternalEventDto>> GetEventByIdAsync(

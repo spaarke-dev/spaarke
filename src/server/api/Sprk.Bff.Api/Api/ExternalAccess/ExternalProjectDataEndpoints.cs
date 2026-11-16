@@ -2548,6 +2548,10 @@ public static class ExternalProjectDataEndpoints
         if (string.IsNullOrWhiteSpace(request.SprkName))
             return Results.Problem(statusCode: 400, title: "Bad Request",
                 detail: "sprk_name is required");
+        // Review pass 2 (K2): longer than the column is the caller's 400, not a Dataverse 400 behind a 503. Applies to every body,
+        // the legacy untyped one included (Dataverse refused it before 014b too, as a fault).
+        if (request.SprkName.Length > ExternalDataService.EventNameMaxLength)
+            return EventNameTooLong();
 
         // Task 097 review F9: never write an arbitrary status integer. Draft or Open only; omitted ⇒ Open. Checked
         // before the owner is resolved, so a malformed body costs no Dataverse read.
@@ -2758,6 +2762,10 @@ public static class ExternalProjectDataEndpoints
         Results.Problem(statusCode: 400, title: "Bad Request", detail: detail,
             extensions: new Dictionary<string, object?> { ["errorCode"] = errorCode });
 
+    /// <summary>Review pass 2 (K2): <c>sprk_name</c> longer than the column (create and PATCH).</summary>
+    private static IResult EventNameTooLong() =>
+        EventBadRequest($"sprk_name is longer than {ExternalDataService.EventNameMaxLength:N0} characters.", ExternalDataService.EventNameTooLongErrorCode);
+
     private static IResult EventTypesUnavailable() =>
         Results.Problem(statusCode: StatusCodes.Status503ServiceUnavailable, title: "Event types unavailable",
             detail: "The event types could not be read right now, and nothing was written. Try again shortly.",
@@ -2903,6 +2911,9 @@ public static class ExternalProjectDataEndpoints
         Allowed,
         Denied,
         Unavailable,
+
+        /// <summary>Dataverse answered that the systemuser cannot READ the event row (uac-r2 Q1: can't read is the uniform 404).</summary>
+        NotReadable,
     }
 
     /// <summary>
@@ -2910,14 +2921,17 @@ public static class ExternalProjectDataEndpoints
     /// parent the event is filed under (<see cref="RightsForRootWriteAsync"/>), and for a caller whose access Dataverse decides,
     /// ALSO Dataverse's Write on the event ROW (<see cref="WithDataverseRightsAsync"/>, app-only naming the systemuser — no OBO).
     /// No parent, or a parent that is not one of the three roots, is Denied. A right missing only because Dataverse gave no
-    /// answer is Unavailable (the PATCH's 503). The list and GET use the SAME decision for <c>canEdit</c>.
+    /// answer is Unavailable (the PATCH's 503). Dataverse's answer WITHOUT Read on the event row is NotReadable (the PATCH's
+    /// uniform 404, uac-r2 Q1). The list and GET use the SAME decision for <c>canEdit</c> (only Allowed is true).
     /// </summary>
     /// <param name="rootCache">Root answers already decided in this request (the list asks many rows under few roots).</param>
+    /// <param name="httpContext">The request whose <see cref="RequestAccessMemo"/> remembers the row answer.</param>
     private static async Task<EventEditDecision> EventEditDecisionAsync(
         CallerPrincipal caller, Guid eventId, IReadOnlyList<(ExternalDataService.TodoRootKind Kind, Guid Id)> parents,
         Func<string, Guid, CancellationToken, Task<Spaarke.Dataverse.AccessRights?>> readCallerRights,
         ILogger logger, CancellationToken ct,
-        IDictionary<(ExternalDataService.TodoRootKind, Guid), ConfirmedRights>? rootCache = null)
+        IDictionary<(ExternalDataService.TodoRootKind, Guid), ConfirmedRights>? rootCache = null,
+        HttpContext? httpContext = null)
     {
         if (parents.Count == 0)
             return EventEditDecision.Denied;
@@ -2953,14 +2967,51 @@ public static class ExternalProjectDataEndpoints
         if (!caller.DataverseConfirmsWrites)
             return EventEditDecision.Allowed;
 
-        // uac-r2 Q1: a systemuser ALSO needs Dataverse's Write on the event row itself (the parent rule alone is not enough).
-        var row = await WithDataverseRightsAsync(
-            caller, Spaarke.Dataverse.AccessRights.Read,
-            ExternalDataService.GetDeletableBinding(ExternalDataService.DeletableKind.Event).EntitySet, eventId,
-            readCallerRights, logger, ct);
-        if (row.Rights.HasFlag(Spaarke.Dataverse.AccessRights.Write))
-            return EventEditDecision.Allowed;
-        return row.IsUnavailableFor(Spaarke.Dataverse.AccessRights.Write) ? EventEditDecision.Unavailable : EventEditDecision.Denied;
+        // uac-r2 Q1: a systemuser ALSO needs Dataverse's Write on the event row itself (the parent rule alone is not enough), and
+        // Dataverse's own answer decides Read on the row too (review pass 2, F4): an answer without Read is "can't read".
+        var answer = await EventRowRightsAsync(caller, eventId, readCallerRights, httpContext, logger, ct);
+        if (answer is not { } rowRights)
+            return EventEditDecision.Unavailable;
+        var surface = SurfaceRightsFromDataverse(rowRights);
+        if (!surface.HasFlag(Spaarke.Dataverse.AccessRights.Read))
+            return EventEditDecision.NotReadable;
+        return surface.HasFlag(Spaarke.Dataverse.AccessRights.Write) ? EventEditDecision.Allowed : EventEditDecision.Denied;
+    }
+
+    /// <summary>
+    /// Dataverse's answer about a Dataverse-decided caller on ONE event row (app-only naming the systemuser — no OBO,
+    /// <see cref="CallerRightsReader"/>), remembered for the request in <see cref="RequestAccessMemo"/> (key: the principal kind,
+    /// its id and the event id) only when Dataverse answered. <see langword="null"/> when it gave no answer or the read threw:
+    /// never "no access" (task 036 fix round 4, F1).
+    /// </summary>
+    private static async Task<Spaarke.Dataverse.AccessRights?> EventRowRightsAsync(
+        CallerPrincipal caller, Guid eventId,
+        Func<string, Guid, CancellationToken, Task<Spaarke.Dataverse.AccessRights?>> readCallerRights,
+        HttpContext? httpContext, ILogger logger, CancellationToken ct)
+    {
+        var entitySet = ExternalDataService.GetDeletableBinding(ExternalDataService.DeletableKind.Event).EntitySet;
+
+        async Task<Spaarke.Dataverse.AccessRights?> ReadAsync(CancellationToken token)
+        {
+            try
+            {
+                return await readCallerRights(entitySet, eventId, token).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (!(ex is OperationCanceledException && token.IsCancellationRequested))
+            {
+                logger.LogError(ex,
+                    "[EXT-EVENT] Dataverse's rights on event {EventId} could not be read for the caller: unavailable, not refused.",
+                    eventId);
+                return null;
+            }
+        }
+
+        var memo = RequestAccessMemo.For(httpContext);
+        if (memo is null)
+            return await ReadAsync(ct);
+
+        var key = $"event-row-rights:systemuser:{AppOnlyConfirmationPrincipal(caller):N}:{eventId:N}";
+        return await memo.GetOrReadAsync(key, ReadAsync, rights => rights is not null, ct);
     }
 
     /// <summary>
@@ -2969,6 +3020,13 @@ public static class ExternalProjectDataEndpoints
     /// the caller may edit. The rows shown have already passed the list's own withholding rules (the multi-root rule, THE external
     /// visibility predicate, the invoice chain) — the PATCH's other checks. Unanswered is false: a UI affordance only.
     /// </summary>
+    /// <remarks>
+    /// Cost (review pass 2, F3): a Dataverse-decided caller costs one row question per event. The roots are decided first, once
+    /// each; the row questions then fan out at most <see cref="EventRowProbeConcurrency"/> at a time, each remembered for the
+    /// request. Above <see cref="EventEditAffordanceRowLimit"/> rows a Dataverse-decided caller's rows say <c>canEdit</c> false
+    /// WITHOUT asking: hiding the affordance is safe, because the PATCH re-checks the edit right on every request — the user can
+    /// still edit (from the event itself, whose GET asks). A contact asks Dataverse nothing here and is unaffected.
+    /// </remarks>
     private static async Task<IReadOnlyList<ExternalEventDto>> WithEventEditAffordancesAsync(
         IReadOnlyList<ExternalEventDto> rows, CallerPrincipal caller, HttpContext httpContext, CallerRecordAccessProbe probe,
         IDataversePrivilegeChecker privileges, ILogger logger, CancellationToken ct)
@@ -2977,19 +3035,45 @@ public static class ExternalProjectDataEndpoints
             return rows;
 
         var ceiling = await WorkforceRoleCeilingGate.AdmitsAsync(caller, privileges, WorkforceRoleCeilingGate.UpdateEvent, ct);
-        var readCallerRights = CallerRightsReader(probe, httpContext);
-        var rootCache = new Dictionary<(ExternalDataService.TodoRootKind, Guid), ConfirmedRights>();
-        var result = new List<ExternalEventDto>(rows.Count);
-        foreach (var row in rows)
+        if (!ceiling || (caller.DataverseConfirmsWrites && rows.Count > EventEditAffordanceRowLimit))
         {
-            var canEdit = ceiling && Guid.TryParse(row.SprkEventid, out var eventId)
-                && await EventEditDecisionAsync(caller, eventId, row.Parents.Select(p => (p.Kind, p.Id)).ToList(),
-                    readCallerRights, logger, ct, rootCache) == EventEditDecision.Allowed;
-            result.Add(WithAffordances(row, canEdit));
+            if (ceiling)
+                logger.LogInformation(
+                    "[EXT-EVENT] {Rows} events exceed the {Limit}-row edit-affordance limit: canEdit is false without asking Dataverse.",
+                    rows.Count, EventEditAffordanceRowLimit);
+            return rows.Select(row => WithAffordances(row, canEdit: false)).ToList();
         }
 
-        return result;
+        var readCallerRights = CallerRightsReader(probe, httpContext);
+        var parentsOf = rows.Select(row => row.Parents.Select(p => (p.Kind, p.Id)).ToList()).ToList();
+
+        // The roots first, once each and in order (few roots under many rows); the row questions below only read this cache.
+        var rootCache = new System.Collections.Concurrent.ConcurrentDictionary<(ExternalDataService.TodoRootKind, Guid), ConfirmedRights>();
+        foreach (var (kind, id) in parentsOf.SelectMany(p => p).Distinct())
+        {
+            if (kind is not (ExternalDataService.TodoRootKind.None or ExternalDataService.TodoRootKind.Ambiguous))
+                rootCache[(kind, id)] = await RightsForRootWriteAsync(caller, kind, id, readCallerRights, logger, ct);
+        }
+
+        var canEdit = new bool[rows.Count];
+        await Parallel.ForEachAsync(Enumerable.Range(0, rows.Count),
+            new ParallelOptions { MaxDegreeOfParallelism = EventRowProbeConcurrency, CancellationToken = ct },
+            async (i, inner) =>
+                canEdit[i] = Guid.TryParse(rows[i].SprkEventid, out var eventId)
+                    && await EventEditDecisionAsync(caller, eventId, parentsOf[i], readCallerRights, logger, inner, rootCache, httpContext)
+                        .ConfigureAwait(false) == EventEditDecision.Allowed).ConfigureAwait(false);
+
+        return rows.Select((row, i) => WithAffordances(row, canEdit[i])).ToList();
     }
+
+    /// <summary>The bound on concurrent event-row questions for the list's <c>canEdit</c> (as <see cref="EventTypeProbeConcurrency"/>).</summary>
+    private const int EventRowProbeConcurrency = EventTypeProbeConcurrency;
+
+    /// <summary>
+    /// Above this many rows, a Dataverse-decided caller's list rows say <c>canEdit</c> false without asking Dataverse (review
+    /// pass 2, F3): one row question per event is bounded here, below the list's own row cap. The PATCH still re-checks.
+    /// </summary>
+    internal const int EventEditAffordanceRowLimit = 100;
 
     /// <summary>The DTO with its edit affordances set (and, for the single GET, its regarding record).</summary>
     private static ExternalEventDto WithAffordances(ExternalEventDto row, bool canEdit, bool withRegarding = false)
@@ -3031,8 +3115,9 @@ public static class ExternalProjectDataEndpoints
     /// parent part). No parent, an unreadable link or a parent without Read is the SAME uniform 404 as a missing id
     /// (<c>sdap.access.deny.record_unavailable</c>), so an id cannot be probed.</item>
     /// <item>With <paramref name="writeChecks"/> (the PATCH): the live-parent rule, THE external visibility predicate and the
-    /// invoice links (the to-do PATCH's checks) — each "hidden" is the uniform 404, each undecided the 503. The GET leaves them to
-    /// its read (<see cref="ExternalDataService.GetEventByIdAsync"/> withholds by the same rules).</item>
+    /// invoice links (the to-do PATCH's checks) — each "hidden" is the uniform 404, each undecided the 503. The GET leaves the
+    /// first two to its read (<see cref="ExternalDataService.GetEventByIdAsync"/> withholds by the lists' rules) and applies the
+    /// lists' invoice hiding to the row it read (<see cref="HideInvoiceLinkedAsync"/>, review pass 2 F1).</item>
     /// </list>
     /// </remarks>
     private static async Task<IResult?> CheckEventReadableAsync(
@@ -3112,12 +3197,19 @@ public static class ExternalProjectDataEndpoints
         var read = await dataService.GetEventByIdAsync(id, callerContext, ct);
         if (read.Truncated)
             return EventUnavailable();
-        if (read.Value.Count == 0)
-            return Sprk.Bff.Api.Infrastructure.Errors.ProblemDetailsHelper.UniformRecordNotFound(httpContext);
+
+        // Review pass 2 (F1): the list's invoice hiding, the SAME call (HideInvoiceLinkedAsync — the read only reads the links):
+        // an event linked to an invoice the caller may not see is the uniform 404; a decision that could not be made, the 503.
+        var shown = await HideInvoiceLinkedAsync(read, callerContext, hideInvoices, logger, "event", ct);
+        if (shown.Value.Count == 0)
+            return shown.Truncated
+                ? EventUnavailable()
+                : Sprk.Bff.Api.Infrastructure.Errors.ProblemDetailsHelper.UniformRecordNotFound(httpContext);
+        read = shown;
 
         var canEdit = await WorkforceRoleCeilingGate.AdmitsAsync(callerContext, privileges, WorkforceRoleCeilingGate.UpdateEvent, ct)
-            && await EventEditDecisionAsync(callerContext, id, RootsOf(target!), CallerRightsReader(probe, httpContext), logger, ct)
-                == EventEditDecision.Allowed;
+            && await EventEditDecisionAsync(callerContext, id, RootsOf(target!), CallerRightsReader(probe, httpContext), logger, ct,
+                httpContext: httpContext) == EventEditDecision.Allowed;
         return Results.Ok(WithAffordances(read.Value[0], canEdit, withRegarding: true));
     }
 
@@ -3150,6 +3242,8 @@ public static class ExternalProjectDataEndpoints
             return EventBadRequest("The assignee cannot be changed here yet.", ExternalDataService.EventAssigneeUpdateUnsupportedErrorCode);
         if (request.NameSent && string.IsNullOrWhiteSpace(request.SprkName))
             return EventBadRequest("sprk_name cannot be empty.", ExternalDataService.EventNameRequiredErrorCode);
+        if (request.NameSent && request.SprkName is { Length: > ExternalDataService.EventNameMaxLength })
+            return EventNameTooLong();
         if (request.PrioritySent && (request.SprkPriority is not { } p || !ExternalDataService.EventPriorities.Contains(p)))
             return EventBadRequest("sprk_priority must be Low, Normal, High or Urgent.", ExternalDataService.EventPriorityInvalidErrorCode);
         if (request.DescriptionSent && request.SprkDescription is { Length: > ExternalDataService.EventDescriptionMaxLength })
@@ -3170,10 +3264,15 @@ public static class ExternalProjectDataEndpoints
             return refusal;
 
         // (3) May the caller edit it? Re-checked on every request (uac-r2 Q1).
-        switch (await EventEditDecisionAsync(callerContext, id, RootsOf(target!), CallerRightsReader(probe, httpContext), logger, ct))
+        switch (await EventEditDecisionAsync(callerContext, id, RootsOf(target!), CallerRightsReader(probe, httpContext), logger, ct,
+                    httpContext: httpContext))
         {
             case EventEditDecision.Unavailable:
                 return EventUnavailable();
+            case EventEditDecision.NotReadable:
+                // Review pass 2 (F4; uac-r2 Q1): Dataverse says the systemuser cannot read the row — can't read is the uniform 404.
+                logger.LogInformation("[EXT-EVENT] Update of event {Id} withheld: Dataverse gives the caller no Read on the row", id);
+                return Sprk.Bff.Api.Infrastructure.Errors.ProblemDetailsHelper.UniformRecordNotFound(httpContext);
             case EventEditDecision.Denied:
                 logger.LogInformation("[EXT-EVENT] Update of event {Id} refused: the caller can read it but not edit it", id);
                 return DenyEventUpdate();

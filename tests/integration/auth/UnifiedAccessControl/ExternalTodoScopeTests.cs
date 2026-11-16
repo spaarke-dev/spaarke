@@ -2009,6 +2009,8 @@ public sealed class ExternalTodoScopeTestFixture : ExternalCollaborationTestFixt
         Ownership.TeamId = Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble.DefaultTeamId;
         Ownership.Fault = null;
         Ownership.Requests.Clear();
+        // R4 task 014b review pass 2 (F1): a test that sets the invoice predicate leaves the next one hiding nothing.
+        InvoiceHiding = Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceHidingStub.NoneHidden();
     }
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)

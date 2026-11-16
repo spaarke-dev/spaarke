@@ -42,6 +42,7 @@ public sealed class ExternalEventFormsContractTests : IClassFixture<ExternalTodo
 
     private static readonly Guid Reminder = Guid.Parse("a0140000-0000-4000-8000-0000000071e1");
     private static readonly Guid Retired = Guid.Parse("a0140000-0000-4000-8000-0000000071e2");
+    private static readonly Guid Invoice = Guid.Parse("a0140000-0000-4000-8000-00000000f1e1");
 
     private const string EventCreatePrivilege = "prvCreatesprk_Event";
     private const string EventSet = "sprk_events";
@@ -102,6 +103,32 @@ public sealed class ExternalEventFormsContractTests : IClassFixture<ExternalTodo
         Parents = matters.Select(m => new ExternalEventParent(ExternalDataService.TodoRootKind.Matter, m, "Matter name")).ToList(),
         InvoiceLinks = Array.Empty<Guid>(), // links to no invoice (the list hides a row whose links were not read)
     };
+
+    /// <summary>The event under <see cref="Matter"/>, linked to <paramref name="invoice"/> (review pass 2, F1).</summary>
+    private static ExternalEventDto DtoLinkedTo(Guid invoice) => new()
+    {
+        SprkEventid = Event.ToString(),
+        SprkName = "Hearing",
+        SprkStatus = EventStatusCode.Open,
+        EventTypeId = EventTypeRef.Task.ToString(),
+        EventTypeName = "Task",
+        Parents = new[] { new ExternalEventParent(ExternalDataService.TodoRootKind.Matter, Matter, "Matter name") },
+        InvoiceLinks = new[] { invoice },
+    };
+
+    /// <summary>Another event under <see cref="Matter"/>, numbered <paramref name="n"/> (review pass 2, F3).</summary>
+    private static ExternalEventDto Row(int n) => new()
+    {
+        SprkEventid = RowId(n).ToString(),
+        SprkName = $"Row {n}",
+        SprkStatus = EventStatusCode.Open,
+        EventTypeId = EventTypeRef.Task.ToString(),
+        EventTypeName = "Task",
+        Parents = new[] { new ExternalEventParent(ExternalDataService.TodoRootKind.Matter, Matter, "Matter name") },
+        InvoiceLinks = Array.Empty<Guid>(),
+    };
+
+    private static Guid RowId(int n) => Guid.Parse($"a0140000-0000-4000-8000-0000{n:D8}");
 
     private static async Task<JsonElement> Json(HttpResponseMessage response)
     {
@@ -513,6 +540,57 @@ public sealed class ExternalEventFormsContractTests : IClassFixture<ExternalTodo
         (await Code(response, "reasonCode")).Should().Be(RecordUnavailable);
     }
 
+    // Review pass 2 (F1): the GET applies the lists' invoice hiding itself — the read only reads the links. These go through the
+    // REAL hiding path (the route's HideInvoiceLinkedAsync over the host's ExternalInvoiceHiding seam), not a stub that drops the row.
+
+    [Fact]
+    public async Task Get_AnEventLinkedToAnInvoiceTheCallerMayNotSee_IsTheUniform404_TheSameAsAnUnknownId()
+    {
+        _fixture.Principal = Contact((Matter, ExternalAccessLevel.FullAccess));
+        EventFiledUnder(EventTypeRef.Task, EventStatusCode.Open, Matter);
+        _fixture.Data.EventsById[Event] = DtoLinkedTo(Invoice);
+        _fixture.InvoiceHiding = InvoiceHidingStub.Hiding(Invoice);
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        using var hidden = await client.GetAsync($"/api/v1/external/events/{Event}");
+        using var unknown = await client.GetAsync($"/api/v1/external/events/{UnknownEvent}");
+
+        hidden.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        await ShouldBeTheSame404(hidden, unknown);
+        _fixture.InvoiceHiding.Calls.Should().ContainSingle().Which.Should().Equal(Invoice);
+    }
+
+    [Fact]
+    public async Task Get_AnEventLinkedToAnInvoiceTheCallerMaySee_Is200()
+    {
+        // Must-not-fire: the same event, the invoice visible.
+        _fixture.Principal = Contact((Matter, ExternalAccessLevel.FullAccess));
+        EventFiledUnder(EventTypeRef.Task, EventStatusCode.Open, Matter);
+        _fixture.Data.EventsById[Event] = DtoLinkedTo(Invoice);
+        _fixture.InvoiceHiding = InvoiceHidingStub.NoneHidden();
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        using var response = await client.GetAsync($"/api/v1/external/events/{Event}");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        _fixture.InvoiceHiding.Calls.Should().ContainSingle().Which.Should().Equal(Invoice);
+    }
+
+    [Fact]
+    public async Task Get_WhenTheInvoiceDecisionFaults_Is503_NotA404()
+    {
+        _fixture.Principal = Contact((Matter, ExternalAccessLevel.FullAccess));
+        EventFiledUnder(EventTypeRef.Task, EventStatusCode.Open, Matter);
+        _fixture.Data.EventsById[Event] = DtoLinkedTo(Invoice);
+        _fixture.InvoiceHiding = InvoiceHidingStub.Faulting();
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        using var response = await client.GetAsync($"/api/v1/external/events/{Event}");
+
+        response.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable);
+        (await Code(response, "reasonCode")).Should().Be("sdap.event.unavailable");
+    }
+
     [Fact]
     public async Task Get_WhenTheEventRowCannotBeRead_Is503_NotA404()
     {
@@ -745,6 +823,7 @@ public sealed class ExternalEventFormsContractTests : IClassFixture<ExternalTodo
     [Theory]
     [InlineData(AccessRights.Read | AccessRights.Write, HttpStatusCode.NoContent)]
     [InlineData(AccessRights.Read, HttpStatusCode.Forbidden)]
+    [InlineData(AccessRights.None, HttpStatusCode.NotFound)] // review pass 2 (F4): Dataverse gives no Read on the row: can't read, the uniform 404
     [InlineData(null, HttpStatusCode.ServiceUnavailable)]
     public async Task Patch_ByASystemUserWithParentWrite_AlsoNeedsDataverseWriteOnTheEventRow(AccessRights? onRow, HttpStatusCode expected)
     {
@@ -757,6 +836,8 @@ public sealed class ExternalEventFormsContractTests : IClassFixture<ExternalTodo
         using var response = await Patch(client, Event, new { sprk_name = "x" });
 
         response.StatusCode.Should().Be(expected, await response.Content.ReadAsStringAsync());
+        if (expected == HttpStatusCode.NotFound)
+            (await Code(response, "reasonCode")).Should().Be(RecordUnavailable, "the SAME uniform 404 as a missing id");
         _fixture.Data.EventUpdates.Should().HaveCount(expected == HttpStatusCode.NoContent ? 1 : 0);
         _fixture.Probe.AppOnlyCalls.Should().Contain((SystemUserId, EventSet, Event), "the ROW is asked, app-only");
         _fixture.Probe.Calls.Should().BeEmpty("never OBO on the external plane");
@@ -852,6 +933,139 @@ public sealed class ExternalEventFormsContractTests : IClassFixture<ExternalTodo
         using var list = await client.GetAsync($"/api/v1/external/matters/{Matter}/events");
 
         (await Json(list)).GetProperty("value")[0].GetProperty("canEdit").GetBoolean().Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task List_CanEdit_ForASystemUserRowDataverseGivesNoRead_IsFalse_AndAnEditableRowIsTrue()
+    {
+        // Review pass 2 (F4): the list agrees with the PATCH's 404 for a row Dataverse says the systemuser cannot read.
+        _fixture.Principal = SystemUser(AccessRights.Read);
+        _fixture.Probe.AnswerAppOnly(SystemUserId, "sprk_matters", Matter, AccessRights.Read | AccessRights.Write);
+        _fixture.Probe.AnswerAppOnly(SystemUserId, EventSet, RowId(1), AccessRights.None);
+        _fixture.Probe.AnswerAppOnly(SystemUserId, EventSet, RowId(2), AccessRights.Read | AccessRights.Write);
+        _fixture.Data.Events.Add(Row(1));
+        _fixture.Data.Events.Add(Row(2));
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        using var list = await client.GetAsync($"/api/v1/external/matters/{Matter}/events");
+
+        var rows = (await Json(list)).GetProperty("value");
+        CanEditOf(rows, RowId(1)).Should().BeFalse();
+        CanEditOf(rows, RowId(2)).Should().BeTrue();
+    }
+
+    private static bool CanEditOf(JsonElement rows, Guid id) =>
+        rows.EnumerateArray().Single(r => r.GetProperty("sprk_eventid").GetString() == id.ToString()).GetProperty("canEdit").GetBoolean();
+
+    // Review pass 2 (F3): the list's per-row question for a systemuser is bounded — fanned out, remembered, capped.
+
+    [Fact]
+    public async Task List_ForASystemUser_AsksEachRowOnce_AtMostTheConcurrencyLimitAtATime_AndEachRootOnce()
+    {
+        const int rows = 12;
+        _fixture.Principal = SystemUser(AccessRights.Read);
+        _fixture.Probe.AnswerAppOnly(SystemUserId, "sprk_matters", Matter, AccessRights.Read | AccessRights.Write);
+        for (var n = 1; n <= rows; n++)
+        {
+            _fixture.Data.Events.Add(Row(n));
+            _fixture.Probe.AnswerAppOnly(SystemUserId, EventSet, RowId(n), AccessRights.Read | AccessRights.Write);
+        }
+
+        _fixture.Probe.AppOnlyAnswerDelay = TimeSpan.FromMilliseconds(25);
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        using var list = await client.GetAsync($"/api/v1/external/matters/{Matter}/events");
+
+        list.StatusCode.Should().Be(HttpStatusCode.OK, await list.Content.ReadAsStringAsync());
+        var rowCalls = _fixture.Probe.AppOnlyCalls.Where(c => c.EntitySet == EventSet).Select(c => c.RecordId).ToList();
+        rowCalls.Should().HaveCount(rows).And.OnlyHaveUniqueItems("each row asked once");
+        _fixture.Probe.MaxAppOnlyInFlight.Should().BeInRange(2, 4, "the row questions fan out, bounded by the limit");
+        _fixture.Probe.AppOnlyCalls.Count(c => c.EntitySet == "sprk_matters").Should().BeLessThanOrEqualTo(2,
+            "the root is decided once for the edit affordances (and at most once more by the list's create gate)");
+        (await Json(list)).GetProperty("value").EnumerateArray().Should().OnlyContain(r => r.GetProperty("canEdit").GetBoolean());
+    }
+
+    [Fact]
+    public async Task List_AboveTheRowLimit_ASystemUserIsNotAskedAboutAnyRow_AndEveryCanEditIsFalse_WhileThePatchStillDecides()
+    {
+        var rows = Sprk.Bff.Api.Api.ExternalAccess.ExternalProjectDataEndpoints.EventEditAffordanceRowLimit + 1;
+        _fixture.Principal = SystemUser(AccessRights.Read);
+        _fixture.Probe.AnswerAppOnly(SystemUserId, "sprk_matters", Matter, AccessRights.Read | AccessRights.Write);
+        for (var n = 1; n <= rows; n++)
+        {
+            _fixture.Data.Events.Add(Row(n));
+            _fixture.Probe.AnswerAppOnly(SystemUserId, EventSet, RowId(n), AccessRights.Read | AccessRights.Write);
+        }
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        using var list = await client.GetAsync($"/api/v1/external/matters/{Matter}/events");
+
+        list.StatusCode.Should().Be(HttpStatusCode.OK, await list.Content.ReadAsStringAsync());
+        var value = (await Json(list)).GetProperty("value");
+        value.GetArrayLength().Should().Be(rows);
+        value.EnumerateArray().Should().OnlyContain(r => !r.GetProperty("canEdit").GetBoolean() && !r.GetProperty("canChangeStatus").GetBoolean());
+        _fixture.Probe.AppOnlyCalls.Should().NotContain(c => c.EntitySet == EventSet, "no row is asked above the limit");
+    }
+
+    [Fact]
+    public async Task List_AboveTheRowLimit_AContactIsUnaffected()
+    {
+        // Must-not-fire: a contact asks Dataverse nothing for canEdit, so the limit does not apply to it.
+        var rows = Sprk.Bff.Api.Api.ExternalAccess.ExternalProjectDataEndpoints.EventEditAffordanceRowLimit + 1;
+        _fixture.Principal = Contact((Matter, ExternalAccessLevel.Collaborate));
+        for (var n = 1; n <= rows; n++)
+            _fixture.Data.Events.Add(Row(n));
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        using var list = await client.GetAsync($"/api/v1/external/matters/{Matter}/events");
+
+        (await Json(list)).GetProperty("value").EnumerateArray().Should().OnlyContain(r => r.GetProperty("canEdit").GetBoolean());
+        _fixture.Probe.AppOnlyCalls.Should().BeEmpty();
+    }
+
+    // Review pass 2 (K2): sprk_name longer than sprk_eventname (850) is a stable 400, on create and on PATCH.
+
+    [Theory]
+    [InlineData(850, HttpStatusCode.Created)]
+    [InlineData(851, HttpStatusCode.BadRequest)]
+    public async Task Create_ANameLongerThanTheColumn_Is400NameTooLong(int length, HttpStatusCode expected)
+    {
+        _fixture.Principal = Contact((Matter, ExternalAccessLevel.Collaborate));
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        using var typed = await Create(client, new { sprk_name = new string('n', length), eventType = "task" });
+        using var legacy = await Create(client, new { sprk_name = new string('n', length) });
+
+        typed.StatusCode.Should().Be(expected, await typed.Content.ReadAsStringAsync());
+        legacy.StatusCode.Should().Be(expected, await legacy.Content.ReadAsStringAsync());
+        if (expected == HttpStatusCode.BadRequest)
+        {
+            (await Code(typed)).Should().Be("sdap.event.name_too_long");
+            (await Code(legacy)).Should().Be("sdap.event.name_too_long");
+        }
+
+        _fixture.Data.CreateEventCallCount.Should().Be(expected == HttpStatusCode.Created ? 2 : 0);
+    }
+
+    [Theory]
+    [InlineData(850, HttpStatusCode.NoContent)]
+    [InlineData(851, HttpStatusCode.BadRequest)]
+    public async Task Patch_ANameLongerThanTheColumn_Is400NameTooLong_AndReadsNothing(int length, HttpStatusCode expected)
+    {
+        _fixture.Principal = Contact((Matter, ExternalAccessLevel.Collaborate));
+        EventFiledUnder(EventTypeRef.Task, EventStatusCode.Open, Matter);
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        using var response = await Patch(client, Event, new { sprk_name = new string('n', length) });
+
+        response.StatusCode.Should().Be(expected, await response.Content.ReadAsStringAsync());
+        if (expected == HttpStatusCode.BadRequest)
+        {
+            (await Code(response)).Should().Be("sdap.event.name_too_long");
+            _fixture.Data.EventTargetReads.Should().BeEmpty();
+        }
+
+        _fixture.Data.EventUpdates.Should().HaveCount(expected == HttpStatusCode.NoContent ? 1 : 0);
     }
 
     // =====================================================================
