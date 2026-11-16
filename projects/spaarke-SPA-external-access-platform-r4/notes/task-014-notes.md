@@ -114,4 +114,9 @@ Questions:
 - **Open for uac-r2:**
   - K1: conferring-membership vs. workforce standing-grant expansion;
   - the merge order against `perf/2845-round2` (both touch `RequestAccessMemo.cs` / `AccessibleRecordSetService`).
+- **uac-r2 interim reply (2026-11-16):**
+  - The gate review has started (an Opus pass plus uac-r2's own read). **No pushes to `work/r4-014a-record-contact-access` until the verdict.**
+  - Merge order: **014a first.** uac-r2 rebases round 2 onto it.
+  - Keep the memo pre-create even after #2851 lands.
+  - K1: the preliminary answer is yes (conferring-membership org grants only; the workforce standing-grant expansion is a separate term, and leaving it out under-lists, which fails closed). Final with the verdict. If confirmed: record it as a known limit in the PR, and file an issue for listing standing-access workforce contacts in a later picker iteration.
 - **NFR-05 deviation** (one DI registration, requested by uac-r2 Q2.8): stated in the PR; the owner is told in this session's report.
