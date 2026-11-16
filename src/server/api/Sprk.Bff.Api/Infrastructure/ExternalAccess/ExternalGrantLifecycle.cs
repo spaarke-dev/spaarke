@@ -1249,27 +1249,49 @@ internal static class ExternalGrantLifecycle
             }
 
             if (row.ContactId is not null && row.OrganizationId is { } firm && firm != Guid.Empty
-                && !conferringOrganizationIds.Contains(firm))
+                && !await GrantFirmIsActiveAsync(firm, conferringOrganizationIds, dataverseClient, ct))
             {
-                ExternalParticipationService.OrganizationStateRow? organization;
-                try
-                {
-                    organization = await dataverseClient.RetrieveAsync<ExternalParticipationService.OrganizationStateRow>(
-                        "sprk_organizations", firm, "statecode", ct);
-                }
-                catch (HttpRequestException ex) when (ex.StatusCode == System.Net.HttpStatusCode.NotFound)
-                {
-                    organization = null; // a deleted firm confers nothing — the row does not count
-                }
-
-                if (!ExternalParticipationService.OrganizationIsActive(organization))
-                    continue;
+                continue;
             }
 
             held.Add(row);
         }
 
         return new ContactHeldGrants(directOnly, held);
+    }
+
+    /// <summary>
+    /// The ISS-026 firm check for a DIRECT grant row that names a firm beside its contact: does that firm let the row confer?
+    /// The ONE definition, shared by <see cref="ReadContactHeldGrantsAsync"/> and <c>RecordContactAccessService</c>.
+    /// </summary>
+    /// <remarks>
+    /// A firm that is one of the contact's CONFERRING organizations (<paramref name="conferringOrganizationIds"/>, task 109) is
+    /// active by construction — no read. Any other is read (<c>sprk_organizations({firm})?$select=statecode</c>): active confers;
+    /// inactive, or a firm that no longer exists (404), does not. Any other fault propagates — never "inactive".
+    /// </remarks>
+    internal static async Task<bool> GrantFirmIsActiveAsync(
+        Guid firm,
+        IReadOnlyCollection<Guid> conferringOrganizationIds,
+        DataverseWebApiClient dataverseClient,
+        CancellationToken ct)
+    {
+        if (conferringOrganizationIds.Contains(firm))
+        {
+            return true;
+        }
+
+        ExternalParticipationService.OrganizationStateRow? organization;
+        try
+        {
+            organization = await dataverseClient.RetrieveAsync<ExternalParticipationService.OrganizationStateRow>(
+                "sprk_organizations", firm, "statecode", ct);
+        }
+        catch (HttpRequestException ex) when (ex.StatusCode == System.Net.HttpStatusCode.NotFound)
+        {
+            organization = null; // a deleted firm confers nothing — the row does not count
+        }
+
+        return ExternalParticipationService.OrganizationIsActive(organization);
     }
 }
 

@@ -8,9 +8,10 @@
 // Every rule is answered by a reader that already exists; this class only orders them and folds their answers:
 //   flags (Restricted / direct-only / inactive)  → ExternalParticipationService.GetEffectiveRootRecordFlagsAsync
 //   active, unexpired grant rows                 → ExternalGrantLifecycle.QueryActiveRowsForRootAsync + ConfersAccessOn
+//   a direct row naming a firm (ISS-026)          → ExternalGrantLifecycle.GrantFirmIsActiveAsync (the firm must be active)
 //   organisation grant → its members             → ExternalParticipationService.FindWallMemberContactsAsync (superset),
 //                                                   narrowed by the evaluator's CONFERRING membership set
-//                                                   (ReadOrganizationMembershipsAsync — the org-grant term's own read)
+//                                                   (RequestAccessMemo.ReadOrganizationMembershipsAsync — the evaluator's read)
 //   No Access list (contact, its orgs, ancestors) → IAccessibleRecordSetService.CheckGranteeNoAccessAsync
 //                                                   (the evaluator's ResolveDenyVetoAsync over INoAccessListReader)
 //   inactive contact                              → ExternalParticipationService.ReadContactStateAsync
@@ -71,6 +72,9 @@ public enum RecordContactAccessUnknownReason
 
     /// <summary>A read about a candidate contact faulted in a way none of its readers reported as an answer.</summary>
     CandidateUnreadable,
+
+    /// <summary>Whether the firm a candidate's direct grant names is active could not be read (ISS-026).</summary>
+    FirmUnreadable,
 }
 
 /// <summary>
@@ -103,7 +107,9 @@ public abstract record RecordContactAccess
 /// <item>The record's ACTIVE grant rows (the grant core's row read), each conferring only on the read path's UTC-today rule
 /// (<see cref="ExternalParticipationService.ConfersAccessOn"/>) and only at a level that carries Read (owner 2026-09-30: no
 /// level = not granted).</item>
-/// <item>A contact-keyed row names its contact directly. An organization row (no contact) reaches the organization's members
+/// <item>A contact-keyed row names its contact directly; when it also names a firm it confers only while that firm is active
+/// (ISS-026, <see cref="ExternalGrantLifecycle.GrantFirmIsActiveAsync"/> — the read path's <c>GrantOrganizationConfers</c>
+/// guard). An organization row (no contact) reaches the organization's members
 /// whose membership CONFERS today (date-bounded, active organization — the evaluator's org-grant term reads exactly that set)
 /// — EXCEPT on a direct-only record (Secure or Limited, <see cref="RootRecordFlags.IsDirectOnly"/>, the evaluator's ONE
 /// suppression predicate), where only named direct contact grants count.</item>
@@ -115,9 +121,12 @@ public abstract record RecordContactAccess
 /// unverifiable No Access check answers <see cref="RecordContactAccess.Unknown"/>. Only the caller's own cancellation
 /// propagates.</para>
 /// <para><b>Names only</b> (Q2.7). The answer carries a contact id and a display name; nothing else is read or returned.
-/// Logs carry fixed labels and counts — no record, contact or organization id, no tenant, oid, UPN or email.</para>
+/// This class's own logs carry fixed labels and counts — no record, contact or organization id, no tenant, oid, UPN or email.
+/// (The evaluator's shared readers it calls log a failed read as the evaluator always has, with the contact id.)</para>
 /// <para><b>Once per request.</b> The contact state, removed-marker and membership reads go through the request's
-/// <see cref="RequestAccessMemo"/> under the evaluator's own keys, so a request that also composes the caller shares them.</para>
+/// <see cref="RequestAccessMemo"/> through the SAME shared reads the evaluator uses (<see cref="ExternalParticipationService.ReadContactStateAsync"/>,
+/// <see cref="RequestAccessMemo.ReadRemovedMarkerAsync"/>, <see cref="RequestAccessMemo.ReadOrganizationMembershipsAsync"/>),
+/// so a request that also composes the caller shares them.</para>
 /// <para><b>CLAUDE.md §11.</b> <i>Existing</i>: <see cref="AccessibleRecordSetService"/> composes access per CONTACT (contact →
 /// records); <c>RecordGrantsEndpoint</c> lists raw grant rows, lapsed ones included. <i>Extension</i>: neither answers per
 /// RECORD over effective access — the evaluator would have to be run once per candidate over that contact's whole grant set,
@@ -250,6 +259,7 @@ public sealed class RecordContactAccessService
 
         var today = ExternalGrantLifecycle.TodayUtc(_timeProvider);
         var directNames = new Dictionary<Guid, string?>();
+        var directGrants = new Dictionary<Guid, DirectGrants>();
         var grantingOrganizations = new HashSet<Guid>();
         foreach (var row in rows)
         {
@@ -271,6 +281,20 @@ public sealed class RecordContactAccessService
                 if (!directNames.TryGetValue(contactId, out var known) || string.IsNullOrEmpty(known))
                 {
                     directNames[contactId] = row.ContactName;
+                }
+
+                if (!directGrants.TryGetValue(contactId, out var grants))
+                {
+                    directGrants[contactId] = grants = new DirectGrants();
+                }
+
+                if (row.OrganizationId is { } firm && firm != Guid.Empty)
+                {
+                    grants.Firms.Add(firm); // ISS-026: confers only while this firm is active (decided per candidate)
+                }
+                else
+                {
+                    grants.Unconditional = true;
                 }
             }
             else if (row.OrganizationId is { } organizationId && organizationId != Guid.Empty && !flags.IsDirectOnly)
@@ -319,16 +343,22 @@ public sealed class RecordContactAccessService
         }
 
         // ── Rules 4 and 5, per candidate: state, removed marker, conferring membership, No Access ─────────────────────
+        // Create the request's memo HERE, before the fan-out. RequestAccessMemo.For locks context.Items, but on a request whose
+        // Items were never touched that dictionary (and its feature) is created lazily by the first accessor — concurrent first
+        // callers can each lock a different object and corrupt it or lose a memo (seen in this class's tests). Afterwards the
+        // candidates only find the memo.
+        _ = RequestMemo;
         var outcomes = new ConcurrentDictionary<Guid, CandidateOutcome>();
         await Parallel.ForEachAsync(
                 candidates,
                 new ParallelOptions { MaxDegreeOfParallelism = MaxConcurrentContactChecks, CancellationToken = ct },
                 async (contactId, token) =>
                 {
-                    var throughOrganizations = directNames.ContainsKey(contactId)
-                        ? null // a named direct grant: no membership needed for it to confer
-                        : reachedThrough[contactId];
-                    outcomes[contactId] = await EvaluateCandidateAsync(entityType, rootId, contactId, throughOrganizations, token)
+                    outcomes[contactId] = await EvaluateCandidateAsync(
+                            entityType, rootId, contactId,
+                            directGrants.GetValueOrDefault(contactId),
+                            reachedThrough.GetValueOrDefault(contactId),
+                            token)
                         .ConfigureAwait(false);
                 })
             .ConfigureAwait(false);
@@ -386,10 +416,20 @@ public sealed class RecordContactAccessService
         internal static CandidateOutcome Undecided(RecordContactAccessUnknownReason reason) => new(false, reason);
     }
 
-    /// <param name="throughOrganizations">The organizations whose grant reached this contact, or <c>null</c> for a contact with a
-    /// named direct grant.</param>
+    /// <summary>A candidate's conferring direct grant rows on the record: one with no firm confers outright
+    /// (<see cref="Unconditional"/>); one naming a firm confers only while that firm is active (ISS-026).</summary>
+    private sealed class DirectGrants
+    {
+        internal bool Unconditional { get; set; }
+
+        internal HashSet<Guid> Firms { get; } = new();
+    }
+
+    /// <param name="direct">The contact's own conferring grant rows, or <c>null</c> when it has none.</param>
+    /// <param name="throughOrganizations">The organizations whose grant reached this contact, or <c>null</c> when none did.</param>
     private async Task<CandidateOutcome> EvaluateCandidateAsync(
-        string entityType, Guid rootId, Guid contactId, IReadOnlyCollection<Guid>? throughOrganizations, CancellationToken ct)
+        string entityType, Guid rootId, Guid contactId, DirectGrants? direct, IReadOnlyCollection<Guid>? throughOrganizations,
+        CancellationToken ct)
     {
         try
         {
@@ -406,7 +446,8 @@ public sealed class RecordContactAccessService
             }
 
             // Rule 5: an administrator's removal confers nothing, whatever the contact's state.
-            var marker = await ReadRemovedMarkerAsync(contactId, ct).ConfigureAwait(false);
+            var marker = await RequestAccessMemo
+                .ReadRemovedMarkerAsync(RequestMemo, _identityStore, _logger, contactId, ct).ConfigureAwait(false);
             if (marker == RemovedMarkerRead.Removed)
             {
                 return CandidateOutcome.Out;
@@ -417,19 +458,50 @@ public sealed class RecordContactAccessService
                 return CandidateOutcome.Undecided(RecordContactAccessUnknownReason.RemovedMarkerUnreadable);
             }
 
-            // Rule 2: an organization grant reaches only a member whose membership CONFERS today (the org-grant term's set).
-            if (throughOrganizations is not null)
+            // A direct row with no firm confers outright. Otherwise the contact's CONFERRING memberships decide: a direct row's
+            // firm (ISS-026: it must be active — a conferring firm is by construction) and an organization grant (rule 2: it
+            // reaches only a member whose membership confers today, the org-grant term's own set).
+            var confers = direct?.Unconditional == true;
+            if (!confers)
             {
-                var memberships = await ReadOrganizationMembershipsAsync(contactId, ct).ConfigureAwait(false);
+                var memberships = await RequestAccessMemo
+                    .ReadOrganizationMembershipsAsync(RequestMemo, _participations, _logger, contactId, ct)
+                    .ConfigureAwait(false);
                 if (memberships.Unreadable)
                 {
                     return CandidateOutcome.Undecided(RecordContactAccessUnknownReason.MembershipsUnreadable);
                 }
 
-                if (!memberships.ConferringOrganizationIds.Any(throughOrganizations.Contains))
+                foreach (var firm in direct?.Firms ?? Enumerable.Empty<Guid>())
                 {
-                    return CandidateOutcome.Out;
+                    bool active;
+                    try
+                    {
+                        active = await ExternalGrantLifecycle
+                            .GrantFirmIsActiveAsync(firm, memberships.ConferringOrganizationIds, _dataverse, ct)
+                            .ConfigureAwait(false);
+                    }
+                    catch (Exception ex) when (!ct.IsCancellationRequested)
+                    {
+                        _logger.LogWarning(ex, "[RECORD-CONTACTS] The state of a firm a direct grant names could not be read.");
+                        return CandidateOutcome.Undecided(RecordContactAccessUnknownReason.FirmUnreadable);
+                    }
+
+                    if (active)
+                    {
+                        confers = true;
+                        break;
+                    }
                 }
+
+                confers = confers
+                    || (throughOrganizations is not null
+                        && memberships.ConferringOrganizationIds.Any(throughOrganizations.Contains));
+            }
+
+            if (!confers)
+            {
+                return CandidateOutcome.Out;
             }
 
             // Rule 4: the evaluator's deny veto — the contact, its organizations (wall set), the record and every secure
@@ -450,65 +522,9 @@ public sealed class RecordContactAccessService
         }
     }
 
+    /// <summary>The request's memo the per-contact reads share with the evaluator (the same keys and remember rules — the
+    /// shared reads on <see cref="RequestAccessMemo"/>); none outside a request.</summary>
     private RequestAccessMemo? RequestMemo => RequestAccessMemo.For(_httpContextAccessor?.HttpContext);
-
-    /// <summary>
-    /// The removed marker, once per request under the evaluator's key and rule (only a proven answer is shared). A thrown read
-    /// is <see cref="RemovedMarkerRead.Unreadable"/>.
-    /// </summary>
-    private Task<RemovedMarkerRead> ReadRemovedMarkerAsync(Guid contactId, CancellationToken ct)
-    {
-        var memo = RequestMemo;
-        return memo is null
-            ? ReadRemovedMarkerLiveAsync(contactId, ct)
-            : memo.GetOrReadAsync(
-                RequestAccessMemo.RemovedMarkerKey(contactId),
-                token => ReadRemovedMarkerLiveAsync(contactId, token),
-                marker => marker is RemovedMarkerRead.NotRemoved or RemovedMarkerRead.Removed,
-                ct);
-    }
-
-    private async Task<RemovedMarkerRead> ReadRemovedMarkerLiveAsync(Guid contactId, CancellationToken ct)
-    {
-        try
-        {
-            return await _identityStore.ReadRemovedMarkerAsync(contactId, ct).ConfigureAwait(false);
-        }
-        catch (Exception ex) when (!ct.IsCancellationRequested)
-        {
-            _logger.LogWarning(ex, "[RECORD-CONTACTS] A candidate contact's removed marker could not be read.");
-            return RemovedMarkerRead.Unreadable;
-        }
-    }
-
-    /// <summary>
-    /// The contact's organization memberships, once per request under the evaluator's key and rule (an unreadable answer is never
-    /// shared). A thrown read is <see cref="ActiveOrgMemberships.Failed"/>.
-    /// </summary>
-    private Task<ActiveOrgMemberships> ReadOrganizationMembershipsAsync(Guid contactId, CancellationToken ct)
-    {
-        var memo = RequestMemo;
-        return memo is null
-            ? ReadOrganizationMembershipsLiveAsync(contactId, ct)
-            : memo.GetOrReadAsync(
-                RequestAccessMemo.OrganizationMembershipsKey(contactId),
-                token => ReadOrganizationMembershipsLiveAsync(contactId, token),
-                orgs => !orgs.Unreadable,
-                ct);
-    }
-
-    private async Task<ActiveOrgMemberships> ReadOrganizationMembershipsLiveAsync(Guid contactId, CancellationToken ct)
-    {
-        try
-        {
-            return await _participations.ReadOrganizationMembershipsAsync(contactId, ct).ConfigureAwait(false);
-        }
-        catch (Exception ex) when (!ct.IsCancellationRequested)
-        {
-            _logger.LogWarning(ex, "[RECORD-CONTACTS] A candidate contact's organization memberships could not be read.");
-            return ActiveOrgMemberships.Failed;
-        }
-    }
 
     /// <summary>
     /// The display names (<c>fullname</c>) of <paramref name="contactIds"/>, batched. Selects the id and the name ONLY. Throws on

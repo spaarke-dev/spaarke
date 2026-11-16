@@ -12,10 +12,12 @@
 // listing nobody or everybody.
 
 using System.Collections.Concurrent;
+using System.Net;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using Azure.Core;
 using FluentAssertions;
+using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Time.Testing;
@@ -46,6 +48,8 @@ public class RecordContactAccessServiceTests
     private static readonly Guid OtherMatter = Guid.Parse("014a014a-0000-0000-0000-0000000000b2");
     private static readonly Guid Firm = Guid.Parse("014a014a-0000-0000-0000-0000000000e1");
     private static readonly Guid OtherFirm = Guid.Parse("014a014a-0000-0000-0000-0000000000e2");
+    private static readonly Guid InactiveFirm = Guid.Parse("014a014a-0000-0000-0000-0000000000e3");
+    private static readonly Guid DeletedFirm = Guid.Parse("014a014a-0000-0000-0000-0000000000e4");
     private static readonly Guid MatterType = Guid.Parse("014a014a-0000-0000-0000-0000000000f2");
 
     private static readonly Guid Alice = Guid.Parse("014a014a-0000-0000-0000-00000000c001");
@@ -139,7 +143,120 @@ public class RecordContactAccessServiceTests
             "on a direct-only record only named, direct contact grants count");
     }
 
+    // ── ISS-026: a direct grant naming a firm confers only while that firm is active (fix round 1, F1) ─────────────────
+
+    [Fact]
+    public async Task GetContactsWithAccess_DirectGrantNamingAnInactiveOrDeletedFirm_IsAbsent_AnActiveFirmsGranteeIsListed()
+    {
+        _dataverse.FirmStates[Firm] = 0;
+        _dataverse.FirmStates[InactiveFirm] = 1;
+        _dataverse.Grant(Alice, Firm, Today.AddDays(30), name: "Alice Active Firm");
+        _dataverse.Grant(Hank, InactiveFirm, Today.AddDays(30), name: "Hank Inactive Firm");
+        _dataverse.Grant(Dan, DeletedFirm, Today.AddDays(30), name: "Dan Deleted Firm");
+
+        var result = await Service().GetContactsWithAccessAsync(ExternalGrantRootType.Matter, Root, CancellationToken.None);
+
+        Known(result).Select(c => c.ContactId).Should().Equal(new[] { Alice },
+            "a direct row whose firm is inactive (or gone) confers nothing — the read path's GrantOrganizationConfers guard");
+        _dataverse.Reads.Where(r => r.EntitySet == "sprk_organizations").Select(r => r.Select).Should()
+            .HaveCount(3).And.OnlyContain(s => s == "statecode", "each firm's state is read, and nothing else about it");
+    }
+
+    [Fact]
+    public async Task GetContactsWithAccess_InactiveFirmDirectGrant_StillListsTheContact_WhenAnotherSourceConfers()
+    {
+        _dataverse.FirmStates[InactiveFirm] = 1;
+        // Erin: one row under an inactive firm, one with no firm. Bob: an inactive-firm row, but his organization's grant
+        // confers. Carol: only the inactive-firm row (control — absent). Gail: the firm is her own CONFERRING organization,
+        // which is active by construction — no read.
+        _dataverse.Grant(Erin, InactiveFirm, Today.AddDays(30), name: "Erin Two Rows");
+        _dataverse.Grant(Erin, null, Today.AddDays(30), name: "Erin Two Rows");
+        _dataverse.Grant(Bob, InactiveFirm, Today.AddDays(30), name: "Bob Member");
+        _dataverse.Grant(null, Firm, Today.AddDays(30));
+        _participations.Members[Firm] = new[] { Bob };
+        _participations.Memberships[Bob] = (Conferring: new[] { Firm }, Wall: new[] { Firm });
+        _dataverse.Grant(Carol, InactiveFirm, Today.AddDays(30), name: "Carol Inactive Firm");
+        _dataverse.Grant(Gail, OtherFirm, Today.AddDays(30), name: "Gail Own Firm");
+        _participations.Memberships[Gail] = (Conferring: new[] { OtherFirm }, Wall: new[] { OtherFirm });
+
+        var result = await Service().GetContactsWithAccessAsync(ExternalGrantRootType.Matter, Root, CancellationToken.None);
+
+        // Gail's firm has no state in the double: had it been read it would answer 404 and she would be absent.
+        Known(result).Select(c => c.ContactId).Should().BeEquivalentTo(new[] { Erin, Bob, Gail });
+        _dataverse.Reads.Count(r => r.EntitySet == "sprk_organizations").Should().Be(2,
+            "only Bob's and Carol's inactive firm is read: Erin has a firm-less row, Gail's firm confers by construction");
+    }
+
+    [Fact]
+    public async Task GetContactsWithAccess_FirmStateReadFault_IsUnknown_NeverAPartialKnown()
+    {
+        _dataverse.FirmStates[Firm] = 0;
+        _dataverse.Grant(Alice, null, Today.AddDays(30), name: "Alice Direct");
+        _dataverse.Grant(Hank, Firm, Today.AddDays(30), name: "Hank Firm");
+
+        var healthy = await Service().GetContactsWithAccessAsync(ExternalGrantRootType.Matter, Root, CancellationToken.None);
+        Known(healthy).Select(c => c.ContactId).Should().BeEquivalentTo(new[] { Alice, Hank }, "control: the firm read answers");
+
+        _dataverse.FirmsThrow = true;
+        var faulted = await Service().GetContactsWithAccessAsync(ExternalGrantRootType.Matter, Root, CancellationToken.None);
+
+        faulted.Should().BeOfType<RecordContactAccess.Unknown>()
+            .Which.Reason.Should().Be(RecordContactAccessUnknownReason.FirmUnreadable);
+    }
+
     // ── Rule 3: Restricted → nobody ────────────────────────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task GetContactsWithAccess_InactiveRecord_IsKnownEmpty_AnActiveOneListsTheGrantee()
+    {
+        _dataverse.Grant(Alice, null, Today.AddDays(30), name: "Alice Direct");
+
+        var active = await Service().GetContactsWithAccessAsync(ExternalGrantRootType.Matter, Root, CancellationToken.None);
+        Known(active).Select(c => c.ContactId).Should().Equal(Alice);
+
+        _participations.Flags[Root] = new RootRecordFlags(IsSecure: false, IsRestricted: false, IsInactive: true);
+        var inactive = await Service().GetContactsWithAccessAsync(ExternalGrantRootType.Matter, Root, CancellationToken.None);
+
+        inactive.Should().BeOfType<RecordContactAccess.Known>()
+            .Which.Contacts.Should().BeEmpty("an inactive record confers nothing contact-sourced (task 137)");
+    }
+
+    [Theory]
+    [InlineData("standard")]
+    [InlineData("secure")]
+    [InlineData("restricted")]
+    public async Task GetContactsWithAccess_WorkAssignmentUnderASecureOrRestrictedMatter_InheritsItsFlags(string parent)
+    {
+        _world.Add(Matter, ParentMatter, parent switch
+        {
+            "secure" => new (string, object)[] { ("sprk_issecure", true), ("sprk_mattername", "Parent") },
+            "restricted" => new (string, object)[]
+            {
+                ("sprk_issecure", false), ("sprk_mattername", "Parent"),
+                ("sprk_accesspermission", new OptionSetValue(ExternalParticipationService.AccessPermissionRestricted)),
+            },
+            _ => new (string, object)[] { ("sprk_issecure", false), ("sprk_mattername", "Parent") },
+        });
+        _world.Add(WorkAssignment, Root,
+            ("sprk_issecure", false),
+            ("sprk_regardingmatter", new EntityReference(Matter, ParentMatter)));
+        _participations.Flags[Root] = RootRecordFlags.None; // the work assignment's OWN row is open and Standard
+        _dataverse.Grant(Alice, null, Today.AddDays(30), name: "Alice Direct", root: "_sprk_workassignment_value");
+        _dataverse.Grant(null, Firm, Today.AddDays(30), root: "_sprk_workassignment_value");
+        _participations.Members[Firm] = new[] { Bob };
+        _participations.Memberships[Bob] = (Conferring: new[] { Firm }, Wall: new[] { Firm });
+        _dataverse.FullNames[Bob] = "Bob Member";
+
+        var result = await Service().GetContactsWithAccessAsync(ExternalGrantRootType.WorkAssignment, Root, CancellationToken.None);
+
+        var expected = parent switch
+        {
+            "secure" => new[] { Alice },   // inherited Secure: direct grants only
+            "restricted" => Array.Empty<Guid>(), // inherited Restricted: nobody
+            _ => new[] { Alice, Bob },     // control: a Standard parent changes nothing
+        };
+        Known(result).Select(c => c.ContactId).Should().BeEquivalentTo(expected);
+    }
 
     [Fact]
     public async Task GetContactsWithAccess_RestrictedRecord_IsKnownEmpty_AStandardOneListsTheGrantee()
@@ -301,6 +418,72 @@ public class RecordContactAccessServiceTests
             .And.NotContain("bob@firm.example");
     }
 
+    // ── Inside a request: the shared memo (fix round 1, F2 — the production path) ──────────────────────────────────────
+
+    [Fact]
+    public async Task GetContactsWithAccess_InsideARequest_SharesTheEvaluatorsMemo_AndAnswersTheSame()
+    {
+        // Alice: a direct grant. Bob and Carol: reached through their organization's grant (the membership read is needed by
+        // this service AND by the evaluator's No Access check). Dan: walled — evaluated, then excluded.
+        _dataverse.Grant(Alice, null, Today.AddDays(30), name: "Alice Direct");
+        _dataverse.Grant(Dan, null, Today.AddDays(30), name: "Dan Walled");
+        _denyList.DenyContactOnRecord(Dan, Root);
+        _dataverse.Grant(null, Firm, Today.AddDays(30));
+        // Bob, Carol and 40 more members, so the fan-out runs at its full width (the concurrent first memo lookups).
+        var crowd = Enumerable.Range(1, 40).Select(n => Guid.Parse($"014a014a-0000-0000-0000-0000000d{n:D4}")).ToArray();
+        _participations.Members[Firm] = new[] { Bob, Carol }.Concat(crowd).ToArray();
+        foreach (var member in new[] { Bob, Carol }.Concat(crowd))
+            _participations.Memberships[member] = (Conferring: new[] { Firm }, Wall: new[] { Firm });
+        _dataverse.FullNames[Bob] = "Bob Member";
+        _dataverse.FullNames[Carol] = "Carol Member";
+        foreach (var (member, n) in crowd.Select((id, i) => (id, i + 1)))
+            _dataverse.FullNames[member] = $"Member {n:D2}";
+
+        // Control: outside a request every read is live — the organization members' memberships are read twice each.
+        var outside = await Service().GetContactsWithAccessAsync(ExternalGrantRootType.Matter, Root, CancellationToken.None);
+        Known(outside).Select(c => c.ContactId).Should().StartWith(new[] { Alice, Bob, Carol }).And.HaveCount(43);
+        _participations.MembershipReads[Bob].Should().Be(2, "control: no memo, this service and the evaluator each read");
+
+        // Several fresh requests: each starts with HttpContext.Items untouched, which is when the candidates' concurrent first
+        // memo lookups could race (the memo is created before the fan-out — without that, a request here intermittently
+        // answered Unknown(CandidateUnreadable) from a corrupted Items dictionary, or lost its memo).
+        DefaultHttpContext context = null!;
+        for (var request = 0; request < 12; request++)
+        {
+            context = new DefaultHttpContext();
+            var accessor = new HttpContextAccessor { HttpContext = context };
+            var inRequest = new Participations(Entities(), accessor);
+            foreach (var (id, m) in _participations.Memberships)
+                inRequest.Memberships[id] = m;
+            foreach (var (id, members) in _participations.Members)
+                inRequest.Members[id] = members;
+
+            var inside = await Service(accessor, inRequest)
+                .GetContactsWithAccessAsync(ExternalGrantRootType.Matter, Root, CancellationToken.None);
+
+            Known(inside).Should().Equal(Known(outside), "the memo changes how often a read runs, never the answer");
+            inRequest.MembershipReads.Should().OnlyContain(kv => kv.Value == 1,
+                "one membership read per contact per request, shared by this service and the evaluator's No Access check");
+        }
+
+        var memo = RequestAccessMemo.For(context)!;
+        foreach (var contact in new[] { Alice, Bob, Carol, Dan })
+        {
+            (await memo.GetOrReadAsync(RequestAccessMemo.ContactStateKey(contact), NotRead<ContactRecordState>, _ => true, default))
+                .Should().Be(ContactRecordState.Active);
+            (await memo.GetOrReadAsync(RequestAccessMemo.RemovedMarkerKey(contact), NotRead<RemovedMarkerRead>, _ => true, default))
+                .Should().Be(RemovedMarkerRead.NotRemoved);
+        }
+
+        (await memo.GetOrReadAsync(RequestAccessMemo.OrganizationMembershipsKey(Bob), NotRead<ActiveOrgMemberships>, _ => true, default))
+            .ConferringOrganizationIds.Should().Equal(Firm);
+        (await memo.GetOrReadAsync(RequestAccessMemo.OrganizationMembershipsKey(Carol), NotRead<ActiveOrgMemberships>, _ => true, default))
+            .ConferringOrganizationIds.Should().Equal(Firm);
+    }
+
+    private static Task<T> NotRead<T>(CancellationToken _)
+        => throw new InvalidOperationException("Test: the memo should already hold this answer.");
+
     // ── Fixtures ───────────────────────────────────────────────────────────────────────────────────────────────────────
 
     private static IReadOnlyList<RecordAccessContact> Known(RecordContactAccess result)
@@ -379,14 +562,16 @@ public class RecordContactAccessServiceTests
         return store.Object;
     }
 
-    private RecordContactAccessService Service()
+    private RecordContactAccessService Service(IHttpContextAccessor? httpContextAccessor = null, Participations? participations = null)
     {
+        participations ??= _participations;
         var entities = Entities();
         var evaluator = new AccessibleRecordSetService(
-            Mock.Of<IMembershipResolverService>(), _participations, Mock.Of<ISubjectStandingGrantReader>(), _denyList,
-            UnlinkedIdentityStore(), InternalSystemUsers(), entities, NullLogger<AccessibleRecordSetService>.Instance);
+            Mock.Of<IMembershipResolverService>(), participations, Mock.Of<ISubjectStandingGrantReader>(), _denyList,
+            UnlinkedIdentityStore(), InternalSystemUsers(), entities, NullLogger<AccessibleRecordSetService>.Instance,
+            httpContextAccessor: httpContextAccessor);
         return new RecordContactAccessService(
-            _dataverse, _participations, evaluator, IdentityStore(), _time, httpContextAccessor: null,
+            _dataverse, participations, evaluator, IdentityStore(), _time, httpContextAccessor,
             NullLogger<RecordContactAccessService>.Instance);
     }
 
@@ -396,11 +581,15 @@ public class RecordContactAccessServiceTests
     /// </summary>
     private sealed class Participations : ExternalParticipationService
     {
-        public Participations(IGenericEntityService filing)
+        public Participations(IGenericEntityService filing, IHttpContextAccessor? httpContextAccessor = null)
             : base(new HttpClient(), cache: null!, configuration: null!, credential: null!,
-                   httpContextAccessor: null!, logger: NullLogger<ExternalParticipationService>.Instance, filing: filing)
+                   httpContextAccessor: httpContextAccessor!, logger: NullLogger<ExternalParticipationService>.Instance,
+                   filing: filing)
         {
         }
+
+        /// <summary>Live membership reads per contact (what the request memo saves).</summary>
+        public ConcurrentDictionary<Guid, int> MembershipReads { get; } = new();
 
         public ConcurrentDictionary<Guid, RootRecordFlags> Flags { get; } = new();
         public bool FlagsThrow { get; set; }
@@ -434,6 +623,7 @@ public class RecordContactAccessServiceTests
 
         internal override Task<ActiveOrgMemberships> ReadOrganizationMembershipsAsync(Guid contactId, CancellationToken ct = default)
         {
+            MembershipReads.AddOrUpdate(contactId, 1, (_, n) => n + 1);
             if (UnreadableMemberships.ContainsKey(contactId))
                 return Task.FromResult(ActiveOrgMemberships.Failed);
 
@@ -472,6 +662,10 @@ public class RecordContactAccessServiceTests
         public Dictionary<Guid, string> Emails { get; } = new();
         public bool GrantsThrow { get; set; }
         public bool NamesThrow { get; set; }
+
+        /// <summary>Each firm's <c>statecode</c> (0 active, 1 inactive); a firm not here does not exist (404).</summary>
+        public ConcurrentDictionary<Guid, int> FirmStates { get; } = new();
+        public bool FirmsThrow { get; set; }
         public ConcurrentQueue<(string EntitySet, string? Select)> Reads { get; } = new();
 
         /// <summary>One active grant row on <see cref="Root"/>: a contact grant, or an organization grant (no contact).</summary>
@@ -521,6 +715,23 @@ public class RecordContactAccessServiceTests
                 default:
                     throw new InvalidOperationException($"Test: unexpected read of {entitySetName}.");
             }
+        }
+
+        /// <summary>The firm point read (<c>sprk_organizations({id})?$select=statecode</c>), as the production client throws a
+        /// non-success status: 404 for a firm that does not exist.</summary>
+        public override Task<T?> RetrieveAsync<T>(
+            string entitySetName, Guid id, string? select = null, CancellationToken cancellationToken = default)
+            where T : default
+        {
+            Reads.Enqueue((entitySetName, select));
+            if (entitySetName != "sprk_organizations")
+                throw new InvalidOperationException($"Test: unexpected point read of {entitySetName}.");
+            if (FirmsThrow)
+                throw new HttpRequestException("Test: the firm could not be read.", null, HttpStatusCode.ServiceUnavailable);
+            if (!FirmStates.TryGetValue(id, out var state))
+                throw new HttpRequestException("Test: no such firm.", null, HttpStatusCode.NotFound);
+
+            return Task.FromResult(JsonSerializer.Deserialize<T>(JsonSerializer.Serialize(new { statecode = state })));
         }
 
         private static List<T> Rows<T>(IEnumerable<Dictionary<string, object?>> rows)
