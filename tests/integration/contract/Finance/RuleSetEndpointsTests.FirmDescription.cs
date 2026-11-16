@@ -10,8 +10,8 @@ namespace Sprk.Bff.Api.Tests.Api.Finance;
 /// <summary>
 /// ebilling-r1 task 130e-1 (DEF-060), the contract task 130e-2's editor builds on: <c>PATCH /api/finance/rulesets/{ruleSetId}/proposals/{policyId}</c>
 /// takes <c>firmDescription</c> (absent or null leaves it, blank clears it); a refused firm description is a 422 whose <c>errors[]</c> entry has
-/// <c>field</c> "firmDescription" and a stable <c>reason</c>, at edit and at publish; a change on a published version is 409
-/// <c>ruleset.firm_description_frozen</c>; any other invalid edit stays 400.
+/// <c>field</c> "firmDescription" and a stable <c>reason</c>, at edit and at publish; any other invalid edit stays 400. (A change on a published
+/// version lands on the new draft the edit creates: fix round 1 F1, proved in RuleSetServiceTests.)
 /// </summary>
 public sealed partial class RuleSetEndpointsTests
 {
@@ -57,19 +57,6 @@ public sealed partial class RuleSetEndpointsTests
         body["errors"]![0]!["field"]!.GetValue<string>().Should().Be("firmDescription");
         body["errors"]![0]!["reason"]!.GetValue<string>().Should().Be("firm_description_names_rule");
         other.StatusCode.Should().Be(HttpStatusCode.BadRequest);
-    }
-
-    [Fact(DisplayName = "130e-1 contract: a firm description change on a published version is 409 ruleset.firm_description_frozen")]
-    public async Task Edit_APublishedVersionsFirmDescription_Is409()
-    {
-        await using var host = await Host.StartAsync();
-        host.Service.Setup(s => s.EditAsync(SetId, PolicyId, It.IsAny<ProposalEdit>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(RuleSetOutcome<ProposalEdited>.Refused(409, RuleSetService.CodeFirmDescriptionFrozen, "frozen"));
-
-        var response = await host.Client.SendAsync(Req("PATCH", $"{Base}/{SetId}/proposals/{PolicyId}", content: JsonContent.Create(new { firmDescription = "x" })));
-
-        response.StatusCode.Should().Be(HttpStatusCode.Conflict);
-        (await Json(response))["errorCode"]!.GetValue<string>().Should().Be("ruleset.firm_description_frozen");
     }
 
     [Fact(DisplayName = "130e-1 contract (Q4): a publish refused for a firm description is 422 ruleset.publish_invalid with every per-rule error")]

@@ -10,8 +10,8 @@ using Sprk.Bff.Api.Services.Finance.Procedures;
 namespace Sprk.Bff.Api.Api.Finance;
 
 /// <summary>The edit of a rule's working version. Every member is optional; a rule body is a JSON object or a JSON string.</summary>
-/// <param name="FirmDescription">Task 130e-1 (DEF-060): the firm description; absent or null leaves it, a blank text clears it. A draft only
-/// (409 <c>ruleset.firm_description_frozen</c> on a published version); refused 422 <c>ruleset.invalid</c> with field <c>firmDescription</c> and
+/// <param name="FirmDescription">Task 130e-1 (DEF-060): the firm description; absent or null leaves it, a blank text clears it. On a published
+/// version the edit lands on the new draft it creates, never on the published row; refused 422 <c>ruleset.invalid</c> with field <c>firmDescription</c> and
 /// a stable reason when it fails the firm description rules.</param>
 public sealed record RuleEditBody(
     string? RuleType, JsonElement? RuleBody, string? MessageTemplate, string? ShortHeadline, string? Consequence,

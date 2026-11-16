@@ -26,6 +26,24 @@ public sealed partial class ProcedureAssignmentServiceTests
             .Should().Be("Travel is billed at half the agreed rate.");
     }
 
+    [Theory(DisplayName = "130e-1 F1 must-fire: a base version whose stored text now fails the checks gives a copy without it (code-only Warning); the change lands")]
+    [InlineData("Rate {{line.rate}} too high.", FirmDescriptionRules.Braces)]
+    [InlineData("<b>Half</b> rate.", FirmDescriptionRules.Markup)]
+    public async Task Change_OfABaseWithAnInvalidText_DropsIt(string stored, string reason)
+    {
+        var w = new World();
+        var policy = w.Rule();
+        w.H.Row("sprk_policyversion", CurrentVersionOf(w, policy))[RuleSetService.FirmDescriptionColumn] = stored;
+
+        var outcome = await w.Service().ChangeRuleAsync(Matter, MatterId, Change(policy), CallerOid, Token, default);
+
+        outcome.Kind.Should().Be(RuleSetOutcomeKind.Done, outcome.Detail);
+        var (_, ruleId) = RecordRuleOf(policy);
+        w.H.Row("sprk_policyversion", RuleSetService.VersionIdFor(ruleId, 1)).Contains(RuleSetService.FirmDescriptionColumn).Should().BeFalse();
+        var entry = w.Log.Entries.Should().ContainSingle(e => e.Message.Contains(FirmDescriptionRules.DroppedLogCode)).Subject;
+        entry.Message.Should().Contain(reason).And.NotContain(stored);
+    }
+
     [Fact(DisplayName = "130e-1 must-not-fire: a base version with no firm description gives a copy with none (no empty column is written)")]
     public async Task Change_OfABaseWithoutAFirmDescription_WritesNone()
     {

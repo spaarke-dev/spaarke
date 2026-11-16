@@ -10,7 +10,7 @@ namespace Sprk.Bff.Api.Tests.Services.Finance;
 
 /// <summary>
 /// ebilling-r1 task 130e-1 (DEF-060, uac-r2 C2 and C4, Q4): the firm description on a billing policy version, through the rule set service's
-/// writes. It is set on a draft and frozen once the version is published (an edit that changes it is refused 409, nothing written); a text
+/// writes. It is set on a draft in place; on a published version an edit lands on the new draft it creates and the published row keeps its text (F1); a text
 /// that fails <see cref="FirmDescriptionRules"/> or names the rule set or the policy is refused 422 at edit and at publish, never echoed;
 /// a Duplicate rule takes none; a new version, a copy forward and a record-rule change carry it.
 /// Over the rule set service's in-memory Dataverse (<see cref="Harness"/>, the real service).
@@ -57,26 +57,81 @@ public sealed partial class RuleSetServiceTests
         FirmDescriptionOf(h, version).Should().BeNull();
     }
 
-    [Fact(DisplayName = "130e-1 C2 must-fire: a change to a published version's firm description is refused 409 (ruleset.firm_description_frozen) and nothing is written")]
-    public async Task Published_FirmDescriptionChange_IsRefused_AndWritesNothing()
+    [Theory(DisplayName = "130e-1 C2 + F1: a firm description change on a published version (a clear included) lands on the NEW draft; the published row is never written")]
+    [InlineData("A different description.", null, "A different description.")]
+    [InlineData("", "Changed too", null)]
+    [InlineData("   ", null, null)]
+    public async Task Published_FirmDescriptionChange_LandsOnTheNewDraft_AndThePublishedRowIsUntouched(string firm, string? headline, string? expected)
     {
         var h = new Harness();
         var set = h.RuleSet(RuleSetService.RuleSetPublished);
         var (policy, version) = h.Rule(set, state: ProposalState.Accepted, current: true);
         h.Row("sprk_policyversion", version)[RuleSetService.FirmDescriptionColumn] = FirmText;
 
-        foreach (var edit in new[] { FirmEdit("A different description."), FirmEdit("", headline: "Changed too"), FirmEdit("Other", headline: "x") })
-        {
-            var outcome = await h.Service().EditAsync(set, policy, edit, default);
+        var outcome = await h.Service().EditAsync(set, policy, FirmEdit(firm, headline), default);
 
-            outcome.Kind.Should().Be(RuleSetOutcomeKind.Refused);
-            outcome.StatusCode.Should().Be(StatusCodes.Status409Conflict);
-            outcome.ErrorCode.Should().Be(RuleSetService.CodeFirmDescriptionFrozen).And.Be("ruleset.firm_description_frozen");
-            outcome.Detail.Should().NotContain(FirmText).And.NotContain("A different description.");
+        outcome.Kind.Should().Be(RuleSetOutcomeKind.Done, outcome.Detail);
+        outcome.Value!.CreatedNewVersion.Should().BeTrue();
+        outcome.Value.Proposal.FirmDescription.Should().Be(expected);
+        var writes = h.WritesOf("sprk_policyversion");
+        writes.Should().OnlyContain(w => w.Kind == Write.Create, "the published version is never updated");
+        var created = writes.Single().Fields;
+        if (expected is null)
+        {
+            created.Should().NotContainKey(RuleSetService.FirmDescriptionColumn);
+        }
+        else
+        {
+            created[RuleSetService.FirmDescriptionColumn].Should().Be(expected);
         }
 
-        h.Writes.Should().BeEmpty("a refused edit writes nothing: no in-place update and no new version");
-        FirmDescriptionOf(h, version).Should().Be(FirmText);
+        FirmDescriptionOf(h, version).Should().Be(FirmText, "C2: the published version's own text never changes");
+    }
+
+    [Theory(DisplayName = "130e-1 F1 must-fire: a published version's stored text that now fails the checks is left off the new draft (code-only Warning) and never blocks an edit that does not touch it")]
+    [InlineData("Rate {{line.rate}} too high.", FirmDescriptionRules.Braces)]
+    [InlineData("Per the ACME GUIDELINES.", FirmDescriptionRules.NamesTheRule)]
+    [InlineData("Travel is billed at half rate.", null)]
+    public async Task Published_InvalidStoredText_IsDroppedFromTheNewDraft_AndTheEditLands(string stored, string? dropped)
+    {
+        var h = new Harness();
+        var set = h.RuleSet(RuleSetService.RuleSetPublished);
+        var (policy, version) = h.Rule(set, state: ProposalState.Accepted, current: true);
+        h.Row("sprk_policyversion", version)[RuleSetService.FirmDescriptionColumn] = stored;
+        var outcome = await h.Service().EditAsync(set, policy, Edit(headline: "A different headline"), default);
+
+        outcome.Kind.Should().Be(RuleSetOutcomeKind.Done, outcome.Detail);
+        var created = h.WritesOf("sprk_policyversion").Single(w => w.Kind == Write.Create).Fields;
+        FirmDescriptionOf(h, version).Should().Be(stored, "the published row keeps its text either way");
+        if (dropped is null)
+        {
+            created[RuleSetService.FirmDescriptionColumn].Should().Be(stored, "must-not-fire: a valid text is carried forward");
+            h.Logs.Should().NotContain(e => e.Message.Contains(FirmDescriptionRules.DroppedLogCode));
+            return;
+        }
+
+        created.Should().NotContainKey(RuleSetService.FirmDescriptionColumn);
+        outcome.Value!.Proposal.FirmDescription.Should().BeNull();
+        var entry = h.Logs.Should().ContainSingle(e => e.Message.Contains(FirmDescriptionRules.DroppedLogCode)).Subject;
+        entry.Message.Should().Contain(dropped).And.NotContain(stored);
+    }
+
+    [Fact(DisplayName = "130e-1 F2d: the Rule Review view and accept check the rule set's own name, so a draft naming it shows the error before publish")]
+    public async Task ViewAndAccept_CheckTheRuleSetName()
+    {
+        var h = new Harness();
+        var set = h.RuleSet();
+        var (policy, version) = h.Rule(set, state: ProposalState.Proposed);
+        h.Row("sprk_policyversion", version)[RuleSetService.FirmDescriptionColumn] = "Per the acme GUIDELINES section 4.";
+
+        var view = (await h.Service().GetAsync(set, default)).Value!.Proposals.Single();
+        view.ValidationErrors.Should().ContainSingle().Which.Should().NotContain("acme GUIDELINES", "the text is never echoed");
+
+        var accepted = await h.Service().DecideAsync(set, policy, true, h.WorkingToken(policy), default);
+        accepted.Kind.Should().Be(RuleSetOutcomeKind.Invalid);
+        accepted.StatusCode.Should().Be(StatusCodes.Status422UnprocessableEntity);
+        accepted.Errors.Should().ContainSingle(e => e.Field == "firmDescription").Which.Reason.Should().Be(FirmDescriptionRules.NamesTheRule);
+        h.Writes.Should().BeEmpty();
     }
 
     [Fact(DisplayName = "130e-1 C2: an edit of a published version that leaves the firm description alone creates the new version carrying it forward")]

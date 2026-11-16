@@ -87,8 +87,8 @@ public sealed record RuleSetDetail(
 
 /// <summary>An edit to a rule's working version. A <c>null</c> member is left as it is.</summary>
 /// <param name="FirmDescription">Task 130e-1 (DEF-060): the firm description; null leaves it as it is, a blank text clears it. Accepted only on a
-/// draft (C2: a published version's is refused, <see cref="RuleSetService.CodeFirmDescriptionFrozen"/>) and validated by
-/// <see cref="FirmDescriptionRules"/>.</param>
+/// working version that is a draft; on a published one the edit creates a new draft that takes it, and the published row keeps its own text
+/// (C2, fix round 1 F1). Validated by <see cref="FirmDescriptionRules"/>.</param>
 public sealed record ProposalEdit(
     string? RuleType, string? RuleBody, string? MessageTemplate, string? ShortHeadline, string? Consequence,
     string? ClauseReference, string? ClauseLocation, Guid? CallerObjectId, string? FirmDescription = null);
@@ -381,18 +381,11 @@ public class RuleSetService
     /// </summary>
     internal const string CodeProcedureOwned = "ruleset.procedure_owned";
 
-    /// <summary>
-    /// Task 130e-1 (DEF-060, uac-r2 C2): an edit that changes the firm description of a version that is published (not a draft: see
-    /// <see cref="VersionRow.IsDraft"/>) is refused 409 with this code and nothing is written. Its description is frozen with the version a Signal
-    /// cites; a new draft carries it forward and is edited there.
-    /// </summary>
-    internal const string CodeFirmDescriptionFrozen = "ruleset.firm_description_frozen";
-
     /// <summary>Task 130e-1: <c>sprk_policyversion.sprk_firmdescription</c> (the one definition is the loader's).</summary>
     internal const string FirmDescriptionColumn = Sprk.Bff.Api.Services.Signals.Billing.BillingFactLoader.FirmDescriptionColumn;
 
     /// <summary>Task 130e-1 (design section 5): the stable reason of a firm description on a Duplicate rule, which never shows one.</summary>
-    internal const string FirmDescriptionOnDuplicateReason = "firm_description_duplicate";
+    internal const string FirmDescriptionOnDuplicateReason = FirmDescriptionRules.OnDuplicate;
 
     // ── Task 081 (EB-D-148, procedure model 7.2): the version chain re-keyed per (policy, Procedure Version). ──
 
@@ -462,7 +455,7 @@ public class RuleSetService
     private static readonly string[] PolicyColumns =
         { "sprk_name", "sprk_policycode", "sprk_currentversion", "sprk_enabled", "sprk_ruleset", RuleDomains.PolicyDomainColumn, RowVersionColumn };
 
-    private static readonly string[] VersionColumns =
+    internal static readonly string[] VersionColumns =
     {
         "sprk_policy", "sprk_versionnumber", "sprk_ruletype", "sprk_rulebody", "sprk_messagetemplate", "sprk_shortheadline",
         "sprk_consequence", "sprk_proposalstatus", "sprk_clausereference", "sprk_clauselocation", "sprk_inforcefrom", "sprk_inforceto",
@@ -561,9 +554,11 @@ public class RuleSetService
         }
 
         var views = new List<ProposalView>();
+        var setName = set.GetAttributeValue<string>("sprk_name");
         foreach (var rule in loaded.Rules.OrderBy(r => r.Policy.Code, StringComparer.Ordinal))
         {
-            views.Add(await ViewAsync(rule, ct, carryRowVersion: true));
+            // Fix round 1 F2d: with the rule set's name, so a description that names it shows its error in the review before publish.
+            views.Add(await ViewAsync(rule with { RuleSetName = setName }, ct, carryRowVersion: true));
         }
 
         JsonNode? notConverted = null;
@@ -1888,26 +1883,19 @@ public class RuleSetService
             errors.Add(new RuleSetError(policyId, rule.Policy.Name, "edit", "Nothing to change: name at least one member.", null));
         }
 
-        // Task 130e-1 (DEF-060, uac-r2 C2): a firm description is changed only on a draft. On a version that is published (in force, or ever
-        // was: not IsDraft, the one "published" test of this service) a change is refused and NOTHING is written; the same text is not a change.
-        // A blank text clears it. The new version an edit of a published version creates carries the published one's text forward.
+        // Task 130e-1 (DEF-060, uac-r2 C2; fix round 1 F1): a published version is never updated: an edit of one becomes a NEW draft version
+        // (below), so a firm description change, a clear included, lands on that new draft and the published row keeps its text. A draft is
+        // edited in place. The same text is not a change; a blank text clears it.
         var firmDescription = work.FirmDescription;
+        var firmDescriptionTouched = false;
         if (edit.FirmDescription is not null)
         {
             var proposed = string.IsNullOrWhiteSpace(edit.FirmDescription) ? null : edit.FirmDescription.Trim();
             var stored = string.IsNullOrWhiteSpace(work.FirmDescription) ? null : work.FirmDescription.Trim();
             if (!string.Equals(proposed, stored, StringComparison.Ordinal))
             {
-                if (!work.IsDraft(rule.Policy))
-                {
-                    _logger.LogWarning("Rule {PolicyId}: a firm description change on published version {VersionId} was refused ({Code}); nothing was written",
-                        policyId, work.Id, CodeFirmDescriptionFrozen);
-                    return RuleSetOutcome<ProposalEdited>.Refused(
-                        StatusCodes.Status409Conflict, CodeFirmDescriptionFrozen,
-                        "This rule version is published, so its firm description cannot change. Edit a draft of the rule to change it.");
-                }
-
                 firmDescription = proposed;
+                firmDescriptionTouched = true;
             }
         }
 
@@ -1925,6 +1913,18 @@ public class RuleSetService
         }
 
         var ruleTypeRaw = edit.RuleType ?? work.RuleType?.ToString(CultureInfo.InvariantCulture);
+
+        // Fix round 1 F1: a published version's text carried onto the new draft, which this edit did not touch and which fails the checks now
+        // (a form edit outside the BFF, or a type changed to Duplicate), is left off the new draft with a code-only Warning, so it never blocks an
+        // edit that does not touch it. The published row keeps it either way.
+        if (!firmDescriptionTouched && !work.IsDraft(rule.Policy)
+            && FirmDescriptionRefusal(ruleTypeRaw, firmDescription, rule.RuleSetName, rule.Policy.Name) is { } droppedBecause)
+        {
+            _logger.LogWarning("[{Code}] Rule {PolicyId}: the firm description of published version {VersionId} was not carried to the new version ({Reason})",
+                FirmDescriptionRules.DroppedLogCode, policyId, work.Id, droppedBecause);
+            firmDescription = null;
+        }
+
         var merged = work with
         {
             RuleBody = edit.RuleBody ?? work.RuleBody,
@@ -2057,7 +2057,7 @@ public class RuleSetService
                 created["sprk_clauselocation"] = merged.ClauseLocation;
             }
 
-            // Task 130e-1 (C2): the published version's firm description is carried forward unchanged (a change was refused above).
+            // Task 130e-1 (C2, F1): the new draft's firm description: this edit's change, or the published version's text carried forward.
             if (merged.FirmDescription is not null)
             {
                 created[FirmDescriptionColumn] = merged.FirmDescription;
@@ -2176,7 +2176,8 @@ public class RuleSetService
 
         if (accept)
         {
-            var errors = ValidateRule(rule.Policy, work.RuleType?.ToString(CultureInfo.InvariantCulture), work);
+            // Fix round 1 F2d: with the rule set's name, as edit and publish check it.
+            var errors = ValidateRule(rule.Policy, work.RuleType?.ToString(CultureInfo.InvariantCulture), work, rule.RuleSetName);
             if (errors.Count > 0)
             {
                 return RuleSetOutcome<ProposalView>.Invalid(CodeInvalid, errors);
@@ -3540,7 +3541,7 @@ public class RuleSetService
     private async Task<ProposalView> ViewAsync(RuleSetRule rule, CancellationToken ct, bool carryRowVersion = false)
     {
         var work = rule.Working;
-        var validation = ValidateRule(rule.Policy, work.RuleType?.ToString(CultureInfo.InvariantCulture), work);
+        var validation = ValidateRule(rule.Policy, work.RuleType?.ToString(CultureInfo.InvariantCulture), work, rule.RuleSetName);
 
         string? text = null, formal = null, refusal = null;
         var description = await _describer.DescribeAsync(work.RuleBody, ct);
@@ -3641,17 +3642,9 @@ public class RuleSetService
             Add("messageTemplate", "The rule needs a message template.");
         }
 
-        if (!string.IsNullOrWhiteSpace(version.FirmDescription))
+        if (FirmDescriptionRefusal(ruleTypeRaw, version.FirmDescription, ruleSetName, policy.Name) is { } firmRefusal)
         {
-            if (RuleBodySchemaValidator.TryParseRuleType(ruleTypeRaw, out var parsedType) && parsedType == RuleType.Duplicate)
-            {
-                Add(FirmDescriptionField, "A Duplicate rule cannot carry a firm description: firms always see the standard duplicate wording.",
-                    FirmDescriptionOnDuplicateReason);
-            }
-            else if (FirmDescriptionRules.Validate(version.FirmDescription, ruleSetName, policy.Name) is { IsValid: false } firm)
-            {
-                Add(FirmDescriptionField, FirmDescriptionMessage(firm.RefusalCode!), firm.RefusalCode);
-            }
+            Add(FirmDescriptionField, FirmDescriptionMessage(firmRefusal), firmRefusal);
         }
 
         return errors;
@@ -3660,9 +3653,17 @@ public class RuleSetService
     /// <summary>The request member and error field of the firm description (task 130e-1).</summary>
     internal const string FirmDescriptionField = "firmDescription";
 
+    /// <summary>
+    /// Task 130e-1: why a firm description cannot stand on a version of this type, or null when it can (or there is none). A Duplicate rule never
+    /// carries one; any other text goes through <see cref="FirmDescriptionRules.Validate(string?, string?, string?)"/> with the rule set and policy names.
+    /// </summary>
+    internal static string? FirmDescriptionRefusal(string? ruleTypeRaw, string? text, string? ruleSetName, string? policyName) =>
+        FirmDescriptionRules.Validate(text, ruleSetName, policyName, ruleTypeRaw).RefusalCode;
+
     /// <summary>The fixed message of a firm description refusal: it says which rule failed and never quotes the text.</summary>
     internal static string FirmDescriptionMessage(string code) => code switch
     {
+        FirmDescriptionOnDuplicateReason => "A Duplicate rule cannot carry a firm description: firms always see the standard duplicate wording.",
         FirmDescriptionRules.TooLong => $"The firm description is longer than {FirmDescriptionRules.MaxRunes} characters.",
         FirmDescriptionRules.Braces => "The firm description cannot contain { or }.",
         FirmDescriptionRules.Markup => "The firm description cannot contain < or >.",

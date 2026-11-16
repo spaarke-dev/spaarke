@@ -815,6 +815,16 @@ public class ProcedureAssignmentService
             Consequence = consequence ?? baseVersion.Consequence,
             State = (int)ProposalState.Accepted,
         };
+
+        // Task 130e-1 fix round 1 (F1): the copied firm description is not this change's to edit. A base text that fails the checks now (a form
+        // edit outside the BFF) is left off the copy with a code-only Warning, so it never blocks a change that does not touch it.
+        if (RuleSetService.FirmDescriptionRefusal(merged.RuleType?.ToString(CultureInfo.InvariantCulture), merged.FirmDescription, null, baseRule.Name) is { } droppedBecause)
+        {
+            _logger.LogWarning("[{Code}] Rule {PolicyId}: the firm description of base version {VersionId} was not copied to the record rule ({Reason})",
+                FirmDescriptionRules.DroppedLogCode, policyId, baseVersion.Id, droppedBecause);
+            merged = merged with { FirmDescription = null };
+        }
+
         var invalid = _ruleSets.ValidateRule(
             new RuleSetService.PolicyRow(policyId, baseRule.Code, baseRule.Name, baseVersion.Id),
             merged.RuleType?.ToString(CultureInfo.InvariantCulture), merged);
@@ -867,7 +877,7 @@ public class ProcedureAssignmentService
     }
 
     /// <summary>The columns stage 3 writes to the record rule's version from the merged content (read back after a no-answer transaction).</summary>
-    private static readonly string[] ReadBackVersionColumns =
+    internal static readonly string[] ReadBackVersionColumns =
     {
         "sprk_policy", "sprk_versionnumber", "sprk_ruletype", "sprk_rulebody", "sprk_messagetemplate", "sprk_shortheadline", "sprk_consequence",
         "sprk_proposalstatus", "sprk_clausereference", "sprk_clauselocation", BasedOnVersionColumn, RuleSetService.FirmDescriptionColumn,
@@ -2165,7 +2175,7 @@ public class ProcedureAssignmentService
         Guid Id, string Name, string Code, Guid? FirmId, bool VisibleToFirms, Guid? CurrentVersionId, int? Priority, int? Lane, int? Severity,
         bool Enabled, bool SetPublished, bool ProcedureEnded);
 
-    private static readonly string[] BaseVersionColumns =
+    internal static readonly string[] BaseVersionColumns =
     {
         "sprk_policy", "sprk_versionnumber", "sprk_ruletype", "sprk_rulebody", "sprk_messagetemplate", "sprk_shortheadline",
         "sprk_consequence", "sprk_proposalstatus", "sprk_clausereference", "sprk_clauselocation", RuleSetService.FirmDescriptionColumn,
