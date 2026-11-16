@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="095f-2c" project="ebilling-r1">
+  <metadata>
+    <title>Decision notes, part 2c: the override note and the blocked-return note</title>
+    <phase>5 Partner surfaces — 095f part 2 (EB-D-236, EB-D-240)</phase>
+    <gate>095f-2a merged into work. Branch from work/ebilling-r1 at the sha named in the agent brief.</gate>
+    <status>open</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>BFF C# on the override release transaction.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+    <parallel-safe>false</parallel-safe>
+    <deps>095f-2a</deps>
+    <tags>bff-api, decision-record, testing</tags>
+    <estimated-effort>0.5 day</estimated-effort>
+  </metadata>
+
+  <prompt>Build design §4 as settled by §15: BlockedDecisionRequest(Reason, Note); override adds sprk_decisionnote (the note, or the required reason when there is no note) to the invoice Entity in BuildReleaseTransaction's one transaction and Values["note"] when given; the blocked return uses 2a's TransitionAsync overload. Declare note optional on override-submission (ontology-r1 light). Update the remark that the release writes no other invoice column.</prompt>
+
+  <goal>Override and blocked return carry an optional note in their Decision Record and on the internal decision-note column, atomically with their own write.</goal>
+
+  <constraints>
+    <constraint source="design 1.1, 1.2">Same validation and no-null-key rules as 2a; the shared 400 codes.</constraint>
+    <constraint source="design 4">The release transaction still writes no status; a version fault applies neither update.</constraint>
+    <constraint source="EB-D-240">Never sprk_correctionnote; InvoiceDecisionNoteWritersGuardTests stays green with the release transaction as an allowed writer.</constraint>
+    <constraint source="project">No live call. Never run python. Never --no-verify. No bare git stash.</constraint>
+  </constraints>
+
+  <acceptance-criteria>
+    <criterion testable="true">The release transaction carries the column on the invoice update, writes no status, and a version fault applies neither update.</criterion>
+    <criterion testable="true">No note: the reason in the column, no Values key, byte-identical hash; the validation set of 2a.</criterion>
+    <criterion testable="true">The existing SubmissionOverrideServiceTests stay green; BFF build --warnaserror 0 warnings; ArchTests green.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load the knowledge files first. Follow task-execute for rigor, checkpoints and quality gates.</protocol>
+  </execution>
+</task>

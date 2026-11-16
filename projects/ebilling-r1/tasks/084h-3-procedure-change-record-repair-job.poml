@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="084h-3" project="ebilling-r1">
+  <metadata>
+    <title>Server-side retry: the ADR-004 repair job for a per-record Procedure Decision Record that failed after the change landed (RecordProcedureDecisionJob)</title>
+    <phase>3 Rules (WP3) — Procedures on the record (EB-D-238, EB-D-239 Q10)</phase>
+    <gate>084h-2 merged into work. Branch from work/ebilling-r1 at the sha named in the agent brief. Ships in the same deploy as 084h-2.</gate>
+    <status>open</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>New background work in the BFF (ADR-004 IJobHandler, ADR-052 placement); writes Decision Records.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>The repaired record must hash exactly as the inline write and never re-read the override row; a wrong payload files a second, different record.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-safe>false</parallel-safe>
+    <deps>084h-2</deps>
+    <tags>bff-api, signals, decision-record, job, background, testing</tags>
+    <estimated-effort>0.5-1 day</estimated-effort>
+  </metadata>
+
+  <prompt>Build design notes/084h-procedure-change-decision-records-design.md §7.3 as settled by §16 item 3-4 and §17 (owner, EB-D-239 Q10: server-side retry required): RecordProcedureDecisionJob (payload, the enqueuer that implements 084h-2's interface, the IJobHandler) and its registration, copying the shape of GateDecisionRecordJob. Tests J1-J5.</prompt>
+
+  <goal>A Decision Record that failed after a per-record Procedure change landed is retried server-side until it is written (or permanently refused, logged and metered), and the repaired record is identical in content and hash to what the inline write would have filed.</goal>
+
+  <context>
+    <background>Read design §7 and §16. Pattern: src/server/api/Sprk.Bff.Api/Services/Signals/GateDecisionRecordJob.cs (payload, enqueuer, handler, registration). The payload carries the landed change's Values, outcome, confirmer, role, decided-on, reason and note (§7.3); the job makes zero reads of sprk_procedureassignment.</background>
+    <relevant-files>
+      <file role="create">src/server/api/Sprk.Bff.Api/Services/Signals/RecordProcedureDecisionJob.cs</file>
+      <file role="modify">the BFF job registration module that registers GateDecisionRecordJob</file>
+      <file role="create">tests/unit/Sprk.Bff.Api.Tests/Services/Signals/RecordProcedureDecisionJobTests.cs</file>
+      <file role="create">projects/ebilling-r1/notes/084h-3-repair-job.md (with the ADR-052 Placement Justification)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-004, ADR-052, root 17">Queue work through IJobHandler on the existing Service Bus job pipeline; no BackgroundService timer; no IScheduledJob sweep (it would need the forbidden row re-read).</constraint>
+    <constraint source="review round 1 item 4">The handler never reads sprk_procedureassignment; row ids recur across episodes.</constraint>
+    <constraint source="J4">A retryable refusal is retried by the pipeline's retry policy; a permanent refusal is logged, metered and completed, not retried.</constraint>
+    <constraint source="logging">No log line from the enqueuer or handler contains reason or note text.</constraint>
+    <constraint source="project">No live call to any environment. No change to DecisionRecordWriter.cs. Never run python. Never --no-verify. No bare git stash.</constraint>
+    <constraint source="root 10">Placement Justification, publish-size delta and CVE check in the notes.</constraint>
+  </constraints>
+
+  <acceptance-criteria>
+    <criterion testable="true">J1: the handler rebuilds the identical request from the payload; its hash equals the inline request's hash.</criterion>
+    <criterion testable="true">J2: when the inline create in fact landed, the job's write answers AlreadyRecorded with zero creates.</criterion>
+    <criterion testable="true">J3 (must-not-fire): zero reads of sprk_procedureassignment; a row with the same id and other content changes nothing recorded.</criterion>
+    <criterion testable="true">J4: a retryable refusal is retried; a permanent refusal is logged, metered and completed.</criterion>
+    <criterion testable="true">J5: no log line contains the reason or note text.</criterion>
+    <criterion testable="true">The handler is registered for its job type; a test proves 084h-2's enqueue reaches this handler's job type. BFF build --warnaserror 0 warnings; ArchTests green.</criterion>
+  </acceptance-criteria>
+
+  <justification>
+    <existing>GateDecisionRecordJob (the gate's post-commit repair).</existing>
+    <extension>It is bound to the gate entry and its payload; this job copies its shape for the record-procedure entry rather than widening it.</extension>
+    <cost-of-doing-nothing>A post-commit write failure leaves a permanent gap in the decision history that no user can close (owner requires server-side retry, EB-D-239).</cost-of-doing-nothing>
+  </justification>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load the knowledge files first. Follow task-execute for rigor, checkpoints and quality gates.</protocol>
+  </execution>
+</task>

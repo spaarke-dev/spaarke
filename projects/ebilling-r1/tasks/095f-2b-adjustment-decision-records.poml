@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="095f-2b" project="ebilling-r1">
+  <metadata>
+    <title>Decision notes, part 2b: adjustments get Decision Records (add-adjustment, remove-adjustment) and a note (EB-D-241)</title>
+    <phase>5 Partner surfaces — 095f part 2</phase>
+    <gate>095f-2a merged into work. Branch from work/ebilling-r1 at the sha named in the agent brief. ontology-r1 reviews the catalog entries and the exact-set test amendment before merge.</gate>
+    <status>open</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Amends ontology-owned catalog exact-set tests (D-100 "additive only", path-B amendment) and adds record writes to the adjustment path.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Cross-owner amendment plus idempotency by AdjustmentId through the writer's hash.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-safe>false</parallel-safe>
+    <deps>095f-2a</deps>
+    <tags>bff-api, signals, decision-record, ontology, testing</tags>
+    <estimated-effort>1 day</estimated-effort>
+  </metadata>
+
+  <prompt>Build design §3 option A as settled by §14 item 2 and §15: two full DeclaredBilling entries (add-adjustment: method, value, rule, reason required, note; remove-adjustment: adjustment, note, no reason), gates as add-line, ExternallyVisible false; the decision id is the client's AdjustmentId for an add and an id derived from remove-{lineId} for a remove; the record is written after the adjustment and totals land, in FinishAddAsync and the remove path, with the existing 503-then-repeat pattern; a repeat that edits only the note maps the writer's ReviewInvalid to 409 ebilling.adjustment.id_reused. The note (or, with none, the reason for an add) goes to sprk_decisionnote in the totals update. Amend both exact-set tests (DecisionRecordWriterTests.Billing.cs:191 and DecisionActionCatalogTests.cs:348-354) and the required-parameter theory.</prompt>
+
+  <goal>Every adjustment add and remove files one Decision Record carrying its reason and optional note, exactly once per adjustment id.</goal>
+
+  <constraints>
+    <constraint source="design 3, review item 2">Values keys are the declared codes: method, value, rule, adjustment, note. No writer literal edit (the codes map to the invoice).</constraint>
+    <constraint source="design 1.1, 1.2">Validation and no-null-key rules of 2a.</constraint>
+    <constraint source="EB-D-240">The totals path is an allowed sprk_decisionnote writer; never sprk_correctionnote.</constraint>
+    <constraint source="project">No live call. Never run python. Never --no-verify. No bare git stash. Publish-size delta and CVE check in the notes.</constraint>
+  </constraints>
+
+  <acceptance-criteria>
+    <criterion testable="true">A repeated AdjustmentId with the same content files one record (AlreadyRecorded, one create); a remove then an add of a new adjustment files two.</criterion>
+    <criterion testable="true">A repeated AdjustmentId that changes only the note gives 409 ebilling.adjustment.id_reused and no second record; the same for a repeated remove with an edited note.</criterion>
+    <criterion testable="true">Each new entry has a Gate; add-adjustment without a reason is refused by the writer; remove-adjustment with a null reason is accepted.</criterion>
+    <criterion testable="true">No note: no key, the reason in the column for an add; the validation set of 2a; the amended exact-set tests pass and BillingActions gains exactly the two codes.</criterion>
+    <criterion testable="true">BFF build --warnaserror 0 warnings; adjustment, totals, Signals writer and catalog suites green; ArchTests green.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>If the record cannot be written idempotently without changing the adjustment row id scheme or the writer: STOP and report.</trigger>
+  </escalation>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load the knowledge files first. Follow task-execute for rigor, checkpoints and quality gates.</protocol>
+  </execution>
+</task>
