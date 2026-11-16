@@ -1992,7 +1992,7 @@ Task 094 (merged 2026-10-27) removed `sprk_document` from the invoice, but `Invo
 
 **After deploy**
 
-Re-index every `sprk_invoice` with modifiedon ≥ 2026-10-27 through the normal indexing job. This writes to the dev search index, so it needs the owner's go here. Report the count and the result to uac-r2.
+Re-index every `sprk_invoice` with modifiedon ≥ 2026-10-27 through the normal indexing job: `scripts/ebilling/Invoke-EbillingInvoiceReindexSweep.ps1 -Apply` (12 invoices on dev, dry run 2026-11-15). This writes to the dev search index, so it needs the owner's go here. Report the count and the result to uac-r2.
 
 **Known limits**
 
