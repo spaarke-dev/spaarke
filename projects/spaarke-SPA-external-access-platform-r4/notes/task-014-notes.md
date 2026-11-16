@@ -119,4 +119,21 @@ Questions:
   - Merge order: **014a first.** uac-r2 rebases round 2 onto it.
   - Keep the memo pre-create even after #2851 lands.
   - K1: the preliminary answer is yes (conferring-membership org grants only; the workforce standing-grant expansion is a separate term, and leaving it out under-lists, which fails closed). Final with the verdict. If confirmed: record it as a known limit in the PR, and file an issue for listing standing-access workforce contacts in a later picker iteration.
+- **uac-r2 GATE VERDICT (2026-11-16) on `09ce996d15`: PASS-WITH-FIXES.**
+  - No over-listing and no fail-open on the contract paths.
+  - Behaviour parity confirmed: the memo readers keep the same keys, remember rules, fault mapping, log text and levels, and Clear path; `GrantFirmIsActiveAsync` keeps the same outcomes.
+  - **Required fixes** (push once, send the SHA; uac-r2 re-checks only the fix diff):
+    - **F2:** `QueryActiveRowsForRootAsync` (lenient `QueryAsync`) turns a 200 `{}` / `{"value":null}` into `Known([])`. Make the shared reader throw when `value` is missing or null, as #2847 did for `ReadIdColumnAsync`. Confirm that the other callers fail closed on a throw (`ExternalGrantRevocationService:879`, `RecordGrantsEndpoint:105`, `SetRecordShareExpiryEndpoint:155`). Add service tests for both bodies → Unknown(GrantsUnreadable), plus a reader unit test.
+    - **F4:** a cancel in the flags read is swallowed as FlagsUnreadable. Add `ThrowIfCancellationRequested` and a test.
+    - **F4 perf:** cache the firm state per call, keyed by firm id.
+    - **Doc:** the class remarks state the standing-grant / derived-member exclusion and its reason, and that `isMe` misses such a caller.
+  - **K1 confirmed, final:** the org term matches the evaluator's org-grant inheritance (`QueryOrganizationGrantRowsAsync`, `ExternalParticipationService.cs:1742`). Filed as **D-19 #2854**.
+  - **Known limits accepted (for the PR body):**
+    - K2: an out-of-set `sprk_accesslevel` wins the evaluator's Max() dedupe and maps to None. uac-r2 files this one.
+    - K3: up to 60 s of over-listing after a maker-authored membership junction (the evaluator's grant-set cache isn't invalidated).
+    - K4: about 3 repeated calls per candidate in `CheckGranteeNoAccessAsync`, memoized by #2845 round 2.
+    - K5: one faulted candidate doesn't cancel the others.
+  - Optional: make the #2851 regression test deterministic.
+  - **On a clean fix diff, uac-r2's gate go for 014b.**
+  - Fixes delegated to an implementer (Opus) on `work/r4-014a-record-contact-access`. Commit only; the main session pushes once after a re-check.
 - **NFR-05 deviation** (one DI registration, requested by uac-r2 Q2.8): stated in the PR; the owner is told in this session's report.

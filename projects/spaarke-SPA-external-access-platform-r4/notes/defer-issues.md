@@ -285,3 +285,19 @@ answered AND `canCreate` is not false. The status toggle is excluded (no server 
 **Effect.** When concurrent compositions are the first to touch `Items` in a request, the dictionary can be corrupted (the read is treated as unknown, giving a 503) or the memo can be lost (the #2845 saving silently disappears). Task 014a's memo test reproduced it in 3 of 4 runs.
 
 **Fix shape.** Create the memo once, single-threaded, before any fan-out (in a filter or middleware, or at the evaluator's entry). Add a concurrency test on a fresh `DefaultHttpContext`. 014a works around it locally.
+
+## D-19 — Assignee picker omits workforce contacts with standing access (#2854)
+
+**Status.** Open, next round. Agreed with uac-r2 in its gate review of #2852 (K1, confirmed 2026-11-16).
+
+**Where.** `Infrastructure/ExternalAccess/RecordContactAccessService.cs` (the class remarks document the exclusion). The terms it leaves out are at `AccessibleRecordSetService.cs` ~2888-3017 (standing-grant / derived-member, ContactOnly plane only).
+
+**Effect.** A workforce contact-only user with standing access can see the record, but:
+- is not offered as an assignee;
+- gets `isMe` = false.
+
+This under-lists, which fails closed.
+
+**Why deferred.** The service can't tell which plane a contact signs in on. Including the terms for every contact would over-list CIAM sign-ins.
+
+**Fix shape.** A way to know a contact's sign-in plane (for example a workforce-bound marker). Then add the standing-grant / derived-member terms for those contacts only. Needs uac-r2's review.
