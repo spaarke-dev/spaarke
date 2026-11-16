@@ -817,8 +817,10 @@ public class ProcedureAssignmentService
         };
 
         // Task 130e-1 fix round 1 (F1): the copied firm description is not this change's to edit. A base text that fails the checks now (a form
-        // edit outside the BFF) is left off the copy with a code-only Warning, so it never blocks a change that does not touch it.
-        if (RuleSetService.FirmDescriptionRefusal(merged.RuleType?.ToString(CultureInfo.InvariantCulture), merged.FirmDescription, null, baseRule.Name) is { } droppedBecause)
+        // edit outside the BFF) is left off the copy with a code-only Warning, so it never blocks a change that does not touch it. Fix round 2
+        // (F1): checked against the BASE rule set's name as well; the record rule's own set has a constant name, so the copy-time checks
+        // downstream would never see the base set's name again.
+        if (RuleSetService.FirmDescriptionRefusal(merged.RuleType?.ToString(CultureInfo.InvariantCulture), merged.FirmDescription, baseRule.SetName, baseRule.Name) is { } droppedBecause)
         {
             _logger.LogWarning("[{Code}] Rule {PolicyId}: the firm description of base version {VersionId} was not copied to the record rule ({Reason})",
                 FirmDescriptionRules.DroppedLogCode, policyId, baseVersion.Id, droppedBecause);
@@ -2173,7 +2175,7 @@ public class ProcedureAssignmentService
     /// <summary>The rule an Exclude or a change names, as read (the policy and its rule set).</summary>
     private sealed record BaseRule(
         Guid Id, string Name, string Code, Guid? FirmId, bool VisibleToFirms, Guid? CurrentVersionId, int? Priority, int? Lane, int? Severity,
-        bool Enabled, bool SetPublished, bool ProcedureEnded);
+        bool Enabled, bool SetPublished, bool ProcedureEnded, string? SetName = null);
 
     internal static readonly string[] BaseVersionColumns =
     {
@@ -2215,7 +2217,7 @@ public class ProcedureAssignmentService
 
         var set = policy?.GetAttributeValue<EntityReference>("sprk_ruleset")?.Id is { } setId
             ? await LoadByIdAsync(entities, RuleSetService.RuleSetEntity,
-                setId, new[] { "sprk_scope", "sprk_firm", "sprk_visibletofirms", "statuscode", RuleDomains.PolicyDomainColumn, RuleSetService.ProcedureColumn }
+                setId, new[] { "sprk_name", "sprk_scope", "sprk_firm", "sprk_visibletofirms", "statuscode", RuleDomains.PolicyDomainColumn, RuleSetService.ProcedureColumn }
                     .Concat(InvoiceFamilyCoreRecordGuard.FilingCoreTables).ToArray(), ct)
             : null;
         if (policy is null || set is null || !RuleDomains.IsBillingRow(set) || RecordRuleSet.IsRecordScoped(set))
@@ -2247,7 +2249,8 @@ public class ProcedureAssignmentService
             policy.GetAttributeValue<OptionSetValue>("sprk_severity")?.Value,
             policy.GetAttributeValue<bool?>("sprk_enabled") == true,
             set.GetAttributeValue<OptionSetValue>("statuscode")?.Value == RuleSetService.RuleSetPublished,
-            procedureEnded), null);
+            procedureEnded,
+            set.GetAttributeValue<string>("sprk_name")), null);
     }
 
     /// <summary>A policy version row as the rule-set service's validator reads it.</summary>

@@ -44,6 +44,36 @@ public sealed partial class ProcedureAssignmentServiceTests
         entry.Message.Should().Contain(reason).And.NotContain(stored);
     }
 
+    [Theory(DisplayName = "130e-1 fix round 2 F1: a base text naming the BASE rule set is not copied to the record rule (code-only Warning); a text naming neither is copied")]
+    [InlineData("Per the Acme Panel Guidelines 2026 travel is billed at half rate.", true)]
+    [InlineData("Per the ACME PANEL GUIDELINES 2026, no.", true)]
+    [InlineData("Travel is billed at half the agreed rate.", false)]
+    public async Task Change_OfABaseTextNamingTheBaseSet_DropsIt(string stored, bool dropped)
+    {
+        var w = new World();
+        var policy = w.Rule();
+        var baseSet = w.H.Row("sprk_policy", policy).GetAttributeValue<Microsoft.Xrm.Sdk.EntityReference>("sprk_ruleset").Id;
+        w.H.Row("sprk_ruleset", baseSet)["sprk_name"] = "Acme Panel Guidelines 2026";
+        w.H.Row("sprk_policyversion", CurrentVersionOf(w, policy))[RuleSetService.FirmDescriptionColumn] = stored;
+
+        var outcome = await w.Service().ChangeRuleAsync(Matter, MatterId, Change(policy), CallerOid, Token, default);
+
+        outcome.Kind.Should().Be(RuleSetOutcomeKind.Done, outcome.Detail);
+        var (_, ruleId) = RecordRuleOf(policy);
+        var copy = w.H.Row("sprk_policyversion", RuleSetService.VersionIdFor(ruleId, 1));
+        var drops = w.Log.Entries.Where(e => e.Message.Contains(FirmDescriptionRules.DroppedLogCode)).ToList();
+        if (dropped)
+        {
+            copy.Contains(RuleSetService.FirmDescriptionColumn).Should().BeFalse("the record rule's set has a constant name, so nothing downstream could catch it");
+            drops.Should().ContainSingle().Which.Message.Should().Contain(FirmDescriptionRules.NamesTheRule).And.NotContain(stored).And.NotContain("Acme Panel");
+        }
+        else
+        {
+            copy.GetAttributeValue<string>(RuleSetService.FirmDescriptionColumn).Should().Be(stored);
+            drops.Should().BeEmpty();
+        }
+    }
+
     [Fact(DisplayName = "130e-1 must-not-fire: a base version with no firm description gives a copy with none (no empty column is written)")]
     public async Task Change_OfABaseWithoutAFirmDescription_WritesNone()
     {
