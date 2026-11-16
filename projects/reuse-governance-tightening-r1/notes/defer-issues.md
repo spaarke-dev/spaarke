@@ -10,35 +10,6 @@
 
 ## Open (in priority order)
 
-### ISS-001 — node-executor-authoring.md still names the renamed `ActionType` enum
-
-| Field | Value |
-|---|---|
-| **Status** | Open |
-| **Urgency** | next-round |
-| **Filed** | 2026-11-11 |
-| **Source** | Task 001 (capability index row 16) verification; rename commit `d2f768e8d5` (2026-06-28) |
-| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2683 |
-
-**Description**
-
-`.claude/patterns/ai/node-executor-authoring.md` tells an agent adding a playbook node executor to add a value to the `ActionType` enum in `INodeExecutor.cs` and to set `SupportedActionTypes`. Commit `d2f768e8d5` renamed them to `ExecutorType` and `SupportedExecutorTypes`. `NodeService.MapCanvasTypeToActionType` kept its name. Failure: an agent following the pointer looks for an enum and a property that do not exist, then either stalls or recreates them under the old names.
-
-**Entry-points**
-
-- `.claude/patterns/ai/node-executor-authoring.md:9,12,16,25,34`
-- `src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/INodeExecutor.cs:26` (`SupportedExecutorTypes`), `:128` (`enum ExecutorType`)
-
-**Suggested fix**
-
-Rename `ActionType` → `ExecutorType` and `SupportedActionTypes` → `SupportedExecutorTypes` in the pointer; keep `MapCanvasTypeToActionType` (still the method name).
-
-**Estimated effort**: 15 minutes
-**Blockers**: none
-**Related**: `.claude/adr/ADR-043-ai-capability-execution-spine.md`; `.claude/patterns/CAPABILITY-INDEX.md` row 16
-
----
-
 ### ISS-002 — Test-InstructionPaths.ps1: 2 false positives on master, and 11 dead directory paths it misses on Windows
 
 | Field | Value |
@@ -436,3 +407,35 @@ The BFF URL normalizer is `normalizeBffBaseUrl()` in `src/client/shared/Spaarke.
 
 ---
 ## Closed
+
+### ISS-001 — node-executor-authoring.md still names the renamed `ActionType` enum
+
+| Field | Value |
+|---|---|
+| **Status** | Done (2026-11-15) |
+| **Urgency** | next-round |
+| **Filed** | 2026-11-11 |
+| **Source** | Task 001 (capability index row 16) verification; rename commit `d2f768e8d5` (2026-06-28) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2683 |
+
+**Description**
+
+`.claude/patterns/ai/node-executor-authoring.md` tells an agent adding a playbook node executor to add a value to the `ActionType` enum in `INodeExecutor.cs` and to set `SupportedActionTypes`. Commit `d2f768e8d5` renamed them to `ExecutorType` and `SupportedExecutorTypes`. `NodeService.MapCanvasTypeToActionType` kept its name. Failure: an agent following the pointer looks for an enum and a property that do not exist, then either stalls or recreates them under the old names.
+
+**Entry-points**
+
+- `.claude/patterns/ai/node-executor-authoring.md:9,12,16,25,34`
+- `src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/INodeExecutor.cs:26` (`SupportedExecutorTypes`), `:128` (`enum ExecutorType`)
+
+**Suggested fix**
+
+Rename `ActionType` → `ExecutorType` and `SupportedActionTypes` → `SupportedExecutorTypes` in the pointer; keep `MapCanvasTypeToActionType` (still the method name).
+
+**Estimated effort**: 15 minutes
+**Blockers**: none
+**Related**: `.claude/adr/ADR-043-ai-capability-execution-spine.md`; `.claude/patterns/CAPABILITY-INDEX.md` row 16
+
+**Resolution** (2026-11-15): the pattern file now names `ExecutorType` / `SupportedExecutorTypes` (verified at `INodeExecutor.cs:26,128` and `QueryDataverseNodeExecutor.cs:48`) and notes that `MapCanvasTypeToActionType` kept its name. Other mentions found by Grep, not changed here (named to the owner): current-tense `ActionType` enum in `docs/architecture/ai-architecture-actions-nodes-scopes.md:199`, `docs/architecture/ai-architecture-playbook-runtime.md:173`, `docs/guides/INSIGHTS-ENGINE-GUIDE.md:181`; ADR-037 and its INDEX rows record the name as it was when shipped (history, left as is).
+
+---
+
