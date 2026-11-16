@@ -280,5 +280,13 @@ Questions:
     - Leftovers: ledger text, OpenAPI summary, dead `AssigneeSent`.
     - **Multi-parent picker note for 015:** `assignable-people` is per root, so a multi-parent event needs the intersection.
   - **Fix round sent:** F2 rows; `canReassign` on the DTO; `ContactUnreadable` → 503; leftovers.
+  - **Fixes landed in `32c32cb890`:**
+    - `canReassign` = `canEdit` && `IsReassignable` && `AdmitsEventAssignAsync`, using the same helpers as the PATCH;
+    - `ContactUnreadable` → 503 on reassign only;
+    - Unknown-wins test rows;
+    - ledger, OpenAPI, and the dead `AssigneeSent` removed.
+  - Tests: forms 139; event/internal set 1,694; ArchTests 2,635.
+  - Sonnet re-check: no F-class findings. K: `canReassign` ignores a transient `ContactUnreadable`.
+  - **PR #2872 opened** and sent to uac-r2 for review.
 - **uac-r2 re-check PASS; UAC gate cleared for 014b at `67b99e2126`** (its own run: 170/170). Merge on Router + Client lint green, then send it the merge SHA for the next dev BFF candidate. #2867 is in CI; whoever merges second rebuilds.
 - **PR #2869 opened 2026-11-16** (head `9719d2f594`, base master `16771d1051`) and sent to uac-r2 for review. Next: uac-r2 OK + CI → merge (owner go) → hand uac-r2 the SHA for the dev BFF deploy → task 015 (SPA). The PATCH-assignee owner decision (a/b/c) is still open. **Publish size:** master `16771d1051` 42,349,704 B vs 014b `c28b4b1478` 42,374,782 B, **+25,078 B** (Compress-Archive, 191 files each, counts match). No CVEs (implementer check).: stated in the PR; the owner is told in this session's report.
