@@ -1032,14 +1032,18 @@ public sealed class ExternalEventFormsContractTests : IClassFixture<ExternalTodo
     }
 
     [Theory]
-    [InlineData(true)]
-    [InlineData(false)]
-    public async Task Patch_WhenOneParentsAssignableSetIsUnknown_Is503_AndWritesNothing(bool unknownFirst)
+    [InlineData(true, true)]
+    [InlineData(false, true)]
+    // Review F2: the other parent is Known WITHOUT the assignee — Unknown still wins (503), in either order, never the 400.
+    [InlineData(true, false)]
+    [InlineData(false, false)]
+    public async Task Patch_WhenOneParentsAssignableSetIsUnknown_Is503_AndWritesNothing(bool unknownFirst, bool otherHasAssignee)
     {
         _fixture.Principal = Contact((Matter, ExternalAccessLevel.Collaborate), (OtherMatter, ExternalAccessLevel.Collaborate));
         var unknown = new RecordContactAccess.Unknown(RecordContactAccessUnknownReason.GrantsUnreadable);
-        _fixture.ContactAccess.AnswersByRecord[Matter] = unknownFirst ? unknown : Knows(Colleague);
-        _fixture.ContactAccess.AnswersByRecord[OtherMatter] = unknownFirst ? Knows(Colleague) : unknown;
+        var known = otherHasAssignee ? Knows(Colleague) : Knows(Stranger);
+        _fixture.ContactAccess.AnswersByRecord[Matter] = unknownFirst ? unknown : known;
+        _fixture.ContactAccess.AnswersByRecord[OtherMatter] = unknownFirst ? known : unknown;
         EventFiledUnder(EventTypeRef.Task, EventStatusCode.Open, Matter, OtherMatter);
 
         using var client = _fixture.CreateAuthenticatedClient();
@@ -1157,6 +1161,64 @@ public sealed class ExternalEventFormsContractTests : IClassFixture<ExternalTodo
         else
             payload.Should().NotContainKey("sprk_ReassignedBy@odata.bind");
         _fixture.Probe.Calls.Should().BeEmpty("never OBO on the external plane");
+    }
+
+    /// <summary>A Dataverse-decided systemuser with Write on <see cref="Matter"/> and the event row; its linked contact as given.</summary>
+    private void SystemUserWhoseContactIs(Guid contactId, bool unreadable)
+    {
+        _fixture.Principal = new CallerPrincipal
+        {
+            Plane = CallerPrincipalPlane.Workforce,
+            ContactId = contactId,
+            ContactUnreadable = unreadable,
+            SystemUserId = SystemUserId,
+            Email = "caller@outside.test",
+            ProjectAccess = Array.Empty<CallerProjectAccess>(),
+            MatterAccess = new Dictionary<Guid, AccessRights> { [Matter] = AccessRights.Read },
+            WorkAssignmentAccess = new Dictionary<Guid, AccessRights>(),
+            DataverseConfirmsWrites = true,
+        };
+        _fixture.Probe.AnswerAppOnly(SystemUserId, "sprk_matters", Matter, AccessRights.Read | AccessRights.Write);
+        _fixture.Probe.AnswerAppOnly(SystemUserId, EventSet, Event, AccessRights.Read | AccessRights.Write);
+    }
+
+    [Fact]
+    public async Task Patch_AReassignByASystemUserWhoseLinkedContactCouldNotBeRead_Is503_AndWritesNothing()
+    {
+        // Review K4: an UNREADABLE linked contact is unknown, not absent (CallerPrincipal.ContactUnreadable) — writing the reassign
+        // without sprk_ReassignedBy would lose the audit column for good on a transient fault. The retry-able 503 instead.
+        SystemUserWhoseContactIs(Guid.Empty, unreadable: true);
+        _fixture.ContactAccess.Answer = Knows(Colleague);
+        EventFiledUnder(EventTypeRef.Task, EventStatusCode.Open, Matter);
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        using var response = await Patch(client, Event, new { assignedToContactId = Colleague });
+
+        response.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable, await response.Content.ReadAsStringAsync());
+        (await Code(response, "reasonCode")).Should().Be("sdap.event.unavailable");
+        _fixture.Data.EventUpdates.Should().BeEmpty();
+        _fixture.ContactAccess.Calls.Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData("no-linked-contact")] // must not fire: read and found absent — the internal behaviour, reassigned-by left out
+    [InlineData("unreadable-no-reassign")] // must not fire: the rule is the reassign path's only
+    public async Task Patch_ByASystemUserWithoutAReadableContact_IsWritten_WhenTheUnreadableRuleDoesNotApply(string fixture)
+    {
+        SystemUserWhoseContactIs(Guid.Empty, unreadable: fixture == "unreadable-no-reassign");
+        _fixture.ContactAccess.Answer = Knows(Colleague);
+        EventFiledUnder(EventTypeRef.Task, EventStatusCode.Open, Matter);
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        using var response = fixture == "no-linked-contact"
+            ? await Patch(client, Event, new { assignedToContactId = Colleague })
+            : await Patch(client, Event, new { sprk_name = "x" });
+
+        response.StatusCode.Should().Be(HttpStatusCode.NoContent, await response.Content.ReadAsStringAsync());
+        var payload = _fixture.Data.EventUpdates.Single().Payload;
+        payload.Should().NotContainKey("sprk_ReassignedBy@odata.bind");
+        if (fixture == "no-linked-contact")
+            payload["statuscode"].Should().Be(EventStatusCode.Reassigned);
     }
 
     [Fact]
@@ -1411,6 +1473,90 @@ public sealed class ExternalEventFormsContractTests : IClassFixture<ExternalTodo
         var rows = (await Json(list)).GetProperty("value");
         CanEditOf(rows, RowId(1)).Should().BeFalse();
         CanEditOf(rows, RowId(2)).Should().BeTrue();
+    }
+
+    // R4 task 014c review: canReassign = canEdit && the row's CURRENT status is open work && the Contact Read ceiling — the
+    // PATCH's own predicates, so the SPA (task 015) hides Reassign rather than re-deriving IsOpenWork on the client.
+
+    [Theory]
+    [InlineData("open-collaborate", true)]   // must fire
+    [InlineData("completed", false)]         // must not: not open work
+    [InlineData("ceiling-refused", false)]   // must not: the role cannot read contacts
+    [InlineData("view-only", false)]         // must not: no edit right
+    public async Task CanReassign_OnTheListAndGet_AgreesWithThePatchReassign(string fixture, bool expected)
+    {
+        var status = fixture == "completed" ? EventStatusCode.Completed : EventStatusCode.Open;
+        _fixture.Principal = fixture switch
+        {
+            "view-only" => Contact((Matter, ExternalAccessLevel.ViewOnly)),
+            "ceiling-refused" => WorkforceContact(ExternalAccessLevel.Collaborate),
+            _ => Contact((Matter, ExternalAccessLevel.Collaborate)),
+        };
+        if (fixture == "ceiling-refused")
+            _fixture.WorkforceCeiling.Ceiling = CeilingRouteTestData.Without(WorkforceRoleCeilingGate.ContactTable, AccessRights.Read);
+        _fixture.ContactAccess.Answer = Knows(Colleague);
+        EventFiledUnder(EventTypeRef.Task, status, Matter);
+        _fixture.Data.Events.Add(Dto(EventTypeRef.Task, status, Matter));
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        using var list = await client.GetAsync($"/api/v1/external/matters/{Matter}/events");
+        using var get = await client.GetAsync($"/api/v1/external/events/{Event}");
+
+        list.StatusCode.Should().Be(HttpStatusCode.OK, await list.Content.ReadAsStringAsync());
+        get.StatusCode.Should().Be(HttpStatusCode.OK, await get.Content.ReadAsStringAsync());
+        (await Json(list)).GetProperty("value")[0].GetProperty("canReassign").GetBoolean().Should().Be(expected);
+        (await Json(get)).GetProperty("canReassign").GetBoolean().Should().Be(expected);
+
+        // The same fixture through the PATCH: canReassign true ⇔ the right, ceiling and open-work checks pass.
+        using var patch = await Patch(client, Event, new { assignedToContactId = Colleague });
+        if (expected)
+        {
+            patch.StatusCode.Should().Be(HttpStatusCode.NoContent, await patch.Content.ReadAsStringAsync());
+        }
+        else
+        {
+            var (code, name) = fixture switch
+            {
+                "completed" => ("sdap.event.reassign_not_open", "errorCode"),
+                "ceiling-refused" => (ExternalProjectDataEndpoints.EventAssignDeniedReasonCode, "reasonCode"),
+                _ => ("sdap.access.deny.event_update", "reasonCode"),
+            };
+            (await Code(patch, name)).Should().Be(code);
+            _fixture.Data.EventUpdates.Should().BeEmpty();
+        }
+    }
+
+    [Fact]
+    public async Task CanReassign_ForASystemUser_FollowsTheRowsEditAnswer_AndEachRowsStatus()
+    {
+        // Per row: an editable open row true, an editable closed row false, a row without Dataverse Write false.
+        _fixture.Principal = SystemUser(AccessRights.Read);
+        _fixture.Probe.AnswerAppOnly(SystemUserId, "sprk_matters", Matter, AccessRights.Read | AccessRights.Write);
+        _fixture.Probe.AnswerAppOnly(SystemUserId, EventSet, RowId(1), AccessRights.Read | AccessRights.Write);
+        _fixture.Probe.AnswerAppOnly(SystemUserId, EventSet, RowId(2), AccessRights.Read | AccessRights.Write);
+        _fixture.Probe.AnswerAppOnly(SystemUserId, EventSet, RowId(3), AccessRights.Read);
+        _fixture.Data.Events.Add(Row(1));
+        _fixture.Data.Events.Add(new ExternalEventDto
+        {
+            SprkEventid = RowId(2).ToString(),
+            SprkName = "Done",
+            SprkStatus = EventStatusCode.Closed,
+            EventTypeId = EventTypeRef.Task.ToString(),
+            EventTypeName = "Task",
+            Parents = new[] { new ExternalEventParent(ExternalDataService.TodoRootKind.Matter, Matter, "Matter name") },
+            InvoiceLinks = Array.Empty<Guid>(),
+        });
+        _fixture.Data.Events.Add(Row(3));
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        using var list = await client.GetAsync($"/api/v1/external/matters/{Matter}/events");
+
+        var rows = (await Json(list)).GetProperty("value");
+        bool CanReassignOf(Guid id) => rows.EnumerateArray()
+            .Single(r => r.GetProperty("sprk_eventid").GetString() == id.ToString()).GetProperty("canReassign").GetBoolean();
+        CanReassignOf(RowId(1)).Should().BeTrue();
+        CanReassignOf(RowId(2)).Should().BeFalse();
+        CanReassignOf(RowId(3)).Should().BeFalse();
     }
 
     private static bool CanEditOf(JsonElement rows, Guid id) =>

@@ -468,7 +468,8 @@ public static class ExternalProjectDataEndpoints
         group.MapPatch("/events/{id:guid}", UpdateEvent)
             .WithName("UpdateExternalEvent")
             .RequireWorkforceCeiling(WorkforceRoleCeilingGate.UpdateEvent)
-            .WithSummary("Edit a calendar event or change its status (Collaborate or Full Access on every record it is filed under)")
+            .WithSummary("Edit a calendar event, change its status or reassign it (Collaborate or Full Access on every record it is " +
+                "filed under; a reassign needs open work and an assignee with access to every one of them)")
             .Produces(StatusCodes.Status204NoContent)
             .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
@@ -3060,9 +3061,11 @@ public static class ExternalProjectDataEndpoints
                 logger.LogInformation(
                     "[EXT-EVENT] {Rows} events exceed the {Limit}-row edit-affordance limit: canEdit is false without asking Dataverse.",
                     rows.Count, EventEditAffordanceRowLimit);
-            return rows.Select(row => WithAffordances(row, canEdit: false)).ToList();
+            return rows.Select(row => WithAffordances(row, canEdit: false, mayAssign: false)).ToList();
         }
 
+        // R4 task 014c: the Contact Read ceiling behind canReassign, asked ONCE for the request (it is the caller's, not the row's).
+        var mayAssign = await AdmitsEventAssignAsync(caller, privileges, ct);
         var readCallerRights = CallerRightsReader(probe, httpContext);
         var parentsOf = rows.Select(row => row.Parents.Select(p => (p.Kind, p.Id)).ToList()).ToList();
 
@@ -3082,7 +3085,7 @@ public static class ExternalProjectDataEndpoints
                     && await EventEditDecisionAsync(caller, eventId, parentsOf[i], readCallerRights, logger, inner, rootCache, httpContext)
                         .ConfigureAwait(false) == EventEditDecision.Allowed).ConfigureAwait(false);
 
-        return rows.Select((row, i) => WithAffordances(row, canEdit[i])).ToList();
+        return rows.Select((row, i) => WithAffordances(row, canEdit[i], mayAssign)).ToList();
     }
 
     /// <summary>The bound on concurrent event-row questions for the list's <c>canEdit</c> (as <see cref="EventTypeProbeConcurrency"/>).</summary>
@@ -3094,11 +3097,31 @@ public static class ExternalProjectDataEndpoints
     /// </summary>
     internal const int EventEditAffordanceRowLimit = 100;
 
-    /// <summary>The DTO with its edit affordances set (and, for the single GET, its regarding record).</summary>
-    private static ExternalEventDto WithAffordances(ExternalEventDto row, bool canEdit, bool withRegarding = false)
+    /// <summary>
+    /// R4 task 014c: THE open-work rule of a reassign, on the event's CURRENT status — <see cref="Spaarke.Dataverse.EventStatusCode.IsOpenWork"/>,
+    /// with no status being "not open work" (as the internal gate, <c>EventDueAssigneeWrite.ReadStatusAsync</c>). The PATCH and
+    /// <c>canReassign</c> both ask it.
+    /// </summary>
+    private static bool IsReassignable(int? currentStatus) =>
+        currentStatus is { } status && Spaarke.Dataverse.EventStatusCode.IsOpenWork(status);
+
+    /// <summary>
+    /// R4 task 014c: whether the caller's role may name an assignee — the Contact Read ceiling
+    /// (<see cref="WorkforceRoleCeilingGate.AssignEventContact"/>, uac-r2 gate F3). The PATCH reassign and <c>canReassign</c> both ask it.
+    /// </summary>
+    private static Task<bool> AdmitsEventAssignAsync(CallerPrincipal caller, IDataversePrivilegeChecker privileges, CancellationToken ct) =>
+        WorkforceRoleCeilingGate.AdmitsAsync(caller, privileges, WorkforceRoleCeilingGate.AssignEventContact, ct);
+
+    /// <summary>
+    /// The DTO with its edit affordances set (and, for the single GET, its regarding record). <c>canReassign</c> (R4 task 014c) is
+    /// the PATCH reassign's own predicates: <paramref name="canEdit"/> (the edit right), <paramref name="mayAssign"/>
+    /// (<see cref="AdmitsEventAssignAsync"/>, the Contact Read ceiling) and <see cref="IsReassignable"/> on the row's status.
+    /// </summary>
+    private static ExternalEventDto WithAffordances(ExternalEventDto row, bool canEdit, bool mayAssign, bool withRegarding = false)
     {
         row.CanEdit = canEdit;
         row.CanChangeStatus = canEdit;
+        row.CanReassign = canEdit && mayAssign && IsReassignable(row.SprkStatus);
         row.AllowedStatuses = canEdit
             ? Spaarke.Dataverse.EventStatusCode.All.Select(s => s.Value).Where(v => v != row.SprkStatus).ToList()
             : Array.Empty<int>();
@@ -3259,7 +3282,8 @@ public static class ExternalProjectDataEndpoints
         var canEdit = await WorkforceRoleCeilingGate.AdmitsAsync(callerContext, privileges, WorkforceRoleCeilingGate.UpdateEvent, ct)
             && await EventEditDecisionAsync(callerContext, id, roots, CallerRightsReader(probe, httpContext), logger, ct,
                 httpContext: httpContext) == EventEditDecision.Allowed;
-        return Results.Ok(WithAffordances(served, canEdit, withRegarding: true));
+        var mayAssign = canEdit && await AdmitsEventAssignAsync(callerContext, privileges, ct);
+        return Results.Ok(WithAffordances(served, canEdit, mayAssign, withRegarding: true));
     }
 
     /// <summary>
@@ -3281,7 +3305,9 @@ public static class ExternalProjectDataEndpoints
     /// <c>reassign_not_open</c>; (c) the contact in EVERY parent's Known assignable set (<see cref="AssigneeDecisionAsync"/>) — an
     /// Unknown set is the 503, outside any set the 400 <c>assignee_not_allowed</c>. The columns are the internal reassign's
     /// (<see cref="Sprk.Bff.Api.Api.Events.EventDueAssigneeWrite.AddReassignColumns"/>), reassigned-by = the caller's contact
-    /// (a systemuser's linked contact; none → left out, as internally). As internally, null is "no reassign" and naming the
+    /// (a systemuser's linked contact; none → left out, as internally; one that could not be READ → the 503, review K4). The list's
+    /// and GET's <c>canReassign</c> ask the same predicates (<see cref="AdmitsEventAssignAsync"/>, <see cref="IsReassignable"/>).
+    /// As internally, null is "no reassign" and naming the
     /// current assignee again is still a reassign.</para>
     /// </remarks>
     private static async Task<IResult> UpdateEvent(
@@ -3339,10 +3365,20 @@ public static class ExternalProjectDataEndpoints
                 return DenyEventUpdate();
         }
 
+        // R4 task 014c review (K4): reassigned-by is the caller's contact. A linked contact that could not be READ is unknown, not
+        // absent (CallerPrincipal.ContactUnreadable): writing without sprk_ReassignedBy would lose the audit column for good on a
+        // transient fault, so it is the retry-able 503 and nothing is written. A systemuser with NO linked contact keeps the internal
+        // behaviour (the column is left out). Only the reassign path; the internal route is unchanged.
+        if (reassignTo is not null && callerContext.ContactUnreadable)
+        {
+            logger.LogWarning("[EXT-EVENT] Reassign of event {Id} withheld: the caller's linked contact could not be read. TraceId={TraceId}",
+                id, httpContext.TraceIdentifier);
+            return EventUnavailable();
+        }
+
         // R4 task 014c (a): naming an assignee asks the assignable set, which is contact data: the role must read contacts, checked
         // BEFORE any set is asked (uac-r2 gate F3, as the create does). The edit right above already ran (G5).
-        if (reassignTo is not null
-            && !await WorkforceRoleCeilingGate.AdmitsAsync(callerContext, privileges, WorkforceRoleCeilingGate.AssignEventContact, ct))
+        if (reassignTo is not null && !await AdmitsEventAssignAsync(callerContext, privileges, ct))
             return DenyEventAssign(RootsOf(target!)[0].Kind);
 
         // (4) The app-only read of the event's own fields, once, only when a rule needs it — after the right check (G5).
@@ -3360,8 +3396,7 @@ public static class ExternalProjectDataEndpoints
                 // R4 task 014c (b): only open work is reassigned, judged on the CURRENT status (the internal gate,
                 // EventDueAssigneeWrite.ReadStatusAsync, reads the row's status before its write); a status in the same PATCH does
                 // not make a closed event reassignable. An unreadable status is not open work, as internally.
-                if (reassignTo is not null
-                    && (current.Value[0].SprkStatus is not { } status || !Spaarke.Dataverse.EventStatusCode.IsOpenWork(status)))
+                if (reassignTo is not null && !IsReassignable(current.Value[0].SprkStatus))
                     return EventBadRequest(
                         "Only an event that is open work (Draft, Open, On Hold or Reassigned) can be reassigned.",
                         ExternalDataService.EventReassignNotOpenErrorCode);
