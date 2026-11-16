@@ -1886,7 +1886,13 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
           documentType={hostPreviewTarget.documentType}
           createdAt={hostPreviewTarget.createdAt}
           createdBy={hostPreviewTarget.createdBy}
-          onClose={() => setHostPreviewDocId(null)}
+          // Task 194: the wizard and Find Similar are non-modal (no backdrop of their own), so a click around them
+          // lands on this preview's light-dismiss backdrop. While one is stacked on it the preview stays, so the user
+          // returns to it when that dialog closes.
+          onClose={() => {
+            if (emailWizardOpen || findSimilarUrl) return;
+            setHostPreviewDocId(null);
+          }}
           fetchPreviewUrl={() => handlePreviewTelemetry(hostPreviewTarget)}
           onFetchSummary={() => handleSummary(hostPreviewTarget)}
           onOpenFile={mode => handleOpenFileTelemetry(hostPreviewTarget, mode)}
