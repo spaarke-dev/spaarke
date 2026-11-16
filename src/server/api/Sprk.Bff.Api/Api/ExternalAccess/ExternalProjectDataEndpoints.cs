@@ -3266,18 +3266,28 @@ public static class ExternalProjectDataEndpoints
     /// PATCH /api/v1/external/events/{id} (R4 task 014b, FR-36; owner S-3/S-4; uac-r2 Q1–Q4 and the conditions of 2026-11-16).
     /// </summary>
     /// <remarks>
-    /// <para><b>Order.</b> (1) The body's shape, with no I/O: the type is immutable (400 <c>type_immutable</c>); an assignee is
-    /// not written by this route yet (400 <c>assignee_update_unsupported</c>, the owner's a/b/c decision is pending); then
-    /// name, priority, description, status and date. (2) The record check (<see cref="CheckEventReadableAsync"/>) — can't read is
-    /// the uniform 404. (3) The edit right (<see cref="EventEditDecisionAsync"/>): unknown 503, read-not-edit 403
-    /// <c>event_update</c>. (4) Only then any app-only read of the event's own fields (the due-date rule) and (5) the write,
-    /// <see cref="ExternalDataService.UpdateEventAsync"/>, of ONLY the allow-listed columns the body sent
-    /// (<see cref="ExternalDataService.BuildEventUpdatePayload"/>).</para>
+    /// <para><b>Order.</b> (1) The body's shape, with no I/O: the type is immutable (400 <c>type_immutable</c>); an empty
+    /// assignee id is 400 <c>assignee_not_allowed</c> (the internal shape rule); then name, priority, description, status and
+    /// date. (2) The record check (<see cref="CheckEventReadableAsync"/>) — can't read is the uniform 404. (3) The edit right
+    /// (<see cref="EventEditDecisionAsync"/>): unknown 503, read-not-edit 403 <c>event_update</c>. (4) Only then any app-only read
+    /// of the event's own fields (the due-date rule; the reassign rules, below) and (5) the write,
+    /// <see cref="ExternalDataService.UpdateEventAsync"/>, of ONLY the allow-listed columns
+    /// (<see cref="BuildEventUpdateWithReassign"/>).</para>
     /// <para>Any status may be set; its <c>statecode</c> is written with it (<see cref="Spaarke.Dataverse.EventStatusCode.GetStateCode"/>).</para>
+    /// <para><b>Reassign</b> (R4 task 014c, owner option (a) "match internal reassign"; uac-r2 conditions). A non-null
+    /// <c>assignedToContactId</c>, after (3): (a) the role's Contact Read ceiling (<see cref="WorkforceRoleCeilingGate.AssignEventContact"/>)
+    /// before any assignable set is asked — refused is 403 <c>event_assign</c>; (b) open work only, judged on the event's CURRENT
+    /// status read app-only (the internal gate reads the row before its write and has no status in its request) — otherwise 400
+    /// <c>reassign_not_open</c>; (c) the contact in EVERY parent's Known assignable set (<see cref="AssigneeDecisionAsync"/>) — an
+    /// Unknown set is the 503, outside any set the 400 <c>assignee_not_allowed</c>. The columns are the internal reassign's
+    /// (<see cref="Sprk.Bff.Api.Api.Events.EventDueAssigneeWrite.AddReassignColumns"/>), reassigned-by = the caller's contact
+    /// (a systemuser's linked contact; none → left out, as internally). As internally, null is "no reassign" and naming the
+    /// current assignee again is still a reassign.</para>
     /// </remarks>
     private static async Task<IResult> UpdateEvent(
         Guid id, UpdateExternalEventRequest request, HttpContext httpContext, ExternalDataService dataService,
-        ExternalModuleRegistry modules, CallerRecordAccessProbe probe,
+        ExternalModuleRegistry modules, CallerRecordAccessProbe probe, IDataversePrivilegeChecker privileges,
+        RecordContactAccessService contactAccess,
         [Microsoft.AspNetCore.Mvc.FromServices] ExternalInvoiceHiding? hideInvoices, ILogger<Program> logger, CancellationToken ct)
     {
         var callerContext = GetCallerPrincipal(httpContext);
@@ -3286,9 +3296,9 @@ public static class ExternalProjectDataEndpoints
         // (1) Shape, no I/O.
         if (request.EventTypeIdSent)
             return EventBadRequest("The event type cannot be changed.", ExternalDataService.EventTypeImmutableErrorCode);
-        // Owner a/b/c pending (uac-r2 Q4): the assignee branch goes HERE, before the record check, once decided.
-        if (request.AssigneeSent)
-            return EventBadRequest("The assignee cannot be changed here yet.", ExternalDataService.EventAssigneeUpdateUnsupportedErrorCode);
+        // R4 task 014c: the internal shape rule (EventDueAssigneeWrite.ShapeProblem) — an assignee must be a contact id.
+        if (request.AssignedToContactId is { } emptyAssignee && emptyAssignee == Guid.Empty)
+            return EventBadRequest("This person cannot be assigned here.", ExternalDataService.EventAssigneeNotAllowedErrorCode);
         if (request.NameSent && string.IsNullOrWhiteSpace(request.SprkName))
             return EventBadRequest("sprk_name cannot be empty.", ExternalDataService.EventNameRequiredErrorCode);
         if (request.NameSent && request.SprkName is { Length: > ExternalDataService.EventNameMaxLength })
@@ -3302,7 +3312,9 @@ public static class ExternalProjectDataEndpoints
         if (request.DueDateSent && DueDateProblem(request.SprkDuedate) is { } badDueDate)
             return badDueDate;
 
-        var payload = ExternalDataService.BuildEventUpdatePayload(request);
+        var reassignTo = request.AssignedToContactId;
+        var payload = BuildEventUpdateWithReassign(request, callerContext.ContactId,
+            (httpContext.RequestServices.GetService<TimeProvider>() ?? TimeProvider.System).GetUtcNow());
         if (payload.Count == 0)
             return EventBadRequest("Nothing to change.", EventUpdateEmptyErrorCode);
 
@@ -3327,8 +3339,15 @@ public static class ExternalProjectDataEndpoints
                 return DenyEventUpdate();
         }
 
-        // (4) Clearing the due date of a type that requires one (owner Q-1, uac-r2 Q3: the event's own type, active or not).
-        if (request.DueDateSent && request.SprkDuedate is null)
+        // R4 task 014c (a): naming an assignee asks the assignable set, which is contact data: the role must read contacts, checked
+        // BEFORE any set is asked (uac-r2 gate F3, as the create does). The edit right above already ran (G5).
+        if (reassignTo is not null
+            && !await WorkforceRoleCeilingGate.AdmitsAsync(callerContext, privileges, WorkforceRoleCeilingGate.AssignEventContact, ct))
+            return DenyEventAssign(RootsOf(target!)[0].Kind);
+
+        // (4) The app-only read of the event's own fields, once, only when a rule needs it — after the right check (G5).
+        var clearsDueDate = request.DueDateSent && request.SprkDuedate is null;
+        if (clearsDueDate || reassignTo is not null)
         {
             try
             {
@@ -3337,7 +3356,18 @@ public static class ExternalProjectDataEndpoints
                     return EventUnavailable();
                 if (current.Value.Count == 0)
                     return Sprk.Bff.Api.Infrastructure.Errors.ProblemDetailsHelper.UniformRecordNotFound(httpContext);
-                if (Guid.TryParse(current.Value[0].EventTypeId, out var typeId))
+
+                // R4 task 014c (b): only open work is reassigned, judged on the CURRENT status (the internal gate,
+                // EventDueAssigneeWrite.ReadStatusAsync, reads the row's status before its write); a status in the same PATCH does
+                // not make a closed event reassignable. An unreadable status is not open work, as internally.
+                if (reassignTo is not null
+                    && (current.Value[0].SprkStatus is not { } status || !Spaarke.Dataverse.EventStatusCode.IsOpenWork(status)))
+                    return EventBadRequest(
+                        "Only an event that is open work (Draft, Open, On Hold or Reassigned) can be reassigned.",
+                        ExternalDataService.EventReassignNotOpenErrorCode);
+
+                // Clearing the due date of a type that requires one (owner Q-1, uac-r2 Q3: the event's own type, active or not).
+                if (clearsDueDate && Guid.TryParse(current.Value[0].EventTypeId, out var typeId))
                 {
                     var types = await dataService.GetEventTypesAsync(ct);
                     if (types.Any(t => t.Id == typeId && t.RequiresDueDate))
@@ -3348,6 +3378,36 @@ public static class ExternalProjectDataEndpoints
             {
                 return EventUnavailable();
             }
+        }
+
+        // R4 task 014c (c): the assignee must have effective access to EVERY parent the event is filed under (uac-r2 condition 2):
+        // each parent's Known set (RecordContactAccessService). ANY Unknown is the 503 (a parent whose set lacks the contact does
+        // not stop the loop, so the answer does not depend on the parents' order); otherwise outside any set is the 400 — never a write.
+        if (reassignTo is { } assignee)
+        {
+            var inEverySet = true;
+            foreach (var (kind, parentId) in RootsOf(target!))
+            {
+                if (GrantRootTypeOf(kind) is not { } rootType)
+                {
+                    inEverySet = false;
+                    continue;
+                }
+
+                switch (await contactAccess.GetContactsWithAccessAsync(rootType, parentId, ct))
+                {
+                    case RecordContactAccess.Known known:
+                        inEverySet &= known.Contacts.Any(c => c.ContactId == assignee);
+                        break;
+                    default:
+                        logger.LogWarning("[EXT-EVENT] Reassign of event {Id} withheld: the people with access to a {RootKind} " +
+                            "could not be decided. TraceId={TraceId}", id, kind, httpContext.TraceIdentifier);
+                        return AssigneesUnavailable();
+                }
+            }
+
+            if (!inEverySet)
+                return EventBadRequest("This person cannot be assigned here.", ExternalDataService.EventAssigneeNotAllowedErrorCode);
         }
 
         // (5) The write: only the allow-listed columns the body sent.
@@ -3362,6 +3422,31 @@ public static class ExternalProjectDataEndpoints
         }
 
         return Results.NoContent();
+    }
+
+    /// <summary>
+    /// The complete PATCH body of an external event edit (R4 task 014c): with a non-null <c>assignedToContactId</c>, the internal
+    /// reassign's columns FIRST (<see cref="Sprk.Bff.Api.Api.Events.EventDueAssigneeWrite.AddReassignColumns"/> — the same code
+    /// the internal route's <c>BuildPatchJson</c> runs, reassigned-by = <paramref name="callerContactId"/>, left out when it is
+    /// empty), THEN <see cref="ExternalDataService.BuildEventUpdatePayload"/>'s fields, so an explicit <c>sprk_status</c> in the
+    /// same PATCH overwrites Reassigned and brings its paired <c>statecode</c> (owner: the explicit status wins). Pure; every key is
+    /// in <see cref="ExternalDataService.EventUpdateColumns"/>. A null assignee adds nothing (internally null is "no reassign").
+    /// </summary>
+    internal static Dictionary<string, object?> BuildEventUpdateWithReassign(
+        UpdateExternalEventRequest request, Guid callerContactId, DateTimeOffset now)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        var body = new Dictionary<string, object?>(StringComparer.Ordinal);
+        if (request.AssignedToContactId is { } assignee)
+        {
+            if (assignee == Guid.Empty)
+                throw new ArgumentOutOfRangeException(nameof(request), "The assignee must be a contact id.");
+            Sprk.Bff.Api.Api.Events.EventDueAssigneeWrite.AddReassignColumns(body, assignee, callerContactId, now);
+        }
+
+        foreach (var (column, value) in ExternalDataService.BuildEventUpdatePayload(request))
+            body[column] = value;
+        return body;
     }
 
     /// <summary>

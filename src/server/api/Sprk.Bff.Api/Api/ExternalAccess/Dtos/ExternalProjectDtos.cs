@@ -704,8 +704,10 @@ public sealed class UpdateExternalEventRequest
     [JsonPropertyName("eventTypeId")]
     public Guid? EventTypeId { get => _eventTypeId; init { _eventTypeId = value; EventTypeIdSent = true; } }
 
-    /// <summary>Not accepted yet (the assignee write path is with the owner): any value is 400
-    /// <c>sdap.event.assignee_update_unsupported</c> and nothing is written.</summary>
+    /// <summary>R4 task 014c (owner option (a)): reassign the event as the internal reassign does — the contact, <c>statuscode</c>
+    /// Reassigned (an explicit <c>sprk_status</c> in the same PATCH wins), the reassigned date and reassigned-by = the caller's
+    /// contact. Open work only (400 <c>sdap.event.reassign_not_open</c>); the contact must have access to every parent (400
+    /// <c>sdap.event.assignee_not_allowed</c>). As internally, null means "no reassign" (there is no clear).</summary>
     [JsonPropertyName("assignedToContactId")]
     public Guid? AssignedToContactId { get => _assignedTo; init { _assignedTo = value; AssigneeSent = true; } }
 

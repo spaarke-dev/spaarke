@@ -843,22 +843,355 @@ public sealed class ExternalEventFormsContractTests : IClassFixture<ExternalTodo
         _fixture.Data.EventUpdates.Should().BeEmpty();
     }
 
-    [Fact]
-    public async Task Patch_WithAnAssignee_Is400AssigneeUpdateUnsupported_AndWritesNothing()
+    // =====================================================================
+    // R4 task 014c: PATCH reassigns as the internal reassign does (owner option (a); uac-r2 conditions G5, ceiling, every
+    // parent, allow-list, fail closed). Column parity with EventDueAssigneeWrite.BuildPatchJson.
+    // =====================================================================
+
+    private static RecordContactAccess.Known Knows(params Guid[] contacts) =>
+        new(contacts.Select(c => new RecordAccessContact(c, "Person")).ToArray());
+
+    /// <summary>The reassign columns' shape: the assignee bind, the reassigned date (UTC, seconds) within the request window.</summary>
+    private static void ShouldCarryTheReassign(IReadOnlyDictionary<string, object?> payload, Guid assignee, DateTimeOffset before, DateTimeOffset after)
     {
-        // uac-r2 Q4 / owner a-b-c pending: the PATCH writes no assignee yet, even one in the assignable set.
-        _fixture.Principal = Contact((Matter, ExternalAccessLevel.FullAccess));
-        _fixture.ContactAccess.Answer = new RecordContactAccess.Known(new[] { new RecordAccessContact(Colleague, "Col League") });
+        payload["sprk_AssignedTo@odata.bind"].Should().Be($"/contacts({assignee:D})");
+        var stamped = DateTimeOffset.ParseExact((string)payload["sprk_reassigneddate"]!, "yyyy-MM-ddTHH:mm:ssZ",
+            System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.AssumeUniversal);
+        stamped.Should().BeOnOrAfter(before.AddSeconds(-1)).And.BeOnOrBefore(after);
+    }
+
+    [Fact]
+    public async Task Patch_AReassignByACollaborator_OnOpenWork_Is204_AndWritesTheInternalReassignColumns()
+    {
+        _fixture.Principal = Contact((Matter, ExternalAccessLevel.Collaborate));
+        _fixture.ContactAccess.Answer = Knows(Colleague);
         EventFiledUnder(EventTypeRef.Task, EventStatusCode.Open, Matter);
 
         using var client = _fixture.CreateAuthenticatedClient();
-        using var inSet = await Patch(client, Event, new { assignedToContactId = Colleague });
-        using var outOfSet = await Patch(client, Event, new { sprk_name = "x", assignedToContactId = Stranger });
+        var before = DateTimeOffset.UtcNow;
+        using var response = await Patch(client, Event, new { assignedToContactId = Colleague });
+        var after = DateTimeOffset.UtcNow;
 
-        (await Code(inSet)).Should().Be("sdap.event.assignee_update_unsupported");
-        outOfSet.StatusCode.Should().Be(HttpStatusCode.BadRequest);
-        _fixture.Data.EventUpdates.Should().BeEmpty();
+        response.StatusCode.Should().Be(HttpStatusCode.NoContent, await response.Content.ReadAsStringAsync());
+        var payload = _fixture.Data.EventUpdates.Single().Payload;
+        payload.Keys.Should().BeEquivalentTo(
+            "sprk_AssignedTo@odata.bind", "statuscode", "sprk_reassigneddate", "sprk_ReassignedBy@odata.bind");
+        ShouldCarryTheReassign(payload, Colleague, before, after);
+        payload["statuscode"].Should().Be(EventStatusCode.Reassigned);
+        payload.Should().NotContainKey("statecode", "Reassigned is Active and the event is open work: the state stays Active");
+        payload["sprk_ReassignedBy@odata.bind"].Should().Be($"/contacts({ContactId:D})", "the caller's own contact");
+        _fixture.ContactAccess.Calls.Should().Equal(new[] { (ExternalGrantRootType.Matter, Matter) });
+    }
+
+    [Fact]
+    public async Task Patch_WithoutAnAssignee_WritesNoReassignColumn_AndAsksNoAssignableSet()
+    {
+        // Must-not-fire for the reassign: an edit naming no assignee, or an explicit null (internal: null is "no reassign").
+        _fixture.Principal = Contact((Matter, ExternalAccessLevel.Collaborate));
+        EventFiledUnder(EventTypeRef.Task, EventStatusCode.Open, Matter);
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        using var plain = await Patch(client, Event, new { sprk_name = "x" });
+        using var withNull = await client.PatchAsync($"/api/v1/external/events/{Event}",
+            new StringContent("{\"sprk_name\":\"y\",\"assignedToContactId\":null}", Encoding.UTF8, "application/json"));
+        using var onlyNull = await client.PatchAsync($"/api/v1/external/events/{Event}",
+            new StringContent("{\"assignedToContactId\":null}", Encoding.UTF8, "application/json"));
+
+        plain.StatusCode.Should().Be(HttpStatusCode.NoContent);
+        withNull.StatusCode.Should().Be(HttpStatusCode.NoContent);
+        onlyNull.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        (await Code(onlyNull)).Should().Be("sdap.event.update_empty");
+        _fixture.Data.EventUpdates.Select(u => u.Payload.Keys.ToList()).Should().BeEquivalentTo(
+            new[] { new List<string> { "sprk_eventname" }, new List<string> { "sprk_eventname" } });
+        _fixture.ContactAccess.Calls.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Patch_AnEmptyAssigneeId_Is400AssigneeNotAllowed_BeforeAnyRead()
+    {
+        // Internal ShapeProblem: "The assignee must be a contact id." — refused on its shape, no I/O.
+        _fixture.Principal = Contact((Matter, ExternalAccessLevel.Collaborate));
+        EventFiledUnder(EventTypeRef.Task, EventStatusCode.Open, Matter);
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        using var response = await Patch(client, Event, new { assignedToContactId = Guid.Empty });
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        (await Code(response)).Should().Be("sdap.event.assignee_not_allowed");
         _fixture.Data.EventTargetReads.Should().BeEmpty();
+        _fixture.Data.EventUpdates.Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData(EventStatusCode.Completed)]
+    [InlineData(EventStatusCode.Cancelled)]
+    [InlineData(EventStatusCode.OnHold)]
+    public async Task Patch_AReassignWithAnExplicitStatus_TheStatusWins_WithItsStatecode(int status)
+    {
+        _fixture.Principal = Contact((Matter, ExternalAccessLevel.Collaborate));
+        _fixture.ContactAccess.Answer = Knows(Colleague);
+        EventFiledUnder(EventTypeRef.Task, EventStatusCode.Open, Matter);
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        var before = DateTimeOffset.UtcNow;
+        using var response = await Patch(client, Event, new { assignedToContactId = Colleague, sprk_status = status });
+        var after = DateTimeOffset.UtcNow;
+
+        response.StatusCode.Should().Be(HttpStatusCode.NoContent, await response.Content.ReadAsStringAsync());
+        var payload = _fixture.Data.EventUpdates.Single().Payload;
+        payload["statuscode"].Should().Be(status, "an explicit status in the same PATCH wins over Reassigned");
+        payload["statecode"].Should().Be(EventStatusCode.GetStateCode(status));
+        ShouldCarryTheReassign(payload, Colleague, before, after);
+        payload["sprk_ReassignedBy@odata.bind"].Should().Be($"/contacts({ContactId:D})");
+    }
+
+    [Theory]
+    [InlineData(EventStatusCode.Completed)]
+    [InlineData(EventStatusCode.Closed)]
+    [InlineData(EventStatusCode.Cancelled)]
+    [InlineData(EventStatusCode.Transferred)]
+    [InlineData(EventStatusCode.NoFurtherAction)]
+    public async Task Patch_AReassignOfAnEventThatIsNotOpenWork_Is400ReassignNotOpen_AndWritesNothing(int current)
+    {
+        _fixture.Principal = Contact((Matter, ExternalAccessLevel.Collaborate));
+        _fixture.ContactAccess.Answer = Knows(Colleague);
+        EventFiledUnder(EventTypeRef.Task, current, Matter);
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        using var response = await Patch(client, Event, new { assignedToContactId = Colleague });
+        // The CURRENT status decides (the internal gate reads the row before its write); reopening in the same PATCH does not help.
+        using var reopening = await Patch(client, Event, new { assignedToContactId = Colleague, sprk_status = EventStatusCode.Open });
+
+        foreach (var r in new[] { response, reopening })
+        {
+            r.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+            (await Code(r)).Should().Be("sdap.event.reassign_not_open");
+        }
+
+        _fixture.Data.EventUpdates.Should().BeEmpty();
+
+        // Must-not-fire: the open-work rule is the reassign's only — a plain edit of the same event is written.
+        using var plain = await Patch(client, Event, new { sprk_name = "x" });
+        plain.StatusCode.Should().Be(HttpStatusCode.NoContent, await plain.Content.ReadAsStringAsync());
+    }
+
+    [Theory]
+    [InlineData(EventStatusCode.Draft)]
+    [InlineData(EventStatusCode.Open)]
+    [InlineData(EventStatusCode.OnHold)]
+    [InlineData(EventStatusCode.Reassigned)]
+    public async Task Patch_AReassignOfOpenWork_IsWritten(int current)
+    {
+        // Must-not-fire for reassign_not_open: EventStatusCode.IsOpenWork (owner decision A: Draft, Open, On Hold, Reassigned).
+        _fixture.Principal = Contact((Matter, ExternalAccessLevel.Collaborate));
+        _fixture.ContactAccess.Answer = Knows(Colleague);
+        EventFiledUnder(EventTypeRef.Task, current, Matter);
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        using var response = await Patch(client, Event, new { assignedToContactId = Colleague });
+
+        response.StatusCode.Should().Be(HttpStatusCode.NoContent, await response.Content.ReadAsStringAsync());
+        _fixture.Data.EventUpdates.Single().Payload["statuscode"].Should().Be(EventStatusCode.Reassigned);
+    }
+
+    [Fact]
+    public async Task Patch_AnAssigneeWithoutAccessToOneOfTwoParents_Is400AssigneeNotAllowed_AndWritesNothing()
+    {
+        _fixture.Principal = Contact((Matter, ExternalAccessLevel.Collaborate), (OtherMatter, ExternalAccessLevel.Collaborate));
+        _fixture.ContactAccess.AnswersByRecord[Matter] = Knows(Colleague);
+        _fixture.ContactAccess.AnswersByRecord[OtherMatter] = Knows(Stranger);
+        EventFiledUnder(EventTypeRef.Task, EventStatusCode.Open, Matter, OtherMatter);
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        using var response = await Patch(client, Event, new { assignedToContactId = Colleague });
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest, await response.Content.ReadAsStringAsync());
+        (await Code(response)).Should().Be("sdap.event.assignee_not_allowed");
+        _fixture.Data.EventUpdates.Should().BeEmpty();
+        _fixture.ContactAccess.Calls.Should().Contain((ExternalGrantRootType.Matter, OtherMatter), "EVERY parent is asked");
+    }
+
+    [Fact]
+    public async Task Patch_AnAssigneeWithAccessToEveryParent_IsWritten_AndEveryParentIsAsked()
+    {
+        // Must-not-fire for assignee_not_allowed on a multi-parent event.
+        _fixture.Principal = Contact((Matter, ExternalAccessLevel.Collaborate), (OtherMatter, ExternalAccessLevel.Collaborate));
+        _fixture.ContactAccess.AnswersByRecord[Matter] = Knows(Colleague);
+        _fixture.ContactAccess.AnswersByRecord[OtherMatter] = Knows(Stranger, Colleague);
+        EventFiledUnder(EventTypeRef.Task, EventStatusCode.Open, Matter, OtherMatter);
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        using var response = await Patch(client, Event, new { assignedToContactId = Colleague });
+
+        response.StatusCode.Should().Be(HttpStatusCode.NoContent, await response.Content.ReadAsStringAsync());
+        _fixture.ContactAccess.Calls.Should().BeEquivalentTo(new[]
+        {
+            (ExternalGrantRootType.Matter, Matter), (ExternalGrantRootType.Matter, OtherMatter),
+        });
+        _fixture.Data.EventUpdates.Should().ContainSingle();
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Patch_WhenOneParentsAssignableSetIsUnknown_Is503_AndWritesNothing(bool unknownFirst)
+    {
+        _fixture.Principal = Contact((Matter, ExternalAccessLevel.Collaborate), (OtherMatter, ExternalAccessLevel.Collaborate));
+        var unknown = new RecordContactAccess.Unknown(RecordContactAccessUnknownReason.GrantsUnreadable);
+        _fixture.ContactAccess.AnswersByRecord[Matter] = unknownFirst ? unknown : Knows(Colleague);
+        _fixture.ContactAccess.AnswersByRecord[OtherMatter] = unknownFirst ? Knows(Colleague) : unknown;
+        EventFiledUnder(EventTypeRef.Task, EventStatusCode.Open, Matter, OtherMatter);
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        using var response = await Patch(client, Event, new { assignedToContactId = Colleague });
+
+        response.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable, await response.Content.ReadAsStringAsync());
+        (await Code(response, "reasonCode")).Should().Be("sdap.event.assignees_unavailable");
+        _fixture.Data.EventUpdates.Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Patch_AReassignByAWorkforceContactWhoseRoleCannotReadContacts_Is403EventAssign_AndAsksNoSet(bool inTheSet)
+    {
+        _fixture.Principal = WorkforceContact(ExternalAccessLevel.Collaborate);
+        _fixture.WorkforceCeiling.Ceiling = CeilingRouteTestData.Without(WorkforceRoleCeilingGate.ContactTable, AccessRights.Read);
+        _fixture.ContactAccess.Answer = Knows(Colleague);
+        EventFiledUnder(EventTypeRef.Task, EventStatusCode.Open, Matter);
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        using var response = await Patch(client, Event, new { assignedToContactId = inTheSet ? Colleague : Stranger });
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden, await response.Content.ReadAsStringAsync());
+        (await Code(response, "reasonCode")).Should().Be(ExternalProjectDataEndpoints.EventAssignDeniedReasonCode);
+        _fixture.ContactAccess.Calls.Should().BeEmpty("the ceiling refuses before the assignable set is read");
+        _fixture.Data.EventUpdates.Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData(true)]  // must not fire: the role reads contacts, an assignee in the set
+    [InlineData(false)] // must not fire: no Read on contacts, but no assignee named
+    public async Task Patch_ByAWorkforceContact_WithoutTheContactCeilingApplying_Is204(bool withAssignee)
+    {
+        _fixture.Principal = WorkforceContact(ExternalAccessLevel.Collaborate);
+        if (!withAssignee)
+            _fixture.WorkforceCeiling.Ceiling = CeilingRouteTestData.Without(WorkforceRoleCeilingGate.ContactTable, AccessRights.Read);
+        _fixture.ContactAccess.Answer = Knows(Colleague);
+        EventFiledUnder(EventTypeRef.Task, EventStatusCode.Open, Matter);
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        using var response = withAssignee
+            ? await Patch(client, Event, new { assignedToContactId = Colleague })
+            : await Patch(client, Event, new { sprk_name = "x" });
+
+        response.StatusCode.Should().Be(HttpStatusCode.NoContent, await response.Content.ReadAsStringAsync());
+        _fixture.Data.EventUpdates.Should().ContainSingle();
+        _fixture.ContactAccess.Calls.Should().HaveCount(withAssignee ? 1 : 0);
+    }
+
+    [Fact]
+    public async Task Patch_AReassignByAViewOnlyReader_Is403EventUpdate_AndReadsNothingPastTheRightCheck()
+    {
+        // uac-r2 G5: the caller's right first; no app-only read of the event's fields, no assignable set, no write.
+        _fixture.Principal = Contact((Matter, ExternalAccessLevel.ViewOnly));
+        _fixture.ContactAccess.Answer = Knows(Colleague);
+        EventFiledUnder(EventTypeRef.Task, EventStatusCode.Open, Matter);
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        using var response = await Patch(client, Event, new { assignedToContactId = Colleague });
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        (await Code(response, "reasonCode")).Should().Be("sdap.access.deny.event_update");
+        _fixture.Data.EventByIdReads.Should().Be(0, "the open-work status is read only after the right check");
+        _fixture.ContactAccess.Calls.Should().BeEmpty();
+        _fixture.Data.EventUpdates.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Patch_AReassignByACollaborator_ReadsTheStatusOnlyAfterTheRightCheck()
+    {
+        // Must-not-fire pair of the G5 test: the same reassign by an editor reads the status once, then writes.
+        _fixture.Principal = Contact((Matter, ExternalAccessLevel.Collaborate));
+        _fixture.ContactAccess.Answer = Knows(Colleague);
+        EventFiledUnder(EventTypeRef.Task, EventStatusCode.Open, Matter);
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        using var response = await Patch(client, Event, new { assignedToContactId = Colleague });
+
+        response.StatusCode.Should().Be(HttpStatusCode.NoContent, await response.Content.ReadAsStringAsync());
+        _fixture.Data.EventByIdReads.Should().Be(1);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Patch_AReassignByASystemUser_ReassignedByIsItsLinkedContact_OrOmittedWithoutOne(bool linked)
+    {
+        // Internal (EventEndpoints.UpdateDueAssigneeAsync): reassigned-by is the systemuser's linked contact, and with none
+        // (callerContactId null) BuildPatchJson leaves sprk_ReassignedBy out — the reassign itself is still written.
+        _fixture.Principal = new CallerPrincipal
+        {
+            Plane = CallerPrincipalPlane.Workforce,
+            ContactId = linked ? ContactId : Guid.Empty,
+            SystemUserId = SystemUserId,
+            Email = "caller@outside.test",
+            ProjectAccess = Array.Empty<CallerProjectAccess>(),
+            MatterAccess = new Dictionary<Guid, AccessRights> { [Matter] = AccessRights.Read },
+            WorkAssignmentAccess = new Dictionary<Guid, AccessRights>(),
+            DataverseConfirmsWrites = true,
+        };
+        _fixture.Probe.AnswerAppOnly(SystemUserId, "sprk_matters", Matter, AccessRights.Read | AccessRights.Write);
+        _fixture.Probe.AnswerAppOnly(SystemUserId, EventSet, Event, AccessRights.Read | AccessRights.Write);
+        _fixture.ContactAccess.Answer = Knows(Colleague);
+        EventFiledUnder(EventTypeRef.Task, EventStatusCode.Open, Matter);
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        using var response = await Patch(client, Event, new { assignedToContactId = Colleague });
+
+        response.StatusCode.Should().Be(HttpStatusCode.NoContent, await response.Content.ReadAsStringAsync());
+        var payload = _fixture.Data.EventUpdates.Single().Payload;
+        payload["statuscode"].Should().Be(EventStatusCode.Reassigned);
+        if (linked)
+            payload["sprk_ReassignedBy@odata.bind"].Should().Be($"/contacts({ContactId:D})");
+        else
+            payload.Should().NotContainKey("sprk_ReassignedBy@odata.bind");
+        _fixture.Probe.Calls.Should().BeEmpty("never OBO on the external plane");
+    }
+
+    [Fact]
+    public void ReassignColumns_AreTheInternalReassignsColumns_AndAllowListed()
+    {
+        // Parity: the external reassign's columns are exactly the ones the internal BuildPatchJson emits for an assignee.
+        var request = JsonSerializer.Deserialize<UpdateExternalEventRequest>(
+            $"{{\"assignedToContactId\":\"{Colleague}\"}}")!;
+        var now = new DateTimeOffset(2026, 11, 16, 9, 30, 15, TimeSpan.Zero);
+
+        var external = ExternalProjectDataEndpoints.BuildEventUpdateWithReassign(request, ContactId, now);
+        var internalJson = Sprk.Bff.Api.Api.Events.EventDueAssigneeWrite.BuildPatchJson(
+            new Sprk.Bff.Api.Api.Events.UpdateEventDueAssigneeRequest(null, Colleague), ContactId, now);
+
+        JsonSerializer.Serialize(external).Should().Be(internalJson, "the same columns and values, in the same order");
+        external.Keys.Should().BeSubsetOf(ExternalDataService.EventUpdateColumns);
+    }
+
+    [Fact]
+    public void EventDueAssigneeWrite_BuildPatchJson_IsByteIdentical_ToItsPre014cOutput()
+    {
+        // The internal reassign's output, pinned before 014c extracted its column logic (byte-for-byte, both callers).
+        var now = new DateTimeOffset(2026, 11, 16, 9, 30, 15, TimeSpan.FromHours(2));
+        var both = new Sprk.Bff.Api.Api.Events.UpdateEventDueAssigneeRequest(new DateOnly(2026, 12, 1), Colleague);
+
+        Sprk.Bff.Api.Api.Events.EventDueAssigneeWrite.BuildPatchJson(both, ContactId, now).Should().Be(
+            "{\"sprk_duedate\":\"2026-12-01\",\"sprk_rescheduleddate\":\"2026-11-16T07:30:15Z\","
+            + "\"sprk_RescheduledBy@odata.bind\":\"/contacts(a0140000-0000-4000-8000-00000000e0c1)\","
+            + "\"sprk_AssignedTo@odata.bind\":\"/contacts(a0140000-0000-4000-8000-00000000e0c2)\",\"statuscode\":659490007,"
+            + "\"sprk_reassigneddate\":\"2026-11-16T07:30:15Z\","
+            + "\"sprk_ReassignedBy@odata.bind\":\"/contacts(a0140000-0000-4000-8000-00000000e0c1)\"}");
+        Sprk.Bff.Api.Api.Events.EventDueAssigneeWrite.BuildPatchJson(both, null, now).Should().Be(
+            "{\"sprk_duedate\":\"2026-12-01\",\"sprk_rescheduleddate\":\"2026-11-16T07:30:15Z\","
+            + "\"sprk_AssignedTo@odata.bind\":\"/contacts(a0140000-0000-4000-8000-00000000e0c2)\",\"statuscode\":659490007,"
+            + "\"sprk_reassigneddate\":\"2026-11-16T07:30:15Z\"}");
     }
 
     [Fact]
@@ -1311,13 +1644,28 @@ public sealed class ExternalEventFormsContractTests : IClassFixture<ExternalTodo
             ["statecode"] = EventStatusCode.GetStateCode(EventStatusCode.Completed),
             ["sprk_duedate"] = "2026-12-01",
         });
+        // R4 task 014c: + the three reassign columns, named exactly as EventDueAssigneeWrite.BuildPatchJson emits them (uac-r2
+        // condition: ONLY these; never ownership, the core-ancestor stamp, sprk_accesspermission or sprk_issecure).
         ExternalDataService.EventUpdateColumns.Should().BeEquivalentTo(
-            "sprk_eventname", "sprk_duedate", "sprk_priority", "sprk_description", "statuscode", "statecode");
+            "sprk_eventname", "sprk_duedate", "sprk_priority", "sprk_description", "statuscode", "statecode",
+            "sprk_AssignedTo@odata.bind", "sprk_reassigneddate", "sprk_ReassignedBy@odata.bind");
+        ExternalDataService.EventUpdateColumns.Should().NotContain(c =>
+            c.Contains("owner", StringComparison.OrdinalIgnoreCase) || c.Contains("ancestor", StringComparison.OrdinalIgnoreCase)
+            || c.Contains("accesspermission", StringComparison.OrdinalIgnoreCase) || c.Contains("issecure", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void BuildEventUpdatePayload_NeverEmitsTheAssignee_TheRouteAddsTheReassignColumns()
+    {
+        // The 014b builder stays the non-assignee fields only; the reassign columns come from EventDueAssigneeWrite (task 014c).
+        var request = JsonSerializer.Deserialize<UpdateExternalEventRequest>(
+            "{\"sprk_name\":\"x\",\"assignedToContactId\":\"a0140000-0000-4000-8000-00000000e0c2\"}")!;
+
+        ExternalDataService.BuildEventUpdatePayload(request).Keys.Should().Equal("sprk_eventname");
     }
 
     [Theory]
     [InlineData("{\"eventTypeId\":\"a0140000-0000-4000-8000-0000000071e1\"}")]
-    [InlineData("{\"assignedToContactId\":\"a0140000-0000-4000-8000-00000000e0c2\"}")]
     [InlineData("{\"sprk_name\":\" \"}")]
     [InlineData("{\"sprk_priority\":7}")]
     [InlineData("{\"sprk_status\":42}")]
