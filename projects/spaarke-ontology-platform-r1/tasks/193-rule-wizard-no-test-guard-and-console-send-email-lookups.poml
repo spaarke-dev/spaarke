@@ -4,7 +4,7 @@
     <title>New rule wizard asks for a test instead of showing a raw schema error; Console Send Email recipients and Related to use the side pane</title>
     <phase>12 Create-wizard lookups and composer (185 dev check fixes)</phase>
     <gate>startable</gate>
-    <status>in-progress</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies shared client code (.ts/.tsx) in @spaarke/ui-components and the Console.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -96,6 +96,7 @@
   <tools>
     <tool name="npm">jest, tsc and ESLint in src/client/shared/Spaarke.UI.Components and src/solutions/SpaarkeAi (npm install --legacy-peer-deps --no-audit --no-fund; in a fresh worktree build ../Spaarke.SdapClient and ../Spaarke.Auth first)</tool>
   </tools>
+  <completion>Done 2026-11-16: PR #2855 merged to master (c0d8a5b74f). Main-session review PASS; code-review + adr-check clean after one lint F fixed. K4: RuleWizard.tsx ~725 refusal list prints BFF text verbatim (no-test case cannot reach it). Browser check rides the Console auto-deploy. Notes: notes/task-193-notes.md. rework: none task 193</completion>
   <execution>
     <protocol>Run through task-execute. Fresh worktree from origin/master; PR to master. Dev check rides the next Console auto-deploy.</protocol>
   </execution>
