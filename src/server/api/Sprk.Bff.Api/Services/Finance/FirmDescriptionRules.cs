@@ -41,7 +41,8 @@ public readonly record struct FirmDescriptionCheck(string? Text, string? Refusal
 /// <item>at most <see cref="MaxRunes"/> Unicode scalars (runes, so a character outside the Basic Multilingual Plane counts once; <see cref="TooLong"/>);</item>
 /// <item>no <c>{</c> or <c>}</c>, so no template placeholder can exist (<see cref="Braces"/>);</item>
 /// <item>no <c>&lt;</c> or <c>&gt;</c>, no markup (<see cref="Markup"/>);</item>
-/// <item>when the version's names are given, neither its rule set name nor its policy name appears in it, case-insensitively (uac-r2 Q4 and C4;
+/// <item>when the version's names are given, neither its rule set name nor its policy name appears in it, case-insensitively after NFKC and
+/// with every run of white space read as one space (uac-r2 Q4 and C4; fix round 2 F3;
 /// <see cref="NamesTheRule"/>).</item>
 /// </list>
 /// A refusal is a code only: no caller logs, returns or echoes the refused text.
@@ -173,8 +174,61 @@ public static class FirmDescriptionRules
         Rune.GetUnicodeCategory(rune) is UnicodeCategory.Control or UnicodeCategory.Format
             or UnicodeCategory.LineSeparator or UnicodeCategory.ParagraphSeparator;
 
-    private static bool Names(string text, string? name) =>
-        !string.IsNullOrWhiteSpace(name) && text.Contains(name.Trim(), StringComparison.OrdinalIgnoreCase);
+    /// <summary>
+    /// Fix round 2 (F3, C4): whether <paramref name="text"/> contains <paramref name="name"/>, compared as <see cref="Comparable"/> on both sides
+    /// and case-insensitively, so a no-break or wide space, a doubled space or fullwidth letters do not get a name past the check.
+    /// </summary>
+    private static bool Names(string text, string? name)
+    {
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            return false;
+        }
+
+        var needle = Comparable(name);
+        return needle.Length > 0 && Comparable(text).Contains(needle, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// The form both sides of the name check are compared in: NFKC (compatibility forms such as fullwidth letters and the typographic spaces
+    /// become their plain forms), then every run of white space (<see cref="char.IsWhiteSpace(char)"/>) becomes one U+0020, trimmed. A value that
+    /// cannot be normalised (an unpaired surrogate; a text holding one is refused before this check) is compared as it is. Look-alike letters
+    /// from other scripts (homoglyphs) are not mapped: a known limit.
+    /// </summary>
+    internal static string Comparable(string value)
+    {
+        string normalized;
+        try
+        {
+            normalized = value.Normalize(NormalizationForm.FormKC);
+        }
+        catch (ArgumentException)
+        {
+            normalized = value;
+        }
+
+        var builder = new StringBuilder(normalized.Length);
+        var inWhiteSpace = false;
+        foreach (var c in normalized)
+        {
+            if (char.IsWhiteSpace(c))
+            {
+                if (!inWhiteSpace)
+                {
+                    builder.Append(' ');
+                }
+
+                inWhiteSpace = true;
+            }
+            else
+            {
+                builder.Append(c);
+                inWhiteSpace = false;
+            }
+        }
+
+        return builder.ToString().Trim(' ');
+    }
 
     private static FirmDescriptionCheck Refused(string code) => new(null, code);
 }

@@ -143,6 +143,58 @@ public class FirmDescriptionRulesTests
         FirmDescriptionRules.Validate(text).IsValid.Should().BeTrue("the content-only check has no names to compare");
     }
 
+    // Fix round 2 (F3): the separators are passed as numbers so the source shows which character each row tests. -1 is a doubled space.
+    [Theory(DisplayName = "130e-1 fix round 2 F3 (C4): a name spelled with another white space between its words is still refused (names_rule)")]
+    [InlineData(0x00A0)] // no-break space
+    [InlineData(0x2000)] // en quad
+    [InlineData(0x2002)] // en space
+    [InlineData(0x2005)] // four-per-em space
+    [InlineData(0x2009)] // thin space
+    [InlineData(0x200A)] // hair space
+    [InlineData(0x202F)] // narrow no-break space
+    [InlineData(0x205F)] // medium mathematical space
+    [InlineData(0x3000)] // ideographic space
+    [InlineData(-1)]     // two plain spaces
+    public void ANameWithOtherWhiteSpace_IsRefused(int separator)
+    {
+        var gap = separator == -1 ? "  " : ((char)separator).ToString();
+        var setText = "Per the " + RuleSetName.Replace(" ", gap) + ", travel is half rate.";
+        var policyText = "See " + PolicyName.Replace(" ", gap) + ".";
+
+        FirmDescriptionRules.Validate(setText, RuleSetName, PolicyName).RefusalCode.Should().Be(FirmDescriptionRules.NamesTheRule);
+        FirmDescriptionRules.Validate(policyText, RuleSetName, PolicyName).RefusalCode.Should().Be(FirmDescriptionRules.NamesTheRule);
+        FirmDescriptionRules.Validate(setText).IsValid.Should().BeTrue("the setup: the separator itself is an allowed character");
+    }
+
+    [Theory(DisplayName = "130e-1 fix round 2 F3 (C4): a name in fullwidth letters (alone or with an ideographic space), or a stored name with odd spacing, is refused")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void AFullwidthName_IsRefused(bool ideographicSpace)
+    {
+        var name = Fullwidth(PolicyName);
+        if (ideographicSpace)
+        {
+            name = name.Replace(" ", ((char)0x3000).ToString());
+        }
+
+        FirmDescriptionRules.Validate("See " + name + ".", RuleSetName, PolicyName).RefusalCode.Should().Be(FirmDescriptionRules.NamesTheRule);
+        FirmDescriptionRules.Validate("See travel expenses.", RuleSetName, "Travel" + (char)0x00A0 + " Expenses ").RefusalCode
+            .Should().Be(FirmDescriptionRules.NamesTheRule, "the stored name is normalised the same way");
+    }
+
+    [Theory(DisplayName = "130e-1 fix round 2 F3 must-not-fire: normalising does not join words a name does not have")]
+    [InlineData("Travel-Expenses are capped.")]
+    [InlineData("TravelExpenses are capped.")]
+    [InlineData("Acme Outside Counsel guidance applies.")]
+    public void NormalisingCreatesNoName(string text)
+    {
+        FirmDescriptionRules.Validate(text, RuleSetName, PolicyName).IsValid.Should().BeTrue();
+    }
+
+    /// <summary>Printable ASCII mapped to its fullwidth form (U+FF01 to U+FF5E); the space is kept.</summary>
+    private static string Fullwidth(string ascii) =>
+        string.Concat(ascii.Select(c => c is >= '!' and <= '~' ? (char)(c + 0xFEE0) : c));
+
     [Fact(DisplayName = "130e-1 C4 must-not-fire: a text naming neither, or blank or missing names, is accepted; a name is compared trimmed")]
     public void NotNamingTheRule_IsAccepted()
     {
