@@ -5,7 +5,7 @@
 > - **History:** git log of this file. **Earlier checkpoints:** `notes/handoff-history/2026-11.md`.
 > - **NOTE:** master is ahead of this work branch on project files. Read master's TASK-INDEX and README for task status.
 
-> **Last Updated**: 2026-11-16 ~07:30Z (checkpoint #145, desktop session `uac-r2`). Private: `~/.claude/projects/c--code-files-spaarke-wt-unified-access-control-r2/private-*.md` (never copy into repo text).
+> **Last Updated**: 2026-11-16 ~08:10Z (checkpoint #146; #145 body below partly superseded by Quick Recovery, desktop session `uac-r2`). Private: `~/.claude/projects/c--code-files-spaarke-wt-unified-access-control-r2/private-*.md` (never copy into repo text).
 
 ## Quick Recovery (READ THIS FIRST)
 
@@ -13,8 +13,8 @@
 |---|---|
 | **Mode** | Wrap-up, extended (round 90). `uac-r2` is authoritative, reviews peers, runs every dev deploy. Live actions need the owner's go IN THIS SESSION; the BFF needs the owner to name the exact SHA. ≤ 2 agents at once. |
 | **Dev BFF** | **`5ef0a548df`** = master `ce6c241964` + mcp **spike-v2 `973776a5a6`** (packages only: M.E.AI/.OpenAI 10.11.0, OpenAI 2.14.0). Local merge in `C:\wtdep11`, ledger 154→155, never pushed. Live 05:47:05Z 2026-11-16 (owner "go BFF 5ef0a548df"). Read-back: 4 files SHA-256, healthz 200, anon /mcp 401, /external/me 401, live deps.json is one consistent M.E.AI family; AI Search -VerifyOnly 7/7 OK (MI flag true). **30-min gate PASSED** (15 req, 0 5xx; 5 exceptions = ID-LINK-RECON 15 s DV timeouts, fail-closed, pre-existing). Fixes the dev drafting 503 (TypeLoadException from the old spike); not yet proven by a live draft call. **Rollback = `f451e0874d` (`C:\wtdep10`).** Dev SPA still `c1eb6e4a8e`. |
-| **Agents running** | (1) **#2845 round 2 fix-round implementer** (Opus) in `C:\wt2845b`. (2) **#2859 adversarial reviewer** (Opus) on `C:\wt2859`. |
-| **Next action** | Wait for both agents. Then: round 2 → re-check the fix diff → rebase onto #2852 once spa-r4 merges it → integration suites → PR → merge → deploy merge (master + spike-v2, ledger 155) → owner SHA go → deploy → measure latency on both planes → close #2845 if < 1 s. #2859 → fix findings → push → PR (code-review + adr-check done by the reviewer) → merge → tell provisioning-r1 the version + commit. |
+| **Agents running** | None. |
+| **Next action** | (a) **PR #2865** (#2859, SpaarkeMaster 1.3.2.0; head e76e92b3b6): merge on Router + Client lint green (`--match-head-commit` full sha), then send the merge SHA to provisioning-r1 (it names 1.3.2.0 in S27 + adds a package check; its PR #2862 waits on the owner). ontology-r1 re-reviewed the exceptions: OK. Import anywhere = owner go. (b) **Draft PR #2867** (#2845 round 2, `perf/2845-round2`, head a48941b538): local scoped 7394/0 + 11487/0, ArchTests 2635/0, integration 212/0 + Spe 353/0; local FULL unit run unusable (machine-load timeouts; sampled failures pass 31/0) → CI is the full-suite verdict. Then rebase onto #2852 when spa-r4 merges it → re-run scoped + integration → ready → merge → deploy merge (master + spike-v2, ledger 155) → owner SHA go → deploy → latency on both planes → close #2845 if < 1 s. Open item in the PR: some reads stay ungated (ExternalDataService, impersonated root-set, CallerRecordAccessProbe, one-record walk). |
 
 ## Active work
 - **#2845 round 2** (`C:\wt2845b`, branch `perf/2845-round2`, 408d045902 + 577f962a5b on ce6c241964; includes the #2851 fix). Two Opus reviews: PASS-WITH-FIXES, no over-grant. The fix round covers:
@@ -23,7 +23,7 @@
   - R2: `For` locks HttpContext then Items.
   - R3: sibling cancel.
   - T1-T3: tests.
-- **#2859 SpaarkeMaster 1.3.2.0** (`C:\wt2859`, branch `fix/2859-invoice-lock-in-spaarkemaster` from master e476e9b61b; 7191dcc0ed source + ArchTest, 47832cd10d release, 5beb7c0f05 rebuilt bundles + docs + ontology wording; NOT pushed):
+- **#2859 SpaarkeMaster 1.3.2.0** (`C:\wt2859`, branch `fix/2859-invoice-lock-in-spaarkemaster` from master e476e9b61b; 7191dcc0ed source + ArchTest, 47832cd10d release, 5beb7c0f05 rebuilt bundles + docs + ontology wording, e76e92b3b6 review F3 fix (guard scans PCF bundles); pushed, **PR #2865**):
   - the #2799 24-column invoice-family lock in source (IsSecured=1; Readers 4/0/0, Writers 4/4/4);
   - `InvoiceFamilyFieldLockSourceGuardTests`;
   - Billing Admin's two unreleased Reads (084f);
