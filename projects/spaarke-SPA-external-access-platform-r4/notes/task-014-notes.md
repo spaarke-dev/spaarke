@@ -153,4 +153,6 @@ Questions:
   - Scoped Sonnet re-check: no F-class findings. New K items: a firm point read with an empty 2xx body → inactive (shared ISS-026 definition, under-lists); the concurrency test's timing coupling.
   - The PR body was updated with §11 for `QueryStrictAsync`, K1–K5 and the merge order.
   - Sent to uac-r2 for its re-check.
+- **uac-r2 re-check PASSED** (`09ce996d15..a866dad1be`). Its gate is cleared, and it gave the go for 014b.
+- **MERGED 2026-11-16 13:24Z:** squash `16771d1051`, on the owner's go ("Yes proceed"), with Router and Client lint green. uac-r2 was given the SHA and rebases #2867 (round 2) onto it.
 - **NFR-05 deviation** (one DI registration, requested by uac-r2 Q2.8): stated in the PR; the owner is told in this session's report.
