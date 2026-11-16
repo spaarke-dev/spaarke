@@ -24,7 +24,7 @@
   - **Dev dry run 2026-11-15: 12 invoices.** sdap-jobs exists and has no duplicate detection, so a re-run re-queues, which is harmless.
   - **Run `-Apply` only after uac-r2 deploys c88ed7105a, and on the owner's go HERE.** It needs the "Azure Service Bus Data Sender" role on the namespace.
   - Then report the count and the result to uac-r2.
-  - uac-r2: c88ed7105a deploys together with #2845 (PR #2847) in one swap; it tells us when live. Dead letters filed as #2848 (job platform, owner TBD). Do NOT replay InvoiceIndexing dead letters; the sweep replaces them.
+  - **c88ed7105a LIVE on dev BFF f451e0874d** (master ce6c241964 + spike, ~00:45Z 2026-11-16, read-back OK). Sweep -Apply now waits ONLY on the owner's go here. Dead letters filed as #2848 (job platform, owner TBD). Do NOT replay InvoiceIndexing dead letters; the sweep replaces them.
 - **113b ✅ on work (owner go 2026-11-15):** the Invoice Review page now shows 113's Procedure-change banner (`ProcedureChangeNotice.tsx`). One Sonnet adversarial pass found no F-class defects; its unknown-state point is closed. It ships with task 112, the page's first deploy.
 - **Reminder for 084h-2 (ontology-r1):** the writer caps only `reason` at 2000 characters, not `note`. 084h-2 must enforce or trim the note at the service (design §9), so an over-long note never reaches the create and fails as a retryable CreateFailed.
 
