@@ -322,6 +322,20 @@ export interface IWizardShellProps {
    */
   uiScale?: number;
   /**
+   * Opt-in (modal mode only), forwarded to `SprkModal`: no backdrop and no focus trap, so a host lookup pane opened in
+   * the same document (`Xrm.Utility.lookupObjects` from a PCF) can take focus. Pair with {@link yieldToSidePane}, as
+   * `SendEmailDialog` does. Default `false`: every other host renders and layers as before.
+   * @since ontology task 194
+   */
+  nonBlocking?: boolean;
+  /**
+   * Opt-in (modal mode only), forwarded to `SprkModal`: while `true` the wizard stays mounted but dims, goes inert and
+   * drops just below the host's lookup side pane (`sidePaneLayering.ts`). Set it while a lookup is open; used together
+   * with {@link nonBlocking}. Default `false`.
+   * @since ontology task 194
+   */
+  yieldToSidePane?: boolean;
+  /**
    * Browse navigation ("‹ N of M ›") in the modal header, rendered by `SprkModal`'s own nav group
    * (modal mode only). Put a discard check in `nav.onBeforeNavigate`.
    * @since ontology task 056
