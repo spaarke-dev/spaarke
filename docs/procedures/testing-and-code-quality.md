@@ -49,19 +49,20 @@ This guide explains the complete code quality system in the Spaarke development 
 9. [Quarterly Audit](#quarterly-audit)
 10. [UI Testing (Step 9.7)](#ui-testing-step-97)
 11. [Claude Code Hooks](#claude-code-hooks)
-12. [AI-Assisted PR Reviews](#ai-assisted-pr-reviews)
-13. [Repository Cleanup (Task 090)](#repository-cleanup-task-090)
-14. [Module-Specific Test Guidance](#module-specific-test-guidance)
-15. [Test Selection Matrix](#test-selection-matrix)
-16. [Coverage Targets](#coverage-targets)
-17. [Architecture Test Enforcement](#architecture-test-enforcement)
-18. [BFF Test Suite Repair Lessons (2026-06-01 — r2 codification)](#bff-test-suite-repair-lessons-2026-06-01--r2-codification)
+12. [Agent Code-Navigation Tools](#agent-code-navigation-tools)
+13. [AI-Assisted PR Reviews](#ai-assisted-pr-reviews)
+14. [Repository Cleanup (Task 090)](#repository-cleanup-task-090)
+15. [Module-Specific Test Guidance](#module-specific-test-guidance)
+16. [Test Selection Matrix](#test-selection-matrix)
+17. [Coverage Targets](#coverage-targets)
+18. [Architecture Test Enforcement](#architecture-test-enforcement)
+19. [BFF Test Suite Repair Lessons (2026-06-01 — r2 codification)](#bff-test-suite-repair-lessons-2026-06-01--r2-codification)
     - [Asymmetric-Registration Pre-Commit Check](#asymmetric-registration-pre-commit-check-lesson-1)
     - [Fixture-Config-FIRST Inspection Protocol](#fixture-config-first-inspection-protocol-lesson-2)
     - [Empirical-Reproduction-FIRST Protocol](#empirical-reproduction-first-protocol-lesson-3)
     - [Deterministic Test Data: TestClock + IGuidProvider Pattern](#deterministic-test-data-testclock--iguidprovider-pattern-fr-13)
-19. [Complete Quality Flow](#complete-quality-flow)
-20. [Skill Reference](#skill-reference)
+20. [Complete Quality Flow](#complete-quality-flow)
+21. [Skill Reference](#skill-reference)
 
 ---
 
@@ -826,6 +827,22 @@ Claude Code hooks provide real-time quality feedback during AI-assisted developm
 
 - **PostToolUse (Edit/Write)**: After Claude edits a `.ts`/`.tsx` or `.ps1` file, the hook runs the matching linter (ESLint from the nearest ESLint-config folder with that package's own `eslint`; PSScriptAnalyzer) under a 4-second cap and returns findings to Claude as `additionalContext`. Advisory; never blocks. Type-aware ESLint configs usually exceed the cap and report nothing here; the Stop gate covers them. `.cs` is not linted per edit: no C# formatter finishes in 4 seconds.
 - **Stop**: When Claude is about to end its turn, the gate checks the session's changes (edits vs `HEAD` plus untracked files): it builds each project that owns a changed `.cs` file, runs `tsc --noEmit` for each `tsconfig.json` that owns a changed `.ts`/`.tsx` file, lints changed files (advisory: `dotnet format whitespace --folder` per project, ESLint per config folder), and runs `tests/Spaarke.ArchTests` when C# changed. It **blocks** (exit 2, report on stderr) only on definite code failures: compiler errors, TypeScript errors located in a changed file, failing arch tests, or a new `projects/x-*` folder. Timeouts, file locks, restore errors and missing tools are warnings. It blocks at most once per stop (`stop_hook_active`); a failure that persists after that becomes a warning to the user. The build omits `-warnaserror` because `Directory.Build.props` owns the warning policy (as CI tier1 `compile` does). Run it by hand with `bash scripts/quality/task-quality-gate.sh </dev/null`. This complements, and does not replace, the `task-execute` Step 9.5 quality gates.
+
+---
+
+## Agent Code-Navigation Tools
+
+Agents navigate code with Grep, Glob and Read. No language server or semantic index is configured for agent sessions.
+
+### C# language server (LSP plugin) — evaluated, not adopted (2026-11-16)
+
+The per-session plugin `csharp-lsp@claude-plugins-official`, which runs `csharp-ls`, was trialled A/B against Grep-only on `Sprk.Bff.Api`. The trial used 10 real-session questions (find references, find implementations, receiver type, signature change) with compiler-checked answers, the same Sonnet model in both arms, and the three gates in `projects/reuse-governance-tightening-r1/design.md` §7.6.
+- **Result:** all three gates passed, with no gain. Both arms scored 10/10 and had zero false "no references". With LSP, the agent made 29 tool calls against Grep's 16, cost 1.6× as much and took 6× the wall time.
+- **Per-session load:** about 1.9 GB of memory and a 3-minute cold start while it loads `Spaarke.sln`. Its 60-second request limit times out until the load finishes, and an agent that is not told to retry falls back to Grep.
+- **Decision (owner): do not adopt** — neither project-wide nor as a documented opt-in.
+- **When to evaluate again:** if navigation questions on overloaded or generic names (`ExecuteAsync`, `Validate`, extension methods) become a real source of wrong answers, or the plugin's cold start or request limit changes. Rerunning it takes about an hour. The full record, the question set, the harness and the steps to repeat it are in `projects/reuse-governance-tightening-r1/notes/csharp-lsp-trial.md`.
+
+A **shared** LSP / semantic-index sidecar serving every worktree was rejected separately, on staleness (`projects/reuse-governance-tightening-r1/design.md` §10, item 6).
 
 ---
 
