@@ -278,7 +278,7 @@ answered AND `canCreate` is not false. The status toggle is excluded (no server 
 
 ## D-18 — RequestAccessMemo.For races on a fresh HttpContext.Items (#2851)
 
-**Status.** Open; reported to uac-r2 (owns #2845 / PR #2847) 2026-11-16.
+**Status.** Handed off → `unified-access-control-r2` (accepted 2026-11-16; fixed in #2845 round 2, branch `perf/2845-round2`). 014a keeps its local pre-create.
 
 **Where.** `Infrastructure/ExternalAccess/RequestAccessMemo.cs:38`. The lock on `context.Items` doesn't cover the lazy creation of `Items` itself.
 
