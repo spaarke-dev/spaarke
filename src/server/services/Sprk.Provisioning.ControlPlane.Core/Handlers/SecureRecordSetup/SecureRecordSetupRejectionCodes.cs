@@ -158,6 +158,37 @@ public static class SecureRecordSetupRejectionCodes
     /// </summary>
     public const string InvoiceMoneyLockOtherWriter = "secure_setup.invoice_money_lock_other_writer";
 
+    // ---- Invoice-family links (unified-access-control-r2 #2799; task 270) ----
+
+    /// <summary>
+    /// S27: the shipped lock on a column of <see cref="SecureRecordSetupProcedure.InvoiceFamilyLinkColumns"/> is incomplete —
+    /// the column absent or not secured, or the BFF-managed Readers (read 4) / Writers (4/4/4) grant missing (Resumable: import a
+    /// SpaarkeMaster release that carries the #2799 lock — 1.3.1.0 and earlier do not — or run
+    /// scripts/Set-InvoiceFamilyFieldSecurity.ps1 on the environment).
+    /// </summary>
+    public const string InvoiceFamilyLockIncomplete = "secure_setup.invoice_family_lock_incomplete";
+
+    /// <summary>
+    /// S27: a profile other than "Spaarke BFF-Managed Field Writers" (and System Administrator) may create or update an
+    /// invoice-family link — the Readers profile included (QuarantineRequired).
+    /// </summary>
+    public const string InvoiceFamilyLockOtherWriter = "secure_setup.invoice_family_lock_other_writer";
+
+    // ---- Message-access columns (field-mapping-server-write-path-r1 task 054b; task 270) ----
+
+    /// <summary>
+    /// S28: the shipped lock on a column of <see cref="SecureRecordSetupProcedure.MessageAccessColumns"/> (or on the direct
+    /// recipient, where it exists) is incomplete (Resumable: import SpaarkeMaster 1.3.1.0 or later, or run
+    /// scripts/Set-ThreadFlagFieldSecurity.ps1 on the environment).
+    /// </summary>
+    public const string MessageAccessLockIncomplete = "secure_setup.message_access_lock_incomplete";
+
+    /// <summary>
+    /// S28: a profile other than "Spaarke BFF-Managed Field Writers" (and System Administrator) may create or update a
+    /// message-access column — the Readers profile included (QuarantineRequired).
+    /// </summary>
+    public const string MessageAccessLockOtherWriter = "secure_setup.message_access_lock_other_writer";
+
     /// <summary>
     /// S19 (ISS-020 / #1565): <c>contact.sprk_standinggrant</c> is not secured, or the "Standing Grant Administrators" profile
     /// does not grant read/create/update (4/4/4) on it (Resumable: import SpaarkeMaster, H6).

@@ -17,7 +17,10 @@
 // unit "Spaarke Ontology Writer" (H10), whose default team holds no role and is in no field-security profile, and holds that
 // unit's copy of the role — plus S25 (task 267, #2618): the customer unit's default team holds the customer-unit copy of
 // "Spaarke Basic User", so it can own ordinary records (contacts included — Dataverse requires the owner to hold Read) —
-// plus S26 (task 268; ebilling-r1 task 166, EB-D-200): the shipped lock on the invoice amounts and firm, VERIFIED ONLY.
+// plus S26 (task 268; ebilling-r1 task 166, EB-D-200): the shipped lock on the invoice amounts and firm, VERIFIED ONLY —
+// plus S27 (task 270; unified-access-control-r2 #2799): the shipped lock on the invoice family's core-record lookups and
+// invoice links, and S28 (task 270; field-mapping task 054b): the shipped lock on the message-access columns, both VERIFIED
+// ONLY (S26–S28 share CheckBffManagedColumnLockAsync).
 // Every step READS first and writes only what is missing, so a second run against a configured environment performs no
 // write at all.
 //
@@ -43,7 +46,7 @@
 //
 // WHAT IT NEVER DOES: move a user (H10 moves the ontology writer into its own unit — task 267), remove a team member, a
 // profile member or a team's role, re-parent a business unit, widen or narrow an existing privilege, or create a
-// field-security profile or secure a column. The profiles, both column locks
+// field-security profile or secure a column. The profiles, every column lock (S14, S18, S19, S22, S26–S28)
 // and the deny-list table ship in SpaarkeMaster (H6); this procedure verifies them and adds only the memberships,
 // which are data.
 //
@@ -132,7 +135,7 @@ public sealed class SecureRecordSetupProcedure
     public const string SystemAdministratorProfileName = "System Administrator";
 
     /// <summary>
-    /// S14/S18/S19/S22/S26: the platform's own "System Administrator" field-security profile — a fixed ID in every environment,
+    /// S14/S18/S19/S22/S26–S28: the platform's own "System Administrator" field-security profile — a fixed ID in every environment,
     /// which Dataverse grants every secured column — the only profile besides a lock's writer excused from the other-writer
     /// rule (owner decision F4). Matched by ID, never by name (task 268 review: a look-alike name would be excused; the same ID
     /// as scripts/ebilling/Set-EbillingInvoiceMoneyFieldSecurity.ps1 <c>$SystemAdministratorProfileId</c>).
@@ -203,6 +206,75 @@ public sealed class SecureRecordSetupProcedure
         "SpaarkeMaster release ABOVE 1.3.0.0 that carries task 166 (a new run, H6), or run " +
         "scripts/ebilling/Set-EbillingInvoiceMoneyFieldSecurity.ps1 (apply, then -Verify) on this environment with the " +
         "owner's OK, then resume. Nothing was written.";
+
+    /// <summary>
+    /// S27 (task 270; unified-access-control-r2 #2799): the invoice family's core-record lookups and invoice links, as
+    /// (table, column), that only the BFF application user writes — field-secured, readable by everyone through
+    /// <see cref="ReaderProfileName"/>, settable only through <see cref="WriterProfileName"/>. Exactly
+    /// scripts/common/InvoiceFamilyLockedColumns.psd1 (the ONE list, which InvoiceFamilyFieldLockGuardTests pins to the BFF's
+    /// InvoiceFamilyLockedWrite.LockedColumns); InvoiceFamilyLinkColumnLockListTests pins this list to that file.
+    /// </summary>
+    public static readonly IReadOnlyList<(string Table, string Column)> InvoiceFamilyLinkColumns =
+    [
+        ("sprk_billingevent", "sprk_invoice"),
+        ("sprk_billingevent", "sprk_matter"),
+        ("sprk_billingevent", "sprk_project"),
+        ("sprk_billingevent", "sprk_regardingworkassignment"),
+        ("sprk_externalidentifier", "sprk_regardinginvoice"),
+        ("sprk_externalidentifier", "sprk_regardingmatter"),
+        ("sprk_externalidentifier", "sprk_regardingproject"),
+        ("sprk_externalidentifier", "sprk_regardingworkassignment"),
+        ("sprk_invoice", "sprk_matter"),
+        ("sprk_invoice", "sprk_project"),
+        ("sprk_invoice", "sprk_regardingworkassignment"),
+        ("sprk_invoice", "sprk_supersedesinvoice"),
+        ("sprk_invoiceapproval", "sprk_invoice"),
+        ("sprk_invoiceapproval", "sprk_regardingmatter"),
+        ("sprk_invoiceapproval", "sprk_regardingproject"),
+        ("sprk_invoiceapproval", "sprk_regardingworkassignment"),
+        ("sprk_invoicecorrection", "sprk_invoice"),
+        ("sprk_invoicecorrection", "sprk_regardingmatter"),
+        ("sprk_invoicecorrection", "sprk_regardingproject"),
+        ("sprk_invoicecorrection", "sprk_regardingworkassignment"),
+        ("sprk_invoicesubmission", "sprk_invoice"),
+        ("sprk_invoicesubmission", "sprk_regardingmatter"),
+        ("sprk_invoicesubmission", "sprk_regardingproject"),
+        ("sprk_invoicesubmission", "sprk_regardingworkassignment"),
+    ];
+
+    /// <summary>S27: the remedy an incomplete invoice-family lock names.</summary>
+    internal const string InvoiceFamilyLockRemedy =
+        "SpaarkeMaster 1.3.1.0 and earlier do not carry the #2799 lock (unified-access-control-r2 packages it in a later " +
+        "release): import a SpaarkeMaster release that carries it (a new run, H6), or run scripts/Set-InvoiceFamilyFieldSecurity.ps1 " +
+        "(dry run, then -BffWritesInvoiceFamilyLinksAsApp -Apply, then -Verify) on this environment with the owner's OK, then " +
+        "resume. Nothing was written.";
+
+    /// <summary>
+    /// S28 (task 270; field-mapping-server-write-path-r1 task 054b): the message-access columns that decide who may read a
+    /// message, as (table, column) — field-secured with the BFF-managed Readers/Writers grants in SpaarkeMaster (1.3.1.0 on).
+    /// Exactly the packaged four of scripts/Set-ThreadFlagFieldSecurity.ps1's $Targets; the fifth, <see cref="DirectRecipientColumn"/>,
+    /// is not in the package. MessageAccessColumnLockPackagedTests pins this list to the script and the package.
+    /// </summary>
+    public static readonly IReadOnlyList<(string Table, string Column)> MessageAccessColumns =
+    [
+        ("sprk_communicationthread", "sprk_threadtype"),
+        ("sprk_communicationthread", "sprk_isdefaultthread"),
+        ("sprk_communication", "sprk_sentby"),
+        ("sprk_communication", "sprk_communicationthread"),
+    ];
+
+    /// <summary>
+    /// S28: the fifth message-access column. It exists only where scripts/Set-DirectRecipientSchema.ps1 ran, which provisioning
+    /// does not run; on a stamp without it the Direct-message feature stays off (DirectMessage:* unset — deployment guide
+    /// §7.4). When it exists, its lock must be whole like the other four.
+    /// </summary>
+    public static readonly (string Table, string Column) DirectRecipientColumn = ("sprk_communication", "sprk_directrecipient");
+
+    /// <summary>S28: the remedy an incomplete message-access lock names.</summary>
+    internal const string MessageAccessLockRemedy =
+        "SpaarkeMaster 1.3.1.0 carries the lock on the four packaged columns (field-mapping task 054b): import it or a later " +
+        "release (a new run, H6), or run scripts/Set-ThreadFlagFieldSecurity.ps1 (apply, then -Verify) on this environment with " +
+        "the owner's OK, then resume. Nothing was written.";
 
     /// <summary>
     /// S19/S20 (ISS-020 / #1565): the profile whose membership lets an identity READ the field-secured
@@ -915,38 +987,44 @@ public sealed class SecureRecordSetupProcedure
         // sets these columns. Verify only: nothing here is written or removed.
         foreach (var column in InvoiceMoneyColumns)
         {
-            var columnPermissions = (await dv.ListFieldPermissionsAsync(t, column, ct).ConfigureAwait(false))
-                .Where(p => Same(p.EntityName, InvoiceMoneyTable))
-                .ToArray();
-            var secured = await dv.IsAttributeSecuredAsync(t, InvoiceMoneyTable, column, ct).ConfigureAwait(false);
-            var reader = columnPermissions.FirstOrDefault(p => p.ProfileId == readerProfileId);
-            var writer = columnPermissions.FirstOrDefault(p => p.ProfileId == writerProfileId);
-            if (secured != true
-                || reader is null || reader.CanRead != FieldPermissionAllowed
-                || writer is null || writer.CanRead != FieldPermissionAllowed || writer.CanCreate != FieldPermissionAllowed
-                || writer.CanUpdate != FieldPermissionAllowed)
+            var refusal = await CheckBffManagedColumnLockAsync(dv, t, InvoiceMoneyTable, column, readerProfileId, writerProfileId,
+                InvoiceMoneyLock, ct).ConfigureAwait(false);
+            if (refusal is not null)
             {
-                return Refuse(FailureClass.Resumable, SecureRecordSetupRejectionCodes.InvoiceMoneyLockIncomplete,
-                    $"{InvoiceMoneyTable}.{column}: IsSecured={secured?.ToString() ?? "(no such column)"}, " +
-                    $"'{ReaderProfileName}' read={reader?.CanRead.ToString() ?? "(none)"}, " +
-                    $"'{WriterProfileName}' read/create/update={Rights(writer)} (expected secured, 4, 4/4/4). The package's " +
-                    "lock on the invoice amounts and firm (ebilling task 166) is incomplete: a user could set them. " +
-                    InvoiceMoneyLockRemedy);
+                return Refuse(refusal.Class, refusal.Code, refusal.Diagnostic);
             }
-            var otherMoneyWriters = columnPermissions
-                .Where(p => p.ProfileId != writerProfileId
-                            && !systemAdministratorProfiles.Contains(p.ProfileId)
-                            && (p.CanCreate == FieldPermissionAllowed || p.CanUpdate == FieldPermissionAllowed))
-                .ToArray();
-            if (otherMoneyWriters.Length > 0)
+        }
+
+        // S27 (task 270; unified-access-control-r2 #2799) — the lock on the invoice family's core-record lookups and invoice
+        // links ships in SpaarkeMaster (path A, owner 2026-11-16): verify it is whole and that nobody else may write. A BFF
+        // built from master writes these columns as the application after checking the person; without the lock a user could
+        // re-file a row through a form or the Web API. Verify only.
+        foreach (var (table, column) in InvoiceFamilyLinkColumns)
+        {
+            var refusal = await CheckBffManagedColumnLockAsync(dv, t, table, column, readerProfileId, writerProfileId,
+                InvoiceFamilyLock, ct).ConfigureAwait(false);
+            if (refusal is not null)
             {
-                return Refuse(FailureClass.QuarantineRequired, SecureRecordSetupRejectionCodes.InvoiceMoneyLockOtherWriter,
-                    $"Profiles other than '{WriterProfileName}' may create or update {InvoiceMoneyTable}.{column}: " +
-                    $"{string.Join(", ", otherMoneyWriters.Take(NamedPrincipalLimit).Select(p => $"{p.ProfileId} read/create/update={Rights(p)}"))}" +
-                    (otherMoneyWriters.Any(p => p.ProfileId == readerProfileId)
-                        ? $" — '{ReaderProfileName}' among them, so every user (every default team is its member)" : string.Empty) +
-                    ". Only the BFF sets an invoice's amounts and firm (EB-D-200); who else may is an owner decision. Nothing " +
-                    "is removed here. Nothing was written.");
+                return Refuse(refusal.Class, refusal.Code, refusal.Diagnostic);
+            }
+        }
+
+        // S28 (task 270; field-mapping task 054b) — the message-access lock: the four packaged columns always, the direct
+        // recipient only where it exists (provisioning does not create it; the Direct-message feature then stays off).
+        foreach (var (table, column) in MessageAccessColumns.Append(DirectRecipientColumn))
+        {
+            if ((table, column) == DirectRecipientColumn
+                && await dv.IsAttributeSecuredAsync(t, table, column, ct).ConfigureAwait(false) is null)
+            {
+                notes.Add($"{table}.{column}: not in this environment (scripts/Set-DirectRecipientSchema.ps1 not run), so the " +
+                          "Direct-message feature stays off: leave DirectMessage:BusinessUnitName and DirectMessage:OwnerTeamName unset.");
+                continue;
+            }
+            var refusal = await CheckBffManagedColumnLockAsync(dv, t, table, column, readerProfileId, writerProfileId,
+                MessageAccessLock, ct).ConfigureAwait(false);
+            if (refusal is not null)
+            {
+                return Refuse(refusal.Class, refusal.Code, refusal.Diagnostic);
             }
         }
 
@@ -1794,6 +1872,88 @@ public sealed class SecureRecordSetupProcedure
     /// <summary>A field permission's read/create/update, or "(none)" when there is no row.</summary>
     private static string Rights(SecureSetupFieldPermission? p)
         => p is null ? "(none)" : $"{p.CanRead}/{p.CanCreate}/{p.CanUpdate}";
+
+    /// <summary>
+    /// What one shipped BFF-managed column lock (S26, S27, S28) refuses with, and the words its messages use.
+    /// <paramref name="LockDescription"/> names the lock ("the invoice amounts and firm (ebilling task 166)");
+    /// <paramref name="Harm"/> says what an incomplete lock lets a user do; <paramref name="OwnerRule"/> is the sentence a
+    /// stray writer breaks; <paramref name="Remedy"/> ends an incomplete-lock message.
+    /// </summary>
+    private sealed record BffManagedColumnLock(
+        string IncompleteCode, string OtherWriterCode, string LockDescription, string Harm, string OwnerRule, string Remedy);
+
+    /// <summary>A refusal a lock check returns; the caller turns it into the procedure's outcome.</summary>
+    private sealed record LockRefusal(FailureClass Class, string Code, string Diagnostic);
+
+    private static readonly BffManagedColumnLock InvoiceMoneyLock = new(
+        SecureRecordSetupRejectionCodes.InvoiceMoneyLockIncomplete,
+        SecureRecordSetupRejectionCodes.InvoiceMoneyLockOtherWriter,
+        "the invoice amounts and firm (ebilling task 166)",
+        "a user could set them",
+        "Only the BFF sets an invoice's amounts and firm (EB-D-200); who else may is an owner decision.",
+        InvoiceMoneyLockRemedy);
+
+    private static readonly BffManagedColumnLock InvoiceFamilyLock = new(
+        SecureRecordSetupRejectionCodes.InvoiceFamilyLockIncomplete,
+        SecureRecordSetupRejectionCodes.InvoiceFamilyLockOtherWriter,
+        "the invoice family's core-record lookups and invoice links (#2799)",
+        "a user could re-file an invoice-family row past the BFF's checks",
+        "Only the BFF writes what an invoice-family row is filed under and which invoice it belongs to (#2799); who else may " +
+        "is an owner decision.",
+        InvoiceFamilyLockRemedy);
+
+    private static readonly BffManagedColumnLock MessageAccessLock = new(
+        SecureRecordSetupRejectionCodes.MessageAccessLockIncomplete,
+        SecureRecordSetupRejectionCodes.MessageAccessLockOtherWriter,
+        "the message-access columns (field-mapping task 054b)",
+        "a user could change who may read a message",
+        "Only the BFF writes who may read a message (field-mapping task 054b); who else may is an owner decision.",
+        MessageAccessLockRemedy);
+
+    /// <summary>
+    /// S26/S27/S28: one shipped BFF-managed column lock on <paramref name="table"/>.<paramref name="column"/> is whole — the
+    /// column exists and is secured, the Readers profile reads it (4), the Writers profile reads, creates and updates it
+    /// (4/4/4) — and no profile but the Writers and the platform System Administrator profile (by its fixed ID, never by name)
+    /// may create or update it. Grants on a column of the same name on ANOTHER table are ignored. Reads only.
+    /// </summary>
+    /// <returns>Null when the lock is whole; otherwise Resumable (incomplete) or QuarantineRequired (another writer).</returns>
+    private static async Task<LockRefusal?> CheckBffManagedColumnLockAsync(
+        ISecureRecordSetupDataverse dv, SecureRecordSetupTarget t, string table, string column,
+        Guid readerProfileId, Guid writerProfileId, BffManagedColumnLock lockRule, CancellationToken ct)
+    {
+        var columnPermissions = (await dv.ListFieldPermissionsAsync(t, column, ct).ConfigureAwait(false))
+            .Where(p => Same(p.EntityName, table))
+            .ToArray();
+        var secured = await dv.IsAttributeSecuredAsync(t, table, column, ct).ConfigureAwait(false);
+        var reader = columnPermissions.FirstOrDefault(p => p.ProfileId == readerProfileId);
+        var writer = columnPermissions.FirstOrDefault(p => p.ProfileId == writerProfileId);
+        if (secured != true
+            || reader is null || reader.CanRead != FieldPermissionAllowed
+            || writer is null || writer.CanRead != FieldPermissionAllowed || writer.CanCreate != FieldPermissionAllowed
+            || writer.CanUpdate != FieldPermissionAllowed)
+        {
+            return new LockRefusal(FailureClass.Resumable, lockRule.IncompleteCode,
+                $"{table}.{column}: IsSecured={secured?.ToString() ?? "(no such column)"}, " +
+                $"'{ReaderProfileName}' read={reader?.CanRead.ToString() ?? "(none)"}, " +
+                $"'{WriterProfileName}' read/create/update={Rights(writer)} (expected secured, 4, 4/4/4). The package's " +
+                $"lock on {lockRule.LockDescription} is incomplete: {lockRule.Harm}. {lockRule.Remedy}");
+        }
+        var otherWriters = columnPermissions
+            .Where(p => p.ProfileId != writerProfileId
+                        && p.ProfileId != SystemAdministratorFieldSecurityProfileId
+                        && (p.CanCreate == FieldPermissionAllowed || p.CanUpdate == FieldPermissionAllowed))
+            .ToArray();
+        if (otherWriters.Length > 0)
+        {
+            return new LockRefusal(FailureClass.QuarantineRequired, lockRule.OtherWriterCode,
+                $"Profiles other than '{WriterProfileName}' may create or update {table}.{column}: " +
+                $"{string.Join(", ", otherWriters.Take(NamedPrincipalLimit).Select(p => $"{p.ProfileId} read/create/update={Rights(p)}"))}" +
+                (otherWriters.Any(p => p.ProfileId == readerProfileId)
+                    ? $" — '{ReaderProfileName}' among them, so every user (every default team is its member)" : string.Empty) +
+                $". {lockRule.OwnerRule} Nothing is removed here. Nothing was written.");
+        }
+        return null;
+    }
 
     /// <summary>
     /// S24: what the ontology writer would hold beyond its own role and profiles - roles inherited through a team (any team

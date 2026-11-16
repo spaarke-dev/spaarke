@@ -718,6 +718,55 @@ public sealed class SecureRecordSetupProcedureTests
                         .Add(new SecureSetupFieldPermission(dv.AddProfile("Billing Admins"), "sprk_invoice", 4, 4, 0)),
                 SecureRecordSetupRejectionCodes.InvoiceMoneyLockOtherWriter, FailureClass.QuarantineRequired },
 
+            // ---- S27: the invoice-family links (task 270; unified-access-control-r2 #2799) ----
+            { "sprk_invoice.sprk_matter not secured (SpaarkeMaster 1.3.1.0)", dv =>
+                    dv.SecuredColumns[FakeSecureRecordSetupDataverse.ColumnKey("sprk_invoice", "sprk_matter")] = false,
+                SecureRecordSetupRejectionCodes.InvoiceFamilyLockIncomplete, FailureClass.Resumable },
+            { "sprk_externalidentifier.sprk_regardinginvoice absent", dv =>
+                    dv.SecuredColumns.Remove(FakeSecureRecordSetupDataverse.ColumnKey("sprk_externalidentifier", "sprk_regardinginvoice")),
+                SecureRecordSetupRejectionCodes.InvoiceFamilyLockIncomplete, FailureClass.Resumable },
+            { "Readers cannot read sprk_invoicesubmission.sprk_regardingworkassignment", dv =>
+                    dv.RemoveGrant("sprk_invoicesubmission", "sprk_regardingworkassignment", dv.ReaderProfileId),
+                SecureRecordSetupRejectionCodes.InvoiceFamilyLockIncomplete, FailureClass.Resumable },
+            { "Writers cannot update sprk_billingevent.sprk_invoice (4/4/0)", dv =>
+                    dv.SetGrant("sprk_billingevent", "sprk_invoice", dv.WriterProfileId, 4, 4, 0),
+                SecureRecordSetupRejectionCodes.InvoiceFamilyLockIncomplete, FailureClass.Resumable },
+            { "Writers grant sprk_regardingmatter on the other family tables but not sprk_invoiceapproval", dv =>
+                    dv.RemoveGrant("sprk_invoiceapproval", "sprk_regardingmatter", dv.WriterProfileId),
+                SecureRecordSetupRejectionCodes.InvoiceFamilyLockIncomplete, FailureClass.Resumable },
+            { "the Readers profile may update sprk_invoicecorrection.sprk_invoice (4/0/4)", dv =>
+                    dv.SetGrant("sprk_invoicecorrection", "sprk_invoice", dv.ReaderProfileId, 4, 0, 4),
+                SecureRecordSetupRejectionCodes.InvoiceFamilyLockOtherWriter, FailureClass.QuarantineRequired },
+            { "a look-alike 'System Administrator' profile (another id) may update sprk_invoice.sprk_project", dv =>
+                    dv.ColumnPermissions("sprk_project").Add(new SecureSetupFieldPermission(
+                        dv.AddProfile(SecureRecordSetupProcedure.SystemAdministratorProfileName), "sprk_invoice", 4, 0, 4)),
+                SecureRecordSetupRejectionCodes.InvoiceFamilyLockOtherWriter, FailureClass.QuarantineRequired },
+
+            // ---- S28: the message-access columns (task 270; field-mapping task 054b) ----
+            { "sprk_communication.sprk_sentby not secured", dv =>
+                    dv.SecuredColumns[FakeSecureRecordSetupDataverse.ColumnKey("sprk_communication", "sprk_sentby")] = false,
+                SecureRecordSetupRejectionCodes.MessageAccessLockIncomplete, FailureClass.Resumable },
+            { "Writers cannot create sprk_communicationthread.sprk_threadtype (4/0/4)", dv =>
+                    dv.SetGrant("sprk_communicationthread", "sprk_threadtype", dv.WriterProfileId, 4, 0, 4),
+                SecureRecordSetupRejectionCodes.MessageAccessLockIncomplete, FailureClass.Resumable },
+            { "the direct recipient exists but is not secured", dv =>
+                {
+                    dv.AddDirectRecipient();
+                    dv.SecuredColumns[FakeSecureRecordSetupDataverse.ColumnKey("sprk_communication", "sprk_directrecipient")] = false;
+                },
+                SecureRecordSetupRejectionCodes.MessageAccessLockIncomplete, FailureClass.Resumable },
+            { "another profile may update sprk_communication.sprk_communicationthread", dv =>
+                    dv.ColumnPermissions("sprk_communicationthread").Add(new SecureSetupFieldPermission(
+                        dv.AddProfile("Mail Admins"), "sprk_communication", 4, 0, 4)),
+                SecureRecordSetupRejectionCodes.MessageAccessLockOtherWriter, FailureClass.QuarantineRequired },
+            { "another profile may create the direct recipient", dv =>
+                {
+                    dv.AddDirectRecipient();
+                    dv.ColumnPermissions("sprk_directrecipient").Add(new SecureSetupFieldPermission(
+                        dv.AddProfile("Mail Admins"), "sprk_communication", 4, 4, 0));
+                },
+                SecureRecordSetupRejectionCodes.MessageAccessLockOtherWriter, FailureClass.QuarantineRequired },
+
             // ---- S19–S21: the standing-grant environment (ISS-020 / #1565) ----
             { "standing-grant profile missing", dv => dv.Profiles.Remove(SecureRecordSetupProcedure.StandingGrantProfileName),
                 SecureRecordSetupRejectionCodes.FieldProfileUnresolved, FailureClass.Resumable },
