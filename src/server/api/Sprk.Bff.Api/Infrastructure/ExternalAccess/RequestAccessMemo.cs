@@ -41,6 +41,16 @@ internal sealed class RequestAccessMemo
     /// The memo of the request <paramref name="context"/> belongs to, created on first use; <c>null</c> when there is no
     /// request (no memo: every read is live).
     /// </summary>
+    /// <remarks>
+    /// <b>Must first be called single-threaded, before any fan-out (#2851).</b> The <c>HttpContext.Items</c> getter is itself
+    /// lazy (the items feature and its dictionary are created on first touch, unsynchronized), so two concurrent FIRST calls
+    /// on a request where nothing has touched <c>Items</c> yet can each get their own dictionary: a lost memo, or a corrupted
+    /// feature collection that turns a read into "unknown" and the request into a 503. The <c>lock</c> below cannot help,
+    /// because each thread may lock a different <c>Items</c>. So every code path that starts concurrent work able to reach
+    /// this method calls it once BEFORE starting that work: the caller-principal strategies before the three compositions,
+    /// each <see cref="AccessibleRecordSetService"/> entry before its first await, and the deny-list reader before its
+    /// chunk fan-out. After that first call <c>Items</c> exists, and concurrent calls only read it.
+    /// </remarks>
     internal static RequestAccessMemo? For(HttpContext? context)
     {
         if (context is null)
@@ -49,8 +59,8 @@ internal sealed class RequestAccessMemo
         }
 
         // Items is a plain dictionary. Items access from the concurrent compositions is safe because the only Items writers
-        // reachable while they run (RequestAccessMemo.For, CallerWhoAmIMemo) lock context.Items; other filters write Items
-        // outside the compositions. Any new Items writer reachable from a composition must lock context.Items.
+        // reachable while they run (RequestAccessMemo.For, CallerWhoAmIMemo) lock it; other filters write Items outside the
+        // compositions. Any new Items writer reachable from a composition must lock it. Safe only once Items exists (above).
         lock (context.Items)
         {
             if (context.Items.TryGetValue(HttpContextItemsKey, out var existing) && existing is RequestAccessMemo memo)

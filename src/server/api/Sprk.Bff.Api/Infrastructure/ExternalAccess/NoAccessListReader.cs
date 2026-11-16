@@ -576,6 +576,9 @@ public class NoAccessListReader : INoAccessListReader
             return answers;
         }
 
+        // #2851: the request's memo exists before the queries fan out (RequestAccessMemo.For must first run single-threaded).
+        RequestAccessMemo.For(_httpContextAccessor?.HttpContext);
+
         using var gate = new SemaphoreSlim(MaxConcurrentChunkQueries, MaxConcurrentChunkQueries);
         var tasks = queries.Select(async (query, index) =>
         {

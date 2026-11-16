@@ -2053,6 +2053,7 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
             throw new ArgumentException("entityType must not be null/empty/whitespace.", nameof(entityType));
         }
 
+        PrepareRequestMemo(); // #2851: before the composition's concurrent reads
         return principal.Kind switch
         {
             WorkforcePrincipalKind.SystemUser => await ComposeForSystemUserAsync(principal, entityType, ct)
@@ -2080,6 +2081,7 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
             throw new ArgumentException("entityType must not be null/empty/whitespace.", nameof(entityType));
         }
 
+        PrepareRequestMemo(); // #2851: before the composition's concurrent reads
         return ComposeContactPlaneAsync(contactId, entityType, includeDerivedMemberTerms: false, ct);
     }
 
@@ -2156,6 +2158,7 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
 
         try
         {
+            PrepareRequestMemo(); // #2851: before the veto's concurrent reads
             // The contact's OWN memberships, read once by the same reader the composition uses (statecode-only wall set,
             // owner D-2 part 2 / D-10). None when there is no contact — not a fault. A fault is ActiveOrgMemberships.Failed.
             var contactOrgs = await ReadActiveOrgMembershipsAsync(granteeContactId, ct).ConfigureAwait(false);
@@ -2791,6 +2794,16 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
     /// every read is live as before. Never across requests; a fault is never remembered; a grant write forgets it.
     /// </summary>
     private RequestAccessMemo? RequestMemo => RequestAccessMemo.For(_httpContextAccessor?.HttpContext);
+
+    /// <summary>
+    /// #2851: creates this request's memo now, while the caller is still single-threaded. Every public entry calls it before
+    /// its first await, because what follows starts concurrent reads that reach <see cref="RequestAccessMemo.For"/>, and the
+    /// first touch of <c>HttpContext.Items</c> must not happen on two threads at once. The caller-principal strategies also
+    /// create it before their three compositions; a caller that starts compositions itself (the Assign Task recipient gate)
+    /// is covered because each composition runs synchronously up to its first await, so the first one creates the memo
+    /// before the next one is started. A no-op outside a request.
+    /// </summary>
+    private void PrepareRequestMemo() => _ = RequestMemo;
 
     /// <summary>
     /// #2845 round 2: the root records' own flags, per id once per request (<see cref="RequestAccessMemo.GetOrReadManyAsync{T}"/>):
