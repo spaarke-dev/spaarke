@@ -2037,3 +2037,23 @@ A BFF deploy can ship code that writes index fields the live index doesn't have.
 **Related**: ISS-022 / #2844; task 153.
 
 ---
+
+### ISS-024 — Dev BFF selects `sprk_policyversion.sprk_rejectionreason`, which was never created on dev
+
+| Field | Value |
+|---|---|
+| **Status** | Open: fix needs the owner's go (dev apply of the 077 script) |
+| **Urgency** | now |
+| **Filed** | 2026-11-16 |
+| **Source** | uac-r2's review of 130e-1 (the guard's pending entry said "Deployed"); confirmed by a read-only metadata GET (404) and the script's -WhatIf (would create 1) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2858 |
+
+**Description**: task 077 (2026-10-18) added the column to `RuleSetService.VersionColumns`, but `Deploy-EbillingRuleRejectionReasonSchema.ps1` was never applied to dev (077 notes :91). The dev BFF (master ce6c241964) selects it, so every `VersionColumns` read (Rule Review, accept/reject, publish, copy-forward, the Procedure-version publish plan and redraft) fails on dev. This is the #2844 class.
+
+**Entry-points**: `RuleSetService.cs` (`VersionColumns`); `scripts/ebilling/Deploy-EbillingRuleRejectionReasonSchema.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com -WhatIf`.
+
+**Suggested fix**: apply the script on dev with the owner's go, then 079 syncs SpaarkeMaster. `PolicyVersionColumnsGuardTests` (130e-1) keeps it on the pending list until then.
+
+**Estimated effort**: minutes. **Blockers**: owner go. **Related**: ISS-022 / #2844, ISS-023 / #2849, task 130e-1.
+
+---
