@@ -4,7 +4,7 @@
     <title>Applying a Dataverse email template fills Subject and body with finished text (no XSL, no CDATA debris); Email documents Summary shows the summary once, not raw JSON</title>
     <phase>12 Create-wizard lookups and composer (185 dev check fixes)</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>in-progress</status>
     <rigor>FULL</rigor>
     <rigor-reason>Tags include bff-api; modifies .cs and .tsx code.</rigor-reason>
     <model-tier>sonnet</model-tier>

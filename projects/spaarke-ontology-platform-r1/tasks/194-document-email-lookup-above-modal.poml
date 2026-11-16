@@ -4,7 +4,7 @@
     <title>Email documents (Semantic Search PCF and Document Relationship Viewer): the To/Cc/Bcc side-pane lookup opens above the wizard, not behind it</title>
     <phase>12 Create-wizard lookups and composer (185 dev check fixes)</phase>
     <gate>startable</gate>
-    <status>in-progress</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies shared client code (.ts/.tsx), a PCF control and a code page; tags include pcf.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -99,6 +99,7 @@
   <tools>
     <tool name="npm">jest, tsc and ESLint in src/client/shared/Spaarke.UI.Components; PCF `npm run build:prod` (build ../Spaarke.SdapClient then Spaarke.UI.Components first in a fresh worktree; do not run PCF builds in parallel with the shared-lib build)</tool>
   </tools>
+  <completion>Done 2026-11-16: PR #2856 merged to master (e476e9b61b). Independent adversarial review (Opus) found 2 F1 (stacked-preview backdrop close; RelatedDocumentCount form path), both fixed and re-checked. SemanticSearchControl 1.1.87, RelatedDocumentCount 1.21.7; not deployed (owner go). Known limits and the non-blocking behaviour change in notes/task-194-notes.md. rework: fix-round-2 task 194</completion>
   <execution>
     <protocol>Run through task-execute. Fresh worktree from origin/master; PR to master. Starts after 195 merges or before it, never in parallel with it.</protocol>
   </execution>

@@ -1,6 +1,6 @@
 # Task 194 notes: Email documents lookup above the modal (owner 185 C1/C2)
 
-PR [#2856](https://github.com/spaarke-dev/spaarke/pull/2856), head `120856474b`, branch `fix/ontology-194-document-email-lookup-layer` (implementer agent, Opus). Main-session sign-off 2026-11-16 after the independent adversarial review (Opus) and a scoped re-check of the fix diff; auto-merge (squash) on green CI. Not deployed.
+PR [#2856](https://github.com/spaarke-dev/spaarke/pull/2856), head `120856474b`, branch `fix/ontology-194-document-email-lookup-layer` (implementer agent, Opus). Main-session sign-off 2026-11-16 after the independent adversarial review (Opus) and a scoped re-check of the fix diff; merged to master `e476e9b61b`. Not deployed.
 
 - **Mechanism:** the existing SprkModal `nonBlocking` + `yieldToSidePane` (`sidePaneLayering.ts`); no second layering mechanism.
 - **WizardShell:** opt-in modal-only `nonBlocking`/`yieldToSidePane` passthrough.
