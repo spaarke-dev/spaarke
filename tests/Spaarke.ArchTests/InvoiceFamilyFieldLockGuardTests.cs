@@ -147,15 +147,9 @@ public class InvoiceFamilyFieldLockGuardTests
     /// The ratchet baseline: committed bundles that still write a locked column on a family table, with their hit count. A
     /// new violation (an unlisted file, or more hits) fails; an entry that no longer violates (fewer hits) fails as stale.
     /// </summary>
-    private static readonly IReadOnlyDictionary<string, (int Hits, string Reason)> Baseline = new Dictionary<string, (int, string)>(StringComparer.Ordinal)
-    {
-        ["src/dataverse/solutions/SpaarkeMaster/WebResources/sprk_creatematterwizard"] =
-            (1, "stale committed bundle; removed when rebuilt from 045g source (the Create Matter wizard's invoice association, updateRecord sprk_invoice sprk_Matter@odata.bind)"),
-        ["src/dataverse/solutions/SpaarkeMaster/WebResources/sprk_spaarkeai"] =
-            (2, "stale committed bundle; removed when rebuilt from 045g source (the embedded Create Matter wizard's invoice association and the Create Invoice wizard's direct createRecord sprk_invoice)"),
-        ["src/dataverse/solutions/SpaarkeMaster/WebResources/sprk_createinvoicewizard"] =
-            (1, "stale committed bundle; removed when rebuilt from 045g source (the Create Invoice wizard's direct createRecord sprk_invoice, payload built at run time)"),
-    };
+    /// <remarks>Empty since #2859: the three stale bundles (sprk_creatematterwizard, sprk_spaarkeai, sprk_createinvoicewizard) were
+    /// rebuilt from current source into SpaarkeMaster 1.3.2.0, which also ships the lock.</remarks>
+    private static readonly IReadOnlyDictionary<string, (int Hits, string Reason)> Baseline = new Dictionary<string, (int, string)>(StringComparer.Ordinal);
 
     /// <summary>The committed web resources (extensionless JavaScript / HTML bundles, not their .data.xml or images).</summary>
     private static IEnumerable<string> CommittedWebResources()
