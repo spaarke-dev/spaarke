@@ -1970,7 +1970,7 @@ K1 (ontology): a D-96 re-file across core records withholds line Duplicates perm
 
 | Field | Value |
 |---|---|
-| **Status** | In Progress: fix merged (#2846, c88ed7105a), live on dev BFF f451e0874d, sweep ran 2026-11-16 (12 queued, 0 failed). Closes when uac-r2's gate shows the 12 jobs ran clean |
+| **Status** | In Progress: fix merged (#2846, c88ed7105a), live on dev BFF f451e0874d, sweep ran 2026-11-16 (12 queued, 0 failed). All 12 jobs then failed on a second fault: the live dev index lacks task 152's fields (see "Second fault"). Closes when the jobs run clean |
 | **Urgency** | now |
 | **Filed** | 2026-11-15, by uac-r2 (its 30-minute gate on dev BFF aa7d6345f3) |
 | **Source** | `InvoiceIndexingJobHandler` faulted on dev at 18:51:58Z |
@@ -1995,6 +1995,13 @@ Task 094 (merged 2026-10-27) removed `sprk_document` from the invoice, but `Invo
 Re-index every `sprk_invoice` with modifiedon ≥ 2026-10-27 through the normal indexing job: `scripts/ebilling/Invoke-EbillingInvoiceReindexSweep.ps1 -Apply` (12 invoices on dev, dry run 2026-11-15). This writes to the dev search index, so it needs the owner's go here. Report the count and the result to uac-r2.
 
 Done 2026-11-16 on the owner's go. The first `-Apply` was refused 401 with nothing sent, because the account had no Service Bus data role. The owner granted "Azure Service Bus Data Sender" on the dev namespace, and the retry queued 12 with 0 failed (correlation id `ebilling-iss022-sweep-20261116T005512Z`). uac-r2 was told before and after.
+
+**Second fault (found 2026-11-16 by uac-r2's gate)**
+
+With `sprk_document` gone, all 12 sweep jobs failed with a 400 from AI Search: `coreRecordType` is not on the index. The live dev `spaarke-invoices-index` predates task 152, which added 14 fields, all additive. `Deploy-AllIndexes.ps1 -Environment dev -Indexes invoices-index -VerifyOnly` reports 7 required fields missing. The checked-in `infrastructure/ai-search/spaarke-invoices-index.json` matches `InvoiceIndexDocument` (31 fields each), which 152's document-vs-JSON test already enforces. The index deploy was task 153's step, but 152's BFF code reached dev through master before it. The first fault hid this one, so invoice indexing on dev has not worked since 152 reached dev.
+
+- Fix (needs the owner's go here; uac-r2 notified before and after): run `Deploy-AllIndexes.ps1 -Environment dev -Indexes invoices-index` (an in-place PUT, no recreate), then `-VerifyOnly`, then re-run the sweep.
+- Guard for live vs code: no offline test can see the live index, so the mechanical check is `-VerifyOnly` in the post-deploy gate. That is proposed to uac-r2.
 
 **Known limits**
 
