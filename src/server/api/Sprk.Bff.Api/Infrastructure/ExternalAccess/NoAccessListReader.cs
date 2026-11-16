@@ -488,31 +488,29 @@ public class NoAccessListReader : INoAccessListReader
             // Loop B — per-child revocation: chunk the DISTINCT candidate record ids themselves.
             var candidateRecordIds = candidates.Select(c => c.RecordId).Distinct().ToList();
 
+            // #2845 round 2: every (subject chunk × object chunk) query is independent, so they are sent CONCURRENTLY —
+            // the same queries, in the same order, at most MaxConcurrentChunkQueries in flight — and their rows are
+            // processed in that order once all have answered. One unreadable or thrown query still fails the WHOLE
+            // answer closed: the matches gathered from the others are not all the denials.
+            var queries = new List<(string Subject, string Object)>();
             foreach (var subjectFilter in subjectFilters)
             {
-                foreach (var chunk in referencedOrgIds.Chunk(ObjectIdChunkSize))
-                {
-                    var rows = await QueryChunkOncePerRequestAsync(subjectFilter, BuildOrganizationObjectFilter(chunk), ct).ConfigureAwait(false);
-                    if (rows is null)
-                    {
-                        // QueryChunkAsync already logged the distinct fail-closed signal. One unreadable chunk fails
-                        // the WHOLE answer: the matches gathered so far are not all the denials.
-                        return FailClosed(candidates);
-                    }
+                queries.AddRange(referencedOrgIds.Chunk(ObjectIdChunkSize)
+                    .Select(chunk => (subjectFilter, BuildOrganizationObjectFilter(chunk))));
+                queries.AddRange(candidateRecordIds.Chunk(ObjectIdChunkSize)
+                    .Select(chunk => (subjectFilter, BuildRecordObjectFilter(chunk))));
+            }
 
-                    ProcessRows(rows, candidates, denied, kinds);
+            var answers = await QueryAllAsync(queries, ct).ConfigureAwait(false);
+            foreach (var rows in answers)
+            {
+                if (rows is null)
+                {
+                    // QueryChunkAsync already logged the distinct fail-closed signal.
+                    return FailClosed(candidates);
                 }
 
-                foreach (var chunk in candidateRecordIds.Chunk(ObjectIdChunkSize))
-                {
-                    var rows = await QueryChunkOncePerRequestAsync(subjectFilter, BuildRecordObjectFilter(chunk), ct).ConfigureAwait(false);
-                    if (rows is null)
-                    {
-                        return FailClosed(candidates);
-                    }
-
-                    ProcessRows(rows, candidates, denied, kinds);
-                }
+                ProcessRows(rows, candidates, denied, kinds);
             }
         }
         catch (OperationCanceledException)
@@ -553,6 +551,47 @@ public class NoAccessListReader : INoAccessListReader
                 token => QueryChunkAsync(subjectFilter, objectFilter, token),
                 rows => rows is not null,
                 ct);
+    }
+
+    /// <summary>
+    /// #2845 round 2: most deny-list queries ONE evaluation keeps in flight. The queries share the BFF's app identity with
+    /// every other request, so the fan-out is bounded (Dataverse's service protection counts concurrent requests per
+    /// identity); a typical composition sends fewer than this many, so it waits one round trip instead of one per chunk.
+    /// </summary>
+    internal const int MaxConcurrentChunkQueries = 6;
+
+    /// <summary>
+    /// #2845 round 2: the answers of <paramref name="queries"/>, in their order, at most
+    /// <see cref="MaxConcurrentChunkQueries"/> in flight (each asked once per request). A thrown query propagates (the
+    /// caller fails closed) once every started query has finished, so no read is left unobserved.
+    /// </summary>
+    private async Task<List<NoAccessEntryRow>?[]> QueryAllAsync(
+        IReadOnlyList<(string Subject, string Object)> queries, CancellationToken ct)
+    {
+        var answers = new List<NoAccessEntryRow>?[queries.Count];
+        if (queries.Count == 1)
+        {
+            // The common single-query case keeps its synchronous start (the evaluation joins the memo before it returns).
+            answers[0] = await QueryChunkOncePerRequestAsync(queries[0].Subject, queries[0].Object, ct).ConfigureAwait(false);
+            return answers;
+        }
+
+        using var gate = new SemaphoreSlim(MaxConcurrentChunkQueries, MaxConcurrentChunkQueries);
+        var tasks = queries.Select(async (query, index) =>
+        {
+            await gate.WaitAsync(ct).ConfigureAwait(false);
+            try
+            {
+                answers[index] = await QueryChunkOncePerRequestAsync(query.Subject, query.Object, ct).ConfigureAwait(false);
+            }
+            finally
+            {
+                gate.Release();
+            }
+        }).ToList();
+
+        await Task.WhenAll(tasks).ConfigureAwait(false);
+        return answers;
     }
 
     /// <summary>Every id in <paramref name="candidates"/>, denied, with no provenance (NFR-01).</summary>
