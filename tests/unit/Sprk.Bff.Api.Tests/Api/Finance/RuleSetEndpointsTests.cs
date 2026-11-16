@@ -39,7 +39,7 @@ namespace Sprk.Bff.Api.Tests.Api.Finance;
 /// is not a billing admin (including an Ontology administrator who holds every policy privilege), the stable disabled code with the flag
 /// off, and the HTTP shape of each outcome. The service is substituted at its own seam (its behaviour is <see cref="Services.Finance.RuleSetServiceTests"/>).
 /// </summary>
-public sealed class RuleSetEndpointsTests
+public sealed partial class RuleSetEndpointsTests
 {
     private const string Base = "/api/finance/rulesets";
     private static readonly Guid SetId = Guid.NewGuid();

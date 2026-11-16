@@ -10,9 +10,12 @@ using Sprk.Bff.Api.Services.Finance.Procedures;
 namespace Sprk.Bff.Api.Api.Finance;
 
 /// <summary>The edit of a rule's working version. Every member is optional; a rule body is a JSON object or a JSON string.</summary>
+/// <param name="FirmDescription">Task 130e-1 (DEF-060): the firm description; absent or null leaves it, a blank text clears it. A draft only
+/// (409 <c>ruleset.firm_description_frozen</c> on a published version); refused 422 <c>ruleset.invalid</c> with field <c>firmDescription</c> and
+/// a stable reason when it fails the firm description rules.</param>
 public sealed record RuleEditBody(
     string? RuleType, JsonElement? RuleBody, string? MessageTemplate, string? ShortHeadline, string? Consequence,
-    string? ClauseReference, string? ClauseLocation);
+    string? ClauseReference, string? ClauseLocation, string? FirmDescription = null);
 
 /// <summary>
 /// Accept or reject a rule. <see cref="RowVersion"/> is the token the Rule Review page was shown for the rule (<c>rowVersion</c> on the
@@ -317,7 +320,7 @@ public static class RuleSetEndpoints
 
         var edit = new ProposalEdit(
             body.RuleType, ruleBody, body.MessageTemplate, body.ShortHeadline, body.Consequence,
-            body.ClauseReference, body.ClauseLocation, CallerOid(http));
+            body.ClauseReference, body.ClauseLocation, CallerOid(http), body.FirmDescription);
         return Map(await service.EditAsync(ruleSetId, policyId, edit, ct), http);
     }
 
@@ -540,16 +543,16 @@ public static class RuleSetEndpoints
         outcome.Kind switch
         {
             RuleSetOutcomeKind.Done => Results.Ok(outcome.Value),
-            RuleSetOutcomeKind.Invalid => InvalidProblem(outcome.ErrorCode!, outcome.Errors),
+            RuleSetOutcomeKind.Invalid => InvalidProblem(outcome.ErrorCode!, outcome.Errors, outcome.StatusCode),
             RuleSetOutcomeKind.OwnerRefused => ProblemDetailsHelper.RecordOwnerRefused(outcome.OwnerRefusal!, "rule set", http.TraceIdentifier),
             _ => Results.Problem(
                 statusCode: outcome.StatusCode, detail: outcome.Detail,
                 extensions: new Dictionary<string, object?> { ["errorCode"] = outcome.ErrorCode }),
         };
 
-    private static IResult InvalidProblem(string errorCode, IReadOnlyList<RuleSetError> errors) =>
+    private static IResult InvalidProblem(string errorCode, IReadOnlyList<RuleSetError> errors, int statusCode = StatusCodes.Status400BadRequest) =>
         Results.Problem(
-            statusCode: StatusCodes.Status400BadRequest,
+            statusCode: statusCode,
             title: errorCode == RuleSetService.CodePublishInvalid ? "Rule set cannot be published" : "Rule set request is not valid",
             detail: $"{errors.Count} problem(s) found; nothing was written.",
             extensions: new Dictionary<string, object?>

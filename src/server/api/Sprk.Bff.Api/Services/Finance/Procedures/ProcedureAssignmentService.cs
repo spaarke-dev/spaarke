@@ -870,7 +870,7 @@ public class ProcedureAssignmentService
     private static readonly string[] ReadBackVersionColumns =
     {
         "sprk_policy", "sprk_versionnumber", "sprk_ruletype", "sprk_rulebody", "sprk_messagetemplate", "sprk_shortheadline", "sprk_consequence",
-        "sprk_proposalstatus", "sprk_clausereference", "sprk_clauselocation", BasedOnVersionColumn,
+        "sprk_proposalstatus", "sprk_clausereference", "sprk_clauselocation", BasedOnVersionColumn, RuleSetService.FirmDescriptionColumn,
     };
 
     /// <summary>Whether a stored record-rule version holds the content stage 3 would have written (a missing and an empty text are the same).</summary>
@@ -885,6 +885,7 @@ public class ProcedureAssignmentService
         && v.GetAttributeValue<OptionSetValue>("sprk_proposalstatus")?.Value == (int)ProposalState.Accepted
         && SameText(v.GetAttributeValue<string>("sprk_clausereference"), merged.ClauseReference)
         && SameText(v.GetAttributeValue<string>("sprk_clauselocation"), merged.ClauseLocation)
+        && SameText(v.GetAttributeValue<string>(RuleSetService.FirmDescriptionColumn), merged.FirmDescription)
         && v.GetAttributeValue<EntityReference>(BasedOnVersionColumn)?.Id == basedOnVersionId;
 
     private static bool SameText(string? a, string? b) => string.Equals(a ?? string.Empty, b ?? string.Empty, StringComparison.Ordinal);
@@ -2167,7 +2168,7 @@ public class ProcedureAssignmentService
     private static readonly string[] BaseVersionColumns =
     {
         "sprk_policy", "sprk_versionnumber", "sprk_ruletype", "sprk_rulebody", "sprk_messagetemplate", "sprk_shortheadline",
-        "sprk_consequence", "sprk_proposalstatus", "sprk_clausereference", "sprk_clauselocation",
+        "sprk_consequence", "sprk_proposalstatus", "sprk_clausereference", "sprk_clauselocation", RuleSetService.FirmDescriptionColumn,
     };
 
     private static readonly string[] RecordSetColumns =
@@ -2252,7 +2253,8 @@ public class ProcedureAssignmentService
         v.GetAttributeValue<string>("sprk_clausereference"),
         v.GetAttributeValue<string>("sprk_clauselocation"),
         null,
-        null);
+        null,
+        FirmDescription: v.GetAttributeValue<string>(RuleSetService.FirmDescriptionColumn));
 
     /// <summary>
     /// True for the system rule (D-125): the policy that carries <see cref="BillingRuleCatalogue.SystemPolicyCode"/> (as
@@ -2578,6 +2580,12 @@ public class ProcedureAssignmentService
         if (content.ClauseLocation is not null)
         {
             version["sprk_clauselocation"] = content.ClauseLocation;
+        }
+
+        // Task 130e-1 (DEF-060): the base rule's firm description travels with the copy (the change edits no firm description).
+        if (content.FirmDescription is not null)
+        {
+            version[RuleSetService.FirmDescriptionColumn] = content.FirmDescription;
         }
 
         // 084d-1: a dry run takes the row as built, before the owner question (it asks no owner and writes nothing).

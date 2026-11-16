@@ -30,7 +30,7 @@ namespace Sprk.Bff.Api.Tests.Services.Finance.Procedures;
 /// fake (real query evaluation, an all-or-nothing transaction that faults a duplicate primary key); the owner is the resolver substitute,
 /// except in the two tests that run the REAL resolver over <see cref="OwnershipDirectory"/>.
 /// </remarks>
-public sealed class ProcedureAssignmentServiceTests
+public sealed partial class ProcedureAssignmentServiceTests
 {
     // C19 (ontology): the close's completion log names the closed Signals in a bounded list.
     [Theory]
