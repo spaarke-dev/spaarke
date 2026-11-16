@@ -129,6 +129,23 @@ export interface IDocumentEmailWizardProps {
    */
   emailComposeHandlers?: IEmailComposeHandlers;
   /**
+   * For a host that renders the wizard in the same document as the host's lookup side pane (a PCF on a Dataverse form):
+   * the wizard renders non-blocking and, while a To/Cc/Bcc or record lookup from `emailComposeHandlers` is open, yields
+   * to the pane (dimmed, inert, layered just below it), then returns to its normal layer on the pick, a cancel or a
+   * failure. The `SendEmailDialog` `nonBlocking` contract. Modal mode only. Default `false` (unchanged).
+   *
+   * @since ontology task 194
+   */
+  nonBlocking?: boolean;
+  /**
+   * Called with `true` when a lookup from `emailComposeHandlers` opens and `false` when it settles (pick, cancel or
+   * failure). For a host whose OUTER surface must yield instead of the wizard: a page in an iframe inside its parent's
+   * dialog (the Document Relationship Viewer passes `postSidePaneLookupToParent`). Default: not called.
+   *
+   * @since ontology task 194
+   */
+  onSidePaneLookupChange?: (open: boolean) => void;
+  /**
    * Dataverse client URL (e.g. `https://contoso.crm.dynamics.com`). Used to
    * construct deep links when "Send Document Links" is enabled. When omitted
    * the wizard falls back to `Xrm.Utility.getGlobalContext().getClientUrl()`
@@ -468,6 +485,8 @@ export const DocumentEmailWizard: React.FC<IDocumentEmailWizardProps> = ({
   bffBaseUrl,
   dataService,
   emailComposeHandlers,
+  nonBlocking,
+  onSidePaneLookupChange,
   clientUrl,
   // v1.1.63 — sizing pass-through (defaults left undefined so WizardShell's
   // own defaults — 95vw / 70vh — apply when consumers don't override).
@@ -475,6 +494,39 @@ export const DocumentEmailWizard: React.FC<IDocumentEmailWizardProps> = ({
 }) => {
   const styles = useStyles();
   const shellRef = React.useRef<IWizardShellHandle>(null);
+
+  // -- Host lookup side pane (ontology task 194) ---------------------------
+  // While the host's lookup pane (To/Cc/Bcc, link a record) is open, a `nonBlocking` wizard yields to it (WizardShell →
+  // SprkModal `yieldToSidePane`, as SendEmailDialog's `wrapLookup` does) and `onSidePaneLookupChange` is told, for a host
+  // whose outer dialog must yield instead. The pick, a cancel and a failure all end it; the failure still reaches the
+  // composer, which treats it as a cancel. With neither prop the handlers reach the composer unchanged.
+  const [lookupOpen, setLookupOpen] = React.useState(false);
+  const lookupChangeRef = React.useRef(onSidePaneLookupChange);
+  lookupChangeRef.current = onSidePaneLookupChange;
+  const tracksLookup = Boolean(nonBlocking || onSidePaneLookupChange);
+  const composeHandlers = React.useMemo<IEmailComposeHandlers | undefined>(() => {
+    if (!emailComposeHandlers || !tracksLookup) return emailComposeHandlers;
+    function wrapLookup<A extends unknown[], R>(
+      fn?: (...args: A) => Promise<R>
+    ): ((...args: A) => Promise<R>) | undefined {
+      if (!fn) return fn;
+      return async (...args: A): Promise<R> => {
+        setLookupOpen(true);
+        lookupChangeRef.current?.(true);
+        try {
+          return await fn(...args);
+        } finally {
+          setLookupOpen(false);
+          lookupChangeRef.current?.(false);
+        }
+      };
+    }
+    return {
+      ...emailComposeHandlers,
+      onLookupRecipients: wrapLookup(emailComposeHandlers.onLookupRecipients),
+      onLookupRecord: wrapLookup(emailComposeHandlers.onLookupRecord),
+    };
+  }, [emailComposeHandlers, tracksLookup]);
 
   // -- Kept (in-wizard) document state -----------------------------------
   const [kept, setKept] = React.useState<IDocumentEmailWizardItem[]>(() => [...selectedDocuments]);
@@ -932,7 +984,7 @@ export const DocumentEmailWizard: React.FC<IDocumentEmailWizardProps> = ({
         }.`}
         value={email}
         onChange={setEmail}
-        composeHandlers={emailComposeHandlers}
+        composeHandlers={composeHandlers}
         onSearchRecipients={handleSearchRecipients}
         headerContent={
           canSend ? undefined : (
@@ -943,7 +995,7 @@ export const DocumentEmailWizard: React.FC<IDocumentEmailWizardProps> = ({
         }
       />
     );
-  }, [canSend, email, emailComposeHandlers, handleSearchRecipients, kept.length, parentEntityType]);
+  }, [canSend, composeHandlers, email, handleSearchRecipients, kept.length, parentEntityType]);
 
   // -- Step configurations -----------------------------------------------
   const stepConfigs: IWizardStepConfig[] = React.useMemo(
@@ -987,6 +1039,9 @@ export const DocumentEmailWizard: React.FC<IDocumentEmailWizardProps> = ({
       hideTitle={embedded}
       // Named size; when omitted WizardShell uses its `wizard` default.
       size={size}
+      // Task 194: a same-document host's lookup pane opens above the wizard (modal mode only).
+      nonBlocking={nonBlocking}
+      yieldToSidePane={Boolean(nonBlocking) && lookupOpen}
     />
   );
 };
