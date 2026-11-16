@@ -74,6 +74,7 @@
    - the Invoice Review page's first deploy (with 113b).
    - Before 095f goes beyond dev: the correction-note column script.
 4. Task 079 must sync `sprk_firmdescription` and `sprk_rejectionreason` into SpaarkeMaster and empty the guard's pending list.
+   - uac-r2 ships SpaarkeMaster 1.3.2.0 first (#2859: the invoice-family lock moves into source, which sets IsSecured=1 on 24 columns of our six invoice-family tables, plus the profile entries). 079 takes the next version, rebases onto it and keeps those entries (export-to-temp, then diff).
 
 ## Standing gates
 
