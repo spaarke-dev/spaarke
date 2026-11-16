@@ -1,6 +1,5 @@
 using System.Globalization;
 using System.Text.Json;
-using System.Text.RegularExpressions;
 using Azure.Core;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
@@ -39,11 +38,6 @@ namespace Sprk.Bff.Api.Api;
 public static class CommunicationTemplateEndpoints
 {
     private const string FormattedValueSuffix = "@OData.Community.Display.V1.FormattedValue";
-
-    /// <summary>An ISO-8601 date or date-time as Dataverse's Web API writes one (Edm.Date / Edm.DateTimeOffset).</summary>
-    private static readonly Regex IsoDateValue = new(
-        @"^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:\d{2})?)?$",
-        RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
     public static IEndpointRouteBuilder MapCommunicationTemplateEndpoints(this IEndpointRouteBuilder app)
     {
@@ -239,18 +233,23 @@ public static class CommunicationTemplateEndpoints
     }
 
     /// <summary>
-    /// Maps one impersonated OData row to the SAME merge variables the pre-161 SDK read produced, so every field code
-    /// renders the text it rendered before (template merge parity, pinned by the characterization test):
+    /// Maps one impersonated OData row to the merge variables the template render reads. The text a recipient sees is
+    /// the text the CALLER sees: the impersonated read returns, beside each typed value, a
+    /// <c>@OData.Community.Display.V1.FormattedValue</c> annotation already formatted in the caller's own language,
+    /// number/currency format and time zone. So:
     /// <list type="bullet">
-    ///   <item>a lookup <c>_x_value</c> becomes key <c>x</c> with the related record's NAME (its FormattedValue
-    ///   annotation), falling back to the id string — as <c>EntityReference.Name ?? Id</c> did;</item>
-    ///   <item>a date or date-time (a string carrying a FormattedValue annotation, in ISO form) becomes a
-    ///   <see cref="DateTime"/> of the same kind the SDK returned (UTC for a <c>Z</c> value);</item>
-    ///   <item>a non-integral number becomes a <see cref="decimal"/> parsed from the JSON text, so a money or decimal
-    ///   column keeps its scale ("25000.0000000000"); an integral one an <see cref="int"/> or <see cref="long"/>, as
-    ///   an option set, whole number or big integer was;</item>
-    ///   <item>a boolean stays a <see cref="bool"/>; a string stays a string; annotations are not variables.</item>
+    ///   <item>every attribute that carries that annotation (option set label, money with its currency symbol, date or
+    ///   date-time in the caller's zone, two-option label, lookup name) becomes that formatted string, verbatim;</item>
+    ///   <item>a lookup <c>_x_value</c> becomes key <c>x</c>: the annotation (the related record's name), else its id
+    ///   string;</item>
+    ///   <item>only an attribute with NO annotation falls back to its raw JSON value (a string, an <see cref="int"/>,
+    ///   <see cref="long"/> or <see cref="decimal"/>, a <see cref="bool"/>), which
+    ///   <c>EmailTemplateService</c> then formats itself; annotations are not variables.</item>
     /// </list>
+    /// The earlier "same value kinds as the pre-161 SDK read" mapping is gone on purpose: it existed so the
+    /// <c>{{x}}</c> (Handlebars) render path produced the same text as before, and that path no longer renders a
+    /// Dataverse template. Re-deriving an option set's integer, a money column's bare number or a UTC date here would
+    /// show the recipient a value different from the one on the caller's own screen.
     /// </summary>
     internal static Dictionary<string, object?> ToMergeVariables(IReadOnlyDictionary<string, JsonElement> row)
     {
@@ -275,26 +274,19 @@ public static class CommunicationTemplateEndpoints
                 continue;
             }
 
-            variables[key] = value.ValueKind switch
-            {
-                JsonValueKind.String when hasFormatted && TryParseIsoDate(value.GetString(), out var dateTime) => dateTime,
-                JsonValueKind.String => value.GetString(),
-                JsonValueKind.Number => ToNumber(value),
-                JsonValueKind.True => true,
-                JsonValueKind.False => false,
-                _ => null,
-            };
+            variables[key] = hasFormatted
+                ? formatted.GetString()
+                : value.ValueKind switch
+                {
+                    JsonValueKind.String => value.GetString(),
+                    JsonValueKind.Number => ToNumber(value),
+                    JsonValueKind.True => true,
+                    JsonValueKind.False => false,
+                    _ => null,
+                };
         }
 
         return variables;
-    }
-
-    private static bool TryParseIsoDate(string? text, out DateTime value)
-    {
-        value = default;
-        return text is not null
-               && IsoDateValue.IsMatch(text)
-               && DateTime.TryParse(text, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out value);
     }
 
     private static object ToNumber(JsonElement value)

@@ -309,9 +309,10 @@ public sealed class EmailTemplateService : IEmailTemplateService
 
     /// <summary>
     /// Resolves one token body <c>entity:attribute[;entity:attribute…][;fallback]</c> to plain text. Leading segments
-    /// that name an attribute are looked up when their entity is the regarding record's type (several non-empty values
-    /// are joined with ", ", as an address's lines are); the remaining segments are the fallback, used when no value
-    /// is readable. No value and no fallback is the empty string.
+    /// that name an attribute are looked up when their entity is the regarding record's type, and the FIRST one with a
+    /// non-empty value wins (Dataverse's own rule for a "data field values" slot: the first field that has a value,
+    /// else the default); the remaining segments are the fallback, used when no value is readable. No value and no
+    /// fallback is the empty string.
     /// </summary>
     private static string ResolveToken(string body, Dictionary<string, object?> values, string? regardingEntityType)
     {
@@ -333,7 +334,6 @@ public sealed class EmailTemplateService : IEmailTemplateService
         else
             fallback = segments.Length > 1 ? segments[^1].Trim() : string.Empty; // a display-name token: nothing to look up
 
-        var found = new List<string>();
         foreach (var attribute in attributes)
         {
             if (regardingEntityType is null
@@ -349,16 +349,18 @@ public sealed class EmailTemplateService : IEmailTemplateService
             if (values.TryGetValue(attribute.Groups["attr"].Value, out var raw)
                 && FormatValue(raw) is { Length: > 0 } text)
             {
-                found.Add(text);
+                return text;
             }
         }
 
-        return found.Count > 0 ? string.Join(", ", found) : fallback;
+        return fallback;
     }
 
     /// <summary>
-    /// A merge value as email text. The route's variables keep their Dataverse shapes (a money column is a decimal with
-    /// ten places, a date a <see cref="DateTime"/>), which must not reach a recipient as "25000.0000000000" or an ISO stamp.
+    /// A merge value as email text. The route supplies the caller's formatted text (a string) for every attribute Dataverse
+    /// annotated, which is used as is. This formatter is the fallback for an attribute with NO annotation, whose raw value
+    /// keeps its Dataverse shape (a decimal with ten places, a <see cref="DateTime"/>) and must not reach a recipient as
+    /// "25000.0000000000" or an ISO stamp.
     /// </summary>
     private static string? FormatValue(object? value) => value switch
     {

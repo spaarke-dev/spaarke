@@ -179,16 +179,19 @@ public sealed class EmailTemplateServiceRenderTests
     }
 
     [Fact]
-    public async Task AMultiAttributeToken_JoinsTheReadableValues_AndFallsBackWhenNoneIsReadable()
+    public async Task AMultiAttributeToken_TakesTheFirstNonEmptyValue_AndFallsBackWhenNoneIsReadable()
     {
-        var html = "<p><span class=\"dataslug\" data-value=\"{!contact:address1_line1;contact:address1_line2;contact:address1_line3;No Address Provided}\">x</span></p>";
+        // Dataverse's "data field values" slot uses the first field that has a value, then the default; never a join.
+        var html = "<p><span class=\"dataslug\" data-value=\"{!contact:nickname;contact:firstname;Friend}\">x</span></p>";
         var (service, _) = CreateService(Row("s", html));
 
-        var some = await Render(service, new Dictionary<string, object?> { ["address1_line1"] = "1 Main St", ["address1_line3"] = "Suite 4" }, "contact");
+        var both = await Render(service, new Dictionary<string, object?> { ["nickname"] = "Al", ["firstname"] = "Alexander" }, "contact");
+        var secondOnly = await Render(service, new Dictionary<string, object?> { ["nickname"] = "  ", ["firstname"] = "Alexander" }, "contact");
         var none = await Render(service, new Dictionary<string, object?>(), "contact");
 
-        some.Body.Should().Be("<p>1 Main St, Suite 4</p>");
-        none.Body.Should().Be("<p>No Address Provided</p>");
+        both.Body.Should().Be("<p>Al</p>");
+        secondOnly.Body.Should().Be("<p>Alexander</p>");
+        none.Body.Should().Be("<p>Friend</p>");
     }
 
     [Fact]
