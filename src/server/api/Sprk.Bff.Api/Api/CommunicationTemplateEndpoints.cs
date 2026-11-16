@@ -16,7 +16,7 @@ namespace Sprk.Bff.Api.Api;
 /// <summary>
 /// One thin endpoint backing the Spaarke email composer's "insert template" feature:
 /// <c>POST /api/communications/template/render</c> renders a Dataverse <c>template</c> record
-/// (subject + body) with <c>{!entity.field}</c> field-code merge from an optional regarding record.
+/// (subject + body) with its <c>{!entity:attribute;fallback}</c> merge fields filled from an optional regarding record.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -52,7 +52,7 @@ public static class CommunicationTemplateEndpoints
             .AddCommunicationRecordAuthorizationFilter(CommunicationRecordRoute.TemplateRender)
             .WithName("RenderCommunicationTemplate")
             .WithTags("Communications")
-            .WithDescription("Render a Dataverse email template with {!entity.field} field-code merge from an optional regarding record, for the email composer's insert-template feature. The caller must hold Read on the regarding record and be able to read the template; the merge read runs as the caller (row and field-level security apply).")
+            .WithDescription("Render a Dataverse email template to a finished plain-text subject and HTML body (its {!entity:attribute;fallback} merge fields filled from an optional regarding record, else the field's fallback text), for the email composer's insert-template feature. The caller must hold Read on the regarding record and be able to read the template; the merge read runs as the caller (row and field-level security apply).")
             .Produces<CommunicationTemplateRenderResponse>(StatusCodes.Status200OK)
             .Produces<ProblemDetails>(StatusCodes.Status400BadRequest)
             .Produces<ProblemDetails>(StatusCodes.Status403Forbidden)
@@ -131,10 +131,12 @@ public static class CommunicationTemplateEndpoints
         var scope = $"{dataverseUrl.TrimEnd('/')}/.default";
         var accessToken = await credential.GetTokenAsync(new TokenRequestContext(new[] { scope }), ct);
 
-        // 3. Delegate fetch + {!entity.field} render to the existing service.
+        // 3. Delegate fetch + merge-field render to the existing service. The regarding type tells it which of the
+        //    template's placeholders these variables may fill.
         var result = await emailTemplateService.FetchAndRenderAsync(
             request.TemplateId,
             variables,
+            hasRegarding ? request.RegardingEntityType!.Trim().ToLowerInvariant() : null,
             dataverseUrl,
             accessToken.Token,
             ct);

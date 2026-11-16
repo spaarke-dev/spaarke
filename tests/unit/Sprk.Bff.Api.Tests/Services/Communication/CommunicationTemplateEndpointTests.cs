@@ -66,6 +66,7 @@ public class CommunicationTemplateEndpointTests
             .Setup(s => s.FetchAndRenderAsync(
                 templateId,
                 It.IsAny<Dictionary<string, object?>>(),
+                It.IsAny<string?>(),
                 It.IsAny<string>(),
                 It.IsAny<string>(),
                 It.IsAny<CancellationToken>()))
@@ -90,6 +91,7 @@ public class CommunicationTemplateEndpointTests
             .Setup(s => s.FetchAndRenderAsync(
                 It.IsAny<Guid>(),
                 It.IsAny<Dictionary<string, object?>>(),
+                It.IsAny<string?>(),
                 It.IsAny<string>(),
                 It.IsAny<string>(),
                 It.IsAny<CancellationToken>()))
@@ -113,6 +115,7 @@ public class CommunicationTemplateEndpointTests
             .Setup(s => s.FetchAndRenderAsync(
                 It.IsAny<Guid>(),
                 It.IsAny<Dictionary<string, object?>>(),
+                It.IsAny<string?>(),
                 It.IsAny<string>(),
                 It.IsAny<string>(),
                 It.IsAny<CancellationToken>()))
@@ -136,6 +139,7 @@ public class CommunicationTemplateEndpointTests
             .Setup(s => s.FetchAndRenderAsync(
                 It.IsAny<Guid>(),
                 It.IsAny<Dictionary<string, object?>>(),
+                It.IsAny<string?>(),
                 It.IsAny<string>(),
                 It.IsAny<string>(),
                 It.IsAny<CancellationToken>()))
@@ -156,15 +160,17 @@ public class CommunicationTemplateEndpointTests
         // Arrange
         var templateId = Guid.NewGuid();
         Dictionary<string, object?>? capturedVariables = null;
+        string? capturedType = "unset";
         _emailTemplateServiceMock
             .Setup(s => s.FetchAndRenderAsync(
                 It.IsAny<Guid>(),
                 It.IsAny<Dictionary<string, object?>>(),
+                It.IsAny<string?>(),
                 It.IsAny<string>(),
                 It.IsAny<string>(),
                 It.IsAny<CancellationToken>()))
-            .Callback<Guid, Dictionary<string, object?>, string, string, CancellationToken>(
-                (_, vars, _, _, _) => capturedVariables = vars)
+            .Callback<Guid, Dictionary<string, object?>, string?, string, string, CancellationToken>(
+                (_, vars, type, _, _, _) => { capturedVariables = vars; capturedType = type; })
             .ReturnsAsync(EmailTemplateResult.Ok("s", "b", isHtml: true));
 
         // Act — no RegardingEntityType / RegardingRecordId
@@ -174,6 +180,7 @@ public class CommunicationTemplateEndpointTests
         result.Should().BeOfType<Ok<CommunicationTemplateRenderResponse>>();
         capturedVariables.Should().NotBeNull();
         capturedVariables!.Should().BeEmpty("no regarding record was supplied");
+        capturedType.Should().BeNull("with no regarding record no placeholder may be filled");
     }
 
     [Fact]
@@ -199,15 +206,17 @@ public class CommunicationTemplateEndpointTests
                 """));
 
         Dictionary<string, object?>? capturedVariables = null;
+        string? capturedType = "unset";
         _emailTemplateServiceMock
             .Setup(s => s.FetchAndRenderAsync(
                 It.IsAny<Guid>(),
                 It.IsAny<Dictionary<string, object?>>(),
+                It.IsAny<string?>(),
                 It.IsAny<string>(),
                 It.IsAny<string>(),
                 It.IsAny<CancellationToken>()))
-            .Callback<Guid, Dictionary<string, object?>, string, string, CancellationToken>(
-                (_, vars, _, _, _) => capturedVariables = vars)
+            .Callback<Guid, Dictionary<string, object?>, string?, string, string, CancellationToken>(
+                (_, vars, type, _, _, _) => { capturedVariables = vars; capturedType = type; })
             .ReturnsAsync(EmailTemplateResult.Ok("s", "b", isHtml: true));
 
         // Act — a mixed-case type is read as its logical name
@@ -223,6 +232,7 @@ public class CommunicationTemplateEndpointTests
         capturedSet.Should().Be("sprk_matters");
         capturedQuery.Should().Be($"$filter=sprk_matterid eq {recordId}&$top=1");
         capturedCaller.Should().Be(CallerSystemUserId);
+        capturedType.Should().Be("sprk_matter", "the renderer is told the regarding type so it fills only that entity's placeholders");
         capturedVariables!["sprk_mattername"].Should().Be("Acme v. Widgets");
         capturedVariables["sprk_status"].Should().Be(2, "an option set renders its integer, as the SDK value did");
         capturedVariables.Keys.Should().NotContain(k => k.Contains('@'), "annotations are not merge variables");
@@ -377,10 +387,11 @@ public class CommunicationTemplateEndpointTests
             .Setup(s => s.FetchAndRenderAsync(
                 It.IsAny<Guid>(),
                 It.IsAny<Dictionary<string, object?>>(),
+                It.IsAny<string?>(),
                 It.IsAny<string>(),
                 It.IsAny<string>(),
                 It.IsAny<CancellationToken>()))
-            .ReturnsAsync((Guid _, Dictionary<string, object?> vars, string _, string _, CancellationToken _) =>
+            .ReturnsAsync((Guid _, Dictionary<string, object?> vars, string? _, string _, string _, CancellationToken _) =>
                 renderer.RenderFromContent(ParitySubjectTemplate, ParityBodyTemplate, vars));
     }
 

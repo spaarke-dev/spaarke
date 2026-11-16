@@ -1,6 +1,9 @@
+using System.Globalization;
+using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Text.RegularExpressions;
 using Microsoft.Extensions.Logging;
 
 namespace Sprk.Bff.Api.Services.Ai.Delivery;
@@ -11,12 +14,22 @@ namespace Sprk.Bff.Api.Services.Ai.Delivery;
 /// </summary>
 /// <remarks>
 /// <para>
-/// Email templates in Dataverse contain subject and body with placeholder patterns.
-/// This service fetches templates by ID or name and renders them using ITemplateEngine.
+/// <b>Rendering a Dataverse <c>template</c> row (ontology task 195).</b> The row's <c>subject</c> and <c>body</c>
+/// columns are generated XSL stylesheets with CDATA sections (<c>&lt;?xml …&gt;&lt;xsl:stylesheet …</c>); they are NOT
+/// renderable text and are never read. The row also carries the finished, editor-facing HTML: <c>subjectsafehtml</c>
+/// and <c>safehtml</c>, in which every merge field is a span
+/// <c>&lt;span class="dataslug" data-value="{!entity:attribute;fallback}"&gt;…&lt;/span&gt;</c>. This service renders from those two
+/// columns only: each placeholder becomes the regarding record's value when the placeholder's entity is the regarding
+/// record's type and the value is readable, else its fallback text, else nothing. The subject is returned as plain
+/// text (tags stripped, entities decoded); the body is HTML with every substituted value HTML-encoded.
 /// </para>
 /// <para>
-/// Supports standard Dataverse template placeholders as well as {{handlebars}} syntax
-/// for AI output variables.
+/// The merge values arrive in <c>variables</c>, already read AS THE CALLER by the route (row and field-level security
+/// applied), so an attribute the caller cannot read is simply absent and renders its fallback. This class never
+/// reads a regarding record itself.
+/// </para>
+/// <para>
+/// <see cref="RenderFromContent"/> is the separate <c>{{handlebars}}</c> path (AI output variables); it is unchanged.
 /// </para>
 /// </remarks>
 public sealed class EmailTemplateService : IEmailTemplateService
@@ -30,6 +43,30 @@ public sealed class EmailTemplateService : IEmailTemplateService
         PropertyNameCaseInsensitive = true,
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
     };
+
+    private const string TemplateSelect = "templateid,title,ispersonal,templatetypecode,subjectsafehtml,safehtml";
+
+    private static readonly TimeSpan RegexTimeout = TimeSpan.FromSeconds(2);
+
+    /// <summary>
+    /// One merge field in a template's safe HTML: either the editor's slug span (its <c>data-value</c> carries the
+    /// logical-name token) or a bare <c>{!…}</c> token left in the text. ONE pass, so a substituted value that itself
+    /// contains <c>{!…}</c> text is never re-expanded.
+    /// </summary>
+    private static readonly Regex MergeField = new(
+        @"<span\b[^>]*?\bdata-value\s*=\s*(?:""(?<dv>[^""]*)""|'(?<dv>[^']*)')[^>]*>(?<inner>.*?)</span>"
+        + @"|(?<bare>\{![^{}]*\})",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant | RegexOptions.IgnoreCase | RegexOptions.Singleline,
+        RegexTimeout);
+
+    /// <summary>A token segment naming one attribute: <c>entity:attribute</c> or a lookup's <c>entity:attribute/@name</c>.</summary>
+    private static readonly Regex AttributeSegment = new(
+        @"^\s*(?<entity>[A-Za-z0-9_]+):(?<attr>[A-Za-z0-9_]+)(?<path>/@[A-Za-z]+)?\s*$",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant,
+        RegexTimeout);
+
+    private static readonly Regex HtmlTag = new("<[^>]*>", RegexOptions.Compiled | RegexOptions.CultureInvariant, RegexTimeout);
+    private static readonly Regex Whitespace = new(@"\s+", RegexOptions.Compiled | RegexOptions.CultureInvariant, RegexTimeout);
 
     public EmailTemplateService(
         ITemplateEngine templateEngine,
@@ -45,6 +82,7 @@ public sealed class EmailTemplateService : IEmailTemplateService
     public async Task<EmailTemplateResult> FetchAndRenderAsync(
         Guid templateId,
         Dictionary<string, object?> variables,
+        string? regardingEntityType,
         string dataverseUrl,
         string accessToken,
         CancellationToken cancellationToken)
@@ -60,7 +98,7 @@ public sealed class EmailTemplateService : IEmailTemplateService
                 return EmailTemplateResult.Fail($"Email template not found: {templateId}");
             }
 
-            return RenderTemplate(template, variables);
+            return RenderTemplate(template, variables, regardingEntityType);
         }
         catch (HttpRequestException ex)
         {
@@ -73,6 +111,7 @@ public sealed class EmailTemplateService : IEmailTemplateService
     public async Task<EmailTemplateResult> FetchAndRenderByNameAsync(
         string templateName,
         Dictionary<string, object?> variables,
+        string? regardingEntityType,
         string dataverseUrl,
         string accessToken,
         CancellationToken cancellationToken)
@@ -87,7 +126,7 @@ public sealed class EmailTemplateService : IEmailTemplateService
                 return EmailTemplateResult.Fail($"Email template not found: {templateName}");
             }
 
-            return RenderTemplate(template, variables);
+            return RenderTemplate(template, variables, regardingEntityType);
         }
         catch (HttpRequestException ex)
         {
@@ -138,7 +177,7 @@ public sealed class EmailTemplateService : IEmailTemplateService
         client.DefaultRequestHeaders.Authorization =
             new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", accessToken);
 
-        var url = $"templates({templateId})?$select=title,subject,body,ispersonal,templatetypecode";
+        var url = $"templates({templateId})?$select={TemplateSelect}";
         var response = await client.GetAsync(url, cancellationToken);
 
         if (!response.IsSuccessStatusCode)
@@ -164,7 +203,7 @@ public sealed class EmailTemplateService : IEmailTemplateService
             new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", accessToken);
 
         // Query by title (name)
-        var url = $"templates?$filter=title eq '{Uri.EscapeDataString(templateName)}'&$select=templateid,title,subject,body,ispersonal,templatetypecode&$top=1";
+        var url = $"templates?$filter=title eq '{Uri.EscapeDataString(templateName)}'&$select={TemplateSelect}&$top=1";
         var response = await client.GetAsync(url, cancellationToken);
 
         if (!response.IsSuccessStatusCode)
@@ -179,20 +218,31 @@ public sealed class EmailTemplateService : IEmailTemplateService
         return result?.Value?.FirstOrDefault();
     }
 
-    private EmailTemplateResult RenderTemplate(DataverseEmailTemplate template, Dictionary<string, object?> variables)
+    private EmailTemplateResult RenderTemplate(
+        DataverseEmailTemplate template,
+        Dictionary<string, object?> variables,
+        string? regardingEntityType)
     {
         _logger.LogDebug(
             "Rendering template '{TemplateTitle}' with {VariableCount} variables",
             template.Title, variables.Count);
 
+        // The XSL `subject` / `body` columns are never rendered (see the class remarks). A row with no safe HTML cannot
+        // be rendered to finished text: refuse it in the route's existing 400 shape rather than send XSL or debris.
+        if (string.IsNullOrWhiteSpace(template.SafeHtml))
+        {
+            _logger.LogWarning(
+                "Email template '{TemplateTitle}' ({TemplateId}) has no safehtml body; refusing the render",
+                template.Title, template.TemplateId);
+            return EmailTemplateResult.Fail("Template rendering failed: the template has no renderable body.");
+        }
+
         try
         {
-            // Dataverse templates may use {!entity.field} syntax - convert to {{entity.field}}
-            var normalizedSubject = NormalizePlaceholders(template.Subject ?? "");
-            var normalizedBody = NormalizePlaceholders(template.Body ?? "");
+            var values = new Dictionary<string, object?>(variables, StringComparer.OrdinalIgnoreCase);
 
-            var renderedSubject = _templateEngine.Render(normalizedSubject, variables);
-            var renderedBody = _templateEngine.Render(normalizedBody, variables);
+            var renderedSubject = RenderSubject(template.SubjectSafeHtml, values, regardingEntityType);
+            var renderedBody = ResolveMergeFields(template.SafeHtml, values, regardingEntityType);
 
             _logger.LogInformation(
                 "Email template '{TemplateTitle}' rendered successfully",
@@ -201,7 +251,7 @@ public sealed class EmailTemplateService : IEmailTemplateService
             return EmailTemplateResult.Ok(
                 renderedSubject,
                 renderedBody,
-                true, // Dataverse email templates are typically HTML
+                true, // the safehtml column is HTML
                 new Dictionary<string, object?>
                 {
                     ["templateId"] = template.TemplateId,
@@ -217,18 +267,119 @@ public sealed class EmailTemplateService : IEmailTemplateService
     }
 
     /// <summary>
-    /// Converts Dataverse placeholder syntax to Handlebars syntax.
-    /// Dataverse uses {!entity.field} while our TemplateEngine uses {{entity.field}}.
+    /// The subject is plain text: merge fields resolved, any markup in <c>subjectsafehtml</c> stripped, entities
+    /// decoded, whitespace collapsed to single spaces.
     /// </summary>
-    private static string NormalizePlaceholders(string input)
+    private static string RenderSubject(
+        string? subjectSafeHtml,
+        Dictionary<string, object?> values,
+        string? regardingEntityType)
     {
-        if (string.IsNullOrEmpty(input)) return input;
+        if (string.IsNullOrWhiteSpace(subjectSafeHtml))
+            return string.Empty;
 
-        // Convert {!variable} to {{variable}}
-        return System.Text.RegularExpressions.Regex.Replace(
-            input,
-            @"\{!([^}]+)\}",
-            "{{$1}}");
+        var resolved = ResolveMergeFields(subjectSafeHtml, values, regardingEntityType);
+        var text = WebUtility.HtmlDecode(HtmlTag.Replace(resolved, string.Empty));
+        return Whitespace.Replace(text, " ").Trim();
+    }
+
+    /// <summary>
+    /// Replaces every merge field in <paramref name="html"/> with its finished text, HTML-encoded (a record value such as
+    /// <c>Smith &amp; Sons</c> or <c>&lt;b&gt;</c> must not become markup). A span that is not a Dataverse merge field is left
+    /// as it is.
+    /// </summary>
+    private static string ResolveMergeFields(
+        string html,
+        Dictionary<string, object?> values,
+        string? regardingEntityType)
+    {
+        return MergeField.Replace(html, match =>
+        {
+            var token = match.Groups["dv"].Success
+                ? WebUtility.HtmlDecode(match.Groups["dv"].Value)
+                : WebUtility.HtmlDecode(match.Groups["bare"].Value);
+
+            var trimmed = token.Trim();
+            if (!trimmed.StartsWith("{!", StringComparison.Ordinal) || !trimmed.EndsWith('}'))
+                return match.Value; // a span with some other data-value
+
+            return WebUtility.HtmlEncode(ResolveToken(trimmed[2..^1], values, regardingEntityType));
+        });
+    }
+
+    /// <summary>
+    /// Resolves one token body <c>entity:attribute[;entity:attribute…][;fallback]</c> to plain text. Leading segments
+    /// that name an attribute are looked up when their entity is the regarding record's type (several non-empty values
+    /// are joined with ", ", as an address's lines are); the remaining segments are the fallback, used when no value
+    /// is readable. No value and no fallback is the empty string.
+    /// </summary>
+    private static string ResolveToken(string body, Dictionary<string, object?> values, string? regardingEntityType)
+    {
+        var segments = body.Split(';');
+        var attributes = new List<Match>();
+        var index = 0;
+        while (index < segments.Length)
+        {
+            var m = AttributeSegment.Match(segments[index]);
+            if (!m.Success)
+                break;
+            attributes.Add(m);
+            index++;
+        }
+
+        string fallback;
+        if (attributes.Count > 0)
+            fallback = string.Join(";", segments.Skip(index)).Trim();
+        else
+            fallback = segments.Length > 1 ? segments[^1].Trim() : string.Empty; // a display-name token: nothing to look up
+
+        var found = new List<string>();
+        foreach (var attribute in attributes)
+        {
+            if (regardingEntityType is null
+                || !string.Equals(attribute.Groups["entity"].Value, regardingEntityType, StringComparison.OrdinalIgnoreCase))
+            {
+                continue; // a placeholder for another entity (the sender, the owner...): nothing to read it from
+            }
+
+            var path = attribute.Groups["path"].Value;
+            if (path.Length > 0 && !string.Equals(path, "/@name", StringComparison.OrdinalIgnoreCase))
+                continue; // only a lookup's name is available
+
+            if (values.TryGetValue(attribute.Groups["attr"].Value, out var raw)
+                && FormatValue(raw) is { Length: > 0 } text)
+            {
+                found.Add(text);
+            }
+        }
+
+        return found.Count > 0 ? string.Join(", ", found) : fallback;
+    }
+
+    /// <summary>
+    /// A merge value as email text. The route's variables keep their Dataverse shapes (a money column is a decimal with
+    /// ten places, a date a <see cref="DateTime"/>), which must not reach a recipient as "25000.0000000000" or an ISO stamp.
+    /// </summary>
+    private static string? FormatValue(object? value) => value switch
+    {
+        null => null,
+        string s => s.Trim(),
+        bool b => b ? "Yes" : "No",
+        DateTime dt => FormatDate(dt),
+        DateTimeOffset dto => FormatDate(dto.UtcDateTime),
+        decimal d => d.ToString(d == decimal.Truncate(d) ? "#,0" : "#,0.##", CultureInfo.InvariantCulture),
+        double d => d.ToString("0.##", CultureInfo.InvariantCulture),
+        IFormattable f => f.ToString(null, CultureInfo.InvariantCulture),
+        _ => Convert.ToString(value, CultureInfo.InvariantCulture),
+    };
+
+    private static string FormatDate(DateTime value)
+    {
+        if (value.TimeOfDay == TimeSpan.Zero)
+            return value.ToString("MMMM d, yyyy", CultureInfo.InvariantCulture);
+
+        var text = value.ToString("MMMM d, yyyy h:mm tt", CultureInfo.InvariantCulture);
+        return value.Kind == DateTimeKind.Utc ? text + " UTC" : text;
     }
 }
 
@@ -238,21 +389,27 @@ public sealed class EmailTemplateService : IEmailTemplateService
 public interface IEmailTemplateService
 {
     /// <summary>
-    /// Fetches an email template from Dataverse by ID and renders it with variables.
+    /// Fetches an email template from Dataverse by ID and renders it to a finished plain-text subject and HTML body.
+    /// <paramref name="variables"/> are the regarding record's attributes (logical name to value), read as the caller;
+    /// <paramref name="regardingEntityType"/> is that record's entity logical name, which decides which of the template's
+    /// placeholders they may fill (a placeholder for any other entity renders its fallback). Both are empty/null when the
+    /// request names no regarding record.
     /// </summary>
     Task<EmailTemplateResult> FetchAndRenderAsync(
         Guid templateId,
         Dictionary<string, object?> variables,
+        string? regardingEntityType,
         string dataverseUrl,
         string accessToken,
         CancellationToken cancellationToken);
 
     /// <summary>
-    /// Fetches an email template from Dataverse by name and renders it with variables.
+    /// Fetches an email template from Dataverse by name and renders it as <see cref="FetchAndRenderAsync"/> does.
     /// </summary>
     Task<EmailTemplateResult> FetchAndRenderByNameAsync(
         string templateName,
         Dictionary<string, object?> variables,
+        string? regardingEntityType,
         string dataverseUrl,
         string accessToken,
         CancellationToken cancellationToken);
@@ -318,11 +475,13 @@ internal sealed record DataverseEmailTemplate
     [JsonPropertyName("title")]
     public string? Title { get; init; }
 
-    [JsonPropertyName("subject")]
-    public string? Subject { get; init; }
+    /// <summary>The subject as editor HTML (merge fields are <c>dataslug</c> spans). The XSL <c>subject</c> column is not read.</summary>
+    [JsonPropertyName("subjectsafehtml")]
+    public string? SubjectSafeHtml { get; init; }
 
-    [JsonPropertyName("body")]
-    public string? Body { get; init; }
+    /// <summary>The body as editor HTML (merge fields are <c>dataslug</c> spans). The XSL <c>body</c> column is not read.</summary>
+    [JsonPropertyName("safehtml")]
+    public string? SafeHtml { get; init; }
 
     [JsonPropertyName("ispersonal")]
     public bool IsPersonal { get; init; }
