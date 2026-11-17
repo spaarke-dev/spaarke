@@ -184,7 +184,7 @@ public sealed class FirmNoticeComposerTests
     }
 
     [Fact]
-    public async Task TheFindingsSummary_IsDistinctAndCapped()
+    public async Task TheFindingsSummary_IsOnePerItem_AndCapped()
     {
         var rig = new Rig();
         var many = Enumerable.Range(0, 60).Select(i => Disallowed()).Concat(Enumerable.Range(0, 60).Select(i =>
@@ -195,8 +195,8 @@ public sealed class FirmNoticeComposerTests
 
         var findings = rig.Requests.Single().Findings;
         findings.Should().HaveCount(FirmNoticeComposer.MaxFindings);
-        findings.Should().OnlyHaveUniqueItems();
-        findings[0].Consequence.Should().Be("Disallowed", "sixty identical lines are one finding");
+        findings.Count(f => f.Consequence == "Disallowed").Should().Be(FirmNoticeComposer.MaxFindings, "review round 1: identical items are not collapsed, so the first twenty are twenty Disallowed findings");
+        findings[0].Consequence.Should().Be("Disallowed");
     }
 
     // ═══════════════════════════════════════════════════════════════════════════════════════════
@@ -328,6 +328,30 @@ public sealed class FirmNoticeComposerTests
         ["Invoice returned", new string('a', FirmNoticeProse.MaxProseLength + 1), FirmNoticeFallbackReasons.ProseTooLong],
         [new string('a', FirmNoticeProse.MaxSubjectLength + 1), "Your invoice was returned.", FirmNoticeFallbackReasons.ProseTooLong],
         ["Invoice\nreturned", "Your invoice was returned.", FirmNoticeFallbackReasons.ProseControlCharacter],
+
+        // Review round 1 (F1-b): digits outside the BMP are two UTF-16 chars each; they are numbers all the same.
+        ["Invoice returned", "Your invoice was reduced by \U0001D7CF\U0001D7D0\U0001D7D1.", FirmNoticeFallbackReasons.ProseDigit], // mathematical bold digits 1 2 3
+        ["Invoice returned", "Line \U0001D7DC was reduced.", FirmNoticeFallbackReasons.ProseDigit], // a mathematical double-struck digit 4
+        ["Invoice returned", "Your invoice was  returned.", FirmNoticeFallbackReasons.ProseControlCharacter], // private use
+        ["Invoice returned", "Your invoice was ͸ returned.", FirmNoticeFallbackReasons.ProseControlCharacter], // unassigned
+        ["Invoice returned", "Your invoice was \U000E0041 returned.", FirmNoticeFallbackReasons.ProseControlCharacter], // a tag character (format)
+
+        // Review round 1 (F1-c): spelled-out figures, whole words, any case, after NFKC folding.
+        ["Invoice returned", "Seven lines were reduced.", FirmNoticeFallbackReasons.ProseAmountWord],
+        ["Invoice returned", "Twelve of your lines were not allowed.", FirmNoticeFallbackReasons.ProseAmountWord],
+        ["Invoice returned", "A fifty hour charge was disallowed.", FirmNoticeFallbackReasons.ProseAmountWord],
+        ["Invoice returned", "Half of the fees were not allowed.", FirmNoticeFallbackReasons.ProseAmountWord],
+        ["Invoice returned", "The fees were reduced twice.", FirmNoticeFallbackReasons.ProseAmountWord],
+        ["Invoice returned", "A dozen entries were not allowed.", FirmNoticeFallbackReasons.ProseAmountWord],
+        ["Invoice returned", "The THIRD entry was reduced.", FirmNoticeFallbackReasons.ProseAmountWord],
+        ["Invoice returned", "Reduced by twenty-five.", FirmNoticeFallbackReasons.ProseAmountWord],
+        ["Invoice returned", "A charge of \U0001D42D\U0001D430\U0001D428 \U0001D421\U0001D42E\U0001D427\U0001D41D\U0001D42B\U0001D41E\U0001D41D was reduced.", FirmNoticeFallbackReasons.ProseAmountWord], // bold "two hundred"
+        ["Invoice returned", "Reduced by ｔｗｏ.", FirmNoticeFallbackReasons.ProseAmountWord], // full-width "two"
+
+        // Review round 1 (K4): any bare domain shape, not six top-level domains.
+        ["Invoice returned", "Visit acme-billing.co.uk for details.", FirmNoticeFallbackReasons.ProseLink],
+        ["Invoice returned", "See evilsite.xyz.", FirmNoticeFallbackReasons.ProseLink],
+        ["Invoice returned", "Go to billing.example.firm for help.", FirmNoticeFallbackReasons.ProseLink],
     ];
 
     [Theory]
@@ -350,6 +374,48 @@ public sealed class FirmNoticeComposerTests
         }
 
         rig.Logger.Messages.Should().Contain(m => m.Contains(reason));
+    }
+
+    [Fact]
+    public void ALoneSurrogate_IsRefused_NeverReadAsAReplacementCharacter()
+    {
+        // Not a theory row: a lone surrogate is not valid text, and a test runner may not carry it through a display name.
+        FirmNoticeProse.Check("Invoice returned", "Your invoice was \uD800 returned.").Should().Be(FirmNoticeFallbackReasons.ProseControlCharacter);
+        FirmNoticeProse.Check("Invoice \uDC00 returned", "Your invoice was returned.").Should().Be(FirmNoticeFallbackReasons.ProseControlCharacter);
+        FirmNoticeProse.Check("Invoice returned", "Your invoice was returned.").Should().BeNull("the control: clean text passes");
+    }
+
+    [Fact]
+    public void OneIsOrdinaryProse_ButAFigureWordWithinAWordIsNotAFigure()
+    {
+        // Whole words only: the screen is not a substring match, so ordinary words that contain a number word still pass.
+        FirmNoticeProse.Check("Invoice returned", "Your invoice was returned for one reason: the stone fence tent was dependent on others.").Should().BeNull();
+        FirmNoticeProse.Check("Invoice returned", "Your invoice was returned for another reason.").Should().BeNull();
+    }
+
+    [Fact]
+    public async Task ATrackingNumberWithControlCharacters_IsCleanedInTheSubjectAndTheDetails()
+    {
+        var rig = new Rig();
+        rig.Outcome = InReview(Reduced()) with { TrackingNumber = "TRK-1\r\nBcc: x\u0000​.2\t  3" };
+
+        var draft = await rig.ComposeAsync();
+
+        draft.Subject.Should().Be("Invoice returned for correction (TRK-1 Bcc: x.2 3)");
+        draft.Subject.Should().NotContainAny("\r", "\n", "\u0000", "​", "\t");
+        draft.Html.Should().Contain("Tracking number: TRK-1 Bcc: x.2 3").And.NotContain("​");
+        FirmNoticeComposer.CleanTrackingNumber("  \u0007 ").Should().BeEmpty("nothing visible is left");
+        FirmNoticeComposer.CleanTrackingNumber(null).Should().BeEmpty();
+    }
+
+    [Fact]
+    public void TheRequest_HasOneFindingPerItem_NotACollapsedSet()
+    {
+        var outcome = InReview(Reduced(), Reduced(), Reduced());
+
+        var request = FirmNoticeComposer.BuildRequest(FirmNoticeKind.ReturnedToFirm, outcome);
+
+        request.Findings.Should().HaveCount(3, "identical findings are not collapsed, so the model is not led to say 'a line' for several");
     }
 
     [Fact]
@@ -649,7 +715,9 @@ public sealed class FirmNoticeComposerTests
         }
 
         draft.Html.Should().NotContain("31000000-0000-4000-8000-0000000000aa", "no id of a line, record, rule set or Procedure is ever shown");
-        draft.Html.ToLowerInvariant().Should().NotContain("procedure").And.NotContain("override").And.NotContain("http").And.NotContain("<a ").And.NotContain("<img");
+        // A hand-made outcome cannot carry an override reason or a Procedure name or id, so no assertion about them is made here; that proof runs through
+        // the REAL projection in FirmFindingsProjectionTests.FirmNotice_NoOverrideReasonProcedureNameOrProcedureId_ReachesTheModelOrTheNotice (review round 1).
+        draft.Html.ToLowerInvariant().Should().NotContain("http").And.NotContain("<a ").And.NotContain("<img");
     }
 
     [Fact]

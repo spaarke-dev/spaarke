@@ -102,24 +102,57 @@ Method: `git archive` of the base (`a93e30cedc`, this branch's parent) and the t
 
 Well under the +5 MB per-task line. The absolute zip size (about 40.4 MB with PDBs) is the existing level, not this task's; the 55 MB and 60 MB thresholds are not approached.
 
-## Seeding commands (NOT run; held for the owner's typed OK and task 136)
+## Seeding commands (NOT run by this task; the dev seed is approved, EB-D-256, and the coordinator runs it after review round 1)
 
-1. Preview, then create the Action row, set the input schema and deploy the mirror (`Deploy-ActionMirrors.ps1` only patches existing rows, so use the ensure script):
+**Order: deploy the BFF that carries the `ConsumerTypes.All` entry FIRST, then seed.** `RoutingConsumerTypeHealthCheck` is tagged `catalog`, so it is served on `/healthz/catalog`, not on `/healthz`. A constant with no row is only Degraded on `/healthz/catalog`; a row with no constant is full drift, a 503 on `/healthz/catalog`. Seeding before the BFF is deployed would put the environment in the worse state.
+
+1. Deploy the BFF (task 136, `/bff-deploy`).
+2. Preview, then create the Action row, set the input schema and deploy the mirror (`Deploy-ActionMirrors.ps1` only patches existing rows, so use the ensure script):
    `pwsh scripts/ebilling/Ensure-ActionRow.ps1 -ActionCode invoice-firm-notice -DryRun`
    `pwsh scripts/ebilling/Ensure-ActionRow.ps1 -ActionCode invoice-firm-notice`
-2. Upsert the Binding row (diff first):
+3. Upsert the Binding row (diff first):
    `pwsh scripts/dataverse/Seed-PlaybookConsumers.ps1 -DryRun`
    `pwsh scripts/dataverse/Seed-PlaybookConsumers.ps1`
-3. Verify with read-only queries:
+4. Verify with read-only queries:
    - `sprk_analysisactions?$filter=sprk_actioncode eq 'invoice-firm-notice'`
    - `sprk_playbookconsumers?$filter=sprk_consumertype eq 'invoice-firm-notice'`
 
-Until the Binding row is seeded in an environment, `/healthz` there reports the routing health check Unhealthy (the type is in `ConsumerTypes.All` but has no row). Seed in the same deploy that ships this code. With no row, the composer still works: it falls back to the template with `ai.invoice.binding_missing`.
+Between the BFF deploy and the seed, `/healthz/catalog` reports Degraded (a constant with no row). With no row the composer still works: it falls back to the template with `ai.invoice.binding_missing`.
 
 ## Known limits
 
-- The prose screen is heuristic. Digits, currency, links and a closed list of amount words are refused; an arbitrary spelled-out number outside the list is not caught. The first wall (nothing numeric reaches the model) is the main guarantee.
+- The prose screen is heuristic. Digits (any script, outside the BMP too), currency, links and a closed list of number and amount words (after NFKC folding; see Review round 1) are refused; a figure phrased outside that list (for example "a couple of") is not caught. The first wall (nothing numeric reaches the model) is the main guarantee.
 - After a Return or Reject has been decided, 130 projects status and totals only, so the post-decision draft has an empty findings table; the reviewer's reason is not in the projection and is not sent to the firm by this task.
 - `golden-utterances.json`, `FinanceModule.cs` and `EndpointMappingExtensions.cs` are shared append points; expect a trivial merge there.
 - The model is Standard tier; the wording of model prose is the owner's to judge once the Action is seeded in dev.
 - 132 owns sending, storage and the in-app feed; this task returns a draft only.
+
+## Review round 1 (Opus review; owner decisions EB-D-255 and EB-D-256)
+
+- **EB-D-255:** the fallback wording above is APPROVED as drafted and is unchanged, byte for byte (`FirmNoticeFallbackText` was not touched; a test pins that it passes its own screen).
+- **EB-D-256:** the dev seed is approved; the coordinator runs it after this round. Nothing was seeded here.
+
+| Finding | Change |
+|---|---|
+| F1-a (ArchTests red) | `FirmNoticeComposer` is added to `FirmFindingsProjectionCallerBoundaryGuardTests.AllowedReferrers` (its only callers are the `ebilling.invoice.decide`-filtered draft route and 132's job, both with server-read ids). New `FirmNoticeComposerCallerBoundaryGuardTests`: allowed `FirmNoticeEndpoints` and `FinanceModule`; 132's handler is added when it lands; must-fire controls (call, field, generic resolution) and a must-not-fire control (a type that uses only `FirmNoticeDraft`). |
+| F1-b (non-BMP digits) | The prose screen walks runes (`Rune.DecodeFromUtf16`), refuses `Rune.IsNumber`, currency, control (other than line breaks in the body), Format, line and paragraph separators, Surrogate, PrivateUse and OtherNotAssigned. A lone surrogate is refused (it is not valid text). Cases for U+1D7CF..D1 and U+1D7DC added to `BadProse`. |
+| F1-c (spelled-out figures) | Prose is NFKC-folded before every word check (and the rune scan runs again on the folded text). Whole-word, case-insensitive refusal of two..ninety (cardinals incl. teens, tens), hundred(s), thousand(s), million(s), billion(s), dozen(s), half, halves, quarter(s), twice, double, triple, and first..tenth. "one" is deliberately not refused (ordinary prose; "line one" is still refused by the numbered-reference check). `.Distinct()` removed from `BuildRequest`: one finding per item (capped at 20). A count of findings is inherently visible to the model (up to 20 entries); it is not a figure it may write, and any number word it writes is refused. Probe cases added: "Seven lines were reduced.", "Twelve of your lines were not allowed.", "A fifty hour charge was disallowed.", "Half of the fees were not allowed.", the bold-letter "two hundred", and more (ordinals, "twice", "dozen", full-width "two", "twenty-five"). |
+| F2-a (health check wording) | Corrected above: the check is tagged `catalog` (on `/healthz/catalog`, not `/healthz`); a constant with no row is Degraded there, a row with no constant is a 503. Order is deploy the BFF first, then seed. The Binding row's `$comment` and the seeding section say the same. |
+| F3 (rate limit) | `.RequireRateLimiting("ai-batch")` on the draft route: a non-streaming model call, the closest existing policy (20 per minute per user, ADR-016). A route test runs a host with a one-permit policy of that name and shows the second request is 429 and calls no model. |
+| F2-b (test that proved nothing) | The negative assertions on a hand-made outcome were removed from `FirmNoticeComposerTests` (they could never fail). New test `FirmFindingsProjectionTests.FirmNotice_NoOverrideReasonProcedureNameOrProcedureId_ReachesTheModelOrTheNotice` (a partial of 130's test class, so it uses that class's `World` rig as it is): the REAL `FirmFindingsProjection` over Dataverse doubles that hold an override record with a reason, a Procedure with a name and an id, and a rule set with a name; the model double echoes whatever it is told. None of the three appears in the subject, prose, HTML or the serialized model request. Controls: the firm-visible reason and label are in the notice, the override record is in the store, the Procedure was read. |
+| K4 | The link screen refuses any bare domain shape (`label.label` with a 2-24 letter TLD), not six TLDs; `acme-billing.co.uk`, `evilsite.xyz` and `billing.example.firm` are cases. `CleanTrackingNumber` removes control, format, private-use and unassigned characters from the tracking number and turns any whitespace into one space, in the subject and the details table. |
+
+**Pending owner decision (not changed):** review finding 1, the post-decision empty findings table. It needs a decision on 130's projection (whether it may project a decided invoice's items and reasons). The existing test is left as it is.
+
+### Fail-before (round 1)
+
+- Composer, endpoint and projection mutated together (composer reverted to the committed round-0 version with a stub `CleanTrackingNumber`, `.RequireRateLimiting` removed, projection's reduce action code pointed at `override-submission`): **51 failed / 266 passed** of 317 in `FirmNotice|FirmFindings`. These include every new `BadProse` case that exercises F1-b/c/K4 (non-BMP digits, number words, ordinals, bold and full-width words, bare domains, private use, unassigned, tag character), the tracking-number test, the one-per-item test, the lone-surrogate test, the rate-limit 429 test, and three of 130's own tests that the projection mutation breaks on purpose.
+- F2-b alone, projection mutated only: **1 failed** on the leak assertion ("Did not expect text ... SENT-OVERRIDE-REASON"); restored: pass. Deviation: the coordinator suggested putting the override reason into the prose request. The composer has no access to an override reason, a Procedure name or a Procedure id (they exist only below the projection), so the mutation that can make the test fail is in the projection; that is the layer the rebuilt test exercises.
+- ArchTests: with the allow-list entries removed from the two guards, **2 failed**; restored: pass.
+
+### Gates (round 1)
+
+- `dotnet build src/server/api/Sprk.Bff.Api/ --warnaserror`: succeeded, 0 warnings, 0 errors.
+- Unit filter (`FirmNotice|ConsumerType|RoutingConsumer|FirmFindings|InvoiceAi|GoldenUtterance|P2LoopInjection|CatalogInputSchema|PlaybookConsumer`): 508 passed, 0 failed.
+- `FirmNotice|FirmFindings`: 317 passed. Seam (`FirmNoticeActionSeamTests`): 9 passed.
+- ArchTests (`Finance|Firm|Boundary|Route|Consumer|Ai`): 508 passed, 0 failed. The pre-existing "082c-2 C16 ... InvoiceAdjustmentService::IsOtherContent" failure the coordinator named did not appear in this run (it is not mine and was not touched).

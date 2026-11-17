@@ -35,6 +35,7 @@ public static class FirmNoticeEndpoints
         group.MapPost("/invoices/{invoiceId:guid}/firm-notice/draft", Draft)
             .AddFinanceAuthorizationFilter("ebilling.invoice.decide", FinanceAuthorizationFilter.InvoiceEntitySet, routeKey: "invoiceId")
             .RequireEbillingEnabled()
+            .RequireRateLimiting("ai-batch") // a model call per request: the same per-user limit as the other non-streaming AI calls (20 per minute, ADR-016)
             .WithName("DraftFirmNotice")
             .WithSummary("Draft the notice to the firm for a Return to Firm or a whole-invoice Reject")
             .WithDescription(

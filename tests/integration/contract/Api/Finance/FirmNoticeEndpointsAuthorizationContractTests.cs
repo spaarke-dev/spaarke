@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Headers;
+using System.Threading.RateLimiting;
 using System.Text.Json.Nodes;
 using FluentAssertions;
 using Microsoft.AspNetCore.Authentication;
@@ -166,6 +167,22 @@ public sealed class FirmNoticeEndpointsAuthorizationContractTests
         (await host.SendAsync("ReturnedToFirm")).StatusCode.Should().Be(HttpStatusCode.Forbidden);
     }
 
+    // ── The rate limit (review round 1, F3): a model call per request ──
+
+    [Fact]
+    public async Task TheRouteCarriesThe_AiBatch_RateLimit_AndTheRequestBeyondItIs429()
+    {
+        await using var host = await Host.StartAsync(rateLimitPermits: 1);
+        host.GrantAll();
+
+        var first = await host.SendAsync("ReturnedToFirm");
+        var second = await host.SendAsync("ReturnedToFirm");
+
+        first.StatusCode.Should().Be(HttpStatusCode.OK);
+        second.StatusCode.Should().Be(HttpStatusCode.TooManyRequests, "the route names the ai-batch policy, which limits it per window");
+        host.AiCalls.Should().Be(1, "a limited request calls no model");
+    }
+
     // ── The request ──
 
     [Theory]
@@ -299,7 +316,7 @@ public sealed class FirmNoticeEndpointsAuthorizationContractTests
             [new FirmOutcomeItem(FirmOutcomeDecision.Disallowed, Guid.NewGuid(), new FirmOutcomeLine(null, null, "A line", 100m, 0m), null, null, [], [])],
             false);
 
-        public static async Task<Host> StartAsync(bool ebillingEnabled = true)
+        public static async Task<Host> StartAsync(bool ebillingEnabled = true, int rateLimitPermits = 1000)
         {
             var host = new Host();
             host.Probe.CallerSystemUserId = Guid.NewGuid();
@@ -315,6 +332,14 @@ public sealed class FirmNoticeEndpointsAuthorizationContractTests
             builder.Services.AddAuthorization();
             host.StepZero = StatedCaller.Register(builder.Services); // task 099: every /api/finance route runs step 0
             builder.Services.AddOptions<EbillingOptions>().Configure(o => o.Enabled = ebillingEnabled);
+
+            // The production policy name ("ai-batch", RateLimitingModule); a route naming a policy this host does not define throws at request time.
+            builder.Services.AddRateLimiter(o =>
+            {
+                o.RejectionStatusCode = (int)HttpStatusCode.TooManyRequests;
+                o.AddPolicy("ai-batch", _ => RateLimitPartition.GetFixedWindowLimiter(
+                    "firm-notice-test", _ => new FixedWindowRateLimiterOptions { PermitLimit = rateLimitPermits, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
+            });
 
             // The REAL authorization stack, substituted only at the access-data boundary.
             builder.Services.AddSingleton<IAccessDataSource>(host.Access);
@@ -346,6 +371,7 @@ public sealed class FirmNoticeEndpointsAuthorizationContractTests
             builder.WebHost.UseTestServer();
             host._app = builder.Build();
             host._app.UseRouting();
+            host._app.UseRateLimiter();
             host._app.UseAuthentication();
             host._app.UseAuthorization();
             host._app.MapFirmNoticeEndpoints();

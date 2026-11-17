@@ -24,7 +24,7 @@ namespace Sprk.Bff.Api.Tests.Services.Finance;
 /// WITHOUT evaluating its filter and with only the requested columns, so a stray row or a forgotten column shows. The clause seam is
 /// <see cref="FirmClauseReader"/>, a fake that counts its calls.
 /// </summary>
-public sealed class FirmFindingsProjectionTests
+public sealed partial class FirmFindingsProjectionTests
 {
     private static readonly Guid SubmissionId = Guid.Parse("20000000-0000-4000-8000-0000000000b1");
     private static readonly Guid InvoiceId = InvoiceSubmissionPersister.InvoiceIdFor(SubmissionId);

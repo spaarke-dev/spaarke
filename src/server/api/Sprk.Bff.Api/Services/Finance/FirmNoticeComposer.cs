@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Diagnostics;
 using System.Globalization;
 using System.Net;
@@ -138,8 +139,15 @@ internal static class FirmNoticeProse
     internal const int MaxSubjectLength = 120;
     internal const int MaxProseLength = 1500;
 
+    // Money words, number words (cardinals two to ninety, the big-number words, fractions and multipliers) and ordinals (first to tenth), as whole
+    // words, case-insensitively, after NFKC folding. "one" is deliberately absent (it is ordinary prose; a numbered reference such as "line one" is
+    // refused by NumberedReference). A false positive only sends the notice to the fixed template.
     private static readonly Regex AmountWords = new(
-        @"\b(dollars?|cents?|euros?|pounds?\s+sterling|per\s?cent|percent|percentage|usd|eur|gbp|hundred|thousand|million|billion)\b",
+        @"\b(dollars?|cents?|euros?|pounds?\s+sterling|per\s?cent|percent|percentage|usd|eur|gbp"
+        + @"|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen"
+        + @"|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety"
+        + @"|hundreds?|thousands?|millions?|billions?|dozens?|half|halves|quarters?|twice|double|triple"
+        + @"|first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth)\b",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, TimeSpan.FromSeconds(1));
 
     private static readonly Regex NumberedReference = new(
@@ -147,7 +155,7 @@ internal static class FirmNoticeProse
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, TimeSpan.FromSeconds(1));
 
     private static readonly Regex Link = new(
-        @"(https?:|ftp:|www\.|@|\b[a-z0-9-]+\.(com|net|org|io|ai|law)\b)",
+        @"(https?:|ftp:|www\.|@|\b[a-z0-9][a-z0-9-]*(\.[a-z0-9][a-z0-9-]*)*\.[a-z]{2,24}\b)", // any bare domain shape: label.label with a 2-24 letter TLD
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, TimeSpan.FromSeconds(1));
 
     /// <summary>The reason code of the first check the text fails, or null when it passes. Never throws.</summary>
@@ -167,42 +175,81 @@ internal static class FirmNoticeProse
     }
 
     /// <summary>True when the text carries a figure, a currency, an amount word or a numbered reference (used to screen a firm reason before the model sees it).</summary>
-    internal static bool ContainsFigure(string text) =>
-        text.Any(char.IsNumber)
-        || text.Any(c => CharUnicodeInfo.GetUnicodeCategory(c) == UnicodeCategory.CurrencySymbol)
-        || MatchesSafely(AmountWords, text)
-        || MatchesSafely(NumberedReference, text);
+    internal static bool ContainsFigure(string text) => CheckText(text, allowLineBreaks: true) is not null;
 
     private static string? CheckText(string text, bool allowLineBreaks)
     {
-        foreach (var c in text)
+        // The code points are walked as runes, so a character outside the BMP (a mathematical digit, an emoji digit) is seen whole and not as two
+        // surrogates; a lone surrogate is not valid text at all.
+        var scanned = ScanRunes(text, allowLineBreaks);
+        if (scanned is not null)
         {
-            if (char.IsNumber(c))
+            return scanned;
+        }
+
+        // NFKC folds compatibility forms (mathematical alphanumerics, full-width letters, ligatures) to plain letters and digits, so every word
+        // check below sees what a reader sees. Folding can only fail on invalid text, which is refused.
+        string folded;
+        try
+        {
+            folded = text.Normalize(NormalizationForm.FormKC);
+        }
+        catch (ArgumentException)
+        {
+            return FirmNoticeFallbackReasons.ProseControlCharacter;
+        }
+
+        if (!string.Equals(folded, text, StringComparison.Ordinal))
+        {
+            scanned = ScanRunes(folded, allowLineBreaks);
+            if (scanned is not null)
+            {
+                return scanned;
+            }
+        }
+
+        if (MatchesSafely(Link, folded) || MatchesSafely(Link, text))
+        {
+            return FirmNoticeFallbackReasons.ProseLink;
+        }
+
+        return MatchesSafely(AmountWords, folded) || MatchesSafely(NumberedReference, folded)
+            ? FirmNoticeFallbackReasons.ProseAmountWord
+            : null;
+    }
+
+    private static string? ScanRunes(string text, bool allowLineBreaks)
+    {
+        var index = 0;
+        while (index < text.Length)
+        {
+            if (Rune.DecodeFromUtf16(text.AsSpan(index), out var rune, out var consumed) != OperationStatus.Done)
+            {
+                return FirmNoticeFallbackReasons.ProseControlCharacter;
+            }
+
+            index += consumed;
+            if (Rune.IsNumber(rune))
             {
                 return FirmNoticeFallbackReasons.ProseDigit;
             }
 
-            if (CharUnicodeInfo.GetUnicodeCategory(c) == UnicodeCategory.CurrencySymbol)
+            var category = Rune.GetUnicodeCategory(rune);
+            if (category == UnicodeCategory.CurrencySymbol)
             {
                 return FirmNoticeFallbackReasons.ProseCurrency;
             }
 
-            var lineBreak = c is '\n' or '\r' or '\t';
-            if ((char.IsControl(c) && !(allowLineBreaks && lineBreak)) ||
-                CharUnicodeInfo.GetUnicodeCategory(c) is UnicodeCategory.Format or UnicodeCategory.LineSeparator or UnicodeCategory.ParagraphSeparator)
+            var lineBreak = rune.Value is 10 or 13 or 9;
+            if ((Rune.IsControl(rune) && !(allowLineBreaks && lineBreak)) ||
+                category is UnicodeCategory.Format or UnicodeCategory.LineSeparator or UnicodeCategory.ParagraphSeparator
+                    or UnicodeCategory.Surrogate or UnicodeCategory.PrivateUse or UnicodeCategory.OtherNotAssigned)
             {
                 return FirmNoticeFallbackReasons.ProseControlCharacter;
             }
         }
 
-        if (MatchesSafely(Link, text))
-        {
-            return FirmNoticeFallbackReasons.ProseLink;
-        }
-
-        return MatchesSafely(AmountWords, text) || MatchesSafely(NumberedReference, text)
-            ? FirmNoticeFallbackReasons.ProseAmountWord
-            : null;
+        return null;
     }
 
     // A regex timeout is a refusal, never a pass: nothing is unchecked.
@@ -334,7 +381,8 @@ public sealed class FirmNoticeComposer
         }
 
         var (subject, prose, source, fallbackReason) = await DraftProseAsync(kind, outcome, id, ct).ConfigureAwait(false);
-        var finalSubject = string.IsNullOrWhiteSpace(outcome.TrackingNumber) ? subject : $"{subject} ({outcome.TrackingNumber.Trim()})";
+        var tracking = CleanTrackingNumber(outcome.TrackingNumber);
+        var finalSubject = tracking.Length == 0 ? subject : $"{subject} ({tracking})";
         var draft = new FirmNoticeDraft(
             kind, finalSubject, prose, RenderHtml(outcome, prose), source,
             source == FirmNoticeSource.Action ? ActionVersion : null, fallbackReason);
@@ -343,6 +391,36 @@ public sealed class FirmNoticeComposer
             "Firm notice composed | Kind {Kind}, Id {Id}, Source {Source}, FallbackReason {FallbackReason}, Items {Items}, ElapsedMs {ElapsedMs}",
             kind, id, source, fallbackReason, outcome.Items.Count, (long)Stopwatch.GetElapsedTime(started).TotalMilliseconds);
         return new FirmNoticeResult(FirmNoticeStatus.Composed, draft);
+    }
+
+    /// <summary>
+    /// The tracking number as it is written into the subject and the details: control, format, private-use and unassigned characters
+    /// removed and every whitespace character (a line break in a subject header is a header-injection shape) made one space, collapsed, trimmed. Empty when nothing is left.
+    /// </summary>
+    internal static string CleanTrackingNumber(string? trackingNumber)
+    {
+        if (string.IsNullOrWhiteSpace(trackingNumber))
+        {
+            return string.Empty;
+        }
+
+        var builder = new StringBuilder(trackingNumber.Length);
+        foreach (var rune in trackingNumber.EnumerateRunes())
+        {
+            var category = Rune.GetUnicodeCategory(rune);
+            if (Rune.IsWhiteSpace(rune))
+            {
+                builder.Append(' '); // a tab, a line break or a separator becomes one space, never a line break
+            }
+            else if (!Rune.IsControl(rune)
+                && category is not (UnicodeCategory.Format or UnicodeCategory.Surrogate or UnicodeCategory.PrivateUse or UnicodeCategory.OtherNotAssigned)
+                && rune != Rune.ReplacementChar)
+            {
+                builder.Append(rune.ToString());
+            }
+        }
+
+        return Regex.Replace(builder.ToString(), @" {2,}", " ", RegexOptions.CultureInvariant, TimeSpan.FromSeconds(1)).Trim();
     }
 
     /// <summary>Which projected states a notice kind may describe. A Return or Reject notice is shown before the decision (In Review) and after it.</summary>
@@ -443,8 +521,7 @@ public sealed class FirmNoticeComposer
                 RuleName: Screened(item.Citations.Select(c => c.RuleName).FirstOrDefault(n => !string.IsNullOrWhiteSpace(n))) ?? string.Empty,
                 Consequence: item.Decision.ToString(),
                 Issue: Screened(item.FirmReasons.FirstOrDefault(r => !string.IsNullOrWhiteSpace(r))) ?? FixedIssue(item.Decision)))
-            .Distinct()
-            .Take(MaxFindings)
+            .Take(MaxFindings) // one entry per item: no collapsing, so the model is not led to say "a line" for several (a count is not a figure it may write)
             .ToList();
 
         return new InvoiceFirmNoticeRequest { Outcome = ToAiOutcome(kind), Findings = findings };
@@ -508,9 +585,10 @@ public sealed class FirmNoticeComposer
     private static string DetailsHtml(FirmOutcome outcome)
     {
         var lines = new List<string>();
-        if (!string.IsNullOrWhiteSpace(outcome.TrackingNumber))
+        var tracking = CleanTrackingNumber(outcome.TrackingNumber);
+        if (tracking.Length > 0)
         {
-            lines.Add("Tracking number: " + Encode(outcome.TrackingNumber.Trim()));
+            lines.Add("Tracking number: " + Encode(tracking));
         }
 
         if (outcome.BilledTotal is { } billed)
