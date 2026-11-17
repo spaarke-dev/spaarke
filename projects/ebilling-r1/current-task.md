@@ -9,39 +9,38 @@
 
 ## NOW — read this first
 
-### Active (2026-11-17, late)
+### Active (2026-11-17, night)
 
-**State per task:**
-- **iss034a ✅** 02173d8497 and **iss034b ✅** d5934d6d51. iss034b round 1 also keeps Override/Return forms open when the hold clears. iss034a K5 (the trail shows who asked to finish, not who completed) waits on the owner's acknowledgement.
-- **095f-2e2a ✅** cdb91493a9. K5–K7 recorded; ISS-035 (#2889) filed.
-- **iss028:** part 1 merged at 332515309f; part 2 ("correction rows: native write hardening", EB-D-249) merged at 92e6e5b629.
-  - Reviewed by Opus with round 1 fixed, and approved by uac-r2.
-  - **Dev apply (EB-D-250) waits on the owner's answer about native deletes.** After the change, an ordinary user's native delete of an invoice, core record or invoice line that correction rows sit under is refused. The recommendation is to accept that as intended.
-  - Then:
-    1. Before notice to uac-r2: dev's live CascadeDelete for `sprk_invoicecorrection_invoice_invoice`, plus the `-Remove -Gap ISS028 -WhatIf` summary (entries pending vs already absent), plus the rollback `-Restore -Gap ISS028`.
-    2. `-Apply`, then `-Verify`.
-    3. After notice with the read-back (depth per privilege, no Create/Write/Delete left). uac-r2 re-probes.
-  - Commands: `pwsh scripts/Set-FeatureRolePrivileges.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com -Remove -Gap ISS028 -WhatIf|-Apply|-Verify`.
-  - **Master-merge obligation (agreed with uac-r2):**
-    - In the iss028 PR, add the five ISS028 entries to `scripts/provisioning/role-privilege-expectations/spaarkemaster-1.3.2.0.json` (Core User absent list).
-    - Amend the 1.3.2.0 release row to say three things: it removes privileges; it needs a managed stage-and-upgrade; dev rolls back with `Set-FeatureRolePrivileges.ps1 -Restore -Gap ISS028`.
-    - Send uac-r2 the PR number to review those two hunks.
-    - `NewestExpectationsFileCarriesTheRuledSet` fails until this is done.
-- **095f-2e2b ✅** merged f160fadc24 (Opus + round 1, spa-r4 approved; shared lib 3.1.0). At the master merge the external-spa lockfile line may need a re-resolve after R4 015 (#2886). ISS-036 (#2891) filed: browser check that the open decision form stays visible to screen readers when the hold clears.
-- **084h-5:**
-  - The option 2 switch is at f7b532d721 on `task/ebilling-084h-5-r1`. **DISPUTED — do not merge.** ontology-r1 reports the owner typed "Option 1" in its session.
-  - uac-r2 withdrew acceptance of option 2 as built: billing DecisionIds are derived from submission or approval id plus the verb, so the outcome sits in the key.
-  - The owner must choose here:
-    - **(A)** HMAC-keyed id for all four entries: per-environment Key Vault value read with managed identity, fail-closed startup, provisioning-r1 catalog step, the owner's typed go for the dev value. ontology-r1 gave the spec.
-    - **(B)** Gate AND Billing out of `DerivedRecordIdEntriesByDefault`, plus a test pinning the set to exactly {ConditionCleared, RecordProcedure}.
-  - EB-D-251 is to be amended to whatever the owner confirms.
+**Merged into work and pushed today (latest first):**
+- **iss032 ✅** 0ec908c554. Finish a reject/return/approve stranded after its transition. Covers both cases: the record is missing, or the record exists but is unlinked. Opus F4 fixed in round 1; the Sonnet re-check found no F. ISS-032 is In Progress until master. Checklist section J.
+- **iss034c ✅** ee94c7d4ea. The stamp records the completer (EB-D-253). AC5, the History-tab "Finished by", is deferred: OWNER QUESTION (about half a day).
+- **084h-5 ✅** e3eae27ef6, squashed (uac-r2's condition: a removed notes paragraph stays out of public history). EB-D-251 option B. ontology-r1 PASS; uac-r2 closed EB-D-247.
+- **iss028 dev apply ✅** (EB-D-250/252). Verify passed; uac-r2's re-probe passed. Checklist section I.
+- Index hygiene: 095f, 165, 116 (on master via #2724) and 130 (delivered by 130-0..130e-2) are marked ✅.
 
-**Open owner questions:**
-1. 084h-5: (A) or (B).
-2. Native deletes refused for records with correction rows: OK?
-3. Acknowledge iss034a K5.
+**Running:**
+- **131** (firm notice Action), Sonnet implementer on `task/ebilling-131` from a93e30cedc.
+  - No dev seed. The seed of the Action and its Binding needs the owner's typed OK plus uac-r2 notices.
+  - Fallback wording goes to the owner for approval.
+  - Then: Opus review, fix rounds, merge.
 
-**Before any master merge:** run the 5 CI shards, measure the publish-size delta against a fresh master build, and get the owner's go.
+**Blocked on the owner:**
+1. **133 (PDF report):** the POML stores via Graph SPE format=pdf in the retired output container. EB-D-148/163 moved files to Blob Stored Files, and the BFF has no PDF renderer.
+   - (a) Add a PDF library (new package; BFF size and CVE check).
+   - (b) An HTML report instead of a PDF.
+   - (c) Keep an SPE conversion step (no container on stamps).
+2. **131:** OK to seed the Action and Binding on dev; approve the fallback wording.
+3. **iss034c:** show "Finished by" on the History tab in R1?
+
+**Master-merge obligations (owner go needed):**
+- **iss028 PR:**
+  - add the five ISS028 entries to `scripts/provisioning/role-privilege-expectations/spaarkemaster-1.3.2.0.json` (Core User absent list);
+  - amend the 1.3.2.0 release row: it removes privileges, needs a managed stage-and-upgrade, and dev rolls back with `-Restore -Gap ISS028`;
+  - send uac-r2 the PR number.
+- **external-spa lockfile:** may need a re-resolve after R4 015 (#2886).
+- **Before the merge:** the 5 CI shards, the publish-size delta against a fresh master build, and the owner's go.
+
+**Next candidates after 131:** 134 and 135 (SPA; coordinate with spa-r4), 132 (needs 131 and 133), 117 (FULL opus), ISS-036 (a11y, small).
 
 - **095f-2b ✅ merged a3ef7e1c93** (fix 64c3e9ecbb: server-derived namespaced decision ids, neutral lookup 503; ontology-r1 PASS on catalog, exact-set amendment and fix; known limit ISS-030 / #2881).
 - **095f-2ui ✅ merged d3a61cc426** (review + 3 fix rounds + tweak). Page-level locks keep a partly saved decision exact on repeat; drafts survive 409s. Known limits are in its notes (locks are memory only; the Override/Return switch guard is client-only, see ISS-031 #2882). ISS-032 #2883 covers a decision stranded after its transition. Checklist section F added.
