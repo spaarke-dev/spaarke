@@ -12,10 +12,10 @@
 ### Active (2026-11-17, after compaction)
 
 **State per task:**
-- **iss034a ✅** merged 02173d8497. K5 (the trail shows who asked to finish, not who completed) waits on the owner's acknowledgement. Next: iss034b (client; codes `own_decision_pending` / `both_decisions_recorded`; GET hints `CanFinishAsOperator` / `StrandedDecision`).
+- **iss034a ✅** merged 02173d8497; **iss034b ✅** merged d5934d6d51 (round 1 also keeps Override/Return forms open when the hold clears). K5 (the trail shows who asked to finish, not who completed) waits on the owner's acknowledgement.
 - **095f-2e2a ✅** merged cdb91493a9. Gates passed: build clean, 2,222 BFF tests, 206 ArchTests. K5–K7 are in its notes. ISS-035 (#2889) filed for the comma-joined repeated field. Next: 095f-2e2b (client). Its POML now requires "resubmit disabled while a request is in flight". spa-r4 conditions 1–4 apply.
 - **iss028 🔄** code merged 332515309f (Opus review, round 1 fixed). ontology-r1 PASS on the writer-guard change. Gates running. The native write hardening waits on the owner's placement answer (questions below). In public text it is only "correction rows: native write hardening".
-- **084h-5:** ontology-r1's full review found F1 (the gate duplicate path skips the share when the retried create already committed) and F2 (the catch filters let a timeout `TaskCanceledException` escape). The fix round runs on `task/ebilling-084h-5-r1` from 74a3b96bdb. When it lands: send the diff to ontology-r1 (re-check of the fix and its callers), then our own scoped re-check. The merge still waits on the owner's 1/2/3 limit choice and on uac-r2. Old worktree `agent-a09fc390b051663f5` (branch `task/ebilling-084h-5`).
+- **084h-5:** fix rounds done on `task/ebilling-084h-5-r1` at 939253c140 (F1 share on the duplicate path, F2 + six more timeout catches, exactly-once meter test); ontology-r1 cleared the change set. Merge waits on the owner's limit choice and uac-r2. Worktree `agent-ac1b833a6981bc837` (and the older `agent-a09fc390b051663f5`).
 
 **Open owner questions:**
 1. iss028 hardening: in iss028 now, or in deploy task 079?

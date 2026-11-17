@@ -2245,7 +2245,7 @@ In a multi-line call whose earlier lines were recorded, the remaining lines take
 
 | Field | Value |
 |---|---|
-| **Status** | In Progress (owner chose option 1, EB-D-244; tasks iss034a, iss034b) |
+| **Status** | In Progress (EB-D-244; iss034a and iss034b merged into work, d5934d6d51; closes when on master) |
 | **Urgency** | next-round |
 | **Filed** | 2026-11-17 |
 | **Source** | iss031 review (Opus): made reachable by the ISS-031 guard |

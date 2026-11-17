@@ -63,3 +63,7 @@ Any other code keeps the per-status sentence of `decisionFailureMessage`. `serve
 - **The fixed sentences are a fallback only.** The server's refusal always carries its own detail, so `BLOCKED_REFUSAL_SENTENCES` is unreachable today; it guards a server that sends none. The tests cover both the detail and the fallback.
 - **`record_unavailable` on the finish is treated as definite.** It is not an unknown outcome (the server says nothing was changed), so the form stays editable. A retry with different text keeps the first operator record (the server reuses it) and writes no second decision.
 - **No live check.** Tested with mocked BFF clients; not run against a deployed server (no deploy in this task).
+
+## Merge re-check (coordinator)
+
+Round 1 diff re-checked (0a6d912e5f..8463a61141), no further finding. Known limit added: once the hold is gone, closing the open "saved in part: repeat it" form drops the lock and the banner is gone, so the repeat cannot be sent from the page again (before round 1 the form vanished on its own; now the user sees the error first). Merged into `work/ebilling-r1`.
