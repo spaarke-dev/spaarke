@@ -24,6 +24,9 @@
  */
 
 import type { AuthenticatedFetchFn } from '@spaarke/auth';
+// Task 095f-2e2b: `GET /api/finance/invoices/{invoiceId}/correction-prefill` uses the shared library's type and reader (one contract: the
+// one the corrected-invoice wizard itself reads).
+import { readCorrectionPrefill, type CorrectionPrefill } from '@spaarke/ui-components';
 import { toFailure, type ApiFailure, type ApiResult } from './invoiceReviewApi';
 import { isNoteRefusal, noteMember } from './noteModel';
 
@@ -313,25 +316,6 @@ export interface TimekeeperRateHistory {
 
 export interface RateHistoryContext {
   timekeepers: TimekeeperRateHistory[];
-}
-
-/**
- * Task 095f-2e2b: `GET /api/finance/invoices/{invoiceId}/correction-prefill` (`CorrectionPrefillResponse`, camelCase): whether the invoice can
- * be replaced by a corrected one, and its own firm, record and firm invoice number, which the corrected-invoice wizard prefills.
- */
-export interface CorrectionPrefill {
-  invoiceId: string;
-  /** The invoice's firm; null when it has none. */
-  firm: { id: string; name: string } | null;
-  /** `entityType` is `Matter`, `Project` or `WorkAssignment`. */
-  coreRecord: { entityType: string; entityId: string; name: string };
-  invoiceStatus: string | null;
-  trackingNumber: string | null;
-  firmInvoiceNumber: string;
-  /** The intake's answer now. */
-  canCorrect: boolean;
-  /** When not `canCorrect`: `invoice_status`, `no_submission` or `submission_in_progress`; else null. */
-  reason: string | null;
 }
 
 export interface InvoiceContext {
@@ -628,7 +612,7 @@ export function createInvoiceDecisionApi(fetchFn: AuthenticatedFetchFn, bffBaseU
         decisionRoutes.correctionPrefill(bffBaseUrl, invoiceId),
         'GET',
         null,
-        b => isObject(b) && typeof b.canCorrect === 'boolean' && isObject(b.coreRecord) && (b.firm === null || isObject(b.firm)),
+        b => readCorrectionPrefill(b) !== null,
         'correction prefill body'
       ),
   };

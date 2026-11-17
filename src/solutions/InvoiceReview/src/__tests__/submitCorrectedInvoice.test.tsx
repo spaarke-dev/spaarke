@@ -24,9 +24,22 @@ import {
   type MockDecisionApi,
 } from './testKit';
 
-function renderPage(opts: { status?: string; open?: OpenCorrectionWizard | null; decision?: MockDecisionApi; theme?: typeof webLightTheme } = {}) {
+function renderPage(
+  opts: {
+    status?: string;
+    open?: OpenCorrectionWizard | null;
+    decision?: MockDecisionApi;
+    theme?: typeof webLightTheme;
+    /** The caller's Write access to the invoice (the review's `flags.canDecide`); default: has it. */
+    canDecide?: boolean;
+  } = {}
+) {
   const base = review([line(1), line(2)]);
-  const inv = { ...base, header: { ...base.header, status: opts.status ?? 'InReview' } };
+  const inv = {
+    ...base,
+    header: { ...base.header, status: opts.status ?? 'InReview' },
+    flags: { ...base.flags, canDecide: opts.canDecide ?? true },
+  };
   const api = mockApi(inv);
   const decision = opts.decision ?? mockDecisionApi();
   const open = opts.open === null ? undefined : (opts.open ?? jest.fn(async () => ({ confirmed: true })));
@@ -77,9 +90,37 @@ describe('Submit corrected invoice: when the action shows', () => {
     expect(screen.queryByTestId('correction-notice')).not.toBeInTheDocument();
   });
 
-  it('works in dark mode (tokens only: it draws no colour of its own)', async () => {
-    renderPage({ theme: webDarkTheme });
+  it('must-fire: a view-only caller (no Write on the invoice) does not see the action, and the page never reads the prefill', async () => {
+    const { api, decision } = renderPage({ canDecide: false });
+    await waitFor(() => expect(api.getReview).toHaveBeenCalled());
+    await screen.findByTestId('progress');
+    expect(screen.queryByTestId('submit-corrected-invoice')).not.toBeInTheDocument();
+    expect(decision.getCorrectionPrefill).not.toHaveBeenCalled();
+  });
+
+  it('must-not-fire: a caller with Write on an In Review invoice sees it (the same page, only the flag differs)', async () => {
+    renderPage({ canDecide: true });
     expect(await action()).toBeInTheDocument();
+  });
+
+  it('works in dark mode: the provider carries the dark tokens and the button draws no colour of its own', async () => {
+    const dark = renderPage({ theme: webDarkTheme });
+    const button = await action();
+    // No inline colour or background on the button or its footer: colour comes from Fluent classes and tokens only.
+    expect(button.getAttribute('style')).toBeNull();
+    const provider = button.closest('.fui-FluentProvider') as HTMLElement | null;
+    expect(provider).not.toBeNull();
+    const darkSurface = getComputedStyle(provider as HTMLElement).getPropertyValue('--colorNeutralBackground1');
+    expect(darkSurface).toBe(webDarkTheme.colorNeutralBackground1);
+    dark.view.unmount();
+
+    renderPage({ theme: webLightTheme });
+    const lightButton = await action();
+    const lightSurface = getComputedStyle(lightButton.closest('.fui-FluentProvider') as HTMLElement).getPropertyValue(
+      '--colorNeutralBackground1'
+    );
+    expect(lightSurface).toBe(webLightTheme.colorNeutralBackground1);
+    expect(lightSurface).not.toBe(darkSurface);
   });
 });
 
@@ -164,7 +205,11 @@ describe('Submit corrected invoice: each refusal is shown in plain words and the
     ],
     [
       'the invoice is not available to this caller, or is gone (404)',
-      d => d.getCorrectionPrefill.mockResolvedValue(failed(problem(404, null, { reasonCode: 'sdap.access.deny.record_unavailable' }))),
+      // As the server answers it: the generic "not found" detail is there, and the correction's own sentence is shown anyway.
+      d =>
+        d.getCorrectionPrefill.mockResolvedValue(
+          failed(problem(404, null, { reasonCode: 'sdap.access.deny.record_unavailable', detail: 'The requested record was not found.' }))
+        ),
       /not available to you, or no longer exists, so it cannot be corrected\. Nothing was saved\./,
     ],
     [
@@ -233,6 +278,35 @@ describe('the correction prefill client (task 095f-2e2b)', () => {
     for (const body of [null, {}, { canCorrect: 'yes', coreRecord: {} }, { canCorrect: true }, { canCorrect: true, coreRecord: {}, firm: 5 }]) {
       const fetchFn = jest.fn(async () => ({ ok: true, status: 200, json: async () => body }) as never);
       expect((await createInvoiceDecisionApi(fetchFn, BASE).getCorrectionPrefill(INVOICE_ID)).ok).toBe(false);
+    }
+  });
+
+  it('refuses a body without the firm invoice number (the library reader is the one validator)', async () => {
+    const { firmInvoiceNumber: _omitted, ...withoutNumber } = correctionPrefill();
+    for (const body of [withoutNumber, { ...withoutNumber, firmInvoiceNumber: null }, { ...withoutNumber, firmInvoiceNumber: 7 }]) {
+      const fetchFn = jest.fn(async () => ({ ok: true, status: 200, json: async () => body }) as never);
+      expect((await createInvoiceDecisionApi(fetchFn, BASE).getCorrectionPrefill(INVOICE_ID)).ok).toBe(false);
+    }
+  });
+
+  it('on the page, a prefill body missing the firm invoice number reads as "could not be read": a sentence, no wizard, no unhandled rejection', async () => {
+    const { firmInvoiceNumber: _omitted, ...withoutNumber } = correctionPrefill();
+    const fetchFn = jest.fn(async () => ({ ok: true, status: 200, json: async () => withoutNumber }) as never);
+    const real = createInvoiceDecisionApi(fetchFn, BASE);
+    const decision = mockDecisionApi();
+    decision.getCorrectionPrefill.mockImplementation(real.getCorrectionPrefill);
+    const unhandled = jest.fn();
+    process.on('unhandledRejection', unhandled);
+    try {
+      const { open } = renderPage({ decision });
+      fireEvent.click(await action());
+      expect(await notice()).toHaveTextContent(/could not be read, so it cannot be corrected\. Try again shortly\. Nothing was saved\./);
+      expect(open).not.toHaveBeenCalled();
+      await waitFor(() => expect(screen.getByTestId('submit-corrected-invoice')).toBeEnabled());
+      await new Promise(resolve => setTimeout(resolve, 0));
+      expect(unhandled).not.toHaveBeenCalled();
+    } finally {
+      process.off('unhandledRejection', unhandled);
     }
   });
 

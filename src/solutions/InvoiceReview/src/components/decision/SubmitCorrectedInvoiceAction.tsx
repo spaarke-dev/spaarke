@@ -35,6 +35,8 @@ export type OpenCorrectionWizard = (invoiceId: string) => Promise<CorrectionWiza
 
 export interface SubmitCorrectedInvoiceActionProps {
   review: InvoiceReview;
+  /** The page's write access (as DecideInvoiceAction): without it the action is not shown. */
+  canWrite: boolean;
   invoiceId: string;
   api: InvoiceDecisionApi;
   openCorrectionWizard: OpenCorrectionWizard;
@@ -51,12 +53,14 @@ export function correctionReadFailureMessage(f: ApiFailure): string {
     // The uniform 404 carries a `reasonCode` (which `toFailure` reads as the code), never an `errorCode` of its own: every 404 here is
     // "not available to you, or gone", in the correction's own words (as the wizard's adapter gives it).
     errorCode: f.status === 404 ? CORRECTION_UNAVAILABLE_ERROR_CODE : (f.errorCode ?? undefined),
-    detail: f.detail ?? undefined,
+    // A 404 carries the server's generic "not found" detail, which would win over the correction's own sentence: leave it out for a 404.
+    // A 2xx whose body was not a prefill (this client's own "unexpected body" failure) is "could not be read" in the wizard's words too.
+    detail: f.status === 404 || (f.status >= 200 && f.status < 300) ? undefined : (f.detail ?? undefined),
   });
   return correctionPrefillErrorMessage(err);
 }
 
-export function SubmitCorrectedInvoiceAction({ review, invoiceId, api, openCorrectionWizard, reload, onNotice }: SubmitCorrectedInvoiceActionProps) {
+export function SubmitCorrectedInvoiceAction({ review, canWrite, invoiceId, api, openCorrectionWizard, reload, onNotice }: SubmitCorrectedInvoiceActionProps) {
   const [busy, setBusy] = React.useState(false);
   // A ref as well as state: two clicks before React re-renders the disabled button are still one request.
   const busyRef = React.useRef(false);
@@ -93,7 +97,7 @@ export function SubmitCorrectedInvoiceAction({ review, invoiceId, api, openCorre
     }
   }, [api, invoiceId, onNotice, openCorrectionWizard, reload]);
 
-  if (review.header.status !== 'InReview') return null;
+  if (!canWrite || review.header.status !== 'InReview') return null;
   return (
     <Button onClick={() => void run()} disabled={busy} data-testid="submit-corrected-invoice">
       Submit corrected invoice…

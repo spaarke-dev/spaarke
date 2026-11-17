@@ -24,6 +24,14 @@ describe('correctionNoteProblem', () => {
     expect(correctionNoteProblem('x'.repeat(2001))).toBe('The note may be at most 2,000 characters.');
   });
 
+  it('refuses the C1 controls the server refuses too (char.IsControl): U+0085 NEL, U+0080 and U+009F', () => {
+    for (const bad of ['a\u0085b', 'a\u0080b', 'a\u009Fb']) {
+      expect(correctionNoteProblem(bad)).toMatch(/control character/);
+    }
+    // The first characters after the C1 block are ordinary text.
+    expect(correctionNoteProblem('a b')).toBeNull();
+  });
+
   it('refuses a control character other than a line break or a tab', () => {
     for (const bad of ['a\u0000b', 'a\u0007b', 'a\u000Bb', 'a\u000Cb', 'a\u001Fb', 'a\u007Fb']) {
       expect(correctionNoteProblem(bad)).toMatch(/control character/);

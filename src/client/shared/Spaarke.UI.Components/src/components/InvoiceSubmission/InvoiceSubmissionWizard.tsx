@@ -205,8 +205,8 @@ export interface InvoiceSubmissionWizardProps extends InvoiceSubmissionCallbacks
    *   `firmId`;
    * - the firm invoice number starts as `correction.firmInvoiceNumber` and cannot be edited (the server refuses another);
    * - the Details step has a required Note (why the invoice is corrected), at most 2,000 characters; Submit stays off without one;
-   * - `submit` receives `correction: { invoiceId, note }`; a second Submit while one is in flight is ignored, so one click sequence
-   *   sends exactly one Correction (two Corrections of one invoice can both be received; the second then fails at commit).
+   * - `submit` receives `correction: { invoiceId, note }`; a second Submit while one is in flight joins that request (it does not send another), so one
+   *   click sequence sends exactly one Correction (two Corrections of one invoice can both be received; the second then fails at commit).
    * `hideTitle`, `embedded` and the close guard behave as without it.
    */
   correction?: InvoiceCorrectionTarget;

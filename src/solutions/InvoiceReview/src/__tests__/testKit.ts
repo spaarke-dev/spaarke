@@ -16,7 +16,8 @@ import type {
   ReviewFinding,
   ReviewLine,
 } from '../services/invoiceReviewApi';
-import type { ApprovalState, BlockedSubmission, ContextSection, CorrectionPrefill, InvoiceContext, InvoiceDecisionApi } from '../services/decisionApi';
+import type { CorrectionPrefill } from '@spaarke/ui-components';
+import type { ApprovalState, BlockedSubmission, ContextSection, InvoiceContext, InvoiceDecisionApi } from '../services/decisionApi';
 import { toFailure } from '../services/invoiceReviewApi';
 
 export const INVOICE_ID = '0d9178d3-9f32-7f46-ed9a-4dec59f66c1a';
@@ -310,7 +311,7 @@ export function correctionPrefill(overrides: Partial<CorrectionPrefill> = {}): C
   };
 }
 
-export type MockDecisionApi ={ [K in keyof InvoiceDecisionApi]: jest.Mock };
+export type MockDecisionApi = { [K in keyof InvoiceDecisionApi]: jest.Mock };
 
 const emptySection = <T>(data: T): ContextSection<T> => ({ status: 'available', data, code: null, message: null });
 

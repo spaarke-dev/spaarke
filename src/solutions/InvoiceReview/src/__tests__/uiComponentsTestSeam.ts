@@ -30,9 +30,11 @@ export type {
 export type { IPdfHighlight, PdfBytes } from '../../../../client/shared/Spaarke.UI.Components/src/components/FilePreview/PdfHighlightViewer';
 export type { IPdfNormalisedBox } from '../../../../client/shared/Spaarke.UI.Components/src/components/FilePreview/pdfHighlightGeometry';
 // Task 095f-2e2b: the corrected-invoice words ("Submit corrected invoice" shows the shared wizard's own sentences for a refusal).
+export type { CorrectionPrefill } from '../../../../client/shared/Spaarke.UI.Components/src/components/CreateInvoiceWizard/internalInvoiceSubmission';
 export {
   correctionPrefillErrorMessage,
   correctionTargetFromPrefill,
+  readCorrectionPrefill,
 } from '../../../../client/shared/Spaarke.UI.Components/src/components/CreateInvoiceWizard/internalInvoiceSubmission';
 export {
   CORRECTION_UNAVAILABLE_ERROR_CODE,

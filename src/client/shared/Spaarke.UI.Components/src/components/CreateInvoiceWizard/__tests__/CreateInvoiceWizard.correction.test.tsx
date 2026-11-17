@@ -190,7 +190,13 @@ describe('CreateInvoiceWizard — correctionInvoiceId', () => {
   });
 
   it('an unavailable invoice (404) says so; a failed read (503) offers Try again, which reads again', async () => {
-    const gone = makeServer({ prefill: () => reply(404, { reasonCode: 'sdap.access.deny.record_unavailable' }) });
+    const gone = makeServer({
+      prefill: () =>
+        reply(404, {
+          reasonCode: 'sdap.access.deny.record_unavailable',
+          detail: 'The requested record was not found.',
+        }),
+    });
     const first = mount(gone);
     expect(await screen.findByTestId('correction-refused')).toHaveTextContent(
       /not available to you, or no longer exists/

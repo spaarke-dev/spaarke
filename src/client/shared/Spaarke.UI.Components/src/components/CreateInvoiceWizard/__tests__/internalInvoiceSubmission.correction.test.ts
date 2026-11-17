@@ -134,9 +134,9 @@ describe('submit — a Correction (the 095f-2e2a form-field contract)', () => {
         /^correctionNote may be at most 2000 characters\.$/,
       ],
       [
-        '404 uniform (no errorCode, a reasonCode)',
+        '404 uniform (no errorCode, a reasonCode, the server generic detail: the correction sentence is shown anyway)',
         404,
-        { reasonCode: 'sdap.access.deny.record_unavailable' },
+        { reasonCode: 'sdap.access.deny.record_unavailable', detail: 'The requested record was not found.' },
         /not available to you, or no longer exists, so it cannot be corrected\. Nothing was saved\./,
       ],
       [
@@ -223,6 +223,8 @@ describe('loadCorrectionPrefill', () => {
       { invoiceId: INVOICE_ID },
       { ...PREFILL, canCorrect: 'yes' },
       { ...PREFILL, coreRecord: null },
+      { ...PREFILL, firmInvoiceNumber: undefined },
+      { ...PREFILL, firmInvoiceNumber: null },
     ]) {
       const t = make(() => reply(200, body));
       await expect(t.client.loadCorrectionPrefill(INVOICE_ID)).rejects.toBeInstanceOf(InvoiceSubmissionError);
@@ -231,7 +233,12 @@ describe('loadCorrectionPrefill', () => {
 
   it('a 404 is the correction words, a 503 is "could not be read", thrown or returned', async () => {
     for (const failure of [
-      () => refuse(404, { reasonCode: 'sdap.access.deny.record_unavailable' }),
+      () =>
+        refuse(404, {
+          reasonCode: 'sdap.access.deny.record_unavailable',
+          detail: 'The requested record was not found.',
+        }),
+      () => reply(404, { detail: 'The requested record was not found.' }),
       () => reply(404, {}),
     ]) {
       const err = await make(failure)

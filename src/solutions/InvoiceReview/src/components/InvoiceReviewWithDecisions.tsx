@@ -88,6 +88,7 @@ export function InvoiceReviewWithDecisions({ invoiceId, initialLineId, api, deci
             {openCorrectionWizard && (
               <SubmitCorrectedInvoiceAction
                 review={ctx.review}
+                canWrite={ctx.canWrite}
                 invoiceId={invoiceId}
                 api={decisionApi}
                 openCorrectionWizard={openCorrectionWizard}

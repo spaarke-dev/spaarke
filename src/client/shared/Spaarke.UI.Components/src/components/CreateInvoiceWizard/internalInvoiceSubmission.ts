@@ -152,7 +152,11 @@ function fromProblem(
     if (!detail && status === 400) detail = firstFieldError(problem);
     // The uniform 404 of an invoice the caller cannot write (or that is gone) carries a `reasonCode`, no `errorCode`: whatever it carries,
     // a 404 here is "not available to you, or gone", and gets the correction's own words.
-    if (status === 404) errorCode = CORRECTION_UNAVAILABLE_ERROR_CODE;
+    // The 404's own `detail` is the server's generic "not found" sentence, which would win over the correction's words: drop it here.
+    if (status === 404) {
+      errorCode = CORRECTION_UNAVAILABLE_ERROR_CODE;
+      detail = undefined;
+    }
   }
   return new InvoiceSubmissionError({ statusCode: status, errorCode, detail, reason });
 }
@@ -325,6 +329,8 @@ const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'obj
 /** The prefill from a parsed body, or null when it is not one (a missing or wrongly typed member: never a partial answer). */
 export function readCorrectionPrefill(body: unknown): CorrectionPrefill | null {
   if (!isRecord(body) || typeof body.invoiceId !== 'string' || typeof body.canCorrect !== 'boolean') return null;
+  // The server always sends the firm invoice number (a non-null string on its DTO): a body without one is not this contract.
+  if (typeof body.firmInvoiceNumber !== 'string') return null;
   const core = body.coreRecord;
   if (
     !isRecord(core) ||
@@ -345,7 +351,7 @@ export function readCorrectionPrefill(body: unknown): CorrectionPrefill | null {
     coreRecord: { entityType: core.entityType, entityId: core.entityId, name: core.name },
     invoiceStatus: asString(body.invoiceStatus),
     trackingNumber: asString(body.trackingNumber),
-    firmInvoiceNumber: typeof body.firmInvoiceNumber === 'string' ? body.firmInvoiceNumber : '',
+    firmInvoiceNumber: body.firmInvoiceNumber,
     canCorrect: body.canCorrect,
     reason: asString(body.reason),
   };

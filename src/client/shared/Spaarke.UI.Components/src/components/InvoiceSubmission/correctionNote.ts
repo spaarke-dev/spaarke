@@ -14,9 +14,9 @@
 /** The most characters a note may have after trimming (`InvoiceCorrectionNote.MaxLength`). */
 export const CORRECTION_NOTE_MAX_CHARS = 2000;
 
-/** Control characters other than a line break (LF, CR) or a tab, which the server refuses in a note. */
+/** Control characters other than a line break (LF, CR) or a tab, which the server refuses in a note (its `char.IsControl`: C0, DEL and C1). */
 // eslint-disable-next-line no-control-regex
-const FORBIDDEN_CONTROL = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/;
+const FORBIDDEN_CONTROL = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F]/;
 
 /** How many characters count against the limit (the server counts after trimming). */
 export function correctionNoteCount(note: string | null | undefined): number {
