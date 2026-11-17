@@ -80,3 +80,20 @@ Nothing here is testable until those deploys run. On an In Review invoice in Inv
 - [ ] A note with only spaces is treated as no note.
 - [ ] After a decision, the note appears on its Decision Record (and the reject/return note appears on the invoice's decision note). The firm does NOT see the note in the SPA.
 - [ ] Confirm a value that is already confirmed, with a note: the page says the note was not saved (instead of "Saved").
+
+## G. Finish a stranded decision as operator (ISS-034, iss034a + iss034b): after a BFF and an Invoice Review page that carry them
+
+Not yet deployed. You need a held invoice whose Override (or blocked Return) by person A was recorded but did not finish; sign in as a billing admin B.
+
+- [ ] B sees **Finish as operator** on the hold banner, naming A's pending Override or Return. A non-admin, and A themself, do not see it.
+- [ ] Finishing needs a reason (note optional). Afterwards the invoice is released (or returned) exactly as A recorded it, and the Decision Records show A's decision plus B's "finish" step.
+- [ ] If the page says the decision was saved in part, the form stays open with that message; repeating it finishes the close.
+
+## H. Submit a corrected invoice from Invoice Review (095f-2e2a server + 095f-2e2b client): after a BFF and the Create Invoice wizard / Invoice Review pages that carry them
+
+Not yet built end to end (2e2b in progress).
+
+- [ ] On an In Review invoice, **Submit corrected invoice** opens the Create Invoice wizard with the firm invoice number filled in and the record locked.
+- [ ] The wizard asks for a note; without one it refuses.
+- [ ] After upload, the new invoice gets the next tracking number (`number.2`), shows the note, and the old invoice becomes Superseded.
+- [ ] A double click on submit sends one correction only.
