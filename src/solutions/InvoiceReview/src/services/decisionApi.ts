@@ -178,6 +178,8 @@ export interface BlockedDecisionStamp {
   bySystemUserId: string;
   on: string;
   reason: string;
+  /** iss034c (EB-D-253): the user whose call completed the decision (the operator on an operator finish). Absent or null on a stamp written before it existed ("not recorded"). */
+  completedBySystemUserId?: string | null;
 }
 
 /** `Blocked`, `Overridden`, `Returned` or `NotBlocked`. */
