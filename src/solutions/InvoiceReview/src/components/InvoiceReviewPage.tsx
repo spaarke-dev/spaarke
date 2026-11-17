@@ -85,11 +85,12 @@ import {
   type RuleGroup,
   type SuggestionPlan,
 } from '../services/reviewModel';
+import { isNoteRefusal, noteMember, noteRefusalMessage } from '../services/noteModel';
 import { LinesGrid } from './LinesGrid';
 import { LineReviewPane, type PaneDecision } from './LineReviewPane';
 import { RuleGroups } from './RuleGroups';
 import { ProcedureChangeNotice } from './ProcedureChangeNotice';
-import { AddLineModal, BulkDecisionModal, CorrectValueModal, HEADER_FIELDS, type BulkRequest, type CorrectTarget } from './Dialogs';
+import { AddLineModal, BulkDecisionModal, ConfirmValueModal, CorrectValueModal, HEADER_FIELDS, type BulkRequest, type CorrectTarget } from './Dialogs';
 
 const useStyles = makeStyles({
   page: {
@@ -310,6 +311,13 @@ export function InvoiceReviewPage(props: InvoiceReviewPageProps) {
   /** The Add line form, open when set. Its requestId is made once, when the form opens, and kept for every send from it (task 164, C1). */
   const [addLine, setAddLine] = React.useState<{ requestId: string } | null>(null);
   const [dialogError, setDialogError] = React.useState<string | null>(null);
+  /** The Confirm-as-read form (task 095f-2ui: it carries an optional note), open when set. */
+  const [confirming, setConfirming] = React.useState<{ line: ReviewLine; field: string } | null>(null);
+  /**
+   * Task 095f-2ui: the server refused a note (400 `ebilling.note_too_long` / `note_invalid_characters`). It is shown under the Note box of the
+   * form the send came from (the pane's line decision, or the open dialog), never as a page notice, and cleared when the note is edited.
+   */
+  const [noteFault, setNoteFault] = React.useState<{ where: 'pane' | 'dialog'; message: string } | null>(null);
 
   const panes = useTwoPanelLayout({ defaultDetailWidth: 560, minPrimaryWidth: 520, minDetailWidth: 420, storageKey: 'sprk-invoice-review-pane' });
 
@@ -468,10 +476,13 @@ export function InvoiceReviewPage(props: InvoiceReviewPageProps) {
          * keeps Repeat with the SAME closure (same id, same body), and no sentence claims that nothing was changed.
          */
         isRepeat?: boolean;
+        /** Where this send's Note box is (the pane's decision form, or the open dialog): a refused note (400) is shown there, not as a notice. */
+        noteField?: 'pane' | 'dialog';
       }
     ): Promise<boolean> => {
       setBusy(true);
       setDialogError(null);
+      setNoteFault(null);
       const result = await call();
       if (!alive.current) return false;
       if (result.ok) {
@@ -488,6 +499,12 @@ export function InvoiceReviewPage(props: InvoiceReviewPageProps) {
         return true;
       }
       const f = result.failure;
+      // A refused note (400, before any read): nothing was written and the form still holds everything, so only the Note box says so.
+      if (opts.noteField && isNoteRefusal(f)) {
+        setBusy(false);
+        setNoteFault({ where: opts.noteField, message: noteRefusalMessage(f) });
+        return false;
+      }
       if (f.status === 403) setRefused403(true);
       const ordinaryText = (opts.failureText ?? writeFailureMessage)(f);
       const text = opts.isRepeat ? repeatFailureMessage(f, ordinaryText) : ordinaryText;
@@ -526,8 +543,10 @@ export function InvoiceReviewPage(props: InvoiceReviewPageProps) {
 
   const decide = (line: ReviewLine, d: PaneDecision) => {
     const decisionId = newDecisionId();
+    // A new submit is a new decision id, with the note as typed now. Repeat (after a 503) is this same closure, so it resends this id and this note.
     void runWrite(() => api.decideLine(invoiceId, line.id, { decisionId, ...d }), {
       success: `Saved · ${decisionWords(d, line)}`,
+      noteField: 'pane',
       after: (_, fresh) => {
         // Move on to the next line to decide, from the server's fresh state.
         const next = fresh ? nextToDecide(fresh.lines, line.id) : null;
@@ -556,7 +575,7 @@ export function InvoiceReviewPage(props: InvoiceReviewPageProps) {
     });
   };
 
-  const submitBulk = (request: BulkRequest, reason: string | null) => {
+  const submitBulk = (request: BulkRequest, reason: string | null, note?: string) => {
     const decisionId = newDecisionId();
     void runWrite(
       () =>
@@ -565,10 +584,12 @@ export function InvoiceReviewPage(props: InvoiceReviewPageProps) {
           action: request.action,
           reason,
           lines: request.lines.map(l => ({ lineId: l.lineId, approvedAmount: request.action === 'reduce' ? l.approvedAmount : null })),
+          ...noteMember(note),
         }),
       {
         success: `Saved · ${request.lines.length} ${request.lines.length === 1 ? 'line' : 'lines'} ${request.action === 'accept' ? 'accepted' : request.action === 'disallow' ? 'disallowed' : 'reduced'}`,
         inDialog: true,
+        noteField: 'dialog',
         closeDialog: () => setBulk(null),
         after: (_, __, isRepeat) => {
           if (!isRepeat) setBulk(null);
@@ -578,14 +599,15 @@ export function InvoiceReviewPage(props: InvoiceReviewPageProps) {
     );
   };
 
-  const submitCorrection = (target: CorrectTarget, field: string, value: string) => {
-    const request = { field, value, confirm: false };
+  const submitCorrection = (target: CorrectTarget, field: string, value: string, note?: string) => {
+    const request = { field, value, confirm: false, ...noteMember(note) };
     const label = target.lineId ? target.label : (HEADER_FIELDS.find(h => h.field === field)?.label ?? field);
     void runWrite(
       () => (target.lineId ? api.correctLine(invoiceId, target.lineId, request) : api.correctHeader(invoiceId, request)),
       {
         success: `Saved · ${label} corrected${target.lineSequence ? ` on line ${target.lineSequence}` : ''}; the rules ran again`,
         inDialog: true,
+        noteField: 'dialog',
         closeDialog: () => setCorrect(null),
         after: (_, __, isRepeat) => {
           if (!isRepeat) setCorrect(null);
@@ -626,14 +648,29 @@ export function InvoiceReviewPage(props: InvoiceReviewPageProps) {
     });
   };
 
+  /** Confirm as read: opens the small form that carries the optional note (task 095f-2ui); the send is `submitConfirm`. */
   const confirmValue = (line: ReviewLine, field: string) => {
-    void runWrite(() => api.correctLine(invoiceId, line.id, { field, value: null, confirm: true }), {
+    setDialogError(null);
+    setNoteFault(null);
+    setConfirming({ line, field });
+  };
+
+  const submitConfirm = (target: { line: ReviewLine; field: string }, note?: string) => {
+    const { line, field } = target;
+    void runWrite(() => api.correctLine(invoiceId, line.id, { field, value: null, confirm: true, ...noteMember(note) }), {
       success: `Saved · ${fieldLabel(field)} on line ${line.sequence} confirmed as read`,
+      inDialog: true,
+      noteField: 'dialog',
+      closeDialog: () => setConfirming(null),
+      after: (_, __, isRepeat) => {
+        if (!isRepeat) setConfirming(null);
+      },
     });
   };
 
   const openCorrect = (line: ReviewLine, field: string) => {
     setDialogError(null);
+    setNoteFault(null);
     const label = CODE_LABEL[field] ?? fieldLabel(field);
     setCorrect({
       lineId: line.id,
@@ -648,11 +685,13 @@ export function InvoiceReviewPage(props: InvoiceReviewPageProps) {
 
   const openHeaderCorrect = () => {
     setDialogError(null);
+    setNoteFault(null);
     setCorrect({ lineId: null, lineSequence: null, field: HEADER_FIELDS[0].field, label: HEADER_FIELDS[0].label, asRead: null, initial: '' });
   };
 
   const openBulk = (action: 'accept' | 'disallow') => {
     setDialogError(null);
+    setNoteFault(null);
     const picked = lines.filter(l => checkedIds.includes(l.id));
     setBulk({
       action,
@@ -663,6 +702,7 @@ export function InvoiceReviewPage(props: InvoiceReviewPageProps) {
 
   const openApply = (group: RuleGroup, plan: SuggestionPlan) => {
     setDialogError(null);
+    setNoteFault(null);
     setBulk({
       action: plan.action,
       title: `Apply the ${group.label} suggestion to ${plan.lines.length} ${plan.lines.length === 1 ? 'line' : 'lines'}`,
@@ -863,6 +903,8 @@ export function InvoiceReviewPage(props: InvoiceReviewPageProps) {
                   firmNeeded={firmNeeded}
                   corrections={selectedLine ? corrections.filter(c => c.lineId === selectedLine.id) : []}
                   toDecideCount={toDecideCount}
+                  noteError={noteFault?.where === 'pane' ? noteFault.message : null}
+                  onNoteEdit={() => setNoteFault(null)}
                   onStart={() => {
                     const first = nextToDecide(lines, null);
                     if (first) onSelect(first.id, null);
@@ -914,8 +956,21 @@ export function InvoiceReviewPage(props: InvoiceReviewPageProps) {
           target={correct}
           busy={busy}
           error={dialogError}
+          noteError={noteFault?.where === 'dialog' ? noteFault.message : null}
+          onNoteEdit={() => setNoteFault(null)}
           onClose={() => setCorrect(null)}
-          onSubmit={(field, value) => submitCorrection(correct, field, value)}
+          onSubmit={(field, value, note) => submitCorrection(correct, field, value, note)}
+        />
+      )}
+      {confirming && (
+        <ConfirmValueModal
+          target={{ lineSequence: confirming.line.sequence, label: fieldLabel(confirming.field), asRead: wireValue(confirming.line, confirming.field) || null }}
+          busy={busy}
+          error={dialogError}
+          noteError={noteFault?.where === 'dialog' ? noteFault.message : null}
+          onNoteEdit={() => setNoteFault(null)}
+          onClose={() => setConfirming(null)}
+          onSubmit={note => submitConfirm(confirming, note)}
         />
       )}
       {addLine && (
@@ -931,8 +986,10 @@ export function InvoiceReviewPage(props: InvoiceReviewPageProps) {
           request={bulk}
           busy={busy}
           error={dialogError}
+          noteError={noteFault?.where === 'dialog' ? noteFault.message : null}
+          onNoteEdit={() => setNoteFault(null)}
           onClose={() => setBulk(null)}
-          onSubmit={reason => submitBulk(bulk, reason)}
+          onSubmit={(reason, note) => submitBulk(bulk, reason, note)}
         />
       )}
     </div>

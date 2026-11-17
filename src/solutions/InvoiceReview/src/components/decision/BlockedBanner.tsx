@@ -29,6 +29,8 @@ import {
 import { FormModal } from '@spaarke/ui-components';
 import { decisionFailureMessage, isDecisionIncomplete, type BlockedFinding, type BlockedSubmission } from '../../services/decisionApi';
 import type { ApiFailure, InvoiceReview } from '../../services/invoiceReviewApi';
+import { isNoteRefusal, noteArgs, noteProblem, noteRefusalMessage } from '../../services/noteModel';
+import { NoteField } from '../NoteField';
 import { useApproval } from './ApprovalProvider';
 
 const REASON_MAX = 2000;
@@ -76,6 +78,11 @@ export function BlockedBanner({ review, reload }: BlockedBannerProps) {
   const action = dialog?.action ?? null;
   const closeDialog = () => setDialog(prev => (prev ? { ...prev, open: false } : prev));
   const [reason, setReason] = React.useState('');
+  // Task 095f-2ui: the optional note. Like the reason, it is kept across a refusal (a 409 or 503) so the reviewer can resend; a decision saved
+  // in part (503) is repeated with the same note, so the box is locked from then on.
+  const [note, setNote] = React.useState('');
+  const [noteError, setNoteError] = React.useState<string | null>(null);
+  const [noteLocked, setNoteLocked] = React.useState(false);
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const alive = React.useRef(true);
@@ -106,15 +113,21 @@ export function BlockedBanner({ review, reload }: BlockedBannerProps) {
 
   const open = (a: Action) => {
     setReason('');
+    setNote('');
+    setNoteError(null);
+    setNoteLocked(false);
     setError(null);
     setDialog(prev => (prev?.open ? { ...prev, action: a } : { action: a, open: true, seq: (prev?.seq ?? 0) + 1 }));
   };
 
   const submit = async () => {
-    if (!dialog?.open || !action || reason.trim() === '') return;
+    if (!dialog?.open || !action || reason.trim() === '' || noteProblem(note) !== null) return;
     setBusy(true);
     setError(null);
-    const r = action === 'override' ? await api.overrideBlocked(submissionId, reason.trim()) : await api.returnBlocked(submissionId, reason.trim());
+    setNoteError(null);
+    const n = noteArgs(note);
+    const r =
+      action === 'override' ? await api.overrideBlocked(submissionId, reason.trim(), ...n) : await api.returnBlocked(submissionId, reason.trim(), ...n);
     if (!alive.current) return;
     if (r.ok) {
       setBusy(false);
@@ -122,6 +135,14 @@ export function BlockedBanner({ review, reload }: BlockedBannerProps) {
       await Promise.all([reload(), refresh(), load()]);
       return;
     }
+    // The server refused the note itself (400): the field message goes under the Note box, and the form keeps the reason and the note.
+    if (isNoteRefusal(r.failure)) {
+      setBusy(false);
+      setNoteError(noteRefusalMessage(r.failure));
+      return;
+    }
+    // A 503 saved part of the decision: the same request, repeated, finishes it, so the note is held as it was sent.
+    if (isDecisionIncomplete(r.failure)) setNoteLocked(true);
     // A 503 `ebilling.blocked.unavailable` can come after the decision stood (the Signals were not all closed): show the server's state
     // (the hold may already be gone) before the error.
     if (isDecisionIncomplete(r.failure)) {
@@ -190,7 +211,7 @@ export function BlockedBanner({ review, reload }: BlockedBannerProps) {
           size="sm"
           title={title}
           submitLabel={action === 'override' ? 'Override' : 'Return'}
-          submitDisabled={reason.trim() === ''}
+          submitDisabled={reason.trim() === '' || noteProblem(note) !== null}
           busy={busy}
           onClose={() => {
             if (!busy) closeDialog();
@@ -214,6 +235,22 @@ export function BlockedBanner({ review, reload }: BlockedBannerProps) {
                 data-testid="blocked-reason"
               />
             </Field>
+            <NoteField
+              value={note}
+              onChange={v => {
+                setNote(v);
+                setNoteError(null);
+              }}
+              serverError={noteError}
+              readOnly={noteLocked}
+              ariaLabel="Note"
+              testId="blocked-note"
+            />
+            {noteLocked && (
+              <Caption1 className={s.muted} data-testid="blocked-note-locked">
+                This decision was saved in part. Submitting again finishes it with the same note.
+              </Caption1>
+            )}
             {error && (
               <MessageBar intent="error" layout="multiline" data-testid="blocked-error">
                 <MessageBarBody>{error}</MessageBarBody>

@@ -32,6 +32,7 @@ import {
   outcomeOfApproval,
   type InvoiceOutcome,
 } from '../../services/decisionModel';
+import { isNoteRefusal, noteArgs, noteProblem, noteRefusalMessage } from '../../services/noteModel';
 import { money } from '../../services/reviewModel';
 import type { InvoiceReview } from '../../services/invoiceReviewApi';
 import { AdjustStep, ConfirmStep, OutcomeStep, ReasonStep } from './steps';
@@ -127,7 +128,13 @@ export function InvoiceDecisionWizard(props: InvoiceDecisionWizardProps) {
         case 'notify':
           return { ...(notifyStep as NotifyStep), id, isSkippable: true };
         default:
-          return { id: 'confirm', label: readOnly ? 'Recorded decision' : 'Confirm', renderContent: () => <ConfirmStep />, canAdvance: () => true };
+          // A note over the limit holds Finish off (the Note box says why); everything else about the note is the server's to refuse.
+          return {
+            id: 'confirm',
+            label: readOnly ? 'Recorded decision' : 'Confirm',
+            renderContent: () => <ConfirmStep />,
+            canAdvance: () => live.current.readOnly || noteProblem(live.current.form.note) === null,
+          };
       }
     },
     // The notify slot and read-only state are fixed for the life of one opened wizard.
@@ -154,9 +161,23 @@ export function InvoiceDecisionWizard(props: InvoiceDecisionWizardProps) {
     const { form: f, api: a, invoiceId: id } = live.current;
     const outcome = f.outcome;
     if (!outcome) throw new Error('Choose a decision first.');
+    // The note is optional and the same text on every send of this decision (the form keeps it across a failure, and a decision saved in part
+    // locks it): blank or whitespace-only sends no key, and a note over the limit never leaves the page (Confirm holds Finish off for it).
+    const note = noteArgs(f.note);
     const result =
-      outcome === 'approve' ? await a.approve(id) : outcome === 'reject' ? await a.reject(id, f.reason.trim()) : await a.returnToFirm(id, f.reason.trim());
+      outcome === 'approve'
+        ? await a.approve(id, ...note)
+        : outcome === 'reject'
+          ? await a.reject(id, f.reason.trim(), ...note)
+          : await a.returnToFirm(id, f.reason.trim(), ...note);
     if (!result.ok) {
+      // The server refused the note itself (400): say so under the Note box. The shell still needs a throw to stay on this step.
+      if (isNoteRefusal(result.failure)) {
+        set({ noteError: noteRefusalMessage(result.failure) });
+        throw new Error('The note was not accepted. Correct it in the Note box, then record again.');
+      }
+      // Saved in part: the repeat must carry the same note, so the box is locked until it finishes.
+      if (isDecisionIncomplete(result.failure)) set({ noteLocked: true });
       // Part of the change may be saved (503 incomplete): show the server's state, then the message tells the user to repeat. A 409
       // (already decided, approval changed, corrections pending) means the page and the approval are out of date: re-read both so
       // the page shows what the server holds. Any other refusal (403, a validation code) changes nothing; the message carries the

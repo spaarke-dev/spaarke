@@ -4,7 +4,8 @@
  *
  *   - CorrectValueModal: "the reading is wrong" (task 101). One field, the value as read, the corrected value. A header correction offers
  *     the header fields 101 accepts. Never a decision.
- *   - BulkDecisionModal: one action and ONE reason for several lines (ticked rows, or a rule's suggestion), sent as one request.
+ *   - ConfirmValueModal: "the reading is right" (task 101 `confirm`), with an optional note (task 095f-2ui).
+ *   - BulkDecisionModal: one action and ONE reason (and one optional note) for several lines (ticked rows, or a rule's suggestion), sent as one request.
  *   - AddLineModal: a Fee or Expense line the firm did not bill, with the reviewer's reason (task 164).
  *
  * None validates what the server owns: a missing reason or an out-of-range value goes to the server, which refuses it with a stable
@@ -28,7 +29,9 @@ import {
   tokens,
 } from '@fluentui/react-components';
 import { FormModal } from '@spaarke/ui-components';
+import { noteMember, noteProblem } from '../services/noteModel';
 import { EMPTY_ADD_LINE_FORM, money, type AddLineForm } from '../services/reviewModel';
+import { NoteField } from './NoteField';
 
 const useStyles = makeStyles({
   muted: { color: tokens.colorNeutralForeground3 },
@@ -79,15 +82,20 @@ export interface CorrectValueModalProps {
   busy: boolean;
   /** The server's refusal of the last submit, shown in the form. */
   error: string | null;
+  /** The server refused the note (400 note code): shown under the Note box until the note is edited. */
+  noteError?: string | null;
+  onNoteEdit?: () => void;
   onClose: () => void;
-  onSubmit: (field: string, value: string) => void;
+  /** `note` is the text as typed, present only when there is one. */
+  onSubmit: (field: string, value: string, note?: string) => void;
 }
 
-export function CorrectValueModal({ target, busy, error, onClose, onSubmit }: CorrectValueModalProps) {
+export function CorrectValueModal({ target, busy, error, noteError = null, onNoteEdit, onClose, onSubmit }: CorrectValueModalProps) {
   const s = useStyles();
   const header = target.lineId === null;
   const [field, setField] = React.useState(target.field);
   const [value, setValue] = React.useState(target.initial);
+  const [note, setNote] = React.useState('');
   const headerField = HEADER_FIELDS.find(h => h.field === field);
   const kind = header ? (headerField?.kind ?? 'text') : (LINE_KIND[field] ?? 'text');
   const title = header ? 'Correct an invoice value' : `Correct ${target.label.toLowerCase()} · line ${target.lineSequence}`;
@@ -99,11 +107,11 @@ export function CorrectValueModal({ target, busy, error, onClose, onSubmit }: Co
       size="sm"
       submitLabel="Save correction"
       busy={busy}
-      submitDisabled={value.trim().length === 0}
+      submitDisabled={value.trim().length === 0 || noteProblem(note) !== null}
       onClose={() => {
         if (!busy) onClose();
       }}
-      onSubmit={() => onSubmit(field, value.trim())}
+      onSubmit={() => onSubmit(field, value.trim(), noteMember(note).note)}
     >
       <Text>Use this when the system read the value wrong. It is recorded as a correction and the rules run again. To pay less than billed, use Reduce instead.</Text>
       {header && (
@@ -141,8 +149,73 @@ export function CorrectValueModal({ target, busy, error, onClose, onSubmit }: Co
           />
         )}
       </Field>
+      <NoteField
+        value={note}
+        onChange={v => {
+          setNote(v);
+          onNoteEdit?.();
+        }}
+        serverError={noteError}
+        ariaLabel="Note"
+        testId="correct-note"
+        rows={2}
+      />
       {error && (
         <MessageBar intent="error" data-testid="correct-error">
+          <MessageBarBody>{error}</MessageBarBody>
+        </MessageBar>
+      )}
+    </FormModal>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Confirm a value as read (task 101 `confirm`; task 095f-2ui note)
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface ConfirmValueModalProps {
+  /** The line and field being confirmed, as the form words them. */
+  target: { lineSequence: number; label: string; asRead: string | null };
+  busy: boolean;
+  error: string | null;
+  noteError?: string | null;
+  onNoteEdit?: () => void;
+  onClose: () => void;
+  /** `note` is the text as typed, present only when there is one. */
+  onSubmit: (note?: string) => void;
+}
+
+export function ConfirmValueModal({ target, busy, error, noteError = null, onNoteEdit, onClose, onSubmit }: ConfirmValueModalProps) {
+  const s = useStyles();
+  const [note, setNote] = React.useState('');
+  return (
+    <FormModal
+      open
+      title={`Confirm ${target.label.toLowerCase()} · line ${target.lineSequence}`}
+      size="sm"
+      submitLabel="Confirm as read"
+      busy={busy}
+      submitDisabled={noteProblem(note) !== null}
+      onClose={() => {
+        if (!busy) onClose();
+      }}
+      onSubmit={() => onSubmit(noteMember(note).note)}
+    >
+      <Text>Use this when the value was read correctly. It is recorded as confirmed and the rules run again.</Text>
+      <Caption1 className={s.muted}>As read: {target.asRead ?? '—'}</Caption1>
+      <NoteField
+        value={note}
+        onChange={v => {
+          setNote(v);
+          onNoteEdit?.();
+        }}
+        serverError={noteError}
+        ariaLabel="Note"
+        testId="confirm-note"
+        rows={2}
+      />
+      {error && (
+        <MessageBar intent="error" data-testid="confirm-error">
           <MessageBarBody>{error}</MessageBarBody>
         </MessageBar>
       )}
@@ -260,13 +333,17 @@ export interface BulkDecisionModalProps {
   request: BulkRequest;
   busy: boolean;
   error: string | null;
+  noteError?: string | null;
+  onNoteEdit?: () => void;
   onClose: () => void;
-  onSubmit: (reason: string | null) => void;
+  /** `note` is the text as typed, present only when there is one. */
+  onSubmit: (reason: string | null, note?: string) => void;
 }
 
-export function BulkDecisionModal({ request, busy, error, onClose, onSubmit }: BulkDecisionModalProps) {
+export function BulkDecisionModal({ request, busy, error, noteError = null, onNoteEdit, onClose, onSubmit }: BulkDecisionModalProps) {
   const s = useStyles();
   const [reason, setReason] = React.useState('');
+  const [note, setNote] = React.useState('');
   const n = request.lines.length;
   return (
     <FormModal
@@ -275,11 +352,12 @@ export function BulkDecisionModal({ request, busy, error, onClose, onSubmit }: B
       size="md"
       submitLabel={`${request.action === 'accept' ? 'Accept' : request.action === 'disallow' ? 'Disallow' : 'Reduce'} ${n} ${n === 1 ? 'line' : 'lines'}`}
       busy={busy}
+      submitDisabled={noteProblem(note) !== null}
       onClose={() => {
         if (!busy) onClose();
       }}
-      // The server stores no reason for an Accept (it drops it), so none is asked for or sent.
-      onSubmit={() => onSubmit(request.action === 'accept' ? null : reason.trim() || null)}
+      // The server stores no reason for an Accept (it drops it), so none is asked for or sent. The one note goes on every line's own record.
+      onSubmit={() => onSubmit(request.action === 'accept' ? null : reason.trim() || null, noteMember(note).note)}
     >
       <Text>
         {n} {n === 1 ? 'line gets' : 'lines get'} the same decision and reason
@@ -304,6 +382,17 @@ export function BulkDecisionModal({ request, busy, error, onClose, onSubmit }: B
           <Textarea value={reason} onChange={(_, d) => setReason(d.value)} resize="vertical" aria-label="Reason" />
         </Field>
       )}
+      <NoteField
+        value={note}
+        onChange={v => {
+          setNote(v);
+          onNoteEdit?.();
+        }}
+        serverError={noteError}
+        ariaLabel="Note"
+        testId="bulk-note"
+        rows={2}
+      />
       {error && (
         <MessageBar intent="error" data-testid="bulk-error">
           <MessageBarBody>{error}</MessageBarBody>

@@ -31,12 +31,15 @@ import {
 } from '@fluentui/react-components';
 import { FormModal, type IWizardShellHandle } from '@spaarke/ui-components';
 import {
+  CODE_ADJUSTMENT_ID_REUSED,
   decisionFailureMessage,
   isDecisionIncomplete,
   newAdjustmentId,
   type AdjustmentMethod,
   type AdjustmentRule,
 } from '../../services/decisionApi';
+import { isNoteRefusal, noteArgs, noteMember, noteProblem, noteRefusalMessage } from '../../services/noteModel';
+import { NoteField } from '../NoteField';
 import { approveBlocker, firmNeededBlocker, INVOICE_OUTCOME_LABEL, outcomeOfApproval, type InvoiceOutcome } from '../../services/decisionModel';
 import { isAdjustment, isDecided, money, shortDate, signedMoney } from '../../services/reviewModel';
 import type { ReviewLine } from '../../services/invoiceReviewApi';
@@ -179,6 +182,10 @@ export function AdjustStep() {
   const closeRemove = () => setRemoveDialog(prev => (prev ? { ...prev, open: false } : prev));
   const [removeBusy, setRemoveBusy] = React.useState(false);
   const [removeError, setRemoveError] = React.useState<string | null>(null);
+  // Task 095f-2ui: the optional notes. The add form's note lives in the wizard form (with the rest of it); the removal's is the confirm's own.
+  const [removeNote, setRemoveNote] = React.useState('');
+  const [removeNoteError, setRemoveNoteError] = React.useState<string | null>(null);
+  const [addNoteError, setAddNoteError] = React.useState<string | null>(null);
   const adjustmentId = React.useRef(newAdjustmentId());
   const alive = React.useRef(true);
 
@@ -204,17 +211,20 @@ export function AdjustStep() {
 
   const adjustments = review.lines.filter(isAdjustment);
   const valueError = adjustmentValueError(form.adjMethod, form.adjValue);
-  const canAdd = !readOnly && !busy && firmBlocker === null && form.adjValue.trim() !== '' && !valueError && form.adjReason.trim() !== '';
+  const canAdd =
+    !readOnly && !busy && firmBlocker === null && form.adjValue.trim() !== '' && !valueError && form.adjReason.trim() !== '' && noteProblem(form.adjNote) === null;
 
   const add = async () => {
     setBusy(true);
     setError(null);
+    setAddNoteError(null);
     const r = await api.addAdjustment(invoiceId, {
       adjustmentId: adjustmentId.current,
       method: form.adjMethod,
       value: Number(form.adjValue),
       reason: form.adjReason.trim(),
       ruleId: form.adjRule || null,
+      ...noteMember(form.adjNote),
     });
     if (!alive.current) return;
     if (r.ok) {
@@ -224,13 +234,17 @@ export function AdjustStep() {
       if (fresh) {
         adjustmentId.current = newAdjustmentId();
         setRepeatable(false);
-        set({ adjValue: '', adjReason: '', adjRule: '' });
+        set({ adjValue: '', adjReason: '', adjRule: '', adjNote: '' });
       } else {
         // Saved, but the page is not showing the server's totals. The form stays, locked, with the same id: Repeat answers "already applied"
         // and re-reads, so nothing is added twice and a new id is never minted over a saved adjustment.
         setError(`${REREAD_FAILED} Repeat to read them again; nothing is added twice.`);
         setRepeatable(true);
       }
+    } else if (isNoteRefusal(r.failure)) {
+      // The server refused the note itself (400, before any read): the field message goes under the Note box, and the form keeps everything.
+      setAddNoteError(noteRefusalMessage(r.failure));
+      setRepeatable(false);
     } else {
       setError(decisionFailureMessage(r.failure));
       // A 503 where the line was written but the totals were not: the same request, with the same id, finishes it. Show the server's state
@@ -248,7 +262,8 @@ export function AdjustStep() {
     if (!removing) return;
     setRemoveBusy(true);
     setRemoveError(null);
-    const r = await api.removeAdjustment(invoiceId, removing.id);
+    setRemoveNoteError(null);
+    const r = await api.removeAdjustment(invoiceId, removing.id, ...noteArgs(removeNote));
     if (!alive.current) return;
     if (r.ok) {
       const fresh = await reload();
@@ -257,7 +272,16 @@ export function AdjustStep() {
       // A failed re-read leaves the list as it was: the form stays open and says so; Remove again answers "already applied" and re-reads.
       if (fresh) closeRemove();
       else setRemoveError(`The adjustment was removed. ${REREAD_FAILED} Remove again to read them again; nothing is removed twice.`);
+    } else if (isNoteRefusal(r.failure)) {
+      setRemoveBusy(false);
+      setRemoveNoteError(noteRefusalMessage(r.failure));
     } else {
+      // 409 `id_reused` on a removal: another reviewer already removed it, or a repeat carried another note. The page is out of date, so the
+      // list is re-read (the form stays open with the server's sentence and the note, which are kept for a resend).
+      if (r.failure.status === 409 && r.failure.errorCode === CODE_ADJUSTMENT_ID_REUSED) {
+        await reload();
+        if (!alive.current) return;
+      }
       setRemoveBusy(false);
       setRemoveError(decisionFailureMessage(r.failure));
     }
@@ -279,7 +303,7 @@ export function AdjustStep() {
                 {a.reason ? ` · ${a.reason}` : ''}
               </Text>
               {!readOnly && (
-                <Button size="small" appearance="subtle" disabled={firmBlocker !== null} onClick={() => { setRemoveError(null); askRemove(a); }} data-testid={`remove-adjustment-${a.id}`}>
+                <Button size="small" appearance="subtle" disabled={firmBlocker !== null} onClick={() => { setRemoveError(null); setRemoveNote(''); setRemoveNoteError(null); askRemove(a); }} data-testid={`remove-adjustment-${a.id}`}>
                   Remove…
                 </Button>
               )}
@@ -331,6 +355,18 @@ export function AdjustStep() {
           <Field label="Reason" required={form.adjValue.trim() !== ''}>
             <Textarea value={form.adjReason} disabled={repeatable} onChange={(_, d) => set({ adjReason: d.value })} resize="vertical" aria-label="Adjustment reason" maxLength={REASON_MAX} />
           </Field>
+          <NoteField
+            value={form.adjNote}
+            onChange={v => {
+              set({ adjNote: v });
+              setAddNoteError(null);
+            }}
+            serverError={addNoteError}
+            disabled={repeatable}
+            ariaLabel="Adjustment note"
+            testId="adjustment-note"
+            rows={2}
+          />
           {error && (
             <MessageBar intent="error" layout="multiline" data-testid="adjustment-error">
               <MessageBarBody>{error}</MessageBarBody>
@@ -341,7 +377,7 @@ export function AdjustStep() {
               {repeatable ? 'Repeat' : 'Add adjustment'}
             </Button>
             {adjustmentFormDirty(form) && !busy && (
-              <Button appearance="subtle" onClick={() => { set({ adjValue: '', adjReason: '', adjRule: '' }); setError(null); setRepeatable(false); adjustmentId.current = newAdjustmentId(); }}>
+              <Button appearance="subtle" onClick={() => { set({ adjValue: '', adjReason: '', adjRule: '', adjNote: '' }); setError(null); setAddNoteError(null); setRepeatable(false); adjustmentId.current = newAdjustmentId(); }}>
                 Clear
               </Button>
             )}
@@ -359,6 +395,7 @@ export function AdjustStep() {
           title="Remove adjustment"
           submitLabel="Remove"
           busy={removeBusy}
+          submitDisabled={noteProblem(removeNote) !== null}
           onClose={() => {
             if (!removeBusy) closeRemove();
           }}
@@ -368,6 +405,17 @@ export function AdjustStep() {
             Remove the adjustment of {signedMoney(removeDialog.line.amount)}
             {removeDialog.line.reason ? ` (${removeDialog.line.reason})` : ''}? The approved total is recalculated by the server.
           </Text>
+          <NoteField
+            value={removeNote}
+            onChange={v => {
+              setRemoveNote(v);
+              setRemoveNoteError(null);
+            }}
+            serverError={removeNoteError}
+            ariaLabel="Removal note"
+            testId="remove-note"
+            rows={2}
+          />
           {removeError && (
             <MessageBar intent="error" layout="multiline" data-testid="remove-error">
               <MessageBarBody>{removeError}</MessageBarBody>
@@ -416,7 +464,7 @@ export function ReasonStep() {
 
 export function ConfirmStep() {
   const s = useStyles();
-  const { form, readOnly, review, approval } = useWiz();
+  const { form, set, readOnly, review, approval } = useWiz();
   const outcome = form.outcome ?? outcomeOfApproval(approval.status);
   const adjustments = review.lines.filter(isAdjustment);
   const changed = review.lines.filter(l => l.status === 'Reduced' || l.status === 'Disallowed').sort((a, b) => a.sequence - b.sequence);
@@ -471,6 +519,21 @@ export function ConfirmStep() {
           </>
         )}
       </div>
+      {!readOnly && (
+        <NoteField
+          value={form.note}
+          onChange={v => set({ note: v, noteError: null })}
+          serverError={form.noteError}
+          readOnly={form.noteLocked}
+          ariaLabel="Note for the decision"
+          testId="decision-note"
+        />
+      )}
+      {!readOnly && form.noteLocked && (
+        <Caption1 className={s.muted} data-testid="decision-note-locked">
+          This decision was saved in part. Repeating it sends the same note, so the note cannot be changed now.
+        </Caption1>
+      )}
       {changed.length > 0 && (
         <Accordion collapsible>
           <AccordionItem value="changed">

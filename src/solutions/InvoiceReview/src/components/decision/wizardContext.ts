@@ -19,9 +19,30 @@ export interface WizardForm {
   adjReason: string;
   /** '' = no rule. */
   adjRule: string;
+  /** Task 095f-2ui: the optional note of the adjustment being typed. Blank is left out of the request. */
+  adjNote: string;
+  /** Task 095f-2ui: the optional note of the approve, reject or return decision (the Confirm step). Kept across a failed send. */
+  note: string;
+  /** The server refused the note (400 `ebilling.note_too_long` / `note_invalid_characters`): its sentence, shown under the Note box until the note is edited. */
+  noteError: string | null;
+  /**
+   * A decision that was saved in part is repeated with the SAME note: the server keeps the first one (reject and return drop an edited note
+   * on a repeat without a word), so the box is read-only once a send came back incomplete.
+   */
+  noteLocked: boolean;
 }
 
-export const EMPTY_FORM: WizardForm = { reason: '', adjMethod: 'percent', adjValue: '', adjReason: '', adjRule: '' };
+export const EMPTY_FORM: WizardForm = {
+  reason: '',
+  adjMethod: 'percent',
+  adjValue: '',
+  adjReason: '',
+  adjRule: '',
+  adjNote: '',
+  note: '',
+  noteError: null,
+  noteLocked: false,
+};
 
 export interface WizardCtx {
   form: WizardForm;
