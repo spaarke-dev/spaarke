@@ -124,3 +124,15 @@ One full pass (sonnet-tier task, no auth/security tag). No F1. The reviewer ran 
 | 6 | Unused `_options` parameter kept | K4 | Cleanup later. |
 
 FR-16's per-wizard integration test is the live check below (criterion 5, not met until the deploy).
+
+## Live check on dev (owner go 2026-11-17; waits for the `sprk_createeventwizard` deploy)
+
+Merged to master as #2875 (merge 3df5ee9e3f). Deploy asked of UAC-r2. The dev web resource was last modified 2026-11-15 09:48Z (the bundle this deploy replaces).
+
+Setup, read from dev before the deploy:
+- Active profile "Matter to Event (Attorney Matrix)" (`24dc0ed2-537b-f111-ab0e-7ced8ddc4a05`). Eight Copy rules, all lookups, same name on both sides: `sprk_assignedattorney1/2`, `sprk_assignedparalegal1/2`, `sprk_assignedlawfirm1/2`, `sprk_assignedtointernal`, `sprk_assignedtoexternal`.
+- Parent: Matter PAT-176903 "Targeted Protein Degradation Patent Issuance" (`232852f8-a263-f111-ab0c-000d3a582930`). It has attorney 1 and 2, paralegal 1, law firm 1 and assigned-to-internal set. The other three mapped columns are empty on the parent, so they stay empty on the event.
+- **Fill-only cannot be shown through this wizard.** Its only person field is Assigned To (`sprk_assignedto`), which no rule maps, so no wizard value can meet a mapped one. Fill-only stays proven by the server tests (FR-02); the live check confirms that a mapped column the user never touched is filled and that `sprk_assignedto` carries the user's pick.
+- The Assigned To bind is chosen by `findNavProp(navProps, 'contact', 'assignedto')`. The exact-match test compares the hint with `sprk_assignedto` and never matches, so the first column containing "assignedto" wins, in metadata order. Wizard events on dev so far (e.g. EVT-000025) wrote `sprk_assignedto`. The live check confirms the column again.
+
+Checks: mapped columns present at first load; `sprk_assignedto` = the picked contact and nothing else changed; owner = the Matter's owning team; `EVT-nnnnnn` autonumber; a second event with no assignee gets the server default (or stays blank, per the Event row of `RecordTableRules.cs`); dark mode.
