@@ -467,28 +467,6 @@ public sealed class InvoiceRejectReturnService
                         : "The invoice is held until its blocked submission is decided (override or return the submission).");
             }
 
-            // ── ISS-031 review round 1: one held submission ends with ONE decision. A Procedure-held submission (an SPA one is Accepted, so the
-            //    FR-20 hold above does not hold it) can be Overridden; an Override that recorded its Decision Record but whose release failed leaves
-            //    the submission held and the invoice In Review. Rejecting or returning the invoice now would leave that Override record on a
-            //    rejected or returned invoice, and its repeat could never release it (invoice_not_held / already_returned). So while the invoice's
-            //    own submission is still held for an Override AND its Override record exists, reject and return are refused 409 and nothing is
-            //    written. Approve cannot reach this: the Procedure hold (and the FR-20 hold) refuse it until the release lands. A finished
-            //    (released) Override does not refuse: the invoice is then decided in review as usual. A lookup fault answers 503. ──
-            try
-            {
-                if (await PendingOverrideAsync(invoiceId, ct).ConfigureAwait(false) is { } pendingOverride)
-                {
-                    _logger.LogWarning("{Verb} of invoice {InvoiceId}: an Override of its submission is recorded ({RecordId}) but not released; nothing changed.",
-                        Label(verb), invoiceId, pendingOverride.RecordId);
-                    return new InvoiceDecisionResult(InvoiceDecisionOutcome.Conflict, InvoiceRejectReturnCodes.OverridePending,
-                        InvoiceRejectReturnCodes.OverridePendingDetail(verb.Kind, callerIsDecider: pendingOverride.ConfirmedByUserId == caller));
-                }
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
-            {
-                return Unavailable(verb, invoiceId, "override-record", ex);
-            }
-
             // Task 095c-4: Return to Firm hands the invoice to its firm (the firm notice, the firm's correction); with no firm, or a stored
             // "firm needed" hold, there is no firm to hand it to. EB-D-185 (R1): after Set firm the invoice has its firm and the re-run is pending;
             // that is not "needs a firm", so Return proceeds when every firm_missing hold is matched by a stored Set-firm naming the invoice's firm.
@@ -526,6 +504,30 @@ public sealed class InvoiceRejectReturnService
         if (await AuthorizeCloseAsync(verb, invoiceId, core, signals.Subjects, callerBearerToken, ct).ConfigureAwait(false) is { } denied)
         {
             return denied;
+        }
+
+        // ── ISS-031 review round 1: one held submission ends with ONE decision. A Procedure-held submission (an SPA one is Accepted, so the FR-20
+        //    hold above does not hold it) can be Overridden; an Override that recorded its Decision Record but whose release failed leaves the
+        //    submission held and the invoice In Review. Rejecting or returning the invoice now would leave that Override record on a rejected or
+        //    returned invoice, and its repeat could never release it (invoice_not_held / already_returned). So while the invoice's own submission is
+        //    still held for an Override AND its Override record exists, reject and return are refused 409 and nothing is written. Approve cannot
+        //    reach this: the Procedure hold (and the FR-20 hold) refuse it until the release lands. A finished (released) Override does not refuse:
+        //    the invoice is then decided in review as usual. A lookup fault answers 503. Round 2: after every 403 (not eligible above, the Signal
+        //    close rights here), as on the blocked routes, so a caller without the rights is never told a decision is pending; before the filing
+        //    check, the claim and every write. A repeat on an invoice already at the verb's target (CompleteOrNoOpAsync) never reaches it. ──
+        try
+        {
+            if (await PendingOverrideAsync(invoiceId, ct).ConfigureAwait(false) is { } pendingOverride)
+            {
+                _logger.LogWarning("{Verb} of invoice {InvoiceId}: an Override of its submission is recorded ({RecordId}) but not released; nothing changed.",
+                    Label(verb), invoiceId, pendingOverride.RecordId);
+                return new InvoiceDecisionResult(InvoiceDecisionOutcome.Conflict, InvoiceRejectReturnCodes.OverridePending,
+                    InvoiceRejectReturnCodes.OverridePendingDetail(verb.Kind, callerIsDecider: pendingOverride.ConfirmedByUserId == caller));
+            }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            return Unavailable(verb, invoiceId, "override-record", ex);
         }
 
         // ── The recorder files the record by the invoice's derived core stamp; it must be exactly the core above, before any write. ──
@@ -1115,14 +1117,9 @@ public sealed class InvoiceRejectReturnService
     /// </summary>
     private async Task<DecisionRecordWriter.BillingStoredResolvedSet?> PendingOverrideAsync(Guid invoiceId, CancellationToken ct)
     {
-        var query = new QueryExpression(FinanceBaseValues.SubmissionEntity)
-        {
-            ColumnSet = new ColumnSet(SubmissionOverrideService.OverrideStateColumns),
-            Criteria = new FilterExpression(LogicalOperator.And),
-        };
-        query.Criteria.AddCondition(InvoiceSubmissionPersister.SubmissionInvoice, ConditionOperator.Equal, invoiceId);
-        var linked = (await _entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false)).Entities;
-        if (InvoiceBlockedHold.OwnSubmissionOf(invoiceId, linked) is not { } own || !SubmissionOverrideService.IsHeldForOverride(own))
+        if (await InvoiceBlockedHold.ReadOwnSubmissionAsync(_entities, invoiceId, SubmissionOverrideService.OverrideStateColumns, ct).ConfigureAwait(false)
+                is not { } own
+            || !SubmissionOverrideService.IsHeldForOverride(own))
         {
             return null;
         }

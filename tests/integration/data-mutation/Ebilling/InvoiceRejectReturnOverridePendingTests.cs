@@ -1,5 +1,6 @@
 using FluentAssertions;
 using Microsoft.Xrm.Sdk;
+using Spaarke.Dataverse;
 using Sprk.Bff.Api.Services.Finance;
 using Sprk.Bff.Api.Services.Finance.Submission;
 using Sprk.Bff.Api.Tests.Services.Finance;
@@ -112,6 +113,62 @@ public sealed class InvoiceRejectReturnOverridePendingTests
         result.Detail.Should().Be(InvoiceRejectReturnCodes.OverridePendingDetail(InvoiceDecisionKind.Return, callerIsDecider: true));
         result.Detail.Should().Contain("Repeat the override to finish it.");
         AssertNothingWritten(w);
+    }
+
+    // ── The 403s come first (round 2) ──
+
+    [Theory(DisplayName = "ISS-031 round 2: on a stranded Override, an eligible approver without the rights to close the invoice's Signals gets 403 not_authorized, not the 409 that says a decision is pending; nothing written")]
+    [MemberData(nameof(Kinds))]
+    public async Task StrandedOverride_NoCloseRights_Is403BeforeThe409(InvoiceDecisionKind kind)
+    {
+        var w = new ApprovalWorld();
+        HoldOwnSubmissionForProcedures(w);
+        await RecordOverrideAsync(w, CarolUser);
+        w.AddInvoiceSignal();
+        // Write on the invoice but no AppendTo on the core record (the close's rights, FR-51).
+        w.Rights = (set, _) => set == "sprk_projects" ? AccessRights.Read | AccessRights.Write : AccessRights.Read | AccessRights.Write | AccessRights.AppendTo;
+
+        var result = await Decide(w, kind, AliceUser);
+
+        result.Outcome.Should().Be(InvoiceDecisionOutcome.Forbidden, "the rights are asked before a pending decision is named");
+        result.Code.Should().Be(InvoiceRejectReturnCodes.NotAuthorized);
+        AssertNothingWritten(w);
+    }
+
+    [Theory(DisplayName = "ISS-031 round 2 control: on a stranded Override, a caller who is not an eligible approver gets 403 not_eligible and no 409; nothing written")]
+    [MemberData(nameof(Kinds))]
+    public async Task StrandedOverride_IneligibleCaller_Is403NotEligible(InvoiceDecisionKind kind)
+    {
+        var w = new ApprovalWorld();
+        HoldOwnSubmissionForProcedures(w);
+        await RecordOverrideAsync(w, CarolUser);
+
+        var result = await Decide(w, kind, CarolUser); // Carol recorded the Override but is assigned nowhere on the core record
+
+        result.Outcome.Should().Be(InvoiceDecisionOutcome.NotEligible);
+        result.Code.Should().Be(InvoiceRejectReturnCodes.NotEligible);
+        AssertNothingWritten(w);
+    }
+
+    [Theory(DisplayName = "ISS-031 round 2 control: an invoice already at the verb's target (the claimant's decision stranded before its record) with an Override record goes through the repeat path, which the guard does not block; the claimant's repeat finishes with one record")]
+    [MemberData(nameof(Kinds))]
+    public async Task InvoiceAtTarget_WithAnOverrideRecord_TheRepeatFinishes(InvoiceDecisionKind kind)
+    {
+        var w = new ApprovalWorld();
+        HoldOwnSubmissionForProcedures(w);
+        w.FaultsOnce["identity"] = new InvalidOperationException("dataverse down"); // the recorder's contact read: the status moved, no record
+        (await Decide(w, kind, AliceUser)).Outcome.Should().Be(InvoiceDecisionOutcome.Incomplete);
+        w.InvoiceStatus.Should().Be(kind == InvoiceDecisionKind.Reject ? InvoiceStatusCodes.Rejected : InvoiceStatusCodes.ReturnedToFirm);
+        await RecordOverrideAsync(w, CarolUser);
+
+        var repeat = await Decide(w, kind, AliceUser);
+
+        repeat.Outcome.Should().Be(InvoiceDecisionOutcome.Decided, "CompleteOrNoOpAsync finishes the claimant's decision; the guard is not on that path");
+        repeat.Code.Should().NotBe(InvoiceRejectReturnCodes.OverridePending);
+        w.RecordsOf(kind == InvoiceDecisionKind.Reject ? "reject-invoice" : "return-to-firm").Should().ContainSingle();
+
+        var other = await Decide(w, kind, BobUser);
+        other.Outcome.Should().Be(InvoiceDecisionOutcome.AlreadyDecided, "anyone else's repeat is a no-op, not a 409");
     }
 
     // ── Must not fire ──
