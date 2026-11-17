@@ -109,3 +109,8 @@ Not yet built end to end (2e2b in progress).
 These states are hard to cause by hand; they need a fault during a decision. If you see one in normal use, test it then:
 - [ ] An invoice showing Rejected, Returned or Approved with the "This decision did not finish" banner: **Finish decision…** opens a form. Before the decision was recorded, it asks for the reason again and says why. After it was recorded, the reason is shown locked. Submitting finishes the decision, and the page then shows "View decision".
 - [ ] A decided invoice with no banner shows only "View decision" (nothing changed for complete decisions).
+
+## K. "Finished by" on the History tab (iss034d): after a BFF and an Invoice Review page that carry it
+
+- [ ] A blocked Override or Return that one person recorded and an operator finished (section G): its History entry shows **Finished by {operator}** under the decision.
+- [ ] A blocked decision its own decider finished, and any decision made before iss034c, shows no "Finished by" line.
