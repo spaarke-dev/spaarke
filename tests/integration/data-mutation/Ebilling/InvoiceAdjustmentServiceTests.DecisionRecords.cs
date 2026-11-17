@@ -13,8 +13,8 @@ namespace Sprk.Bff.Api.Tests.Services.Finance;
 
 /// <summary>
 /// ebilling-r1 task 095f-2b (EB-D-241; design 095f-part2 sections 1, 3, 8 to 11): an adjustment's add and its removal each file ONE Decision Record
-/// (<c>add-adjustment</c>, <c>remove-adjustment</c>) after the line and the totals, idempotent on the client's adjustment id (an add) and on an id
-/// derived from <c>remove-{lineId}</c> (a removal). The optional note is in the record's Values and, through the totals' own conditional update, in
+/// (<c>add-adjustment</c>, <c>remove-adjustment</c>) after the line and the totals, idempotent on a decision id derived from the invoice and the client's adjustment id (an add) and on an id
+/// derived from the invoice and the line (a removal), never the raw client id. The optional note is in the record's Values and, through the totals' own conditional update, in
 /// the invoice's <c>sprk_decisionnote</c>; an add without a note writes its reason there. Over the REAL adjustment service, totals service,
 /// recorder and writer harness: each test proves the stored state (the records, the invoice's columns, the line rows).
 /// </summary>
@@ -116,8 +116,8 @@ public sealed partial class InvoiceAdjustmentServiceTests
         var record = w.DecisionRecords.Should().ContainSingle().Subject;
         record.GetAttributeValue<string>("sprk_actioncode").Should().Be(InvoiceAdjustmentService.AddActionCode);
         record.GetAttributeValue<string>("sprk_reason").Should().Be(Why);
-        StepsOf(record)["reviewId"]!.GetValue<string>().Should().Be(BillingDecisionKey.IdOf("sprk_invoice", w.InvoiceId, id).ToString("D"),
-            "the record's key is the client's adjustment id on the invoice");
+        StepsOf(record)["reviewId"]!.GetValue<string>().Should().Be(BillingDecisionKey.IdOf("sprk_invoice", w.InvoiceId, InvoiceAdjustmentService.AddDecisionIdFor(w.InvoiceId, id)).ToString("D"),
+            "the record's key is the derived decision id on the invoice");
         var values = ValuesOf(record);
         values.Select(v => v.Key).Should().BeEquivalentTo(["method", "value", "note"], "the declared codes; no rule when none is cited");
         values["method"]!.GetValue<string>().Should().Be("percent");
@@ -177,7 +177,7 @@ public sealed partial class InvoiceAdjustmentServiceTests
         record.GetAttributeValue<string>("sprk_actioncode").Should().Be(InvoiceAdjustmentService.RemoveActionCode);
         record.GetAttributeValue<string>("sprk_reason").Should().BeNull("a removal takes no reason");
         StepsOf(record)["reviewId"]!.GetValue<string>().Should().Be(
-            BillingDecisionKey.IdOf("sprk_invoice", w.InvoiceId, InvoiceAdjustmentService.RemoveDecisionIdFor(line.Id)).ToString("D"));
+            BillingDecisionKey.IdOf("sprk_invoice", w.InvoiceId, InvoiceAdjustmentService.RemoveDecisionIdFor(w.InvoiceId, line.Id)).ToString("D"));
         var values = ValuesOf(record);
         values.Select(v => v.Key).Should().BeEquivalentTo(["adjustment", "note"]);
         values["adjustment"]!.GetValue<Guid>().Should().Be(line.Id);
@@ -437,7 +437,7 @@ public sealed partial class InvoiceAdjustmentServiceTests
         var w = new World();
         var id = Guid.NewGuid();
         await w.Recorder().RecordAsync(new BillingDecision(
-            id, InvoiceAdjustmentService.AddActionCode, w.InvoiceId, BillingDecider.Human(Reviewer, InvoiceAdjustmentService.ReviewerRole),
+            InvoiceAdjustmentService.AddDecisionIdFor(w.InvoiceId, id), InvoiceAdjustmentService.AddActionCode, w.InvoiceId, BillingDecider.Human(Reviewer, InvoiceAdjustmentService.ReviewerRole),
             new Dictionary<string, object?> { ["invoiceId"] = w.InvoiceId }, "Added", Reason: "Another adjustment",
             Values: new Dictionary<string, object?> { ["method"] = "fixed", ["value"] = 5m }));
 
@@ -520,6 +520,176 @@ public sealed partial class InvoiceAdjustmentServiceTests
         repeat.Status.Should().Be(AdjustmentStatus.Applied);
         ValuesOf(w.DecisionRecords.Should().ContainSingle().Subject)["note"]!.GetValue<string>().Should().Be("Second");
         DecisionNote(w).Should().Be("Second");
+    }
+
+    // =========================================================================================
+    // Review round 1: the decision ids are namespaced hashes, never the client's raw id
+    // =========================================================================================
+
+    /// <summary>A decision of another billing act on the invoice, filed under <paramref name="decisionId"/> (what approve, reject and return derive).</summary>
+    private static BillingDecision OtherDecision(World w, string code, Guid decisionId) => new(
+        decisionId, code, w.InvoiceId, BillingDecider.Human(Reviewer, InvoiceAdjustmentService.ReviewerRole),
+        new Dictionary<string, object?> { ["invoiceId"] = w.InvoiceId, ["approvedTotal"] = 900m }, "Done",
+        Reason: code == InvoiceApprovalService.ApproveActionCode ? null : "A reason", Values: new Dictionary<string, object?>());
+
+    /// <summary>The ids another billing decision on an invoice derives (approve, reject, return), for the same input id.</summary>
+    public static TheoryData<string, Guid> OtherDecisionIds() => new()
+    {
+        { InvoiceApprovalService.ApproveActionCode, InvoiceApprovalService.DecisionIdFor(Guid.Parse("095f2b01-0000-4000-8000-000000000001")) },
+        { InvoiceRejectReturnService.RejectActionCode, InvoiceRejectReturnService.RejectDecisionIdFor(Guid.Parse("095f2b01-0000-4000-8000-000000000002")) },
+        { InvoiceRejectReturnService.ReturnActionCode, InvoiceRejectReturnService.ReturnDecisionIdFor(Guid.Parse("095f2b01-0000-4000-8000-000000000003")) },
+    };
+
+    [Fact(DisplayName = "095f-2b R1 (F1): the decision ids are namespaced hashes: never the raw adjustment id, different per invoice, and pinned")]
+    public void TheDecisionIds_AreNamespacedHashes_NeverTheRawId_AndDifferPerInvoice()
+    {
+        var invoiceA = Guid.Parse("095f2b02-0000-4000-8000-00000000000a");
+        var invoiceB = Guid.Parse("095f2b02-0000-4000-8000-00000000000b");
+        var id = Guid.Parse("095f2b02-0000-4000-8000-0000000000c1");
+
+        InvoiceAdjustmentService.AddDecisionIdFor(invoiceA, id).Should().NotBe(id, "the client's id is never the decision id");
+        InvoiceAdjustmentService.AddDecisionIdFor(invoiceA, id).Should().NotBe(InvoiceAdjustmentService.AddDecisionIdFor(invoiceB, id), "the same id on two invoices");
+        InvoiceAdjustmentService.AddDecisionIdFor(invoiceA, id).Should().Be(InvoiceAdjustmentService.AddDecisionIdFor(invoiceA, id), "deterministic");
+        InvoiceAdjustmentService.AddDecisionIdFor(invoiceA, id).Should().Be(InvoiceLineDecisionService.IdOf($"ebilling-add-adjustment-{invoiceA:D}-{id:D}"));
+
+        InvoiceAdjustmentService.RemoveDecisionIdFor(invoiceA, id).Should().NotBe(id);
+        InvoiceAdjustmentService.RemoveDecisionIdFor(invoiceA, id).Should().NotBe(InvoiceAdjustmentService.RemoveDecisionIdFor(invoiceB, id), "the same line id on two invoices");
+        InvoiceAdjustmentService.RemoveDecisionIdFor(invoiceA, id).Should().Be(InvoiceLineDecisionService.IdOf($"ebilling-remove-adjustment-{invoiceA:D}-{id:D}"));
+        InvoiceAdjustmentService.RemoveDecisionIdFor(invoiceA, id).Should().NotBe(InvoiceAdjustmentService.AddDecisionIdFor(invoiceA, id), "an add and a removal never share an id");
+    }
+
+    [Fact(DisplayName = "095f-2b R1 (F1): an add's record is keyed by the derived decision id, not the client's raw adjustment id")]
+    public async Task Add_TheRecordIsKeyedByTheDerivedDecisionId_NotTheRawAdjustmentId()
+    {
+        var w = new World();
+        var id = Guid.NewGuid();
+
+        (await w.Service().AddAsync(AddWithNote(w, null, id), CancellationToken.None)).Status.Should().Be(AdjustmentStatus.Applied);
+
+        var key = StepsOf(w.DecisionRecords.Should().ContainSingle().Subject)["reviewId"]!.GetValue<string>();
+        key.Should().Be(BillingDecisionKey.IdOf("sprk_invoice", w.InvoiceId, InvoiceAdjustmentService.AddDecisionIdFor(w.InvoiceId, id)).ToString("D"));
+        key.Should().NotBe(BillingDecisionKey.IdOf("sprk_invoice", w.InvoiceId, id).ToString("D"));
+    }
+
+    [Theory(DisplayName = "095f-2b R1 (F1): an add whose adjustment id equals another decision's id no longer blocks that decision (the add first, then the decision)")]
+    [MemberData(nameof(OtherDecisionIds))]
+    public async Task Add_WhoseIdEqualsAnotherDecisionsId_DoesNotBlockThatDecision(string code, Guid otherDecisionId)
+    {
+        var w = new World();
+
+        var add = await w.Service().AddAsync(AddWithNote(w, null, otherDecisionId), CancellationToken.None);
+        var other = await Record.ExceptionAsync(() => w.Recorder().RecordAsync(OtherDecision(w, code, otherDecisionId)));
+
+        add.Status.Should().Be(AdjustmentStatus.Applied);
+        other.Should().BeNull("the later decision records normally under its own id");
+        w.DecisionRecords.Select(r => r.GetAttributeValue<string>("sprk_actioncode")).Should().BeEquivalentTo([InvoiceAdjustmentService.AddActionCode, code]);
+    }
+
+    [Theory(DisplayName = "095f-2b R1 (F1): an add whose adjustment id equals an already recorded decision's id is not refused (the decision first, then the add)")]
+    [MemberData(nameof(OtherDecisionIds))]
+    public async Task Add_WhoseIdEqualsAnAlreadyRecordedDecisionsId_IsNotRefused(string code, Guid otherDecisionId)
+    {
+        var w = new World();
+        await w.Recorder().RecordAsync(OtherDecision(w, code, otherDecisionId));
+
+        var add = await w.Service().AddAsync(AddWithNote(w, null, otherDecisionId), CancellationToken.None);
+
+        add.Status.Should().Be(AdjustmentStatus.Applied);
+        w.CreateCount.Should().Be(1);
+        w.DecisionRecords.Select(r => r.GetAttributeValue<string>("sprk_actioncode")).Should().BeEquivalentTo([code, InvoiceAdjustmentService.AddActionCode]);
+    }
+
+    [Theory(DisplayName = "095f-2b R1 (F1): a removal's decision id is not the earlier lineId-only hash, so a decision under that id does not block the removal")]
+    [MemberData(nameof(OtherDecisionIds))]
+    public async Task Remove_ADecisionUnderTheEarlierLineOnlyId_DoesNotBlockTheRemoval(string code, Guid _)
+    {
+        var w = new World();
+        var line = ActiveAdjustment(w);
+        await w.Recorder().RecordAsync(OtherDecision(w, code, InvoiceLineDecisionService.IdOf($"remove-{line.Id:D}")));
+
+        var removal = await w.Service().RemoveAsync(RemoveOf(w, line.Id, null), CancellationToken.None);
+
+        removal.Status.Should().Be(AdjustmentStatus.Applied);
+        RecordsOf(w, InvoiceAdjustmentService.RemoveActionCode).Should().ContainSingle();
+        w.Row(line.Id).GetAttributeValue<OptionSetValue>("statecode").Value.Should().Be(1);
+    }
+
+    [Fact(DisplayName = "095f-2b R1 (F1): the same adjustment id on two invoices files two records with different decision ids")]
+    public async Task Add_TheSameAdjustmentIdOnTwoInvoices_FilesTwoRecordsUnderDifferentDecisionIds()
+    {
+        var id = Guid.NewGuid();
+        var a = new World();
+        var b = new World();
+
+        (await a.Service().AddAsync(AddWithNote(a, null, id), CancellationToken.None)).Status.Should().Be(AdjustmentStatus.Applied);
+        (await b.Service().AddAsync(AddWithNote(b, null, id), CancellationToken.None)).Status.Should().Be(AdjustmentStatus.Applied);
+
+        InvoiceAdjustmentService.AddDecisionIdFor(a.InvoiceId, id).Should().NotBe(InvoiceAdjustmentService.AddDecisionIdFor(b.InvoiceId, id));
+        a.DecisionRecords.Should().ContainSingle();
+        b.DecisionRecords.Should().ContainSingle();
+    }
+
+    [Fact(DisplayName = "095f-2b R1 (F1) must-not-fire: a repeat of an add under the derived id still files ONE record, and a different note is still 409")]
+    public async Task Add_RepeatsUnderTheDerivedId_StillFileOneRecord_AndAnotherNoteIsStill409()
+    {
+        var w = new World();
+        var id = Guid.NewGuid();
+
+        (await w.Service().AddAsync(AddWithNote(w, "Same", id), CancellationToken.None)).Status.Should().Be(AdjustmentStatus.Applied);
+        (await w.Service().AddAsync(AddWithNote(w, "Same", id), CancellationToken.None)).AlreadyApplied.Should().BeTrue();
+        var edited = await w.Service().AddAsync(AddWithNote(w, "Other", id), CancellationToken.None);
+
+        edited.Status.Should().Be(AdjustmentStatus.IdReused);
+        w.DecisionRecords.Should().ContainSingle();
+    }
+
+    // =========================================================================================
+    // Review round 1 (F1 low): a faulted stored-record lookup on a repeat does not claim the totals were updated
+    // =========================================================================================
+
+    [Fact(DisplayName = "095f-2b R1: an add repeat whose stored-record lookup faults is 503 with neutral wording (it never says the totals were updated), and the next repeat finishes it")]
+    public async Task Add_ALookupFaultOnARepeat_Is503WithNeutralWording()
+    {
+        var w = new World();
+        var command = AddWithNote(w, "Kept");
+        w.TotalsFault = new TimeoutException("totals");
+        (await w.Service().AddAsync(command, CancellationToken.None)).Status.Should().Be(AdjustmentStatus.Incomplete);
+
+        w.H.LookupFault = new TimeoutException("lookup");
+        var repeat = await w.Service().AddAsync(command, CancellationToken.None);
+
+        repeat.Status.Should().Be(AdjustmentStatus.Incomplete);
+        repeat.Code.Should().Be(AdjustmentCodes.Incomplete);
+        repeat.Detail.Should().Contain("not finished").And.Contain("Repeat the same request");
+        repeat.Detail.Should().NotContain("totals were updated").And.NotContain("not recorded").And.NotContain("saved");
+        w.TotalsWriteCount.Should().Be(0, "the totals were never confirmed, and the faulted repeat did not run them");
+
+        w.H.LookupFault = null;
+        w.TotalsFault = null;
+        (await w.Service().AddAsync(command, CancellationToken.None)).Status.Should().Be(AdjustmentStatus.Applied);
+        w.DecisionRecords.Should().ContainSingle();
+    }
+
+    [Fact(DisplayName = "095f-2b R1: a removal repeat whose stored-record lookup faults is 503 with neutral wording (it never says the totals were updated), and the next repeat finishes it")]
+    public async Task Remove_ALookupFaultOnARepeat_Is503WithNeutralWording()
+    {
+        var w = new World();
+        var line = ActiveAdjustment(w);
+        w.TotalsFault = new TimeoutException("totals");
+        (await w.Service().RemoveAsync(RemoveOf(w, line.Id, "Gone"), CancellationToken.None)).Status.Should().Be(AdjustmentStatus.Incomplete);
+
+        w.H.LookupFault = new TimeoutException("lookup");
+        var repeat = await w.Service().RemoveAsync(RemoveOf(w, line.Id, "Gone"), CancellationToken.None);
+
+        repeat.Status.Should().Be(AdjustmentStatus.Incomplete);
+        repeat.Code.Should().Be(AdjustmentCodes.Incomplete);
+        repeat.Detail.Should().Contain("not finished").And.Contain("Repeat the same request");
+        repeat.Detail.Should().NotContain("totals were updated").And.NotContain("not recorded");
+
+        w.H.LookupFault = null;
+        w.TotalsFault = null;
+        (await w.Service().RemoveAsync(RemoveOf(w, line.Id, "Gone"), CancellationToken.None)).Status.Should().Be(AdjustmentStatus.Applied);
+        RecordsOf(w, InvoiceAdjustmentService.RemoveActionCode).Should().ContainSingle();
     }
 
     // =========================================================================================

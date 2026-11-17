@@ -170,7 +170,7 @@ public sealed record AdjustmentRulesResult(
 /// A cited rule must be one of these options (400 otherwise).</para>
 /// <para><b>Decision Records (task 095f-2b, EB-D-241; design 3 option A).</b> Every add files ONE <c>add-adjustment</c> record and every
 /// removal ONE <c>remove-adjustment</c> record, through <see cref="BillingDecisionRecorder"/>, filed under the invoice, AFTER the line write and the
-/// totals land. The decision id of an add is the client's adjustment id; of a removal, <see cref="RemoveDecisionIdFor"/> of the line. Values hold
+/// totals land. The decision id of an add is <see cref="AddDecisionIdFor"/> (the invoice and the client's adjustment id), of a removal <see cref="RemoveDecisionIdFor"/> (the invoice and the line): namespaced hashes like every other billing decision id, never the raw client id. Values hold
 /// the declared codes only (<c>method</c>, <c>value</c>, <c>rule</c> when cited, <c>adjustment</c>, and <c>note</c> only when a note is given, never
 /// with a null value); the add's reason is the record's reason. The note (or, with none, an add's reason; a removal with none leaves it) goes to
 /// <c>sprk_invoice.sprk_decisionnote</c> in the totals' own conditional update (<see cref="IInvoiceTotalsService.RecalculateAsync(Guid, string?, CancellationToken)"/>).
@@ -293,9 +293,16 @@ public sealed class InvoiceAdjustmentService
     internal static Guid LineIdFor(Guid invoiceId, Guid adjustmentId) =>
         InvoiceLineDecisionService.IdOf($"ebilling-adjustment-{invoiceId:D}-{adjustmentId:D}");
 
-    /// <summary>Task 095f-2b (design 3): the decision id of a removal's Decision Record, derived from <c>remove-{lineId}</c>. A removed adjustment
-    /// cannot be re-added under its id (409 <c>id_reused</c>), so the id names one removal.</summary>
-    internal static Guid RemoveDecisionIdFor(Guid lineId) => InvoiceLineDecisionService.IdOf($"remove-{lineId:D}");
+    /// <summary>Task 095f-2b (review round 1): the decision id of an add's Decision Record: the client's adjustment id hashed with the invoice, in
+    /// the same namespaced form as every other billing decision id (as Add line's <c>DecisionIdFor</c>). The writer keys records by subject and decision
+    /// id, so the raw client id could coincide with another decision's id on the invoice.</summary>
+    internal static Guid AddDecisionIdFor(Guid invoiceId, Guid adjustmentId) =>
+        InvoiceLineDecisionService.IdOf($"ebilling-add-adjustment-{invoiceId:D}-{adjustmentId:D}");
+
+    /// <summary>Task 095f-2b (design 3; review round 1): the decision id of a removal's Decision Record, namespaced like <see cref="AddDecisionIdFor"/>.
+    /// A removed adjustment cannot be re-added under its id (409 <c>id_reused</c>), so the id names one removal.</summary>
+    internal static Guid RemoveDecisionIdFor(Guid invoiceId, Guid lineId) =>
+        InvoiceLineDecisionService.IdOf($"ebilling-remove-adjustment-{invoiceId:D}-{lineId:D}");
 
     // ── The rule options (F-8, D-74) ──
 
@@ -566,11 +573,11 @@ public sealed class InvoiceAdjustmentService
             bool recorded;
             try
             {
-                recorded = await IsRecordedAsync(AddActionCode, command.InvoiceId, command.AdjustmentId, ct).ConfigureAwait(false);
+                recorded = await IsRecordedAsync(AddActionCode, command.InvoiceId, AddDecisionIdFor(command.InvoiceId, command.AdjustmentId), ct).ConfigureAwait(false);
             }
             catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
             {
-                return Incomplete(command.InvoiceId, RecordStep, DetailOf(ex));
+                return LookupFailed(command.InvoiceId, DetailOf(ex));
             }
 
             return await FinishAddAsync(
@@ -583,7 +590,7 @@ public sealed class InvoiceAdjustmentService
         // that no repeat could finish: refused before anything is written. ──
         try
         {
-            if (await IsRecordedAsync(AddActionCode, command.InvoiceId, command.AdjustmentId, ct).ConfigureAwait(false))
+            if (await IsRecordedAsync(AddActionCode, command.InvoiceId, AddDecisionIdFor(command.InvoiceId, command.AdjustmentId), ct).ConfigureAwait(false))
             {
                 return IdReused("This adjustment id is already recorded for another decision on this invoice. Use a new adjustment id.");
             }
@@ -840,7 +847,7 @@ public sealed class InvoiceAdjustmentService
             ["approvedTotal"] = approvedTotal,
         };
         return new BillingDecision(
-            command.AdjustmentId, AddActionCode, command.InvoiceId, BillingDecider.Human(command.ReviewerSystemUserId, ReviewerRole), facts, OutcomeAdded,
+            AddDecisionIdFor(command.InvoiceId, command.AdjustmentId), AddActionCode, command.InvoiceId, BillingDecider.Human(command.ReviewerSystemUserId, ReviewerRole), facts, OutcomeAdded,
             Reason: reason, Values: values, Written: [new DecisionRecordRef(InvoiceReviewReadService.LineEntity, lineId)], DecidedOn: decidedOn);
     }
 
@@ -860,7 +867,7 @@ public sealed class InvoiceAdjustmentService
             ["approvedTotal"] = approvedTotal,
         };
         return new BillingDecision(
-            RemoveDecisionIdFor(command.LineId), RemoveActionCode, command.InvoiceId, BillingDecider.Human(command.ReviewerSystemUserId, ReviewerRole), facts,
+            RemoveDecisionIdFor(command.InvoiceId, command.LineId), RemoveActionCode, command.InvoiceId, BillingDecider.Human(command.ReviewerSystemUserId, ReviewerRole), facts,
             OutcomeRemoved, Reason: null, Values: values, Written: [new DecisionRecordRef(InvoiceReviewReadService.LineEntity, command.LineId)],
             DecidedOn: decidedOn);
     }
@@ -938,11 +945,11 @@ public sealed class InvoiceAdjustmentService
             // 095f-2b: once the removal's record exists the column already has the first attempt's note; the totals then run without it.
             try
             {
-                writeColumn = !await IsRecordedAsync(RemoveActionCode, command.InvoiceId, RemoveDecisionIdFor(command.LineId), ct).ConfigureAwait(false);
+                writeColumn = !await IsRecordedAsync(RemoveActionCode, command.InvoiceId, RemoveDecisionIdFor(command.InvoiceId, command.LineId), ct).ConfigureAwait(false);
             }
             catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
             {
-                return Incomplete(command.InvoiceId, RecordStep, DetailOf(ex), removal: true);
+                return LookupFailed(command.InvoiceId, DetailOf(ex), removal: true);
             }
 
             removedOn = row.GetAttributeValue<DateTime?>(InvoiceReviewReadService.LineReviewedOn) is { } at
@@ -1083,6 +1090,21 @@ public sealed class InvoiceAdjustmentService
                 (true, _) => "The adjustment was removed but the invoice totals were not updated. Repeat the same request to complete it.",
                 _ => "The adjustment was saved but the invoice totals were not updated. Repeat the same request to complete it.",
             });
+    }
+
+    /// <summary>095f-2b (review round 1): the stored-record lookup of a repeat faulted, so how far the first attempt got (the totals, the record) is not
+    /// known: 503 <c>incomplete</c> with neutral wording, and the same repeat finishes whatever is left (unlike <see cref="Incomplete"/>, it never says
+    /// the totals were updated).</summary>
+    private AdjustmentResult LookupFailed(Guid invoiceId, string detail, bool removal = false)
+    {
+        _logger.LogError(
+            "Adjustment on invoice {InvoiceId}: the stored record could not be looked up on a repeat ({Detail}); the caller repeats the same request to finish it.",
+            invoiceId, detail);
+        return new AdjustmentResult(
+            AdjustmentStatus.Incomplete, AdjustmentCodes.Incomplete,
+            removal
+                ? "The removal is not finished. Repeat the same request to complete it."
+                : "The adjustment is not finished. Repeat the same request to complete it.");
     }
 
     private static AdjustmentResult IdReused(string detail) => new(AdjustmentStatus.IdReused, AdjustmentCodes.IdReused, detail);
