@@ -1,7 +1,9 @@
+using System.Text.Json;
 using Cronos;
 using Microsoft.AspNetCore.Mvc;
 using Spaarke.Scheduling;
 using Sprk.Bff.Api.Api.Admin.Models;
+using Sprk.Bff.Api.Services.RecordCreation;
 
 namespace Sprk.Bff.Api.Api.Admin;
 
@@ -96,6 +98,24 @@ public static class JobsEndpoints
             .WithSummary("Manually trigger a registered background job (R3 task 021)")
             .WithDescription("Dispatches the named IScheduledJob out-of-band with Trigger=ManualAdmin and a fresh correlationId (NFR-08). Returns 202 Accepted immediately with the persistent run id and dispatch timestamp — the admin client polls GET /api/admin/jobs/{jobId}/status for run outcome. 404 when the jobId is not registered. 409 when the job is already running (a scheduled tick or another trigger holds its lease — ADR-036 A1 rule 1). 503 when the scheduler lease store is unavailable.")
             .Produces<TriggerResponse>(StatusCodes.Status202Accepted)
+            .ProducesProblem(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status403Forbidden)
+            .ProducesProblem(StatusCodes.Status404NotFound)
+            .ProducesProblem(StatusCodes.Status409Conflict)
+            .ProducesProblem(StatusCodes.Status500InternalServerError)
+            .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
+
+        // ============================================================================
+        // ===== fm task 052c — POST /api/admin/jobs/record-repair-pass/runs =========
+        // ============================================================================
+        // The repair pass for ONE table over ONE bounded createdon window, typed for this job only and validated before any lease
+        // is taken. The generic /{jobId}/trigger stays parameterless: it never forwards admin-chosen keys to a job.
+        group.MapPost("/record-repair-pass/runs", StartRecordRepairRunAsync)
+            .WithName("AdminRecordRepairRun")
+            .WithSummary("Run the record repair pass for one table over one createdon window")
+            .WithDescription("Starts the record repair pass (Repair mode, fill-only) for ONE table it sweeps, over rows created in [createdFrom, createdTo). Both bounds are ISO 8601 with an offset; createdTo is not after now; the window is at most 31 days; createdFrom is not before the go-live instant (the pass is forward-only). Returns 202 Accepted with the run id; the outcome is on GET /api/admin/jobs/record-repair-pass/status. 400 with a reasonCode when the request is refused; 409 when the pass is not configured or the job is already running; 503 when the scheduler lease store is unavailable.")
+            .Produces<TriggerResponse>(StatusCodes.Status202Accepted)
+            .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
             .ProducesProblem(StatusCodes.Status403Forbidden)
             .ProducesProblem(StatusCodes.Status404NotFound)
@@ -310,9 +330,24 @@ public static class JobsEndpoints
             });
         }
 
+        return await DispatchAsync(jobId, parameters: null, host, logger, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Starts <paramref name="jobId"/> through <see cref="ScheduledJobHost.TriggerNowAsync"/> and maps the outcome: 202 with the run
+    /// id, 404 not registered, 409 already running (ADR-036 A1 rule 1), 503 lease store unavailable, 499 caller gone. Shared by the
+    /// generic trigger (no parameters) and the typed repair-pass run (its one validated value).
+    /// </summary>
+    private static async Task<IResult> DispatchAsync(
+        string jobId,
+        IDictionary<string, object>? parameters,
+        ScheduledJobHost host,
+        ILogger logger,
+        CancellationToken cancellationToken)
+    {
         try
         {
-            var trigger = await host.TriggerNowAsync(jobId, parameters: null, cancellationToken)
+            var trigger = await host.TriggerNowAsync(jobId, parameters, cancellationToken)
                 .ConfigureAwait(false);
 
             var response = new TriggerResponse(
@@ -364,6 +399,98 @@ public static class JobsEndpoints
             return Results.StatusCode(StatusCodes.Status499ClientClosedRequest);
         }
     }
+
+    // ============================================================================
+    // ===== fm task 052c handler =================================================
+    // ============================================================================
+
+    /// <summary>
+    /// Handler for <c>POST /api/admin/jobs/record-repair-pass/runs</c> (field-mapping-server-write-path-r1 task 052c): the repair
+    /// pass for ONE table over ONE <c>createdon</c> window. Everything is checked before the job's lease is taken: the job is
+    /// registered, the go-live instant is set and parses, and the body passes <see cref="RecordRepairOnDemandRun.TryCreate"/>
+    /// against the job's own table list. Only then is the run started, with the validated value as its one parameter.
+    /// </summary>
+    /// <remarks>
+    /// <para>Authorization: the group's <c>SystemAdmin</c> policy (ADR-008), nothing else. Refusals are ProblemDetails with a
+    /// stable <c>reasonCode</c> (<see cref="RecordRepairRunReason"/>), never exception text or row data: 400 for the request, 409
+    /// when the pass is not configured. Lease outcomes are the generic trigger's (<see cref="DispatchAsync"/>).</para>
+    /// <para>The job checks the window against go-live again before it reads anything (the route is not the only guard).</para>
+    /// <para>Component Justification (CLAUDE.md §11): (1) Existing — <c>POST /{jobId}/trigger</c> runs a job by id with no
+    /// parameters. (2) Extension — the generic trigger is not given a body: every other job would then receive admin-chosen
+    /// parameters it never validated; one typed route for this job is the narrow extension. (3) Cost of doing nothing — rows the
+    /// scheduled pass's watermark has passed are never repaired (052b notes K1, K6, K9).</para>
+    /// </remarks>
+    private static async Task<IResult> StartRecordRepairRunAsync(
+        HttpRequest request,
+        ScheduledJobRegistry registry,
+        ScheduledJobHost host,
+        IConfiguration configuration,
+        TimeProvider timeProvider,
+        ILogger<Program> logger,
+        CancellationToken cancellationToken)
+    {
+        const string jobId = RecordRepairPassJob.JobIdConstant;
+        if (registry.Resolve(jobId) is not RecordRepairPassJob job)
+        {
+            return Results.Problem(new ProblemDetails
+            {
+                Title = "Not Found",
+                Detail = $"No background job with jobId '{jobId}' is registered.",
+                Status = StatusCodes.Status404NotFound
+            });
+        }
+
+        switch (RecordRepairPassJob.ReadGoLive(configuration[RecordRepairPassJob.GoLiveConfigKey], out var goLive))
+        {
+            case RecordRepairPassJob.GoLiveSetting.Unset:
+                return RepairRunRefused(StatusCodes.Status409Conflict, new RecordRepairRunRefusal(RecordRepairRunReason.NotConfigured,
+                    "The repair pass is not configured (" + RecordRepairPassJob.GoLiveConfigKey + " is unset), so no run starts."));
+            case RecordRepairPassJob.GoLiveSetting.Invalid:
+                logger.LogError("Record repair run refused: {Key} does not parse as an ISO 8601 round-trip instant",
+                    RecordRepairPassJob.GoLiveConfigKey);
+                return RepairRunRefused(StatusCodes.Status409Conflict, new RecordRepairRunRefusal(RecordRepairRunReason.GoLiveInvalid,
+                    RecordRepairPassJob.GoLiveConfigKey + " does not parse as an instant, so no run starts."));
+        }
+
+        RecordRepairRunRequest? body;
+        try
+        {
+            body = await request.ReadFromJsonAsync<RecordRepairRunRequest>(cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is JsonException or InvalidOperationException)
+        {
+            body = null;
+        }
+
+        if (body is null)
+        {
+            return RepairRunRefused(StatusCodes.Status400BadRequest, new RecordRepairRunRefusal(RecordRepairRunReason.BodyInvalid,
+                "The body must be a JSON object with table, createdFrom and createdTo."));
+        }
+
+        var run = RecordRepairOnDemandRun.TryCreate(
+            body.Table, body.CreatedFrom, body.CreatedTo, goLive, timeProvider.GetUtcNow(), job.Tables, out var refusal);
+        if (run is null)
+        {
+            return RepairRunRefused(StatusCodes.Status400BadRequest, refusal!);
+        }
+
+        logger.LogInformation("Record repair run requested for {Run}", run);
+        return await DispatchAsync(
+                jobId,
+                new Dictionary<string, object>(StringComparer.Ordinal) { [RecordRepairOnDemandRun.ParameterKey] = run },
+                host,
+                logger,
+                cancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    private static IResult RepairRunRefused(int statusCode, RecordRepairRunRefusal refusal) =>
+        Results.Problem(
+            title: "Repair run refused",
+            detail: refusal.Detail,
+            statusCode: statusCode,
+            extensions: new Dictionary<string, object?> { ["reasonCode"] = refusal.Code });
 
     // ============================================================================
     // ===== Task 022 handlers ====================================================
