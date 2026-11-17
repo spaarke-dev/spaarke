@@ -16,12 +16,12 @@ export { CreateRecordWizard } from './CreateRecordWizard';
 // deleted in task 021. Import follow-on symbols from '@spaarke/ui-components'
 // (the root barrel re-exports WizardFollowOns) or from the WizardFollowOns barrel.
 
-// Step components still owned here (NOT migrated to WizardFollowOns):
-//   - AssignResourcesStep: legacy "Assign Resources" step with no WizardFollowOns successor.
+// No step components are owned here any more. The legacy "Assign Resources" step (inline lookups, no consumer) was retired
+// by ontology task 184 (importer audit: none); a wizard person/organization field is DataverseLookupField and a wizard
+// email is EmailComposer (.claude/patterns/ui/wizard-side-pane-lookup-and-email-compose.md).
 // SendEmailStep was retained past task 021 pending CreateWorkAssignmentWizard's (task 023)
 // migration off it — task 023 completed that migration (now uses SendEmailFollowOnStep),
 // so the local copy + its exports were removed here (post-021-wave cleanup, 2026-07-08).
-export { AssignResourcesStep } from './steps/AssignResourcesStep';
 
 // Types
 export type {
@@ -38,6 +38,3 @@ export type {
   AssociationResult,
   EntityTypeOption,
 } from './types';
-
-// Step prop types
-export type { IAssignResourcesStepProps } from './steps/AssignResourcesStep';

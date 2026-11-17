@@ -23,6 +23,9 @@ export * from './scaledTheme';
 // hooks/useUiScale.ts by the app shells (SpaarkeAi, LegalWorkspace).
 export * from './uiScale';
 
+// Cross-frame side-pane signal: a framed page asks its parent's modal to yield to the lookup pane (task 194)
+export * from './sidePaneFrameSignal';
+
 // Opt-in chevron-pager body variant (`bodyScroll="arrows"`)
 export * from './ModalScrollArea';
 

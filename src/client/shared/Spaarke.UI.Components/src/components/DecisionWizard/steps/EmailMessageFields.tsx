@@ -24,6 +24,7 @@ import * as React from 'react';
 import { MessageBar, MessageBarBody, makeStyles, tokens } from '@fluentui/react-components';
 import { EmailComposer } from '../../EmailComposer/EmailComposer';
 import { EMAIL_RE } from '../../EmailComposer/EmailComposer.reducer';
+import { toPlainText } from '../../EmailComposer/composeOnlyText';
 import type { EmailComposerState, IRecipient } from '../../EmailComposer/EmailComposer.types';
 import type { AuthenticatedFetchFn } from '../../../services/EntityCreationService';
 import { fieldValue, withValue } from '../decisionDraft';
@@ -62,16 +63,6 @@ const useStyles = makeStyles({
 /** The composer never sends in compose-only mode; a fetch that refuses makes that certain. */
 const refuseFetch = (() =>
   Promise.reject(new Error('The decision wizard never sends from the composer.'))) as unknown as AuthenticatedFetchFn;
-
-/** Plain text of a body the user switched to rich text: block ends become line breaks, tags are dropped. */
-function toPlainText(body: string, format: EmailComposerState['bodyFormat']): string {
-  if (format !== 'HTML' || !/[<&]/.test(body)) return body;
-  // DOMParser builds an inert document: nothing in the markup runs (an `innerHTML` write on a detached element would run
-  // <img onerror>, and the body carries the record name).
-  const withBreaks = body.replace(/<\s*br\s*\/?>/gi, '\n').replace(/<\s*\/\s*(p|div|li|h[1-6])\s*>/gi, '\n');
-  const text = new DOMParser().parseFromString(withBreaks, 'text/html').body.textContent;
-  return text.replace(/\n{3,}/g, '\n\n').trim();
-}
 
 export const EmailMessageFields: React.FC<{ scope: StepScope; action: DecisionAction }> = ({ scope, action }) => {
   const { draft, update, openLookup } = useDecisionItem();

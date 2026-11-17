@@ -26,7 +26,8 @@ namespace Sprk.Bff.Api.Services.Finance.Submission;
 /// <para><b>Internal part (uac-r2, binding; 082d resolves the U3 tension of the 082 notes).</b> Chain ids, Procedure Version ids, override row ids
 /// and override reasons are in this member ONLY. <c>sprk_findingsjson</c> is field-secured with no reader profile and read app-only
 /// (<c>FindingsJsonFieldSecurityAgreementTests</c>, <c>FindingsJsonAppOnlyReadGuardTests</c>), and no reader projection emits this member: the review
-/// read model, the status view, the admin attention text and the hold readers read named members field by field and never this one. A reader-facing
+/// read model, the status view, the admin attention text and the hold readers read named members field by field and never emit this one (the review
+/// read model hands the stored text to task 113's <c>ProcedureChangeBanner</c>, which reads this member and returns ONE state, never the basis). A reader-facing
 /// member about Procedures is built from <see cref="ProcedureRulesOnDate.ForReaders"/> / <see cref="ProcedureGap.ForReaders"/> only (the gap
 /// pipeline finding). Tests: <c>ProcedureSnapshotTests</c>.</para>
 /// <para><b>Versions.</b> <see cref="Version"/> is 1. A row stored before 082d has no member: <see cref="Read(JsonObject)"/> answers null, which
@@ -44,13 +45,15 @@ internal static class ProcedureSnapshot
     internal const string DecisionRecordFact = "procedureSnapshot";
 
     /// <summary>The snapshot of <paramref name="evaluation"/>'s basis, or null when nothing was evaluated (a held fault, a pre-evaluation stop).</summary>
-    internal static JsonObject? Build(BillingEvaluationResult? evaluation)
-    {
-        if (evaluation?.ProcedureBasis is not { } basis)
-        {
-            return null;
-        }
+    internal static JsonObject? Build(BillingEvaluationResult? evaluation) =>
+        evaluation?.ProcedureBasis is { } basis ? Build(basis) : null;
 
+    /// <summary>
+    /// The snapshot of <paramref name="basis"/>. The one builder: the submission's snapshot is <c>Build(evaluation.ProcedureBasis)</c> and task 113's
+    /// read-time comparison builds the current resolution's side with the same code, so the two can only differ by what they were built from.
+    /// </summary>
+    internal static JsonObject Build(BillingProcedureBasis basis)
+    {
         var rows = new Dictionary<Guid, ProcedureOverrideRow>();
         void Collect(IEnumerable<ProcedureOverrideRow> deciding)
         {
@@ -404,7 +407,7 @@ internal static class ProcedureSnapshot
 /// The parts of a stored <see cref="ProcedureSnapshot"/> its readers need today. <see cref="AppliedPolicyVersionIds"/>: the versions that judged at
 /// least one subject (task 083: a clause is shown only for these); <see cref="DisplacedPolicyVersionIds"/>: those applied on no subject and displaced
 /// on at least one. Only <see cref="GapCount"/> feeds the Decision Record summary (no other count does: see <see cref="ProcedureSnapshot.DecisionRecordSummary"/>);
-/// <see cref="ProcedureCount"/> is for 113. Internal: it carries policy version ids.
+/// <see cref="ProcedureCount"/> has no reader today (task 113 compares the members themselves, not these counts; tests read it). Internal: it carries policy version ids.
 /// </summary>
 internal sealed record StoredProcedureSnapshot(
     int Version, IReadOnlyList<Guid> AppliedPolicyVersionIds, IReadOnlyList<Guid> DisplacedPolicyVersionIds, int ProcedureCount, int GapCount)

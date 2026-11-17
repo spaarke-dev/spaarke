@@ -1,35 +1,39 @@
 # Current Task State
 
-> **Last Updated**: 2026-11-12
+> **Last Updated**: 2026-11-15 (checkpoint after the Event forms decisions)
 > **Format**: CURRENT state only. Each checkpoint REWRITES this file. Target ≤ 10 KB.
 
 ## Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
 |-------|-------|
-| **Task** | 018 — P1 deploy + E2E (`tasks/018-p1-deploy-dev-e2e.poml`) — PREP ONLY, nothing live |
-| **Step** | — |
-| **Status** | 001–007 ✅; Phase 1 code complete. Next is 018 (live: BFF deploy via uac-r2 + SPA dev deploy + E2E) |
-| **Next Action** | Gates in `notes/task-018-notes.md`: (1) owner decides PR #2681 ready + merge to master (UAC review done: uac-r2 PASS (FR-08, FR-24), 2026-11-12, after F4-1); then the uac-r2 deploy request for the master SHA. SPA rollback target `b083d62183` |
+| **Task** | **014** IN PROGRESS: BFF Event forms (FR-35–FR-37), `tasks/014-bff-event-forms.poml`. FULL, opus high, two adversarial passes |
+| **Step** | Step 1 (gates): master merged at `5eb257a40d` (incl. #2847); conflict check clean; proposal + Q1–Q6 sent to uac-r2 2026-11-16 — **waiting on its review; no BFF code before it** |
+| **Status** | 018 ✅ (retest round 3 passed). Event forms: owner decided Q-1–Q-8, S-1–S-4; spec FR-35–FR-37 written; tasks 014/015/016 created; 036 superseded |
+| **Next Action** | On uac-r2's review: record it verbatim in `notes/task-014-notes.md`, adjust the design if asked, then load knowledge (Step 4) and implement. Phase 2 (020/022/023/024/028) still open |
 
-### Critical Context
-- Record view: `components/record/RecordTemplateModal.tsx`; sections in `record/sections/`, action hosts in `record/actions/`.
-- Per-record access: `components/record/recordAccess.ts` is the one place (create rights, "Your access", read-only lines,
-  Submit invoice rule). Unknown = hidden and silent.
-- Submit invoice (007): page param `?invoiceRecord=` (not `?record=`); router-free `pages/invoiceSubmitLink.ts`;
-  `components/detail/RouterRecordOpener.tsx`.
-- Task 018 browser checks carried from earlier tasks: 004 ui-tests + D-8 aria-hidden; 006 ui-tests (light/dark);
-  007 ui-tests + #2658 aria-hidden after Submit invoice from a grid-opened record (steps in `notes/task-007-notes.md`).
+## Event forms (decided 2026-11-15)
+- Design and every file:line: `notes/event-forms-design.md`. Spec: FR-35 (create), FR-36 (event record: read, deep link, edit, status), FR-37 (assignable people); FR-23 superseded; out-of-scope line narrowed (events are editable).
+- **Owner decisions:**
+  - all active event types the caller has AppendTo on (fallback config: Task + Reminder);
+  - type required, and **not editable** after create;
+  - priority, assignee and description on create;
+  - edit and **any** status by Collaborate/Full Access on every parent;
+  - assignees = contacts granted on the record (incl. me);
+  - deep link yes;
+  - assignee column `sprk_assignedto`.
+  - Q-9 (existing type-less events) not answered → leave as "—".
+- **BFF builds on `RequestAccessMemo`** (`Infrastructure/ExternalAccess/RequestAccessMemo.cs`, #2847):
+  - get-or-add with a `remember` predicate; own key prefix covering every input;
+  - lock `context.Items` inside a composition;
+  - clear on any in-request access-state write (the PATCH).
 
-## Open owner questions
-- (Reminder, not a question) Tell ebilling-r1 the merge sha when PR #2681 reaches master (they asked, 2026-11-12).
-- Post-merge R4 look at ebilling's `src/client/external-spa/**` changes in #2689 (ebilling-r1 asked; waits on owner go).
-- D-6 #2703: send the Create Event type, or remove the select?
-- D-4 #2693: should Copy link carry `?customer={activeKey}`?
-- D-1 #2686: R4 follow-up task, or hand to the event/write-path owner?
-- D-2 #2687: the `Location` header contract choice.
-- PR #2681: mark ready and merge to master (gate for 018)?
+## Live state
+- **Dev BFF:** **`f451e0874d`** (master `ce6c241964` incl. #2845 latency fix + ebilling #2846, + spike), live about 00:45Z 2026-11-16. Rollback: BFF `aa7d6345f3` alone (still pairs with the current SPA). uac-r2's 30-minute gate with request timings is running.
+- **Dev SPA:** master `c1eb6e4a8e` (run 43747335450; tasks 012/013/021). SPA rollback `04dbd8df05` only together with BFF rollback `5a9b687a0b` (the old SPA calls the retired invoice-document routes).
 
-## Quick Reference
-- Project CLAUDE.md, tasks/TASK-INDEX.md, spec.md, notes/task-007-notes.md, notes/defer-issues.md (D-1..D-11)
-- PR #2681 (draft, Auto-fix on); Project issue #2680; Epic #2099
+## Open items / issues
+- D-17 #2845: fixed by uac-r2 (#2847 merged); expect each external request to drop from 3–4 s once `f451e0874d` is live. Ask the owner to recheck speed.
+- D-13 #2800, D-14 #2809, D-15 #2810, D-16 #2823.
+- Older owner questions: D-1 #2686, D-2 #2687, D-4 #2693, #2786 backfill (uac-r2).
+- Preview not loading = by design until task 022 (FR-14).

@@ -146,6 +146,14 @@ export interface IFilePreviewDialogProps {
    * changes.
    */
   onNavigate?: (nextIndex: number) => void;
+  /**
+   * Opt-in, forwarded to the preset's `SprkModal`: while `true` the preview dims, goes inert and drops just below the
+   * host's lookup side pane. A host sets it while a modal stacked over the preview (the Email documents wizard, the
+   * Find Similar dialog) has the pane open, so the preview neither covers the pane nor rises above that modal.
+   * Default `false`.
+   * @since ontology task 194
+   */
+  yieldToSidePane?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -173,6 +181,7 @@ export const RichFilePreviewDialog: React.FC<IFilePreviewDialogProps> = ({
   navigationTotal,
   currentIndex,
   onNavigate,
+  yieldToSidePane,
 }) => {
   // -----------------------------------------------------------------------
   // Navigation enablement + direction → index-delta adapter. The legacy
@@ -244,6 +253,7 @@ export const RichFilePreviewDialog: React.FC<IFilePreviewDialogProps> = ({
         onClose={onClose}
         title={documentName}
         metadata={metadata}
+        yieldToSidePane={yieldToSidePane}
         nav={{
           index: currentIndex as number,
           total: navigationTotal as number,
@@ -256,7 +266,13 @@ export const RichFilePreviewDialog: React.FC<IFilePreviewDialogProps> = ({
   }
 
   return (
-    <PreviewModal open={open} onClose={onClose} title={documentName} metadata={metadata}>
+    <PreviewModal
+      open={open}
+      onClose={onClose}
+      title={documentName}
+      metadata={metadata}
+      yieldToSidePane={yieldToSidePane}
+    >
       {stage}
     </PreviewModal>
   );

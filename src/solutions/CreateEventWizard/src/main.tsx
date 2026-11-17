@@ -39,6 +39,7 @@ function App() {
         dataService={b.dataService}
         uploadService={b.uploadService}
         navigationService={b.navigationService}
+        emailComposeHandlers={b.emailComposeHandlers}
         embedded={true}
         onClose={b.closeDialog}
         onComplete={b.completeHandoff}

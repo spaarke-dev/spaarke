@@ -38,17 +38,20 @@ namespace Sprk.Bff.Api.Api.ExternalAccess;
 ///   GET  /workassignments/{id}/todos     — to-dos for a work assignment
 ///   POST /workassignments/{id}/todos     — create a new to-do regarding the work assignment
 ///   PATCH /todos/{id}                    — update a to-do (scoped to its own accessible root)
-///   GET  /{matters|workassignments|servicerequests|invoices}/{id}/documents                          — documents (task 031)
-///   GET  /{matters|workassignments|servicerequests|invoices}/{id}/documents/{documentId}/content     — download
-///   POST /{matters|workassignments|servicerequests|invoices}/{id}/documents                          — upload
-///   GET  /{matters|workassignments|servicerequests|invoices}/{id}/documents/{documentId}/versions    — version history
+///   GET  /{matters|workassignments|servicerequests}/{id}/documents                          — documents (task 031)
+///   GET  /{matters|workassignments|servicerequests}/{id}/documents/{documentId}/content     — download
+///   POST /{matters|workassignments|servicerequests}/{id}/documents                          — upload
+///   GET  /{matters|workassignments|servicerequests}/{id}/documents/{documentId}/versions    — version history
 ///   DELETE /{documents|todos|events}/{id} — delete a record the caller created, with Read on its parent (task 032)
 ///
 /// DOCUMENTS ON EVERY CORE RECORD (task 031 / FR-24): one list, download, versions and upload handler,
 /// generalized over the document parent (ExternalDataService.DocumentParentKind). Project, matter and
 /// work assignment rights come from RightsForRoot; a service request's from the submitter scope (the
-/// Service Requests module's accessible set); an invoice's are inherited from its matter and project
-/// (owner decision 2026-10-11, option A — the union, RightsForInvoiceAsync).
+/// Service Requests module's accessible set). An invoice's rights are inherited from its matter and project
+/// (owner decision 2026-10-11, option A — the union, RightsForInvoiceAsync); they still decide delete-own of a
+/// document under an invoice. The four /invoices/{id}/documents routes retired with ebilling-r1 task 093: a firm
+/// reads an invoice's files only through GET /invoices/{id}/files (ExternalInvoiceSubmissionEndpoints), which
+/// serves Stored Files, not SPE documents.
 ///
 /// READ routes verify the caller holds Read on the requested record (HoldsReadOnProject /
 /// ListTodosForRoot, both through RightsForRoot). Returns 403 if not; NEVER an empty collection, which
@@ -95,9 +98,9 @@ namespace Sprk.Bff.Api.Api.ExternalAccess;
 /// deliberately do NOT select, accept, or return sprk_todoflag. To-dos remain exclusively on
 /// sprk_todo via /todos. If a future change makes these two surfaces overlap again, that is the
 /// regression FR-29 existed to prevent — keep them disjoint.
-/// PATCH /events/{id} was NOT restored: its only client wrapper (web-api-client.updateEvent) had zero call sites
-/// and was deleted (spaarke-ontology-platform-r1 task 097), so there is no consumer to justify the write surface
-/// (CLAUDE.md §11).
+/// PATCH /events/{id} was NOT restored by uac-r2 (no consumer then). spaarke-SPA-external-access-platform-r4 task 014b (FR-36,
+/// owner Q-5/Q-6) adds it with its own gate — GET /events/{id}, PATCH /events/{id} and GET /{root}/{id}/assignable-people — still
+/// calendar events only, never sprk_todoflag.
 ///
 /// ADR-001: Minimal API — no controllers.
 /// ADR-008: Authorization applied via route group + CallerPrincipalAuthorizationFilter.
@@ -380,53 +383,6 @@ public static class ExternalProjectDataEndpoints
             .ProducesProblem(StatusCodes.Status403Forbidden)
             .ProducesProblem(StatusCodes.Status404NotFound);
 
-        // Invoice documents (task 031, owner decision 2026-10-11, option A "inherit"): the same four handlers. An invoice
-        // is not a root, so its rights are the caller's rights on its PARENT records — the union over the invoice's
-        // sprk_matter and sprk_project (RightsForInvoiceAsync). Read lists, downloads and reads versions; Create uploads.
-        group.MapGet("/invoices/{id:guid}/documents", GetInvoiceDocuments)
-            .WithName("GetExternalInvoiceDocuments")
-            .RequireWorkforceCeiling(WorkforceRoleCeilingGate.ReadInvoiceDocuments)
-            .WithSummary("Get documents for an invoice whose matter or project the caller can read")
-            .Produces<ExternalDocumentListResponse>(StatusCodes.Status200OK)
-            .ProducesProblem(StatusCodes.Status401Unauthorized)
-            .ProducesProblem(StatusCodes.Status403Forbidden)
-            .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
-
-        group.MapGet("/invoices/{id:guid}/documents/{documentId:guid}/content", DownloadInvoiceDocumentContent)
-            .WithName("DownloadExternalInvoiceDocument")
-            .RequireWorkforceCeiling(WorkforceRoleCeilingGate.ReadInvoiceDocuments)
-            .WithSummary("Download an invoice document's content (authz-before-stream, app-only)")
-            .Produces(StatusCodes.Status200OK)
-            .ProducesProblem(StatusCodes.Status401Unauthorized)
-            .ProducesProblem(StatusCodes.Status403Forbidden)
-            .ProducesProblem(StatusCodes.Status404NotFound)
-            .ProducesProblem(StatusCodes.Status409Conflict)
-            .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
-
-        group.MapPost("/invoices/{id:guid}/documents", UploadInvoiceDocument)
-            .WithName("UploadExternalInvoiceDocument")
-            .RequireWorkforceCeiling(WorkforceRoleCeilingGate.UploadInvoiceDocument)
-            .WithSummary("Upload a document to an invoice (Create inherited from its matter or project; server-derived container, app-only)")
-            .Accepts<IFormFile>("multipart/form-data")
-            .DisableAntiforgery() // multipart upload; auth is the JWT + Tier-2 gate, not a form token
-            .Produces<ExternalDocumentDto>(StatusCodes.Status201Created)
-            .ProducesProblem(StatusCodes.Status400BadRequest)
-            .ProducesProblem(StatusCodes.Status401Unauthorized)
-            .ProducesProblem(StatusCodes.Status403Forbidden)
-            .ProducesProblem(StatusCodes.Status409Conflict)
-            .ProducesProblem(StatusCodes.Status422UnprocessableEntity)
-            .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
-
-        group.MapGet("/invoices/{id:guid}/documents/{documentId:guid}/versions", GetInvoiceDocumentVersions)
-            .WithName("GetExternalInvoiceDocumentVersions")
-            .RequireWorkforceCeiling(WorkforceRoleCeilingGate.ReadInvoiceDocuments)
-            .WithSummary("Get SPE version history for a document on an invoice")
-            .Produces<ExternalDocumentVersionsResponse>(StatusCodes.Status200OK)
-            .ProducesProblem(StatusCodes.Status401Unauthorized)
-            .ProducesProblem(StatusCodes.Status403Forbidden)
-            .ProducesProblem(StatusCodes.Status404NotFound)
-            .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
-
         // GET /api/v1/external/projects/{id}/events — calendar events for the project
         group.MapGet("/projects/{id:guid}/events", GetEvents)
             .WithName("GetExternalProjectEvents")
@@ -490,6 +446,62 @@ public static class ExternalProjectDataEndpoints
             .ProducesProblem(StatusCodes.Status403Forbidden)
             .ProducesProblem(StatusCodes.Status409Conflict) // task 146: no owner resolvable from the root
             .ProducesProblem(StatusCodes.Status503ServiceUnavailable); // Dataverse gave no answer
+
+        // ---------------------------------------------------------------------------------------
+        // spaarke-SPA-external-access-platform-r4 task 014b (FR-36, FR-37; owner Q-3/Q-5/Q-6/Q-7, S-1–S-4; uac-r2 review of
+        // task 014, Q1–Q6). Same group (ExternalCollaboration + CallerPrincipalAuthorizationFilter) and the same style of
+        // workforce ceiling as the event routes above. GET /events/{id}: Read on EVERY parent (the delete rule's parent check),
+        // else the uniform 404. PATCH /events/{id}: the edit right, re-checked on every request (uac-r2 Q1). The assignable-people
+        // routes are the ONLY external routes that return contact ids for assigning (names only, never email).
+        // ---------------------------------------------------------------------------------------
+
+        group.MapGet("/events/{id:guid}", GetEvent)
+            .WithName("GetExternalEvent")
+            .RequireWorkforceCeiling(WorkforceRoleCeilingGate.ReadEvent)
+            .WithSummary("Get one calendar event the caller can read on every record it is filed under (else the uniform 404)")
+            .Produces<ExternalEventDto>(StatusCodes.Status200OK)
+            .ProducesProblem(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status403Forbidden)
+            .ProducesProblem(StatusCodes.Status404NotFound)
+            .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
+
+        group.MapPatch("/events/{id:guid}", UpdateEvent)
+            .WithName("UpdateExternalEvent")
+            .RequireWorkforceCeiling(WorkforceRoleCeilingGate.UpdateEvent)
+            .WithSummary("Edit a calendar event or change its status (Collaborate or Full Access on every record it is filed under)")
+            .Produces(StatusCodes.Status204NoContent)
+            .ProducesProblem(StatusCodes.Status400BadRequest)
+            .ProducesProblem(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status403Forbidden)
+            .ProducesProblem(StatusCodes.Status404NotFound)
+            .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
+
+        group.MapGet("/projects/{id:guid}/assignable-people", GetProjectAssignablePeople)
+            .WithName("GetExternalProjectAssignablePeople")
+            .RequireWorkforceCeiling(WorkforceRoleCeilingGate.ReadProjectAssignablePeople)
+            .WithSummary("The people an event on this project may be assigned to (names only)")
+            .Produces<ExternalCollectionResponse<ExternalAssignablePersonDto>>(StatusCodes.Status200OK)
+            .ProducesProblem(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status403Forbidden)
+            .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
+
+        group.MapGet("/matters/{id:guid}/assignable-people", GetMatterAssignablePeople)
+            .WithName("GetExternalMatterAssignablePeople")
+            .RequireWorkforceCeiling(WorkforceRoleCeilingGate.ReadMatterAssignablePeople)
+            .WithSummary("The people an event on this matter may be assigned to (names only)")
+            .Produces<ExternalCollectionResponse<ExternalAssignablePersonDto>>(StatusCodes.Status200OK)
+            .ProducesProblem(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status403Forbidden)
+            .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
+
+        group.MapGet("/workassignments/{id:guid}/assignable-people", GetWorkAssignmentAssignablePeople)
+            .WithName("GetExternalWorkAssignmentAssignablePeople")
+            .RequireWorkforceCeiling(WorkforceRoleCeilingGate.ReadWorkAssignmentAssignablePeople)
+            .WithSummary("The people an event on this work assignment may be assigned to (names only)")
+            .Produces<ExternalCollectionResponse<ExternalAssignablePersonDto>>(StatusCodes.Status200OK)
+            .ProducesProblem(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status403Forbidden)
+            .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
 
         // GET /api/v1/external/projects/{id}/contacts
         group.MapGet("/projects/{id:guid}/contacts", GetContacts)
@@ -681,7 +693,6 @@ public static class ExternalProjectDataEndpoints
             ExternalDataService.DocumentParentKind.Matter => WorkforceRoleCeilingGate.UploadMatterDocument,
             ExternalDataService.DocumentParentKind.WorkAssignment => WorkforceRoleCeilingGate.UploadWorkAssignmentDocument,
             ExternalDataService.DocumentParentKind.ServiceRequest => WorkforceRoleCeilingGate.UploadServiceRequestDocument,
-            ExternalDataService.DocumentParentKind.Invoice => WorkforceRoleCeilingGate.UploadInvoiceDocument,
             _ => Array.Empty<WorkforceCeilingRequirement>(), // AdmitsAsync refuses an empty set
         };
 
@@ -877,6 +888,17 @@ public static class ExternalProjectDataEndpoints
             ExternalDataService.TodoRootKind.Project => WorkforceRoleCeilingGate.CreateProjectEvent,
             ExternalDataService.TodoRootKind.Matter => WorkforceRoleCeilingGate.CreateMatterEvent,
             ExternalDataService.TodoRootKind.WorkAssignment => WorkforceRoleCeilingGate.CreateWorkAssignmentEvent,
+            _ => Array.Empty<WorkforceCeilingRequirement>(), // a deny state: AdmitsAsync refuses an empty set
+        };
+
+    /// <summary>The events list's own ceiling for a root (Read on the root's table and on <c>sprk_event</c>) — what
+    /// <c>GET /events/{id}</c> asks of each parent (R4 task 014b, uac-r2 gate F1).</summary>
+    private static IReadOnlyList<WorkforceCeilingRequirement> ReadEventsCeiling(ExternalDataService.TodoRootKind rootKind) =>
+        rootKind switch
+        {
+            ExternalDataService.TodoRootKind.Project => WorkforceRoleCeilingGate.ReadProjectEvents,
+            ExternalDataService.TodoRootKind.Matter => WorkforceRoleCeilingGate.ReadMatterEvents,
+            ExternalDataService.TodoRootKind.WorkAssignment => WorkforceRoleCeilingGate.ReadWorkAssignmentEvents,
             _ => Array.Empty<WorkforceCeilingRequirement>(), // a deny state: AdmitsAsync refuses an empty set
         };
 
@@ -1355,14 +1377,15 @@ public static class ExternalProjectDataEndpoints
     /// module descriptor, or a module that grants the caller nothing, denies before any read. A requester read that
     /// FAILS (throttle, outage) is a 503 <see cref="ServiceRequestUnreadableReasonCode"/>, never a 403.</para>
     /// <para><b>An invoice is not a root either</b> (owner decision 2026-10-11, option A): it INHERITS the caller's
-    /// rights on its parent records — the union over its matter and project (<see cref="RightsForInvoiceAsync"/>). An
-    /// invoice read that FAILS is a 503 <see cref="InvoiceUnreadableReasonCode"/>.</para>
+    /// Read from its parent records (<see cref="RightsForInvoiceAsync"/>), Read only. Since ebilling-r1 task 093 retired the
+    /// <c>/invoices/{id}/documents</c> routes, only delete-own names an invoice parent here. An invoice read that FAILS is a
+    /// 503 <see cref="InvoiceUnreadableReasonCode"/>.</para>
     /// </remarks>
     /// <param name="confirmWrites">Task 036: set by the upload route and (fix round 1, F4) the document LIST, whose
     /// <c>canCreate</c> is the upload route's answer. Confirms the rights against Dataverse for a caller whose access
-    /// Dataverse decided (<see cref="WithDataverseRightsAsync"/>) — on the root, or on the invoice before its secure-roots
-    /// gate. It only widens a parent that already holds Read, so the list's Read gate is unchanged. A service request's
-    /// requester scope is not confirmed (see the task 036 notes). Download and versions pass nothing and ask Dataverse
+    /// Dataverse decided (<see cref="WithDataverseRightsAsync"/>) on the root. It only widens a parent that already holds
+    /// Read, so the list's Read gate is unchanged. A service request's requester scope is not confirmed (see the task 036
+    /// notes), and an invoice parent takes none (Read only). Download and versions pass nothing and ask Dataverse
     /// nothing.</param>
     /// <param name="logger">Logger for the confirmation; required when <paramref name="confirmWrites"/> is set.</param>
     /// <param name="readCallerPrivilege">Fix round 1 (F1): with <paramref name="confirmWrites"/>, Dataverse's Create also
@@ -1411,8 +1434,8 @@ public static class ExternalProjectDataEndpoints
             case ExternalDataService.DocumentParentKind.Invoice:
                 try
                 {
-                    return WithoutFault(await RightsForInvoiceAsync(
-                        caller, parentId, dataService, modules, ct, confirmWrites, logger, readCallerPrivilege, hideInvoices));
+                    // Read only (delete-own, the one route that still names an invoice parent); confirmWrites does not apply.
+                    return WithoutFault(await RightsForInvoiceAsync(caller, parentId, dataService, ct, hideInvoices));
                 }
                 catch (ExternalDataService.DataverseUnavailableException)
                 {
@@ -1486,37 +1509,26 @@ public static class ExternalProjectDataEndpoints
     }
 
     /// <summary>
-    /// The caller's rights on an invoice's documents (task 031, owner decision 2026-10-11, option A "inherit"): the UNION
-    /// of the caller's rights on the invoice's parent records, its <c>sprk_matter</c> and <c>sprk_project</c>, through
-    /// the same <see cref="RightsForRoot"/> the matter and project routes use.
+    /// The caller's Read on a document's invoice parent, for delete-own (task 031, owner decision 2026-10-11, option A "inherit"):
+    /// Read when the caller holds Read on any of the invoice's parent records (its <c>sprk_matter</c>, <c>sprk_project</c> or work
+    /// assignment, through the same <see cref="RightsForRoot"/> the root routes use) and the (a') predicate leaves the invoice
+    /// visible; otherwise <see cref="Spaarke.Dataverse.AccessRights.None"/>.
     /// </summary>
     /// <remarks>
-    /// <para>The union is the rule the invoices module already applies to make an invoice visible (its matter OR its
-    /// project in the caller's Read set) and the rule the message routes apply to an invoice post
-    /// (<c>ExternalMessageEndpoints.RightsThroughParents</c>). So Read on either parent lists, downloads and reads
-    /// versions; Create on either parent uploads; a ViewOnly parent alone gives Read without Create.</para>
-    /// <para>A caller holding Read on no matter and no project is denied before any read (the read could not change the
-    /// answer). A missing invoice and an invoice under records the caller cannot read deny identically (no oracle).</para>
-    /// <para><b>Create passes the invoice gate</b> (unified-access-control-r2 task 187, fix round 2, F1). When the union
-    /// carries Create, the invoice is put to the gate the invoice thread uses
-    /// (<see cref="ExternalMessageEndpoints.GetRecordRightsDecisionAsync"/>: the rule attributes, the live parents, the
-    /// secure flags, then the invoices module's <c>ScopeRows</c>, D4). An invoice whose live roots include a SECURE root the
-    /// caller cannot read loses Create, so an upload is refused before SPE or Dataverse is touched (and the list offers no
-    /// upload); without this a Create on ordinary matter M wrote the file into secure project X's container. Read is
-    /// unchanged: the read routes withhold such an invoice's documents through the document walk (D4), with their own
-    /// shapes. A gate read that could not decide throws <see cref="ExternalDataService.DataverseUnavailableException"/>,
-    /// which <see cref="RightsForDocumentParentAsync"/> answers with the <see cref="InvoiceUnreadableReasonCode"/> 503.
-    /// A caller without Create causes no gate read.</para>
+    /// <para>Read only. The four <c>/invoices/{id}/documents</c> routes, which also asked Create (upload) here, retired with
+    /// ebilling-r1 task 093; its only caller now is delete-own (<see cref="AuthorizeDeleteOwnAsync"/>, through
+    /// <see cref="RightsForDocumentParentAsync"/>), which asks Read on every parent of the row.</para>
+    /// <para>A caller holding Read on no matter, project or work assignment is denied before any read (the read could not change the
+    /// answer). A missing invoice and an invoice under records the caller cannot read deny identically (no oracle). A parent read
+    /// that fails, and an (a') decision that could not be made for a caller who reaches the invoice, throw
+    /// <see cref="ExternalDataService.DataverseUnavailableException"/>, which <see cref="RightsForDocumentParentAsync"/> answers with
+    /// the <see cref="InvoiceUnreadableReasonCode"/> 503.</para>
     /// </remarks>
     private static async Task<ConfirmedRights> RightsForInvoiceAsync(
         CallerPrincipal caller,
         Guid invoiceId,
         ExternalDataService dataService,
-        ExternalModuleRegistry modules,
         CancellationToken ct,
-        Func<string, Guid, CancellationToken, Task<Spaarke.Dataverse.AccessRights?>>? confirmWrites = null,
-        ILogger? logger = null,
-        Func<string, CancellationToken, Task<bool?>>? readCallerPrivilege = null,
         ExternalInvoiceHiding? hideInvoices = null)
     {
         var denied = new ConfirmedRights(Spaarke.Dataverse.AccessRights.None, Spaarke.Dataverse.AccessRights.None);
@@ -1539,13 +1551,13 @@ public static class ExternalProjectDataEndpoints
             rights |= RightsForRoot(caller, ExternalDataService.TodoRootKind.WorkAssignment, workAssignmentId);
 
         // Task 130-0 fix round 2 (K1): no Read through any parent is the uniform refusal BEFORE the invoice decision, so the seam is
-        // asked only for a caller who reaches the invoice (no timing difference). The steps below only widen a parent that holds Read.
+        // asked only for a caller who reaches the invoice (no timing difference).
         if (!rights.HasFlag(Spaarke.Dataverse.AccessRights.Read))
             return denied;
 
         // ebilling-r1 task 098 (model 9.1, (a')): an invoice whose Submit Invoice source is isolated is denied exactly like a
-        // missing one (the same `denied`, so the same 403 body), before any Dataverse confirmation or gate read. No predicate
-        // and a failed predicate read deny too (fail closed; never "unknown means visible").
+        // missing one (the same `denied`). No predicate and a failed predicate read deny too (fail closed; never "unknown means
+        // visible").
         // Task 130-0 fix round 1 (K1): a failed predicate read is the InvoiceUnreadableReasonCode 503 instead, but only AFTER the record
         // check: the invoice exists (its parents were read) and the caller holds Read through one of them. Any other caller gets the
         // uniform `denied`, so the 503 is no existence oracle.
@@ -1558,38 +1570,7 @@ public static class ExternalProjectDataEndpoints
             return denied;
         }
 
-        // Task 036 (FR-20): the upload confirms against Dataverse on the INVOICE itself (the target record), BEFORE the
-        // secure-roots gate below, so a Dataverse-confirmed Create is put to that gate exactly as a grant-derived one is.
-        var unanswered = Spaarke.Dataverse.AccessRights.None;
-        if (confirmWrites is not null)
-        {
-            var confirmed = await WithDataverseRightsAsync(
-                caller, rights,
-                ExternalDataService.GetDocumentParentBinding(ExternalDataService.DocumentParentKind.Invoice).EntitySet,
-                invoiceId, confirmWrites, logger ?? throw new ArgumentNullException(nameof(logger)), ct,
-                CommunicationRecordAuthorizationFilter.CreateDocumentPrivilege, readCallerPrivilege);
-            (rights, unanswered) = (confirmed.Rights, confirmed.Unanswered);
-        }
-
-        if (!rights.HasFlag(Spaarke.Dataverse.AccessRights.Create))
-            return new ConfirmedRights(rights, unanswered);
-
-        var (gate, undecided) = await ExternalMessageEndpoints.GetRecordRightsDecisionAsync(
-                ExternalMessageEndpoints.Roots["invoices"], invoiceId, caller, modules,
-                (_, id, attributes, token) => dataService.GetInvoiceLookupsAsync(id, attributes ?? Array.Empty<string>(), token),
-                dataService.Logger, ct, dataService.GetNonSecureRootsAsync, dataService.GetLiveParentRootsAsync,
-                // Task 098: the gate asks (a') itself (it refuses an invoice without the predicate); decided visible above.
-                hideInvoices)
-            .ConfigureAwait(false);
-        if (undecided)
-            throw new ExternalDataService.DataverseUnavailableException("The invoice's secure roots could not be read.");
-
-        // A secure-roots refusal is an ANSWER: Create is removed and is not "unanswered" (fix round 4, F1), so the upload is a
-        // 403, never a 503.
-        return gate.HasFlag(Spaarke.Dataverse.AccessRights.Read)
-            ? new ConfirmedRights(rights, unanswered)
-            : new ConfirmedRights(
-                rights & ~Spaarke.Dataverse.AccessRights.Create, unanswered & ~Spaarke.Dataverse.AccessRights.Create);
+        return new ConfirmedRights(Spaarke.Dataverse.AccessRights.Read, Spaarke.Dataverse.AccessRights.None);
     }
 
     /// <summary>
@@ -1661,7 +1642,6 @@ public static class ExternalProjectDataEndpoints
         ExternalDataService.DocumentParentKind.Matter => "matter",
         ExternalDataService.DocumentParentKind.WorkAssignment => "work assignment",
         ExternalDataService.DocumentParentKind.ServiceRequest => "service request",
-        ExternalDataService.DocumentParentKind.Invoice => "invoice",
         _ => "project",
     };
 
@@ -1804,12 +1784,6 @@ public static class ExternalProjectDataEndpoints
             ExternalDataService.DocumentParentKind.ServiceRequest, id, httpContext, dataService, modules, probe, privileges, logger, ct,
             hideInvoices);
 
-    private static Task<IResult> GetInvoiceDocuments(
-        Guid id, HttpContext httpContext, ExternalDataService dataService, ExternalModuleRegistry modules,
-        CallerRecordAccessProbe probe, IDataversePrivilegeChecker privileges, [Microsoft.AspNetCore.Mvc.FromServices] ExternalInvoiceHiding? hideInvoices, ILogger<Program> logger, CancellationToken ct) =>
-        ListDocumentsForParent(
-            ExternalDataService.DocumentParentKind.Invoice, id, httpContext, dataService, modules, probe, privileges, logger, ct, hideInvoices);
-
     private static Task<IResult> DownloadDocumentContent(
         Guid id, Guid documentId, HttpContext httpContext, ExternalDataService dataService,
         ExternalModuleRegistry modules, IDocumentStorageResolver storageResolver, ISpeFileOperations fileStore,
@@ -1836,13 +1810,6 @@ public static class ExternalProjectDataEndpoints
         ExternalModuleRegistry modules, IDocumentStorageResolver storageResolver, ISpeFileOperations fileStore,
         [Microsoft.AspNetCore.Mvc.FromServices] ExternalInvoiceHiding? hideInvoices, ILogger<Program> logger, CancellationToken ct) =>
         DownloadDocumentForParent(ExternalDataService.DocumentParentKind.ServiceRequest, id, documentId, httpContext,
-            dataService, modules, storageResolver, fileStore, logger, ct, hideInvoices);
-
-    private static Task<IResult> DownloadInvoiceDocumentContent(
-        Guid id, Guid documentId, HttpContext httpContext, ExternalDataService dataService,
-        ExternalModuleRegistry modules, IDocumentStorageResolver storageResolver, ISpeFileOperations fileStore,
-        [Microsoft.AspNetCore.Mvc.FromServices] ExternalInvoiceHiding? hideInvoices, ILogger<Program> logger, CancellationToken ct) =>
-        DownloadDocumentForParent(ExternalDataService.DocumentParentKind.Invoice, id, documentId, httpContext,
             dataService, modules, storageResolver, fileStore, logger, ct, hideInvoices);
 
     private static Task<IResult> UploadDocument(
@@ -1878,15 +1845,6 @@ public static class ExternalProjectDataEndpoints
         UploadDocumentForParent(ExternalDataService.DocumentParentKind.ServiceRequest, id, file, httpContext, dataService,
             modules, containerResolver, fileStore, ownership, indexing, jobs, configuration, probe, logger, ct, hideInvoices);
 
-    private static Task<IResult> UploadInvoiceDocument(
-        Guid id, IFormFile file, HttpContext httpContext, ExternalDataService dataService,
-        ExternalModuleRegistry modules, RecordContainerResolver containerResolver, ISpeFileOperations fileStore,
-        IRecordOwnershipResolver ownership, IPostUploadIndexingEnqueuer indexing, JobSubmissionService jobs,
-        IConfiguration configuration, CallerRecordAccessProbe probe, [Microsoft.AspNetCore.Mvc.FromServices] ExternalInvoiceHiding? hideInvoices,
-        ILogger<Program> logger, CancellationToken ct) =>
-        UploadDocumentForParent(ExternalDataService.DocumentParentKind.Invoice, id, file, httpContext, dataService,
-            modules, containerResolver, fileStore, ownership, indexing, jobs, configuration, probe, logger, ct, hideInvoices);
-
     private static Task<IResult> GetDocumentVersions(
         Guid id, Guid documentId, HttpContext httpContext, ExternalDataService dataService,
         ExternalModuleRegistry modules, IDocumentStorageResolver storageResolver, ISpeFileOperations fileStore,
@@ -1917,14 +1875,6 @@ public static class ExternalProjectDataEndpoints
         Spaarke.Dataverse.IGenericEntityService entityService, [Microsoft.AspNetCore.Mvc.FromServices] ExternalInvoiceHiding? hideInvoices,
         ILogger<Program> logger, CancellationToken ct) =>
         ListDocumentVersionsForParent(ExternalDataService.DocumentParentKind.ServiceRequest, id, documentId, httpContext,
-            dataService, modules, storageResolver, fileStore, entityService, logger, ct, hideInvoices);
-
-    private static Task<IResult> GetInvoiceDocumentVersions(
-        Guid id, Guid documentId, HttpContext httpContext, ExternalDataService dataService,
-        ExternalModuleRegistry modules, IDocumentStorageResolver storageResolver, ISpeFileOperations fileStore,
-        Spaarke.Dataverse.IGenericEntityService entityService, [Microsoft.AspNetCore.Mvc.FromServices] ExternalInvoiceHiding? hideInvoices,
-        ILogger<Program> logger, CancellationToken ct) =>
-        ListDocumentVersionsForParent(ExternalDataService.DocumentParentKind.Invoice, id, documentId, httpContext,
             dataService, modules, storageResolver, fileStore, entityService, logger, ct, hideInvoices);
 
     private static IResult DenyRoot(ExternalDataService.TodoRootKind rootKind) =>
@@ -2323,7 +2273,6 @@ public static class ExternalProjectDataEndpoints
         ExternalDataService.DocumentParentKind.Matter => "matters",
         ExternalDataService.DocumentParentKind.WorkAssignment => "workassignments",
         ExternalDataService.DocumentParentKind.ServiceRequest => "servicerequests",
-        ExternalDataService.DocumentParentKind.Invoice => "invoices",
         _ => "projects",
     };
 
@@ -2451,6 +2400,7 @@ public static class ExternalProjectDataEndpoints
         ExternalDataService dataService,
         CallerRecordAccessProbe probe,
         IDataversePrivilegeChecker privileges,
+        IConfiguration configuration,
         ILogger logger,
         CancellationToken ct,
         ExternalInvoiceHiding? hideInvoices = null)
@@ -2469,63 +2419,93 @@ public static class ExternalProjectDataEndpoints
         // Task 036 fix round 1 (F4) said this for a project, to a caller whose access Dataverse decided. R4 task 002
         // (FR-06): every root has an event create route now (CreateEventForRoot), and every caller is told whether it would
         // admit them here (AppendTo on the root + prvCreatesprk_Event, asked only of a Dataverse-decided caller).
+        var canCreate = await CanCreateUnderRootAsync(
+            callerContext, rootKind, rootId, Sprk.Bff.Api.Api.Events.EventEndpoints.CreateEventPrivilege,
+            CreateEventCeiling(rootKind), httpContext, probe, privileges, logger, ct);
+
+        // R4 task 014b (FR-35, owner Q-1, uac-r2 Q3): the types the create route would accept from this caller — the ACTIVE rows,
+        // narrowed by configuration, and for a Dataverse-decided caller by AppendTo on each row (ONE memoized composite read per
+        // request, CreatableEventTypesForCallerAsync). Asked only when canCreate is already true. A type read that could not be
+        // completed offers no create at all (canCreate false, no types): a UI affordance only — the create route answers 503.
+        IReadOnlyList<ExternalDataService.EventTypeOption> creatable = Array.Empty<ExternalDataService.EventTypeOption>();
+        if (canCreate)
+        {
+            var read = await CreatableEventTypesForCallerAsync(callerContext, dataService, configuration, httpContext, probe, logger, ct);
+            if (read is null)
+                canCreate = false;
+            else
+                creatable = read;
+        }
+
+        // R4 task 008 review round 1 (F2-1, FR-07) asked AppendTo on the Task row for canCreateTask; since task 014b that is ONE
+        // question of the creatable set above, so the two cannot disagree.
+        var canCreateTask = canCreate && creatable.Any(t => t.Id == Spaarke.Dataverse.EventTypeRef.Task);
+
+        // R4 task 014b (FR-36, uac-r2 Q1): each row says whether the PATCH route would admit this caller — the SAME edit decision
+        // (EventEditDecisionAsync). An undecidable row offers no edit (false); the PATCH itself answers that caller a 503.
+        var rows = await WithEventEditAffordancesAsync(
+            events.Value, callerContext, httpContext, probe, privileges, logger, ct);
+
         return Results.Ok(new ExternalCollectionResponse<ExternalEventDto>
         {
-            Value = events.Value,
+            Value = rows,
             Truncated = events.Truncated,
-            CanCreate = await CanCreateUnderRootAsync(
-                callerContext, rootKind, rootId, Sprk.Bff.Api.Api.Events.EventEndpoints.CreateEventPrivilege,
-                CreateEventCeiling(rootKind), httpContext, probe, privileges, logger, ct),
+            CanCreate = canCreate,
+            CanCreateTask = canCreateTask,
+            CreatableEventTypes = creatable.Select(ToTypeOptionDto).ToList(),
         });
     }
 
     /// <summary>GET /api/v1/external/projects/{id}/events — calendar events for a project.</summary>
     private static Task<IResult> GetEvents(
         Guid id, HttpContext httpContext, ExternalDataService dataService, CallerRecordAccessProbe probe,
-        IDataversePrivilegeChecker privileges,
+        IDataversePrivilegeChecker privileges, IConfiguration configuration,
         [Microsoft.AspNetCore.Mvc.FromServices] ExternalInvoiceHiding? hideInvoices, ILogger<Program> logger, CancellationToken ct) =>
-        ListEventsForRoot(ExternalDataService.TodoRootKind.Project, id, httpContext, dataService, probe, privileges, logger, ct,
-            hideInvoices);
+        ListEventsForRoot(ExternalDataService.TodoRootKind.Project, id, httpContext, dataService, probe, privileges, configuration,
+            logger, ct, hideInvoices);
 
     /// <summary>GET /api/v1/external/matters/{id}/events — calendar events for a matter (task 039).</summary>
     private static Task<IResult> GetMatterEvents(
         Guid id, HttpContext httpContext, ExternalDataService dataService, CallerRecordAccessProbe probe,
-        IDataversePrivilegeChecker privileges,
+        IDataversePrivilegeChecker privileges, IConfiguration configuration,
         [Microsoft.AspNetCore.Mvc.FromServices] ExternalInvoiceHiding? hideInvoices, ILogger<Program> logger, CancellationToken ct) =>
-        ListEventsForRoot(ExternalDataService.TodoRootKind.Matter, id, httpContext, dataService, probe, privileges, logger, ct,
-            hideInvoices);
+        ListEventsForRoot(ExternalDataService.TodoRootKind.Matter, id, httpContext, dataService, probe, privileges, configuration,
+            logger, ct, hideInvoices);
 
     /// <summary>GET /api/v1/external/workassignments/{id}/events — calendar events for a work assignment (task 039).</summary>
     private static Task<IResult> GetWorkAssignmentEvents(
         Guid id, HttpContext httpContext, ExternalDataService dataService, CallerRecordAccessProbe probe,
-        IDataversePrivilegeChecker privileges,
+        IDataversePrivilegeChecker privileges, IConfiguration configuration,
         [Microsoft.AspNetCore.Mvc.FromServices] ExternalInvoiceHiding? hideInvoices, ILogger<Program> logger, CancellationToken ct) =>
         ListEventsForRoot(ExternalDataService.TodoRootKind.WorkAssignment, id, httpContext, dataService, probe, privileges,
-            logger, ct, hideInvoices);
+            configuration, logger, ct, hideInvoices);
 
     /// <summary>POST /api/v1/external/projects/{id}/events — create a calendar event on a project.</summary>
     private static Task<IResult> CreateEvent(
         Guid id, CreateExternalEventRequest request, HttpContext httpContext,
         ExternalDataService dataService, IRecordOwnershipResolver ownership, CallerRecordAccessProbe probe,
+        RecordContactAccessService contactAccess, IConfiguration configuration, IDataversePrivilegeChecker privileges,
         ILogger<Program> logger, CancellationToken ct) =>
         CreateEventForRoot(ExternalDataService.TodoRootKind.Project, id, request, httpContext, dataService, ownership,
-            probe, logger, ct);
+            probe, contactAccess, configuration, privileges, logger, ct);
 
     /// <summary>POST /api/v1/external/matters/{id}/events — create a calendar event on a matter (R4 task 002, FR-08).</summary>
     private static Task<IResult> CreateMatterEvent(
         Guid id, CreateExternalEventRequest request, HttpContext httpContext,
         ExternalDataService dataService, IRecordOwnershipResolver ownership, CallerRecordAccessProbe probe,
+        RecordContactAccessService contactAccess, IConfiguration configuration, IDataversePrivilegeChecker privileges,
         ILogger<Program> logger, CancellationToken ct) =>
         CreateEventForRoot(ExternalDataService.TodoRootKind.Matter, id, request, httpContext, dataService, ownership,
-            probe, logger, ct);
+            probe, contactAccess, configuration, privileges, logger, ct);
 
     /// <summary>POST /api/v1/external/workassignments/{id}/events — create a calendar event on a work assignment (R4 task 002, FR-08).</summary>
     private static Task<IResult> CreateWorkAssignmentEvent(
         Guid id, CreateExternalEventRequest request, HttpContext httpContext,
         ExternalDataService dataService, IRecordOwnershipResolver ownership, CallerRecordAccessProbe probe,
+        RecordContactAccessService contactAccess, IConfiguration configuration, IDataversePrivilegeChecker privileges,
         ILogger<Program> logger, CancellationToken ct) =>
         CreateEventForRoot(ExternalDataService.TodoRootKind.WorkAssignment, id, request, httpContext, dataService, ownership,
-            probe, logger, ct);
+            probe, contactAccess, configuration, privileges, logger, ct);
 
     /// <summary>
     /// Create a calendar event on one accessible root — project, matter or work assignment. ONE implementation; the three
@@ -2552,6 +2532,9 @@ public static class ExternalProjectDataEndpoints
         ExternalDataService dataService,
         IRecordOwnershipResolver ownership,
         CallerRecordAccessProbe probe,
+        RecordContactAccessService contactAccess,
+        IConfiguration configuration,
+        IDataversePrivilegeChecker privileges,
         ILogger logger,
         CancellationToken ct)
     {
@@ -2572,16 +2555,15 @@ public static class ExternalProjectDataEndpoints
         if (confirmed.IsUnavailableFor(Spaarke.Dataverse.AccessRights.Create))
             return DataverseRightsUnavailable();
         if (!confirmed.Rights.HasFlag(Spaarke.Dataverse.AccessRights.Create))
-            return Results.Problem(statusCode: 403, title: "Forbidden",
-                detail: $"Your access level does not permit creating events on this {RootNoun(rootKind)}",
-                extensions: new Dictionary<string, object?>
-                {
-                    ["reasonCode"] = "sdap.access.deny.insufficient_rights"
-                });
+            return DenyEventCreate(rootKind);
 
         if (string.IsNullOrWhiteSpace(request.SprkName))
             return Results.Problem(statusCode: 400, title: "Bad Request",
                 detail: "sprk_name is required");
+        // Review pass 2 (K2): longer than the column is the caller's 400, not a Dataverse 400 behind a 503. Applies to every body,
+        // the legacy untyped one included (Dataverse refused it before 014b too, as a fault).
+        if (request.SprkName.Length > ExternalDataService.EventNameMaxLength)
+            return EventNameTooLong();
 
         // Task 097 review F9: never write an arbitrary status integer. Draft or Open only; omitted ⇒ Open. Checked
         // before the owner is resolved, so a malformed body costs no Dataverse read.
@@ -2589,11 +2571,101 @@ public static class ExternalProjectDataEndpoints
             return Results.Problem(statusCode: 400, title: "Bad Request",
                 detail: "sprk_status must be Draft (1) or Open (659490001); omit it to create the event Open.");
 
+        // R4 task 008 (uac-r2 review 2026-11-13, B; ADR-019): the event type is a CLOSED set — "task" or omitted. Anything else is
+        // a 400 with a stable errorCode, before any Dataverse read, and nothing is created. Omitted is today's create exactly.
+        if (!ExternalDataService.IsCreatableEventType(request.EventType))
+            return Results.Problem(statusCode: 400, title: "Bad Request",
+                detail: "eventType must be \"task\"; omit it to create an event with no type.",
+                extensions: new Dictionary<string, object?>
+                {
+                    ["errorCode"] = ExternalDataService.EventTypeNotAllowedErrorCode
+                });
+
+        // R4 task 014b (FR-35, owner Q-1): a new-shape body names its type — eventTypeId, or eventType "task" (one release).
+        // Both sent and naming different types is the same 400. LEGACY-EVENT-CREATE-R4: a legacy untyped body
+        // (CreateExternalEventRequest.IsLegacyUntypedCreate) names none and is not refused for it.
+        if (request.EventTypeId is { } namedType && namedType != Guid.Empty
+            && request.EventType is ExternalDataService.TaskEventType && namedType != Spaarke.Dataverse.EventTypeRef.Task)
+            return EventBadRequest("eventType and eventTypeId name different types.", ExternalDataService.EventTypeNotAllowedErrorCode);
+        var namedEventTypeId = ExternalDataService.EventTypeIdOf(request);
+        if (namedEventTypeId is null && !request.IsLegacyUntypedCreate)
+            return EventBadRequest("eventTypeId is required.", ExternalDataService.EventTypeRequiredErrorCode);
+
+        // R4 task 014b (owner Q-4): priority is one of the four, description at most 2,000 characters.
+        if (request.SprkPriority is { } priority && !ExternalDataService.EventPriorities.Contains(priority))
+            return EventBadRequest("sprk_priority must be Low, Normal, High or Urgent.", ExternalDataService.EventPriorityInvalidErrorCode);
+        if (request.SprkDescription is { Length: > ExternalDataService.EventDescriptionMaxLength })
+            return EventBadRequest("sprk_description is longer than 2,000 characters.", ExternalDataService.EventDescriptionTooLongErrorCode);
+
         // Task 098: sprk_event.sprk_duedate is a calendar date (Dataverse Date Only); refuse what is not one rather than let
         // Dataverse answer 400 behind a 500.
         if (DueDateProblem(request.SprkDuedate) is { } badDueDate)
             return badDueDate;
 
+        // LEGACY-EVENT-CREATE-R4 (CreateExternalEventRequest.IsLegacyUntypedCreate; remove in R5 with the "task" alias): the old
+        // SPA's untyped "Event" body, having passed every check it had before 014b, creates an untyped event exactly as before —
+        // no type read, no type rule, no assignee.
+        if (namedEventTypeId is not { } eventTypeId)
+            return await CreateEventAfterOwnerAsync(rootKind, id, binding, request, callerContext, dataService, ownership, ct);
+
+        // R4 task 014b (FR-35, uac-r2 Q3): the type must be in the CREATABLE set — active, allowed by configuration. A type read
+        // that could not be completed is a 503 and nothing is written; an unknown, inactive or not-allowed id is the same 400.
+        IReadOnlyList<ExternalDataService.EventTypeOption> types;
+        try
+        {
+            types = await dataService.GetEventTypesAsync(ct);
+        }
+        catch (ExternalDataService.DataverseUnavailableException)
+        {
+            return EventTypesUnavailable();
+        }
+
+        var chosen = ExternalDataService.CreatableEventTypes(
+            types, ExternalDataService.AllowedEventTypeIds(configuration), appendTo: null).FirstOrDefault(t => t.Id == eventTypeId);
+        if (chosen is null)
+            return EventBadRequest("This event type cannot be created here.", ExternalDataService.EventTypeNotAllowedErrorCode);
+
+        // R4 task 008 (uac-r2 B1), widened by task 014b to every type: the event binds a row of sprk_eventtype_ref, and the BFF writes
+        // app-only, so Dataverse never asks the caller's AppendTo on that row itself. For a caller whose access Dataverse decides (a
+        // systemuser), ask it here, through the same app-only reader that names the caller's systemuser (CallerRightsReader — never
+        // OBO on this plane), before anything is written: no AppendTo is the route's own create refusal (403); no answer is the
+        // retry-able 503. A contact is not asked: an event type confers no access.
+        if (callerContext.DataverseConfirmsWrites)
+        {
+            var typeRefusal = await EventTypeAppendToRefusalAsync(
+                rootKind, eventTypeId, CallerRightsReader(probe, httpContext), httpContext.TraceIdentifier, logger, ct);
+            if (typeRefusal is not null)
+                return typeRefusal;
+        }
+
+        // R4 task 014b (owner Q-1): a type that requires a due date gets one.
+        if (chosen.RequiresDueDate && string.IsNullOrWhiteSpace(request.SprkDuedate))
+            return EventBadRequest("This event type requires a due date.", ExternalDataService.EventDueDateRequiredErrorCode);
+
+        // R4 task 014b (owner Q-5, uac-r2 Q4 + 2026-11-16 condition 2): the first assignee must be in the record's server-computed
+        // assignable set (RecordContactAccessService, Known only). The event is filed under THIS root only (one root, one bind), so
+        // the root's set is every parent's. Unknown is the 503 and nothing is written; outside the set is the 400.
+        if (request.AssignedToContactId is { } assignee)
+        {
+            // uac-r2 gate F3: naming an assignee asks the assignable set, which is contact data; the caller's role must read contacts,
+            // as assignable-people requires — checked BEFORE the set is asked, so 400-vs-201 cannot reveal who has access.
+            if (!await WorkforceRoleCeilingGate.AdmitsAsync(callerContext, privileges, WorkforceRoleCeilingGate.AssignEventContact, ct))
+                return DenyEventAssign(rootKind);
+
+            // A create is filed under the route root only, so checking the root's assignable set is sufficient (coordinator, 2026-11-16).
+            if (await AssigneeDecisionAsync(contactAccess, rootKind, id, assignee, ct) is { } assigneeRefusal)
+                return assigneeRefusal;
+        }
+
+        return await CreateEventAfterOwnerAsync(rootKind, id, binding, request, callerContext, dataService, ownership, ct);
+    }
+
+    /// <summary>The tail every event create shares, once its body has passed its rules: the owner, then the write.</summary>
+    private static async Task<IResult> CreateEventAfterOwnerAsync(
+        ExternalDataService.TodoRootKind rootKind, Guid id, ExternalDataService.TodoRootBinding binding,
+        CreateExternalEventRequest request, CallerPrincipal callerContext, ExternalDataService dataService,
+        IRecordOwnershipResolver ownership, CancellationToken ct)
+    {
         // Task 146: owned by the ROOT's team (the named Secure team for a secure root), or refused.
         var (owningTeamId, ownerRefusal) = await ResolveChildOwnerAsync(ownership, binding.EntityLogicalName, id, "event", ct);
         if (ownerRefusal is not null)
@@ -2603,6 +2675,764 @@ public static class ExternalProjectDataEndpoints
         var created = await dataService.CreateEventAsync(rootKind, id, request, owningTeamId, callerContext, ct);
         return Results.Created($"/api/v1/external/{RootRouteSegment(rootKind)}/{id}/events/{created.SprkEventid}", created);
     }
+
+    /// <summary>The event create's insufficient-rights 403 (its detail and <c>reasonCode</c> are the shipped ones).</summary>
+    private static IResult DenyEventCreate(ExternalDataService.TodoRootKind rootKind) =>
+        Results.Problem(statusCode: 403, title: "Forbidden",
+            detail: $"Your access level does not permit creating events on this {RootNoun(rootKind)}",
+            extensions: new Dictionary<string, object?>
+            {
+                ["reasonCode"] = "sdap.access.deny.insufficient_rights"
+            });
+
+    /// <summary>
+    /// R4 task 008 (uac-r2 review 2026-11-13, B1; task 014b widened it from the Task row to every type): the create route's answer
+    /// to a type from a Dataverse-decided caller, from <see cref="EventTypeAppendToAsync"/> (the same question the event lists'
+    /// <c>creatableEventTypes</c> asks). <see langword="null"/> when the caller holds AppendTo on the type row;
+    /// <see cref="DenyEventCreate"/> (403) for "no"; <see cref="DataverseRightsUnavailable"/> (503, nothing written) when Dataverse
+    /// gave no answer or the read threw — a fault is never a denial (task 036 fix round 4, F1).
+    /// </summary>
+    private static async Task<IResult?> EventTypeAppendToRefusalAsync(
+        ExternalDataService.TodoRootKind rootKind,
+        Guid eventTypeId,
+        Func<string, Guid, CancellationToken, Task<Spaarke.Dataverse.AccessRights?>> readCallerRights,
+        string traceId,
+        ILogger logger,
+        CancellationToken ct)
+    {
+        switch (await EventTypeAppendToAsync(eventTypeId, readCallerRights, traceId, logger, ct).ConfigureAwait(false))
+        {
+            case null:
+                return DataverseRightsUnavailable();
+            case false:
+                logger.LogWarning(
+                    "[EXT-EVENT] Refused an event on a {RootKind}: Dataverse does not grant the caller AppendTo on its event type. TraceId={TraceId}",
+                    rootKind, traceId);
+                return DenyEventCreate(rootKind);
+            default:
+                return null;
+        }
+    }
+
+    /// <summary>
+    /// R4 task 008 (uac-r2 B1; review round 1, F2-1; task 014b: any type row): whether a Dataverse-decided caller holds AppendTo on
+    /// one row of <c>sprk_eventtype_ref</c>, asked through <paramref name="readCallerRights"/> (the route's
+    /// <see cref="CallerRightsReader"/>: app-only, naming the caller's resolved systemuser — never OBO on this plane). The ONE
+    /// question behind both the create's refusal (<see cref="EventTypeAppendToRefusalAsync"/>) and the lists' creatable set
+    /// (<see cref="ReadEventTypeAppendToAsync"/>), so the two cannot drift. <see langword="true"/>/<see langword="false"/> is
+    /// Dataverse's answer; <see langword="null"/> is no answer (the read returned none or threw), logged at Information with the
+    /// trace id and nothing that names the caller. Only the caller's own cancellation is rethrown.
+    /// </summary>
+    private static async Task<bool?> EventTypeAppendToAsync(
+        Guid eventTypeId,
+        Func<string, Guid, CancellationToken, Task<Spaarke.Dataverse.AccessRights?>> readCallerRights,
+        string traceId,
+        ILogger logger,
+        CancellationToken ct)
+    {
+        Spaarke.Dataverse.AccessRights? answer;
+        try
+        {
+            answer = await readCallerRights(Spaarke.Dataverse.EventTypeRef.EntitySet, eventTypeId, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (!(ex is OperationCanceledException && ct.IsCancellationRequested))
+        {
+            logger.LogInformation(ex,
+                "[EXT-EVENT] AppendTo on event type {EventTypeId} could not be read. TraceId={TraceId}", eventTypeId, traceId);
+            return null;
+        }
+
+        if (answer is not { } rights)
+        {
+            logger.LogInformation(
+                "[EXT-EVENT] Dataverse gave no answer for AppendTo on event type {EventTypeId}. TraceId={TraceId}", eventTypeId, traceId);
+            return null;
+        }
+
+        return rights.HasFlag(Spaarke.Dataverse.AccessRights.AppendTo);
+    }
+
+    // -------------------------------------------------------------------------------------------
+    // R4 task 014b — event types, assignees, the event record check, GET/PATCH /events/{id}
+    // -------------------------------------------------------------------------------------------
+
+    /// <summary>The 503 reason code when the event types could not be read completely (nothing was written).</summary>
+    internal const string EventTypesUnavailableReasonCode = "sdap.event.types_unavailable";
+
+    /// <summary>The 503 reason code when the people with access to the record could not be decided (nothing was written).</summary>
+    internal const string AssigneesUnavailableReasonCode = "sdap.event.assignees_unavailable";
+
+    /// <summary>The 503 reason code of an event GET or PATCH that could not be checked right now (nothing was written).</summary>
+    internal const string EventUnavailableReasonCode = "sdap.event.unavailable";
+
+    /// <summary>The reason code of an event PATCH from a caller who can read the event but not edit it (uac-r2 Q1).</summary>
+    internal const string EventUpdateDeniedReasonCode = "sdap.access.deny.event_update";
+
+    /// <summary>The reason code of an assignable-people read from a caller who may neither create nor edit an event there.</summary>
+    internal const string EventAssignDeniedReasonCode = "sdap.access.deny.event_assign";
+
+    /// <summary>The 400 errorCode of an event PATCH whose body sets no editable field.</summary>
+    internal const string EventUpdateEmptyErrorCode = "sdap.event.update_empty";
+
+    /// <summary>A 400 with the stable <c>errorCode</c> (ADR-019) of an event create or PATCH; nothing is written.</summary>
+    private static IResult EventBadRequest(string detail, string errorCode) =>
+        Results.Problem(statusCode: 400, title: "Bad Request", detail: detail,
+            extensions: new Dictionary<string, object?> { ["errorCode"] = errorCode });
+
+    /// <summary>Review pass 2 (K2): <c>sprk_name</c> longer than the column (create and PATCH).</summary>
+    private static IResult EventNameTooLong() =>
+        EventBadRequest($"sprk_name is longer than {ExternalDataService.EventNameMaxLength:N0} characters.", ExternalDataService.EventNameTooLongErrorCode);
+
+    private static IResult EventTypesUnavailable() =>
+        Results.Problem(statusCode: StatusCodes.Status503ServiceUnavailable, title: "Event types unavailable",
+            detail: "The event types could not be read right now, and nothing was written. Try again shortly.",
+            extensions: new Dictionary<string, object?> { ["reasonCode"] = EventTypesUnavailableReasonCode });
+
+    private static IResult AssigneesUnavailable() =>
+        Results.Problem(statusCode: StatusCodes.Status503ServiceUnavailable, title: "People unavailable",
+            detail: "The people with access to this record could not be read right now, and nothing was written. Try again shortly.",
+            extensions: new Dictionary<string, object?> { ["reasonCode"] = AssigneesUnavailableReasonCode });
+
+    private static IResult EventUnavailable() =>
+        Results.Problem(statusCode: StatusCodes.Status503ServiceUnavailable, title: "Event unavailable",
+            detail: "The event could not be checked right now, and nothing was changed. Try again shortly.",
+            extensions: new Dictionary<string, object?> { ["reasonCode"] = EventUnavailableReasonCode });
+
+    private static IResult DenyEventUpdate() =>
+        Results.Problem(statusCode: 403, title: "Forbidden",
+            detail: "Your access level does not permit changing this event.",
+            extensions: new Dictionary<string, object?> { ["reasonCode"] = EventUpdateDeniedReasonCode });
+
+    private static IResult DenyEventAssign(ExternalDataService.TodoRootKind rootKind) =>
+        Results.Problem(statusCode: 403, title: "Forbidden",
+            detail: $"Your access level does not permit assigning events on this {RootNoun(rootKind)}",
+            extensions: new Dictionary<string, object?> { ["reasonCode"] = EventAssignDeniedReasonCode });
+
+    private static ExternalEventTypeOptionDto ToTypeOptionDto(ExternalDataService.EventTypeOption t) =>
+        new() { Id = t.Id.ToString(), Name = t.Name, RequiresDueDate = t.RequiresDueDate };
+
+    /// <summary>The grant root type of a route root kind (the three are the same set); null for a deny state.</summary>
+    private static ExternalGrantRootType? GrantRootTypeOf(ExternalDataService.TodoRootKind rootKind) => rootKind switch
+    {
+        ExternalDataService.TodoRootKind.Project => ExternalGrantRootType.Project,
+        ExternalDataService.TodoRootKind.Matter => ExternalGrantRootType.Matter,
+        ExternalDataService.TodoRootKind.WorkAssignment => ExternalGrantRootType.WorkAssignment,
+        _ => null,
+    };
+
+    /// <summary>The route root kind of an event parent (an event's parents are its three regarding lookups only).</summary>
+    private static ExternalDataService.TodoRootKind RootKindOf(ExternalDataService.DocumentParentKind parentKind) => parentKind switch
+    {
+        ExternalDataService.DocumentParentKind.Project => ExternalDataService.TodoRootKind.Project,
+        ExternalDataService.DocumentParentKind.Matter => ExternalDataService.TodoRootKind.Matter,
+        ExternalDataService.DocumentParentKind.WorkAssignment => ExternalDataService.TodoRootKind.WorkAssignment,
+        _ => ExternalDataService.TodoRootKind.None,
+    };
+
+    /// <summary>
+    /// THE creatable event-type set for this caller (FR-35, owner Q-1, uac-r2 Q3): every ACTIVE <c>sprk_eventtype_ref</c> row,
+    /// narrowed by <c>ExternalAccess:EventTypes:Allowed</c>, and for a Dataverse-decided caller to the rows it holds AppendTo on
+    /// (<see cref="ReadEventTypeAppendToAsync"/>; a row with no answer is left out). A contact gets every active (allowed) row: an
+    /// event type confers no access. <see langword="null"/> when the type rows could not be read completely.
+    /// </summary>
+    private static async Task<IReadOnlyList<ExternalDataService.EventTypeOption>?> CreatableEventTypesForCallerAsync(
+        CallerPrincipal caller, ExternalDataService dataService, IConfiguration configuration, HttpContext httpContext,
+        CallerRecordAccessProbe probe, ILogger logger, CancellationToken ct)
+    {
+        IReadOnlyList<ExternalDataService.EventTypeOption> types;
+        try
+        {
+            types = await dataService.GetEventTypesAsync(ct);
+        }
+        catch (ExternalDataService.DataverseUnavailableException)
+        {
+            logger.LogWarning("[EXT-EVENT] The event types could not be read; no create is offered. TraceId={TraceId}",
+                httpContext.TraceIdentifier);
+            return null;
+        }
+
+        var allowed = ExternalDataService.AllowedEventTypeIds(configuration);
+        if (!caller.DataverseConfirmsWrites)
+            return ExternalDataService.CreatableEventTypes(types, allowed, appendTo: null);
+
+        // Only the rows that could be offered are asked about.
+        var candidates = ExternalDataService.CreatableEventTypes(types, allowed, appendTo: null);
+        var appendTo = await ReadEventTypeAppendToAsync(
+            caller, candidates.Select(t => t.Id).ToList(), CallerRightsReader(probe, httpContext), httpContext, logger, ct);
+        return ExternalDataService.CreatableEventTypes(candidates, allowed, appendTo);
+    }
+
+    /// <summary>
+    /// AppendTo on each of <paramref name="typeIds"/> for a Dataverse-decided caller: ONE composite read per request
+    /// (<see cref="RequestAccessMemo"/>; key = the principal kind, its id and the sorted type ids), fanned out over the existing
+    /// app-only probe question (<see cref="EventTypeAppendToAsync"/>) at most <see cref="EventTypeProbeConcurrency"/> at a time —
+    /// the probe has no batch form. Remembered only when EVERY row was answered; a row with no answer is <see langword="null"/>.
+    /// </summary>
+    private static async Task<IReadOnlyDictionary<Guid, bool?>> ReadEventTypeAppendToAsync(
+        CallerPrincipal caller, IReadOnlyList<Guid> typeIds,
+        Func<string, Guid, CancellationToken, Task<Spaarke.Dataverse.AccessRights?>> readCallerRights,
+        HttpContext httpContext, ILogger logger, CancellationToken ct)
+    {
+        var sorted = typeIds.Distinct().OrderBy(id => id).ToList();
+        if (sorted.Count == 0)
+            return new Dictionary<Guid, bool?>();
+
+        async Task<IReadOnlyDictionary<Guid, bool?>> ReadAsync(CancellationToken token)
+        {
+            var answers = new System.Collections.Concurrent.ConcurrentDictionary<Guid, bool?>();
+            await Parallel.ForEachAsync(sorted,
+                new ParallelOptions { MaxDegreeOfParallelism = EventTypeProbeConcurrency, CancellationToken = token },
+                async (typeId, inner) =>
+                    answers[typeId] = await EventTypeAppendToAsync(typeId, readCallerRights, httpContext.TraceIdentifier, logger, inner)
+                        .ConfigureAwait(false)).ConfigureAwait(false);
+            return answers;
+        }
+
+        var memo = RequestAccessMemo.For(httpContext);
+        if (memo is null)
+            return await ReadAsync(ct);
+
+        var key = $"event-type-appendto:systemuser:{AppOnlyConfirmationPrincipal(caller):N}:{string.Join(",", sorted.Select(id => id.ToString("N")))}";
+        return await memo.GetOrReadAsync(key, ReadAsync, answers => answers.Values.All(a => a is not null), ct);
+    }
+
+    /// <summary>The bound on concurrent AppendTo questions for the creatable set (the probe's own record-lookup bound).</summary>
+    private const int EventTypeProbeConcurrency = 4;
+
+    /// <summary>
+    /// The assignee rule (owner Q-5; uac-r2 Q4, condition 2 of 2026-11-16): <paramref name="assignee"/> must be in the record's
+    /// server-computed assignable set (<see cref="RecordContactAccessService"/>, Known only). <see langword="null"/> when it is;
+    /// the 400 <c>assignee_not_allowed</c> when it is not; the 503 when the set is Unknown — never a write.
+    /// </summary>
+    private static async Task<IResult?> AssigneeDecisionAsync(
+        RecordContactAccessService contactAccess, ExternalDataService.TodoRootKind rootKind, Guid rootId, Guid assignee,
+        CancellationToken ct)
+    {
+        if (GrantRootTypeOf(rootKind) is not { } rootType)
+            return EventBadRequest("This person cannot be assigned here.", ExternalDataService.EventAssigneeNotAllowedErrorCode);
+
+        switch (await contactAccess.GetContactsWithAccessAsync(rootType, rootId, ct))
+        {
+            case RecordContactAccess.Known known:
+                return assignee != Guid.Empty && known.Contacts.Any(c => c.ContactId == assignee)
+                    ? null
+                    : EventBadRequest("This person cannot be assigned here.", ExternalDataService.EventAssigneeNotAllowedErrorCode);
+            default:
+                return AssigneesUnavailable();
+        }
+    }
+
+    /// <summary>The edit decision on one event (uac-r2 Q1).</summary>
+    private enum EventEditDecision
+    {
+        Allowed,
+        Denied,
+        Unavailable,
+
+        /// <summary>Dataverse answered that the systemuser cannot READ the event row (uac-r2 Q1: can't read is the uniform 404).</summary>
+        NotReadable,
+    }
+
+    /// <summary>
+    /// THE edit right on an event (FR-36, uac-r2 Q1), re-checked on every request: Write (Collaborate or Full Access) on EVERY
+    /// parent the event is filed under (<see cref="RightsForRootWriteAsync"/>), and for a caller whose access Dataverse decides,
+    /// ALSO Dataverse's Write on the event ROW (<see cref="WithDataverseRightsAsync"/>, app-only naming the systemuser — no OBO).
+    /// No parent, or a parent that is not one of the three roots, is Denied. A right missing only because Dataverse gave no
+    /// answer is Unavailable (the PATCH's 503). Dataverse's answer WITHOUT Read on the event row is NotReadable (the PATCH's
+    /// uniform 404, uac-r2 Q1). The list and GET use the SAME decision for <c>canEdit</c> (only Allowed is true).
+    /// <para>NotReadable refuses only the PATCH: the GET's readability is the parent rule (owner decision Q-7), so the same
+    /// systemuser gets the GET's 200 with <c>canEdit</c> false. The asymmetry is deliberate (uac-r2 K6; see <see cref="GetEvent"/>).</para>
+    /// </summary>
+    /// <param name="rootCache">Root answers already decided in this request (the list asks many rows under few roots).</param>
+    /// <param name="httpContext">The request whose <see cref="RequestAccessMemo"/> remembers the row answer.</param>
+    private static async Task<EventEditDecision> EventEditDecisionAsync(
+        CallerPrincipal caller, Guid eventId, IReadOnlyList<(ExternalDataService.TodoRootKind Kind, Guid Id)> parents,
+        Func<string, Guid, CancellationToken, Task<Spaarke.Dataverse.AccessRights?>> readCallerRights,
+        ILogger logger, CancellationToken ct,
+        IDictionary<(ExternalDataService.TodoRootKind, Guid), ConfirmedRights>? rootCache = null,
+        HttpContext? httpContext = null)
+    {
+        if (parents.Count == 0)
+            return EventEditDecision.Denied;
+
+        var unavailable = false;
+        foreach (var (kind, id) in parents)
+        {
+            if (kind is ExternalDataService.TodoRootKind.None or ExternalDataService.TodoRootKind.Ambiguous)
+                return EventEditDecision.Denied;
+
+            ConfirmedRights rights;
+            if (rootCache is not null && rootCache.TryGetValue((kind, id), out var cached))
+            {
+                rights = cached;
+            }
+            else
+            {
+                rights = await RightsForRootWriteAsync(caller, kind, id, readCallerRights, logger, ct);
+                if (rootCache is not null)
+                    rootCache[(kind, id)] = rights;
+            }
+
+            if (rights.Rights.HasFlag(Spaarke.Dataverse.AccessRights.Write))
+                continue;
+            if (!rights.IsUnavailableFor(Spaarke.Dataverse.AccessRights.Write))
+                return EventEditDecision.Denied;
+            unavailable = true;
+        }
+
+        if (unavailable)
+            return EventEditDecision.Unavailable;
+
+        if (!caller.DataverseConfirmsWrites)
+            return EventEditDecision.Allowed;
+
+        // uac-r2 Q1: a systemuser ALSO needs Dataverse's Write on the event row itself (the parent rule alone is not enough), and
+        // Dataverse's own answer decides Read on the row too (review pass 2, F4): an answer without Read is "can't read".
+        var answer = await EventRowRightsAsync(caller, eventId, readCallerRights, httpContext, logger, ct);
+        if (answer is not { } rowRights)
+            return EventEditDecision.Unavailable;
+        var surface = SurfaceRightsFromDataverse(rowRights);
+        if (!surface.HasFlag(Spaarke.Dataverse.AccessRights.Read))
+            return EventEditDecision.NotReadable;
+        return surface.HasFlag(Spaarke.Dataverse.AccessRights.Write) ? EventEditDecision.Allowed : EventEditDecision.Denied;
+    }
+
+    /// <summary>
+    /// Dataverse's answer about a Dataverse-decided caller on ONE event row (app-only naming the systemuser — no OBO,
+    /// <see cref="CallerRightsReader"/>), remembered for the request in <see cref="RequestAccessMemo"/> (key: the principal kind,
+    /// its id and the event id) only when Dataverse answered. <see langword="null"/> when it gave no answer or the read threw:
+    /// never "no access" (task 036 fix round 4, F1).
+    /// </summary>
+    private static async Task<Spaarke.Dataverse.AccessRights?> EventRowRightsAsync(
+        CallerPrincipal caller, Guid eventId,
+        Func<string, Guid, CancellationToken, Task<Spaarke.Dataverse.AccessRights?>> readCallerRights,
+        HttpContext? httpContext, ILogger logger, CancellationToken ct)
+    {
+        var entitySet = ExternalDataService.GetDeletableBinding(ExternalDataService.DeletableKind.Event).EntitySet;
+
+        async Task<Spaarke.Dataverse.AccessRights?> ReadAsync(CancellationToken token)
+        {
+            try
+            {
+                return await readCallerRights(entitySet, eventId, token).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (!(ex is OperationCanceledException && token.IsCancellationRequested))
+            {
+                logger.LogError(ex,
+                    "[EXT-EVENT] Dataverse's rights on event {EventId} could not be read for the caller: unavailable, not refused.",
+                    eventId);
+                return null;
+            }
+        }
+
+        var memo = RequestAccessMemo.For(httpContext);
+        if (memo is null)
+            return await ReadAsync(ct);
+
+        var key = $"event-row-rights:systemuser:{AppOnlyConfirmationPrincipal(caller):N}:{eventId:N}";
+        return await memo.GetOrReadAsync(key, ReadAsync, rights => rights is not null, ct);
+    }
+
+    /// <summary>
+    /// The list's per-row edit affordances (FR-36): <c>canEdit</c>/<c>canChangeStatus</c> from <see cref="EventEditDecisionAsync"/>
+    /// behind the PATCH route's own workforce ceiling, and <c>allowedStatuses</c> (every event status but the current one) when
+    /// the caller may edit. The rows shown have already passed the list's own withholding rules (the multi-root rule, THE external
+    /// visibility predicate, the invoice chain) — the PATCH's other checks. Unanswered is false: a UI affordance only.
+    /// </summary>
+    /// <remarks>
+    /// Cost (review pass 2, F3): a Dataverse-decided caller costs one row question per event. The roots are decided first, once
+    /// each; the row questions then fan out at most <see cref="EventRowProbeConcurrency"/> at a time, each remembered for the
+    /// request. Above <see cref="EventEditAffordanceRowLimit"/> rows a Dataverse-decided caller's rows say <c>canEdit</c> false
+    /// WITHOUT asking: hiding the affordance is safe, because the PATCH re-checks the edit right on every request — the user can
+    /// still edit (from the event itself, whose GET asks). A contact asks Dataverse nothing here and is unaffected.
+    /// </remarks>
+    private static async Task<IReadOnlyList<ExternalEventDto>> WithEventEditAffordancesAsync(
+        IReadOnlyList<ExternalEventDto> rows, CallerPrincipal caller, HttpContext httpContext, CallerRecordAccessProbe probe,
+        IDataversePrivilegeChecker privileges, ILogger logger, CancellationToken ct)
+    {
+        if (rows.Count == 0)
+            return rows;
+
+        var ceiling = await WorkforceRoleCeilingGate.AdmitsAsync(caller, privileges, WorkforceRoleCeilingGate.UpdateEvent, ct);
+        if (!ceiling || (caller.DataverseConfirmsWrites && rows.Count > EventEditAffordanceRowLimit))
+        {
+            if (ceiling)
+                logger.LogInformation(
+                    "[EXT-EVENT] {Rows} events exceed the {Limit}-row edit-affordance limit: canEdit is false without asking Dataverse.",
+                    rows.Count, EventEditAffordanceRowLimit);
+            return rows.Select(row => WithAffordances(row, canEdit: false)).ToList();
+        }
+
+        var readCallerRights = CallerRightsReader(probe, httpContext);
+        var parentsOf = rows.Select(row => row.Parents.Select(p => (p.Kind, p.Id)).ToList()).ToList();
+
+        // The roots first, once each and in order (few roots under many rows); the row questions below only read this cache.
+        var rootCache = new System.Collections.Concurrent.ConcurrentDictionary<(ExternalDataService.TodoRootKind, Guid), ConfirmedRights>();
+        foreach (var (kind, id) in parentsOf.SelectMany(p => p).Distinct())
+        {
+            if (kind is not (ExternalDataService.TodoRootKind.None or ExternalDataService.TodoRootKind.Ambiguous))
+                rootCache[(kind, id)] = await RightsForRootWriteAsync(caller, kind, id, readCallerRights, logger, ct);
+        }
+
+        var canEdit = new bool[rows.Count];
+        await Parallel.ForEachAsync(Enumerable.Range(0, rows.Count),
+            new ParallelOptions { MaxDegreeOfParallelism = EventRowProbeConcurrency, CancellationToken = ct },
+            async (i, inner) =>
+                canEdit[i] = Guid.TryParse(rows[i].SprkEventid, out var eventId)
+                    && await EventEditDecisionAsync(caller, eventId, parentsOf[i], readCallerRights, logger, inner, rootCache, httpContext)
+                        .ConfigureAwait(false) == EventEditDecision.Allowed).ConfigureAwait(false);
+
+        return rows.Select((row, i) => WithAffordances(row, canEdit[i])).ToList();
+    }
+
+    /// <summary>The bound on concurrent event-row questions for the list's <c>canEdit</c> (as <see cref="EventTypeProbeConcurrency"/>).</summary>
+    private const int EventRowProbeConcurrency = EventTypeProbeConcurrency;
+
+    /// <summary>
+    /// Above this many rows, a Dataverse-decided caller's list rows say <c>canEdit</c> false without asking Dataverse (review
+    /// pass 2, F3): one row question per event is bounded here, below the list's own row cap. The PATCH still re-checks.
+    /// </summary>
+    internal const int EventEditAffordanceRowLimit = 100;
+
+    /// <summary>The DTO with its edit affordances set (and, for the single GET, its regarding record).</summary>
+    private static ExternalEventDto WithAffordances(ExternalEventDto row, bool canEdit, bool withRegarding = false)
+    {
+        row.CanEdit = canEdit;
+        row.CanChangeStatus = canEdit;
+        row.AllowedStatuses = canEdit
+            ? Spaarke.Dataverse.EventStatusCode.All.Select(s => s.Value).Where(v => v != row.SprkStatus).ToList()
+            : Array.Empty<int>();
+        if (withRegarding && row.Parents.Count > 0)
+        {
+            var first = row.Parents[0];
+            row.Regarding = new ExternalEventRegardingDto
+            {
+                Kind = RootRouteSegment(first.Kind) switch
+                {
+                    "matters" => "matter",
+                    "workassignments" => "workassignment",
+                    _ => "project",
+                },
+                Id = first.Id.ToString(),
+                Name = first.Name,
+            };
+        }
+
+        return row;
+    }
+
+    /// <summary>
+    /// THE event record check of GET and PATCH <c>/events/{id}</c> (FR-36; uac-r2 Q1 and G5). <see langword="null"/> when the
+    /// caller can read the event; otherwise the response to send. The order:
+    /// </summary>
+    /// <remarks>
+    /// <list type="number">
+    /// <item>The event's parent lookups (the delete-own row read, <see cref="ExternalDataService.GetDeleteTargetAsync"/>, app-only):
+    /// a read that FAILED is the 503; no row is the uniform 404. Nothing else of the row is read before step 2 — the parents can
+    /// only come from the row.</item>
+    /// <item>Read on EVERY parent through the contact-plane evaluator (<see cref="RightsForDocumentParentAsync"/>, delete-own's
+    /// parent part). No parent, an unreadable link or a parent without Read is the SAME uniform 404 as a missing id
+    /// (<c>sdap.access.deny.record_unavailable</c>), so an id cannot be probed.</item>
+    /// <item>With <paramref name="writeChecks"/> (the PATCH): the live-parent rule, THE external visibility predicate and the
+    /// invoice links (the to-do PATCH's checks) — each "hidden" is the uniform 404, each undecided the 503. The GET leaves the
+    /// first two to its read (<see cref="ExternalDataService.GetEventByIdAsync"/> withholds by the lists' rules) and applies the
+    /// lists' invoice hiding to the row it read (<see cref="HideInvoiceLinkedAsync"/>, review pass 2 F1).</item>
+    /// </list>
+    /// </remarks>
+    private static async Task<IResult?> CheckEventReadableAsync(
+        CallerPrincipal caller, Guid id, bool writeChecks, HttpContext httpContext, ExternalDataService dataService,
+        ExternalModuleRegistry modules, ILogger logger, CancellationToken ct, ExternalInvoiceHiding? hideInvoices,
+        Action<ExternalDataService.DeleteTarget>? onTarget = null)
+    {
+        var notFound = Sprk.Bff.Api.Infrastructure.Errors.ProblemDetailsHelper.UniformRecordNotFound(httpContext);
+
+        ExternalDataService.DeleteTarget? target;
+        try
+        {
+            target = await dataService.GetDeleteTargetAsync(ExternalDataService.DeletableKind.Event, id, ct);
+        }
+        catch (ExternalDataService.DataverseUnavailableException)
+        {
+            return EventUnavailable();
+        }
+
+        if (target is null || target.Parents.Count == 0 || target.HasUnreadableParentLink)
+            return notFound;
+
+        foreach (var parent in target.Parents)
+        {
+            var (rights, fault, _) = await RightsForDocumentParentAsync(
+                caller, parent.Kind, parent.Id, dataService, modules, ct, hideInvoices: hideInvoices);
+            if (fault is not null)
+                return EventUnavailable();
+            if (!rights.HasFlag(Spaarke.Dataverse.AccessRights.Read))
+            {
+                logger.LogInformation("[EXT-EVENT] Event {Id} withheld: no Read on its {ParentKind}", id, parent.Kind);
+                return notFound;
+            }
+        }
+
+        onTarget?.Invoke(target);
+        if (!writeChecks)
+            return null;
+
+        var live = await dataService.CheckLiveParentsAsync(ExternalDataService.DeletableKind.Event, id, caller, ct);
+        if (live == ExternalDataService.LiveParentDecision.Unavailable) return EventUnavailable();
+        if (live != ExternalDataService.LiveParentDecision.Readable) return notFound;
+
+        var visibility = await dataService.CheckExternalVisibilityAsync(ExternalDataService.DeletableKind.Event, id, caller, ct);
+        if (visibility == ExternalDataService.LiveParentDecision.Unavailable) return EventUnavailable();
+        if (visibility != ExternalDataService.LiveParentDecision.Readable) return notFound;
+
+        var (linksAllowed, linksFaulted) = await InvoiceLinkWriteDecisionAsync(
+            caller, target.InvoiceLinks, hideInvoices, logger, "event-update", ct);
+        if (!linksAllowed)
+            return linksFaulted ? EventUnavailable() : notFound;
+
+        return null;
+    }
+
+    private static IReadOnlyList<(ExternalDataService.TodoRootKind Kind, Guid Id)> RootsOf(ExternalDataService.DeleteTarget target) =>
+        target.Parents.Select(p => (RootKindOf(p.Kind), p.Id)).ToList();
+
+    /// <summary>
+    /// GET /api/v1/external/events/{id} (R4 task 014b, FR-36, owner Q-7): one event, the list DTO plus its regarding record, when
+    /// the caller can read EVERY record it is filed under (<see cref="CheckEventReadableAsync"/>); otherwise — and when it does
+    /// not exist — the uniform 404. <c>canEdit</c> is the PATCH's own decision (<see cref="EventEditDecisionAsync"/>).
+    /// </summary>
+    /// <remarks>
+    /// <para>Every parent also passes the events list's own workforce ceiling (<see cref="ReadEventsCeiling"/>: Read on the parent's
+    /// table and on <c>sprk_event</c>), because the response names the parent in <c>regarding</c> (uac-r2 gate F1): a refusal is
+    /// the uniform 404, an unreadable role the 503. The row served must be filed under exactly the parents checked (F2).</para>
+    /// <para><b>Deliberate asymmetry</b> (uac-r2 K6): readability here is the PARENT rule (owner decision Q-7), so a systemuser
+    /// whom Dataverse gives no Read on the event ROW still gets this 200, with <c>canEdit</c> false, while its PATCH is the
+    /// uniform 404 (uac-r2 Q1, <see cref="EventEditDecision.NotReadable"/>). Not a defect; do not "fix" one to match the other
+    /// without both decisions changing.</para>
+    /// </remarks>
+    private static async Task<IResult> GetEvent(
+        Guid id, HttpContext httpContext, ExternalDataService dataService, ExternalModuleRegistry modules,
+        CallerRecordAccessProbe probe, IDataversePrivilegeChecker privileges,
+        [Microsoft.AspNetCore.Mvc.FromServices] ExternalInvoiceHiding? hideInvoices, ILogger<Program> logger, CancellationToken ct)
+    {
+        var callerContext = GetCallerPrincipal(httpContext);
+        if (callerContext is null) return MissingContextResult();
+
+        ExternalDataService.DeleteTarget? target = null;
+        if (await CheckEventReadableAsync(callerContext, id, writeChecks: false, httpContext, dataService, modules, logger, ct,
+                hideInvoices, t => target = t) is { } refusal)
+            return refusal;
+
+        // uac-r2 gate F1: each parent's table under the lists' ceiling, as the parent's own events list asks it.
+        var roots = RootsOf(target!);
+        var ceiling = await WorkforceRoleCeilingGate.CeilingForAsync(callerContext, privileges, ct);
+        if (ceiling is { IsAvailable: false })
+            return EventUnavailable();
+        foreach (var (kind, _) in roots)
+        {
+            if (!await WorkforceRoleCeilingGate.AdmitsAsync(callerContext, privileges, ReadEventsCeiling(kind), ct))
+            {
+                logger.LogInformation("[EXT-EVENT] Event {Id} withheld: the workforce role does not read its {ParentKind}", id, kind);
+                return Sprk.Bff.Api.Infrastructure.Errors.ProblemDetailsHelper.UniformRecordNotFound(httpContext);
+            }
+        }
+
+        var read = await dataService.GetEventByIdAsync(id, callerContext, ct);
+        if (read.Truncated)
+            return EventUnavailable();
+
+        // Review pass 2 (F1): the list's invoice hiding, the SAME call (HideInvoiceLinkedAsync — the read only reads the links):
+        // an event linked to an invoice the caller may not see is the uniform 404; a decision that could not be made, the 503.
+        var shown = await HideInvoiceLinkedAsync(read, callerContext, hideInvoices, logger, "event", ct);
+        if (shown.Value.Count == 0)
+            return shown.Truncated
+                ? EventUnavailable()
+                : Sprk.Bff.Api.Infrastructure.Errors.ProblemDetailsHelper.UniformRecordNotFound(httpContext);
+        // uac-r2 gate F2: the parents were checked from one read and the row is served from another; a row re-filed in between
+        // would name a parent nobody checked in `regarding`. Served only when it is filed under exactly the parents checked.
+        var served = shown.Value[0];
+        if (!roots.ToHashSet().SetEquals(served.Parents.Select(p => (p.Kind, p.Id))))
+        {
+            logger.LogInformation("[EXT-EVENT] Event {Id} withheld: its parents changed between the check and the read", id);
+            return Sprk.Bff.Api.Infrastructure.Errors.ProblemDetailsHelper.UniformRecordNotFound(httpContext);
+        }
+
+        var canEdit = await WorkforceRoleCeilingGate.AdmitsAsync(callerContext, privileges, WorkforceRoleCeilingGate.UpdateEvent, ct)
+            && await EventEditDecisionAsync(callerContext, id, roots, CallerRightsReader(probe, httpContext), logger, ct,
+                httpContext: httpContext) == EventEditDecision.Allowed;
+        return Results.Ok(WithAffordances(served, canEdit, withRegarding: true));
+    }
+
+    /// <summary>
+    /// PATCH /api/v1/external/events/{id} (R4 task 014b, FR-36; owner S-3/S-4; uac-r2 Q1–Q4 and the conditions of 2026-11-16).
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Order.</b> (1) The body's shape, with no I/O: the type is immutable (400 <c>type_immutable</c>); an assignee is
+    /// not written by this route yet (400 <c>assignee_update_unsupported</c>, the owner's a/b/c decision is pending); then
+    /// name, priority, description, status and date. (2) The record check (<see cref="CheckEventReadableAsync"/>) — can't read is
+    /// the uniform 404. (3) The edit right (<see cref="EventEditDecisionAsync"/>): unknown 503, read-not-edit 403
+    /// <c>event_update</c>. (4) Only then any app-only read of the event's own fields (the due-date rule) and (5) the write,
+    /// <see cref="ExternalDataService.UpdateEventAsync"/>, of ONLY the allow-listed columns the body sent
+    /// (<see cref="ExternalDataService.BuildEventUpdatePayload"/>).</para>
+    /// <para>Any status may be set; its <c>statecode</c> is written with it (<see cref="Spaarke.Dataverse.EventStatusCode.GetStateCode"/>).</para>
+    /// </remarks>
+    private static async Task<IResult> UpdateEvent(
+        Guid id, UpdateExternalEventRequest request, HttpContext httpContext, ExternalDataService dataService,
+        ExternalModuleRegistry modules, CallerRecordAccessProbe probe,
+        [Microsoft.AspNetCore.Mvc.FromServices] ExternalInvoiceHiding? hideInvoices, ILogger<Program> logger, CancellationToken ct)
+    {
+        var callerContext = GetCallerPrincipal(httpContext);
+        if (callerContext is null) return MissingContextResult();
+
+        // (1) Shape, no I/O.
+        if (request.EventTypeIdSent)
+            return EventBadRequest("The event type cannot be changed.", ExternalDataService.EventTypeImmutableErrorCode);
+        // Owner a/b/c pending (uac-r2 Q4): the assignee branch goes HERE, before the record check, once decided.
+        if (request.AssigneeSent)
+            return EventBadRequest("The assignee cannot be changed here yet.", ExternalDataService.EventAssigneeUpdateUnsupportedErrorCode);
+        if (request.NameSent && string.IsNullOrWhiteSpace(request.SprkName))
+            return EventBadRequest("sprk_name cannot be empty.", ExternalDataService.EventNameRequiredErrorCode);
+        if (request.NameSent && request.SprkName is { Length: > ExternalDataService.EventNameMaxLength })
+            return EventNameTooLong();
+        if (request.PrioritySent && (request.SprkPriority is not { } p || !ExternalDataService.EventPriorities.Contains(p)))
+            return EventBadRequest("sprk_priority must be Low, Normal, High or Urgent.", ExternalDataService.EventPriorityInvalidErrorCode);
+        if (request.DescriptionSent && request.SprkDescription is { Length: > ExternalDataService.EventDescriptionMaxLength })
+            return EventBadRequest("sprk_description is longer than 2,000 characters.", ExternalDataService.EventDescriptionTooLongErrorCode);
+        if (request.StatusSent && (request.SprkStatus is not { } s || !Spaarke.Dataverse.EventStatusCode.IsDefined(s)))
+            return EventBadRequest("sprk_status must be an event status.", ExternalDataService.EventStatusInvalidErrorCode);
+        if (request.DueDateSent && DueDateProblem(request.SprkDuedate) is { } badDueDate)
+            return badDueDate;
+
+        var payload = ExternalDataService.BuildEventUpdatePayload(request);
+        if (payload.Count == 0)
+            return EventBadRequest("Nothing to change.", EventUpdateEmptyErrorCode);
+
+        // (2) Can the caller read it? (G5: before any read of the event's own fields and before any write.)
+        ExternalDataService.DeleteTarget? target = null;
+        if (await CheckEventReadableAsync(callerContext, id, writeChecks: true, httpContext, dataService, modules, logger, ct,
+                hideInvoices, t => target = t) is { } refusal)
+            return refusal;
+
+        // (3) May the caller edit it? Re-checked on every request (uac-r2 Q1).
+        switch (await EventEditDecisionAsync(callerContext, id, RootsOf(target!), CallerRightsReader(probe, httpContext), logger, ct,
+                    httpContext: httpContext))
+        {
+            case EventEditDecision.Unavailable:
+                return EventUnavailable();
+            case EventEditDecision.NotReadable:
+                // Review pass 2 (F4; uac-r2 Q1): Dataverse says the systemuser cannot read the row — can't read is the uniform 404.
+                logger.LogInformation("[EXT-EVENT] Update of event {Id} withheld: Dataverse gives the caller no Read on the row", id);
+                return Sprk.Bff.Api.Infrastructure.Errors.ProblemDetailsHelper.UniformRecordNotFound(httpContext);
+            case EventEditDecision.Denied:
+                logger.LogInformation("[EXT-EVENT] Update of event {Id} refused: the caller can read it but not edit it", id);
+                return DenyEventUpdate();
+        }
+
+        // (4) Clearing the due date of a type that requires one (owner Q-1, uac-r2 Q3: the event's own type, active or not).
+        if (request.DueDateSent && request.SprkDuedate is null)
+        {
+            try
+            {
+                var current = await dataService.GetEventByIdAsync(id, callerContext, ct);
+                if (current.Truncated)
+                    return EventUnavailable();
+                if (current.Value.Count == 0)
+                    return Sprk.Bff.Api.Infrastructure.Errors.ProblemDetailsHelper.UniformRecordNotFound(httpContext);
+                if (Guid.TryParse(current.Value[0].EventTypeId, out var typeId))
+                {
+                    var types = await dataService.GetEventTypesAsync(ct);
+                    if (types.Any(t => t.Id == typeId && t.RequiresDueDate))
+                        return EventBadRequest("This event type requires a due date.", ExternalDataService.EventDueDateRequiredErrorCode);
+                }
+            }
+            catch (ExternalDataService.DataverseUnavailableException)
+            {
+                return EventUnavailable();
+            }
+        }
+
+        // (5) The write: only the allow-listed columns the body sent.
+        try
+        {
+            if (!await dataService.UpdateEventAsync(id, payload, ct))
+                return Sprk.Bff.Api.Infrastructure.Errors.ProblemDetailsHelper.UniformRecordNotFound(httpContext);
+        }
+        catch (ExternalDataService.DataverseUnavailableException)
+        {
+            return EventUnavailable();
+        }
+
+        return Results.NoContent();
+    }
+
+    /// <summary>
+    /// GET /api/v1/external/{root}/{id}/assignable-people (R4 task 014b, owner Q-5, uac-r2 Q4): the people an event on this record
+    /// may be assigned to — <see cref="RecordContactAccessService"/>'s Known set, names only; the ONLY external route that returns
+    /// contact ids for assigning. Gate: Read on the record (else <see cref="DenyRoot"/>), then the event create right
+    /// (<see cref="CreateEventCeiling"/> + Create, as <see cref="CreateEventForRoot"/>) or the edit right (the PATCH's ceiling +
+    /// Write on the record); neither is 403 <c>event_assign</c>. A right missing only because Dataverse gave no answer, and an
+    /// Unknown set, are the 503 — never <c>[]</c>.
+    /// </summary>
+    private static async Task<IResult> ListAssignablePeopleForRoot(
+        ExternalDataService.TodoRootKind rootKind, Guid id, HttpContext httpContext, CallerRecordAccessProbe probe,
+        IDataversePrivilegeChecker privileges, RecordContactAccessService contactAccess, ILogger logger, CancellationToken ct)
+    {
+        var callerContext = GetCallerPrincipal(httpContext);
+        if (callerContext is null) return MissingContextResult();
+
+        if (GrantRootTypeOf(rootKind) is not { } rootType
+            || !RightsForRoot(callerContext, rootKind, id).HasFlag(Spaarke.Dataverse.AccessRights.Read))
+            return DenyRoot(rootKind);
+
+        var rights = await RightsForRootWriteAsync(
+            callerContext, rootKind, id, CallerRightsReader(probe, httpContext), logger, ct,
+            Sprk.Bff.Api.Api.Events.EventEndpoints.CreateEventPrivilege, CallerPrivilegeReader(probe, httpContext));
+        var mayCreate = rights.Rights.HasFlag(Spaarke.Dataverse.AccessRights.Create)
+            && await WorkforceRoleCeilingGate.AdmitsAsync(callerContext, privileges, CreateEventCeiling(rootKind), ct);
+        var mayEdit = rights.Rights.HasFlag(Spaarke.Dataverse.AccessRights.Write)
+            && await WorkforceRoleCeilingGate.AdmitsAsync(callerContext, privileges, WorkforceRoleCeilingGate.UpdateEvent, ct);
+        if (!mayCreate && !mayEdit)
+        {
+            if (rights.IsUnavailableFor(Spaarke.Dataverse.AccessRights.Create) || rights.IsUnavailableFor(Spaarke.Dataverse.AccessRights.Write))
+                return DataverseRightsUnavailable();
+            return DenyEventAssign(rootKind);
+        }
+
+        switch (await contactAccess.GetContactsWithAccessAsync(rootType, id, ct))
+        {
+            case RecordContactAccess.Known known:
+                return Results.Ok(new ExternalCollectionResponse<ExternalAssignablePersonDto>
+                {
+                    Value = known.Contacts
+                        .Select(c => new ExternalAssignablePersonDto
+                        {
+                            ContactId = c.ContactId.ToString(),
+                            Name = c.Name,
+                            IsMe = callerContext.ContactId is { } me && me == c.ContactId,
+                        })
+                        .ToList(),
+                });
+            default:
+                logger.LogWarning("[EXT-EVENT] The people with access to a {RootKind} could not be decided. TraceId={TraceId}",
+                    rootKind, httpContext.TraceIdentifier);
+                return AssigneesUnavailable();
+        }
+    }
+
+    private static Task<IResult> GetProjectAssignablePeople(
+        Guid id, HttpContext httpContext, CallerRecordAccessProbe probe, IDataversePrivilegeChecker privileges,
+        RecordContactAccessService contactAccess, ILogger<Program> logger, CancellationToken ct) =>
+        ListAssignablePeopleForRoot(ExternalDataService.TodoRootKind.Project, id, httpContext, probe, privileges, contactAccess, logger, ct);
+
+    private static Task<IResult> GetMatterAssignablePeople(
+        Guid id, HttpContext httpContext, CallerRecordAccessProbe probe, IDataversePrivilegeChecker privileges,
+        RecordContactAccessService contactAccess, ILogger<Program> logger, CancellationToken ct) =>
+        ListAssignablePeopleForRoot(ExternalDataService.TodoRootKind.Matter, id, httpContext, probe, privileges, contactAccess, logger, ct);
+
+    private static Task<IResult> GetWorkAssignmentAssignablePeople(
+        Guid id, HttpContext httpContext, CallerRecordAccessProbe probe, IDataversePrivilegeChecker privileges,
+        RecordContactAccessService contactAccess, ILogger<Program> logger, CancellationToken ct) =>
+        ListAssignablePeopleForRoot(ExternalDataService.TodoRootKind.WorkAssignment, id, httpContext, probe, privileges,
+            contactAccess, logger, ct);
 
     /// <summary>The route segment of a root kind, as the event and to-do routes are mapped (<c>projects</c>,
     /// <c>matters</c>, <c>workassignments</c>).</summary>

@@ -7,7 +7,7 @@
  *
  * What runs for real: the six widget bodies (`createGridWidgetBody`), `RecordTemplateModal` and its sections,
  * `RecordDetailFields`, the
- * canonical `SprkModal` shell, and the existing `EventsCalendar` / `SmartTodo` / `web-api-client`. What is substituted:
+ * canonical `SprkModal` shell, and the existing `EventsCalendar` / `web-api-client`. What is substituted:
  * the network seam (`bffApiCall`, answering the module read seam's routes — the id-filtered fetch is the ONE detail
  * read for all six entities; the mock models the real server, which attaches `@formattedValues` on the fetch seam only), the shared grid (a fake that reports its rows
  * and opens one on click, exactly the two callbacks the real grid fires), and two browser-only helpers jsdom lacks.
@@ -237,13 +237,14 @@ interface Mocks {
   deny: Set<string>;
   /**
    * Rows the task 031 document routes return, keyed by `${root}:${recordId}` (root = projects | matters | workassignments |
-   * servicerequests | invoices), in the DTO shape (`sprk_name`).
+   * servicerequests), in the DTO shape (`sprk_name`). An invoice has NO documents route (R4 task 021).
    */
   documents: Record<string, Array<Record<string, unknown>>>;
+  /** Rows ebilling's `GET /invoices/{id}/files` returns, keyed by the invoice id (the invoice's read-only Files section). */
+  invoiceFiles: Record<string, Array<Record<string, unknown>>>;
   /** Rows the invoices rollup (still the module fetch) returns, keyed by `${parentAttribute}:${parentId}`. */
   invoices: Record<string, Array<Record<string, unknown>>>;
   events: Array<Record<string, unknown>>;
-  todos: Array<Record<string, unknown>>;
 }
 
 let mocks: Mocks;
@@ -268,21 +269,21 @@ function detailReadOf(body: { entityName: string; fetchXml: string }): { c: Case
  */
 function sideReads(path: string): unknown {
   if (path === '/api/v1/external/me') return { contactId: guid(7), email: 'me@example.test', projects: [] };
-  if (
-    /^\/api\/v1\/external\/(projects|matters|workassignments|servicerequests|invoices)\/[^/]+\/documents$/.test(path)
-  ) {
+  if (/^\/api\/v1\/external\/(projects|matters|workassignments|servicerequests)\/[^/]+\/documents$/.test(path)) {
     return { value: [] };
   }
+  if (/^\/api\/v1\/external\/invoices\/[^/]+\/files$/.test(path)) return { value: [] };
   return undefined;
 }
 
 function installNetwork(): void {
   bffApiCall.mockImplementation(async (path: string, options?: RequestInit) => {
-    const docs =
-      /^\/api\/v1\/external\/(projects|matters|workassignments|servicerequests|invoices)\/([^/]+)\/documents$/.exec(
-        path
-      );
+    const docs = /^\/api\/v1\/external\/(projects|matters|workassignments|servicerequests)\/([^/]+)\/documents$/.exec(
+      path
+    );
     if (docs) return { value: mocks.documents[`${docs[1]}:${docs[2]}`] ?? [] };
+    const files = /^\/api\/v1\/external\/invoices\/([^/]+)\/files$/.exec(path);
+    if (files) return { value: mocks.invoiceFiles[files[1]] ?? [] };
     if (path === '/api/v1/external/me') return sideReads(path);
     // POST /fetch  (every entity's detail by id, and the invoices rollup by parent lookup)
     if (path.endsWith('/api/dataverse/fetch')) {
@@ -298,10 +299,9 @@ function installNetwork(): void {
       const key = `${cond.attribute}:${cond.value}`;
       if (body.entityName === 'sprk_invoice') return { entities: mocks.invoices[key] ?? [], moreRecords: false };
     }
-    // Task 006: the thread says the caller may post, so the toolbar offers New message.
+    // Task 006: the thread says the caller may post, so the Messages section offers New message (task 009).
     if (/\/messages$/.test(path)) return { value: [], canCreate: true };
     if (/\/(projects|matters|workassignments)\/[^/]+\/events$/.test(path)) return { value: mocks.events };
-    if (/\/(projects|matters|workassignments)\/[^/]+\/todos$/.test(path)) return { value: mocks.todos };
     throw new Error(`unexpected BFF call ${options?.method ?? 'GET'} ${path}`);
   });
 }
@@ -353,7 +353,7 @@ const caseOf = (entity: string): Case => CASES.find(c => c.entityName === entity
 
 beforeEach(() => {
   setGrids();
-  mocks = { deny: new Set(), documents: {}, invoices: {}, events: [], todos: [] };
+  mocks = { deny: new Set(), documents: {}, invoiceFiles: {}, invoices: {}, events: [] };
   bffApiCall.mockReset();
   installNetwork();
 });
@@ -380,8 +380,8 @@ describe.each(CASES)('$label grid', c => {
     expect(within(dialog).getByTestId(c.fieldTestId).textContent).toBe(c.fieldValue);
 
     // Read-only: the record itself has no input, and (task 004) neither does the thread: the compose box moved out of the
-    // Messages section into the New message dialog that the toolbar opens. So the record modal holds no input at all (a
-    // stray input anywhere fails), and for an entity with a thread the dialog the toolbar opens holds exactly one
+    // Messages section into the New message dialog that its section header opens. So the record modal holds no input at all (a
+    // stray input anywhere fails), and for an entity with a thread the dialog the section header opens holds exactly one
     // textbox - a textarea - which is not inside the Messages section (it is its own child dialog).
     const inputs = Array.from(dialog.querySelectorAll('input, textarea, select, [role="textbox"]'));
     expect(inputs).toHaveLength(0);
@@ -539,7 +539,7 @@ describe('browsing', () => {
         finishPost = resolve;
       });
       bffApiCall.mockImplementation(async (path: string, options?: RequestInit) => {
-        // Task 006: the thread says the caller may post, so the toolbar offers New message.
+        // Task 006: the thread says the caller may post, so the Messages section offers New message.
         if (path.endsWith('/messages')) return options?.method === 'POST' ? inFlight : { value: [], canCreate: true };
         if (sideReads(path) !== undefined) return sideReads(path);
         const body = JSON.parse(String(options?.body)) as { entityName: string; fetchXml: string };
@@ -563,7 +563,7 @@ describe('browsing', () => {
       const dialog = await screen.findByRole('dialog');
       await waitFor(() => expect(titleOf(dialog)).toBe('Matter M-201'));
       await within(dialog).findByTestId('record-messages-empty');
-      // Task 004: the compose box lives in the New message dialog the toolbar opens (a child of this modal, so while it is
+      // Task 004: the compose box lives in the New message dialog the section header opens (a child of this modal, so while it is
       // open the record's own controls are aria-hidden by the modal layer - they are read with hidden: true below).
       // A real timer must run here: the record's own modal layer hides everything outside it for ~250 ms after it opens
       // (tabster's debounce), and a child opened inside that window would be hidden with it.
@@ -653,7 +653,7 @@ describe('browsing', () => {
 // ---------------------------------------------------------------------------
 
 describe('sections', () => {
-  it('Project: documents come from the project documents route and invoices from the module rollup; events and tasks are read-only', async () => {
+  it('Project: documents come from the project documents route and invoices from the module rollup; the events list is read-only', async () => {
     const c = caseOf('sprk_project');
     const projectId = ID.project[0];
     mocks.documents[`projects:${projectId}`] = [
@@ -680,7 +680,6 @@ describe('sections', () => {
       },
     ];
     mocks.events = [{ sprk_eventid: 'e-1', sprk_name: 'Signing call', sprk_duedate: '2026-03-01' }];
-    mocks.todos = [{ sprk_todoid: 't-1', sprk_name: 'Review draft', statuscode: 1 }];
 
     renderWidget(c.Body);
     fireEvent.click(gridRow(c, 1));
@@ -708,12 +707,11 @@ describe('sections', () => {
     );
     expect(invoiceFetch?.fetchXml).toContain('<attribute name="statuscode"/>');
 
-    // Events and tasks, read-only: both lists show, and there is no create or toggle affordance.
+    // Events, read-only: the list shows, and there is no create affordance. Task 009: no task list at all.
     const events = within(dialog).getByTestId('record-detail-events');
     await within(events).findByText('Signing call');
-    await within(events).findByText('Review draft');
     expect(within(dialog).queryByRole('button', { name: /create event/i })).toBeNull();
-    expect(within(dialog).queryByRole('button', { name: /create new task|add task/i })).toBeNull();
+    expect(within(dialog).queryByRole('button', { name: /create new task|add task|create task/i })).toBeNull();
   });
 
   it('Project: shows the empty states when there is nothing', async () => {
@@ -725,10 +723,12 @@ describe('sections', () => {
     await within(within(dialog).getByTestId('record-detail-documents')).findByText('No Documents');
     expect(within(dialog).getByText('No invoices for this record.')).toBeTruthy();
     await within(dialog).findByText(/No events yet/);
-    await within(dialog).findByText('No tasks yet');
+    // Task 012: one Events list (a Task is an event type): no separate Tasks list, no to-do read.
+    expect(within(dialog).queryByText(/No tasks/)).toBeNull();
+    expect(bffApiCall.mock.calls.some(call => String(call[0]).endsWith('/todos'))).toBe(false);
   });
 
-  it('Matter: documents come from the matter documents route, invoices roll up by the matter lookup; events/tasks come from the matter routes (task 057)', async () => {
+  it('Matter: documents come from the matter documents route, invoices roll up by the matter lookup; events come from the matter route (task 057)', async () => {
     const c = caseOf('sprk_matter');
     const matterId = ID.matter[0];
     mocks.documents[`matters:${matterId}`] = [
@@ -752,12 +752,11 @@ describe('sections', () => {
 
     const events = within(dialog).getByTestId('record-detail-events');
     await within(events).findByText(/No events yet/);
-    await within(events).findByText('No tasks yet');
-    // The static "no reads yet" empty state is gone; the matter's own event and to-do routes are read.
+    // The static "no reads yet" empty state is gone; the matter's own event route is read (and, task 009, nothing else).
     expect(within(events).queryByTestId('record-detail-events-unavailable')).toBeNull();
     const calls = bffApiCall.mock.calls.map(call => String(call[0]));
     expect(calls).toContain(`/api/v1/external/matters/${matterId}/events`);
-    expect(calls).toContain(`/api/v1/external/matters/${matterId}/todos`);
+    expect(calls.some(p => p.endsWith('/todos'))).toBe(false);
   });
 
   it('Work assignment: documents and the events section, but no invoices section (invoices have no work-assignment lookup)', async () => {
@@ -798,22 +797,31 @@ describe('sections', () => {
     expect(calls.some(p => p.endsWith('/events') || p.endsWith('/todos') || p.endsWith('/documents'))).toBe(false);
   });
 
-  it('sprk_invoice: documents from the invoices route (owner decision 2026-10-11); no events section, no invoices rollup', async () => {
+  it('sprk_invoice: read-only Files from the invoice files route (task 021); no documents route, no events section, no invoices rollup', async () => {
     const c = caseOf('sprk_invoice');
     const invoiceId = ID.invoice[0];
-    mocks.documents[`invoices:${invoiceId}`] = [
-      { sprk_documentid: guid(941), sprk_name: 'Invoice PDF', createdon: '2026-02-03T10:00:00Z' },
+    mocks.invoiceFiles[invoiceId] = [
+      {
+        id: guid(941),
+        fileName: 'Invoice PDF',
+        contentType: 'application/pdf',
+        sizeBytes: 1024,
+        createdOn: '2026-02-03T10:00:00Z',
+        scanStatus: 'Clean',
+      },
     ];
     renderWidget(c.Body);
     fireEvent.click(gridRow(c, 1));
     const dialog = await screen.findByRole('dialog');
-    await within(await within(dialog).findByTestId('record-detail-documents')).findByText('Invoice PDF');
+    await within(await within(dialog).findByTestId('record-detail-files')).findByText('Invoice PDF');
 
+    expect(within(dialog).queryByTestId('record-detail-documents')).toBeNull();
     expect(within(dialog).queryByTestId('record-detail-events')).toBeNull();
     expect(within(dialog).queryByTestId('record-detail-invoices')).toBeNull();
     const calls = bffApiCall.mock.calls.map(call => String(call[0]));
-    expect(calls).toContain(`/api/v1/external/invoices/${invoiceId}/documents`);
-    // Never the module fetch for an invoice's documents.
+    expect(calls).toContain(`/api/v1/external/invoices/${invoiceId}/files`);
+    // Never an invoice documents route, and never the module fetch for an invoice's documents.
+    expect(calls.filter(p => /\/invoices\/[^/]+\/documents/.test(p))).toEqual([]);
     const moduleDocumentReads = bffApiCall.mock.calls
       .filter(call => String(call[0]).endsWith('/api/dataverse/fetch'))
       .map(call => JSON.parse(String((call[1] as RequestInit).body)) as { entityName: string })

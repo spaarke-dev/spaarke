@@ -88,6 +88,7 @@ import {
 import { LinesGrid } from './LinesGrid';
 import { LineReviewPane, type PaneDecision } from './LineReviewPane';
 import { RuleGroups } from './RuleGroups';
+import { ProcedureChangeNotice } from './ProcedureChangeNotice';
 import { AddLineModal, BulkDecisionModal, CorrectValueModal, HEADER_FIELDS, type BulkRequest, type CorrectTarget } from './Dialogs';
 
 const useStyles = makeStyles({
@@ -769,6 +770,7 @@ export function InvoiceReviewPage(props: InvoiceReviewPageProps) {
             <MessageBarBody>{FIRM_FIRST_WORDS}</MessageBarBody>
           </MessageBar>
         )}
+        <ProcedureChangeNotice change={review.procedureChange} />
         {access.reason && (
           <MessageBar intent="info" data-testid="readonly-notice">
             <MessageBarBody>{access.reason}</MessageBarBody>

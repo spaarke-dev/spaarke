@@ -1,14 +1,15 @@
 /**
  * R4 D-9 (#2716), a task 006 follow-up (FR-07 / NFR-04: no action the UI offers may answer 403).
  *
- * On the standalone ProjectPage a project caller WITHOUT `writeAccessPerRecord` used to be offered Add Task, Create Event
- * and Upload on the `/me` level alone. The create routes also apply the workforce role ceiling, which the level does not
+ * On the standalone ProjectPage a project caller WITHOUT `writeAccessPerRecord` used to be offered Create Event and Upload
+ * on the `/me` level alone. The create routes also apply the workforce role ceiling, which the level does not
  * show, and each project list's `canCreate` is the POST's own decision (task 002). So the page now follows the record
  * view's rule (`listCreateRightOf` / `createRightOf`, recordAccess.ts): offered only when the level allows AND the list
  * has answered and allows. The kept exception: a list that answered WITHOUT `canCreate` follows the level.
  *
- * Rendered for real: the page, its Overview and Calendar tabs, `DocumentLibrary`, `EventsCalendar`, `SmartTodo` and
- * `useAccessLevel`. Substituted: the network seam (`bffApiCall`), the project read and the `/me` data source.
+ * Task 009 (owner 2026-11-12): external users work only with events, so the Calendar tab has no task list and no Add Task.
+ *
+ * Rendered for real: the page, its Overview and Calendar tabs, `DocumentLibrary`, `EventsCalendar` and `useAccessLevel`. Substituted: the network seam (`bffApiCall`), the project read and the `/me` data source.
  */
 import * as React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -54,12 +55,12 @@ vi.mock('../src/hooks/useExternalContext', () => ({
 
 import { ProjectPage } from '../src/pages/ProjectPage';
 
-/** How every project list (documents, events, to-dos) answers. */
+/** How every project list (documents, events) answers. */
 type ListAnswer = { canCreate: boolean | undefined } | 'pending' | 'failed';
 
 function answerLists(answer: ListAnswer): void {
   bffApiCall.mockImplementation((path: string) => {
-    if (!/\/projects\/p-d9\/(documents|events|todos)/.test(path)) {
+    if (!/\/projects\/p-d9\/(documents|events)/.test(path)) {
       return Promise.reject(new Error(`unexpected request ${path}`));
     }
     if (answer === 'pending') return new Promise(() => undefined);
@@ -110,19 +111,17 @@ async function overview(answer: ListAnswer): Promise<void> {
   }
 }
 
-/** The Calendar tab with its event and to-do lists settled the given way. */
+/** The Calendar tab with its event list settled the given way. */
 async function calendar(answer: ListAnswer): Promise<void> {
   answerLists(answer);
   renderProject();
   fireEvent.click(await screen.findByRole('tab', { name: /Calendar/ }));
   if (answer === 'pending') {
     await screen.findByText('Loading events...');
-    await screen.findByText('Loading tasks...');
   } else if (answer === 'failed') {
-    await waitFor(() => expect(screen.getAllByRole('button', { name: 'Try again' })).toHaveLength(2));
+    await waitFor(() => expect(screen.getAllByRole('button', { name: 'Try again' })).toHaveLength(1));
   } else {
     await screen.findByText('No events yet');
-    await screen.findByText('No tasks yet');
   }
 }
 
@@ -138,10 +137,11 @@ describe('ProjectPage (D-9): a partner without writeAccessPerRecord is offered a
       expect(await screen.findByRole('button', { name: UPLOAD })).toBeTruthy();
     });
 
-    it('Create Event and Add Task are offered', async () => {
+    it('Create Event is offered, and Add Task is not (task 009)', async () => {
       await calendar({ canCreate: true });
       expect(screen.getByRole('button', { name: CREATE_EVENT })).toBeTruthy();
-      expect(screen.getByRole('button', { name: ADD_TASK })).toBeTruthy();
+      // Task 009: no task list on the page, so no Add Task (must not fire even where events may be created).
+      expectNotOffered(ADD_TASK);
     });
   });
 
@@ -190,10 +190,11 @@ describe('ProjectPage (D-9): a partner without writeAccessPerRecord is offered a
       expect(await screen.findByRole('button', { name: UPLOAD })).toBeTruthy();
     });
 
-    it('Create Event and Add Task are offered', async () => {
+    it('Create Event is offered, and Add Task is not (task 009)', async () => {
       await calendar({ canCreate: undefined });
       expect(screen.getByRole('button', { name: CREATE_EVENT })).toBeTruthy();
-      expect(screen.getByRole('button', { name: ADD_TASK })).toBeTruthy();
+      // Task 009: no task list on the page, so no Add Task (must not fire even where events may be created).
+      expectNotOffered(ADD_TASK);
     });
   });
 

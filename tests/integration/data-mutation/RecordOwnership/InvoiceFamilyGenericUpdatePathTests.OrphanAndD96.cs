@@ -159,7 +159,7 @@ public partial class InvoiceFamilyGenericUpdatePathTests
                 Sprk.Bff.Api.Tests.Domain.Dataverse.FieldMapping.PermissivePushSourceGate.AllowingEveryChild(),
                         _writes.Object, new StampWorld().Restamper, rules.ToArray(), values, table, [id], Caller,
                         NullLogger.Instance, ct, scopes: PushScopes(), lookupBinds: binds, appOnlyEntities: app,
-                        callerQuery: CallerQuery());
+                        callerQuery: CallerQuery(), lockedWriteProbe: LockedProbe());
                     if (failed == 0)
                         return new PathOutcome(null, null);
 
@@ -174,7 +174,8 @@ public partial class InvoiceFamilyGenericUpdatePathTests
     {
         var services = new ServiceCollection()
             .AddSingleton(new StampWorld().Restamper)
-            .AddSingleton<IRecordOwnershipResolver>(new RecordOwnershipResolverDouble());
+            .AddSingleton<IRecordOwnershipResolver>(new RecordOwnershipResolverDouble())
+            .AddSingleton(LockedProbe()); // #2799: the person's rights on a locked invoice-family write
         if (app is not null)
         {
             // uac-r2 #2091 round 4 (master): the core reads a lookup's entity set from metadata through this same service.

@@ -21,7 +21,6 @@ vi.mock('../src/auth/bff-client', async () => {
 
 import { getDocuments } from '../src/api/web-api-client';
 import { DocumentLibrary } from '../src/components/DocumentLibrary';
-import { SmartTodo } from '../src/components/SmartTodo';
 import { EventsCalendar } from '../src/components/EventsCalendar';
 import { ContactsOrganizations } from '../src/components/ContactsOrganizations';
 
@@ -32,7 +31,6 @@ function answerEveryList(truncated: boolean): void {
   bffApiCall.mockImplementation(async (path: string) => {
     const envelope = <T,>(row: T) => (truncated ? { value: [row], truncated: true } : { value: [row] });
     if (path.endsWith('/documents')) return envelope({ sprk_documentid: 'd-1', sprk_name: 'Engagement letter' });
-    if (path.endsWith('/todos')) return envelope({ sprk_todoid: 't-1', sprk_name: 'Review draft', statuscode: 1 });
     if (path.endsWith('/events')) return envelope({ sprk_eventid: 'e-1', sprk_name: 'Signing' });
     if (path.endsWith('/contacts')) return envelope({ contactid: 'c-1', fullname: 'Ada Lovelace' });
     if (path.endsWith('/organizations')) return envelope({ accountid: 'a-1', name: 'Acme' });
@@ -42,7 +40,6 @@ function answerEveryList(truncated: boolean): void {
 
 const views: Array<[string, () => React.ReactElement, number]> = [
   ['documents', () => <DocumentLibrary projectId={PROJECT} accessLevel={AccessLevel.ViewOnly} />, 1],
-  ['to-dos', () => <SmartTodo projectId={PROJECT} accessLevel={AccessLevel.ViewOnly} />, 1],
   ['events', () => <EventsCalendar projectId={PROJECT} accessLevel={AccessLevel.ViewOnly} />, 1],
   // Contacts and organisations: one notice per list.
   ['contacts and organisations', () => <ContactsOrganizations projectId={PROJECT} />, 2],
@@ -116,7 +113,7 @@ describe('each list view says when its list was cut short', () => {
     renderView(view);
 
     // Wait until the row is on screen, so the absence below is not just "still loading".
-    await screen.findByText(/Engagement letter|Review draft|Signing|Ada Lovelace/);
+    await screen.findByText(/Engagement letter|Signing|Ada Lovelace/);
     await waitFor(() => expect(bffApiCall).toHaveBeenCalled());
     expect(screen.queryByTestId('truncated-list-notice')).toBeNull();
   });
@@ -124,11 +121,6 @@ describe('each list view says when its list was cut short', () => {
 
 describe('a truncated flag from an earlier read never sits beside a later read error', () => {
   const reloadable: Array<[string, (projectId: string) => React.ReactElement, RegExp]> = [
-    [
-      'to-dos',
-      id => <SmartTodo projectId={id} accessLevel={AccessLevel.ViewOnly} />,
-      /Tasks could not be loaded just now/,
-    ],
     ['contacts', id => <ContactsOrganizations projectId={id} />, /Could not load contacts/],
   ];
 

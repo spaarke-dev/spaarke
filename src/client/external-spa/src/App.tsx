@@ -20,7 +20,7 @@ import { AppHeader } from './components/AppHeader';
 import { AuthGuard } from './components/AuthGuard';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { NotificationBell } from './components/shell/NotificationBell';
-import { RouterRecordOpener } from './components/detail/RouterRecordOpener';
+import { RecordOpenerProvider } from './components/detail/RecordOpener';
 import { RecordDeepLink } from './components/detail/RecordDeepLink';
 import { WorkspaceHomePage } from './pages/WorkspaceHomePage';
 import { ProjectPage } from './pages/ProjectPage';
@@ -259,7 +259,7 @@ export const App: React.FC<{ teamsHost?: boolean }> = ({ teamsHost = false }) =>
         <FluentProvider theme={theme} style={{ height: '100%' }}>
           <BrowserRouter>
             {/* One record opener for the shell: the notification bell and a `?record=` deep link open the same detail view. */}
-            <RouterRecordOpener>
+            <RecordOpenerProvider>
               <AppShell
                 isDark={isDark}
                 onToggleDark={handleToggleDark}
@@ -267,7 +267,7 @@ export const App: React.FC<{ teamsHost?: boolean }> = ({ teamsHost = false }) =>
                 teamsHost={teamsHost}
                 onSignOut={handleSignOut}
               />
-            </RouterRecordOpener>
+            </RecordOpenerProvider>
           </BrowserRouter>
         </FluentProvider>
       </TeamsHostProvider>

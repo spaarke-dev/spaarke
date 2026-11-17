@@ -1,6 +1,6 @@
 /**
  * DocumentLibrary component — Document management for the Project page Documents tab AND the record detail view
- * (task 054: project, matter, work assignment, service request, invoice - the task 031 routes).
+ * (task 054: project, matter, work assignment, service request - the task 031 routes).
  *
  * ROOT (task 054). `root` + `recordId` pick the task 031 routes (`/api/v1/external/{projects|matters|workassignments|
  * servicerequests}/{id}/documents[/...]`); a service request's documents are reachable ONLY through its own route. The
@@ -40,8 +40,10 @@ import {
   DataGridBody,
   DataGridCell,
   TableColumnDefinition,
+  type TableColumnId,
   createTableColumn,
   makeStyles,
+  mergeClasses,
   shorthands,
   tokens,
   Button,
@@ -87,7 +89,8 @@ import {
   type CreateActionReporter,
 } from './createAction';
 import { bffApiCall, bffApiBlob, problemMessage } from '../auth/bff-client';
-import { levelVerdictOf, listCreateRightOf, type CreateRight } from './record/recordAccess';
+import { childRecordAttributesOf } from './record/childRecord';
+import { levelVerdictOf, listCreateRightOf } from './record/recordAccess';
 import { AccessLevel, ApiError } from '../types';
 
 // ---------------------------------------------------------------------------
@@ -126,20 +129,105 @@ const useStyles = makeStyles({
     ...shorthands.border('1px', 'solid', tokens.colorNeutralStroke2),
     borderRadius: tokens.borderRadiusMedium,
   },
+  // D-12 (#2769, task 009): the grid's columns, sized so they never overlap at the record modal's width. Fluent's
+  // DataGrid lays a row out as flex cells that all share the width equally (`flex: 1 1 0px`), and a cell's content (the
+  // type badge, the summary button, the row actions) kept its own width and spilled into the next column. The name takes
+  // the flexible width, the summary what is left; type, date and actions are fixed. Every cell clips what does not fit,
+  // and the name, type and summary end in an ellipsis. Applied to the header cell and the body cell of each column.
+  columnName: {
+    flexGrow: 2,
+    flexShrink: 1,
+    flexBasis: '0px',
+    minWidth: 0,
+    overflow: 'hidden',
+  },
+  columnType: {
+    flexGrow: 0,
+    flexShrink: 0,
+    flexBasis: '120px',
+    minWidth: 0,
+    overflow: 'hidden',
+  },
+  columnDate: {
+    flexGrow: 0,
+    flexShrink: 0,
+    flexBasis: '112px',
+    minWidth: 0,
+    overflow: 'hidden',
+  },
+  columnSummary: {
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: '0px',
+    minWidth: 0,
+    overflow: 'hidden',
+  },
+  columnActions: {
+    flexGrow: 0,
+    flexShrink: 0,
+    flexBasis: '112px',
+    minWidth: 0,
+    overflow: 'hidden',
+  },
   documentName: {
     display: 'flex',
     flexDirection: 'row',
     alignItems: 'center',
     gap: tokens.spacingHorizontalXS,
+    minWidth: 0,
+    overflow: 'hidden',
     color: tokens.colorBrandForeground1,
     cursor: 'pointer',
     ':hover': {
       textDecoration: 'underline',
     },
   },
+  // Record template only (task 013): the name as a link-style button that opens the document's record.
+  documentNameButton: {
+    display: 'flex',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalXS,
+    minWidth: 0,
+    maxWidth: '100%',
+    margin: 0,
+    padding: 0,
+    border: 'none',
+    backgroundColor: 'transparent',
+    font: 'inherit',
+    textAlign: 'start',
+    color: tokens.colorBrandForeground1,
+    cursor: 'pointer',
+    ':hover': {
+      textDecoration: 'underline',
+    },
+    ':focus-visible': {
+      outlineStyle: 'solid',
+      outlineWidth: tokens.strokeWidthThick,
+      outlineColor: tokens.colorStrokeFocus2,
+    },
+  },
   documentNameIcon: {
     flexShrink: '0',
     color: tokens.colorNeutralForeground3,
+  },
+  /** A flex child that may shrink below its text's width, so its own ellipsis shows (name, summary). */
+  shrinkable: {
+    minWidth: 0,
+  },
+  typeBadge: {
+    maxWidth: '100%',
+    minWidth: 0,
+  },
+  ellipsis: {
+    minWidth: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  summaryButton: {
+    maxWidth: '100%',
+    minWidth: 0,
   },
   summaryText: {
     overflow: 'hidden',
@@ -239,7 +327,7 @@ interface DocumentVersionsResponse {
 /**
  * Format a file size in bytes to a human-readable string.
  */
-function formatFileSize(bytes: number | null | undefined): string {
+export function formatFileSize(bytes: number | null | undefined): string {
   if (bytes == null || bytes <= 0) return '—';
   const units = ['B', 'KB', 'MB', 'GB'];
   let value = bytes;
@@ -254,7 +342,7 @@ function formatFileSize(bytes: number | null | undefined): string {
 /**
  * Format a Dataverse ISO date string for display.
  */
-function formatDate(isoDate: string | null | undefined): string {
+export function formatDate(isoDate: string | null | undefined): string {
   if (!isoDate) return '—';
   try {
     return new Intl.DateTimeFormat('en-US', {
@@ -273,7 +361,6 @@ const RECORD_NOUN: Readonly<Record<DocumentRoot, string>> = {
   matters: 'matter',
   workassignments: 'work assignment',
   servicerequests: 'service request',
-  invoices: 'invoice',
 };
 
 /**
@@ -303,12 +390,16 @@ export async function downloadDocumentFile(
   documentId: string,
   fileName: string
 ): Promise<void> {
-  let objectUrl: string | undefined;
+  saveBlobAs(await bffApiBlob(documentContentPath(root, recordId, documentId)), fileName);
+}
+
+/**
+ * Hands bytes to the browser under a file name (an object URL and a temporary anchor). Shared by the document download and
+ * the invoice Files list (R4 task 021), whose content route sends no file name of its own.
+ */
+export function saveBlobAs(blob: Blob, fileName: string): void {
+  const objectUrl = window.URL.createObjectURL(blob);
   try {
-    const blob = await bffApiBlob(documentContentPath(root, recordId, documentId));
-
-    objectUrl = window.URL.createObjectURL(blob);
-
     // Trigger browser download via a temporary anchor element
     const anchor = window.document.createElement('a');
     anchor.href = objectUrl;
@@ -319,10 +410,7 @@ export async function downloadDocumentFile(
     window.document.body.removeChild(anchor);
   } finally {
     // Revoke on the next tick - revoking synchronously can cancel the in-flight navigation the anchor click just started.
-    if (objectUrl) {
-      const toRevoke = objectUrl;
-      window.setTimeout(() => window.URL.revokeObjectURL(toRevoke), 0);
-    }
+    window.setTimeout(() => window.URL.revokeObjectURL(objectUrl), 0);
   }
 }
 
@@ -693,20 +781,22 @@ export type DocumentLibraryProps = DocumentLibraryTarget & {
    */
   writeAccessPerRecord?: boolean;
   /**
-   * Record template only (task 004, FR-03). When given, the toolbar's Upload is the entry point: this list shows no
-   * "Upload Document" button of its own, offers its Upload action through this callback (shown exactly when its own button
-   * would have been) and renders the upload dialog itself, so the dialog is a descendant of the host that owns the toolbar.
+   * Record template only (task 004, FR-03; task 009). When given, the Upload in the Documents section's header is the
+   * entry point: this list shows no "Upload Document" button of its own, offers its Upload action through this callback
+   * (shown exactly when its own button would have been) and renders the upload dialog itself, so the dialog is a
+   * descendant of the host.
    * Omit it everywhere else (the project page keeps its button).
    */
   onCreateActionChange?: CreateActionReporter;
   /** Called with `true` while an upload is in flight and `false` otherwise (and on unmount), so the host can hold. */
   onBusyChange?: (busy: boolean) => void;
   /**
-   * Record template, a list that keeps its own Upload button (the invoice Files list; task 006 fix round 1): told the
-   * Upload right as the shared rule reads it (`createRightOf`: `true` / `false`, `null` while unknown, and `null` on
-   * unmount), so the record's "Your access" and the Files card's read-only line follow it. Changes nothing on screen here.
+   * Record template only (task 013, owner 2026-11-14). When given, a document's name is a link-style button that calls this
+   * with the document's id and the button (focus returns to it when the record opened over this one closes); a document with
+   * no file (`hasFile === false`) is still opened (FR-15: its record shows Information only). Omit it everywhere else: the
+   * Project page keeps plain-text names.
    */
-  onUploadRightChange?: (right: CreateRight) => void;
+  onOpenDocument?: (documentId: string, trigger: HTMLElement) => void;
 };
 
 // ---------------------------------------------------------------------------
@@ -741,7 +831,7 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
   writeAccessPerRecord = false,
   onCreateActionChange,
   onBusyChange,
-  onUploadRightChange,
+  onOpenDocument,
 }) => {
   const styles = useStyles();
   // The props type refuses a call with neither; an empty id that still arrives (a caller that casts, or a blank id from
@@ -761,7 +851,7 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
   // list did, and a stored, already-interpreted value would then be stale (task 036 fix round 2).
   const [listCanCreate, setListCanCreate] = React.useState<boolean | null>(null);
   const [loading, setLoading] = React.useState<boolean>(true);
-  // True once a list read has answered, so a re-read after an upload does not withdraw the toolbar's Upload (and with it
+  // True once a list read has answered, so a re-read after an upload does not withdraw the section's Upload (and with it
   // the control focus returns to).
   const [loadedOnce, setLoadedOnce] = React.useState<boolean>(false);
   const [error, setError] = React.useState<string | null>(null);
@@ -773,8 +863,8 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
   // Task 066: why the last download failed (null = none); cleared when the next download starts.
   const [downloadError, setDownloadError] = React.useState<string | null>(null);
 
-  // The Upload right (task 006, FR-06: `listCreateRightOf` / `createRightOf`, the rule SmartTodo and EventsCalendar
-  // share): offered exactly when it is known to be `true`. The list must have answered (a re-read after an upload keeps
+  // The Upload right (task 006, FR-06: `listCreateRightOf` / `createRightOf`, the rule EventsCalendar shares
+  // too): offered exactly when it is known to be `true`. The list must have answered (a re-read after an upload keeps
   // the last answer, so the action does not blink out) and its `canCreate` must allow. A level that decides must allow
   // too: the host's `canUpload` (the record template's `uploadOverride`), else, on a project, the `/me` level for a caller
   // whose write access is not per record (`levelVerdictOf`; a per-record caller follows the list alone, task 036 fix round
@@ -787,28 +877,15 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
     listCanCreate,
     levelAllows,
   });
-  // The list's own button (outside the template, and the invoice Files list inside it). A project follows the shared
+  // The list's own button (outside the template). A project follows the shared
   // rule; every other record keeps its R3 rule, unchanged: the host's `canUpload`, else the list's `canCreate`, else
   // `accessLevel`.
   const showUpload =
     root === 'projects' ? uploadAllowed : (canUpload ?? listCanCreate ?? canUploadOrDownload(accessLevel));
-  // In the record template the toolbar's Upload replaces this list's button (task 004), and the dialog stays here.
+  // In the record template the section's Upload replaces this list's button (task 004 / 009), and the dialog stays here.
   const ownUploadButton = onCreateActionChange === undefined;
   useOfferCreateAction(onCreateActionChange, uploadAllowed, upload.show, right);
-  // The same right, told to a host that wants it without a toolbar action (the invoice Files list). Read through a ref, so
-  // a new callback identity never re-reports; unmount reports "unknown".
-  const onUploadRightChangeRef = React.useRef(onUploadRightChange);
-  onUploadRightChangeRef.current = onUploadRightChange;
-  React.useEffect(() => {
-    onUploadRightChangeRef.current?.(right);
-  }, [right]);
-  React.useEffect(
-    () => () => {
-      onUploadRightChangeRef.current?.(null);
-    },
-    []
-  );
-  // Whether Upload is available at all: the list's own button outside the template, the toolbar's inside it.
+  // Whether Upload is available at all: the list's own button outside the template, the section's inside it.
   const uploadAvailable = ownUploadButton ? showUpload : uploadAllowed;
   // Download / version history need only Read on the record (the server checks it). A per-record caller's level says only
   // what they may SEE, and the list rendering at all proves that Read, so they are offered (task 036 fix round 2).
@@ -901,14 +978,36 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
         columnId: 'name',
         compare: (a, b) => (a.sprk_name ?? '').localeCompare(b.sprk_name ?? ''),
         renderHeaderCell: () => 'Name',
-        renderCell: item => (
-          <div className={styles.documentName}>
-            <DocumentRegular className={styles.documentNameIcon} fontSize={16} />
-            <Text size={300} weight="semibold" truncate wrap={false}>
-              {item.sprk_name}
-            </Text>
-          </div>
-        ),
+        renderCell: item =>
+          onOpenDocument ? (
+            <button
+              type="button"
+              className={styles.documentNameButton}
+              aria-label={`Open document ${item.sprk_name}`}
+              title={item.sprk_name}
+              {...childRecordAttributesOf('sprk_document', item.sprk_documentid)}
+              onClick={e => onOpenDocument(item.sprk_documentid, e.currentTarget)}
+            >
+              <DocumentRegular className={styles.documentNameIcon} fontSize={16} />
+              <Text size={300} weight="semibold" truncate wrap={false} className={styles.shrinkable}>
+                {item.sprk_name}
+              </Text>
+            </button>
+          ) : (
+            <div className={styles.documentName}>
+              <DocumentRegular className={styles.documentNameIcon} fontSize={16} />
+              <Text
+                size={300}
+                weight="semibold"
+                truncate
+                wrap={false}
+                className={styles.shrinkable}
+                title={item.sprk_name}
+              >
+                {item.sprk_name}
+              </Text>
+            </div>
+          ),
       }),
 
       // --- Type ---
@@ -918,8 +1017,8 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
         renderHeaderCell: () => 'Type',
         renderCell: item =>
           item.sprk_documenttype ? (
-            <Badge appearance="tint" size="small">
-              {item.sprk_documenttype}
+            <Badge appearance="tint" size="small" className={styles.typeBadge} title={item.sprk_documenttype}>
+              <span className={styles.ellipsis}>{item.sprk_documenttype}</span>
             </Badge>
           ) : (
             <Text size={200} className={styles.noSummaryText}>
@@ -956,8 +1055,8 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
           return (
             <AiSummaryPopover
               trigger={
-                <Button appearance="subtle" size="small" style={{ maxWidth: '300px' }}>
-                  <Text className={styles.summaryText} size={200}>
+                <Button appearance="subtle" size="small" className={styles.summaryButton}>
+                  <Text className={mergeClasses(styles.summaryText, styles.shrinkable)} size={200}>
                     {item.sprk_summary}
                   </Text>
                 </Button>
@@ -1032,14 +1131,29 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
       askDelete,
       downloadingId,
       handleDownload,
+      onOpenDocument,
+      styles.documentNameButton,
       styles.documentName,
       styles.documentNameIcon,
+      styles.shrinkable,
+      styles.typeBadge,
+      styles.ellipsis,
+      styles.summaryButton,
       styles.noSummaryText,
       styles.summaryText,
       styles.versionLabel,
       styles.actionButtons,
     ]
   );
+
+  // D-12: each column's sizing class (`columnName` …), on its header cell and its body cells alike.
+  const columnClasses: Record<TableColumnId, string> = {
+    name: styles.columnName,
+    type: styles.columnType,
+    modifiedDate: styles.columnDate,
+    aiSummary: styles.columnSummary,
+    actions: styles.columnActions,
+  };
 
   // ---------------------------------------------------------------------------
   // Render — loading state
@@ -1108,7 +1222,9 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
             </Text>
             <Text size={300} className={styles.emptyStateText}>
               {uploadAvailable
-                ? `No documents have been uploaded to this ${noun} yet. Use the Upload button to add your first document.`
+                ? ownUploadButton
+                  ? `No documents have been uploaded to this ${noun} yet. Use the Upload button to add your first document.`
+                  : `No documents have been uploaded to this ${noun} yet. Use Upload above to add your first document.`
                 : `No documents have been uploaded to this ${noun} yet.`}
             </Text>
           </div>
@@ -1169,13 +1285,17 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
         >
           <DataGridHeader>
             <DataGridRow>
-              {({ renderHeaderCell }) => <DataGridHeaderCell>{renderHeaderCell()}</DataGridHeaderCell>}
+              {({ renderHeaderCell, columnId }) => (
+                <DataGridHeaderCell className={columnClasses[columnId]}>{renderHeaderCell()}</DataGridHeaderCell>
+              )}
             </DataGridRow>
           </DataGridHeader>
           <DataGridBody<ODataDocument>>
             {({ item, rowId }) => (
               <DataGridRow<ODataDocument> key={rowId}>
-                {({ renderCell }) => <DataGridCell>{renderCell(item)}</DataGridCell>}
+                {({ renderCell, columnId }) => (
+                  <DataGridCell className={columnClasses[columnId]}>{renderCell(item)}</DataGridCell>
+                )}
               </DataGridRow>
             )}
           </DataGridBody>

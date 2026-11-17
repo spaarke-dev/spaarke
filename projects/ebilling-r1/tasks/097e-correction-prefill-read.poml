@@ -4,7 +4,7 @@
     <title>Correction prefill read for the add-in</title>
     <phase>3 Rules — corrected invoices (split from 097, EB-D-179)</phase>
     <gate>startable after 097b</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Adds a read endpoint to the BFF behind the Finance route gate; tags include bff-api and auth.</rigor-reason>
     <model-tier>sonnet</model-tier>

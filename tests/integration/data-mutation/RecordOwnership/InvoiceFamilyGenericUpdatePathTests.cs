@@ -234,12 +234,42 @@ public partial class InvoiceFamilyGenericUpdatePathTests
     /// <c>InvoiceFamilyCoreRecordGuard.UpdateExistingAsync</c>) and the generic one send the same call; they differ in how a row
     /// gone by then is answered, which <c>AFamilyRowDeletedAfterTheGuard_IsRefusedByTheUpdateOnlyWrite_WithTheGuardsCode</c> pins.
     /// </summary>
+    /// <remarks>#2799 (uac-r2): on a person's run, a write that carries a locked invoice-family column is ONE logical write sent
+    /// as at most two requests — the other columns as the person, then the locked ones as the application (no impersonation),
+    /// which <see cref="LockedColumnsWrittenOnlyByTheApp"/> pins.</remarks>
     private void WrittenOnce(string table, Guid id)
     {
         var sent = Sent().Where(w => w.Table == table && w.Id == id).ToList();
-        sent.Should().ContainSingle();
-        sent[0].Method.Should().Be(nameof(IFieldMappingDataverseService.UpdateExistingRecordFieldsAsync));
-        Sent().Should().ContainSingle("only that one write");
+        sent.Should().NotBeEmpty().And.HaveCountLessThanOrEqualTo(2);
+        sent.Should().OnlyContain(w => w.Method == nameof(IFieldMappingDataverseService.UpdateExistingRecordFieldsAsync));
+        Sent().Should().HaveCount(sent.Count, "only that one write");
+        LockedColumnsWrittenOnlyByTheApp(table, id);
+    }
+
+    /// <summary>
+    /// #2799: every write of the row that carries a locked invoice-family column carries ONLY locked columns and is sent by the
+    /// application (no impersonation); the person's write, if any, carries none and comes first.
+    /// </summary>
+    private void LockedColumnsWrittenOnlyByTheApp(string table, Guid id)
+    {
+        var locked = InvoiceFamilyLockedWrite.LockedColumnsOf(table);
+        var writes = _writes.Invocations
+            .Where(i => i.Method.Name == nameof(IFieldMappingDataverseService.UpdateExistingRecordFieldsAsync)
+                        && (string)i.Arguments[0] == table && (Guid)i.Arguments[1] == id)
+            .Select(i => (Fields: (Dictionary<string, object?>)i.Arguments[2], As: i.Arguments.Count > 4 ? (Guid?)i.Arguments[3] : null))
+            .ToList();
+        foreach (var (fields, asWho) in writes)
+        {
+            var lockedKeys = fields.Keys.Where(k => locked.ContainsKey(Sprk.Bff.Api.Services.Access.SecureRootInheritance.NormalizeColumn(k))).ToList();
+            if (lockedKeys.Count > 0 && writes.Count == 2)
+            {
+                asWho.Should().BeNull("a locked invoice-family column is written by the application");
+                fields.Keys.Should().BeEquivalentTo(lockedKeys, "the application's write carries only the locked columns");
+            }
+        }
+
+        if (writes.Count == 2)
+            writes[1].As.Should().BeNull("the person's write of the other columns comes first, then the application's");
     }
 
     // ── The output orchestrator: DataverseUpdateHandler ────────────────────────────────────────────────────────────
@@ -256,7 +286,7 @@ public partial class InvoiceFamilyGenericUpdatePathTests
         }
         return new(_writes.Object, app, new StampWorld().Restamper, new RecordOwnershipResolverDouble(),
             SecureRootFilingGateFixtures.NothingSecure(), NullLogger<DataverseUpdateHandler>.Instance,
-            SecureChildReconcilerFixtures.OverEmptyWorld(), readAsPerson: CallerQuery());
+            SecureChildReconcilerFixtures.OverEmptyWorld(), readAsPerson: CallerQuery(), lockedWriteProbe: LockedProbe());
     }
 
     [Fact]
@@ -312,6 +342,7 @@ public partial class InvoiceFamilyGenericUpdatePathTests
                 .AddSingleton(app)
                 .AddSingleton(new StampWorld().Restamper)
                 .AddSingleton<IRecordOwnershipResolver>(new RecordOwnershipResolverDouble())
+                .AddSingleton(LockedProbe())
                 .BuildServiceProvider()
                 .GetRequiredService<IServiceScopeFactory>(),
             NullLogger.Instance);

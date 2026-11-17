@@ -150,6 +150,13 @@ public class GrantLifecycleCharacterizationTests
                 .ReturnsAsync((string _, string? filter, string? _, int? _, int? _, CancellationToken _) =>
                     Match(filter).ToList());
 
+            // The grant core's root-row read (the revoke's remaining-grants overlap check) is strict (#2852).
+            mock.Setup(c => c.QueryStrictAsync<ExternalGrantRow>(
+                    GrantEntitySet, It.IsAny<string>(), It.IsAny<string>(),
+                    It.IsAny<int?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((string _, string? filter, string? _, int? _, int? _, CancellationToken _) =>
+                    Match(filter).ToList());
+
             mock.Setup(c => c.RetrieveAsync<ExternalGrantRow>(
                     GrantEntitySet, It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync((string _, Guid id, string? _, CancellationToken _) =>

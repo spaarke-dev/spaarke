@@ -33,7 +33,9 @@ export const RECORD_ACTION_ICONS = Object.freeze({
   refresh: ArrowClockwise20Regular,
   upload: ArrowUpload20Regular,
   newMessage: ChatAdd20Regular,
-  addTodo: TaskListAdd20Regular,
+  // R4 task 011 (owner 2026-11-12): external users work with events of type Task, not to-dos. `addTodo` became `addTask`
+  // (same icon); the external SPA was its only consumer.
+  addTask: TaskListAdd20Regular,
   addEvent: CalendarAdd20Regular,
   submitInvoice: ReceiptAdd20Regular,
   copyLink: Link20Regular,
