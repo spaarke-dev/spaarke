@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="iss034d" project="ebilling-r1">
+  <metadata>
+    <title>Invoice Review History tab shows "Finished by {name}" for a blocked Override or Return completed by someone other than its decider (EB-D-257; iss034c AC5)</title>
+    <phase>Defect fix follow-up (ISS-034 #2888; owner EB-D-257)</phase>
+    <gate>iss034c merged into work. Branch from work/ebilling-r1 at the sha named in the agent brief.</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>BFF review read plus the Invoice Review code page; tests modified.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+    <parallel-safe>true</parallel-safe>
+    <deps>iss034c</deps>
+    <tags>bff-api, react, testing</tags>
+    <estimated-effort>0.5 day</estimated-effort>
+  </metadata>
+
+  <prompt>iss034c stores `completedBySystemUserId` in the blocked-decision stamp (`BlockedDecisionStamp` in `sprk_findingsjson`, src/server/api/Sprk.Bff.Api/Services/Finance/SubmissionOverrideService.cs; `ReadStamp` tolerates its absence). The owner wants it shown (EB-D-257). Invoice Review's History tab (src/solutions/InvoiceReview/src/components/tabs/HistoryTab.tsx) lists `review.decisionHistory`, Decision Records with a server-resolved `decidedBy.name`, built by src/server/api/Sprk.Bff.Api/Services/Finance/InvoiceReviewReadService.cs.
+
+Fix: for the history entry of a blocked Override (`override-submission`) or blocked Return (`return-to-firm`) record, the review read adds `completedBy { name }` when the submission's stamp for that verb names that record and carries a completer that differs from the decider. The name is resolved server-side the same way `decidedBy.name` is resolved today, in the same batched read where possible (no per-row round trip). The History tab shows "Finished by {name}" under that entry. When there is no completer, the completer equals the decider, or the stamp names another record, nothing changes.</prompt>
+
+  <goal>A reviewer reading the History tab can see who completed a blocked decision that someone else recorded.</goal>
+
+  <constraints>
+    <constraint source="EB-D-257">Read-only: no new write, no schema change, no new endpoint. Extend the existing review read DTO and the existing History entry.</constraint>
+    <constraint source="performance">At most one extra batched read per review (the invoice's submissions' stamps plus the completers' names); never one read per history row. If the read already has the submission row, reuse it.</constraint>
+    <constraint source="fail-safe">A fault reading the stamp or the name drops `completedBy` (logged with ids only) and never fails the review read.</constraint>
+    <constraint source="access">The name is shown only to callers who already get the review (the same read authorization); no new data leaves the server beyond a display name of a user who acted on the invoice.</constraint>
+    <constraint source="ADR-021">Fluent v9 tokens only; one line in the existing entry.</constraint>
+    <constraint source="project">Only InvoiceReviewReadService.cs (and its DTO types), the Invoice Review files that type and render the history (invoiceReviewApi.ts / decisionModel.ts / HistoryTab.tsx as needed), their tests, notes/iss034c-finish-completed-by.md (AC5 delivered by iss034d) and notes/iss034d-history-finished-by.md. No deploy.</constraint>
+  </constraints>
+
+  <acceptance-criteria>
+    <criterion testable="true">xUnit: an operator-finished Override and an operator-finished Return give completedBy.name on their history entry; a decider's own completion, a stamp without a completer and a stamp naming another record give none.</criterion>
+    <criterion testable="true">xUnit: a fault reading the stamp or the name gives none and the review still returns; the number of reads does not grow with the number of history rows.</criterion>
+    <criterion testable="true">Jest: the History tab shows "Finished by {name}" when completedBy is present, and nothing extra otherwise.</criterion>
+    <criterion testable="true">Filtered InvoiceReview|SubmissionOverride tests, the InvoiceReview Jest suite, typecheck and build, and the --warnaserror BFF build pass.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>
