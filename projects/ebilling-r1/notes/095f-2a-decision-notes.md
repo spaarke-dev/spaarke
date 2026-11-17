@@ -161,7 +161,9 @@ Fail-before was shown by running the new tests on a29e59aa38's source before the
 - the record's `approvedAmount` is still the frozen one, never 999;
 - the portion is linked.
 
-So the tampered amount is still never recorded. That the amount is inside the record's `Values`, and so inside the hash, stays proven by `Approve_Note_IsInValuesAndInTheColumn`.
+So the tampered amount is still never recorded. ~~That the amount is inside the record's `Values`, and so inside the hash, stays proven by `Approve_Note_IsInValuesAndInTheColumn`.~~
+
+**Corrected in review round 2.** That statement was wrong. The amount is still in the record's `Values`, but once the record exists `RecordAsync` is no longer asked, so the hash never compares it. A repeat with a tampered portion amount answered Approved, and the portion kept the tampered value while the record held the original. The restated test asserted something true by construction. Round 2 F2 below restores the refusal.
 
 ### F2: the writers guard missed names in attributes
 
@@ -232,3 +234,53 @@ The client file `src/solutions/InvoiceReview/src/services/decisionApi.ts` is lef
 (d) **Publish delta.** The +4,112 B above was measured against the branch base (5508b576fe), not master, because the work branch carries unmerged code. Review round 1 changes one source file (`InvoiceApprovalService.cs`, a small refactor into `LinkAsync`) plus a doc comment, so it adds no package.
 
 (e) **The column's text with no note is the reason.** That text is checked by the reason's rule (length only), not the note's control-character rule. Changing it would change the reject and return contract, so it is left as is.
+
+## Review round 2
+
+An independent re-check of round 1 (a29e59aa38..55efd48441) confirmed two regressions, each with a test. Both are fixed on `task/ebilling-095f-2a`. Reject and return are unchanged.
+
+### F1: the repeater became the decider of a stranded approve
+
+**Before.** Alice approves and the call stops at "signals" or "link" after her record is written. Bob, named on the portion's `sprk_decidedby` (a column a person can edit), repeats. Round 1 finished Alice's record, but `FinishAsync` closed the Signals with `decision.Decider.SystemUserId`, which is Bob. Approve's `ReplaySignalsAsync` dropped the stored record's `ConfirmedByUserId`.
+
+**Fix** (`Services/Finance/InvoiceApprovalService.cs`), parity with reject and return (#2507 K1):
+
+- `ReplaySignalsAsync` carries the stored record's `ConfirmedByUserId` out in `SignalRead.StoredDeciderUserId`.
+- `FinishAsync` takes it as `storedDeciderUserId` and names it as the decider for every Signal close. A first attempt (no stored record) is still the caller's own decision.
+- The repeater may finish the recorded decision but is never recorded as its decider. `AuthorizeCloseAsync` still runs as the caller, unchanged.
+
+### F2: a tampered approved amount was no longer detected
+
+**Before.** Round 1 stopped asking `RecordAsync` once the record existed, so the hash (which covers `approvedAmount`) no longer refused a repeat with a changed portion amount. `CheckCompletionAmountMismatch` runs only when no record exists. A tampered repeat answered Approved.
+
+**Fix** (`Services/Finance/InvoiceApprovalService.cs`):
+
+- `WriterApproveRecordRowsAsync` is the same writer-created record read as `WriterApproveRecordsAsync` (which now delegates to it), and it also returns each record's stored `approvedAmount`, read from `sprk_steps` (the taken `approve-invoice` step's `values.approvedAmount`).
+- In completion, once a record exists, the stored amount of the record being finished is compared with the portion's current approved amount, after the signal read and the close-rights check and before `FinishAsync`. On a mismatch, or when the stored amount cannot be read (fail closed), the answer is what the writer's refusal used to be: Incomplete at "record" (detail `ReviewInvalid`). Nothing is written, closed or linked.
+- One Warning is logged with the invoice id and the record id only, never the amounts.
+
+### Tests (`tests/unit/Sprk.Bff.Api.Tests/Services/Finance/InvoiceApprovalServiceTests.cs`)
+
+| Test | Cases | On 55efd48441 | After the fix |
+|---|---|---|---|
+| `StrandedApprove_RepeatedByAnother_ClosesForTheStoredDecider` (F1) | "signals", "link" | 2 failed: `CloseDeciders` held Bob's user twice | pass. Approved with the first record's id, `CloseDeciders` non-empty and only Alice's user, one record, the link written, both Signals resolved |
+| `ApprovedAmount_IsCoveredByTheHash` (103 K3 SEEDED, F2, replaces round 1's restated test) | "signals", "link" | 2 failed: Approved, not Incomplete | pass. Incomplete at "record"; no create, no write, no close asked, nothing linked; the record keeps its amount; the one Warning carries ids only |
+| `ApprovedAmount_Unchanged_StrandedApproveCompletes` (F2 must-not-fire) | "signals", "link" | passed | pass. The frozen amount written back with two decimals completes: Approved, linked, Signal resolved |
+
+Fail-before was shown by running the new tests on 55efd48441's source before any service edit: 4 failed, 2 passed (the must-not-fire pair) of 6. In that first run the must-not-fire pair wrote a fixed 100.00 back to the portion, which is not the amount the record freezes in this fixture. With the F2 fix that pair then failed as tampered, so it was corrected to write back the record's own frozen amount, which is a true must-not-fire. The F1 fix was committed with its test alone; the F2 tests then ran green with both fixes. The round-1 tests (`Approve_StrandedAfterTheRecord_CompletesOnARepeatWithAnotherNote`, `Approve_K1_RepeatAfterTheRecord_DropsTheEditedNote`, `Approve_K1_RepeatBeforeTheRecord_RecordsTheEditedNote_ColumnKeepsTheFirst`) and the reject and return suite stay green.
+
+### Gates (review round 2)
+
+| Gate | Result |
+|---|---|
+| `dotnet build src/server/api/Sprk.Bff.Api/ --warnaserror` | Succeeded, 0 warnings, 0 errors |
+| `dotnet test tests/unit/Sprk.Bff.Api.Tests --filter "FullyQualifiedName~Finance\|FullyQualifiedName~Signals\|FullyQualifiedName~Invoice\|FullyQualifiedName~Ebilling"` | 16837 passed, 0 failed, 12 skipped (16849) |
+| `dotnet test tests/Spaarke.ArchTests` | 2661 passed, 0 failed |
+
+Round 2 changes one source file (`InvoiceApprovalService.cs`) and adds no package.
+
+### Known limits (review round 2)
+
+(f) **Writers guard attribution.** A custom attribute on a parameter or return value is attributed to its method's name. So such an attribute naming a note column on a method whose name is allowed (for example `TransitionAsync`) passes the writers guard. The guard documents this attribution rule.
+
+(g) **The stored decider when the stored set cannot be found.** As in reject and return, the closes fall back to the caller's user only when the stored-set lookup returns no record while the writer-created record read found one. Both reads look for the writer-created record under the same key, so this is not expected on a real path; it was not made to fail closed, to keep parity with reject and return.
