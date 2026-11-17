@@ -194,7 +194,8 @@ public class InvoiceNoteColumnsGuardTests
         // Must not fire: lookalike names and unrelated columns.
         Assert.Empty(NamedColumns("sprk_notes, sprk_notebook, new_sprk_note, sprk_correctionnote, sprk_decisionnotes, sprk_reason"));
 
-        // The real tree: the BFF names neither column today, and the real pending list covers both.
+        // The real tree: the BFF names sprk_invoice.sprk_decisionnote (095f-2a's lifecycle write) but not yet sprk_invoicecorrection.sprk_note;
+        // the real pending list covers both, so neither is a violation.
         Assert.Empty(Violations(BffSources(), SourceAttributesByColumn(), PendingSchema));
 
         // The ratchet: an entry the source carries is stale.

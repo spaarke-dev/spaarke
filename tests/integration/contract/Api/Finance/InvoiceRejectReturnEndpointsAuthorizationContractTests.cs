@@ -267,6 +267,43 @@ public sealed class InvoiceRejectReturnEndpointsAuthorizationContractTests
         host.World.InvoiceStatus.Should().Be(InvoiceStatusCodes.InReview);
     }
 
+    [Theory(DisplayName = "095f-2a: a body with a note is 200; the note is in the record's Values and in the internal sprk_decisionnote column")]
+    [MemberData(nameof(Routes))]
+    public async Task Note_IsRecorded(string route)
+    {
+        await using var host = await Host.StartAsync();
+        host.GrantAll();
+
+        var response = await host.SendAsync(route, body: "{\"reason\":\"Because\",\"note\":\"Spoke to the partner.\\nAgreed.\"}");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var record = host.World.RecordsOf(ActionOf(route)).Should().ContainSingle().Subject;
+        JsonNode.Parse(record.GetAttributeValue<string>("sprk_steps"))!["steps"]![0]!["values"]!["note"]!.GetValue<string>()
+            .Should().Be("Spoke to the partner.\nAgreed.");
+        host.World.Invoice.GetAttributeValue<string>(InvoiceCorrectionNote.DecisionColumn).Should().Be("Spoke to the partner.\nAgreed.");
+    }
+
+    [Theory(DisplayName = "095f-2a: a 2001-character note is 400 ebilling.note_too_long; a control character is 400 ebilling.note_invalid_characters; nothing is read or written")]
+    [InlineData("reject", "too-long", "ebilling.note_too_long")]
+    [InlineData("return", "too-long", "ebilling.note_too_long")]
+    [InlineData("reject", "bell", "ebilling.note_invalid_characters")]
+    [InlineData("return", "bell", "ebilling.note_invalid_characters")]
+    public async Task RefusedNote_Is400_AndWritesNothing(string route, string shape, string code)
+    {
+        await using var host = await Host.StartAsync();
+        host.GrantAll();
+        var note = shape == "too-long" ? new string('x', InvoiceCorrectionNote.MaxLength + 1) : "see\\u0007this";
+
+        var response = await host.SendAsync(route, body: $"{{\"reason\":\"Because\",\"note\":\"{note}\"}}");
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        (await ErrorCode(response)).Should().Be(code);
+        host.World.Entities.Invocations.Should().BeEmpty("refused before any read");
+        host.World.Transitions.Should().Be(0);
+        host.World.RecordsOf(ActionOf(route)).Should().BeEmpty();
+        host.World.InvoiceStatus.Should().Be(InvoiceStatusCodes.InReview);
+    }
+
     [Theory(DisplayName = "104 FR-36: an invoice that is not In Review is 409 not_in_review")]
     [MemberData(nameof(Routes))]
     public async Task NotInReview_Is409(string route)

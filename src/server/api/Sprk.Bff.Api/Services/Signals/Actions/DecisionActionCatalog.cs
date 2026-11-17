@@ -420,15 +420,17 @@ public static class DecisionActionCatalog
             DecisionRecordClass.Judgement)
         { Gate = new DecisionGateFactors(GateRiskTier.Tier4, Reversible: false, RecordOfTruthImpact: true) },
 
+        // ebilling-r1 095f-2a (EB-D-236; design 8, Q6 answered by ontology-r1): "note" declared optional, the Values key the service writes when
+        // a note is given. The writer reads only required parameters, so declaring it changes no behaviour.
         new("reject-invoice", "Reject invoice", DecisionLane.Decide, IsNextStep: false, WorkType: null,
-            [new("reason", "Reason for rejection", DecisionParameterKind.TextArea, Required: true, Hint: ReasonHint)],
+            [new("reason", "Reason for rejection", DecisionParameterKind.TextArea, Required: true, Hint: ReasonHint), NoteParameter()],
             ["Rejects the whole invoice; the rejection is final", "The firm sees the reason"],
             Excludes: ["return-to-firm"],
             DecisionRecordClass.Judgement)
         { Gate = new DecisionGateFactors(GateRiskTier.Tier4, Reversible: false, ExternallyVisible: true, RecordOfTruthImpact: true) },
 
         new("return-to-firm", "Return to firm", DecisionLane.Decide, IsNextStep: false, WorkType: null,
-            [new("reason", "Reason for returning", DecisionParameterKind.TextArea, Required: true, Hint: ReasonHint)],
+            [new("reason", "Reason for returning", DecisionParameterKind.TextArea, Required: true, Hint: ReasonHint), NoteParameter()],
             ["Returns the invoice to the firm to correct and resubmit", "The firm sees the reason"],
             Excludes: [],
             DecisionRecordClass.Judgement)

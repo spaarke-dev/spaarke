@@ -18,9 +18,11 @@ namespace Sprk.Bff.Api.Api.Finance;
 /// core record (<see cref="EligibleApproverResolver"/>): a caller with Write who is not an eligible approver gets 403
 /// <c>ebilling.approver.not_eligible</c> and nothing is written. The stored eligible-approver set never grants. The kill switch
 /// (<c>RequireEbillingEnabled</c>, ADR-018) follows the authorization filter and never replaces it.</para>
-/// <para><b>Nothing is trusted from the request.</b> Approve takes no body: the decider is the caller's <c>systemuserid</c> resolved from the
-/// caller's own token, and the decision id is derived from the approval portion so every attempt by every approver is one decision.</para>
-/// <para><b>Status codes (approve).</b> 200 approved or already approved (a second approve is a no-op); 401; 403 (route, not eligible by the
+/// <para><b>Nothing is trusted from the request but the note.</b> Approve takes an optional body holding only a note (task 095f-2a,
+/// <see cref="InvoiceApprovalRequest"/>; no body means no note): the decider is the caller's <c>systemuserid</c> resolved from the caller's own
+/// token, and the decision id is derived from the approval portion so every attempt by every approver is one decision.</para>
+/// <para><b>Status codes (approve).</b> 200 approved or already approved (a second approve is a no-op); 400 <c>ebilling.note_too_long</c> /
+/// <c>ebilling.note_invalid_characters</c>; 401; 403 (route, not eligible by the
 /// caller's own contact or no contact (EB-D-171), identity unproven, or the rights to close the invoice's or the bulk accept's Signals); 404
 /// uniform; 409 (lines open with counts, held, not In Review, no or ambiguous approval portion, unknown approval status, already decided,
 /// approval changed or claimed by another approver, another person's unrecorded line decision, another decision in progress, a correction
@@ -62,8 +64,10 @@ public static class InvoiceApprovalEndpoints
                 "Any one eligible approver approves. Refused while a line is Pending or Flagged (409 with counts), the invoice is held, or a saved " +
                 "correction did not finish (409, repeat it). Undecided " +
                 "Clean lines are accepted in bulk. Moves the invoice to Approved, freezes the approved total on the approval and records one " +
-                "Decision Record naming the approver. A second approve is a no-op.")
+                "Decision Record naming the approver. A second approve is a no-op. An optional body { note } records an approval note " +
+                "(at most 2000 characters); no body means no note.")
             .Produces<InvoiceApprovalResponse>(StatusCodes.Status200OK)
+            .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
             .ProducesProblem(StatusCodes.Status403Forbidden)
             .ProducesProblem(StatusCodes.Status404NotFound)
@@ -183,7 +187,8 @@ public static class InvoiceApprovalEndpoints
         return state is null ? FinanceAuthorizationFilter.UniformRecordNotFound(httpContext) : TypedResults.Ok(state);
     }
 
-    private static async Task<IResult> Approve(Guid invoiceId, InvoiceApprovalService service, HttpContext httpContext, CancellationToken ct)
+    private static async Task<IResult> Approve(
+        Guid invoiceId, InvoiceApprovalRequest? body, InvoiceApprovalService service, HttpContext httpContext, CancellationToken ct)
     {
         if (await PlaybookAuthorizationFilter.ResolveCallerSystemUserIdAsync(httpContext, ct) is not { } caller)
         {
@@ -191,7 +196,7 @@ public static class InvoiceApprovalEndpoints
                 InvoiceApprovalCodes.DeciderUnresolved, "Your user could not be identified, so the invoice was not approved.", httpContext.TraceIdentifier);
         }
 
-        var result = await service.ApproveAsync(invoiceId, caller, TokenHelper.ExtractBearerTokenOrNull(httpContext), ct);
+        var result = await service.ApproveAsync(invoiceId, caller, body?.Note, TokenHelper.ExtractBearerTokenOrNull(httpContext), ct);
         if (result.Outcome is ApprovalOutcome.Approved or ApprovalOutcome.AlreadyApproved)
         {
             // The current state, best effort: the approval already succeeded or was a no-op, so a failed read never turns it into an error.
@@ -252,6 +257,10 @@ public static class InvoiceApprovalEndpoints
         _ => InvoiceLineReviewEndpoints.Refused(StatusCodes.Status503ServiceUnavailable, result.Code, result.Detail),
     };
 }
+
+/// <summary>Task 095f-2a (EB-D-236, design 5.3): the optional body of approve. No body, or <c>{}</c>, means no note and an approval exactly as
+/// before; a note is at most 2000 characters (400 <c>ebilling.note_too_long</c> / <c>ebilling.note_invalid_characters</c>).</summary>
+public sealed record InvoiceApprovalRequest(string? Note);
 
 /// <summary>200 body of approve: <c>approved</c> (this call approved) or <c>alreadyApproved</c> (a no-op), the decision and its record, and the
 /// current state (null when it could not be read after the approval).</summary>

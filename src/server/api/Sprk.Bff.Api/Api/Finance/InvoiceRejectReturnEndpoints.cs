@@ -15,10 +15,10 @@ namespace Sprk.Bff.Api.Api.Finance;
 /// caller's eligibility LIVE from the invoice's core record (<see cref="EligibleApproverResolver"/>), matched on the caller's own contact
 /// (EB-D-171): a caller with Write who is not an eligible approver gets 403 <c>ebilling.approver.not_eligible</c> and nothing is written.
 /// The kill switch (<c>RequireEbillingEnabled</c>, ADR-018) follows the authorization filter and never replaces it.</para>
-/// <para><b>Nothing is trusted from the request but the reason.</b> The decider is the caller's <c>systemuserid</c> resolved from the caller's
-/// own token; the decision id is derived from the approval portion, so every attempt by every approver is one decision.</para>
+/// <para><b>Nothing is trusted from the request but the reason and the note.</b> The decider is the caller's <c>systemuserid</c> resolved from the
+/// caller's own token; the decision id is derived from the approval portion, so every attempt by every approver is one decision.</para>
 /// <para><b>Status codes.</b> 200 decided or already decided (a repeat is a no-op, <c>alreadyDecided</c>); 400 <c>ebilling.reason_required</c> /
-/// <c>ebilling.reason_too_long</c>; 401; 403 (route, not eligible, identity unproven, or no rights to close the invoice's Signals); 404
+/// <c>ebilling.reason_too_long</c> / <c>ebilling.note_too_long</c> / <c>ebilling.note_invalid_characters</c> (task 095f-2a); 401; 403 (route, not eligible, identity unproven, or no rights to close the invoice's Signals); 404
 /// uniform; 409 (not In Review, held, no or ambiguous approval portion, unknown or already-decided approval, approval changed or claimed by
 /// another approver, another decision in progress, transition refused); 500 (no single core record, a decision the writer refuses); 503
 /// <c>ebilling.disabled</c>, <c>ebilling.invoice.decision_unavailable</c> (nothing changed) or <c>ebilling.invoice.decision_incomplete</c>
@@ -94,8 +94,8 @@ public static class InvoiceRejectReturnEndpoints
 
         var token = TokenHelper.ExtractBearerTokenOrNull(httpContext);
         var result = kind == InvoiceDecisionKind.Reject
-            ? await service.RejectAsync(invoiceId, caller, body?.Reason, token, ct)
-            : await service.ReturnAsync(invoiceId, caller, body?.Reason, token, ct);
+            ? await service.RejectAsync(invoiceId, caller, body?.Reason, body?.Note, token, ct)
+            : await service.ReturnAsync(invoiceId, caller, body?.Reason, body?.Note, token, ct);
 
         return result.Outcome is InvoiceDecisionOutcome.Decided or InvoiceDecisionOutcome.AlreadyDecided
             ? TypedResults.Ok(new InvoiceDecisionResponse(
@@ -128,8 +128,9 @@ public static class InvoiceRejectReturnEndpoints
     };
 }
 
-/// <summary>The body of a reject or return: the reason, required (400 <c>ebilling.reason_required</c> without it).</summary>
-public sealed record InvoiceDecisionRequest(string? Reason);
+/// <summary>The body of a reject or return: the reason, required (400 <c>ebilling.reason_required</c> without it), and (task 095f-2a,
+/// EB-D-236) an optional note of at most 2000 characters (400 <c>ebilling.note_too_long</c> / <c>ebilling.note_invalid_characters</c>).</summary>
+public sealed record InvoiceDecisionRequest(string? Reason, string? Note = null);
 
 /// <summary>200 body: <c>decided</c> (this call decided) or <c>alreadyDecided</c> (a no-op), the invoice's outcome (<c>Rejected</c> or
 /// <c>Returned</c>), the decision and its Decision Record (null on a no-op that did not look it up).</summary>
