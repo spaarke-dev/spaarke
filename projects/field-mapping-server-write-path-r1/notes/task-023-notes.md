@@ -109,3 +109,18 @@ Why not add `sprk_event` to `InferMappingSourceTables` instead: it is a BFF edit
 
 - Stale comments in `CreateMatterWizard.tsx` (~:643) and `CreateProjectWizard.tsx` (~:733) still say the follow-on `EventService` "drives the Field Mapping Framework engine". Not edited (another wizard's files); fixed when those wizards' bundles are next touched.
 - `createEvent`'s unused `_options` parameter (above).
+
+## Review (Opus adversarial pass, 2026-11-16) and fix round 1
+
+One full pass (sonnet-tier task, no auth/security tag). No F1. The reviewer ran 62 jest suites (656 passed), `tsc --noEmit` and `client-lint check`: clean.
+
+| # | Finding | Class | Outcome |
+|---|---|---|---|
+| 1 | `ChildRecordEndpoints.InferMappingSourceTables` says tasks 023-029 add their table there; 023 sends an explicit source instead, and task 026 plans a work-assignment follow-on event through the route with no source | F2 | Decided in the main session: `sprk_event` joins the inference set in **task 024**, when the To Do wizard (the last browser writer that still maps `sprk_event`) moves. Adding it now would switch on server mapping for To Do creates one task early. 026 depends on 024, so its follow-on event is covered. The route comment and the 024 POML now say so (work branch). The explicit source stays correct either way. |
+| 2 | Comments in `CreateMatterWizard.tsx` / `CreateProjectWizard.tsx` and `SPAARKE-FIELD-MAPPING-FRAMEWORK.md` (:51, :197) still describe client mapping in `EventService` | F2, out of scope (other wizards' files; docs task 062) | Filed: #2874, DI-031 |
+| 3 | The `rootCreate` wording was untested (the refusal test sent no reason code) | F2 | Fixed: two tests send `child_record.not_found` and assert the root-create sentence with no parent and the filed-under reading with one. Mutation check: flag inverted, 2 fail; flag always on, 1 fails. |
+| 4 | `sprk_priority` is always sent (form default Normal), so a parent → event priority rule can never fill it; the old client engine overwrote it | K (owner informed) | The form shows Normal selected and the user submits it, so it is the user's value and fill-only (FR-02) keeps it; the old overwrite also overwrote a deliberate choice. No profile in the repo maps priority. Owner told; changing it needs a "priority not chosen" state in the form. |
+| 5 | A service built on an already-wrapped data service with no fetch now refuses | K2 | No real caller does this (all four construction sites pass both props); fails closed. |
+| 6 | Unused `_options` parameter kept | K4 | Cleanup later. |
+
+FR-16's per-wizard integration test is the live check below (criterion 5, not met until the deploy).

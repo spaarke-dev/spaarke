@@ -350,6 +350,43 @@ describe('EventService — creates through the server write path (task 023, FR-1
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  describe("the route's uniform not-found", () => {
+    const ROOT_SENTENCE =
+      "One of the values you selected was not found, or you don't have permission to link it to this event. Ask your administrator.";
+    const FILED_UNDER_DETAIL = 'A record this event is filed under was not found. The event was not saved.';
+    const notFound = () =>
+      jest.fn(async (): Promise<Response> => {
+        throw apiErrorFor(404, {
+          title: 'Not found',
+          status: 404,
+          detail: FILED_UNDER_DETAIL,
+          reasonCode: 'child_record.not_found',
+        });
+      });
+
+    beforeEach(() => {
+      jest.spyOn(console, 'error').mockImplementation(() => undefined);
+    });
+
+    it('with no regarding parent is the root-create sentence, never "filed under"', async () => {
+      const result = await new EventService(makeDataService(), notFound(), BFF_BASE).createEvent(makeForm());
+
+      expect(result.success).toBe(false);
+      expect(result.errorMessage).toBe(ROOT_SENTENCE);
+    });
+
+    it('with a regarding parent keeps the filed-under reading, not the root-create sentence', async () => {
+      const result = await new EventService(makeDataService(), notFound(), BFF_BASE).createEvent(
+        makeForm({ regardingRecordId: MATTER_ID_RAW }),
+        'sprk_matter'
+      );
+
+      expect(result.success).toBe(false);
+      expect(result.errorMessage).not.toBe(ROOT_SENTENCE);
+      expect(result.errorMessage).not.toContain('One of the values you selected');
+    });
+  });
+
   it('a service built with no BFF connection creates nothing (fails closed, no Xrm fallback)', async () => {
     const dataService = makeDataService();
     jest.spyOn(console, 'error').mockImplementation(() => undefined);
