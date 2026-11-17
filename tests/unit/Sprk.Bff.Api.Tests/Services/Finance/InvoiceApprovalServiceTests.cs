@@ -653,30 +653,59 @@ public sealed class InvoiceApprovalServiceTests
         (await w.ApproveAs(BobUser)).Outcome.Should().Be(ApprovalOutcome.Approved, "the claimant completes it");
     }
 
-    [Fact(DisplayName = "103 K3 SEEDED: the approved amount is in the record's Values; once the record exists a repeat with a different frozen amount finishes the stored record and never records the new amount")]
-    public async Task ApprovedAmount_IsCoveredByTheHash()
+    [Theory(DisplayName = "103 K3 SEEDED (095f-2a review round 2 F2): an approve stranded after its record ('signals' or 'link') whose portion approved amount was changed is refused on the repeat - Incomplete at 'record', nothing written, closed or linked")]
+    [InlineData("signals")]
+    [InlineData("link")]
+    public async Task ApprovedAmount_IsCoveredByTheHash(string failingStep)
     {
         var w = new ApprovalWorld();
         w.AddLine(InvoiceLineStatus.Accepted, approved: 100m);
-        w.FaultsOnce["link"] = new InvalidOperationException("dataverse down");
-        (await w.ApproveAs(AliceUser)).Outcome.Should().Be(ApprovalOutcome.Incomplete);
+        var signal = w.AddInvoiceSignal("EB-TOTAL");
+        StrandAt(w, failingStep, signal);
+        (await w.ApproveAs(AliceUser)).FailedStep.Should().Be(failingStep);
         var record = w.ApproveRecords.Should().ContainSingle().Subject;
-        var created = w.H.Created.Count;
         var frozen = RecordedAmount(record);
+        var (created, writes, closes, closed) = (w.H.Created.Count, w.Writes, w.Closes.Count, w.ClosedBy.Count);
 
         w.Portion["sprk_approvedamount"] = new Money(999m);
         var retried = await w.ApproveAs(AliceUser);
 
-        // 095f-2a review F1: the record found by its key is finished as it is (as reject and return do); RecordAsync is never asked again, so
-        // the changed amount is neither recorded nor answered as recorded under another content.
+        // Before round 1 the repeat asked RecordAsync again and the hash (which covers approvedAmount) refused it; round 1 finished the
+        // stored record instead and answered Approved with the tampered amount on the portion. The stored amount is compared now.
+        retried.Outcome.Should().Be(ApprovalOutcome.Incomplete, retried.Detail);
+        retried.FailedStep.Should().Be("record");
+        w.H.Created.Count.Should().Be(created, "no second record");
+        w.Writes.Should().Be(writes, "nothing written");
+        w.Closes.Count.Should().Be(closes, "no Signal close asked");
+        w.ClosedBy.Count.Should().Be(closed);
+        w.Portion.GetAttributeValue<EntityReference>("sprk_decisionrecord").Should().BeNull("nothing linked");
+        RecordedAmount(record).Should().Be(frozen).And.NotBe(999m);
+        w.Log.Entries.Should().Contain((Microsoft.Extensions.Logging.LogLevel.Warning,
+            $"Approve of invoice {w.InvoiceId}: the portion's approved amount is not the one Decision Record {record.Id} holds; nothing was changed."),
+            "one Warning with ids only, never the amounts");
+    }
+
+    [Theory(DisplayName = "095f-2a review round 2 F2 (must-not-fire): a stranded approve whose portion amount is unchanged completes on the repeat")]
+    [InlineData("signals")]
+    [InlineData("link")]
+    public async Task ApprovedAmount_Unchanged_StrandedApproveCompletes(string failingStep)
+    {
+        var w = new ApprovalWorld();
+        w.AddLine(InvoiceLineStatus.Accepted, approved: 100m);
+        var signal = w.AddInvoiceSignal("EB-TOTAL");
+        StrandAt(w, failingStep, signal);
+        (await w.ApproveAs(AliceUser)).FailedStep.Should().Be(failingStep);
+        var record = w.ApproveRecords.Should().ContainSingle().Subject;
+
+        // Untampered: the same amount the record froze, written back with two decimal places as Dataverse returns a Money.
+        w.Portion["sprk_approvedamount"] = new Money(decimal.Round(RecordedAmount(record), 2) + 0.00m);
+        var retried = await w.ApproveAs(AliceUser);
+
         retried.Outcome.Should().Be(ApprovalOutcome.Approved, retried.Detail);
         retried.DecisionRecordId.Should().Be(record.Id);
-        w.H.Created.Count.Should().Be(created, "no second record");
-        RecordedAmount(record).Should().Be(frozen, "the stored record keeps the amount it froze").And.NotBe(999m);
+        w.ApproveRecords.Should().ContainSingle();
         w.Portion.GetAttributeValue<EntityReference>("sprk_decisionrecord").Id.Should().Be(record.Id);
-
-        static decimal RecordedAmount(Entity r) =>
-            System.Text.Json.Nodes.JsonNode.Parse(r.GetAttributeValue<string>("sprk_steps"))!["steps"]![0]!["values"]!["approvedAmount"]!.GetValue<decimal>();
+        w.SignalStatus(signal).Should().Be(SignalWriter.SignalStatusResolved);
     }
 
     [Theory(DisplayName = "095f-2a review round 2 F1: a stranded approve repeated by someone the (tampered) portion names completes with the STORED decider on every Signal close, never the repeater")]
@@ -719,6 +748,9 @@ public sealed class InvoiceApprovalServiceTests
             w.FaultsOnce["link"] = new InvalidOperationException("dataverse down");
         }
     }
+
+    private static decimal RecordedAmount(Entity r) =>
+        System.Text.Json.Nodes.JsonNode.Parse(r.GetAttributeValue<string>("sprk_steps"))!["steps"]![0]!["values"]!["approvedAmount"]!.GetValue<decimal>();
 
     [Theory(DisplayName = "103 K4: a portion with no or an unknown status is refused (409 status_unknown), never treated as Pending; GET shows Unknown")]
     [InlineData(null)]

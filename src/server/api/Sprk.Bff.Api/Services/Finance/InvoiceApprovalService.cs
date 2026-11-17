@@ -782,15 +782,17 @@ public sealed class InvoiceApprovalService
         var decidedBy = portion.GetAttributeValue<EntityReference>(PortionDecidedBy);
         var portionStatus = StatusOf(portion);
 
-        IReadOnlyList<Guid> recorded;
+        IReadOnlyList<(Guid Id, decimal? ApprovedAmount)> recordRows;
         try
         {
-            recorded = await WriterApproveRecordsAsync(invoiceId, decisionId, ct).ConfigureAwait(false);
+            recordRows = await WriterApproveRecordRowsAsync(invoiceId, decisionId, ct).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
             return Unavailable(invoiceId, "read", ex);
         }
+
+        var recorded = recordRows.Select(r => r.Id).ToList();
 
         // Task 165b-3 fix round (F1): the portion's status is a user-writable column. An invoice that is not Approved with no writer-created
         // approve record is not an approved one, whatever the portion says: refused, never answered as "already approved". Nothing is written.
@@ -884,8 +886,20 @@ public sealed class InvoiceApprovalService
         // when the portion is not yet linked to it (the first call stopped at "signals" or "link"): its stored set is closed and the link written;
         // RecordAsync is never asked again, so a repeat with an edited (or no) note completes, and the edited note is dropped. Before the record
         // exists the record takes the repeat's note, while the decision note column keeps what the first call's transition wrote.
+        var existingRecord = recordId ?? (recorded.Count > 0 ? recorded[0] : null);
+
+        // Review round 2 F2: RecordAsync is not asked again once the record exists, so its hash (which covers approvedAmount) no longer refuses a
+        // changed portion amount. The stored amount is compared here instead; a mismatch (or an unreadable amount) is answered as the writer's
+        // refusal was (Incomplete at "record"), before anything is written, closed or linked. Ids only in the log, never the amounts.
+        if (existingRecord is { } held && recordRows.First(r => r.Id == held).ApprovedAmount != amount)
+        {
+            _logger.LogWarning("Approve of invoice {InvoiceId}: the portion's approved amount is not the one Decision Record {RecordId} holds; nothing was changed.",
+                invoiceId, held);
+            return Incomplete(invoiceId, decisionId, "record", nameof(DecisionRecordRefusalReason.ReviewInvalid));
+        }
+
         // Review round 2 F1: the closes name the stored record's decider (signals.StoredDeciderUserId), never this caller; the caller only finishes it.
-        return await FinishAsync(invoiceId, portion.Id, decision, portionStatus, recordId ?? (recorded.Count > 0 ? recorded[0] : null), decidedBy!.Id,
+        return await FinishAsync(invoiceId, portion.Id, decision, portionStatus, existingRecord, decidedBy!.Id,
             signals.Set, ct, refuseAlreadyRecorded: recorded.Count == 0, storedDeciderUserId: signals.StoredDeciderUserId).ConfigureAwait(false);
     }
 
@@ -1420,7 +1434,12 @@ public sealed class InvoiceApprovalService
     /// record's key (<see cref="BillingDecisionKey.IdOf"/>). Read app-only. Whether an approval is complete is decided from these, never from
     /// the portion's columns. Throws on a read fault (the caller answers Unavailable).
     /// </summary>
-    private async Task<IReadOnlyList<Guid>> WriterApproveRecordsAsync(Guid invoiceId, Guid decisionId, CancellationToken ct)
+    private async Task<IReadOnlyList<Guid>> WriterApproveRecordsAsync(Guid invoiceId, Guid decisionId, CancellationToken ct) =>
+        (await WriterApproveRecordRowsAsync(invoiceId, decisionId, ct).ConfigureAwait(false)).Select(r => r.Id).ToList();
+
+    /// <summary><see cref="WriterApproveRecordsAsync"/> with each record's stored approved amount (<see cref="StoredApprovedAmount"/>; null
+    /// when unreadable), from the same read (095f-2a review round 2 F2).</summary>
+    private async Task<IReadOnlyList<(Guid Id, decimal? ApprovedAmount)>> WriterApproveRecordRowsAsync(Guid invoiceId, Guid decisionId, CancellationToken ct)
     {
         var writer = await _recorder.WriterUserIdAsync(ct).ConfigureAwait(false);
         // Task 165b-4: the same record read the spend readers and InvoicesWithApproveRecordAsync use (InvoiceApproveRecord), here for one invoice.
@@ -1430,8 +1449,44 @@ public sealed class InvoiceApprovalService
         var key = BillingDecisionKey.IdOf(InvoiceReviewReadService.InvoiceEntity, invoiceId, decisionId);
         return (await InvoiceReviewReadService.ReadPagedAsync(_entities, query, ct).ConfigureAwait(false))
             .Where(row => row.Id != Guid.Empty && InvoiceLineOrigin.ReviewIdOf(row) == key)
-            .Select(row => row.Id)
+            .Select(row => (row.Id, StoredApprovedAmount(row)))
             .ToList();
+    }
+
+    /// <summary>
+    /// 095f-2a review round 2 F2: the approved amount an approve record holds (<c>sprk_steps</c>: the taken <c>approve-invoice</c> step's
+    /// <c>values.approvedAmount</c>, which the record's hash covers). Null when it cannot be read; the caller then refuses (fail closed).
+    /// </summary>
+    private static decimal? StoredApprovedAmount(Entity row)
+    {
+        try
+        {
+            using var steps = System.Text.Json.JsonDocument.Parse(row.GetAttributeValue<string>(InvoiceLineOrigin.RecordSteps) ?? "{}");
+            if (steps.RootElement.ValueKind != System.Text.Json.JsonValueKind.Object
+                || !steps.RootElement.TryGetProperty("steps", out var list) || list.ValueKind != System.Text.Json.JsonValueKind.Array)
+            {
+                return null;
+            }
+
+            foreach (var step in list.EnumerateArray())
+            {
+                if (step.ValueKind == System.Text.Json.JsonValueKind.Object
+                    && step.TryGetProperty("code", out var code) && code.ValueKind == System.Text.Json.JsonValueKind.String && code.GetString() == ApproveActionCode
+                    && step.TryGetProperty("taken", out var taken) && taken.ValueKind == System.Text.Json.JsonValueKind.True
+                    && step.TryGetProperty("values", out var values) && values.ValueKind == System.Text.Json.JsonValueKind.Object
+                    && values.TryGetProperty("approvedAmount", out var amount) && amount.ValueKind == System.Text.Json.JsonValueKind.Number
+                    && amount.TryGetDecimal(out var stored))
+                {
+                    return stored;
+                }
+            }
+
+            return null;
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return null;
+        }
     }
 
     /// <summary>
