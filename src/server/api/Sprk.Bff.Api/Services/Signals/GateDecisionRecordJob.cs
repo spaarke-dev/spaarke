@@ -157,9 +157,10 @@ public class GateDecisionRecordEnqueuer
 /// no subject, unfileable subject), is <c>Poisoned</c>: dead-lettered and visible. Everything else (a Dataverse fault, an owner the
 /// resolver refused, a privilege fault, a lookup that could not be made, and a refused processing lock) is <c>Failure</c>: abandoned and
 /// redelivered, then dead-lettered after the last delivery by <c>ServiceBusJobProcessor</c>. A refused lock is never a <c>Success</c>:
-/// it does not prove a record exists (it may be this job's own leftover lock after a failed release), so the job is retried until a
-/// redelivery finds the record or takes the lock. A concurrent duplicate can therefore be redelivered quickly up to the delivery cap and
-/// dead-lettered while its sibling is still writing; replaying it then finds the record.</para>
+/// it does not prove a record exists (it may be this job's own leftover lock after a failed release), so the job is retried. The
+/// processor abandons without a delay, so all the deliveries of a refused job land inside the one-minute takeover age
+/// (<c>IdempotencyService.OwnerTakeoverAge</c>) and it is dead-lettered (visible), a concurrent duplicate while its sibling is still
+/// writing included; a replay after a minute takes a stale lock over or finds the record.</para>
 /// <para><b>Priority at job time.</b> The matched rule's <c>sprk_priority</c> is read here, not by the gate (it was an inline request on
 /// the gate's path). A rule edited between the decision and the job shows its later priority; the rule id in the snapshot is the
 /// decision's.</para>
@@ -225,10 +226,6 @@ public sealed class GateDecisionRecordJobHandler : IJobHandler
             // IdempotencyService.OwnerTakeoverAge). Completing here would lose the Decision Record, so it is a Failure: the processor
             // abandons it for redelivery and dead-letters it after the last delivery. A redelivery finds the sibling's record ("already
             // recorded") or takes over a stale lock. The lock is not ours, so it is neither released nor written under.
-            _logger.LogWarning(GateDecisionRecordEvents.HandlerFailed,
-                "[GATE-DR] job {JobId} not run: the processing lock for communication {CommunicationId} (authorized {Authorize}) is held; " +
-                "it will be redelivered (attempt {Attempt}, delivery {Delivery}), and dead-lettered after the last delivery.",
-                job.JobId, payload.CommunicationId, payload.Authorize, job.Attempt, job.DeliveryCount);
             if (job.IsFinalDelivery)
             {
                 _logger.LogError(GateDecisionRecordEvents.HandlerFailed,
@@ -236,6 +233,13 @@ public sealed class GateDecisionRecordJobHandler : IJobHandler
                     "final delivery (attempt {Attempt}, delivery {Delivery}); it will be dead-lettered and no Decision Record was written by it.",
                     job.JobId, payload.CommunicationId, payload.Authorize, job.Attempt, job.DeliveryCount);
                 OntologyWriterTelemetry.RecordFailure(DecisionRecordRefusalReason.GateRecordFailed);
+            }
+            else
+            {
+                _logger.LogWarning(GateDecisionRecordEvents.HandlerFailed,
+                    "[GATE-DR] job {JobId} not run: the processing lock for communication {CommunicationId} (authorized {Authorize}) is held; " +
+                    "it will be redelivered (attempt {Attempt}, delivery {Delivery}), and dead-lettered after the last delivery.",
+                    job.JobId, payload.CommunicationId, payload.Authorize, job.Attempt, job.DeliveryCount);
             }
 
             return JobOutcome.Failure(job.JobId, JobType, LockRefusedError, job.Attempt, stopwatch.Elapsed);

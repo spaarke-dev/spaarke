@@ -14,6 +14,7 @@ using Sprk.Bff.Api.Services.Jobs;
 using Sprk.Bff.Api.Services.Signals;
 using Sprk.Bff.Api.Telemetry;
 using Sprk.Bff.Api.Tests.Services.Communication; // CapturingLogger<T> / LogEntry (internal, same assembly)
+using Sprk.Bff.Api.Tests.TestInfrastructure; // ReleaseFaultingCache
 using Xunit;
 using static Sprk.Bff.Api.Tests.TestInfrastructure.OwnershipDirectory;
 
@@ -301,15 +302,16 @@ public sealed class GateDecisionRecordJobTests
 
         outcome.Status.Should().Be(JobStatus.Failed);
         rig.Writer.Created.Should().BeEmpty();
-        rig.Log.Entries.Count(e => e.Level == LogLevel.Warning).Should().Be(1);
         if (isFinal)
         {
+            rig.Log.Entries.Should().NotContain(e => e.Level == LogLevel.Warning, "the final delivery says it is dead-lettered, not that it will be redelivered");
             rig.Log.Entries.Should().ContainSingle(e => e.Level == LogLevel.Error && e.EventId == GateDecisionRecordEvents.HandlerFailed)
                 .Which.Message.Should().Contain("dead-lettered");
             reasons.Should().Equal(DecisionRecordRefusalReason.GateRecordFailed);
         }
         else
         {
+            rig.Log.Entries.Count(e => e.Level == LogLevel.Warning).Should().Be(1);
             rig.Log.Entries.Should().NotContain(e => e.Level >= LogLevel.Error);
             reasons.Should().BeEmpty();
         }
@@ -572,22 +574,6 @@ public sealed class GateDecisionRecordJobTests
         string.Join("\n", rig.Log.Entries.Select(e => e.Message)).Should().Contain(CommunicationId.ToString("D"));
         // The job never sees the subject or the sender (the payload test is in the consumer tests), so its lines cannot carry them (D-123).
         rig.Log.Entries.Should().OnlyContain(e => e.Level == LogLevel.Information);
-    }
-
-    /// <summary>An in-memory cache whose <c>RemoveAsync</c> can be made to fault: the lock-release failure the idempotency service swallows.</summary>
-    private sealed class ReleaseFaultingCache(IDistributedCache inner) : IDistributedCache
-    {
-        public bool FailRemove { get; set; }
-
-        public byte[]? Get(string key) => inner.Get(key);
-        public Task<byte[]?> GetAsync(string key, CancellationToken token = default) => inner.GetAsync(key, token);
-        public void Set(string key, byte[] value, DistributedCacheEntryOptions options) => inner.Set(key, value, options);
-        public Task SetAsync(string key, byte[] value, DistributedCacheEntryOptions options, CancellationToken token = default) => inner.SetAsync(key, value, options, token);
-        public void Refresh(string key) => inner.Refresh(key);
-        public Task RefreshAsync(string key, CancellationToken token = default) => inner.RefreshAsync(key, token);
-        public void Remove(string key) => inner.Remove(key);
-        public Task RemoveAsync(string key, CancellationToken token = default) =>
-            FailRemove ? Task.FromException(new TimeoutException("cache")) : inner.RemoveAsync(key, token);
     }
 
     private static (MeterListener Listener, List<string?> Reasons) ListenReasons(Guid scope, string instrumentName = "ontology.writer.failures")
