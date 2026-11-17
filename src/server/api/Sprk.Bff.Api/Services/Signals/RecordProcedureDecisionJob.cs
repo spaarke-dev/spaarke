@@ -1,6 +1,9 @@
 using System.Diagnostics;
 using System.Globalization;
 using System.Text.Json;
+using Microsoft.Extensions.Options;
+using Sprk.Bff.Api.Configuration;
+using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Finance;
 using Sprk.Bff.Api.Services.Jobs;
 using Sprk.Bff.Api.Telemetry;
@@ -19,21 +22,26 @@ public static class RecordProcedureDecisionJobEvents
     /// abandoned. The job may or may not have been sent; the Procedure service answers NotRecorded.</summary>
     public static readonly EventId EnqueueTimedOut = new(50324, nameof(EnqueueTimedOut));
 
-    /// <summary>Warning (or Error on the last delivery): the job did not finish for a reason a retry may clear. It is abandoned and
-    /// redelivered, and dead-lettered after the last delivery by <c>ServiceBusJobProcessor</c>.</summary>
+    /// <summary>Warning (or Error on the last delivery): the job did not finish for a reason a retry may clear, or the decision's processing
+    /// lock is held. It is abandoned and redelivered, and dead-lettered after the last delivery by <c>ServiceBusJobProcessor</c>.</summary>
     public static readonly EventId HandlerRetrying = new(50325, nameof(HandlerRetrying));
 
-    /// <summary>Error: the writer refused the repair for a reason a retry cannot change. Nothing was written; the job is completed, not
-    /// retried, and metered under <see cref="RecordProcedureDecisionRepairReason.Abandoned"/>.</summary>
+    /// <summary>Error: the writer refused the repair for a reason a retry cannot change. Nothing was written; the job is poisoned
+    /// (dead-lettered, so the message, the only copy of the reason and the note, is kept for an operator) and metered under
+    /// <see cref="RecordProcedureDecisionRepairReason.Abandoned"/>.</summary>
     public static readonly EventId HandlerAbandoned = new(50326, nameof(HandlerAbandoned));
 
-    /// <summary>Information: the job finished. The record was written, or was already there (the inline create had landed), or another
-    /// copy of the job holds the decision.</summary>
+    /// <summary>Information: the job finished. The record was written, or was already there (the inline create had landed).</summary>
     public static readonly EventId HandlerCompleted = new(50327, nameof(HandlerCompleted));
 
     /// <summary>Error: the job's payload cannot be read. It is poisoned (dead-lettered, so the message is kept) and metered under
     /// <see cref="RecordProcedureDecisionRepairReason.PayloadInvalid"/>.</summary>
     public static readonly EventId PayloadInvalid = new(50328, nameof(PayloadInvalid));
+
+    /// <summary>Warning (084h-3 review round 1, ADR-018): <c>Ebilling:Enabled</c> is off. Nothing is written; the job is poisoned, so the
+    /// message is kept in the dead-letter queue for replay once the flag is on, and metered under
+    /// <see cref="RecordProcedureDecisionRepairReason.Disabled"/>.</summary>
+    public static readonly EventId HandlerDisabled = new(50329, nameof(HandlerDisabled));
 }
 
 /// <summary>
@@ -46,8 +54,11 @@ public static class RecordProcedureDecisionRepairReason
     /// <summary>The repair job could not be queued (a Service Bus fault or timeout). The change stands with no record (NotRecorded).</summary>
     public const string EnqueueFailed = "decision_record_procedure_enqueue_failed";
 
-    /// <summary>The writer refused the repair permanently. The job is completed with no record; this is the one count of that gap.</summary>
+    /// <summary>The writer refused the repair permanently. The job is dead-lettered with no record; this is the one count of that gap.</summary>
     public const string Abandoned = "decision_record_procedure_repair_abandoned";
+
+    /// <summary>The job ran while <c>Ebilling:Enabled</c> was off. Nothing was written; the job is dead-lettered for replay.</summary>
+    public const string Disabled = "decision_record_procedure_repair_disabled";
 
     /// <summary>The repair threw an exception that is not a writer refusal. The job is retried.</summary>
     public const string Faulted = "decision_record_procedure_repair_faulted";
@@ -62,7 +73,8 @@ public enum RecordProcedureRefusalClass
     /// <summary>A fault, a missing privilege or a resolver failure that time or an administrator can clear: the job is retried.</summary>
     Retryable,
 
-    /// <summary>The request or its subject is wrong in a way a retry does not change: logged, metered and completed.</summary>
+    /// <summary>The request or its subject is wrong in a way a retry does not change: logged, metered and poisoned (dead-lettered, so the
+    /// message is kept).</summary>
     Permanent,
 }
 
@@ -164,12 +176,17 @@ public sealed class RecordProcedureDecisionEnqueuer : IRecordProcedureDecisionEn
 /// <para><b>Exactly one record per decision.</b> (1) The writer's key from (core record, decision id). (2) A processing lock under that key,
 /// owned by this job id, as <see cref="GateDecisionRecordJobHandler"/> takes it. (3) The writer's durable "already recorded" lookup: when
 /// the inline create did land (a create timeout), the job answers AlreadyRecorded and writes nothing.</para>
-/// <para><b>Outcomes (ontology-r1 K1).</b> Written, already recorded, and a copy in flight are <c>Success</c>. Every writer refusal is
-/// classified in <see cref="RefusalClasses"/>: a retryable one is <c>Failure</c> (abandoned, redelivered, dead-lettered after the last
-/// delivery); a permanent one is logged at Error, metered (<see cref="RecordProcedureDecisionRepairReason.Abandoned"/>) and completed, never
-/// retried. An exception that is not a refusal is <c>Failure</c>. An unreadable payload is <c>Poisoned</c>.</para>
-/// <para><b>Logs.</b> Ids, codes and exception type names only, never the reason or the note text (and never an exception object, whose
-/// message a Dataverse fault could fill with a column value).</para>
+/// <para><b>Outcomes (ontology-r1 K1; 084h-3 review round 1).</b> Written and already recorded are <c>Success</c>. The payload is the only
+/// copy of the user's reason and note, so no path that writes nothing completes the message. A held processing lock is <c>Failure</c>
+/// (redelivered; a stale lock of this job's own earlier attempt is taken over after <c>IdempotencyService.OwnerTakeoverAge</c>, and a
+/// genuinely concurrent copy answers AlreadyRecorded on its next delivery). Every writer refusal is classified in
+/// <see cref="RefusalClasses"/>, and an owner refusal by its resolver code in <see cref="OwnerRefusalClasses"/>: a retryable one is
+/// <c>Failure</c> (abandoned, redelivered, dead-lettered after the last delivery); a permanent one is logged at Error, metered
+/// (<see cref="RecordProcedureDecisionRepairReason.Abandoned"/>) and <c>Poisoned</c> (dead-lettered at once, never retried). An exception
+/// that is not a refusal is <c>Failure</c>. An unreadable payload is <c>Poisoned</c>. With <c>Ebilling:Enabled</c> off (ADR-018) nothing
+/// is written and the job is <c>Poisoned</c>, kept for replay.</para>
+/// <para><b>Logs.</b> Ids, codes, exception type names and stack traces (method names) only, never the reason or the note text (and never an
+/// exception object or message, which a Dataverse fault could fill with a column value).</para>
 /// <para>Placement (ADR-004, ADR-052): a queue consumer on the existing main-queue seam, in the BFF (B2: it runs the BFF's writer and
 /// recorder; B3: low volume, only failed writes). §11: <i>Existing</i> - <see cref="GateDecisionRecordJobHandler"/>. <i>Extension</i> - it
 /// is bound to the gate entry and payload; this class copies its shape. <i>Cost of doing nothing</i> - see
@@ -179,6 +196,9 @@ public sealed class RecordProcedureDecisionJobHandler : IJobHandler
 {
     /// <summary>How long a job holds the decision's processing lock (the gate job's value).</summary>
     internal static readonly TimeSpan LockDuration = TimeSpan.FromMinutes(5);
+
+    /// <summary>The error of a <c>Failure</c> whose decision's processing lock was held (084h-3 review round 1).</summary>
+    internal const string ProcessingLockHeld = "processing_lock_held";
 
     /// <summary>
     /// Every <see cref="DecisionRecordRefusalReason"/>, classified for this job (ontology-r1 K1). A reason missing here fails
@@ -202,7 +222,10 @@ public sealed class RecordProcedureDecisionJobHandler : IJobHandler
             [DecisionRecordRefusalReason.SubjectUnfileable] = RecordProcedureRefusalClass.Permanent,
             [DecisionRecordRefusalReason.CoreUnsupported] = RecordProcedureRefusalClass.Permanent,
             [DecisionRecordRefusalReason.OwnerMissing] = RecordProcedureRefusalClass.Permanent,
-            [DecisionRecordRefusalReason.OwnerRefused] = RecordProcedureRefusalClass.Permanent,                // e.g. the core record was deleted
+
+            // Raised on this path for EVERY resolver refusal: classified by its code (OwnerRefusalClasses), not here. This entry is the
+            // class of an owner refusal that carries no code.
+            [DecisionRecordRefusalReason.OwnerRefused] = RecordProcedureRefusalClass.Retryable,
 
             // Not raised on this path (another entry's reason). Classified by what each means, so a future change cannot leave one open.
             [DecisionRecordRefusalReason.BillingRecordLookupFailed] = RecordProcedureRefusalClass.Retryable,   // a lookup fault
@@ -218,19 +241,48 @@ public sealed class RecordProcedureDecisionJobHandler : IJobHandler
             [DecisionRecordRefusalReason.ConditionClearedSubjectMissing] = RecordProcedureRefusalClass.Permanent, // the subject is gone
         };
 
+    /// <summary>
+    /// 084h-3 review round 1 (ontology-r1 F1): the writer raises <see cref="DecisionRecordRefusalReason.OwnerRefused"/> for EVERY
+    /// <see cref="RecordOwnerRefusal"/> code, so an owner refusal is classified by its code. Only a parent that does not exist (or has no
+    /// owning business unit) is permanent: the core record was deleted after the change. Every other code is a configuration, an identity or
+    /// a read that an administrator or time can clear, as <see cref="GateDecisionRecordJobHandler"/> retries them. A code missing here fails
+    /// <c>RecordProcedureDecisionJobTests</c>; at run time an unlisted (or absent) code is retried, so the message is never dropped.
+    /// </summary>
+    internal static readonly IReadOnlyDictionary<string, RecordProcedureRefusalClass> OwnerRefusalClasses =
+        new Dictionary<string, RecordProcedureRefusalClass>(StringComparer.Ordinal)
+        {
+            [RecordOwnerRefusal.ParentUnresolved] = RecordProcedureRefusalClass.Permanent,                   // the core record was deleted
+            [RecordOwnerRefusal.SecureParentNotIsolated] = RecordProcedureRefusalClass.Retryable,
+            [RecordOwnerRefusal.SecureOwnerTeamUnresolved] = RecordProcedureRefusalClass.Retryable,
+            [RecordOwnerRefusal.SecureBusinessUnitAmbiguous] = RecordProcedureRefusalClass.Retryable,
+            [RecordOwnerRefusal.NoDefaultOwnerTeam] = RecordProcedureRefusalClass.Retryable,
+            [RecordOwnerRefusal.ActingUserUnresolved] = RecordProcedureRefusalClass.Retryable,
+            [RecordOwnerRefusal.NoOwnerSource] = RecordProcedureRefusalClass.Retryable,
+            [RecordOwnerRefusal.RecordMissing] = RecordProcedureRefusalClass.Retryable,                      // a re-file's row; not raised on a create
+            [RecordOwnerRefusal.ParentUndetermined] = RecordProcedureRefusalClass.Retryable,
+            [RecordOwnerRefusal.RestrictedContentOwnerTeamUnresolved] = RecordProcedureRefusalClass.Retryable,
+            [RecordOwnerRefusal.CommunicationFilingUnresolved] = RecordProcedureRefusalClass.Retryable,
+            [RecordOwnerRefusal.DirectTeamUnusable] = RecordProcedureRefusalClass.Retryable,
+            [RecordOwnerRefusal.DirectTeamUnavailable] = RecordProcedureRefusalClass.Retryable,
+            [RecordOwnerRefusal.CustomerContactTeamUnresolved] = RecordProcedureRefusalClass.Retryable,
+        };
+
     private static readonly JsonSerializerOptions PayloadOptions = new() { PropertyNameCaseInsensitive = true };
 
     private readonly BillingDecisionRecorder _recorder;
     private readonly IIdempotencyService _idempotency;
+    private readonly IOptionsMonitor<EbillingOptions> _ebilling;
     private readonly ILogger<RecordProcedureDecisionJobHandler> _logger;
 
     public RecordProcedureDecisionJobHandler(
         BillingDecisionRecorder recorder,
         IIdempotencyService idempotency,
+        IOptionsMonitor<EbillingOptions> ebilling,
         ILogger<RecordProcedureDecisionJobHandler> logger)
     {
         _recorder = recorder ?? throw new ArgumentNullException(nameof(recorder));
         _idempotency = idempotency ?? throw new ArgumentNullException(nameof(idempotency));
+        _ebilling = ebilling ?? throw new ArgumentNullException(nameof(ebilling));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -240,10 +292,29 @@ public sealed class RecordProcedureDecisionJobHandler : IJobHandler
     internal static RecordProcedureRefusalClass ClassOf(string reason) =>
         RefusalClasses.TryGetValue(reason, out var refusalClass) ? refusalClass : RecordProcedureRefusalClass.Retryable;
 
+    /// <summary>The class of a refusal with its owner refusal code: an owner refusal by its code (<see cref="OwnerRefusalClasses"/>; an
+    /// unlisted or absent code is retried), every other reason by <see cref="ClassOf(string)"/>.</summary>
+    internal static RecordProcedureRefusalClass ClassOf(string reason, string? ownerRefusalCode) =>
+        reason == DecisionRecordRefusalReason.OwnerRefused && ownerRefusalCode is not null
+            ? OwnerRefusalClasses.TryGetValue(ownerRefusalCode, out var ownerClass) ? ownerClass : RecordProcedureRefusalClass.Retryable
+            : ClassOf(reason);
+
     public async Task<JobOutcome> ProcessAsync(JobContract job, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(job);
         var stopwatch = Stopwatch.StartNew();
+
+        // ADR-018: the same flag as the endpoints (FinanceModule flag rule: an eBilling IJobHandler reads it itself). Off: nothing is
+        // written, and the message is NOT completed - the payload is the only copy of the reason and the note - so it is poisoned and
+        // kept in the dead-letter queue for replay once eBilling is on.
+        if (!_ebilling.CurrentValue.Enabled)
+        {
+            _logger.LogWarning(RecordProcedureDecisionJobEvents.HandlerDisabled,
+                "Decision Record repair job {JobId} not run: eBilling is disabled (Ebilling:Enabled); nothing was written and the job is " +
+                "dead-lettered for replay.", job.JobId);
+            OntologyWriterTelemetry.RecordFailure(RecordProcedureDecisionRepairReason.Disabled);
+            return JobOutcome.Poisoned(job.JobId, JobType, "Ebilling disabled", job.Attempt, stopwatch.Elapsed);
+        }
 
         if (!TryReadPayload(job, out var decision))
         {
@@ -258,11 +329,14 @@ public sealed class RecordProcedureDecisionJobHandler : IJobHandler
 
         if (!await _idempotency.TryAcquireProcessingLockAsync(key, owner, LockDuration, ct).ConfigureAwait(false))
         {
-            // Another copy of the same decision is being written now. It owns the write, and the broker redelivers it if it fails.
-            _logger.LogInformation(RecordProcedureDecisionJobEvents.HandlerCompleted,
-                "Decision Record repair job {JobId} not run: another job holds decision {DecisionId} ({ActionCode}) on {CoreTable} {RecordId}.",
-                job.JobId, decision.DecisionId, decision.ActionCode, decision.CoreTable, decision.RecordId);
-            return JobOutcome.Success(job.JobId, JobType, stopwatch.Elapsed);
+            // 084h-3 review round 1 (F1): never Success. The lock may be this job's own, left by an earlier attempt whose release faulted
+            // (it is taken over only after IdempotencyService.OwnerTakeoverAge), and completing would lose the only copy of the decision.
+            // A genuinely concurrent copy answers AlreadyRecorded on the next delivery after it finishes.
+            _logger.Log(job.IsFinalDelivery ? LogLevel.Error : LogLevel.Warning, RecordProcedureDecisionJobEvents.HandlerRetrying,
+                "Decision Record repair job {JobId} not run: the processing lock of decision {DecisionId} ({ActionCode}) on {CoreTable} {RecordId} " +
+                "is held; it is redelivered (attempt {Attempt}, delivery {Delivery}) and dead-lettered after the last delivery.",
+                job.JobId, decision.DecisionId, decision.ActionCode, decision.CoreTable, decision.RecordId, job.Attempt, job.DeliveryCount);
+            return JobOutcome.Failure(job.JobId, JobType, ProcessingLockHeld, job.Attempt, stopwatch.Elapsed);
         }
 
         try
@@ -278,29 +352,33 @@ public sealed class RecordProcedureDecisionJobHandler : IJobHandler
         }
         catch (DecisionRecordRefusedException ex)
         {
-            if (ClassOf(ex.Reason) == RecordProcedureRefusalClass.Permanent)
+            if (ClassOf(ex.Reason, ex.OwnerRefusalCode) == RecordProcedureRefusalClass.Permanent)
             {
+                // Poisoned, not completed (ontology-r1 F2): the payload is the only copy of the reason and the note, so the message is kept.
                 _logger.LogError(RecordProcedureDecisionJobEvents.HandlerAbandoned,
                     "Decision Record repair job {JobId}: decision {DecisionId} ({ActionCode}) on {CoreTable} {RecordId} was refused for a reason a retry " +
-                    "does not change ({Reason}, ownerRefusal={OwnerRefusalCode}); no record was written and the job is completed.",
+                    "does not change ({Reason}, ownerRefusal={OwnerRefusalCode}); no record was written and the job is dead-lettered.",
                     job.JobId, decision.DecisionId, decision.ActionCode, decision.CoreTable, decision.RecordId, ex.Reason, ex.OwnerRefusalCode);
                 OntologyWriterTelemetry.RecordFailure(RecordProcedureDecisionRepairReason.Abandoned);
-                return JobOutcome.Success(job.JobId, JobType, stopwatch.Elapsed);
+                return JobOutcome.Poisoned(job.JobId, JobType, ex.Reason, job.Attempt, stopwatch.Elapsed);
             }
 
             // The writer has already logged and metered its own refusal; a retry may clear this one.
             _logger.Log(job.IsFinalDelivery ? LogLevel.Error : LogLevel.Warning, RecordProcedureDecisionJobEvents.HandlerRetrying,
-                "Decision Record repair job {JobId}: decision {DecisionId} ({ActionCode}) on {CoreTable} {RecordId} did not finish ({Reason}); it is " +
-                "redelivered (attempt {Attempt}, delivery {Delivery}) and dead-lettered after the last delivery.",
-                job.JobId, decision.DecisionId, decision.ActionCode, decision.CoreTable, decision.RecordId, ex.Reason, job.Attempt, job.DeliveryCount);
+                "Decision Record repair job {JobId}: decision {DecisionId} ({ActionCode}) on {CoreTable} {RecordId} did not finish ({Reason}, " +
+                "ownerRefusal={OwnerRefusalCode}); it is redelivered (attempt {Attempt}, delivery {Delivery}) and dead-lettered after the last delivery.",
+                job.JobId, decision.DecisionId, decision.ActionCode, decision.CoreTable, decision.RecordId, ex.Reason, ex.OwnerRefusalCode, job.Attempt,
+                job.DeliveryCount);
             return JobOutcome.Failure(job.JobId, JobType, ex.Reason, job.Attempt, stopwatch.Elapsed);
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
+            // The type and the stack trace (method names only), never the exception object or its message (a column value may be in it).
             _logger.Log(job.IsFinalDelivery ? LogLevel.Error : LogLevel.Warning, RecordProcedureDecisionJobEvents.HandlerRetrying,
                 "Decision Record repair job {JobId}: decision {DecisionId} ({ActionCode}) on {CoreTable} {RecordId} threw ({ExceptionType}); it is " +
-                "redelivered (attempt {Attempt}, delivery {Delivery}) and dead-lettered after the last delivery.",
-                job.JobId, decision.DecisionId, decision.ActionCode, decision.CoreTable, decision.RecordId, ex.GetType().Name, job.Attempt, job.DeliveryCount);
+                "redelivered (attempt {Attempt}, delivery {Delivery}) and dead-lettered after the last delivery. Stack: {StackTrace}",
+                job.JobId, decision.DecisionId, decision.ActionCode, decision.CoreTable, decision.RecordId, ex.GetType().Name, job.Attempt, job.DeliveryCount,
+                ex.StackTrace);
             OntologyWriterTelemetry.RecordFailure(RecordProcedureDecisionRepairReason.Faulted);
             return JobOutcome.Failure(job.JobId, JobType, ex.GetType().Name, job.Attempt, stopwatch.Elapsed);
         }

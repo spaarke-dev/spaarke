@@ -11,6 +11,7 @@ using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Moq;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Services.Ai.Membership;
 using Sprk.Bff.Api.Services.Ai.Membership.Models;
 using Sprk.Bff.Api.Services.Dataverse;
@@ -23,6 +24,7 @@ using Sprk.Bff.Api.Tests.Services.Communication; // CapturingLogger<T> / LogEntr
 using Sprk.Bff.Api.Tests.Services.Signals;
 using Xunit;
 using static Sprk.Bff.Api.Tests.TestInfrastructure.OwnershipDirectory;
+using SettableClock = Sprk.Bff.Api.Tests.Api.Finance.SettableClock;
 
 namespace Sprk.Bff.Api.Tests.Integration.DataMutation.Signals;
 
@@ -71,15 +73,23 @@ public sealed class RecordProcedureDecisionJobTests
         public CapturingLogger<RecordProcedureDecisionJobHandler> Log { get; } = new();
         public RecordProcedureDecisionJobHandler Handler { get; }
 
+        /// <summary>The eBilling flag the handler reads on each job (on unless a test turns it off).</summary>
+        public EbillingOptions Ebilling { get; } = new() { Enabled = true };
+
+        /// <summary>The idempotency service's clock (its owner takeover age).</summary>
+        public SettableClock Clock { get; } = new(DecidedOn.AddMinutes(5));
+
         public Rig(IRecordOwnershipResolver? realResolver = null)
         {
             Writer = DecisionRecordWriterTests.WithBillingLookups(new DecisionRecordWriterTests.Harness(realResolver: realResolver));
             Identity.Setup(i => i.ResolveAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync((Guid user, CancellationToken _) => new PersonIdentity(user, ContactId: DeciderContact));
             Idempotency = new IdempotencyService(
-                new MemoryDistributedCache(Options.Create(new MemoryDistributedCacheOptions())), NullLogger<IdempotencyService>.Instance);
+                new MemoryDistributedCache(Options.Create(new MemoryDistributedCacheOptions())), NullLogger<IdempotencyService>.Instance, Clock);
             Recorder = new BillingDecisionRecorder(Writer.Writer, Identity.Object, NullLogger<BillingDecisionRecorder>.Instance);
-            Handler = new RecordProcedureDecisionJobHandler(Recorder, Idempotency, Log);
+            var flag = new Mock<IOptionsMonitor<EbillingOptions>>();
+            flag.Setup(f => f.CurrentValue).Returns(() => Ebilling);
+            Handler = new RecordProcedureDecisionJobHandler(Recorder, Idempotency, flag.Object, Log);
         }
 
         public Task<JobOutcome> RunAsync(RecordProcedureDecision decision, int delivery = 1, CancellationToken ct = default) =>
@@ -336,7 +346,7 @@ public sealed class RecordProcedureDecisionJobTests
 
     [Theory]
     [MemberData(nameof(PermanentRefusals))]
-    public async Task J4_APermanentRefusal_IsLoggedAtErrorMeteredAndCompleted_NotRetried_AndWritesNothing(string shape, string reason)
+    public async Task J4_APermanentRefusal_IsLoggedAtErrorMeteredAndPoisoned_NotRetried_AndWritesNothing(string shape, string reason)
     {
         var scope = Guid.NewGuid();
         MetricScope.Value = scope;
@@ -359,7 +369,9 @@ public sealed class RecordProcedureDecisionJobTests
         var createsBefore = rig.Writer.Created.Count;
         var outcome = await rig.RunAsync(decision);
 
-        outcome.Status.Should().Be(JobStatus.Completed, "a retry meets the same refusal: the job is completed, never retried forever");
+        outcome.Status.Should().Be(JobStatus.Poisoned,
+            "a retry meets the same refusal, and the payload is the only copy of the reason and note: dead-lettered at once, never completed (ontology-r1 F2)");
+        outcome.ErrorMessage.Should().Be(reason);
         rig.Writer.Created.Should().HaveCount(createsBefore, "nothing was written");
         var entry = rig.Log.Entries.Should().ContainSingle(e => e.EventId == RecordProcedureDecisionJobEvents.HandlerAbandoned).Subject;
         entry.Level.Should().Be(LogLevel.Error);
@@ -369,7 +381,7 @@ public sealed class RecordProcedureDecisionJobTests
     }
 
     [Fact]
-    public async Task J4_OwnerRefused_ADeletedCoreRecord_IsPermanent_LoggedMeteredAndCompleted_WithTheRealResolver()
+    public async Task J4_OwnerRefused_ADeletedCoreRecord_IsPermanent_LoggedMeteredAndPoisoned_WithTheRealResolver()
     {
         // ontology-r1 K1: the REAL ownership resolver over an in-memory directory that has no row for the matter (it was deleted after the
         // change): the resolver refuses (parent unresolved), the writer refuses OwnerRefused, and a retry would meet the same answer.
@@ -381,12 +393,47 @@ public sealed class RecordProcedureDecisionJobTests
 
         var outcome = await rig.RunAsync(Decision(recordId: Guid.NewGuid()));
 
-        outcome.Status.Should().Be(JobStatus.Completed);
+        outcome.Status.Should().Be(JobStatus.Poisoned, "dead-lettered, so the message (the only copy of the reason and note) is kept");
         rig.Writer.Created.Should().BeEmpty();
         var entry = rig.Log.Entries.Should().ContainSingle(e => e.EventId == RecordProcedureDecisionJobEvents.HandlerAbandoned).Subject;
+        entry.Level.Should().Be(LogLevel.Error);
         entry.Field("Reason").Should().Be(DecisionRecordRefusalReason.OwnerRefused);
         entry.Field("OwnerRefusalCode").Should().Be(RecordOwnerRefusal.ParentUnresolved);
-        failures.Should().Contain(RecordProcedureDecisionRepairReason.Abandoned);
+        failures.Count(r => r == RecordProcedureDecisionRepairReason.Abandoned).Should().Be(1);
+    }
+
+    [Theory]
+    [InlineData(RecordOwnerRefusal.NoDefaultOwnerTeam)]
+    [InlineData(RecordOwnerRefusal.SecureOwnerTeamUnresolved)]
+    [InlineData(RecordOwnerRefusal.ActingUserUnresolved)]
+    public async Task J4_OwnerRefused_ForAConfigurationOrIdentityCode_IsAFailureForRedelivery_NotAbandoned_AndTheRedeliveryWritesTheRecord(string code)
+    {
+        // Must-fire (ontology-r1 F1): the writer raises OwnerRefused for EVERY resolver refusal. A unit with no default Owner team (and the
+        // like) is a configuration an administrator fixes; the message must be redelivered, never dropped or dead-lettered at once.
+        var scope = Guid.NewGuid();
+        MetricScope.Value = scope;
+        var (listener, failures) = ListenReasons(scope);
+        using var _ = listener;
+        var rig = new Rig();
+        rig.Writer.Ownership.Setup(r => r.ResolveOwnerAsync(It.IsAny<RecordOwnershipContext>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(RecordOwnerResolution.Refused(code, "configuration"));
+        var decision = Decision();
+
+        var first = await rig.RunAsync(decision, delivery: 1);
+
+        first.Status.Should().Be(JobStatus.Failed, "an administrator can clear it: abandoned and redelivered");
+        first.ErrorMessage.Should().Be(DecisionRecordRefusalReason.OwnerRefused);
+        rig.Writer.Created.Should().BeEmpty();
+        rig.Log.Entries.Should().NotContain(e => e.EventId == RecordProcedureDecisionJobEvents.HandlerAbandoned);
+        rig.Log.Entries.Should().ContainSingle(e => e.EventId == RecordProcedureDecisionJobEvents.HandlerRetrying)
+            .Which.Field("OwnerRefusalCode").Should().Be(code);
+        failures.Should().NotContain(RecordProcedureDecisionRepairReason.Abandoned);
+
+        Disarm(rig, "ownerRead"); // the administrator fixed it
+        var redelivered = await rig.RunAsync(decision, delivery: 2);
+
+        redelivered.Status.Should().Be(JobStatus.Completed);
+        rig.Writer.Created.Should().ContainSingle();
     }
 
     [Fact]
@@ -405,6 +452,12 @@ public sealed class RecordProcedureDecisionJobTests
         outcome.Status.Should().Be(JobStatus.Failed);
         outcome.ErrorMessage.Should().Be(nameof(TaskCanceledException));
         failures.Should().Contain(RecordProcedureDecisionRepairReason.Faulted);
+
+        // 084h-3 review round 1: the line carries the stack trace (method names), so an unexpected fault can be located; never the exception.
+        var entry = rig.Log.Entries.Should().ContainSingle(e => e.EventId == RecordProcedureDecisionJobEvents.HandlerRetrying).Subject;
+        entry.Exception.Should().BeNull();
+        entry.Field("ExceptionType").Should().Be(nameof(TaskCanceledException));
+        Convert.ToString(entry.Field("StackTrace")).Should().Contain("RecordProcedureAsync", "the trace names the methods the fault passed through");
     }
 
     // ── K1 (ontology-r1, 2026-11-16): every writer refusal is classified ───────────────────────────────────────────────
@@ -446,7 +499,7 @@ public sealed class RecordProcedureDecisionJobTests
     [InlineData(DecisionRecordRefusalReason.CreateFailed, RecordProcedureRefusalClass.Retryable)]
     [InlineData(DecisionRecordRefusalReason.FilingFailed, RecordProcedureRefusalClass.Retryable)]
     [InlineData(DecisionRecordRefusalReason.DataverseAccessDenied, RecordProcedureRefusalClass.Retryable)]
-    [InlineData(DecisionRecordRefusalReason.OwnerRefused, RecordProcedureRefusalClass.Permanent)]
+    [InlineData(DecisionRecordRefusalReason.OwnerRefused, RecordProcedureRefusalClass.Retryable)] // with no code; with one, by OwnerRefusalClasses
     [InlineData(DecisionRecordRefusalReason.ReviewInvalid, RecordProcedureRefusalClass.Permanent)]
     [InlineData(DecisionRecordRefusalReason.SubjectUnsupported, RecordProcedureRefusalClass.Permanent)]
     [InlineData(DecisionRecordRefusalReason.SubjectUnfileable, RecordProcedureRefusalClass.Permanent)]
@@ -455,6 +508,56 @@ public sealed class RecordProcedureDecisionJobTests
     public void K1_TheNamedRefusals_HaveTheirAgreedClass(string reason, RecordProcedureRefusalClass expected)
     {
         RecordProcedureDecisionJobHandler.RefusalClasses[reason].Should().Be(expected);
+    }
+
+    // ── 084h-3 review round 1 (ontology-r1 F1): an owner refusal is classified by its resolver code ─────────────────────────
+
+    /// <summary>Every <see cref="RecordOwnerRefusal"/> constant, read by reflection, so a code added later is in the set.</summary>
+    private static IReadOnlyList<string> AllOwnerRefusalCodes() => typeof(RecordOwnerRefusal)
+        .GetFields(BindingFlags.Public | BindingFlags.Static)
+        .Where(f => f.IsLiteral && f.FieldType == typeof(string))
+        .Select(f => (string)f.GetRawConstantValue()!)
+        .ToList();
+
+    private static IReadOnlyList<string> UnclassifiedOwnerCodes(IEnumerable<string> codes) =>
+        codes.Where(c => !RecordProcedureDecisionJobHandler.OwnerRefusalClasses.ContainsKey(c)).ToList();
+
+    [Fact]
+    public void F1_EveryOwnerRefusalCode_IsClassified_OnlyTheDeletedCoreCodeIsPermanent_AndTheTableNamesNoOtherCode()
+    {
+        var all = AllOwnerRefusalCodes();
+
+        all.Should().HaveCountGreaterThan(10, "the reflection read the owner refusal codes");
+        UnclassifiedOwnerCodes(all).Should().BeEmpty("a resolver code this job does not classify must fail here (ontology-r1 F1)");
+        RecordProcedureDecisionJobHandler.OwnerRefusalClasses.Keys.Should().BeSubsetOf(all, "the table classifies resolver codes only");
+        RecordProcedureDecisionJobHandler.OwnerRefusalClasses.Where(c => c.Value == RecordProcedureRefusalClass.Permanent).Select(c => c.Key)
+            .Should().Equal(new[] { RecordOwnerRefusal.ParentUnresolved },
+                "only a parent that does not exist (the core record was deleted, or has no owning business unit) is permanent");
+    }
+
+    [Fact]
+    public void F1_Control_ACodeAddedToTheResolver_WouldBeReportedUnclassified_AndIsRetriedAtRunTime()
+    {
+        const string added = "record_owner_some_future_refusal";
+
+        UnclassifiedOwnerCodes(AllOwnerRefusalCodes().Append(added)).Should().Equal(added);
+        RecordProcedureDecisionJobHandler.ClassOf(DecisionRecordRefusalReason.OwnerRefused, added).Should().Be(RecordProcedureRefusalClass.Retryable,
+            "fail safe: an unlisted code is retried and dead-lettered after the last delivery, never dropped");
+        RecordProcedureDecisionJobHandler.ClassOf(DecisionRecordRefusalReason.OwnerRefused, null).Should().Be(RecordProcedureRefusalClass.Retryable);
+    }
+
+    [Theory]
+    [InlineData(RecordOwnerRefusal.ParentUnresolved, RecordProcedureRefusalClass.Permanent)]
+    [InlineData(RecordOwnerRefusal.NoDefaultOwnerTeam, RecordProcedureRefusalClass.Retryable)]
+    [InlineData(RecordOwnerRefusal.SecureOwnerTeamUnresolved, RecordProcedureRefusalClass.Retryable)]
+    [InlineData(RecordOwnerRefusal.SecureBusinessUnitAmbiguous, RecordProcedureRefusalClass.Retryable)]
+    [InlineData(RecordOwnerRefusal.SecureParentNotIsolated, RecordProcedureRefusalClass.Retryable)]
+    [InlineData(RecordOwnerRefusal.ActingUserUnresolved, RecordProcedureRefusalClass.Retryable)]
+    [InlineData(RecordOwnerRefusal.ParentUndetermined, RecordProcedureRefusalClass.Retryable)]
+    [InlineData(RecordOwnerRefusal.RecordMissing, RecordProcedureRefusalClass.Retryable)]
+    public void F1_AnOwnerRefusal_HasTheClassOfItsCode(string code, RecordProcedureRefusalClass expected)
+    {
+        RecordProcedureDecisionJobHandler.ClassOf(DecisionRecordRefusalReason.OwnerRefused, code).Should().Be(expected);
     }
 
     // ── J5: no log line carries the reason or the note ────────────────────────────────────────────────────────────────
@@ -483,6 +586,16 @@ public sealed class RecordProcedureDecisionJobTests
         outcomes.Add(await retried.RunAsync(Decision(coreTable: "sprk_invoice")));
         handlerLogs.AddRange(retried.Log.Entries);
 
+        // 084h-3 review round 1: a held lock, and eBilling off.
+        var held = new Rig();
+        var heldDecision = Decision();
+        await held.Idempotency.TryAcquireProcessingLockAsync(
+            RecordProcedureDecisionKey.Of("sprk_matter", Matter, heldDecision.DecisionId), "another-job", TimeSpan.FromMinutes(5));
+        outcomes.Add(await held.RunAsync(heldDecision));
+        held.Ebilling.Enabled = false;
+        outcomes.Add(await held.RunAsync(Decision()));
+        handlerLogs.AddRange(held.Log.Entries);
+
         // The enqueuer: queued, failed and timed out.
         var enqueuerLogs = new CapturingLogger<RecordProcedureDecisionEnqueuer>();
         var queue = Queue();
@@ -500,8 +613,10 @@ public sealed class RecordProcedureDecisionJobTests
         {
             RecordProcedureDecisionJobEvents.HandlerCompleted.Id, RecordProcedureDecisionJobEvents.HandlerRetrying.Id,
             RecordProcedureDecisionJobEvents.HandlerAbandoned.Id, RecordProcedureDecisionJobEvents.Queued.Id,
-            RecordProcedureDecisionJobEvents.EnqueueTimedOut.Id,
+            RecordProcedureDecisionJobEvents.EnqueueTimedOut.Id, RecordProcedureDecisionJobEvents.HandlerDisabled.Id,
         }, "every kind of line was produced, so the check below is not vacuous");
+        entries.Should().Contain(e => e.Fields.ContainsKey("StackTrace") && e.Fields["StackTrace"] != null,
+            "the unexpected-exception line, with its stack trace, is among the lines checked");
         foreach (var entry in entries)
         {
             var text = entry.Message + "\n" + string.Join("\n", entry.Fields.Values.Select(v => Convert.ToString(v)));
@@ -587,18 +702,116 @@ public sealed class RecordProcedureDecisionJobTests
     }
 
     [Fact]
-    public async Task AJobWhileAnotherJobHoldsTheSameDecision_WritesNothing_AndCompletes()
+    public async Task AJobWhileAnotherJobHoldsTheSameDecision_WritesNothing_AndIsAFailureForRedelivery_ThenAnswersAlreadyRecorded()
     {
         var rig = new Rig();
         var decision = Decision();
-        (await rig.Idempotency.TryAcquireProcessingLockAsync(
-                RecordProcedureDecisionKey.Of("sprk_matter", Matter, decision.DecisionId), "another-job", TimeSpan.FromMinutes(5)))
-            .Should().BeTrue();
+        var key = RecordProcedureDecisionKey.Of("sprk_matter", Matter, decision.DecisionId);
+        (await rig.Idempotency.TryAcquireProcessingLockAsync(key, "another-job", TimeSpan.FromMinutes(5))).Should().BeTrue();
 
         var outcome = await rig.RunAsync(decision);
 
-        outcome.Status.Should().Be(JobStatus.Completed, "the other job owns the write, and the broker redelivers it if it fails");
+        outcome.Status.Should().Be(JobStatus.Failed, "never completed while another holds the lock: the other copy may still fail (review F1)");
+        outcome.ErrorMessage.Should().Be(RecordProcedureDecisionJobHandler.ProcessingLockHeld);
         rig.Writer.Created.Should().BeEmpty();
+
+        // The other copy writes the record and releases the lock; this copy's next delivery answers AlreadyRecorded with no create.
+        await rig.Recorder.RecordProcedureAsync(decision);
+        await rig.Idempotency.ReleaseProcessingLockAsync(key, "another-job");
+        var redelivered = await rig.RunAsync(decision, delivery: 2);
+
+        redelivered.Status.Should().Be(JobStatus.Completed);
+        rig.Writer.Created.Should().ContainSingle();
+    }
+
+    [Fact]
+    public async Task F1_ALockLeftByAnEarlierAttemptOfTheSameJob_IsAFailure_NotASuccess_AndTheRecordIsNotLost()
+    {
+        // Must-fire (084h-3 review F1): an earlier delivery of THIS job took the lock and its release faulted (IdempotencyService swallows
+        // the fault). The lock is younger than the owner takeover age, so it is refused. Completing here would drop the only copy of the
+        // decision; the job must be redelivered, and once the lock is stale its own redelivery takes it over and writes the record.
+        var rig = new Rig();
+        var decision = Decision();
+        var job = RecordProcedureDecisionEnqueuer.JobFor(decision);
+        var key = RecordProcedureDecisionKey.Of("sprk_matter", Matter, decision.DecisionId);
+        (await rig.Idempotency.TryAcquireProcessingLockAsync(key, job.JobId.ToString("N"), RecordProcedureDecisionJobHandler.LockDuration))
+            .Should().BeTrue("the earlier attempt's lock, never released");
+
+        var refused = await rig.Handler.ProcessAsync(Delivered(job, delivery: 2), CancellationToken.None);
+
+        refused.Status.Should().Be(JobStatus.Failed, "a Success would complete the message with nothing written");
+        rig.Writer.Created.Should().BeEmpty();
+        rig.Log.Entries.Should().ContainSingle(e => e.EventId == RecordProcedureDecisionJobEvents.HandlerRetrying)
+            .Which.Level.Should().Be(LogLevel.Warning);
+
+        rig.Clock.SetUtcNow(rig.Clock.GetUtcNow() + IdempotencyService.OwnerTakeoverAge);
+        var taken = await rig.Handler.ProcessAsync(Delivered(job, delivery: 3), CancellationToken.None);
+
+        taken.Status.Should().Be(JobStatus.Completed, "the same job's redelivery takes its own stale lock over");
+        rig.Writer.Created.Should().ContainSingle("the record is written: nothing was lost");
+    }
+
+    [Fact]
+    public async Task F1_MustNotFire_TheNormalPath_TakesTheLockAndReleasesIt()
+    {
+        var rig = new Rig();
+        var decision = Decision();
+        var key = RecordProcedureDecisionKey.Of("sprk_matter", Matter, decision.DecisionId);
+        var lockSeenDuringTheWrite = false;
+        rig.Writer.Org.Setup(o => o.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
+            .Returns<Entity, CancellationToken>(async (entity, _) =>
+            {
+                // While the job writes, a second copy cannot take the lock.
+                lockSeenDuringTheWrite = !await rig.Idempotency.TryAcquireProcessingLockAsync(key, "another-job", TimeSpan.FromMinutes(1));
+                rig.Writer.Created.Add(entity);
+                return rig.Writer.NewId;
+            });
+
+        var outcome = await rig.RunAsync(decision);
+
+        outcome.Status.Should().Be(JobStatus.Completed);
+        lockSeenDuringTheWrite.Should().BeTrue("the job holds the decision's lock while it writes");
+        rig.Writer.Created.Should().ContainSingle();
+        (await rig.Idempotency.TryAcquireProcessingLockAsync(key, "another-job", TimeSpan.FromMinutes(1)))
+            .Should().BeTrue("the job released its lock when it finished");
+    }
+
+    // ── 084h-3 review round 1 (F2, ADR-018): the eBilling flag ─────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task F2_WithEbillingDisabled_TheJobWritesNothing_AndIsPoisoned_SoTheMessageIsKept_LoggedAndMetered()
+    {
+        // Must-fire: off, the handler writes nothing AND does not complete the message (the payload is the only copy of the decision).
+        var scope = Guid.NewGuid();
+        MetricScope.Value = scope;
+        var (listener, failures) = ListenReasons(scope);
+        using var _ = listener;
+        var rig = new Rig();
+        rig.Ebilling.Enabled = false;
+
+        var outcome = await rig.RunAsync(Decision());
+
+        outcome.Status.Should().Be(JobStatus.Poisoned, "kept in the dead-letter queue for replay once eBilling is on; never Success while disabled");
+        rig.Writer.Created.Should().BeEmpty();
+        rig.CreateCalls.Should().Be(0);
+        rig.Writer.Org.Invocations.Should().BeEmpty("nothing is read or written while eBilling is off");
+        rig.Writer.Entities.Invocations.Should().BeEmpty();
+        rig.Log.Entries.Should().ContainSingle(e => e.EventId == RecordProcedureDecisionJobEvents.HandlerDisabled)
+            .Which.Level.Should().Be(LogLevel.Warning);
+        failures.Should().Equal(RecordProcedureDecisionRepairReason.Disabled);
+    }
+
+    [Fact]
+    public async Task F2_MustNotFire_WithEbillingEnabled_TheJobWritesTheRecord()
+    {
+        var rig = new Rig();
+        rig.Ebilling.Enabled.Should().BeTrue();
+
+        var outcome = await rig.RunAsync(Decision());
+
+        outcome.Status.Should().Be(JobStatus.Completed);
+        rig.Writer.Created.Should().ContainSingle();
+        rig.Log.Entries.Should().NotContain(e => e.EventId == RecordProcedureDecisionJobEvents.HandlerDisabled);
     }
 
     [Fact]
