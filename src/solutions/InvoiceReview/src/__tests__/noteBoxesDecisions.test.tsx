@@ -10,7 +10,7 @@
 
 import '@testing-library/jest-dom';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { FluentProvider, webDarkTheme, webLightTheme } from '@fluentui/react-components';
+import { FluentProvider, webLightTheme } from '@fluentui/react-components';
 import { InvoiceReviewWithDecisions } from '../components/InvoiceReviewWithDecisions';
 import type { InvoiceReview } from '../services/invoiceReviewApi';
 import {
@@ -28,10 +28,10 @@ import {
   type MockDecisionApi,
 } from './testKit';
 
-function renderDecisions(reviews: InvoiceReview | InvoiceReview[], decision: MockDecisionApi, theme: typeof webLightTheme = webLightTheme) {
+function renderDecisions(reviews: InvoiceReview | InvoiceReview[], decision: MockDecisionApi) {
   const api = mockApi(reviews);
   render(
-    <FluentProvider theme={theme}>
+    <FluentProvider theme={webLightTheme}>
       <InvoiceReviewWithDecisions invoiceId={INVOICE_ID} api={api as never} decisionApi={decision as never} pollIntervalMs={60_000} />
     </FluentProvider>
   );
@@ -189,15 +189,16 @@ describe('the decision wizard: the Note box on the Confirm step', () => {
     typeNote(d, 'a note');
     fireEvent.click(finishBtn(d, /Reject & record/));
     await waitFor(() => expect(within(within(d).getByTestId('decision-note-field')).getByText(detail)).toBeInTheDocument());
-    // The shell's error bar only points at the Note box; the server's sentence and its code are not repeated there.
-    // (Fluent's field message is an alert too, so the bar is the alert that is not inside the Note field.)
-    const bar = within(d)
-      .getAllByRole('alert', { hidden: true })
-      .find(a => !within(d).getByTestId('decision-note-field').contains(a));
-    expect(bar).toBeDefined();
-    expect(bar).toHaveTextContent('The note was not accepted. Correct it in the Note box, then record again.');
-    expect(bar).not.toHaveTextContent(code);
-    expect(bar).not.toHaveTextContent(detail);
+    // Review round 1: the field message is the only message. The shell's error bar says nothing (no second alert outside the Note field), and
+    // the wizard stays on the Confirm step with Finish available for another try.
+    // (Fluent's field message is an alert too, so any alert that is not inside the Note field would be the shell's bar.)
+    const outsideField = within(d)
+      .queryAllByRole('alert', { hidden: true })
+      .filter(a => !within(d).getByTestId('decision-note-field').contains(a));
+    expect(outsideField).toHaveLength(0);
+    expect(within(d).queryByText(/The note was not accepted/)).not.toBeInTheDocument();
+    expect(within(d).getByTestId('confirm-decision')).toBeInTheDocument();
+    expect(finishBtn(d, /Reject & record/)).toBeEnabled();
     expect(noteBox(d).value).toBe('a note');
     expect(noteBox(d)).not.toHaveAttribute('readonly');
     // Editing the note clears the message.
@@ -239,13 +240,6 @@ describe('the decision wizard: the Note box on the Confirm step', () => {
     await waitFor(() => expect(decision.reject).toHaveBeenCalledTimes(2));
     expect(decision.reject.mock.calls[1]).toEqual(decision.reject.mock.calls[0]);
     expect(decision.reject.mock.calls[1][2]).toBe('The first note');
-  });
-
-  it('renders in the dark theme', async () => {
-    renderDecisions(clean(), mockDecisionApi(), webDarkTheme);
-    const d = await openWizard();
-    await toConfirmViaReject(d);
-    expect(noteBox(d)).toBeInTheDocument();
   });
 
   it('a decided invoice reopens read-only with no Note box', async () => {
@@ -510,7 +504,7 @@ describe('the invoice adjustment: the Note box on add and remove', () => {
     expect(removeNote(confirm).value).toBe('bad\u0007');
   });
 
-  it('a removal answered 409 ebilling.adjustment.id_reused re-reads the adjustments list and keeps the form with the server\'s sentence and the note', async () => {
+  it('a removal answered 409 ebilling.adjustment.id_reused re-reads the adjustments list; the adjustment is gone, so the form closes and the server\'s sentence stays on the step', async () => {
     const decision = mockDecisionApi();
     decision.removeAdjustment.mockResolvedValue(
       failed(problem(409, 'ebilling.adjustment.id_reused', { detail: 'This adjustment was already removed by another reviewer.' }))
@@ -521,10 +515,27 @@ describe('the invoice adjustment: the Note box on add and remove', () => {
     const reads = api.getReview.mock.calls.length;
     fireEvent.change(removeNote(confirm), { target: { value: 'Entered twice' } });
     submitRemove(confirm);
-    expect(await within(confirm).findByTestId('remove-error')).toHaveTextContent('This adjustment was already removed by another reviewer. (ebilling.adjustment.id_reused)');
+    await waitFor(() => expect(within(d).getByTestId('remove-notice')).toHaveTextContent('This adjustment was already removed by another reviewer. (ebilling.adjustment.id_reused)'));
     expect(api.getReview.mock.calls.length).toBeGreaterThan(reads);
     await waitFor(() => expect(within(d).queryByTestId(`adjustment-${lineId(90)}`)).not.toBeInTheDocument());
+    // Nothing is left to remove: the removal form is closed, not left open on a line that no longer exists.
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Remove adjustment', hidden: true })).not.toBeInTheDocument());
+  });
+
+  it('(must-not-fire) a 409 id_reused whose re-read still lists the adjustment keeps the form open with the sentence and the note', async () => {
+    const decision = mockDecisionApi();
+    decision.removeAdjustment.mockResolvedValue(
+      failed(problem(409, 'ebilling.adjustment.id_reused', { detail: 'A removal with another note was already recorded.' }))
+    );
+    const { api, d, confirm } = await toRemoveForm(decision, [withAdjustment(), withAdjustment()]);
+    const reads = api.getReview.mock.calls.length;
+    fireEvent.change(removeNote(confirm), { target: { value: 'Entered twice' } });
+    submitRemove(confirm);
+    expect(await within(confirm).findByTestId('remove-error')).toHaveTextContent('A removal with another note was already recorded. (ebilling.adjustment.id_reused)');
+    expect(api.getReview.mock.calls.length).toBeGreaterThan(reads);
+    expect(within(d).getByTestId(`adjustment-${lineId(90)}`)).toBeInTheDocument();
     expect(removeNote(confirm).value).toBe('Entered twice');
+    expect(within(d).queryByTestId('remove-notice')).not.toBeInTheDocument();
   });
 
   it('(must-not-fire) another 409 on a removal does not re-read the list', async () => {

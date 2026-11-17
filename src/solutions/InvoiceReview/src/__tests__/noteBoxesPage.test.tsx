@@ -7,15 +7,17 @@
  * decision id for a new submit, and a refused note shown under the Note box and not as a page notice.
  */
 
+import * as fs from 'fs';
+import * as path from 'path';
 import '@testing-library/jest-dom';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { FluentProvider, webDarkTheme, webLightTheme } from '@fluentui/react-components';
+import { FluentProvider, webLightTheme } from '@fluentui/react-components';
 import { InvoiceReviewPage } from '../components/InvoiceReviewPage';
 import { INVOICE_ID, failed, field, finding, flagged, line, lineId, mockApi, ok, problem, review, type MockApi } from './testKit';
 
-function renderPage(api: MockApi, theme: typeof webLightTheme = webLightTheme) {
+function renderPage(api: MockApi) {
   return render(
-    <FluentProvider theme={theme}>
+    <FluentProvider theme={webLightTheme}>
       <InvoiceReviewPage invoiceId={INVOICE_ID} api={api as never} pollIntervalMs={60_000} />
     </FluentProvider>
   );
@@ -166,13 +168,26 @@ describe('the line decision: the Note box', () => {
     expect(decideBody(api, 1).decisionId).not.toBe(decideBody(api, 0).decisionId);
   });
 
-  it('renders in the dark theme', async () => {
-    const api = mockApi(normal());
-    renderPage(api, webDarkTheme);
-    await screen.findByTestId('review-title');
-    fireEvent.click(row(2));
-    await screen.findByTestId(`pane-line-${lineId(2)}`);
-    expect(noteBox()).toBeInTheDocument();
+});
+
+/**
+ * Dark mode is a property of the source (ADR-021): every colour comes from a Fluent token, so the theme provider decides it. A render under
+ * `webDarkTheme` proves nothing about that (jsdom resolves no styles), so the Note box's source is scanned instead.
+ */
+describe('the Note box takes its colours from Fluent tokens only', () => {
+  const COLOUR_LITERAL = /#[0-9a-fA-F]{3,8}\b|\b(?:rgb|rgba|hsl|hsla)\(/;
+  const noteFieldSource = () => fs.readFileSync(path.resolve(__dirname, '..', 'components', 'NoteField.tsx'), 'utf8');
+
+  it('NoteField.tsx styles with tokens and has no hex, rgb() or hsl() colour', () => {
+    const source = noteFieldSource();
+    expect(source).toMatch(/color: tokens\.color\w+/);
+    expect(source).not.toMatch(COLOUR_LITERAL);
+  });
+
+  it('(controls) the scan fires on a hex and an rgb() colour and stays quiet on a token', () => {
+    expect(COLOUR_LITERAL.test("const a = { color: '#fff' };")).toBe(true);
+    expect(COLOUR_LITERAL.test("const a = { color: 'rgb(0, 0, 0)' };")).toBe(true);
+    expect(COLOUR_LITERAL.test('const a = { color: tokens.colorNeutralForeground3 };')).toBe(false);
   });
 });
 

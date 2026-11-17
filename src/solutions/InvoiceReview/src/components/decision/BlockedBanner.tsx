@@ -27,7 +27,7 @@ import {
   tokens,
 } from '@fluentui/react-components';
 import { FormModal } from '@spaarke/ui-components';
-import { decisionFailureMessage, isDecisionIncomplete, type BlockedFinding, type BlockedSubmission } from '../../services/decisionApi';
+import { decisionFailureMessage, isOutcomeUnknown, type BlockedFinding, type BlockedSubmission } from '../../services/decisionApi';
 import type { ApiFailure, InvoiceReview } from '../../services/invoiceReviewApi';
 import { isNoteRefusal, noteArgs, noteProblem, noteRefusalMessage } from '../../services/noteModel';
 import { NoteField } from '../NoteField';
@@ -66,7 +66,7 @@ export interface BlockedBannerProps {
 
 export function BlockedBanner({ review, reload }: BlockedBannerProps) {
   const s = useStyles();
-  const { api, refresh } = useApproval();
+  const { api, refresh, locks } = useApproval();
   const held = review.header.held;
   const submissionId = submissionIdOf(review);
 
@@ -78,11 +78,12 @@ export function BlockedBanner({ review, reload }: BlockedBannerProps) {
   const action = dialog?.action ?? null;
   const closeDialog = () => setDialog(prev => (prev ? { ...prev, open: false } : prev));
   const [reason, setReason] = React.useState('');
-  // Task 095f-2ui: the optional note. Like the reason, it is kept across a refusal (a 409 or 503) so the reviewer can resend; a decision saved
-  // in part (503) is repeated with the same note, so the box is locked from then on.
+  // Task 095f-2ui: the optional note. Like the reason, it is kept across a refusal (a 409 or 503) so the reviewer can resend. A decision saved
+  // in part (503), or one that got no answer (status 0), is repeated with the same reason and note, so both are locked from then on, and the
+  // locked request is kept at page level (`locks`) so closing and reopening the form does not lose it.
   const [note, setNote] = React.useState('');
   const [noteError, setNoteError] = React.useState<string | null>(null);
-  const [noteLocked, setNoteLocked] = React.useState(false);
+  const [locked, setLocked] = React.useState(false);
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const alive = React.useRef(true);
@@ -109,13 +110,23 @@ export function BlockedBanner({ review, reload }: BlockedBannerProps) {
     if (held) void load();
   }, [held, load]);
 
+  // The hold is gone (the decision is done): nothing is left to repeat, so a lock kept from an unsure send is dropped.
+  React.useEffect(() => {
+    if (!held) locks.clear('blocked');
+  }, [held, locks]);
+
   if (!held || !submissionId) return null;
 
   const open = (a: Action) => {
-    setReason('');
-    setNote('');
+    // An Override or Return that came back unsure is reopened as it was sent, locked, so the repeat is the same request. The other action is
+    // a different request: nothing stays locked.
+    const kept = locks.get('blocked');
+    if (kept && kept.action !== a) locks.clear('blocked');
+    const same = kept && kept.action === a ? kept : undefined;
+    setReason(same ? same.reason : '');
+    setNote(same ? same.note : '');
     setNoteError(null);
-    setNoteLocked(false);
+    setLocked(!!same);
     setError(null);
     setDialog(prev => (prev?.open ? { ...prev, action: a } : { action: a, open: true, seq: (prev?.seq ?? 0) + 1 }));
   };
@@ -130,6 +141,7 @@ export function BlockedBanner({ review, reload }: BlockedBannerProps) {
       action === 'override' ? await api.overrideBlocked(submissionId, reason.trim(), ...n) : await api.returnBlocked(submissionId, reason.trim(), ...n);
     if (!alive.current) return;
     if (r.ok) {
+      locks.clear('blocked');
       setBusy(false);
       closeDialog();
       await Promise.all([reload(), refresh(), load()]);
@@ -141,11 +153,15 @@ export function BlockedBanner({ review, reload }: BlockedBannerProps) {
       setNoteError(noteRefusalMessage(r.failure));
       return;
     }
-    // A 503 saved part of the decision: the same request, repeated, finishes it, so the note is held as it was sent.
-    if (isDecisionIncomplete(r.failure)) setNoteLocked(true);
-    // A 503 `ebilling.blocked.unavailable` can come after the decision stood (the Signals were not all closed): show the server's state
-    // (the hold may already be gone) before the error.
-    if (isDecisionIncomplete(r.failure)) {
+    // A 503 saved part of the decision, or no answer came back: the same request, repeated, finishes it, so the reason and the note are held as
+    // they were sent, here and at page level.
+    if (isOutcomeUnknown(r.failure)) {
+      setLocked(true);
+      locks.set('blocked', { action, reason: reason.trim(), note });
+    }
+    // A 503 `ebilling.blocked.unavailable` can come after the decision stood (the Signals were not all closed), and a send with no answer may
+    // have been recorded: show the server's state (the hold may already be gone) before the error.
+    if (isOutcomeUnknown(r.failure)) {
       await Promise.all([reload(), refresh(), load()]);
       if (!alive.current) return;
     }
@@ -231,6 +247,7 @@ export function BlockedBanner({ review, reload }: BlockedBannerProps) {
                 resize="vertical"
                 rows={3}
                 maxLength={REASON_MAX}
+                readOnly={locked}
                 aria-label="Reason"
                 data-testid="blocked-reason"
               />
@@ -242,13 +259,14 @@ export function BlockedBanner({ review, reload }: BlockedBannerProps) {
                 setNoteError(null);
               }}
               serverError={noteError}
-              readOnly={noteLocked}
+              readOnly={locked}
               ariaLabel="Note"
               testId="blocked-note"
             />
-            {noteLocked && (
+            {locked && (
               <Caption1 className={s.muted} data-testid="blocked-note-locked">
-                This decision was saved in part. Submitting again finishes it with the same note.
+                This decision was saved in part, or no answer came back. Submitting again finishes it with the same reason and note, so they cannot be
+                changed now.
               </Caption1>
             )}
             {error && (

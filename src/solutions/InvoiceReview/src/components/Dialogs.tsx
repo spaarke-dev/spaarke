@@ -77,6 +77,20 @@ export interface CorrectTarget {
   initial: string;
 }
 
+/**
+ * Review round 1: what was typed in a dialog whose send could not be resent (a 409 saying the invoice or line changed) and so closed it. The
+ * page keeps it and offers it back, as the starting text, the next time the same dialog opens for the same target.
+ */
+export interface DialogDraft {
+  /** A header correction: the field that was chosen. */
+  field?: string;
+  /** A correction: the corrected value. */
+  value?: string;
+  /** A bulk decision: the reason ('' when none). */
+  reason?: string;
+  note: string;
+}
+
 export interface CorrectValueModalProps {
   target: CorrectTarget;
   busy: boolean;
@@ -85,17 +99,19 @@ export interface CorrectValueModalProps {
   /** The server refused the note (400 note code): shown under the Note box until the note is edited. */
   noteError?: string | null;
   onNoteEdit?: () => void;
+  /** What was typed in an earlier opening of this form for this target, when a send closed it (read once, when the form opens). */
+  draft?: DialogDraft;
   onClose: () => void;
   /** `note` is the text as typed, present only when there is one. */
   onSubmit: (field: string, value: string, note?: string) => void;
 }
 
-export function CorrectValueModal({ target, busy, error, noteError = null, onNoteEdit, onClose, onSubmit }: CorrectValueModalProps) {
+export function CorrectValueModal({ target, busy, error, noteError = null, onNoteEdit, draft, onClose, onSubmit }: CorrectValueModalProps) {
   const s = useStyles();
   const header = target.lineId === null;
-  const [field, setField] = React.useState(target.field);
-  const [value, setValue] = React.useState(target.initial);
-  const [note, setNote] = React.useState('');
+  const [field, setField] = React.useState(draft?.field ?? target.field);
+  const [value, setValue] = React.useState(draft?.value ?? target.initial);
+  const [note, setNote] = React.useState(draft?.note ?? '');
   const headerField = HEADER_FIELDS.find(h => h.field === field);
   const kind = header ? (headerField?.kind ?? 'text') : (LINE_KIND[field] ?? 'text');
   const title = header ? 'Correct an invoice value' : `Correct ${target.label.toLowerCase()} · line ${target.lineSequence}`;
@@ -180,14 +196,16 @@ export interface ConfirmValueModalProps {
   error: string | null;
   noteError?: string | null;
   onNoteEdit?: () => void;
+  /** What was typed in an earlier opening of this form for this value, when a send closed it (read once, when the form opens). */
+  draft?: DialogDraft;
   onClose: () => void;
   /** `note` is the text as typed, present only when there is one. */
   onSubmit: (note?: string) => void;
 }
 
-export function ConfirmValueModal({ target, busy, error, noteError = null, onNoteEdit, onClose, onSubmit }: ConfirmValueModalProps) {
+export function ConfirmValueModal({ target, busy, error, noteError = null, onNoteEdit, draft, onClose, onSubmit }: ConfirmValueModalProps) {
   const s = useStyles();
-  const [note, setNote] = React.useState('');
+  const [note, setNote] = React.useState(draft?.note ?? '');
   return (
     <FormModal
       open
@@ -335,15 +353,17 @@ export interface BulkDecisionModalProps {
   error: string | null;
   noteError?: string | null;
   onNoteEdit?: () => void;
+  /** What was typed in an earlier opening of this form for these lines, when a send closed it (read once, when the form opens). */
+  draft?: DialogDraft;
   onClose: () => void;
   /** `note` is the text as typed, present only when there is one. */
   onSubmit: (reason: string | null, note?: string) => void;
 }
 
-export function BulkDecisionModal({ request, busy, error, noteError = null, onNoteEdit, onClose, onSubmit }: BulkDecisionModalProps) {
+export function BulkDecisionModal({ request, busy, error, noteError = null, onNoteEdit, draft, onClose, onSubmit }: BulkDecisionModalProps) {
   const s = useStyles();
-  const [reason, setReason] = React.useState('');
-  const [note, setNote] = React.useState('');
+  const [reason, setReason] = React.useState(draft?.reason ?? '');
+  const [note, setNote] = React.useState(draft?.note ?? '');
   const n = request.lines.length;
   return (
     <FormModal

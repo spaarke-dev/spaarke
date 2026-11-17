@@ -52,6 +52,7 @@ import {
   loadFailureMessage,
   newDecisionId,
   staysInAddLineForm,
+  staysInNoteDialog,
   isRetryableRepeatFailure,
   repeatFailureMessage,
   writeFailureMessage,
@@ -90,7 +91,16 @@ import { LinesGrid } from './LinesGrid';
 import { LineReviewPane, type PaneDecision } from './LineReviewPane';
 import { RuleGroups } from './RuleGroups';
 import { ProcedureChangeNotice } from './ProcedureChangeNotice';
-import { AddLineModal, BulkDecisionModal, ConfirmValueModal, CorrectValueModal, HEADER_FIELDS, type BulkRequest, type CorrectTarget } from './Dialogs';
+import {
+  AddLineModal,
+  BulkDecisionModal,
+  ConfirmValueModal,
+  CorrectValueModal,
+  HEADER_FIELDS,
+  type BulkRequest,
+  type CorrectTarget,
+  type DialogDraft,
+} from './Dialogs';
 
 const useStyles = makeStyles({
   page: {
@@ -317,7 +327,14 @@ export function InvoiceReviewPage(props: InvoiceReviewPageProps) {
    * Task 095f-2ui: the server refused a note (400 `ebilling.note_too_long` / `note_invalid_characters`). It is shown under the Note box of the
    * form the send came from (the pane's line decision, or the open dialog), never as a page notice, and cleared when the note is edited.
    */
-  const [noteFault, setNoteFault] = React.useState<{ where: 'pane' | 'dialog'; message: string } | null>(null);
+  const [noteFault, setNoteFault] = React.useState<{ where: 'pane' | 'dialog'; message: string; lineId?: string } | null>(null);
+  /**
+   * Review round 1: what was typed in a bulk, correction or Confirm-as-read dialog, kept when a send that could not be resent closed the dialog
+   * (a 409 saying the invoice or line changed, or a 503 / 403 whose outcome belongs to the page). The next opening of the same dialog for the
+   * same target is prefilled from it. Dropped when the send is saved, and when the reviewer closes the dialog themselves. Plain memory: the
+   * dialog reads it once, when it mounts.
+   */
+  const drafts = React.useRef(new Map<string, DialogDraft>());
 
   const panes = useTwoPanelLayout({ defaultDetailWidth: 560, minPrimaryWidth: 520, minDetailWidth: 420, storageKey: 'sprk-invoice-review-pane' });
 
@@ -416,6 +433,8 @@ export function InvoiceReviewPage(props: InvoiceReviewPageProps) {
   );
 
   const onSelect = React.useCallback((lineId: string, field: string | null) => {
+    // A refused note belongs to the line decision it came from: moving to another line must not carry its message along.
+    setNoteFault(prev => (prev?.where === 'pane' ? null : prev));
     setSelectedLineId(lineId);
     setSelectedField(field);
     setTab('review');
@@ -478,6 +497,13 @@ export function InvoiceReviewPage(props: InvoiceReviewPageProps) {
         isRepeat?: boolean;
         /** Where this send's Note box is (the pane's decision form, or the open dialog): a refused note (400) is shown there, not as a notice. */
         noteField?: 'pane' | 'dialog';
+        /** For a pane Note box: the line whose decision this send is, so the refusal is shown on that line only. */
+        noteLine?: string;
+        /**
+         * Review round 1: a sentence that replaces the plain success text for a write the server answered 200 but did not do in full (a
+         * correction or confirm that was already in place stores no note). Shown as a warning. Return null for the plain success.
+         */
+        warnAfter?: (value: T) => string | null;
       }
     ): Promise<boolean> => {
       setBusy(true);
@@ -490,10 +516,13 @@ export function InvoiceReviewPage(props: InvoiceReviewPageProps) {
         if (!alive.current) return false;
         setBusy(false);
         // The write is saved; if the re-read failed, what is on the page is NOT the server's state: say so instead of a plain "Saved".
+        // A write the server found already in place (and so did not store the note) is a warning, never a plain "Saved".
+        const warn = opts.warnAfter?.(result.value) ?? null;
+        const text = warn ?? opts.success;
         setNotice(
           fresh
-            ? { intent: 'success', text: opts.success }
-            : { intent: 'warning', text: `${opts.success} — but the page could not refresh.`, action: { label: 'Reload', run: () => void reload() } }
+            ? { intent: warn ? 'warning' : 'success', text }
+            : { intent: 'warning', text: `${text} — but the page could not refresh.`, action: { label: 'Reload', run: () => void reload() } }
         );
         opts.after?.(result.value, fresh, opts.isRepeat === true);
         return true;
@@ -502,7 +531,7 @@ export function InvoiceReviewPage(props: InvoiceReviewPageProps) {
       // A refused note (400, before any read): nothing was written and the form still holds everything, so only the Note box says so.
       if (opts.noteField && isNoteRefusal(f)) {
         setBusy(false);
-        setNoteFault({ where: opts.noteField, message: noteRefusalMessage(f) });
+        setNoteFault({ where: opts.noteField, message: noteRefusalMessage(f), lineId: opts.noteLine });
         return false;
       }
       if (f.status === 403) setRefused403(true);
@@ -547,6 +576,7 @@ export function InvoiceReviewPage(props: InvoiceReviewPageProps) {
     void runWrite(() => api.decideLine(invoiceId, line.id, { decisionId, ...d }), {
       success: `Saved · ${decisionWords(d, line)}`,
       noteField: 'pane',
+      noteLine: line.id,
       after: (_, fresh) => {
         // Move on to the next line to decide, from the server's fresh state.
         const next = fresh ? nextToDecide(fresh.lines, line.id) : null;
@@ -575,8 +605,15 @@ export function InvoiceReviewPage(props: InvoiceReviewPageProps) {
     });
   };
 
+  /** The keys of the dialog drafts: one per dialog and target, so a draft is only offered back to the same form for the same lines or value. */
+  const bulkKey = (r: BulkRequest) => `bulk:${r.action}:${r.lines.map(l => l.lineId).sort().join(',')}`;
+  const correctKey = (t: CorrectTarget) => (t.lineId ? `correct:${t.lineId}:${t.field}` : 'correct:header');
+  const confirmKey = (t: { line: ReviewLine; field: string }) => `confirm:${t.line.id}:${t.field}`;
+
   const submitBulk = (request: BulkRequest, reason: string | null, note?: string) => {
     const decisionId = newDecisionId();
+    const key = bulkKey(request);
+    drafts.current.set(key, { reason: reason ?? '', note: note ?? '' });
     void runWrite(
       () =>
         api.decideLines(invoiceId, {
@@ -590,8 +627,10 @@ export function InvoiceReviewPage(props: InvoiceReviewPageProps) {
         success: `Saved · ${request.lines.length} ${request.lines.length === 1 ? 'line' : 'lines'} ${request.action === 'accept' ? 'accepted' : request.action === 'disallow' ? 'disallowed' : 'reduced'}`,
         inDialog: true,
         noteField: 'dialog',
+        staysInDialog: staysInNoteDialog,
         closeDialog: () => setBulk(null),
         after: (_, __, isRepeat) => {
+          drafts.current.delete(key);
           if (!isRepeat) setBulk(null);
           setChecked(prev => new Set([...prev].filter(id => !request.lines.some(l => l.lineId === id))));
         },
@@ -602,14 +641,20 @@ export function InvoiceReviewPage(props: InvoiceReviewPageProps) {
   const submitCorrection = (target: CorrectTarget, field: string, value: string, note?: string) => {
     const request = { field, value, confirm: false, ...noteMember(note) };
     const label = target.lineId ? target.label : (HEADER_FIELDS.find(h => h.field === field)?.label ?? field);
+    const key = correctKey(target);
+    drafts.current.set(key, { field, value, note: note ?? '' });
     void runWrite(
       () => (target.lineId ? api.correctLine(invoiceId, target.lineId, request) : api.correctHeader(invoiceId, request)),
       {
         success: `Saved · ${label} corrected${target.lineSequence ? ` on line ${target.lineSequence}` : ''}; the rules ran again`,
         inDialog: true,
         noteField: 'dialog',
+        staysInDialog: staysInNoteDialog,
+        // The server found the correction already in place (a repeat, or another reviewer's) and stored no note: say so.
+        warnAfter: v => (note !== undefined && v.alreadyApplied ? 'Already corrected to this value; the note was not saved.' : null),
         closeDialog: () => setCorrect(null),
         after: (_, __, isRepeat) => {
+          drafts.current.delete(key);
           if (!isRepeat) setCorrect(null);
         },
       }
@@ -657,12 +702,18 @@ export function InvoiceReviewPage(props: InvoiceReviewPageProps) {
 
   const submitConfirm = (target: { line: ReviewLine; field: string }, note?: string) => {
     const { line, field } = target;
+    const key = confirmKey(target);
+    drafts.current.set(key, { note: note ?? '' });
     void runWrite(() => api.correctLine(invoiceId, line.id, { field, value: null, confirm: true, ...noteMember(note) }), {
       success: `Saved · ${fieldLabel(field)} on line ${line.sequence} confirmed as read`,
       inDialog: true,
       noteField: 'dialog',
+      staysInDialog: staysInNoteDialog,
+      // The server found it already confirmed and stored no note: say so.
+      warnAfter: v => (note !== undefined && v.alreadyApplied ? 'Already confirmed; the note was not saved.' : null),
       closeDialog: () => setConfirming(null),
       after: (_, __, isRepeat) => {
+        drafts.current.delete(key);
         if (!isRepeat) setConfirming(null);
       },
     });
@@ -903,7 +954,7 @@ export function InvoiceReviewPage(props: InvoiceReviewPageProps) {
                   firmNeeded={firmNeeded}
                   corrections={selectedLine ? corrections.filter(c => c.lineId === selectedLine.id) : []}
                   toDecideCount={toDecideCount}
-                  noteError={noteFault?.where === 'pane' ? noteFault.message : null}
+                  noteError={noteFault?.where === 'pane' && noteFault.lineId === selectedLine?.id ? noteFault.message : null}
                   onNoteEdit={() => setNoteFault(null)}
                   onStart={() => {
                     const first = nextToDecide(lines, null);
@@ -958,7 +1009,11 @@ export function InvoiceReviewPage(props: InvoiceReviewPageProps) {
           error={dialogError}
           noteError={noteFault?.where === 'dialog' ? noteFault.message : null}
           onNoteEdit={() => setNoteFault(null)}
-          onClose={() => setCorrect(null)}
+          draft={drafts.current.get(correctKey(correct))}
+          onClose={() => {
+            drafts.current.delete(correctKey(correct));
+            setCorrect(null);
+          }}
           onSubmit={(field, value, note) => submitCorrection(correct, field, value, note)}
         />
       )}
@@ -969,7 +1024,11 @@ export function InvoiceReviewPage(props: InvoiceReviewPageProps) {
           error={dialogError}
           noteError={noteFault?.where === 'dialog' ? noteFault.message : null}
           onNoteEdit={() => setNoteFault(null)}
-          onClose={() => setConfirming(null)}
+          draft={drafts.current.get(confirmKey(confirming))}
+          onClose={() => {
+            drafts.current.delete(confirmKey(confirming));
+            setConfirming(null);
+          }}
           onSubmit={note => submitConfirm(confirming, note)}
         />
       )}
@@ -988,7 +1047,11 @@ export function InvoiceReviewPage(props: InvoiceReviewPageProps) {
           error={dialogError}
           noteError={noteFault?.where === 'dialog' ? noteFault.message : null}
           onNoteEdit={() => setNoteFault(null)}
-          onClose={() => setBulk(null)}
+          draft={drafts.current.get(bulkKey(bulk))}
+          onClose={() => {
+            drafts.current.delete(bulkKey(bulk));
+            setBulk(null);
+          }}
           onSubmit={(reason, note) => submitBulk(bulk, reason, note)}
         />
       )}

@@ -25,7 +25,13 @@ import {
   type IWizardStepConfig,
   type IWizardSuccessConfig,
 } from '@spaarke/ui-components';
-import { decisionFailureMessage, isDecisionIncomplete, type ApprovalState, type InvoiceDecisionApi } from '../../services/decisionApi';
+import {
+  decisionFailureMessage,
+  isOutcomeUnknown,
+  newAdjustmentId,
+  type ApprovalState,
+  type InvoiceDecisionApi,
+} from '../../services/decisionApi';
 import {
   INVOICE_OUTCOME_LABEL,
   invoiceDecisionRecord,
@@ -35,6 +41,7 @@ import {
 import { isNoteRefusal, noteArgs, noteProblem, noteRefusalMessage } from '../../services/noteModel';
 import { money } from '../../services/reviewModel';
 import type { InvoiceReview } from '../../services/invoiceReviewApi';
+import { createDecisionLocks, type DecisionLocks } from './decisionLocks';
 import { AdjustStep, ConfirmStep, OutcomeStep, ReasonStep } from './steps';
 import { EMPTY_FORM, WizardContext, adjustmentFormDirty, type WizardCtx, type WizardForm } from './wizardContext';
 
@@ -60,6 +67,11 @@ export interface InvoiceDecisionWizardProps {
   /** Re-read the approval state after the decision. */
   refreshApproval: () => Promise<unknown>;
   notifyStep?: NotifyStep;
+  /**
+   * The requests locked until they finish, held at page level (the `ApprovalProvider`'s), so reopening the wizard for the same invoice
+   * prefills a decision that came back unsure and keeps it locked. Without it the wizard keeps its own (lost on close).
+   */
+  locks?: DecisionLocks;
 }
 
 function stepIds(outcome: InvoiceOutcome | undefined, hasNotify: boolean): string[] {
@@ -74,13 +86,24 @@ const STATUS_LABEL: Readonly<Record<InvoiceOutcome, string>> = { approve: 'Appro
 export function InvoiceDecisionWizard(props: InvoiceDecisionWizardProps) {
   const { open, onClose, review, approval, api, invoiceId, reload, refreshApproval, notifyStep } = props;
   const s = useStyles();
+  const ownLocks = React.useRef<DecisionLocks | null>(null);
+  if (!ownLocks.current) ownLocks.current = createDecisionLocks();
+  const locks = props.locks ?? ownLocks.current;
 
   // Frozen at mount: the wizard that opened on a pending invoice does not turn read-only under the user when its own decision refreshes the page.
   const [readOnly] = React.useState(() => approval.status !== 'Pending' || review.header.status !== 'InReview');
   const recorded = React.useMemo(() => invoiceDecisionRecord(review), [review]);
   const [form, setForm] = React.useState<WizardForm>(() => {
     if (readOnly) return { ...EMPTY_FORM, outcome: outcomeOfApproval(approval.status), reason: recorded?.reason ?? '' };
-    return { ...EMPTY_FORM, outcome: approval.canApprove ? 'approve' : undefined };
+    // Review round 1: a decision or an adjustment add that came back unsure is reopened as it was sent, and locked, so the repeat is the same request.
+    const w = locks.get('wizard');
+    const a = locks.get('adjust');
+    const base: WizardForm = { ...EMPTY_FORM, adjId: a?.adjustmentId ?? newAdjustmentId() };
+    if (a) {
+      Object.assign(base, { adjMethod: a.method, adjValue: a.value, adjReason: a.reason, adjRule: a.rule, adjNote: a.note, adjLocked: true });
+    }
+    if (w) Object.assign(base, { reason: w.reason, note: w.note, locked: true });
+    return { ...base, outcome: w?.outcome ?? (a ? 'approve' : approval.canApprove ? 'approve' : undefined) };
   });
   const set = React.useCallback((patch: Partial<WizardForm>) => setForm(f => ({ ...f, ...patch })), []);
 
@@ -93,7 +116,15 @@ export function InvoiceDecisionWizard(props: InvoiceDecisionWizardProps) {
     api,
     invoiceId,
     reload,
-    onOutcome: (outcome, handle) => syncSteps(outcome, handle),
+    onOutcome: (outcome, handle) => {
+      // A different outcome is a different request: nothing stays locked (the text typed so far stays, editable).
+      if (live.current.form.locked && live.current.form.outcome !== outcome) {
+        set({ locked: false });
+        locks.clear('wizard');
+      }
+      syncSteps(outcome, handle);
+    },
+    locks,
   };
   const live = React.useRef<WizardCtx>(ctx);
   live.current = ctx;
@@ -157,7 +188,7 @@ export function InvoiceDecisionWizard(props: InvoiceDecisionWizardProps) {
     []
   );
 
-  const onFinish = async (): Promise<IWizardSuccessConfig> => {
+  const onFinish = async (): Promise<IWizardSuccessConfig | void> => {
     const { form: f, api: a, invoiceId: id } = live.current;
     const outcome = f.outcome;
     if (!outcome) throw new Error('Choose a decision first.');
@@ -171,20 +202,26 @@ export function InvoiceDecisionWizard(props: InvoiceDecisionWizardProps) {
           ? await a.reject(id, f.reason.trim(), ...note)
           : await a.returnToFirm(id, f.reason.trim(), ...note);
     if (!result.ok) {
-      // The server refused the note itself (400): say so under the Note box. The shell still needs a throw to stay on this step.
+      // The server refused the note itself (400): say so under the Note box, and only there (review round 1: the shell's error bar did not
+      // repeat it well). The shell stays open on this step because it was given `stayOpenOnFinish` and nothing is returned.
       if (isNoteRefusal(result.failure)) {
         set({ noteError: noteRefusalMessage(result.failure) });
-        throw new Error('The note was not accepted. Correct it in the Note box, then record again.');
+        return;
       }
-      // Saved in part: the repeat must carry the same note, so the box is locked until it finishes.
-      if (isDecisionIncomplete(result.failure)) set({ noteLocked: true });
-      // Part of the change may be saved (503 incomplete): show the server's state, then the message tells the user to repeat. A 409
+      // Saved in part, or no answer at all: the repeat must be the same request, so the reason and the note are locked until it finishes.
+      // The lock is also kept at page level, so closing and reopening the wizard does not lose it.
+      if (isOutcomeUnknown(result.failure)) {
+        set({ locked: true });
+        locks.set('wizard', { outcome, reason: outcome === 'approve' ? '' : f.reason.trim(), note: f.note });
+      }
+      // Part of the change may be saved (503 incomplete, or no answer): show the server's state, then the message tells the user to repeat. A 409
       // (already decided, approval changed, corrections pending) means the page and the approval are out of date: re-read both so
       // the page shows what the server holds. Any other refusal (403, a validation code) changes nothing; the message carries the
       // server's detail and its code.
-      if (isDecisionIncomplete(result.failure) || result.failure.status === 409) await Promise.all([refreshApproval(), reload()]);
+      if (isOutcomeUnknown(result.failure) || result.failure.status === 409) await Promise.all([refreshApproval(), reload()]);
       throw new Error(decisionFailureMessage(result.failure));
     }
+    locks.clear('wizard');
     await Promise.all([refreshApproval(), reload()]);
     const value = result.value as { outcome: string; state?: ApprovalState | null };
     const already = value.outcome === 'alreadyApproved' || value.outcome === 'alreadyDecided';
@@ -236,6 +273,8 @@ export function InvoiceDecisionWizard(props: InvoiceDecisionWizardProps) {
         steps={initialSteps}
         onClose={onClose}
         onFinish={onFinish}
+        // A refused note is shown under the Note box and nothing is returned: the wizard stays on the Confirm step.
+        stayOpenOnFinish
         finishLabel={finishLabel}
         finishingLabel="Recording…"
         showSkippedSteps

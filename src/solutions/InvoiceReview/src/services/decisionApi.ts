@@ -357,6 +357,13 @@ export const isDecisionIncomplete = (f: ApiFailure): boolean =>
   f.status === 503 && ((f.errorCode !== null && INCOMPLETE_CODES.has(f.errorCode)) || f.failedStep !== null || f.committedLineIds.length > 0);
 
 /**
+ * Task 095f-2ui (review round 1): a send whose outcome is not known. Either it saved part of the change (`isDecisionIncomplete`) or no answer
+ * came back at all (status 0: the request may have been recorded). Either way the form is locked and the repeat is the SAME request: the same
+ * reason, note and ids. The server keeps the first note it saw, so a changed text would be dropped without a word or refused.
+ */
+export const isOutcomeUnknown = (f: ApiFailure): boolean => f.status === 0 || isDecisionIncomplete(f);
+
+/**
  * The sentence shown for a refused decision step. The server's `detail` is its own explanation (ADR-019) and is shown as is, followed by the
  * stable code in brackets (a 403 or 409 is shown with its code); a missing detail falls back to a fixed sentence per status. Raw transport
  * text never reaches here (`toFailure` drops it).

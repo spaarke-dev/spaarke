@@ -11,6 +11,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { CODE_ADJUSTMENT_ID_REUSED } from '../services/decisionApi';
+import { staysInNoteDialog } from '../services/invoiceReviewApi';
 import { CODE_NOTE_INVALID_CHARACTERS, CODE_NOTE_TOO_LONG, NOTE_ERROR_CODES, NOTE_MAX_CHARS } from '../services/noteModel';
 
 const REPO = path.resolve(__dirname, '../../../../..');
@@ -113,5 +114,39 @@ describe('the request bodies: `note` is the server\'s member name on every decis
 
   it('(must-not-fire) Accept all Clean takes the decision id only: the page has no note to send there', () => {
     expect(recordMembers(finance('InvoiceLineReviewEndpoints.cs'), 'AcceptCleanRequest')).toEqual(['DecisionId']);
+  });
+});
+
+describe('the 409 codes a dialog keeps open for a resend (review round 1)', () => {
+  const lineCodes = () => stringConsts(read(`${BFF}/Services/Finance/InvoiceLineDecisionService.cs`));
+  const correctionCodes = () => stringConsts(read(`${BFF}/Services/Finance/InvoiceCorrectionService.cs`));
+  const conflict = (errorCode: string | null, status = 409) => ({ status, errorCode, detail: null, signInFailed: false, failedStep: null, committedLineIds: [] });
+
+  it('every server code the page keeps a dialog open for is one the server really sends', () => {
+    const l = lineCodes();
+    const c = correctionCodes();
+    const stays = [l.Busy, l.LinePending, l.CorrectionsPending, l.TotalsRefused, c.FirmMissing, c.CodeSetUnavailable, c.ExtractionUnavailable];
+    for (const code of stays) {
+      expect(typeof code).toBe('string');
+      expect(staysInNoteDialog(conflict(code))).toBe(true);
+    }
+  });
+
+  it('(must-not-fire) the server codes that say the invoice or line is no longer what the form was about close the dialog', () => {
+    const l = lineCodes();
+    const c = correctionCodes();
+    const closes = [l.NotInReview, l.LineNotDecidable, l.LineChanged, c.InvoiceChanged, c.LineNotCorrectable, c.NoProvenance, c.ProcedureGap, c.TooLarge];
+    for (const code of closes) {
+      expect(typeof code).toBe('string');
+      expect(staysInNoteDialog(conflict(code))).toBe(false);
+    }
+    // Only a 409 with a code is ever kept open.
+    expect(staysInNoteDialog(conflict(l.Busy, 503))).toBe(false);
+    expect(staysInNoteDialog(conflict(null))).toBe(false);
+  });
+
+  it('a "concurrent_change" code of any area is kept open too', () => {
+    expect(staysInNoteDialog(conflict('ebilling.blocked.concurrent_change'))).toBe(true);
+    expect(staysInNoteDialog(conflict('ebilling.invoice.concurrent_change'))).toBe(true);
   });
 });
