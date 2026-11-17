@@ -1632,10 +1632,10 @@ Spaarke.Document.openInDesktop = async function(primaryControl) {
                     }, 500);
                 }
             } else {
-                console.warn("[Spaarke.Document] No desktop URL available for document");
-                await Xrm.Navigation.openErrorDialog({
-                    message: "This document cannot be opened in a desktop application."
-                });
+                // Not an Office file (the enable rule normally hides this button for those): download it so the
+                // browser hands it to the user's default app — the same behaviour as every other surface (ISS-004).
+                console.log("[Spaarke.Document] No desktop URL for this file type; downloading instead");
+                await Spaarke.Document.downloadDocument(primaryControl);
             }
 
         } else {

@@ -70,3 +70,6 @@ export type { ILookupItem } from './types/LookupTypes';
 
 // ─── Utilities (no React dependency) ────────────────────────────────────────
 export { createLogger } from './utils/logger';
+// "Open in desktop" (ISS-004): import-free, so PCFs can use it — or deep-import dist/utils/openInDesktopApp.
+export { openInDesktopApp, saveBlobAsFile, documentContentUrl } from './utils/openInDesktopApp';
+export type { IDesktopOpenLinks, IOpenInDesktopAppOptions, DesktopOpenResult } from './utils/openInDesktopApp';

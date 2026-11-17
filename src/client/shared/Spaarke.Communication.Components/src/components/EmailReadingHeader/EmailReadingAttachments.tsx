@@ -34,7 +34,8 @@ import {
   MessageBar,
   MessageBarBody,
 } from '@fluentui/react-components';
-import { RichFilePreviewDialog } from '@spaarke/ui-components';
+import { RichFilePreviewDialog, openInDesktopApp } from '@spaarke/ui-components';
+import { authenticatedFetch } from '@spaarke/auth';
 import {
   CommunicationAttachmentsService,
   AttachmentApiService,
@@ -80,9 +81,8 @@ function toAttachmentsWebApi(dataService: {
   };
 }
 
-/** Open a URL in a new tab. Best-effort — no-op when both URLs are absent. */
-function openExternal(desktopUrl: string | null, webUrl: string | null): void {
-  const url = desktopUrl || webUrl;
+/** Open a web URL in a new tab ("Open in desktop" uses the shared openInDesktopApp instead). */
+function openExternal(url: string | null): void {
   if (!url) return;
   window.open(url, '_blank', 'noopener');
 }
@@ -230,9 +230,26 @@ export const EmailReadingAttachments: React.FC<IEmailReadingAttachmentsProps> = 
           fetchPreviewUrl={() => apiService.getPreviewUrl(previewItem.documentId as string)}
           onOpenFile={mode => {
             void (async () => {
-              const links = await apiService.getOpenLinks(previewItem.documentId as string);
+              const documentId = previewItem.documentId as string;
+              const links = await apiService.getOpenLinks(documentId);
               if (!links) return;
-              openExternal(mode === 'desktop' ? links.desktopUrl : null, links.webUrl);
+              if (mode !== 'desktop') {
+                openExternal(links.webUrl);
+                return;
+              }
+              // Office files open in the Office app; anything else downloads through the BFF (shared
+              // behaviour, ISS-004) — not the SharePoint webUrl, which a read-only user cannot open.
+              try {
+                await openInDesktopApp({
+                  bffBaseUrl: apiBaseUrl,
+                  documentId,
+                  links,
+                  fetch: authenticatedFetch,
+                  fallbackFileName: previewItem.name || previewItem.documentName || undefined,
+                });
+              } catch (err) {
+                console.error('[EmailReadingAttachments] Open in desktop failed:', err);
+              }
             })();
           }}
           onOpenRecord={() => {

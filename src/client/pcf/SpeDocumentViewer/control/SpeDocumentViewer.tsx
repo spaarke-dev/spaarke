@@ -26,10 +26,12 @@ import { Toolbar } from './components/Toolbar';
 import { CheckInDialog } from './components/CheckInDialog';
 import { DiscardConfirmDialog } from './components/DiscardConfirmDialog';
 import { BffClient, describeDeleteFailure } from './BffClient';
+import { authenticatedFetch } from '@spaarke/auth';
+import { openInDesktopApp } from '@spaarke/ui-components/dist/utils/openInDesktopApp';
 import './css/SpeDocumentViewer.css';
 
 // Control version — keep in sync with ControlManifest.Input.xml (per /pcf-deploy skill)
-const CONTROL_VERSION = '1.0.29';
+const CONTROL_VERSION = '1.0.30';
 const BUILD_DATE = '2026-10-08';
 
 /**
@@ -260,17 +262,18 @@ export const DocumentViewerApp: React.FC<DocumentViewerProps> = ({
 
     try {
       const response = await bffClient.current.getOpenLinks(documentId, correlationId);
-
-      if (response.desktopUrl) {
-        // Open desktop app using protocol URL
-        window.location.href = response.desktopUrl;
-      } else {
-        console.warn('[SpeDocumentViewer] No desktop URL available');
-      }
+      // Office files open in the Office app; anything else downloads through the BFF (shared
+      // behaviour, ISS-004). Before this, a non-Office file did nothing here.
+      await openInDesktopApp({
+        bffBaseUrl: bffApiUrl,
+        documentId,
+        links: response,
+        fetch: authenticatedFetch,
+      });
     } catch (err) {
-      console.error('[SpeDocumentViewer] Get open links failed:', err);
+      console.error('[SpeDocumentViewer] Open in desktop failed:', err);
     }
-  }, [documentId, correlationId]);
+  }, [documentId, correlationId, bffApiUrl]);
 
   /**
    * Handle open in web button click - opens Office Online in new tab
