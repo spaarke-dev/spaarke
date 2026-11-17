@@ -914,6 +914,54 @@ public class ExternalParticipationService
     private const int FlagQueryChunkSize = 50;
 
     /// <summary>
+    /// #2845 round 2: most chunk queries one batched read keeps in flight. The reads share the BFF's app identity with every
+    /// other request (Dataverse's service protection counts concurrent requests per identity), so the fan-out is bounded;
+    /// a typical composition (≤ 300 ids) needs one round trip instead of one per chunk.
+    /// </summary>
+    internal const int MaxConcurrentChunkQueries = 6;
+
+    /// <summary>
+    /// #2845 round 2: <paramref name="read"/> over each <see cref="FlagQueryChunkSize"/> chunk of <paramref name="ids"/>,
+    /// at most <see cref="MaxConcurrentChunkQueries"/> in flight; the answers in chunk order. A chunk that throws propagates
+    /// once every started chunk has finished (Task.WhenAll), so the caller's fail-closed catch sees it and nothing is left
+    /// unobserved.
+    /// </summary>
+    /// <remarks>#2845 F-R3: the first chunk that THROWS cancels its siblings (a token linked to <paramref name="ct"/>, passed
+    /// to the fan-out wait and to every read), because a throw already fails every id of the batch closed in the caller's
+    /// catch: the siblings' answers would be discarded, so they stop instead of loading Dataverse. The outcome is unchanged.
+    /// A chunk that ANSWERS with its own fail-closed values (a non-success status) does not cancel anything: the other
+    /// chunks' answers still stand.</remarks>
+    internal static async Task<T[]> ForEachChunkAsync<T>(
+        IReadOnlyList<Guid> ids, Func<List<Guid>, CancellationToken, Task<T>> read, CancellationToken ct)
+    {
+        var chunks = ids.Chunk(FlagQueryChunkSize).Select(c => c.ToList()).ToList();
+        if (chunks.Count == 1)
+        {
+            return new[] { await read(chunks[0], ct).ConfigureAwait(false) };
+        }
+
+        using var siblings = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        using var gate = new SemaphoreSlim(MaxConcurrentChunkQueries, MaxConcurrentChunkQueries);
+        return await Task.WhenAll(chunks.Select(async chunk =>
+        {
+            await gate.WaitAsync(siblings.Token).ConfigureAwait(false);
+            try
+            {
+                return await read(chunk, siblings.Token).ConfigureAwait(false);
+            }
+            catch
+            {
+                siblings.Cancel(); // the batch is failed closed already: stop the rest
+                throw;
+            }
+            finally
+            {
+                gate.Release();
+            }
+        })).ConfigureAwait(false);
+    }
+
+    /// <summary>
     /// Reads the veto flags for a batch of root records (NFR-02: batched — never a per-record round trip).
     /// </summary>
     /// <remarks>
@@ -956,9 +1004,19 @@ public class ExternalParticipationService
             var token = await GetAppOnlyTokenAsync(ct);
             var apiUrl = GetDataverseApiUrl();
 
-            for (var offset = 0; offset < distinct.Count; offset += FlagQueryChunkSize)
+            // #2845 round 2: the chunks are independent queries — sent concurrently (bounded, ForEachChunkAsync), each decided
+            // exactly as before; a chunk that throws still fails every id closed (the catch below), once every chunk has finished.
+            foreach (var chunkAnswer in await ForEachChunkAsync(distinct, ReadChunkAsync, ct).ConfigureAwait(false))
             {
-                var chunk = distinct.Skip(offset).Take(FlagQueryChunkSize).ToList();
+                foreach (var (id, value) in chunkAnswer)
+                {
+                    flags[id] = value;
+                }
+            }
+
+            async Task<Dictionary<Guid, RootRecordFlags>> ReadChunkAsync(List<Guid> chunk, CancellationToken chunkCt)
+            {
+                var part = new Dictionary<Guid, RootRecordFlags>();
                 var idFilter = string.Join(" or ", chunk.Select(id => $"{source.IdAttribute} eq {id}"));
                 var query = $"{apiUrl}/{source.Collection}" +
                             $"?$filter=({idFilter})" +
@@ -970,7 +1028,7 @@ public class ExternalParticipationService
                 request.Headers.Add("OData-Version", "4.0");
                 request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
 
-                var response = await _httpClient.SendAsync(request, ct);
+                var response = await _httpClient.SendAsync(request, chunkCt);
                 if (!response.IsSuccessStatusCode)
                 {
                     _logger.LogError(
@@ -979,19 +1037,19 @@ public class ExternalParticipationService
                         entityType, chunk.Count, response.StatusCode);
                     foreach (var id in chunk)
                     {
-                        flags[id] = RootRecordFlags.Unreadable;
+                        part[id] = RootRecordFlags.Unreadable;
                     }
-                    continue;
+                    return part;
                 }
 
-                var result = await response.Content.ReadFromJsonAsync<DataverseQueryResult<RootFlagRow>>(ct);
+                var result = await response.Content.ReadFromJsonAsync<DataverseQueryResult<RootFlagRow>>(chunkCt);
                 var byId = (result?.Value ?? new List<RootFlagRow>())
                     .GroupBy(r => r.GetId(source.IdAttribute))
                     .ToDictionary(g => g.Key, g => g.First());
 
                 foreach (var id in chunk)
                 {
-                    flags[id] = byId.TryGetValue(id, out var row)
+                    part[id] = byId.TryGetValue(id, out var row)
                         ? FlagsFrom(row.sprk_issecure, row.sprk_accesspermission, row.statecode)
                         // Asked about, not returned. Cannot be distinguished from an unreadable row.
                         : RootRecordFlags.Unreadable;
@@ -1006,6 +1064,7 @@ public class ExternalParticipationService
                             entityType, id);
                     }
                 }
+                return part;
             }
         }
         catch (Exception ex)
@@ -1262,9 +1321,19 @@ public class ExternalParticipationService
             var token = await GetAppOnlyTokenAsync(ct);
             var apiUrl = GetDataverseApiUrl();
 
-            for (var offset = 0; offset < distinct.Count; offset += FlagQueryChunkSize)
+            // #2845 round 2: the chunks are independent queries — sent concurrently (bounded, ForEachChunkAsync), each decided
+            // exactly as before; a chunk that throws still fails every id closed (the catch below), once every chunk has finished.
+            foreach (var chunkAnswer in await ForEachChunkAsync(distinct, ReadChunkAsync, ct).ConfigureAwait(false))
             {
-                var chunk = distinct.Skip(offset).Take(FlagQueryChunkSize).ToList();
+                foreach (var (id, value) in chunkAnswer)
+                {
+                    result[id] = value;
+                }
+            }
+
+            async Task<Dictionary<Guid, ReferencedOrganizations>> ReadChunkAsync(List<Guid> chunk, CancellationToken chunkCt)
+            {
+                var part = new Dictionary<Guid, ReferencedOrganizations>();
                 var idFilter = string.Join(" or ", chunk.Select(id => $"{source.IdAttribute} eq {id}"));
                 var query = $"{apiUrl}/{source.Collection}" +
                             $"?$filter=({idFilter})" +
@@ -1276,7 +1345,7 @@ public class ExternalParticipationService
                 request.Headers.Add("OData-Version", "4.0");
                 request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
 
-                var response = await _httpClient.SendAsync(request, ct);
+                var response = await _httpClient.SendAsync(request, chunkCt);
                 if (!response.IsSuccessStatusCode)
                 {
                     _logger.LogError(
@@ -1285,25 +1354,26 @@ public class ExternalParticipationService
                         entityType, chunk.Count, response.StatusCode);
                     foreach (var id in chunk)
                     {
-                        result[id] = ReferencedOrganizations.Unresolved;
+                        part[id] = ReferencedOrganizations.Unresolved;
                     }
-                    continue;
+                    return part;
                 }
 
-                var payload = await response.Content.ReadFromJsonAsync<DataverseQueryResult<OrganizationReferenceRow>>(ct);
+                var payload = await response.Content.ReadFromJsonAsync<DataverseQueryResult<OrganizationReferenceRow>>(chunkCt);
                 var byId = (payload?.Value ?? new List<OrganizationReferenceRow>())
                     .GroupBy(r => r.GetId(source.IdAttribute))
                     .ToDictionary(g => g.Key, g => g.First());
 
                 foreach (var id in chunk)
                 {
-                    result[id] = byId.TryGetValue(id, out var row) && row.EveryLookupReturned
+                    part[id] = byId.TryGetValue(id, out var row) && row.EveryLookupReturned
                         ? new ReferencedOrganizations(row.ReferencedOrganizationIds(), Unreadable: false)
                         // Asked about, not returned - or returned WITHOUT one of its org-lookup properties (a property absent from the response; an
                         // empty lookup is an explicit null). Neither can be told from an unreadable row, and an org slot that was not read must
                         // not read as an empty one: that would be "references no organization" (D-110).
                         : ReferencedOrganizations.Unresolved;
                 }
+                return part;
             }
         }
         catch (Exception ex)

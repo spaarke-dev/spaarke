@@ -564,6 +564,10 @@ public sealed class CiamContactPrincipalStrategy : ICallerPrincipalStrategy
         // plane composition the workforce contact also uses. Nothing here reads a grant's level: the
         // evaluator decides which level counts (DirectAccessLevel on a Secure root) and which records
         // survive (deny list, then Restricted).
+        //
+        // #2851: the request's access memo is created HERE, single-threaded, before the three concurrent compositions
+        // start, so none of them is the first to touch HttpContext.Items (RequestAccessMemo.For).
+        RequestAccessMemo.For(httpContext);
         var principal = (await ComposeAsync(_accessibleSet, contactId, email, oid, httpContext.RequestAborted)
             .ConfigureAwait(false)).Principal;
 
@@ -849,6 +853,10 @@ public sealed class WorkforcePrincipalStrategy : ICallerPrincipalStrategy
         }
 
         var principal = resolution.Principal!;
+
+        // #2851: the request's access memo is created HERE, single-threaded, before the three concurrent compositions
+        // start, so none of them is the first to touch HttpContext.Items (RequestAccessMemo.For).
+        RequestAccessMemo.For(httpContext);
         var composed = await ComposeAsync(
                 _accessibleSet, principal, WorkforcePrincipalResolver.ExtractTokenEmail(httpContext.User), httpContext.RequestAborted)
             .ConfigureAwait(false);

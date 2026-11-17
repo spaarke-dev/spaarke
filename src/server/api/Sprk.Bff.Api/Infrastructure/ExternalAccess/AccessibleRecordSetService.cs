@@ -1382,14 +1382,24 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
     /// </remarks>
     /// <param name="ancestry">What the candidates are filed under (task 174), or <c>null</c> for a table that files under
     /// nothing.</param>
+    /// <param name="referencedOrgsRead">#2845 round 2: the composition's read of the candidates' referenced organizations,
+    /// started alongside its flag read (the request memo's per-id read); awaited here exactly where the read was made.
+    /// <c>null</c> (the write-time check): read here, live, as before.</param>
     private async Task<DenyVetoResult> ResolveDenyVetoAsync(
         string entityType,
         IReadOnlyCollection<Guid> candidateIds,
         Guid? subjectContactId,
         ActiveOrgMemberships subjectOrgs,
         IReadOnlyDictionary<Guid, Sprk.Bff.Api.Services.Access.SecureParentsAnswer>? ancestry,
-        CancellationToken ct)
+        CancellationToken ct,
+        Task<IReadOnlyDictionary<Guid, ReferencedOrganizations>>? referencedOrgsRead = null)
     {
+        if (referencedOrgsRead is not null)
+        {
+            // An early return below does not need it; its fault (if any) is still observed, never left unobserved.
+            Observe(referencedOrgsRead);
+        }
+
         if (candidateIds.Count == 0)
         {
             return DenyVetoResult.None;
@@ -1427,10 +1437,13 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
             // #1425 (owner rounds 61/82, round 83 item 10): the secure matters and projects each candidate is filed under, at
             // any depth, each carrying its OWN referenced organizations. A candidate whose filing or an ancestor's
             // organizations cannot be read is unverifiable (fail closed). A matter, or no walk, has no ancestry.
-            var secureAncestry = await BuildSecureAncestryAsync(entityType, candidateIds, ancestry, ct).ConfigureAwait(false);
-
-            var referencedOrgs = await _participations
-                .GetReferencedOrganizationIdsAsync(entityType, candidateIds, ct).ConfigureAwait(false);
+            // #2845 round 2: the ancestors' organizations and the candidates' own are independent reads — made concurrently.
+            var referencedOrgsTask = referencedOrgsRead
+                ?? _participations.GetReferencedOrganizationIdsAsync(entityType, candidateIds, ct);
+            Observe(referencedOrgsTask);
+            var secureAncestry = await BuildSecureAncestryAsync(
+                entityType, candidateIds, ancestry, ct, memoized: referencedOrgsRead is not null).ConfigureAwait(false);
+            var referencedOrgs = await referencedOrgsTask.ConfigureAwait(false);
 
             var unverifiable = new HashSet<Guid>(secureAncestry.Unverifiable);
             var candidateRecords = new List<NoAccessCandidateRecord>(candidateIds.Count);
@@ -1581,8 +1594,15 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
         ActiveOrgMemberships linkedContactOrgs,
         IReadOnlyDictionary<Guid, RootRecordFlags> flags,
         IReadOnlyDictionary<Guid, Sprk.Bff.Api.Services.Access.SecureParentsAnswer>? ancestryAnswers,
-        CancellationToken ct)
+        CancellationToken ct,
+        Task<IReadOnlyDictionary<Guid, ReferencedOrganizations>>? referencedOrgsRead = null)
     {
+        if (referencedOrgsRead is not null)
+        {
+            // #2845 round 2: prefetched by the composition; an early return below does not need it (its fault is observed).
+            Observe(referencedOrgsRead);
+        }
+
         if (candidateIds.Count == 0)
         {
             return SystemUserDenyVeto.None;
@@ -1616,15 +1636,17 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
             // #1410 / owner round 82 ("the parent permissions control"): EVERY work assignment and project is walked, secure
             // or not — a record filed under a secure parent is governed by that parent's list whatever its own flag reads.
             // One batched walk; a matter composition reads nothing here.
-            var ancestry = await BuildSecureAncestryAsync(entityType, candidateIds, ancestryAnswers, ct).ConfigureAwait(false);
+            var ancestry = await BuildSecureAncestryAsync(
+                entityType, candidateIds, ancestryAnswers, ct, memoized: true).ConfigureAwait(false);
             if (!anySecure && !hasContactAxis && ancestry.AncestorsOf.Count == 0 && ancestry.Unverifiable.Count == 0)
             {
                 // Nothing could match: no secure candidate, no secure parent above any candidate, no contact axis.
                 return SystemUserDenyVeto.None;
             }
 
-            var referencedOrgs = await _participations
-                .GetReferencedOrganizationIdsAsync(entityType, candidateIds, ct).ConfigureAwait(false);
+            var referencedOrgs = await (referencedOrgsRead
+                    ?? ReadReferencedOrganizationsAsync(entityType, candidateIds, ct))
+                .ConfigureAwait(false);
 
             var removeWhole = new HashSet<Guid>(ancestry.Unverifiable);
             var contactSourced = new HashSet<Guid>();
@@ -1655,12 +1677,27 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
                 .Select(c => c.RecordId)
                 .ToHashSet();
 
+            // #2845 round 2: the non-secure query (below) does not depend on the secure one: it is started first and
+            // awaited after, so the two run concurrently. Same subjects, same candidates, same decision as before.
+            var openSubjects = new NoAccessSubjects(
+                hasContact ? new[] { linkedContactId!.Value } : Array.Empty<Guid>(),
+                linkedContactOrgs.WallSubjectOrganizationIds,
+                SystemUserId: null);
+            var openQuery = openBatch.Count > 0 && hasContactAxis
+                ? _noAccessList.GetDeniedRecordsAsync(openSubjects, openBatch, ct)
+                : null;
+            if (openQuery is not null)
+            {
+                Observe(openQuery);
+            }
+
             // ── Secure candidates, and every candidate with a secure ancestor: the write-time guard's subjects, read
             //    status-first (task 143 r1) ──
             if (secureBatch.Count > 0 || walled.Count > 0)
             {
-                var subjects = await SecureShareNoAccessGuard.ResolveSubjectsAsync(
-                        _identityStore, _participations, systemUserId,
+                // #2845 round 2: once per request for the same principal inputs (a readable answer only).
+                var subjects = await ResolveSecureVetoSubjectsAsync(
+                        systemUserId,
                         hasContact ? linkedContactId : null,
                         hasContact ? linkedContactOrgs : null,
                         ct)
@@ -1704,14 +1741,9 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
             }
 
             // ── Non-secure candidates: the derived contact's grant contribution only (owner N3) ──
-            if (openBatch.Count > 0 && hasContactAxis)
+            if (openQuery is not null)
             {
-                var openSubjects = new NoAccessSubjects(
-                    hasContact ? new[] { linkedContactId!.Value } : Array.Empty<Guid>(),
-                    linkedContactOrgs.WallSubjectOrganizationIds,
-                    SystemUserId: null);
-
-                var openResult = await _noAccessList.GetDeniedRecordsAsync(openSubjects, openBatch, ct).ConfigureAwait(false);
+                var openResult = await openQuery.ConfigureAwait(false);
                 if (openResult is null || openResult.FailedClosed)
                 {
                     removeWhole.UnionWith(openBatch.Select(c => c.RecordId));
@@ -1784,7 +1816,8 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
     /// </summary>
     private async Task<SecureAncestry> BuildSecureAncestryAsync(
         string entityType, IReadOnlyCollection<Guid> candidateIds,
-        IReadOnlyDictionary<Guid, Sprk.Bff.Api.Services.Access.SecureParentsAnswer>? answers, CancellationToken ct)
+        IReadOnlyDictionary<Guid, Sprk.Bff.Api.Services.Access.SecureParentsAnswer>? answers, CancellationToken ct,
+        bool memoized = false)
     {
         if (candidateIds.Count == 0 || answers is null || !SecureRootInheritance.Inherits(entityType))
         {
@@ -1823,14 +1856,28 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
             }
         }
 
-        // Each ancestor's own referenced organizations: one batched read per table (matters, projects).
+        // Each ancestor's own referenced organizations: one batched read per table (matters, projects). #2845 round 2: the
+        // tables are read concurrently, and — in a composition — per id once per request (an ancestor matter is often the
+        // matter composition's own candidate); results are folded in table order, as before.
         var ancestors = new List<NoAccessCandidateRecord>();
         var unreadable = new HashSet<Guid>();
-        foreach (var table in ancestorTables.GroupBy(a => a.Value, StringComparer.OrdinalIgnoreCase))
+        var tableReads = ancestorTables.GroupBy(a => a.Value, StringComparer.OrdinalIgnoreCase)
+            .Select(table =>
+            {
+                var ids = table.Select(a => a.Key).ToList();
+                return (Table: table.Key, Ids: ids, Read: memoized
+                    ? ReadReferencedOrganizationsAsync(table.Key, ids, ct)
+                    : _participations.GetReferencedOrganizationIdsAsync(table.Key, ids, ct));
+            })
+            .ToList();
+        foreach (var (_, _, read) in tableReads)
         {
-            var ids = table.Select(a => a.Key).ToList();
-            var referenced = await _participations
-                .GetReferencedOrganizationIdsAsync(table.Key, ids, ct).ConfigureAwait(false);
+            Observe(read);
+        }
+
+        foreach (var (tableName, ids, read) in tableReads)
+        {
+            var referenced = await read.ConfigureAwait(false);
             foreach (var id in ids)
             {
                 if (referenced.TryGetValue(id, out var refs) && refs.Unreadable)
@@ -1839,7 +1886,7 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
                     continue;
                 }
 
-                ancestors.Add(new NoAccessCandidateRecord(table.Key, id,
+                ancestors.Add(new NoAccessCandidateRecord(tableName, id,
                     referenced.TryGetValue(id, out var resolved) ? resolved.OrganizationIds : Array.Empty<Guid>()));
             }
         }
@@ -1978,6 +2025,7 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
             throw new ArgumentException("entityType must not be null/empty/whitespace.", nameof(entityType));
         }
 
+        PrepareRequestMemo(); // #2851: before the composition's concurrent reads
         return principal.Kind switch
         {
             WorkforcePrincipalKind.SystemUser => await ComposeForSystemUserAsync(principal, entityType, ct)
@@ -2005,6 +2053,7 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
             throw new ArgumentException("entityType must not be null/empty/whitespace.", nameof(entityType));
         }
 
+        PrepareRequestMemo(); // #2851: before the composition's concurrent reads
         return ComposeContactPlaneAsync(contactId, entityType, includeDerivedMemberTerms: false, ct);
     }
 
@@ -2081,6 +2130,7 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
 
         try
         {
+            PrepareRequestMemo(); // #2851: before the veto's concurrent reads
             // The contact's OWN memberships, read once by the same reader the composition uses (statecode-only wall set,
             // owner D-2 part 2 / D-10). None when there is no contact — not a fault. A fault is ActiveOrgMemberships.Failed.
             var contactOrgs = await ReadActiveOrgMembershipsAsync(granteeContactId, ct).ConfigureAwait(false);
@@ -2413,7 +2463,12 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
                 // term is untouched: internal access is Dataverse's answer, not the contact's.
                 if (GrantedIdsFor(grants, entityType).Any())
                 {
-                    var linkedState = await _participations.ReadContactStateAsync(resolved, ct).ConfigureAwait(false);
+                    // #2845 round 2: the state and the removed marker are independent reads of the same contact — read
+                    // concurrently. The decision is unchanged: the state decides first, the marker only when Active.
+                    var linkedStateRead = _participations.ReadContactStateAsync(resolved, ct);
+                    var linkedMarkerRead = ReadRemovedMarkerAsync(resolved, ct);
+                    Observe(linkedMarkerRead);
+                    var linkedState = await linkedStateRead.ConfigureAwait(false);
                     if (linkedState != ContactRecordState.Active)
                     {
                         _logger.LogWarning(
@@ -2423,7 +2478,7 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
                         grants = null;
                         contactGrantsApplied = false;
                     }
-                    else if (await ReadRemovedMarkerAsync(resolved, ct).ConfigureAwait(false) is var linkedMarker
+                    else if (await linkedMarkerRead.ConfigureAwait(false) is var linkedMarker
                              && linkedMarker != RemovedMarkerRead.NotRemoved)
                     {
                         // Slice C: likewise a linked contact whose external access was removed, or whose marker cannot be
@@ -2450,10 +2505,32 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
         // Task 174 (owner round 84; #1442): the EFFECTIVE flags — each candidate's own, folded with every record it is filed
         // under (secure-if-any; Restricted over Limited), through the ONE filing walk. The same walk answers the veto's
         // parent lists below (#1410), so it is read once per composition. A matter reads nothing extra.
-        var ancestry = await EffectiveRootFlags.ReadAncestryAsync(_dataverse, _logger, entityType, candidates, ct)
-            .ConfigureAwait(false);
-        var flags = EffectiveRootFlags.Fold(
-            await _participations.GetRootRecordFlagsAsync(entityType, candidates, ct).ConfigureAwait(false), ancestry);
+        //
+        // #2845 round 2: the walk, the own-flag read, and the two veto inputs that depend only on the candidate list — the
+        // linked contact's organizations and the candidates' referenced organizations — are independent, so they are read
+        // CONCURRENTLY here instead of one after another. Each is read under exactly the condition the veto below reads it
+        // (the organizations: candidates, and not the unreadable-contact path; the referenced organizations: also a contact,
+        // because only then does the veto always need them); the veto awaits them where it used to read them, so a fault
+        // still lands in the same fail-closed branch. Per id once per request (RequestAccessMemo).
+        var vetoReadsOrganizations = candidates.Count > 0
+                                     && !(principal.ContactUnreadable && IsGrantSupported(entityType));
+        var ancestryRead = ReadAncestryAsync(entityType, candidates, ct);
+        var ownFlagsRead = ReadRootFlagsAsync(entityType, candidates, ct);
+        var activeOrgsRead = vetoReadsOrganizations
+            ? ReadActiveOrgMembershipsAsync(grantContactId, ct)
+            : Task.FromResult(ActiveOrgMemberships.None);
+        var referencedOrgsRead = vetoReadsOrganizations && grantContactId is not null
+            ? ReadReferencedOrganizationsAsync(entityType, candidates, ct)
+            : null;
+        Observe(ownFlagsRead);
+        Observe(activeOrgsRead);
+        if (referencedOrgsRead is not null)
+        {
+            Observe(referencedOrgsRead);
+        }
+
+        var ancestry = await ancestryRead.ConfigureAwait(false);
+        var flags = EffectiveRootFlags.Fold(await ownFlagsRead.ConfigureAwait(false), ancestry);
         var isDirectOnly = DirectOnlyPredicate(flags);
 
         // Term 1 — the systemuser's own term: ADR-034 membership (flag off) or Dataverse's answer at Read (flag on, task
@@ -2560,6 +2637,11 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
         // the same). The write-time CheckGranteeNoAccessAsync never sees a principal's contact: its subject is the
         // caller-supplied grantee, and an unreadable read there (memberships, referenced organizations, the reader)
         // answers NoAccessCheckAnswer.Unverifiable, never Denied.
+        // #2845 round 2: the Restricted survivor's input (sprk_isexternal, read only when a candidate is Restricted) does not
+        // depend on the veto, so it is read while the veto runs. Its fault answers "external" inside it, as before.
+        var survivesRestrictedRead = SurvivesRestrictedForSystemUserAsync(systemUserId, entityType, ownTerm, flags, ct);
+        Observe(survivesRestrictedRead);
+
         SystemUserDenyVeto veto;
         if (principal.ContactUnreadable && IsGrantSupported(entityType) && candidates.Count > 0)
         {
@@ -2572,14 +2654,13 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
         }
         else
         {
-            var activeOrgs = candidates.Count == 0
-                ? ActiveOrgMemberships.None
-                : await ReadActiveOrgMembershipsAsync(grantContactId, ct).ConfigureAwait(false);
+            // Started above, with the flags (#2845 round 2): None when there are no candidates, as before.
+            var activeOrgs = await activeOrgsRead.ConfigureAwait(false);
 
             // Task 143 (owner Q4, N2, N3): three subjects — this systemuser, its linked contact, that contact's
             // organizations — split by whether the record is secure. See ResolveSystemUserDenyVetoAsync.
             veto = await ResolveSystemUserDenyVetoAsync(
-                    entityType, candidates, systemUserId, grantContactId, activeOrgs, flags, ancestry, ct)
+                    entityType, candidates, systemUserId, grantContactId, activeOrgs, flags, ancestry, ct, referencedOrgsRead)
                 .ConfigureAwait(false);
         }
 
@@ -2588,7 +2669,7 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
             veto.RemoveWhole,
             flags,
             // Flag on, this is the Dataverse term at Read (amendment 3 of 2026-09-30): the constant cannot creep back here.
-            await SurvivesRestrictedForSystemUserAsync(systemUserId, entityType, ownTerm, flags, ct).ConfigureAwait(false),
+            await survivesRestrictedRead.ConfigureAwait(false),
             veto.ContactSourcedOnly);
 
         // Last: no key without Read (task 136 · C2). On this plane the reachable case is the linked contact's
@@ -2687,6 +2768,90 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
     private RequestAccessMemo? RequestMemo => RequestAccessMemo.For(_httpContextAccessor?.HttpContext);
 
     /// <summary>
+    /// #2851: creates this request's memo now, while the caller is still single-threaded. Every public entry calls it before
+    /// its first await, because what follows starts concurrent reads that reach <see cref="RequestAccessMemo.For"/>, and the
+    /// first touch of <c>HttpContext.Items</c> must not happen on two threads at once. The caller-principal strategies also
+    /// create it before their three compositions; a caller that starts compositions itself (the Assign Task recipient gate)
+    /// is covered because each composition runs synchronously up to its first await, so the first one creates the memo
+    /// before the next one is started. A no-op outside a request.
+    /// </summary>
+    private void PrepareRequestMemo() => _ = RequestMemo;
+
+    /// <summary>
+    /// #2845 round 2: the root records' own flags, per id once per request (<see cref="RequestAccessMemo.GetOrReadManyAsync{T}"/>):
+    /// an id another composition of this request already read is not read again, and an unreadable id is never remembered
+    /// (only that id is read again; #2845 F-R1). The answer for each id is exactly <see cref="ExternalParticipationService.GetRootRecordFlagsAsync"/>'s.
+    /// </summary>
+    private Task<IReadOnlyDictionary<Guid, RootRecordFlags>> ReadRootFlagsAsync(
+        string entityType, IReadOnlyCollection<Guid> ids, CancellationToken ct)
+    {
+        var memo = RequestMemo;
+        var asked = ids.Where(id => id != Guid.Empty).Distinct().ToList();
+        return memo is null || asked.Count == 0
+            ? _participations.GetRootRecordFlagsAsync(entityType, ids, ct)
+            : memo.GetOrReadManyAsync(
+                RequestAccessMemo.RootFlagsReader(entityType),
+                asked,
+                (missing, token) => _participations.GetRootRecordFlagsAsync(entityType, missing, token),
+                flags => !flags.IsUnreadable,
+                ct);
+    }
+
+    /// <summary>
+    /// #2845 round 2: the records' referenced organizations, per id once per request — shared between a composition's own
+    /// candidates and another composition's secure ancestors (a project's or work assignment's secure matter is the matter
+    /// composition's candidate). An unresolved id is never remembered (only that id is read again; #2845 F-R1).
+    /// </summary>
+    private Task<IReadOnlyDictionary<Guid, ReferencedOrganizations>> ReadReferencedOrganizationsAsync(
+        string entityType, IReadOnlyCollection<Guid> ids, CancellationToken ct)
+    {
+        var memo = RequestMemo;
+        var asked = ids.Where(id => id != Guid.Empty).Distinct().ToList();
+        return memo is null || asked.Count == 0
+            ? _participations.GetReferencedOrganizationIdsAsync(entityType, ids, ct)
+            : memo.GetOrReadManyAsync(
+                RequestAccessMemo.ReferencedOrganizationsReader(entityType),
+                asked,
+                (missing, token) => _participations.GetReferencedOrganizationIdsAsync(entityType, missing, token),
+                refs => !refs.Unreadable,
+                ct);
+    }
+
+    /// <summary>
+    /// #2845 round 2: the candidates' filing (task 174's ONE walk), its row and parent reads shared per id by the
+    /// compositions of one request (a work assignment's walk climbs through the projects the project composition walks).
+    /// </summary>
+    private Task<IReadOnlyDictionary<Guid, Sprk.Bff.Api.Services.Access.SecureParentsAnswer>?> ReadAncestryAsync(
+        string entityType, IReadOnlyCollection<Guid> candidates, CancellationToken ct)
+        => EffectiveRootFlags.ReadAncestryAsync(_dataverse, _logger, entityType, candidates, ct, requestMemo: RequestMemo);
+
+    /// <summary>
+    /// #2845 round 2: the systemuser-plane veto's secure-record subjects (the write-time guard's own resolution), once per
+    /// request for the same principal inputs. Only a readable answer is shared; an unreadable one is asked again.
+    /// </summary>
+    private Task<SystemUserNoAccessSubjects> ResolveSecureVetoSubjectsAsync(
+        Guid systemUserId, Guid? linkedContactId, ActiveOrgMemberships? linkedContactOrgs, CancellationToken ct)
+    {
+        Task<SystemUserNoAccessSubjects> Read(CancellationToken token) => SecureShareNoAccessGuard.ResolveSubjectsAsync(
+            _identityStore, _participations, systemUserId, linkedContactId, linkedContactOrgs, token);
+
+        var memo = RequestMemo;
+        return memo is null
+            ? Read(ct)
+            : memo.GetOrReadAsync(
+                RequestAccessMemo.SecureVetoSubjectsKey(
+                    systemUserId, linkedContactId, linkedContactOrgs?.WallSubjectOrganizationIds),
+                Read,
+                subjects => subjects.Readable,
+                ct);
+    }
+
+    /// <summary>Observes a prefetched read the composition turned out not to need (so its fault is never unobserved).</summary>
+    private static void Observe(Task task) =>
+        _ = task.ContinueWith(t => _ = t.Exception, CancellationToken.None,
+            TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+
+    /// <summary>
     /// #2845: the contact's grant set, read once per request. A FAULTED set (built over a failed read) is never shared: the
     /// next composition reads again, exactly as the grant cache never stores one (task 132).
     /// </summary>
@@ -2753,6 +2918,9 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
         // deactivated after sign-in loses access on its next request. Unreadable or missing is not Active (fail
         // closed, ADR-003). Read before anything else so a deactivated contact costs no grant read, no membership
         // walk and no flag read.
+        // #2845 round 2: the removed marker (read next) is read concurrently with the state; the state still decides first.
+        var removedMarkerRead = ReadRemovedMarkerAsync(contactId, ct);
+        Observe(removedMarkerRead);
         var contactState = await _participations.ReadContactStateAsync(contactId, ct).ConfigureAwait(false);
         if (contactState != ContactRecordState.Active)
         {
@@ -2775,7 +2943,7 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
         // ── Slice C: a contact whose external access an administrator removed confers nothing — read LIVE ──────────
         // Whatever its statecode: reactivating the row does not reinstate the person. An empty marker counts only on a proven
         // read (its own readability proof); a marker that cannot be read, or a read that faults, composes the EMPTY set.
-        var removedMarker = await ReadRemovedMarkerAsync(contactId, ct).ConfigureAwait(false);
+        var removedMarker = await removedMarkerRead.ConfigureAwait(false);
         if (removedMarker != RemovedMarkerRead.NotRemoved)
         {
             // Slice C2c: the same EMPTY set either way; the log tells an administrator's removal from an unproven read.
@@ -2975,10 +3143,31 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
         // Task 174 (owner round 84; #1442): the EFFECTIVE flags, as on the systemuser plane — a work assignment or project
         // filed under a secure, Limited or Restricted parent is cancelled as its parent is, whatever its own flag reads. The
         // same walk feeds the contact-plane veto's secure-parent lists (#1425).
-        var ancestry = await EffectiveRootFlags.ReadAncestryAsync(_dataverse, _logger, entityType, candidates, ct)
-            .ConfigureAwait(false);
-        var flags = EffectiveRootFlags.Fold(
-            await _participations.GetRootRecordFlagsAsync(entityType, candidates, ct).ConfigureAwait(false), ancestry);
+        //
+        // #2845 round 2: the walk, the own-flag read, and the veto's two candidate-only inputs — the subject's organizations
+        // (on CIAM, read here only for the veto) and the candidates' referenced organizations — are read CONCURRENTLY. Each
+        // under the condition the veto reads it (there are candidates; the subject is this contact, so the veto always needs
+        // the referenced organizations unless its organizations are unreadable). The veto awaits them where it used to read
+        // them, so a fault lands in the same fail-closed branch. Per id once per request (RequestAccessMemo).
+        var ancestryRead = ReadAncestryAsync(entityType, candidates, ct);
+        var ownFlagsRead = ReadRootFlagsAsync(entityType, candidates, ct);
+        var subjectOrgsRead = activeOrgs is { } alreadyRead
+            ? Task.FromResult(alreadyRead)
+            : candidates.Count == 0
+                ? Task.FromResult(ActiveOrgMemberships.None)
+                : ReadActiveOrgMembershipsAsync(contactId, ct);
+        var referencedOrgsRead = candidates.Count > 0
+            ? ReadReferencedOrganizationsAsync(entityType, candidates, ct)
+            : null;
+        Observe(ownFlagsRead);
+        Observe(subjectOrgsRead);
+        if (referencedOrgsRead is not null)
+        {
+            Observe(referencedOrgsRead);
+        }
+
+        var ancestry = await ancestryRead.ConfigureAwait(false);
+        var flags = EffectiveRootFlags.Fold(await ownFlagsRead.ConfigureAwait(false), ancestry);
         var isDirectOnly = DirectOnlyPredicate(flags);
 
         // Term 1 — explicit sprk_externalrecordaccess grants, with direct-only suppression applied BEFORE the
@@ -3028,14 +3217,12 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
         // before it would consult the subject, so `None` is never a fail-open there (the systemuser
         // plane's identical gate); with candidates the read happens, and its Unreadable outcome — every
         // fault, query-level included since task 109 — denies every candidate.
-        var subjectOrgs = activeOrgs
-            ?? (candidates.Count == 0
-                ? ActiveOrgMemberships.None
-                : await ReadActiveOrgMembershipsAsync(contactId, ct).ConfigureAwait(false));
+        // #2845 round 2: started above, with the flags.
+        var subjectOrgs = await subjectOrgsRead.ConfigureAwait(false);
 
         // A provable denial and an unverifiable candidate are both removed here (fail closed) — task 142 r4 split them
         // only so the WRITE-time check can report the second as a fault.
-        var veto = await ResolveDenyVetoAsync(entityType, candidates, contactId, subjectOrgs, ancestry, ct)
+        var veto = await ResolveDenyVetoAsync(entityType, candidates, contactId, subjectOrgs, ancestry, ct, referencedOrgsRead)
             .ConfigureAwait(false);
 
         ApplyVetoPipeline(composed, veto.Removed, flags, EmptyRights);
