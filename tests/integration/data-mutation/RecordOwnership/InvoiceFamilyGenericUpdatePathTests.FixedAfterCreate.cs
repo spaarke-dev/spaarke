@@ -146,7 +146,7 @@ public partial class InvoiceFamilyGenericUpdatePathTests
     [Theory]
     [InlineData(GenericPath.PlaybookUpdate, "sprk_invoiceapproval")]
     [InlineData(GenericPath.OutputOrchestrator, "sprk_invoiceapproval")]
-    public async Task AnApprovalOrCorrectionWhoseInvoiceIsCleared_IsRefusedInvoiceCleared_AndNothingIsWritten(GenericPath path, string table)
+    public async Task AnApprovalWhoseInvoiceIsCleared_IsRefusedInvoiceCleared_AndNothingIsWritten(GenericPath path, string table)
     {
         var outcome = await RunAsync(path, table, FamilyRow, Lookups(("sprk_invoice", null)), NoPlain,
             ChildWorld(table, "sprk_invoice", storedInvoice: Invoice).Object);
@@ -301,7 +301,7 @@ public partial class InvoiceFamilyGenericUpdatePathTests
     [Theory]
     [InlineData(GenericPath.PlaybookUpdate, "sprk_invoiceapproval")]
     [InlineData(GenericPath.OutputOrchestrator, "sprk_invoiceapproval")]
-    public async Task OnAPersonsRun_AnApprovalOrCorrectionsInvoiceCleared_IsRefusedInvoiceCleared_WhenThePersonReadsTheRow_AndReadFailedWhenNot(
+    public async Task OnAPersonsRun_AnApprovalsInvoiceCleared_IsRefusedInvoiceCleared_WhenThePersonReadsTheRow_AndReadFailedWhenNot(
         GenericPath path, string table)
     {
         _personRows = (t, id) => t == table && id == FamilyRow

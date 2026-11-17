@@ -21,7 +21,7 @@ deterministic id). That call asks none of the writer-only refusals, so neither w
 | Chat create tool (`DataverseCreateRecordHandler`, validate and execute) | Already refused (the invoice-family block, asked first). It keeps those words; `IsCreatedOnlyByItsWriter` now also answers true for the table. |
 | Chat update tool, Update Record node and action seam, playbook output mapping (`DataverseUpdateHandler`), work-product persister, field-mapping push, child-records update and re-file core | Refused whole by `RecordTableRules.RefuseWriterOnlyTableUpdate` (`record_update.changed_only_by_its_writer`), before any read or write. |
 | Chat delete tool (`DataverseDeleteRecordHandler`) | Refused by `RefuseWriterOnlyTableDelete` (`record_delete.changed_only_by_its_writer`). Delete reads this flag alone. |
-| Record repair pass (`RecordRepairPassJob.ExcludedTables`) | The table joins the tables the pass never sweeps (it excludes every writer-only table). A correction row is never created by the generic service, so it has no generic owner to repair. |
+| Record repair pass (`RecordRepairPassJob.ExcludedTables`) | The table joins the tables the pass never sweeps (it excludes every writer-only table). The pass never wrote a correction row before this change: repair refuses every invoice-family write, failing closed (`RecordCreationService.Repair.cs:225` and `:936-948`, `InvoiceFamilyGuardUnavailable`, TODO #1911). Secure-family ownership of a correction row is still covered by `SecureChildLineage.cs:306` plus the `SecureChildReconciler`, pinned by `SecureChildOrdinaryParentMoveTests.cs:241-255`. |
 
 ## Every reference to the table
 
@@ -38,7 +38,7 @@ deterministic id). That call asks none of the writer-only refusals, so neither w
 | `SecureChildLineage.cs`, `RecordFamilyEdges.cs`, `RecordFamilyReader.cs`, `ParentLineage.cs` | No. Lineage and read registries. The secure-child reconciler re-owns rows with its own app-only writes after a re-file; it does not ask the refusals (the same as for Signals and Decision Records). |
 | `RecordCreatorPerson.cs`, `ExternalTeamShareSynchronizer.cs` (never-shared list), `ExternalInvoiceVisibility.cs` | No. Registries and read filters. |
 | `RecordRepairPassJob.cs` | Yes, by design: the table is no longer swept (see the table above). |
-| Client code, playbook and config files | None reference the table; no generic client caller exists. |
+| Client code, playbooks, config files and `scripts/ebilling/*.ps1` | No client code or playbook references the table, and no generic client caller exists. Several config files (`config/feature-role-privileges.json`, `config/secure-record-owner-role.json`, `config/external-collaborator-role.json`) and `scripts/ebilling/*.ps1` name it for provisioning; none of them writes rows, so none is affected. |
 
 No legitimate writer goes through a generic path the flag refuses, so nothing was widened.
 
@@ -69,3 +69,15 @@ Tests that pinned the old, writable rule and were updated:
 - A new direct writer of correction rows must send them through `IGenericEntityService.ExecuteTransactionAsync` (or another typed path) and be added to `WriterOnlyTablesWritersGuardTests`.
 - The guard's IL scan does not follow a dependency reached only through another type the writer calls (the same limit as for the other writers).
 - Existing rows are unchanged; only future generic writes are refused.
+- Once #1911 lands and repair can write invoice-family rows, a correction row created outside the product stays excluded from the repair pass (it is never swept).
+
+## Review round 1
+
+| Finding | Change |
+|---|---|
+| Repair-pass rationale (notes) | Rewritten: repair already refused every invoice-family write (fail closed, `RecordCreationService.Repair.cs:225`, `:936-948`, TODO #1911), so it never wrote a correction row; secure-family ownership stays covered by `SecureChildLineage.cs:306` and the `SecureChildReconciler` (`SecureChildOrdinaryParentMoveTests.cs:241-255`). New known limit added for the post-#1911 case. |
+| Config claim (notes) | Corrected: the config files and `scripts/ebilling/*.ps1` do reference the table (for provisioning); none writes rows. No role or privilege detail given. |
+| Guard messages | `WriterOnlyTablesWritersGuardTests`: failure messages, the first display name, and the class summary and remarks use generic "writer-only table" wording and name the two correction writers. |
+| Re-file core in the guard's list | `Sprk.Bff.Api.Services.Dataverse.OwnedChildWrite` added to `GeneralUpdate`. No writer in `Services/Signals` or `Services/Finance` references it, so nothing legitimate is flagged. |
+| Pair-agreement theory data | `GenericPathFamilyTables` in `InvoiceFamilyGenericUpdatePathTests.PairAgreement.cs` is a hard-coded array of the three tables, not derived from `RefuseWriterOnlyTableUpdate`. |
+| Test names | The six tests named "ApprovalOrCorrection" now name the approval only (seam tests, two `InvoiceFamilyGenericUpdatePathTests.FixedAfterCreate` tests, the chat-update `InvoiceFamilyFixedAfterCreate` test). Tests in `InvoiceFamilyCoreRecordGuardTests` and the derive tests still cover both tables and keep their names. |

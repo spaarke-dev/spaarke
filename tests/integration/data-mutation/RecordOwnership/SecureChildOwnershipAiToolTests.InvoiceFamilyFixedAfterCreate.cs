@@ -117,7 +117,7 @@ public sealed partial class SecureChildOwnershipAiToolTests
 
     [Theory]
     [InlineData("sprk_invoiceapproval")]
-    public async Task UpdateRecordTool_AnApprovalOrCorrectionsInvoiceCleared_IsRefusedInvoiceCleared_AndNothingIsPatched(string table)
+    public async Task UpdateRecordTool_AnApprovalsInvoiceCleared_IsRefusedInvoiceCleared_AndNothingIsPatched(string table)
     {
         InvoiceChildUnderTheMatter(table, "sprk_invoice", storedInvoice: GuardInvoice);
 

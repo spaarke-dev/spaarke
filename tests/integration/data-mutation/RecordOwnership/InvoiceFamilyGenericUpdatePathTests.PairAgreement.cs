@@ -44,10 +44,10 @@ public partial class InvoiceFamilyGenericUpdatePathTests
     private static (string Column, EntityReference? Record) PairType(Guid catalogRow) =>
         ("sprk_regardingrecordtype", new EntityReference("sprk_recordtype_ref", catalogRow));
 
-    /// <summary>ISS-028 (EB-D-248): the family tables a generic path writes at all. The correction is writer-only, so every generic path
+    /// <summary>ISS-028 (EB-D-248): the family tables a generic path writes at all, named here (not derived from the code under test). The correction is writer-only, so every generic path
     /// refuses it whole before this guard runs (WriterOnlyTablesUpdateRefusalTests); the guard itself still lists it.</summary>
-    private static IEnumerable<string> GenericPathFamilyTables =>
-        InvoiceFamilyCoreRecordGuard.CoreRecordLookups.Keys.Where(t => RecordTableRules.RefuseWriterOnlyTableUpdate(t) is null);
+    private static readonly string[] GenericPathFamilyTables =
+        ["sprk_invoiceapproval", "sprk_externalidentifier", "sprk_invoicesubmission"];
 
     /// <summary>The paths that write a pair they are sent (the push never maps one: the mapping engine skips a rule aimed at the
     /// pair, FR-05(e), so its pair moves only with the core lookup — <see cref="APushRuleAimedAtThePair_IsSkipped_AndNothingIsWritten"/>).</summary>

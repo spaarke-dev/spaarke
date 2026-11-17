@@ -107,7 +107,7 @@ public sealed partial class RecordCreationServicePipelineSeamTests
         return WebApiRequest(table, body);
     }
 
-    public static TheoryData<string, string> ApprovalOrCorrectionWithNoInvoice()
+    public static TheoryData<string, string> ApprovalWithNoInvoice()
     {
         var data = new TheoryData<string, string>();
         foreach (var table in new[] { "sprk_invoiceapproval" })
@@ -117,8 +117,8 @@ public sealed partial class RecordCreationServicePipelineSeamTests
     }
 
     [Theory]
-    [MemberData(nameof(ApprovalOrCorrectionWithNoInvoice))]
-    public async Task CreateAsync_AnApprovalOrCorrectionNamingNoInvoice_Is400InvoiceRequired_AndWritesNothing(string table, string invoice)
+    [MemberData(nameof(ApprovalWithNoInvoice))]
+    public async Task CreateAsync_AnApprovalNamingNoInvoice_Is400InvoiceRequired_AndWritesNothing(string table, string invoice)
     {
         var outcome = await Service().CreateAsync(NoInvoiceRequest(table, "sprk_Invoice_bind", invoice), AsCaller(), CancellationToken.None);
 
@@ -130,7 +130,7 @@ public sealed partial class RecordCreationServicePipelineSeamTests
 
     [Theory]
     [InlineData("sprk_invoiceapproval")]
-    public async Task CreateAsync_AnApprovalOrCorrectionBindingAnEmptyInvoiceId_Is400_AndWritesNothing(string table)
+    public async Task CreateAsync_AnApprovalBindingAnEmptyInvoiceId_Is400_AndWritesNothing(string table)
     {
         // The payload step refuses a binding to an empty id before any rule runs; the guard's own answer to an empty id (the
         // invoice-required code) is pinned in InvoiceFamilyCoreRecordGuardTests.
