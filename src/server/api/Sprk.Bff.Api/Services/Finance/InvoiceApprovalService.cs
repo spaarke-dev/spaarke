@@ -193,6 +193,9 @@ public sealed record ApprovalOpenLinesDto(int Pending, int Flagged)
 /// (082c-2, <see cref="InvoiceProcedureHold"/>).</param>
 /// <param name="BlockedSubmissionHeld">The FR-20 blocked-submission hold alone (<see cref="InvoiceBlockedHold"/>): Reject and Return are refused too
 /// (the submission's Override or Return is the way out). False for a Procedure-only hold, which refuses Approve only.</param>
+/// <param name="IncompleteDecision">ISS-032: a reject, return or approve that moved the invoice's status but whose Decision Record was never
+/// written (<see cref="InvoiceIncompleteDecisionDto"/>), reported only to the caller whose repeat finishes it; null otherwise, and null when
+/// the lookup faulted (never a guess).</param>
 public sealed record InvoiceApprovalStateDto(
     Guid InvoiceId,
     Guid? ApprovalId,
@@ -211,7 +214,20 @@ public sealed record InvoiceApprovalStateDto(
     Guid? DecisionRecordId,
     DateTime? EligibleResolvedOn,
     bool FirmNeeded = false,
-    bool BlockedSubmissionHeld = false);
+    bool BlockedSubmissionHeld = false,
+    InvoiceIncompleteDecisionDto? IncompleteDecision = null);
+
+/// <summary>
+/// ISS-032: a decision of the invoice stranded after its status transition, before it was complete (its Decision Record written AND the
+/// approval portion linked to it, the repeat's own definition). A read-only hint: the caller finishes it by repeating the same decision
+/// (approve, reject or return), under that route's own rules.
+/// </summary>
+/// <param name="Verb"><c>Approve</c>, <c>Reject</c> or <c>Return</c>.</param>
+/// <param name="FailedStep">Where it stopped: <c>portion</c> (no Decision Record; the approval portion's status was not moved yet),
+/// <c>record</c> (no Decision Record; the portion's status moved) or <c>link</c> (the Decision Record exists; a step after it did not
+/// finish: its Signals, the portion's link to it, or the portion's status). At <c>link</c> the repeat finishes from the stored record and
+/// ignores the request's reason and note.</param>
+public sealed record InvoiceIncompleteDecisionDto(string Verb, string? FailedStep);
 
 public sealed record ApprovalResult(
     ApprovalOutcome Outcome,
@@ -451,17 +467,25 @@ public sealed class InvoiceApprovalService
             }
         }
 
+        // ISS-032: the decision the invoice's status shows (Approved, Rejected, Returned to Firm) and the person the portion names as its decider.
+        // Only they finish an unrecorded one (the claimant's repeat, below); the hint is then asked for them alone.
+        var strandedKind = portion is null ? null : StrandedKindOf(InvoiceStatus(invoice));
+        var claimedBy = portion?.GetAttributeValue<EntityReference>(PortionDecidedBy)?.Id is { } c && c != Guid.Empty ? c : (Guid?)null;
+
         // EB-D-171: eligible only by the caller's own contact. Best effort here: a read fault shows "not eligible"; approve refuses it.
         var callerEligible = false;
-        if (set is not null && callerSystemUserId is { } user && user != Guid.Empty)
+        var claimant = false;
+        if ((set is not null || (strandedKind is not null && claimedBy is not null)) && callerSystemUserId is { } user && user != Guid.Empty)
         {
             var contact = await CallerContactAsync(invoiceId, user, ct).ConfigureAwait(false);
-            callerEligible = contact.Failure is null && set.ForContact(contact.ContactId) is not null;
+            callerEligible = set is not null && contact.Failure is null && set.ForContact(contact.ContactId) is not null;
+            claimant = strandedKind is not null && contact.Failure is null && contact.ContactId is { } own && own == claimedBy;
         }
 
-        // F4: canApprove also needs the decide right (Write on the invoice), asked as the caller; "could not answer" is no.
+        // F4: canApprove also needs the decide right (Write on the invoice), asked as the caller; "could not answer" is no. ISS-032: the claimant's
+        // repeat needs it too (the decide routes' filter), so it is asked for them as well; canApprove still needs eligibility.
         var canDecide = false;
-        if (callerEligible && caller is not null)
+        if ((callerEligible || claimant) && caller is not null)
         {
             try
             {
@@ -478,8 +502,87 @@ public sealed class InvoiceApprovalService
         var approveRecorded = portion is not null && StatusOf(portion) == PortionApproved && IsCountedStatus(InvoiceStatus(invoice))
             && (await InvoicesWithApproveRecordAsync(_entities, [invoiceId], _recorder.WriterUserIdAsync, ct).ConfigureAwait(false)).Contains(invoiceId);
 
+        // ISS-032: asked only for the claimant with the decide right; an approve's record read above (approveRecorded) is reused, not read again.
+        var incomplete = claimant && canDecide && portion is not null
+            ? await IncompleteDecisionAsync(invoiceId, portion, strandedKind!.Value, callerEligible, approveRecorded, ct).ConfigureAwait(false)
+            : null;
+
         return State(invoice, portion, lines, held, correctionsPending, set, eligibilityUnavailable: set is null, callerEligible, canDecide, resolvedOn, firmNeeded,
-            approveRecorded, blockedSubmissionHeld);
+            approveRecorded, blockedSubmissionHeld) with
+        { IncompleteDecision = incomplete };
+    }
+
+    /// <summary>ISS-032: the decision a status shows. Approve has no <see cref="InvoiceDecisionKind"/>; null is any status that is not a decision's target.</summary>
+    private enum StrandedKind
+    {
+        Approve,
+        Reject,
+        Return,
+    }
+
+    private static StrandedKind? StrandedKindOf(int? invoiceStatus) =>
+        invoiceStatus == InvoiceStatusCodes.Approved ? StrandedKind.Approve
+        : InvoiceRejectReturnService.KindOfInvoiceStatus(invoiceStatus) switch
+        {
+            InvoiceDecisionKind.Reject => StrandedKind.Reject,
+            InvoiceDecisionKind.Return => StrandedKind.Return,
+            _ => null,
+        };
+
+    /// <summary>
+    /// ISS-032: the hint that the decision the invoice's status shows is not complete, for the claimant who holds the decide right (checked by
+    /// the caller). "Complete" is the claimant's repeat's own definition: the portion has the decision's status AND names its record. Reject
+    /// and return by <see cref="InvoiceRejectReturnService.UnfinishedStepAsync"/>. Approve: <paramref name="approveRecorded"/> (the
+    /// writer-created approve record, the match completion uses, already read for the state when the portion is Approved) or, for a portion
+    /// still Pending, <see cref="WriterApproveRecordsAsync"/>. With the record, an unlinked portion (or one not yet Approved) is <c>link</c>;
+    /// the repeat finishes it without re-checking eligibility (<see cref="CheckCompletionAsync"/> runs only while no record exists), so neither
+    /// does the hint. Without it, the repeat re-checks eligibility before it writes the record, so <c>record</c> and <c>portion</c> are
+    /// hinted only to an eligible caller. A portion that records another decision is not this one's (none). A lookup fault gives no hint and
+    /// is logged (ids only). Read only.
+    /// </summary>
+    private async Task<InvoiceIncompleteDecisionDto?> IncompleteDecisionAsync(
+        Guid invoiceId, Entity portion, StrandedKind kind, bool callerEligible, bool approveRecorded, CancellationToken ct)
+    {
+        string? step;
+        try
+        {
+            step = kind == StrandedKind.Approve
+                ? await UnfinishedApproveStepAsync(invoiceId, portion, callerEligible, approveRecorded, ct).ConfigureAwait(false)
+                : await InvoiceRejectReturnService.UnfinishedStepAsync(
+                    _recorder, kind == StrandedKind.Reject ? InvoiceDecisionKind.Reject : InvoiceDecisionKind.Return, invoiceId, portion, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogWarning("Approval state of invoice {InvoiceId}: whether its {Verb} decision is recorded could not be read ({Fault}); no hint is given.",
+                invoiceId, kind, (ex as DecisionRecordRefusedException)?.Reason.ToString() ?? ex.GetType().Name);
+            return null;
+        }
+
+        return step is null ? null : new InvoiceIncompleteDecisionDto(kind.ToString(), step);
+    }
+
+    /// <summary>ISS-032: the approve half of <see cref="IncompleteDecisionAsync"/>. Throws on a lookup fault.</summary>
+    private async Task<string?> UnfinishedApproveStepAsync(Guid invoiceId, Entity portion, bool callerEligible, bool approveRecorded, CancellationToken ct)
+    {
+        // K1 (as reject and return): a portion that records another decision is not this approve's to finish.
+        var portionStatus = StatusOf(portion);
+        if (portionStatus is not (PortionPending or null) && portionStatus != PortionApproved)
+        {
+            return null;
+        }
+
+        // An Approved portion's record was read for the state (approveRecorded: the same match completion makes), so it is not read again (K3);
+        // a Pending portion's was not, so it is read here.
+        var recorded = portionStatus == PortionApproved
+            ? approveRecorded
+            : (await WriterApproveRecordsAsync(invoiceId, DecisionIdFor(portion.Id), ct).ConfigureAwait(false)).Count > 0;
+        if (recorded)
+        {
+            var linked = portion.GetAttributeValue<EntityReference>(PortionRecord)?.Id is { } link && link != Guid.Empty;
+            return portionStatus == PortionApproved && linked ? null : "link";
+        }
+
+        return !callerEligible ? null : portionStatus == PortionApproved ? "record" : "portion";
     }
 
     // ── POST approve ──

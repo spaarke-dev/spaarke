@@ -283,6 +283,48 @@ public sealed class InvoiceRejectReturnService
     /// <summary>The return's one decision id: derived from the portion.</summary>
     public static Guid ReturnDecisionIdFor(Guid approvalId) => InvoiceSubmissionPersister.IdOf($"{ReturnVerb.KeyPrefix}{approvalId:D}");
 
+    /// <summary>ISS-032: the reject or return whose target status the invoice is in (Rejected or Returned to Firm), or null for any other status.</summary>
+    internal static InvoiceDecisionKind? KindOfInvoiceStatus(int? invoiceStatus) =>
+        invoiceStatus == RejectVerb.InvoiceStatus ? InvoiceDecisionKind.Reject
+        : invoiceStatus == ReturnVerb.InvoiceStatus ? InvoiceDecisionKind.Return
+        : null;
+
+    /// <summary>
+    /// ISS-032: the step a reject or return the invoice's status shows stopped before; null when the decision is complete. Read only, for
+    /// the approval state's hint. "Complete" is the claimant's repeat's own definition (<see cref="CompleteOrNoOpAsync"/>): the portion has
+    /// the verb's status AND names its Decision Record. A portion that records another decision is not this one's to finish (null).
+    /// <list type="bullet">
+    /// <item><c>link</c>: the record exists (the portion names it, or the writer holds it under the derived decision id through
+    /// <see cref="FindStoredRecordAsync"/>, the lookup the repeat's <see cref="ReplaySignalsAsync"/> makes) and a step after it did not
+    /// finish: its Signals, the link, or the portion's status. The repeat finishes it from the stored record and ignores the request's reason.</item>
+    /// <item><c>record</c>: no record, the portion's status moved.</item>
+    /// <item><c>portion</c>: no record, the portion's status not moved yet.</item>
+    /// </list>
+    /// Who may finish it (the claimant, with Write on the invoice) is the caller's to check. Throws on a lookup fault.
+    /// </summary>
+    internal static async Task<string?> UnfinishedStepAsync(
+        BillingDecisionRecorder recorder, InvoiceDecisionKind kind, Guid invoiceId, Entity portion, CancellationToken ct)
+    {
+        var verb = VerbOf(kind);
+        var portionStatus = StatusOf(portion);
+        if (portionStatus is not (InvoiceApprovalService.PortionPending or null) && portionStatus != verb.PortionStatus)
+        {
+            return null;
+        }
+
+        if (portion.GetAttributeValue<EntityReference>(InvoiceApprovalService.PortionRecord)?.Id is { } linked && linked != Guid.Empty)
+        {
+            return portionStatus == verb.PortionStatus ? null : "link";
+        }
+
+        if (await FindStoredRecordAsync(recorder, verb, invoiceId, DecisionIdFor(verb, portion.Id), ct).ConfigureAwait(false) is not null)
+        {
+            return "link";
+        }
+
+        return portionStatus == verb.PortionStatus ? "record" : "portion";
+    }
+
     /// <summary>Rejects the invoice as the caller (final). See the class remarks.</summary>
     /// <param name="note">Task 095f-2a (EB-D-236): the optional decision note; null, empty or whitespace-only means none.</param>
     public Task<InvoiceDecisionResult> RejectAsync(
@@ -879,7 +921,7 @@ public sealed class InvoiceRejectReturnService
         DecisionRecordWriter.BillingStoredResolvedSet? stored;
         try
         {
-            stored = await _recorder.FindStoredResolvedSetAsync(verb.ActionCode, invoiceId, decisionId, ct).ConfigureAwait(false);
+            stored = await FindStoredRecordAsync(_recorder, verb, invoiceId, decisionId, ct).ConfigureAwait(false);
         }
         catch (DecisionRecordRefusedException ex)
         {
@@ -1029,6 +1071,14 @@ public sealed class InvoiceRejectReturnService
 
     private static Guid DecisionIdFor(Verb verb, Guid approvalId) =>
         verb.Kind == InvoiceDecisionKind.Reject ? RejectDecisionIdFor(approvalId) : ReturnDecisionIdFor(approvalId);
+
+    private static Verb VerbOf(InvoiceDecisionKind kind) => kind == InvoiceDecisionKind.Reject ? RejectVerb : ReturnVerb;
+
+    /// <summary>The verb's Decision Record under <paramref name="decisionId"/> as the writer holds it (with the set stored with it), or null when
+    /// none exists. The one lookup: the claimant's repeat (<see cref="ReplaySignalsAsync"/>) and the ISS-032 hint (<see cref="UnfinishedStepAsync"/>).</summary>
+    private static Task<DecisionRecordWriter.BillingStoredResolvedSet?> FindStoredRecordAsync(
+        BillingDecisionRecorder recorder, Verb verb, Guid invoiceId, Guid decisionId, CancellationToken ct) =>
+        recorder.FindStoredResolvedSetAsync(verb.ActionCode, invoiceId, decisionId, ct);
 
     private static string Label(Verb verb) => verb.Kind == InvoiceDecisionKind.Reject ? "Reject" : "Return";
 

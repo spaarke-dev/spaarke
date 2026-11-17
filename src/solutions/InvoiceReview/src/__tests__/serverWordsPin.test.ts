@@ -26,6 +26,8 @@ import {
   isBlockedOutcomeUnknown,
 } from '../services/decisionApi';
 import { staysInNoteDialog } from '../services/invoiceReviewApi';
+import { incompleteOutcome } from '../services/decisionModel';
+import { strandedApproval } from './testKit';
 import { CODE_NOTE_INVALID_CHARACTERS, CODE_NOTE_TOO_LONG, NOTE_ERROR_CODES, NOTE_MAX_CHARS } from '../services/noteModel';
 
 const REPO = path.resolve(__dirname, '../../../../..');
@@ -267,5 +269,22 @@ describe('the 409 codes a dialog keeps open for a resend (review round 1)', () =
   it('a "concurrent_change" code of any area is kept open too', () => {
     expect(staysInNoteDialog(conflict('ebilling.blocked.concurrent_change'))).toBe(true);
     expect(staysInNoteDialog(conflict('ebilling.invoice.concurrent_change'))).toBe(true);
+  });
+});
+
+describe('Finish decision (ISS-032): the approval state\'s hint', () => {
+  const src = () => read(`${BFF}/Services/Finance/InvoiceApprovalService.cs`);
+
+  it('the hint the page reads is the server\'s member: IncompleteDecision(Verb, FailedStep) on the approval state', () => {
+    expect(recordMembers(src(), 'InvoiceIncompleteDecisionDto')).toEqual(['Verb', 'FailedStep']);
+    expect(src()).toMatch(/InvoiceIncompleteDecisionDto\? IncompleteDecision = null\);/);
+  });
+
+  it('the verbs the page knows are the server\'s words (the StrandedKind names, sent as kind.ToString())', () => {
+    const kinds = /private enum StrandedKind\s*\{([^}]*)\}/.exec(src());
+    expect(kinds).not.toBeNull();
+    expect(kinds![1].split(',').map(k => k.trim()).filter(Boolean)).toEqual(['Approve', 'Reject', 'Return']);
+    expect(src()).toMatch(/new InvoiceIncompleteDecisionDto\(kind\.ToString\(\), step\)/);
+    for (const verb of ['Approve', 'Reject', 'Return'] as const) expect(incompleteOutcome(strandedApproval(verb))).not.toBeNull();
   });
 });

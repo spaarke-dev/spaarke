@@ -24,14 +24,14 @@ Approach (coordinator's choice, directional): (1) the approval-state read the pa
   <constraints>
     <constraint source="ADR-002">The server decides: the hint is read-only and computed server-side; the finish is the existing repeat path, with no new write path and no second decision.</constraint>
     <constraint source="095f-2c, iss034a">Who may repeat a decision is decided by the existing services (eligible approver, Write on the invoice, the stored-decider rules where they apply). The hint never widens that; a caller who may not repeat sees no Finish affordance.</constraint>
-    <constraint source="ISS-032">A decided invoice whose Decision Record exists is unchanged: still read-only "View decision" (must-not-fire).</constraint>
+    <constraint source="ISS-032; amended review round 1 (coordinator)">A complete decision, meaning its Decision Record is written AND the approval portion is linked to it (the server's own CompleteOrNoOpAsync definition), is unchanged: still read-only "View decision" (must-not-fire). A decision whose record exists but whose follow-up steps (Signals, link) did not finish is stranded too, and is hinted with failedStep "link".</constraint>
     <constraint source="escalation">If the repeat cannot be rebuilt (a required value is neither stored nor safely re-askable) or the approach contradicts a stored-decision rule, STOP and report; do not invent a new path.</constraint>
     <constraint source="ADR-021">Fluent v9 tokens only; reuse the page's existing banner or message pattern (as iss034b's Finish-as-operator did).</constraint>
     <constraint source="project">Only InvoiceRejectReturnService.cs, InvoiceApprovalService.cs, InvoiceApprovalEndpoints.cs (the state DTO), the Invoice Review decision files (DecideInvoiceAction.tsx, decisionModel.ts, decisionApi.ts as needed), their tests, and notes/iss032-finish-incomplete-invoice-decision.md. No schema or package change, no deploy.</constraint>
   </constraints>
 
   <acceptance-criteria>
-    <criterion testable="true">xUnit: for each of reject, return and approve, a transition with no Decision Record reports incompleteDecision with the verb; a decision with its record reports none; a lookup fault reports none and logs.</criterion>
+    <criterion testable="true">xUnit: for each of reject, return and approve, a transition with no Decision Record reports incompleteDecision with the verb, and one stranded after its record (at "signals" or "link") reports it with failedStep "link", each with a repeat that clears it; a complete decision (record written AND linked) reports none; a lookup fault reports none and logs. (Amended review round 1.)</criterion>
     <criterion testable="true">xUnit: a caller who may not make the decision gets no hint.</criterion>
     <criterion testable="true">Jest: after a reload, a stranded decision shows the stranded message and "Finish decision"; Finish sends exactly one repeat (the button is disabled while it is in flight), then refreshes and shows the decision read-only; a complete decision shows only "View decision".</criterion>
     <criterion testable="true">Jest: a refusal or 503 from the repeat shows its message and keeps the Finish affordance.</criterion>

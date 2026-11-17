@@ -78,6 +78,23 @@ export interface ApprovalState {
    * return to firm has its own firm check. Optional so an older server reads as "not needed".
    */
   firmNeeded?: boolean;
+  /**
+   * ISS-032 (#2883), a read-only hint: the invoice's status shows this decision, but its Decision Record was never written, and the caller is
+   * the one whose repeat finishes it (`InvoiceIncompleteDecisionDto`). Null when there is none, when the caller may not finish it, or when the
+   * server could not tell. Optional so an older server reads as none. The decide route still decides.
+   */
+  incompleteDecision?: IncompleteDecision | null;
+}
+
+/** ISS-032: a reject, return or approve that stopped after its status transition, before it was complete (recorded AND linked). */
+export interface IncompleteDecision {
+  /** `Approve`, `Reject` or `Return`. */
+  verb: 'Approve' | 'Reject' | 'Return' | string;
+  /**
+   * Where it stopped: `portion` or `record` (no Decision Record yet), or `link` (the record exists; its follow-up steps did not finish, and
+   * the repeat finishes from the stored record, ignoring the request's reason and note).
+   */
+  failedStep: 'portion' | 'record' | 'link' | string | null;
 }
 
 export interface ApproveResponse {
