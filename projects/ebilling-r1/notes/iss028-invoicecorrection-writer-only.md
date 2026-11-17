@@ -147,3 +147,16 @@ Dev gets the change by a direct scoped edit after merge (EB-D-250). Other enviro
 - Intended, owner confirmation pending: after this change an ordinary user's native delete of an invoice that has correction rows (and
   of a core record or invoice line that correction rows reference) is refused; invoices end by status, not by delete. To be tried
   during the dev apply.
+
+## Dev apply (EB-D-250), 2026-11-17
+
+- Before notice to uac-r2, with the dry-run plan, the live cascades and the rollback; uac-r2 confirmed that they match its review.
+- Live cascades onto `sprk_invoicecorrection`:
+  - invoice: Delete=Cascade;
+  - invoice line, matter, project, work assignment and record type: Delete=RemoveLink;
+  - Assign=NoCascade on all of them.
+- `scripts/Set-FeatureRolePrivileges.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com -Remove -Gap ISS028 -Apply` removed 5 entries and read each back absent on the root role and every business-unit copy. `-Verify` passed.
+- Read-back on all 6 Spaarke Core User roles: correction rows hold Read, Append and AppendTo at Deep, and nothing else.
+- After notice sent to uac-r2, which re-probes.
+- Rollback: `-Restore -Gap ISS028 -Apply`.
+- Other environments get the change with the SpaarkeMaster import (1.3.2.0 expectations at the master merge).
