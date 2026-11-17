@@ -4,7 +4,7 @@
     <title>Repair pass on-demand admin trigger: one table, one bounded window (FR-25, NFR-01)</title>
     <phase>5 W5 Records created outside the product</phase>
     <gate>052b on the work branch (merge b18d4fc394). Nothing here enables the pass on any environment.</gate>
-    <status>in-progress</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Security-critical: an admin route that makes the system principal write existing Dataverse rows; .cs in Sprk.Bff.Api; new auth tests at KEEP paths. Auth-tagged: two adversarial passes.</rigor-reason>
     <model-tier>opus</model-tier>

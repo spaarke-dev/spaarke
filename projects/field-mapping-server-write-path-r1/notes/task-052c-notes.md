@@ -212,3 +212,6 @@ every touched .cs; the filtered Sprk.Bff.Api.Tests run (Repair, RecordOwnership,
   other, and was fixed).
 - Scoped re-check of the fix diff 7285c88b4e..3f4ad4b8be (Sonnet; the fix changed the approach, adding paging): no F1/F2; K6-K8.
 - Merged into the work branch at cb86030700 (`task/fm-052c` c569dd8a6a).
+- Gates on cb86030700 (main session): solution build 0 warnings, 0 errors; ArchTests 2639/2639; project suites
+  (`scripts/verify-suites.sh`) 9505 passed, 0 failed, 7 skipped; publish +5,496 B vs a fresh build of master 08161cfb0e
+  (42,405,466 vs 42,399,970 B zipped, 40.44 MB, 191 = 191 files, Compress-Archive Optimal); no vulnerable packages.
