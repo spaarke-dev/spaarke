@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="iss031" project="ebilling-r1">
+  <metadata>
+    <title>ISS-031 (#2882): a blocked Override or Return refuses while the other verb's Decision Record exists</title>
+    <phase>Defect fix (found in 095f-2ui re-check)</phase>
+    <gate>Branch from work/ebilling-r1 at the sha named in the agent brief.</gate>
+    <status>open</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>BFF decision write path (.cs); two conflicting decisions on one invoice.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <effort>high</effort>
+    <parallel-safe>true</parallel-safe>
+    <deps>095f-2c</deps>
+    <tags>bff-api, finance, data-mutation, testing</tags>
+    <estimated-effort>3-5 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Fix ISS-031 (projects/ebilling-r1/notes/defer-issues.md): in SubmissionOverrideService, before an Override or a blocked Return decides, look up the OTHER verb's stored Decision Record (OverrideDecisionIdFor / ReturnDecisionIdFor with its action code, through the same _findStored). If it exists, refuse with 409 and a new code (ebilling.blocked.other_decision_pending) whose detail tells the caller to repeat that decision to finish it; write nothing. A fault on that lookup answers 503 unavailable, as the existing lookup does. The order of checks: after the rights check (403 first) and the not-held checks, next to the existing stored-record lookup.</prompt>
+
+  <goal>One blocked submission ends with one decision, never an Override record on a returned invoice or the reverse.</goal>
+
+  <constraints>
+    <constraint source="095f-2c">A repeat of the SAME verb still finishes from its stored record exactly as today (golden hashes unchanged).</constraint>
+    <constraint source="project">Only SubmissionOverrideService.cs (plus the errors constants file if the codes live there) and tests. Update the endpoint's documented status codes. No client change (095f-2ui already blocks the switch client-side; record the new code for a later client mapping in the notes).</constraint>
+  </constraints>
+
+  <acceptance-criteria>
+    <criterion testable="true">Data-mutation tests: a stranded Override (record written, release failed) followed by a Return answers 409 other_decision_pending and writes nothing (no record, no transition, no Signal change); the same for a stranded Return followed by an Override.</criterion>
+    <criterion testable="true">Must-not-fire: neither record exists gives today's behaviour; the same verb's repeat finishes from its stored record.</criterion>
+    <criterion testable="true">A fault on the other-verb lookup answers 503 and writes nothing; a caller without rights still gets 403 first.</criterion>
+    <criterion testable="true">The new tests fail before the change; filtered SubmissionOverride|DecisionNote|DecisionRecord tests, the Invoice|Decision ArchTests and the --warnaserror build pass.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="iss030" project="ebilling-r1">
+  <metadata>
+    <title>ISS-030 (#2881): a refused totals recalculation after an adjustment removal reactivates the row, as the add path undoes its row</title>
+    <phase>Defect fix (found in 095f-2b review)</phase>
+    <gate>Branch from work/ebilling-r1 at the sha named in the agent brief.</gate>
+    <status>open</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>BFF write path (.cs); invariant: no half-applied removal.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+    <parallel-safe>true</parallel-safe>
+    <deps>095f-2b</deps>
+    <tags>bff-api, finance, data-mutation, testing</tags>
+    <estimated-effort>2-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Fix ISS-030 (projects/ebilling-r1/notes/defer-issues.md): in InvoiceAdjustmentService's removal, when RecalculateAsync returns IsRefused after the row was deactivated by THIS request, reactivate the row (conditionally, the way the add path deactivates its own row on a refused calculation, ~715-730) and answer the refusal. A repeat that finds the row already removed by an earlier request is not this request's to undo (mirror the add path's rule). A failed reactivation answers 503 incomplete with a distinct failed step, and the same request repeated finishes it.</prompt>
+
+  <goal>A refused removal leaves the invoice exactly as it was: the adjustment active and the totals unchanged.</goal>
+
+  <constraints>
+    <constraint source="ADR-002 / project 2">The totals are written only by IInvoiceTotalsService; the removal never writes totals itself.</constraint>
+    <constraint source="095f-2b">No Decision Record is written for a refused removal; the note is not written.</constraint>
+    <constraint source="project">Only InvoiceAdjustmentService.cs and tests. No schema, no deploy.</constraint>
+  </constraints>
+
+  <acceptance-criteria>
+    <criterion testable="true">Data-mutation test: a removal whose recalculation is refused reactivates the row (state Active, remover fields cleared to their prior values or as the add-undo pattern does) and answers the refusal; no record is written.</criterion>
+    <criterion testable="true">Must-not-fire: a repeat of an earlier successful removal whose recalculation is refused does not reactivate the row.</criterion>
+    <criterion testable="true">A failed reactivation answers 503 incomplete; the same request repeated reactivates and answers the refusal.</criterion>
+    <criterion testable="true">The new tests fail before the change; the filtered Adjustment|InvoiceTotals|DecisionRecord tests and the --warnaserror build pass.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>
