@@ -261,7 +261,7 @@ public sealed class ExternalEventFormsContractTests : IClassFixture<ExternalTodo
         response.StatusCode.Should().Be(HttpStatusCode.Created, await response.Content.ReadAsStringAsync());
         var args = _fixture.Data.LastCreateEventArgs!.Value;
         var payload = ExternalDataService.BuildEventCreatePayload(args.Kind, args.RootId, args.Request, args.OwningTeamId);
-        payload["sprk_eventtype_ref@odata.bind"].Should().Be($"/sprk_eventtype_refs({Reminder})");
+        payload["sprk_EventType_Ref@odata.bind"].Should().Be($"/sprk_eventtype_refs({Reminder})");
         payload["sprk_priority"].Should().Be(100000001, "Normal when not sent");
         payload["sprk_description"].Should().Be("Ask about the draft");
         payload["sprk_AssignedTo@odata.bind"].Should().Be($"/contacts({Colleague})");
@@ -414,7 +414,7 @@ public sealed class ExternalEventFormsContractTests : IClassFixture<ExternalTodo
         _fixture.ContactAccess.Calls.Should().BeEmpty();
         var args = _fixture.Data.LastCreateEventArgs!.Value;
         var payload = ExternalDataService.BuildEventCreatePayload(args.Kind, args.RootId, args.Request, args.OwningTeamId);
-        payload.Keys.Should().NotContain(new[] { "sprk_eventtype_ref@odata.bind", "sprk_priority", "sprk_description", "sprk_AssignedTo@odata.bind" },
+        payload.Keys.Should().NotContain(new[] { "sprk_EventType_Ref@odata.bind", "sprk_priority", "sprk_description", "sprk_AssignedTo@odata.bind" },
             "the pre-014b payload: no type, no priority, no description, no assignee");
         payload.Keys.Count(k => k.EndsWith("@odata.bind", StringComparison.Ordinal)).Should().Be(2, "the root and the owner only");
     }
@@ -455,7 +455,7 @@ public sealed class ExternalEventFormsContractTests : IClassFixture<ExternalTodo
         response.StatusCode.Should().Be(HttpStatusCode.Created, await response.Content.ReadAsStringAsync());
         var args = _fixture.Data.LastCreateEventArgs!.Value;
         ExternalDataService.BuildEventCreatePayload(args.Kind, args.RootId, args.Request, args.OwningTeamId)
-            ["sprk_eventtype_ref@odata.bind"].Should().Be($"/sprk_eventtype_refs({EventTypeRef.Task})");
+            ["sprk_EventType_Ref@odata.bind"].Should().Be($"/sprk_eventtype_refs({EventTypeRef.Task})");
     }
 
     [Theory]

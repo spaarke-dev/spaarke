@@ -313,3 +313,25 @@ This under-lists, which fails closed.
 **R4 part.** 014a adds `QueryStrictAsync<T>` and moves only `ExternalGrantLifecycle.QueryActiveRowsForRootAsync` to it. The owner chose this option (A) on 2026-11-16.
 
 **Fix shape.** Audit the remaining callers. Move the access-relevant ones to the strict method, checking that each fails closed on a throw.
+
+## D-21 — External event create with a type answers 500: wrong-case event-type bind key (#2892)
+
+**Status.** Fixed in the task 016 fix PR (BFF). Found in the owner E2E, 2026-11-17 (matter root, type Task).
+
+**Where.** `Infrastructure/ExternalAccess/ExternalDataService.cs` `EventTypeBindKey`, introduced by task 008 (c9b9492c86).
+
+**Effect.** Every external event create that names a type wrote `sprk_eventtype_ref@odata.bind`. `@odata.bind` keys are the navigation property name and are case-sensitive; for `sprk_event` it is `sprk_EventType_Ref` (metadata-verified in 9b32c1c8ab, and the internal create already uses it). Dataverse refused the write, and the BFF answered 500 `InvalidOperationException`. The R4 form always sends a type, so every create failed.
+
+**Why the tests missed it.** The contract tests pinned the same wrong literal; nothing compared it with the metadata or with the internal create.
+
+**Fix.** The key is `sprk_EventType_Ref@odata.bind`; the three contract pins are corrected; `tests/integration/regression/Issue2892_ExternalEventTypeBindKeyTests.cs` pins the payload key (the internal create's key, `sprk_EventType_Ref`), with a must-not-fire pair for an untyped create.
+
+## D-22 — Signals assign-task writes the event-type bind key in the wrong case (#2893)
+
+**Status.** Open, filed for `spaarke-ontology-platform-r1` (their file; hand-off pending their acceptance). Not reproduced live.
+
+**Where.** `Services/Signals/Actions/DecisionActionExecutors.cs` ~1509; its test pin `tests/unit/domain/Signals/DecisionActionExecutorsTests.cs` ~1069.
+
+**Effect.** Same lowercase key as D-21, so an assign-task decision should fail at the Dataverse write and create no Task event.
+
+**Fix shape.** Correct the key and its pin; better, one shared constant on `EventTypeRef` used by all three writers.
