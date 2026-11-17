@@ -302,3 +302,13 @@ Two-write rule: every entry here has a GitHub issue, and every issue has an entr
 | **Class** | Test reliability; outside this project's code (the Office save path is unchanged) |
 | **Failure** | `OfficeVersionSaveContractTests.Post_OfficeSave_EmailOrAttachmentCarryingExistingDocumentId_…(Email)`, `Issue1084_OfficeJobRecordDurabilityTests.RetryOfASaveWhoseRequestDied_…`, `OfficeEmailSaveNamingTests.EmailSave_WithATypedDocumentName_…` each failed after ~3 minutes in a 9362-test run (9352 passed); all pass alone (4 cases, 7 s). Same class as #2543. |
 | **Status** | Filed; not blocking 045g. |
+
+## DI-031 — Comments and the framework doc still describe client mapping in EventService
+
+| Field | Value |
+|---|---|
+| **Found** | 2026-11-16, task 023 adversarial review (finding 2) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2874 |
+| **Class** | F2, documentation; outside task 023's scope (other wizards' files; docs task 062) |
+| **Failure** | `CreateMatterWizard.tsx` (~:639) and `CreateProjectWizard.tsx` (~:729) comments say the follow-on `EventService` "drives the Field Mapping Framework engine"; `docs/architecture/SPAARKE-FIELD-MAPPING-FRAMEWORK.md` (~:51, ~:197) lists `eventService.ts` as calling `applyFieldMappings` and as a graceful no-op without a fetch. Since 023 the server maps and the create fails closed. No runtime effect. |
+| **Status** | Filed; fix the comments when those wizards are next touched, the doc in task 062. |
