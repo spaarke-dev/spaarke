@@ -139,6 +139,7 @@ To begin: `work on task 001`. Wave W0-1 (001, 002, 003) and W2-1 (040, 041) have
 | iss034a | 🔲 | ISS-034 #2888 server: operator route finishes a stranded blocked decision as recorded (EB-D-244) | FULL | opus / high | none | iss031 |
 | iss034b | 🔲 | ISS-034 #2888 client: Invoice Review "Finish as operator" | STANDARD | sonnet / high | none | iss034a |
 | iss028 | 🔲 | ISS-028 #2879: sprk_invoicecorrection writer-only (EB-D-248) | FULL | sonnet / high | none | 095f-2d2 |
+| 084h-5 | 🔲 [merge waits on owner + uac-r2 accepting the derivable-id known limit] | Keyed Decision Records get a derived primary id: Dataverse refuses a duplicate (EB-D-247, ontology-r1 option 1) | FULL | opus / high | none | 084h-3 |
 | 095f-2e2 | 🔲 [B′ chosen, EB-D-245: delivered by 095f-2e2a + 095f-2e2b] | Internal Correction path | — | — | none | 095f-2e1 |
 | 095f-2e2a | 🔲 | B′ server: internal multipart route accepts Correction + required note (one shared check) | FULL | opus / high | none | 095f-2e1 |
 | 095f-2e2b | 🔲 | B′ client: Invoice Review "Submit corrected invoice" → wizard correction prop (spa-r4 conditions) | FULL | sonnet / high | none | 095f-2e2a |
