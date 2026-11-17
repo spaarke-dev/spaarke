@@ -4,6 +4,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
 using Spaarke.Dataverse;
 using Spaarke.Scheduling;
+using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Services.ExternalAccess;
@@ -75,6 +76,13 @@ public static class ExternalAccessModule
         // Registered HERE so the grant routes do not depend on an unrelated module having been added.
         services.TryAddSingleton(TimeProvider.System);
 
+        // #2845 F1: the ONE process-wide gate on the access evaluator's concurrent app-only Dataverse reads (Dataverse limits
+        // concurrent requests per identity; a 429 reads as "unknown" and fails a record closed). Shared by the two reader
+        // clients below (through DataverseThrottlingHandler, which also retries a throttled read briefly) and the filing
+        // walk's reads (through the request memo). Sized by the optional Dataverse:MaxConcurrentRequests (default 24).
+        services.TryAddSingleton(sp => DataverseConcurrencyGate.FromConfiguration(sp.GetService<IConfiguration>()));
+        services.TryAddTransient<DataverseThrottlingHandler>();
+
         // Participation service — queries sprk_externalrecordaccess with Redis caching (60s TTL): the
         // grant-DATA reader. (Contact resolution moved to ContactIdentityBinder below — task 141.)
         services.AddHttpClient<ExternalParticipationService>((sp, client) =>
@@ -88,7 +96,7 @@ public static class ExternalAccessModule
                 client.DefaultRequestHeaders.Add("OData-Version", "4.0");
             }
             client.Timeout = TimeSpan.FromSeconds(15);
-        });
+        }).AddHttpMessageHandler<DataverseThrottlingHandler>(); // #2845 F1: the process-wide read gate + throttle retry
 
         // Data service — queries project data (projects, documents, events, contacts, organizations)
         // for external SPA users using managed identity app-only access.
@@ -103,7 +111,8 @@ public static class ExternalAccessModule
                 client.DefaultRequestHeaders.Add("OData-Version", "4.0");
             }
             client.Timeout = TimeSpan.FromSeconds(15);
-        });
+        }).AddHttpMessageHandler<DataverseThrottlingHandler>(); // #2845 F1 (round 2 follow-up, r4 014b): the same process-wide gate;
+                                                                // a throttled GET is retried, a write is sent once and its 429/503 returned
 
         // unified-access-control-r2 task 188 (main-session decision 2026-10-20): the assistant's dataverse.* tools decide a
         // document with THE external document narrowing APP-ONLY, through the reader above, so a link field security masks
@@ -317,7 +326,7 @@ public static class ExternalAccessModule
                 client.DefaultRequestHeaders.Add("OData-Version", "4.0");
             }
             client.Timeout = TimeSpan.FromSeconds(15);
-        });
+        }).AddHttpMessageHandler<DataverseThrottlingHandler>(); // #2845 F1: the process-wide read gate + throttle retry
         services.AddTransient<INoAccessListReader>(sp => sp.GetRequiredService<NoAccessListReader>());
 
         // unified-access-control-r2 task 143 (owner Q4) — the No Access list for INTERNAL users on secure records.
