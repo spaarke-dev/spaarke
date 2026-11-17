@@ -22,7 +22,7 @@ The completer is the user whose request performs the completing stamp write. In 
 - the decider's own repeat of a stranded decision: the decider;
 - an operator finish: the operator. `bySystemUserId` stays the stored decider, and so do the Signal closes, the stored record and the holds derivation.
 
-The completer is written in the same write that writes the stamp: the release transaction (Override) or the Return path's submission write, so it can never name a caller whose call did not complete the decision. A finish that stops earlier (any refusal, the release or transition faulting, the Signal closes) writes no stamp at all, so no completer; the call that later completes it writes its own caller (tested for another operator and for the decider).
+The completer is written in the same write that writes the stamp: the release transaction (Override) or the Return path's submission write, so it can never name a caller whose call did not complete the decision. A finish that stops earlier (any refusal, or the release or transition faulting) writes no stamp at all, so no completer; the call that later completes it writes its own caller (tested for another operator and for the decider). Failed Signal closes alone do NOT stop the stamp write: the closes that fail are counted, the stamp (with its completer) is written, and only then does the call answer 503; a later repeat re-closes the Signals (K1).
 
 ### Where the stamp is built
 
@@ -79,3 +79,13 @@ All in `SubmissionOverrideOperatorFinishTests` (the shared `World`, `StrandAsync
 ## Component justification (CLAUDE.md section 11)
 
 One new member on an existing record and its JSON stamp; no new component. Existing: `BlockedDecisionStamp` / `WithStamp` / `ReadStamp`. Cost of doing nothing: after an operator finish nothing names who completed the decision (K5).
+
+## Review (Opus, one pass) and known limits
+
+There are no F1 or F3 findings. F2 (this note wrongly said that failed Signal closes stop the stamp) is fixed above. F4 (the History tab line, AC5) is deferred: see the last limit below.
+
+- **K1. The user who repairs the Signal closes is not named.** Suppose a decision's state write succeeds but a Signal close fails. The stamp names that call's caller, and the call answers 503. A later call, by the decider or an operator, goes down the already-decided path, re-closes the Signals and answers success. The completer stays the first caller, and the later call leaves no record. "Completed" means the call that made the state write (EB-D-253). This matches the contract.
+- **K2. Close to the size limit.** The stamp is now about 65 characters longer. A held submission whose findings were already within about 65 characters of the findings column's limit is now refused 409 `findings_too_large`, with nothing written, and that includes the repeat of a decision stranded before this change. It fails closed, has not been seen in practice, and the data needs support (like iss034a K6).
+- **K3. The shared library's copy of `BlockedDecisionStamp`** (`Spaarke.UI.Components/.../internalInvoiceSubmission.ts`) does not declare `completedBySystemUserId`. Nothing reads it there, and TypeScript ignores the extra field. Add it when something there needs it.
+- **K4.** `ARefusedFinish_WritesNoCompleter` repeats existing refusal checks. It is harmless and kept.
+- **AC5 deferred (owner question).** Invoice Review's History tab lists Decision Records only. It never reads the blocked view, and nothing turns the stored user id into a name. Showing "Finished by {name}" needs the server to add the name to what Invoice Review reads, about half a day. The completer is recorded in the data now; whether to show it in R1 is the owner's call.

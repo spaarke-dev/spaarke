@@ -4,7 +4,7 @@
     <title>Blocked decision stamp records who completed the decision (iss034a K5, EB-D-253)</title>
     <phase>Defect fix (ISS-034 #2888 follow-up; owner EB-D-253)</phase>
     <gate>iss034a and iss034b merged into work. Branch from work/ebilling-r1 at the sha named in the agent brief.</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>BFF decision path (SubmissionOverrideService) plus the Invoice Review code page; tests modified.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -35,7 +35,7 @@ Fix: the blocked-decision stamp (`BlockedDecisionStamp`, written into `sprk_find
     <criterion testable="true">xUnit: a failed finish (any refusal or fault before the completing write) writes no completer; a later completion by someone else writes that person.</criterion>
     <criterion testable="true">xUnit: ReadStamp of a stamp without the member gives a null completer and no fault (must-not-fire); the GET view carries the completer.</criterion>
     <criterion testable="true">xUnit: the findings_too_large pre-check counts the new member (a stamp that fits only without it is refused before any write).</criterion>
-    <criterion testable="true">Jest: the History tab shows "Finished by {name}" when the completer differs from the decider, and nothing extra when it matches or is absent.</criterion>
+    <criterion testable="true" status="deferred, owner question: show in R1?">Jest: the History tab shows "Finished by {name}" when the completer differs from the decider, and nothing extra when it matches or is absent.</criterion>
     <criterion testable="true">Filtered SubmissionOverride|BlockedSubmission tests, the InvoiceReview Jest suite, typecheck and build, and the --warnaserror BFF build pass.</criterion>
   </acceptance-criteria>
 
