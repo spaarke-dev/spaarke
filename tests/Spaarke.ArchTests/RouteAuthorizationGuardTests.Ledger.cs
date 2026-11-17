@@ -509,6 +509,12 @@ public partial class RouteAuthorizationGuardTests
             + "eBilling kill switch runs after it. Both additionally resolve the caller's eligibility LIVE from the invoice's core record inside "
             + "InvoiceRejectReturnService on every call (403 ebilling.approver.not_eligible, nothing written); the stored eligible-approver set "
             + "never grants. The decider and the decision id are derived server-side, never taken from the request."),
+        new GovernedFile("Api/Finance/FirmNoticeEndpoints.cs", Scope.RouteLevelGate,
+            "POST /api/finance/invoices/{invoiceId}/firm-notice/draft (ebilling-r1 task 131, FR-50, D-60) -- a reviewer previews the notice the firm "
+            + "will receive for a Return or a Reject. Step 0 on the group, then AddFinanceAuthorizationFilter as the caller on the invoice named in "
+            + "the path (ebilling.invoice.decide: Write, the same right as the Return and Reject routes), fail closed; the eBilling kill switch runs "
+            + "after it. Read-only: it projects the firm-visible outcome (FirmFindingsProjection) and drafts prose; it writes nothing, sends nothing "
+            + "and returns a draft only. The kind is the closed set ReturnedToFirm or InvoiceRejected, never a free value."),
         new GovernedFile("Api/Finance/ApExportEndpoints.cs", Scope.RouteLevelGate,
             "GET /api/finance/export-batches/candidates, POST /api/finance/export-batches and GET /api/finance/export-batches/{batchId} (ebilling-r1 "
             + "task 150, FR-41, EB-D-178, D-56) -- export a selection of Approved invoices to AP as one batch; plus, from task 151a (EB-D-181), "
@@ -1249,7 +1255,11 @@ public partial class RouteAuthorizationGuardTests
     // /api/finance/firms and POST /api/finance/core-records/{entityType}/{entityId}/firms. Classified by GovernedFiles (RouteLevelGate: step 0
     // on the group, then AddFinanceAuthorizationFilter in the fail-closed mode as the caller); .RequireEbillingEnabled is already in
     // NotAuthorizationForms.
-    private const int ExpectedEndpointFileCount = 154;
+    //
+    // 154 -> 155 (2026-11-17, ebilling-r1 task 131, FR-50). Net +1: Api/Finance/FirmNoticeEndpoints.cs ADDED -- POST
+    // /api/finance/invoices/{invoiceId}/firm-notice/draft. Classified by GovernedFiles (RouteLevelGate: step 0 on the group, then
+    // AddFinanceAuthorizationFilter as the caller on the invoice in the path); .RequireEbillingEnabled is already in NotAuthorizationForms.
+    private const int ExpectedEndpointFileCount = 155;
 
     // =============================================================================================
     // THE CREDITED ALLOW-LIST — the only attachment forms Rule A credits as a per-resource decision
