@@ -4,7 +4,7 @@
     <title>Adversarial review of items 1-4 and their PRs</title>
     <phase>6 Review and wrap-up</phase>
     <gate>blocked until 002, 012, 020, 021, 033, 034, 035</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Fixes review findings in code and skill files; depends on 3+ tasks</rigor-reason>
     <model-tier>opus</model-tier>
@@ -96,6 +96,7 @@
   </acceptance-criteria>
 
   <notes>Item-5 PRs are opened by their own tasks.</notes>
+  <completion-notes>Completed 2026-11-15. One adversarial-reviewer (fable) pass over items 1-3 (8c05f5b70f, already merged as #2751) and item 4 (branch diff minus 040 files); report + triage in notes/080-review.md. Fixed: F4 Compose test mock missing useDocumentActions (from master #2812); F1 sweep changed-file list missed merge-commit landings (--first-parent -m --no-renames) + jscpd step timeout; F2 stale retired-package references, CAPABILITY-INDEX rows 3 and 27, bff-url-normalization pointer, code-page-deploy wording. Scoped sonnet re-check of 518b5bec8d: clean. K recorded: alert counts touched files as new (baseline cut in 10.7, owner decides at OQ-8 review), hook in pcf-safe graph (tree-shaken, verified), stale LegalWorkspace lock edge. Out of scope, filed + reported: ISS-006 #2841 (deploy-spaarke-ai.yml misses six bundled trees), ISS-007 #2842 (normalizeUrl in docs/comments). PRs: items 1-3 = #2751 (merged before this task); item 4 = #2843 (owner OK "Yes, open it"; one squashed commit off master, 040 files excluded). Only one fable launch. rework: fix-round-1 task 080</completion-notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

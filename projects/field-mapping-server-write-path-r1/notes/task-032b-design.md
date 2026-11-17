@@ -8,7 +8,7 @@ ruling). The round-1 job design is kept in §8.4 only as the rejected alternativ
 
 Trees: **fm** = `work/field-mapping-server-write-path-r1` 57648a15a2; **eb** = `work/ebilling-r1`. Line numbers are at
 31afe98fa6; re-grep against d58e3a3554 (082d merged), the base for 032b-2 and 032b-3. Round 2 of task 032
-(`task/fm-032-design` 60ecb8e9e6, `notes/task-032-design.md`) holds the detail this note reuses by section number.
+(`notes/task-032-design.md`, from 60ecb8e9e6) holds the detail this note reuses by section number.
 
 ## 0. Summary
 

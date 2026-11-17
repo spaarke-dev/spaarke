@@ -1,45 +1,24 @@
 # Current Task — Reuse Governance Tightening R1
 
-> State, not history (root CLAUDE.md §5). Rewrite at each checkpoint; keep ≤ 10 KB.
-> Decisions live in `design.md` §11 and `notes/decisions.md`; narrative lives in the commit messages.
+> State, not history (root CLAUDE.md §5). Decisions: `design.md` §11 and `notes/decisions.md`; narrative: commit messages.
 
 ---
 
-**Checkpoint 2026-11-12** (after task 020). Branch `work/reuse-governance-tightening-r1`, all committed and pushed. **PR #2751 open** (items 1–3; master merged in `d523a7edcc`, INDEX.md conflict resolved).
+**Task ID**: none · **Status**: none · **Project**: Complete and archived (2026-11-17)
 
-**Done (9/19; board synced 9)**: 001, 002, 041, 042 (2026-11-11); 010, 011, 012, 021, 020 (2026-11-12). 041/042 merged to master (#2705, #2706); master merged into the branch (`29bcda5fe3`).
-- Items 1 (capability index), 2 (reuse scan: design-to-spec, pipeline fallback, task-create citation) and 3 (jscpd sweep + adversarial-reviewer checks) are complete on the branch.
-- Task 020: weekly `duplication-sweep` job in `nightly-health.yml` (Mon 07:00 UTC cron, dispatch input `duplication_sweep_only`), `.jscpd.json`. Verified by dispatch runs 43289750101 and 43293619731: 38 s, artifact uploaded, 17 new / 192 old cross-area clusters, status failing in dry-run. The first master run after merge will open the `weekly/duplication-sweep` alert for those 17 (intended).
+**Next action**: Owner decides on the final docs PR. Then the worktree can be removed with `scripts/worktree/Remove-WorktreeSafe.ps1` whenever the owner wants.
 
-**Active task**: none. **Next**: PR #2751 CI and owner merge. Then 030 (package decision records, owner gate; merge master first, check PR #935), 040 (Learn MCP; owner does the per-machine approval), 043, 080, 090.
-**Open, reported to owner**
-- ISS-001 #2683 — `node-executor-authoring.md` still names `ActionType` (≈15 min; offered to fix here).
-- ISS-003 #2713 — fixed on branch (`65224ce73f`, power-page-deploy archived); closes when the branch reaches master.
-- 042 known limits: S2 prose-only (K1); three integration-test projects set `TreatWarningsAsErrors=false` (K4, `notes/042-cs0618.md`).
+## State
 
-**Registered**: Project Issue #2682 under Epic #427, Board #2 (item `PVTI_lAHODW0Pv84BEgWuzhHuX4E`, Tasks Completed field `PVTF_lAHODW0Pv84BEgWuzhWPlLY`), label `reuse-governance-tightening-r1`.
+- 19/19 tasks done. Merged to master: #2751 (items 1–3), #2705 (5c), #2706 (5e), #2843 (item 4), #2873 (5a). 5(f) C# LSP: not adopted. 5(b): deferred by design.
+- SpaarkeAi DEV auto-deploy from the #2843 merge succeeded (2026-11-17).
+- Issue #2682 closed; board Status Completed, Closed Date 2026-11-17, Tasks Completed 19, AI spend $184.30 / 1,461 calls. `.archived` marker written.
+- **Not yet on master** (branch `work/reuse-governance-tightening-r1` only): task 043 record (`notes/csharp-lsp-trial.md`, design.md §10 item 6, `docs/procedures/testing-and-code-quality.md` "Agent Code-Navigation Tools"), the ISS-001 pattern fix (`.claude/patterns/ai/node-executor-authoring.md`; issue #2683 already closed), the wrap-up docs (README, plan, TASK-INDEX, test-diet report, lessons learned, `.archived`), and the `scripts/ai-cost` item-list limit fix. They need one docs PR, which the owner must approve first.
 
-## Standing directives (owner)
+## Open follow-ups (filed, stay open after close)
 
-- No PR unless the owner asks or approves. Never `git stash` (shared stack). Never commit secrets.
-- OQ-2: if the reuse scan needs effort above `low`, show the owner the measured token/cost impact first.
-- OQ-5 / NFR-10: the 3-package limit limits effort, never significance — every defect is fixed or reported by name.
-- Do not silently re-adopt design.md §10 rejected alternatives or §10.7 ROI cuts.
-- `.claude/` edits run in the main session only. DEV deploy (035) needs the owner's explicit OK.
-- nightly-health changes: verify by `workflow_dispatch` on the branch (alerts dry-run off master).
-
-## Gotchas
-
-- `code-mapper` is read-only and fact-only; the orchestrator judges and writes `notes/reuse-scan.md`.
-- Repo-wide scanners must exclude `.claude/worktrees/agent-*/`.
-- Full `Sprk.Bff.Api.Tests` takes ~2 h here and times out host-based contract tests when other sessions load the machine (#1724). Verify failures by rerunning the affected classes in small chunks.
-- `Test-InstructionPaths.ps1` scans `git ls-files` — stage a new file before checking it. Archived skills go to `.claude/archive/YYYY-MM-DD/` (the checker skips it), not `_archived/`.
-- Pre-commit hook needs prettier: prepend `C:\code_files\spaarke\node_modules\.bin` to PATH; no `--no-verify`. Commit with an explicit pathspec and `git commit -F <file>`.
-- `gh project item-list` can miss new items — resolve item ids via GraphQL `issue.projectItems`.
-- Bash can hang on this machine — prefer PowerShell; never `python3` in Bash (use `py -3`).
-- The advisory Tier 2 api-seam unit-test job times out (cancelled at 40 min) on many branches; not caused by this project.
-
-## Context sources
-
-- `design.md` §11 (decisions), `spec.md`, `plan.md`, `notes/decisions.md`, `notes/defer-issues.md`, `notes/reuse-scan-dry-run.md`.
-- Auto-memory: `project_reuse-governance-tightening-r1.md` in the `C--code-files-spaarke` memory folder.
+- DEF-001..006 (#2801–#2806): the six remaining package actions.
+- ISS-004 #2807, ISS-005 #2808, ISS-006 #2841, ISS-007 #2842.
+- OQ-8 sweep tuning after four weekly runs (the alert counts touched files as "new"; a real fix needs a baseline, cut in design.md §10.7). Alert #2866 is open.
+- `.claude/skills/devops-project-start/SKILL.md:57` uses `--limit 1000` for `gh project item-list` (board at 576 items).
+- Three docs outside `.claude/` still say `ActionType` (listed under ISS-001 in `notes/defer-issues.md`).

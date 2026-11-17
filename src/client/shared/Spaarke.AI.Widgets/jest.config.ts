@@ -9,7 +9,6 @@ const config: Config = {
     // Map workspace packages to source until dist is built in CI.
     '^@spaarke/ai-outputs$': '<rootDir>/../Spaarke.AI.Outputs/src/index.ts',
     '^@spaarke/ui-components$': '<rootDir>/../Spaarke.UI.Components/src/index.ts',
-    '^@spaarke/ai-context$': '<rootDir>/../Spaarke.AI.Context/src/index.ts',
     // @spaarke/communication-components — new shared lib (messaging-communication-app-r2
     // task 030); source-mode only, mirrors the pattern above (no dist build).
     '^@spaarke/communication-components$': '<rootDir>/../Spaarke.Communication.Components/src/index.ts',

@@ -10,9 +10,11 @@
  *   6. Send to Index: POST /api/documents/{id}/analyze
  *
  * Originally lived in `src/client/code-pages/SemanticSearch/src/hooks/useDocumentActions.ts`.
- * Moved verbatim into @spaarke/document-operations by task 031 (spaarkeai-compose-r1)
- * so SemanticSearch (task 032) and Compose (task 033) share a single
- * source of truth for document operations.
+ * Moved verbatim into a shared document-operations package by task 031 (spaarkeai-compose-r1)
+ * so SemanticSearch and Compose share a single source of truth for document operations.
+ * reuse-governance-tightening-r1 task 033 moved it unchanged into @spaarke/ui-components
+ * (owner decision, notes/package-reviews.md §6). It is exported from the main barrel only,
+ * not from pcf-safe.ts: no PCF control calls it.
  *
  * Smallest-possible-change pivot: the hook now accepts a `bffBaseUrl`
  * parameter rather than importing SemanticSearch's local

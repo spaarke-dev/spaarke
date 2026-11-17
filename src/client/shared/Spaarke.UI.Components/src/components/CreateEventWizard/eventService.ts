@@ -2,19 +2,21 @@
  * eventService.ts
  * Event creation service for the Create New Event wizard.
  *
- * Creates a sprk_event record in Dataverse via IDataService.
+ * Creates a sprk_event record through the BFF child-records route
+ * (`POST /api/v1/child-records/sprk_event`). The wizard sends only what the user entered or picked, plus the regarding
+ * keys the route files the event by; the server owns field mapping (fill-only, FR-02), the owner (FR-09), the
+ * search-index default (FR-38/FR-40), the I-1 stamp and the event number (the platform autonumber, I-11)
+ * (field-mapping-server-write-path-r1 task 023, FR-16).
  * Follows the same nav-prop discovery pattern as ProjectService.
  *
  * @see IDataService — high-level data access abstraction (no IWebApi dependency)
  */
 
 import { describeWebApiCreateError } from '../../utils/webApiCreateError';
-import { withBffChildWrites } from '../../utils/adapters/bffChildWriteAdapter';
+import { ChildRecordWriteError, createRecordViaBffWithWarnings } from '../../utils/adapters/bffChildWriteAdapter';
 import type { ICreateEventFormState } from './formTypes';
 import type { ILookupItem } from '../../types/LookupTypes';
 import type { IDataService } from '../../types/serviceInterfaces';
-import type { IWebApiLike } from '../../types/WebApiLike';
-import { EntityCreationService } from '../../services/EntityCreationService';
 import type { AuthenticatedFetchFn } from '../../services/EntityCreationService';
 import {
   applyResolverFields,
@@ -22,8 +24,6 @@ import {
   findNavProp,
   cleanGuid,
 } from '../../services/PolymorphicResolverService';
-import { applyFieldMappings } from '../../services/FieldMappingService';
-import { getXrmUserId } from '../../utils/xrmUserId';
 
 // ---------------------------------------------------------------------------
 // Result types
@@ -34,7 +34,7 @@ export interface ICreateEventResult {
   eventName?: string;
   success: boolean;
   errorMessage?: string;
-  /** Non-fatal warnings (e.g. field-mapping profile fetch failures). Empty when none. */
+  /** Non-fatal warnings (a mapped value the server did not write, an assignee that could not be linked). Empty when none. */
   warnings: string[];
 }
 
@@ -84,40 +84,6 @@ function _resolveLookupHint(entityLogicalName: string): string {
 }
 
 // ---------------------------------------------------------------------------
-// Current-user resolution (Xrm-host best-effort)
-// ---------------------------------------------------------------------------
-
-/**
- * Best-effort resolution of the current Dataverse user GUID from the host Xrm global.
- *
- * Matches the established `CreateWorkAssignmentWizard/workAssignmentService._getCurrentUserId`
- * pattern: walks the frames (shared `getXrm` walk, via `utils/xrmUserId`) looking first for
- * `Xrm.Utility.getGlobalContext().userSettings.userId` (Code Page hosted in a Power App iframe),
- * then falling back to `Xrm.Utility.getUserId()` (PCF / direct host).
- *
- * Returns `null` when unavailable so callers can degrade gracefully — the BU cascade is
- * optional and the BFF tenant-default chain handles the fallback server-side.
- *
- * @returns Current user GUID (braces stripped, lowercased), or `null` if Xrm is unreachable.
- */
-function _tryGetCurrentUserId(): string | null {
-  // The shared helper: the nearest frame with a NON-EMPTY user id; a frame answering
-  // with an empty id is skipped, as the pre-081 per-frame loop did (task 081 round 6).
-  return getXrmUserId() ?? null;
-}
-
-/**
- * Adapt an {@link IDataService} into an {@link IWebApiLike} suitable for
- * `EntityCreationService.resolveUserBuDefaults`.
- */
-function _toWebApiLike(dataService: IDataService): IWebApiLike {
-  return {
-    retrieveRecord: (entityType, id, options) => dataService.retrieveRecord(entityType, id, options),
-    retrieveMultipleRecords: (entityType, options) => dataService.retrieveMultipleRecords(entityType, options),
-  };
-}
-
-// ---------------------------------------------------------------------------
 // EventService class
 // ---------------------------------------------------------------------------
 
@@ -125,10 +91,9 @@ export class EventService {
   constructor(
     private readonly _dataService: IDataService,
     /**
-     * Injected BFF-authenticated fetch. Optional — only required to activate the
-     * Field Mapping Framework engine (task 020, spec FR-12). Lookup-only callers
-     * (e.g. searchEventTypes) may omit it. When absent, the engine call is a
-     * graceful no-op — identical to today's behavior.
+     * Injected BFF-authenticated fetch. Required for {@link createEvent}: the create goes to the BFF child-records
+     * route (never `Xrm.WebApi`), so a service built without it fails closed on create. Lookup-only callers
+     * (e.g. searchEventTypes) may omit it.
      */
     private readonly _authenticatedFetch?: AuthenticatedFetchFn,
     /** BFF API base URL. See {@link _authenticatedFetch}. */
@@ -161,7 +126,7 @@ export class EventService {
   }
 
   /**
-   * Create a sprk_event record in Dataverse.
+   * Create a sprk_event record through the BFF child-records route.
    *
    * @param formValues - Event form state. When `regardingRecordId` is set and
    *   `regardingEntityName` is provided, the event is linked to the parent
@@ -173,20 +138,25 @@ export class EventService {
    *   entity-specific `@odata.bind` lookup AND all 5 denormalized resolver
    *   fields (`sprk_regardingrecordtype`/`id`/`name`/`url`/`number`) are
    *   written. `formValues.regardingRecordName` supplies the display-name
-   *   fallback per SRFR-052.
-   * @param options - Optional injection points for testing:
-   *   - `getCurrentUserId`: override of the Xrm.Utility.getUserId() probe (returns
-   *     a GUID without braces, or `null` when no user context is available).
+   *   fallback per SRFR-052. That parent is also the explicit mapping source
+   *   (see below).
+   * @param _options - Unused. `getCurrentUserId` fed the BU search-index cascade, which task 023 deleted (the index
+   *   columns are the server's); kept only so existing callers and tests that pass it still type-check.
    *
-   * FR-WIZ-05 (spaarke-multi-container-multi-index-r1): The Event create payload
-   * MUST include BOTH `sprk_containerid` AND `sprk_searchindexname` sourced from
-   * the current user's owning Business Unit. INV-5 contract honored — explicit
-   * overrides on the payload are preserved.
+   * Task 023 (FR-16): the payload holds ONLY the user's own values (name, priority, description, due date, event type,
+   * assigned to) and the regarding keys the route files the event by. It holds no mapped field (the server maps
+   * fill-only, FR-02), no owner / owning team / impersonation value (FR-09), no search-index value (`SearchIndexed`,
+   * FR-38/FR-40), no container (task 076) and no `sprk_eventnumber` (the platform autonumber issues it, I-11).
+   *
+   * Mapping source: the event's regarding parent, named explicitly in the route's query string. The route infers a
+   * source from the row only for the tables in `ChildRecordEndpoints.InferMappingSourceTables`, which does not yet
+   * list `sprk_event`; naming it keeps the mapping working on every BFF build, and the body stays the user's values
+   * (the source travels in the query string).
    */
   async createEvent(
     formValues: ICreateEventFormState,
     regardingEntityName?: string,
-    options?: { getCurrentUserId?: () => string | null }
+    _options?: { getCurrentUserId?: () => string | null }
   ): Promise<ICreateEventResult> {
     const warnings: string[] = [];
     const navProps = await discoverNavProps('sprk_event');
@@ -201,84 +171,6 @@ export class EventService {
     }
     if (formValues.dueDate) {
       entity['sprk_duedate'] = formValues.dueDate;
-    }
-
-    // -------------------------------------------------------------------------
-    // FR-WIZ-05 (spaarke-multi-container-multi-index-r1): cascade
-    // `sprk_searchindexname` from the current user's owning Business Unit onto
-    // the create payload.
-    //
-    // ⚠️ This used to cascade `sprk_containerid` as well. That half was DELETED
-    // 2026-09-03 by unified-access-control-r2 task 076 (harmful write "W1") —
-    // see the block comment on `EntityCreationService.applyDefaultContainerId`.
-    // A storage location is not the client's to choose; a search-index routing
-    // hint still is.
-    //
-    // INV-5 contract: if the payload already has an explicit non-empty value
-    // for the field, DO NOT overwrite. `EntityCreationService.applyUserBuDefaults`
-    // enforces this guard.
-    //
-    // Non-fatal: if userId resolution fails (no Xrm host), or the BU has no
-    // value for one or both fields, leave the corresponding field unset — the
-    // BFF tenant-default chain handles the fallback server-side. We log a
-    // warning instead of aborting event creation.
-    //
-    // Reference: matterService.ts FR-WIZ-01 cascade block (lines ~274-319).
-    // -------------------------------------------------------------------------
-    try {
-      const resolveUserId = options?.getCurrentUserId ?? _tryGetCurrentUserId;
-      const userId = resolveUserId();
-      if (userId) {
-        const webApi = _toWebApiLike(this._dataService);
-        const buDefaults = await EntityCreationService.resolveUserBuDefaults(webApi, userId);
-        const applied = EntityCreationService.applyUserBuDefaults(entity, buDefaults);
-        // The `sprk_containerid` cascade + its two log branches were DELETED here 2026-09-03 by
-        // task 076 (W1) along with `applyDefaultContainerId` itself.
-        if (applied.searchIndexNameSet) {
-          console.info(
-            '[EventService] Cascaded sprk_searchindexname from user BU:',
-            buDefaults.searchIndexName,
-            '(BU:',
-            buDefaults.businessUnitId,
-            ')'
-          );
-        } else if (buDefaults.searchIndexName) {
-          console.info('[EventService] sprk_searchindexname already explicitly set on payload — preserving (INV-5).');
-        }
-        if (!buDefaults.searchIndexName) {
-          console.info(
-            '[EventService] User BU has no sprk_searchindexname — leaving the payload field unset; BFF tenant-default chain will apply.'
-          );
-        }
-        // Phase G: cascade BU's `sprk_ai_search_index` lookup onto the new Event.
-        if (buDefaults.searchIndexId) {
-          const aiNavProp = findNavProp(navProps, 'sprk_aisearchindex');
-          if (aiNavProp) {
-            entity[`${aiNavProp}@odata.bind`] = `/sprk_aisearchindexes(${cleanGuid(buDefaults.searchIndexId)})`;
-            console.info(
-              '[EventService] Cascaded sprk_ai_search_index from user BU:',
-              buDefaults.searchIndexId,
-              '(BU:',
-              buDefaults.businessUnitId,
-              ')'
-            );
-          } else {
-            console.warn(
-              '[EventService] sprk_ai_search_index nav-prop not discovered on sprk_event — lookup cascade skipped.'
-            );
-          }
-        }
-      } else {
-        console.warn(
-          '[EventService] Xrm.Utility.getUserId() unavailable — skipping BU cascade for sprk_containerid / sprk_searchindexname. BFF tenant-default will apply server-side.'
-        );
-      }
-    } catch (err) {
-      // Cascade is best-effort; never block event creation on it.
-      console.warn(
-        '[EventService] Failed to cascade BU defaults (non-fatal):',
-        err instanceof Error ? err.message : err
-      );
     }
 
     // Event type lookup
@@ -311,7 +203,10 @@ export class EventService {
     // `sprk_regardingrecordid`, `sprk_regardingrecordname`,
     // `sprk_regardingrecordurl`, `sprk_regardingrecordnumber`) via the shared
     // `applyResolverFields` primitive — the ADR-024-mandated flow, mirroring
-    // the canonical `WorkAssignmentService`.
+    // the canonical `WorkAssignmentService`. These are the filing keys the
+    // route needs (the regarding pair files the event and decides its owner);
+    // the server keeps the pair as sent and canonicalises the record URL
+    // (task 045f: a URL that names another record than the pair is refused).
     //
     // This replaces the pre-existing ad-hoc matter/project-only map that bound
     // only the entity-specific lookup and skipped every resolver field — a
@@ -324,6 +219,7 @@ export class EventService {
     // Graceful degradation (NFR-06): `applyResolverFields` never throws for a
     // missing catalog row or target-field value — it warns and skips the
     // affected write, so event creation is never blocked by resolver metadata.
+    const hasRegarding = !!formValues.regardingRecordId && !!regardingEntityName;
     if (formValues.regardingRecordId && regardingEntityName) {
       const entitySet = _resolveEntitySet(regardingEntityName);
       const hint = _resolveLookupHint(regardingEntityName);
@@ -343,38 +239,30 @@ export class EventService {
         formValues.regardingRecordName,
         hint
       );
-
-      // Field Mapping Framework (spec FR-12, task 020): apply the configured
-      // {parent -> sprk_event} mapping profile (if any) onto the create payload.
-      // Runs AFTER applyResolverFields (regarding fields already written) and
-      // BEFORE createRecord, on the SAME payload object. The engine never
-      // throws and is a graceful no-op when no profile exists or the BFF deps
-      // are unavailable (e.g. a lookup-only construction site) -- no behavior
-      // change in either case. No source===target guard (same-entity mapping
-      // is a supported scenario per ADR-024/design.md §10).
-      if (this._authenticatedFetch && this._bffBaseUrl) {
-        const mappingResult = await applyFieldMappings({
-          sourceEntity: regardingEntityName,
-          sourceId: formValues.regardingRecordId,
-          targetEntity: 'sprk_event',
-          payload: entity,
-          dataService: this._dataService,
-          authenticatedFetch: this._authenticatedFetch,
-          bffBaseUrl: this._bffBaseUrl,
-        });
-        warnings.push(...mappingResult.warnings);
-      }
     }
 
     try {
-      // UAC-r2 task 147 r1 (owner round 28 item 1): the child create goes through the BFF (G5) — the server decides the
-      // owner (the Secure Record Owners team under a secure record); a refusal surfaces the server's message.
-      const id = await withBffChildWrites(this._dataService, this._authenticatedFetch, this._bffBaseUrl).createRecord(
+      // Task 023 (FR-16): the create goes to the BFF child-records route, never to Xrm.WebApi. The server maps the fields
+      // fill-only (the user's own value wins), owns the record by the caller's rules (FR-09), picks the search index and
+      // the platform autonumber issues the event number. A server warning (a source that could not be read, a mapped value
+      // that was not written) is shown like any other.
+      if (!this._authenticatedFetch || typeof this._bffBaseUrl !== 'string') {
+        throw new ChildRecordWriteError(
+          'The sprk_event record was not saved: this screen is not connected to the Spaarke service, which must save it.',
+          0,
+          'child_record.bff_not_configured'
+        );
+      }
+      const created = await createRecordViaBffWithWarnings(
+        this._authenticatedFetch,
+        this._bffBaseUrl,
         'sprk_event',
-        entity
+        entity,
+        hasRegarding ? { mappingSource: { entity: regardingEntityName!, id: formValues.regardingRecordId } } : undefined
       );
+      warnings.push(...created.warnings);
       return {
-        eventId: id,
+        eventId: created.id,
         eventName: formValues.eventName.trim(),
         success: true,
         warnings,
@@ -382,7 +270,8 @@ export class EventService {
     } catch (err) {
       console.error('[EventService] createRecord error:', err);
       // #2382: a privilege refusal becomes one plain sentence; the full error is logged above.
-      const described = describeWebApiCreateError(err, 'event');
+      // An event with no regarding parent is a root create: the route's uniform not-found can only be a selected value.
+      const described = describeWebApiCreateError(err, 'event', { rootCreate: !hasRegarding });
       const message = described.message;
       return {
         success: false,
