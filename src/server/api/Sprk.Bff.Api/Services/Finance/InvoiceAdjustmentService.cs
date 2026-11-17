@@ -206,6 +206,7 @@ public sealed class InvoiceAdjustmentService
     internal const string OutcomeRemoved = "Removed";
     private const string TotalsStep = "totals";
     private const string RecordStep = "record";
+    private const string UndoStep = "undo";
 
     internal const string SystemUserEntity = InvoiceLineDecisionService.SystemUserEntity;
     internal const string PolicyVersionEntity = "sprk_policyversion";
@@ -216,6 +217,7 @@ public sealed class InvoiceAdjustmentService
     internal const string InvoiceDateColumn = InvoiceReviewService.InvInvoiceDate;
     internal const string StatusReasonColumn = "statuscode";
     internal const int StatusReasonInactive = 2;
+    internal const int StatusReasonActive = 1;
     internal const int StateInactive = 1;
 
     private static readonly TimeSpan LockDuration = TimeSpan.FromMinutes(2);
@@ -1010,7 +1012,16 @@ public sealed class InvoiceAdjustmentService
 
         if (calculation.IsRefused)
         {
-            return Refused(command.InvoiceId, calculation);
+            if (alreadyRemoved && !writeColumn)
+            {
+                // A repeat of a removal whose Decision Record exists: that removal finished, so it is removed for good and not this request's to
+                // undo (the add path's rule for a repeat). The refusal is reported, nothing is written.
+                return Refused(command.InvoiceId, calculation);
+            }
+
+            // ISS-030: this request deactivated the row (or an earlier one did and was refused without being undone: no record exists). The refused
+            // calculation wrote no totals, so put the row back; nothing stays half applied. No Decision Record and no note are written.
+            return await UndoRemovalAsync(command.InvoiceId, command.LineId, alreadyRemoved ? null : row, calculation).ConfigureAwait(false);
         }
 
         // Task 152 (FR-43): the removal changed the approved total; the change is the removed line's id (unique per adjustment line). Best effort.
@@ -1025,6 +1036,51 @@ public sealed class InvoiceAdjustmentService
         }
 
         return new AdjustmentResult(AdjustmentStatus.Applied, "ok", RemovedLineId: command.LineId, Totals: TotalsOf(invoice, calculation), AlreadyApplied: alreadyRemoved);
+    }
+
+    /// <summary>
+    /// ISS-030: a removal's totals were refused after the row was deactivated, so the row is reactivated and the refusal answered. The write is the
+    /// add path's own undo (a plain update: the platform returns no row version for the deactivation, and the invoice lock is held); it runs on
+    /// <see cref="CancellationToken.None"/> because the deactivation already happened and must not be left behind by a cancelled request. A failed
+    /// reactivation is 503 <c>incomplete</c> at the <see cref="UndoStep"/> step; the same request repeated finds the row inactive with no record,
+    /// recalculates, and (still refused) undoes again.
+    /// </summary>
+    private async Task<AdjustmentResult> UndoRemovalAsync(Guid invoiceId, Guid lineId, Entity? priorRow, InvoiceTotalsCalculation calculation)
+    {
+        try
+        {
+            await _entities.UpdateAsync(InvoiceReviewReadService.LineEntity, lineId, ReactivationFields(priorRow), CancellationToken.None).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            return Incomplete(invoiceId, UndoStep, ex.GetType().Name, removal: true);
+        }
+
+        return Refused(invoiceId, calculation);
+    }
+
+    /// <summary>
+    /// ISS-030: the reverse of <see cref="DeactivationFields"/> (statecode and statuscode travel together). <paramref name="priorRow"/> is the row as
+    /// read before THIS request's deactivation: the remover's stamp is replaced by the reviewer and time the row held (cleared when it held none).
+    /// On a repeat there is no prior row (an earlier request overwrote the stamp and it is not recoverable), so the stamp is left as the removal wrote it.
+    /// </summary>
+    private static Dictionary<string, object> ReactivationFields(Entity? priorRow)
+    {
+        var fields = new Dictionary<string, object>
+        {
+            [InvoiceTotalsService.LineState] = new OptionSetValue(InvoiceTotalsService.StateActive),
+            [StatusReasonColumn] = new OptionSetValue(StatusReasonActive),
+        };
+
+        if (priorRow is not null)
+        {
+            fields[InvoiceReviewReadService.LineReviewedBy] =
+                priorRow.GetAttributeValue<EntityReference>(InvoiceReviewReadService.LineReviewedBy) is { } by ? by : DBNull.Value;
+            fields[InvoiceReviewReadService.LineReviewedOn] =
+                priorRow.GetAttributeValue<DateTime?>(InvoiceReviewReadService.LineReviewedOn) is { } on ? on : DBNull.Value;
+        }
+
+        return fields;
     }
 
     // ── Shared ──
@@ -1087,6 +1143,7 @@ public sealed class InvoiceAdjustmentService
             {
                 (true, RecordStep) => "The adjustment was removed and the invoice totals were updated, but the removal was not recorded. Repeat the same request to complete it.",
                 (false, RecordStep) => "The adjustment and the invoice totals were updated, but the adjustment was not recorded. Repeat the same request to complete it.",
+                (true, UndoStep) => "The adjustment removal was refused, but the adjustment could not be put back. Repeat the same request to complete it.",
                 (true, _) => "The adjustment was removed but the invoice totals were not updated. Repeat the same request to complete it.",
                 _ => "The adjustment was saved but the invoice totals were not updated. Repeat the same request to complete it.",
             });
