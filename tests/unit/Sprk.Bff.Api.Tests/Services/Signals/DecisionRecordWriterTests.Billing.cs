@@ -32,21 +32,29 @@ public sealed partial class DecisionRecordWriterTests
     internal static Harness WithBillingLookups(Harness h)
     {
         h.Entities.Setup(e => e.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
-            .Returns((QueryExpression query, CancellationToken _) =>
+            .Returns(async (QueryExpression query, CancellationToken _) =>
             {
-                h.Lookups.Add(query);
-                if (h.LookupFault is { } fault)
+                // Task 084h-5: the harness's lock (creates may run concurrently), then its barrier: answered, then held, so concurrent
+                // attempts have all read before any of them creates.
+                List<Entity> stored;
+                lock (h.Created)
                 {
-                    return Task.FromException<EntityCollection>(fault);
+                    h.Lookups.Add(query);
+                    if (h.LookupFault is { } fault)
+                    {
+                        throw fault;
+                    }
+
+                    stored = h.Created.Select(c => StoredByTheWriter(c, c.Id == Guid.Empty ? h.NewId : c.Id))
+                        .Concat(h.Seeded)
+                        .Concat(h.Rows.Values)
+                        .Where(row => row.LogicalName == query.EntityName && query.Criteria.Conditions.All(c => BillingSatisfies(c, row)))
+                        .Take(query.TopCount ?? int.MaxValue)
+                        .ToList();
                 }
 
-                var stored = h.Created.Select(c => StoredByTheWriter(c, c.Id == Guid.Empty ? h.NewId : c.Id))
-                    .Concat(h.Seeded)
-                    .Concat(h.Rows.Values)
-                    .Where(row => row.LogicalName == query.EntityName && query.Criteria.Conditions.All(c => BillingSatisfies(c, row)))
-                    .Take(query.TopCount ?? int.MaxValue)
-                    .ToList();
-                return Task.FromResult(new EntityCollection(stored));
+                await h.HoldIfKeyedAsync(query);
+                return new EntityCollection(stored);
             });
         return h;
 
@@ -100,9 +108,9 @@ public sealed partial class DecisionRecordWriterTests
     }
 
     /// <summary>A harness whose invoice is filed under <see cref="MatterId"/> and whose line under its own project (D-75).</summary>
-    private static Harness BillingHarness(Guid? lineProject = null)
+    private static Harness BillingHarness(Guid? lineProject = null, IReadOnlySet<DecisionRecordWriter.KeyedEntry>? derivedRecordIds = null)
     {
-        var h = WithBillingLookups(new Harness());
+        var h = WithBillingLookups(new Harness(derivedRecordIds: derivedRecordIds));
         h.Rows[("sprk_invoice", InvoiceId)] = new Entity("sprk_invoice", InvoiceId) { ["sprk_matter"] = new EntityReference("sprk_matter", MatterId) };
         h.Rows[("sprk_billingevent", LineId)] = new Entity("sprk_billingevent", LineId)
         {

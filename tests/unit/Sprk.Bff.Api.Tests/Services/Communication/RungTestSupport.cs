@@ -106,6 +106,10 @@ internal sealed class CapturingLogger<T> : ILogger<T>
 {
     public List<LogEntry> Entries { get; } = new();
 
+    /// <summary>Optional: called with each entry's level and formatted message before it is captured; it may throw, to stand in for a fault
+    /// the code under test does not wrap (ebilling-r1 084h-5 review round 2).</summary>
+    public Action<LogLevel, string>? Intercept { get; set; }
+
     public IDisposable BeginScope<TState>(TState state) where TState : notnull => NullScope.Instance;
 
     public bool IsEnabled(LogLevel logLevel) => true;
@@ -121,7 +125,9 @@ internal sealed class CapturingLogger<T> : ILogger<T>
                 fields[kvp.Key] = kvp.Value;
         }
 
-        Entries.Add(new LogEntry(logLevel, eventId, formatter(state, exception), exception, fields));
+        var message = formatter(state, exception);
+        Intercept?.Invoke(logLevel, message);
+        Entries.Add(new LogEntry(logLevel, eventId, message, exception, fields));
     }
 
     private sealed class NullScope : IDisposable

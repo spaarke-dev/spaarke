@@ -439,13 +439,13 @@ public sealed class RecordProcedureDecisionJobTests
     [Fact]
     public async Task J4_AnExceptionThatIsNotARefusal_IsAFailureForRedelivery_AndMetered()
     {
-        // A Dataverse client timeout can surface as a TaskCanceledException the writer does not wrap. The host's token is not cancelled.
+        // A Dataverse client timeout can surface as a TaskCanceledException the writer does not wrap (here from the writer's own log call after the create, which nothing wraps; a timeout in any Dataverse call the writer makes is that call's refusal, task 084h-5 review F2). The host's token is not cancelled.
         var scope = Guid.NewGuid();
         MetricScope.Value = scope;
         var (listener, failures) = ListenReasons(scope);
         using var _ = listener;
         var rig = new Rig();
-        rig.Writer.Org.Setup(o => o.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>())).ThrowsAsync(new TaskCanceledException("timeout"));
+        DecisionRecordWriterTests.FaultTheWritersLogAfterTheCreate(rig.Writer, new TaskCanceledException("timeout"));
 
         var outcome = await rig.RunAsync(Decision());
 
@@ -580,8 +580,7 @@ public sealed class RecordProcedureDecisionJobTests
         retried.Writer.LookupFault = new TimeoutException(ReasonText + NoteText); // even a fault that echoed the text is not logged
         outcomes.Add(await retried.RunAsync(Decision(), delivery: JobContract.MaxDeliveryCount));
         retried.Writer.LookupFault = null;
-        retried.Writer.Org.Setup(o => o.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new TaskCanceledException(ReasonText + NoteText));
+        DecisionRecordWriterTests.FaultTheWritersLogAfterTheCreate(retried.Writer, new TaskCanceledException(ReasonText + NoteText));
         outcomes.Add(await retried.RunAsync(Decision()));
         outcomes.Add(await retried.RunAsync(Decision(coreTable: "sprk_invoice")));
         handlerLogs.AddRange(retried.Log.Entries);

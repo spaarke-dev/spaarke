@@ -1,6 +1,6 @@
 # 084h-3: the repair job for a per-record Procedure Decision Record
 
-> **Task:** `tasks/084h-3-procedure-change-record-repair-job.poml` (FULL) · **Design:** `084h-procedure-change-decision-records-design.md` §7.3, as settled by §16 items 3-4 and §17 (EB-D-239 Q10) · **Base:** `task/ebilling-084h-3` from 5508b576fe · **Status:** built and tested; review round 1 fixed (see "Review round 1"). The ADR-004 tension is pending owner confirmation.
+> **Task:** `tasks/084h-3-procedure-change-record-repair-job.poml` (FULL) · **Design:** `084h-procedure-change-decision-records-design.md` §7.3, as settled by §16 items 3-4 and §17 (EB-D-239 Q10) · **Base:** `task/ebilling-084h-3` from 5508b576fe · **Status:** built and tested; review round 1 fixed (see "Review round 1"). The ADR-004 tension is resolved by task 084h-5 (Path C, comply; EB-D-247).
 
 ## What was built
 
@@ -101,8 +101,8 @@ Every constant of `DecisionRecordRefusalReason` is in `RecordProcedureDecisionJo
 
 - **ADR:** ADR-004 (async job contract), A1: a handler is idempotent per unit of work.
 - **The gap.** Three layers make one record per decision, and none is atomic: the processing lock is check-then-set and fails open on a cache fault (#984); the writer looks the record up by the decision key before it creates; and `sprk_decisionrecord` has no alternate key on the decision key, so Dataverse does not refuse a second create. Two copies that both pass the lock and both find nothing could both create.
-- **Proposed path: §6.5 Path A (project exception),** the same exception already recorded by the gate job (ontology task 149 K2) and by 084h-1 (K-b). The window needs two deliveries of the same decision inside one lock check, which the lock and the lookup together make rare; a duplicate is visible (two records with the same key) and does not change any decision.
-- **Status: pending owner confirmation.**
+- **Superseded: no longer a §6.5 Path A exception.** Path A was proposed here (the same exception as the gate job's ontology task 149 K2 and 084h-1 K-b). The owner did not take it (EB-D-247, question (d): build a check instead).
+- **Resolved by task 084h-5: §6.5 Path C (comply).** Every keyed writer entry point (gate, condition-cleared, billing, Procedure) now creates its Decision Record with a primary id derived from its key alone, so Dataverse refuses a second create of the same decision, and the writer answers the refused copy exactly as the existing already-recorded case. The repair job's unit of work (the decision id) is therefore idempotent at the receive side, with no change to this job. Design: ontology-r1 option 1. Detail: `084h-5-decision-record-derived-id.md`. Known limit: derivable record id, see uac-r2 thread. In effect when 084h-5 merges; its merge waits on the owner and uac-r2 accepting that limit.
 
 ## Review round 1 (2026-11-17)
 
@@ -186,4 +186,4 @@ BFF Hygiene §10 + NFR-01 verified: compressed publish size 52.72 MB (50.28 MiB)
   - K4 (doc): the first-build "Tests" and "Verification" figures predate round 1 (labelled above).
   - K1: a permanent owner refusal is dead-lettered with the description `decision_owner_refused` only. The owner refusal code is in the Error log, not on the message, so a dead-letter triage joins to logs.
 - **Merged into work/ebilling-r1 as bb4ad3f578.** On the merged tip: BFF build `--warnaserror` 0 warnings; the 084h-3, Procedure assignment, billing recorder and gate job suites 661/0.
-- **ADR-004 tension above: pending owner confirmation** (§6.5 path A, the same exception as ontology task 149 K2 and 084h-1 K-b; ontology-r1 has no objection).
+- **ADR-004 tension above: resolved by task 084h-5** (§6.5 Path C, comply; EB-D-247). The Path A exception first proposed here was not taken.

@@ -4,7 +4,7 @@
     <title>Duplicate check for keyed Decision Records: a derived primary id, so Dataverse refuses a second create of the same decision</title>
     <phase>Defect fix (owner question (d), EB-D-247; replaces the ADR-004 Path A exception of 084h-3)</phase>
     <gate>Branch from work/ebilling-r1 at the sha named in the agent brief. Merge waits on the owner and uac-r2 accepting the known limit "derivable record id, see uac-r2 thread".</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Shared Decision Record writer (ontology-owned, every keyed decision path); data-mutation.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -15,12 +15,12 @@
     <estimated-effort>1 day</estimated-effort>
   </metadata>
 
-  <prompt>Build ontology-r1's chosen design (option 1) for EB-D-247 in src/server/api/Sprk.Bff.Api/Services/Signals/DecisionRecordWriter.cs. Every KEYED writer entry point (the gate key GateDecisionKey, the condition-cleared key ConditionClearedRecordKey, the billing key BillingDecisionKey and the per-record Procedure key) creates its Decision Record with a primary id derived from the key alone, so a second concurrent create of the same decision is refused by Dataverse and answered as the existing already-recorded case. Today the only guard is a check-then-create (processing lock, then the sprk_steps lookup), which two concurrent deliveries can both pass (084h-3 notes, "ADR-004 tension"; the invoice decision lock's 2-minute expiry has the same window).</prompt>
+  <prompt>Build ontology-r1's chosen design (option 1) for EB-D-247 in src/server/api/Sprk.Bff.Api/Services/Signals/DecisionRecordWriter.cs. Every KEYED writer entry point that the owner leaves on (EB-D-251: condition-cleared and Procedure; the gate and billing keep random ids) (the gate key GateDecisionKey, the condition-cleared key ConditionClearedRecordKey, the billing key BillingDecisionKey and the per-record Procedure key) creates its Decision Record with a primary id derived from the key alone, so a second concurrent create of the same decision is refused by Dataverse and answered as the existing already-recorded case. Today the only guard is a check-then-create (processing lock, then the sprk_steps lookup), which two concurrent deliveries can both pass (084h-3 notes, "ADR-004 tension"; the invoice decision lock's 2-minute expiry has the same window).</prompt>
 
   <goal>One keyed decision can never produce two Decision Records, even when two attempts run at the same moment, and every such race ends in the same already-recorded answer a sequential repeat gets.</goal>
 
   <constraints>
-    <constraint source="ontology-r1 rule 1">Scope: every keyed entry point (gate, condition-cleared, billing, Procedure). The id reaches the ONE private CreateAsync (~2593) through the plan or request; no second create site (DecisionRecordContextImmutabilityTests pins it).</constraint>
+    <constraint source="ontology-r1 rule 1">Scope: the keyed entry points on by default (condition-cleared, Procedure; EB-D-251 option B leaves the gate and billing on random ids, with their code paths kept behind the switch). The id reaches the ONE private CreateAsync (~2593) through the plan or request; no second create site (DecisionRecordContextImmutabilityTests pins it).</constraint>
     <constraint source="ontology-r1 rule 2">NOT the review path (WriteAsync from the commit route): its ReviewId is chosen by the client, so a derived id there would let a client choose a record id. It keeps random ids, its own lock, lookup and hash check. Pin it with a test (the review path creates with no id set).</constraint>
     <constraint source="ontology-r1 rule 3">Derive from the key Guid only, never the action code, with its own prefix: InvoiceSubmissionPersister.IdOf-style, e.g. IdOf("decision-record-id:" + key:D) (use the writer's own derivation helper if one exists, else the same SHA-based scheme; never a raw key). One key is one record whatever the code; a second code under the key keeps its existing refusal.</constraint>
     <constraint source="ontology-r1 rule 4">A typed OrganizationServiceFault DuplicateRecord (check the error code against the SDK; typed first, as IsDataverseAccessDenied does) re-reads the stored row as the writer and then applies EXACTLY the rules the lookup-first path applies today: same code and same hash → AlreadyRecorded; another code, other content or an unreadable hash → the existing refusals; gate → AlreadyRecorded. Never CreateFailed. Any other fault stays CreateFailed / DataverseAccessDenied as today.</constraint>
@@ -33,9 +33,9 @@
 
   <acceptance-criteria>
     <criterion testable="true">The writer test fakes refuse a create whose primary id already exists, the way Dataverse does (typed DuplicateRecord fault).</criterion>
-    <criterion testable="true">Two concurrent writes of the same key (both pass the lookup) give exactly one create and one AlreadyRecorded, for each keyed entry point (gate, condition-cleared, billing, Procedure). Seeding proof: with the derived id removed the same test sees two creates.</criterion>
+    <criterion testable="true">Two concurrent writes of the same key (both pass the lookup) give exactly one create and one AlreadyRecorded, for each entry point that keeps the derived id (condition-cleared, Procedure). Seeding proof: with the derived id removed the same test sees two creates. The gate and billing are off by default (owner option B, EB-D-251): their records keep random ids, a test pins the default set to exactly {ConditionCleared, RecordProcedure}, and their duplicates stay guarded by the existing locks and the sprk_steps lookup; the derived-id code paths for them stay and are tested through the opt-in seam.</criterion>
     <criterion testable="true">A DuplicateRecord whose stored row carries other content (or another code) gives the existing other-content (or other-code) refusal; an unreadable stored hash gives the existing refusal; never CreateFailed.</criterion>
-    <criterion testable="true">Must-not-fire: the review path still creates with no id set; any other create fault is unchanged; the gate job's, the repair job's and the billing writers' existing tests pass unchanged, golden hashes unchanged.</criterion>
+    <criterion testable="true">Must-not-fire: the review path still creates with no id set; a default gate or billing create sets no id; any other create fault is unchanged; the gate job's, the repair job's and the billing writers' existing tests pass unchanged, golden hashes unchanged.</criterion>
     <criterion testable="true">Filtered DecisionRecord|DecisionCommit|RecordProcedureDecision|GateDecision|SignalGate|SubmissionOverride|InvoiceRejectReturn|InvoiceAdjustment tests, the Decision|Signal ArchTests and the --warnaserror build pass.</criterion>
   </acceptance-criteria>
 
