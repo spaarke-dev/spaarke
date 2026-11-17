@@ -25,8 +25,12 @@ import type { IDataService } from '../../types/serviceInterfaces';
 import type { ResponseFetchFn } from '../../utils/fetchTypes';
 import { isApiError, problemOf } from '../../utils/thrownFetchError';
 import {
+  CORRECTION_NOT_ALLOWED_ERROR_CODE,
+  CORRECTION_UNAVAILABLE_ERROR_CODE,
   FIRM_REQUIRED_ERROR_CODE,
   InvoiceSubmissionError,
+  invoiceSubmissionErrorMessage,
+  type InvoiceCorrectionTarget,
   type InvoiceCoreRecordKind,
   type InvoiceCoreRecordList,
   type InvoiceCoreRecordOption,
@@ -133,24 +137,51 @@ export function isBlockedStatus(status: Pick<InvoiceSubmissionStatusView, 'statu
 // ---------------------------------------------------------------------------
 
 /** What the server's ProblemDetails (a thrown `ApiError` body or a returned response body) says, as the screen's error type. */
-function fromProblem(status: number | undefined, problem: Record<string, unknown> | null): InvoiceSubmissionError {
-  const detail = typeof problem?.detail === 'string' && problem.detail.trim() ? problem.detail : undefined;
-  const errorCode = typeof problem?.errorCode === 'string' && problem.errorCode ? problem.errorCode : undefined;
-  return new InvoiceSubmissionError({ statusCode: status, errorCode, detail });
+function fromProblem(
+  status: number | undefined,
+  problem: Record<string, unknown> | null,
+  correction = false
+): InvoiceSubmissionError {
+  let detail = typeof problem?.detail === 'string' && problem.detail.trim() ? problem.detail : undefined;
+  let errorCode = typeof problem?.errorCode === 'string' && problem.errorCode ? problem.errorCode : undefined;
+  // The `reason` extension of a 409 `correction_not_allowed` (why the intake refused the correction).
+  const reason = typeof problem?.reason === 'string' && problem.reason ? problem.reason : undefined;
+  if (correction) {
+    // A correction's field errors (`errors.mode` / `invoiceId` / `correctionNote`) arrive as a ValidationProblem with no `detail`: show
+    // the server's own first field sentence, never the generic 400 text.
+    if (!detail && status === 400) detail = firstFieldError(problem);
+    // The uniform 404 of an invoice the caller cannot write (or that is gone) carries a `reasonCode`, no `errorCode`: whatever it carries,
+    // a 404 here is "not available to you, or gone", and gets the correction's own words.
+    if (status === 404) errorCode = CORRECTION_UNAVAILABLE_ERROR_CODE;
+  }
+  return new InvoiceSubmissionError({ statusCode: status, errorCode, detail, reason });
+}
+
+/** The first sentence of a ValidationProblem's `errors` (`{ field: [sentence, ...] }`), or undefined. */
+function firstFieldError(problem: Record<string, unknown> | null): string | undefined {
+  const errors = problem?.errors;
+  if (typeof errors !== 'object' || errors === null) return undefined;
+  for (const messages of Object.values(errors as Record<string, unknown>)) {
+    if (Array.isArray(messages)) {
+      const first = messages.find((m): m is string => typeof m === 'string' && m.trim().length > 0);
+      if (first) return first;
+    }
+  }
+  return undefined;
 }
 
 /** A thrown failure of the injected fetch as the screen's error type. No answer at all (a network failure) carries no status. */
-export function toInvoiceSubmissionError(err: unknown): InvoiceSubmissionError {
+export function toInvoiceSubmissionError(err: unknown, correction = false): InvoiceSubmissionError {
   if (err instanceof InvoiceSubmissionError) return err;
-  if (isApiError(err)) return fromProblem(err.status, problemOf(err));
+  if (isApiError(err)) return fromProblem(err.status, problemOf(err), correction);
   return new InvoiceSubmissionError({ message: err instanceof Error ? err.message : undefined });
 }
 
-async function errorFromResponse(response: Response): Promise<InvoiceSubmissionError> {
+async function errorFromResponse(response: Response, correction = false): Promise<InvoiceSubmissionError> {
   // A body that is not ProblemDetails JSON leaves the status alone to speak.
   const body: unknown = await response.json().catch(() => null);
   const problem = typeof body === 'object' && body !== null ? (body as Record<string, unknown>) : null;
-  return fromProblem(response.status, problem);
+  return fromProblem(response.status, problem, correction);
 }
 
 // ---------------------------------------------------------------------------
@@ -268,7 +299,123 @@ export interface InternalInvoiceSubmissionOptions {
   lockRecord?: boolean;
 }
 
+// ---------------------------------------------------------------------------
+// Correction prefill (ebilling-r1 095f-2e2b)
+// ---------------------------------------------------------------------------
+
+/** The `GET /api/finance/invoices/{invoiceId}/correction-prefill` body (`CorrectionPrefillResponse`, camelCase). */
+export interface CorrectionPrefill {
+  invoiceId: string;
+  /** The invoice's firm; null when it has none. */
+  firm: { id: string; name: string } | null;
+  /** `entityType` is `Matter`, `Project` or `WorkAssignment`. */
+  coreRecord: { entityType: string; entityId: string; name: string };
+  invoiceStatus: string | null;
+  trackingNumber: string | null;
+  /** The firm invoice number the invoice was submitted with. */
+  firmInvoiceNumber: string;
+  /** The intake's answer now. */
+  canCorrect: boolean;
+  /** When not `canCorrect`: `invoice_status`, `no_submission` or `submission_in_progress`; else null. */
+  reason: string | null;
+}
+
+const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null;
+
+/** The prefill from a parsed body, or null when it is not one (a missing or wrongly typed member: never a partial answer). */
+export function readCorrectionPrefill(body: unknown): CorrectionPrefill | null {
+  if (!isRecord(body) || typeof body.invoiceId !== 'string' || typeof body.canCorrect !== 'boolean') return null;
+  const core = body.coreRecord;
+  if (
+    !isRecord(core) ||
+    typeof core.entityType !== 'string' ||
+    typeof core.entityId !== 'string' ||
+    typeof core.name !== 'string'
+  ) {
+    return null;
+  }
+  let firm: CorrectionPrefill['firm'] = null;
+  if (body.firm !== null && body.firm !== undefined) {
+    if (!isRecord(body.firm) || typeof body.firm.id !== 'string' || typeof body.firm.name !== 'string') return null;
+    firm = { id: body.firm.id, name: body.firm.name };
+  }
+  return {
+    invoiceId: body.invoiceId,
+    firm,
+    coreRecord: { entityType: core.entityType, entityId: core.entityId, name: core.name },
+    invoiceStatus: asString(body.invoiceStatus),
+    trackingNumber: asString(body.trackingNumber),
+    firmInvoiceNumber: typeof body.firmInvoiceNumber === 'string' ? body.firmInvoiceNumber : '',
+    canCorrect: body.canCorrect,
+    reason: asString(body.reason),
+  };
+}
+
+/** What a correction launch comes to: the invoice to replace, or the plain sentence saying why it cannot be corrected here. */
+export type CorrectionLaunch = { ok: true; target: InvoiceCorrectionTarget } | { ok: false; message: string };
+
+const ROUTE_TYPE_TO_KIND: Readonly<Record<string, InvoiceCoreRecordKind>> = {
+  Matter: 'matter',
+  Project: 'project',
+  WorkAssignment: 'workassignment',
+};
+
+/**
+ * The correction the wizard takes from a prefill. The server's answer decides: `canCorrect` false is shown with its reason, and an
+ * invoice with no firm, no firm invoice number or a core record this wizard does not know cannot be offered to the wizard at all
+ * (the internal route needs the firm named, and the number must be the invoice's own). The server still checks everything again on submit.
+ */
+export function correctionTargetFromPrefill(prefill: CorrectionPrefill): CorrectionLaunch {
+  if (!prefill.canCorrect) {
+    return {
+      ok: false,
+      message: invoiceSubmissionErrorMessage(
+        new InvoiceSubmissionError({
+          statusCode: 409,
+          errorCode: CORRECTION_NOT_ALLOWED_ERROR_CODE,
+          reason: prefill.reason ?? undefined,
+        })
+      ),
+    };
+  }
+  const kind = ROUTE_TYPE_TO_KIND[prefill.coreRecord.entityType];
+  if (!prefill.firm || !prefill.firmInvoiceNumber.trim() || !kind) {
+    return {
+      ok: false,
+      message:
+        'This invoice cannot be corrected from here: its firm, number or record is not on file. Nothing was saved.',
+    };
+  }
+  return {
+    ok: true,
+    target: {
+      invoiceId: prefill.invoiceId,
+      firmInvoiceNumber: prefill.firmInvoiceNumber,
+      record: { kind, recordId: stripBraces(prefill.coreRecord.entityId), name: prefill.coreRecord.name },
+      firmId: prefill.firm.id,
+      firmName: prefill.firm.name,
+      trackingNumber: prefill.trackingNumber,
+    },
+  };
+}
+
+/** The sentence for a failed read of the prefill (the 404 and 503 of the route, or no answer at all). */
+export function correctionPrefillErrorMessage(err: unknown): string {
+  if (err instanceof InvoiceSubmissionError) {
+    if (err.detail?.trim()) return err.detail;
+    if (err.errorCode === CORRECTION_UNAVAILABLE_ERROR_CODE) return invoiceSubmissionErrorMessage(err);
+    if (err.statusCode === 401) return invoiceSubmissionErrorMessage(err);
+    if (err.statusCode === 403) return 'You do not have access to this invoice.';
+    if (err.statusCode !== undefined && err.statusCode >= 500) {
+      return 'This invoice could not be read right now. Try again shortly. Nothing was saved.';
+    }
+  }
+  return 'This invoice could not be read, so it cannot be corrected. Try again shortly. Nothing was saved.';
+}
+
 export interface InternalInvoiceSubmission {
+  /** Reads the correction prefill of an invoice (095f-2e2b). Rejects with {@link InvoiceSubmissionError}; see `correctionPrefillErrorMessage`. */
+  loadCorrectionPrefill: (invoiceId: string) => Promise<CorrectionPrefill>;
   loadRecords: (query: InvoiceRecordQuery) => Promise<InvoiceCoreRecordList>;
   loadFirms: () => Promise<InvoiceFirmOption[] | null>;
   submit: (input: InvoiceSubmissionInput) => Promise<InvoiceSubmissionAccepted>;
@@ -286,14 +433,14 @@ export function createInternalInvoiceSubmission(options: InternalInvoiceSubmissi
   const doFetch = options.fetch;
 
   /** One BFF call: the parsed JSON body of a 2xx answer, or the screen's error for any failure (thrown or returned). */
-  async function call<T>(path: string, init: RequestInit): Promise<T> {
+  async function call<T>(path: string, init: RequestInit, correction = false): Promise<T> {
     let response: Response;
     try {
       response = await doFetch(`${root}${path}`, init);
     } catch (err) {
-      throw toInvoiceSubmissionError(err);
+      throw toInvoiceSubmissionError(err, correction);
     }
-    if (!response.ok) throw await errorFromResponse(response);
+    if (!response.ok) throw await errorFromResponse(response, correction);
     try {
       return (await response.json()) as T;
     } catch {
@@ -406,11 +553,32 @@ export function createInternalInvoiceSubmission(options: InternalInvoiceSubmissi
       form.append('file', input.file);
       form.append('firmInvoiceNumber', input.firmInvoiceNumber);
       if (input.poNumber) form.append('poNumber', input.poNumber);
+      // A corrected invoice (095f-2e2b): the three Correction fields, each once. A new invoice sends none of them (the server refuses a
+      // stray `invoiceId` or `correctionNote` on New).
+      if (input.correction) {
+        form.append('mode', 'Correction');
+        form.append('invoiceId', input.correction.invoiceId);
+        form.append('correctionNote', input.correction.note);
+      }
       return call<InvoiceSubmissionAccepted>(
         `${FINANCE}/${CORE_KINDS[input.record.kind].segment}/${encodeURIComponent(input.record.recordId)}` +
           `/invoice-submissions?firmId=${encodeURIComponent(firmId)}`,
-        { method: 'POST', headers: { Accept: 'application/json' }, body: form }
+        { method: 'POST', headers: { Accept: 'application/json' }, body: form },
+        input.correction !== undefined
       );
+    },
+
+    async loadCorrectionPrefill(invoiceId: string): Promise<CorrectionPrefill> {
+      const body = await call<unknown>(
+        `${FINANCE}/invoices/${encodeURIComponent(invoiceId)}/correction-prefill`,
+        { method: 'GET', headers: { Accept: 'application/json' } },
+        true
+      );
+      const prefill = readCorrectionPrefill(body);
+      if (!prefill) {
+        throw new InvoiceSubmissionError({ message: 'The answer of the server about this invoice could not be read.' });
+      }
+      return prefill;
     },
 
     getStatus: (submissionId: string) =>

@@ -22,6 +22,11 @@
  *   4. Processing then Result — the success screen mounts {@link InvoiceSubmissionOutcome}, which polls `getStatus`
  *      and shows Accepted (tracking number), Rejected (reason + the host's report slot) or Failed (retry guidance).
  *
+ * A corrected invoice (`correction`, ebilling-r1 095f-2e2b): the same flow, replacing an invoice that is In Review. The host reads the
+ * invoice's correction prefill and passes it as `correction`; the record and the firm are the invoice's own, so there is no Record step
+ * and no firm step (`loadFirms` is not called), the firm invoice number is prefilled and read-only, and the Details step asks for a
+ * required note. `submit` receives `correction: { invoiceId, note }` and the firm. Without `correction` nothing here changes.
+ *
  * The client never creates a submission or invoice itself and never decides authorization (ADR-002 / FR-17): a
  * refusal from `submit` is shown by its error code and the wizard stays where it is.
  *
@@ -42,6 +47,7 @@ import {
   RadioGroup,
   Spinner,
   Text,
+  Textarea,
   makeStyles,
   tokens,
 } from '@fluentui/react-components';
@@ -52,9 +58,11 @@ import { FileUploadZone, UploadedFileList } from '../FileUpload';
 import type { IFileValidationError, IUploadedFile } from '../FileUpload/fileUploadTypes';
 import { InvoiceSubmissionOutcome } from './InvoiceSubmissionOutcome';
 import { invoiceSubmissionErrorMessage } from './messages';
+import { correctionNoteCounterText, correctionNoteProblem, correctionNoteToSend } from './correctionNote';
 import { FIRM_REQUIRED_ERROR_CODE, InvoiceSubmissionError } from './types';
 import type {
   InvoiceCoreRecordKind,
+  InvoiceCorrectionTarget,
   InvoiceCoreRecordOption,
   InvoiceFirmOption,
   InvoiceSubmissionAccepted,
@@ -99,6 +107,9 @@ const useStyles = makeStyles({
     minWidth: 0,
   },
   caption: {
+    color: tokens.colorNeutralForeground3,
+  },
+  noteCount: {
     color: tokens.colorNeutralForeground3,
   },
   // The locked-record gate's persistent container: it keeps keyboard focus when Retry's button is replaced by the checking text.
@@ -184,6 +195,21 @@ export interface InvoiceSubmissionWizardProps extends InvoiceSubmissionCallbacks
    * If both `lockedRecord` and `initialRecord` are given, `lockedRecord` wins and `initialRecord` is ignored.
    */
   lockedRecord?: InvoiceCoreRecordOption;
+  /**
+   * Optional (ebilling-r1 095f-2e2b): submit a CORRECTED invoice, replacing the invoice this names. The host has read the invoice's
+   * correction prefill; the wizard does not read it. ABSENT: the wizard behaves exactly as before. PRESENT:
+   * - the record is the invoice's own (`correction.record`) and is fixed, as with `lockedRecord`: no Record step, same check against
+   *   `loadRecords`. If `lockedRecord` is also given it names the record instead (it wins, as it wins over `initialRecord`); the
+   *   server still refuses a record that is not the invoice's own (409 `different_core_record`);
+   * - the firm is `correction.firmId`, never chosen: `loadFirms` is not called, so there is no firm step, and `submit` receives
+   *   `firmId`;
+   * - the firm invoice number starts as `correction.firmInvoiceNumber` and cannot be edited (the server refuses another);
+   * - the Details step has a required Note (why the invoice is corrected), at most 2,000 characters; Submit stays off without one;
+   * - `submit` receives `correction: { invoiceId, note }`; a second Submit while one is in flight is ignored, so one click sequence
+   *   sends exactly one Correction (two Corrections of one invoice can both be received; the second then fails at commit).
+   * `hideTitle`, `embedded` and the close guard behave as without it.
+   */
+  correction?: InvoiceCorrectionTarget;
   /** Optional (task 052): passed to the result screen (`InvoiceSubmissionOutcome.keepPolling`). */
   keepPolling?: (status: InvoiceSubmissionStatusView) => boolean;
   /** Optional (task 052): passed to the result screen (`InvoiceSubmissionOutcome.renderAccepted`). */
@@ -235,15 +261,19 @@ export const InvoiceSubmissionWizard: React.FC<InvoiceSubmissionWizardProps> = (
   pollIntervalMs,
   doneLabel = 'Done',
   initialRecord,
-  lockedRecord,
+  lockedRecord: lockedRecordProp,
+  correction,
   keepPolling,
   renderAccepted,
   loadRecords,
-  loadFirms,
+  loadFirms: loadFirmsProp,
   submit,
   getStatus,
 }) => {
   const styles = useStyles();
+  // A correction fixes the record to the invoice's own (the host's `lockedRecord` still wins) and never asks for the firm.
+  const lockedRecord = lockedRecordProp ?? correction?.record;
+  const loadFirms = correction ? undefined : loadFirmsProp;
 
   // ── Firm step (only for a caller with more than one firm) ───────────────
   // WizardShell fixes its step list when it mounts, so the shell is not mounted until the firm list is known: the step
@@ -314,7 +344,13 @@ export const InvoiceSubmissionWizard: React.FC<InvoiceSubmissionWizardProps> = (
   const loadRecordsRef = React.useRef(loadRecords);
   loadRecordsRef.current = loadRecords;
   const firmsKnown = firms !== null;
-  const recordFirmId = needsFirmStep ? chosenFirm?.firmId : firms?.length === 1 ? firms[0].firmId : undefined;
+  const recordFirmId = needsFirmStep
+    ? chosenFirm?.firmId
+    : correction
+      ? correction.firmId
+      : firms?.length === 1
+        ? firms[0].firmId
+        : undefined;
 
   React.useEffect(() => {
     if (!open || !firmsKnown) return;
@@ -401,9 +437,14 @@ export const InvoiceSubmissionWizard: React.FC<InvoiceSubmissionWizardProps> = (
   }, []);
 
   // ── Details step ────────────────────────────────────────────────────────
-  const [firmInvoiceNumber, setFirmInvoiceNumber] = React.useState('');
+  // A correction keeps the number of the invoice it replaces (read-only below).
+  const [firmInvoiceNumber, setFirmInvoiceNumber] = React.useState(correction?.firmInvoiceNumber ?? '');
   const [poNumber, setPoNumber] = React.useState('');
   const firmInvoiceNumberTrimmed = firmInvoiceNumber.trim();
+  // The correction note (required for a correction; the box exists only then).
+  const [correctionNote, setCorrectionNote] = React.useState('');
+  const correctionNoteTrimmed = correctionNoteToSend(correctionNote);
+  const noteProblem = correction ? correctionNoteProblem(correctionNote) : null;
 
   // ── Finish: submit, then mount the Processing / Result screen ───────────
   // True while the submit request is in flight. WizardShell's own close (its title-bar x) is ignored then, so a refusal that
@@ -412,10 +453,12 @@ export const InvoiceSubmissionWizard: React.FC<InvoiceSubmissionWizardProps> = (
   const handleShellClose = React.useCallback((): void => {
     if (!submittingRef.current) onClose();
   }, [onClose]);
-  const handleFinish = React.useCallback(async (): Promise<IWizardSuccessConfig | void> => {
+  const finishOnce = React.useCallback(async (): Promise<IWizardSuccessConfig | void> => {
     if (!chosenRecord || !file || !firmInvoiceNumberTrimmed) return;
     // A caller with several firms must have chosen one: never submit without it (the server would answer firm_required).
     if (needsFirmStep && !chosenFirm) return;
+    // A correction needs its note (the Submit button is off without one; this is the same rule where the request is made).
+    if (correction && noteProblem !== null) return;
 
     setNotice(null);
     let accepted: InvoiceSubmissionAccepted;
@@ -426,7 +469,8 @@ export const InvoiceSubmissionWizard: React.FC<InvoiceSubmissionWizardProps> = (
         file: file.file,
         firmInvoiceNumber: firmInvoiceNumberTrimmed,
         poNumber: poNumber.trim() || undefined,
-        ...(chosenFirm ? { firmId: chosenFirm.firmId } : {}),
+        ...(chosenFirm ? { firmId: chosenFirm.firmId } : correction ? { firmId: correction.firmId } : {}),
+        ...(correction ? { correction: { invoiceId: correction.invoiceId, note: correctionNoteTrimmed } } : {}),
       });
     } catch (err) {
       const message = invoiceSubmissionErrorMessage(err);
@@ -472,6 +516,9 @@ export const InvoiceSubmissionWizard: React.FC<InvoiceSubmissionWizardProps> = (
     poNumber,
     needsFirmStep,
     chosenFirm,
+    correction,
+    correctionNoteTrimmed,
+    noteProblem,
     submit,
     onSubmitted,
     styles.successIcon,
@@ -483,6 +530,23 @@ export const InvoiceSubmissionWizard: React.FC<InvoiceSubmissionWizardProps> = (
     onClose,
     doneLabel,
   ]);
+
+  // A correction sends one request at a time: a second Submit while one is in flight (a double click, a key repeat that lands before
+  // the shell has re-rendered its button) JOINS the request in flight and gets its answer, so one click sequence sends exactly one
+  // Correction. Two Corrections of one invoice can both be received (095f-2e2a K2: the second fails at commit, after the user saw
+  // "received"). A new invoice is not guarded: `correction` absent leaves the call exactly as it was.
+  const inFlightFinish = React.useRef<Promise<IWizardSuccessConfig | void> | null>(null);
+  const handleFinish = React.useCallback((): Promise<IWizardSuccessConfig | void> => {
+    if (!correction) return finishOnce();
+    if (inFlightFinish.current) return inFlightFinish.current;
+    const run = finishOnce();
+    inFlightFinish.current = run;
+    const release = () => {
+      if (inFlightFinish.current === run) inFlightFinish.current = null;
+    };
+    run.then(release, release);
+    return run;
+  }, [correction, finishOnce]);
 
   // ── Steps ───────────────────────────────────────────────────────────────
   const firmStep: IWizardStepConfig = {
@@ -718,21 +782,56 @@ export const InvoiceSubmissionWizard: React.FC<InvoiceSubmissionWizardProps> = (
           <Text size={400} weight="semibold">
             Invoice details
           </Text>
-          <Field label="Firm invoice number" required hint="The number on the invoice as your firm issued it.">
+          <Field
+            label="Firm invoice number"
+            required
+            hint={
+              correction
+                ? 'A corrected invoice keeps the number of the invoice it replaces.'
+                : 'The number on the invoice as your firm issued it.'
+            }
+          >
             <Input
               value={firmInvoiceNumber}
               maxLength={FIRM_INVOICE_NUMBER_MAX}
+              readOnly={correction !== undefined}
               onChange={(_e, data) => setFirmInvoiceNumber(data.value)}
             />
           </Field>
           <Field label="PO number (optional)">
             <Input value={poNumber} maxLength={PO_NUMBER_MAX} onChange={(_e, data) => setPoNumber(data.value)} />
           </Field>
+          {correction && (
+            <div data-testid="correction-note-field">
+              {/* No maxLength (ISS-027): a browser cuts a paste without a word. The box counts and says when the note is too long. */}
+              <Field
+                label="Note"
+                required
+                hint="Why this invoice is corrected. Recorded with the replacement."
+                validationState={correctionNote !== '' && noteProblem ? 'error' : 'none'}
+                validationMessage={correctionNote !== '' ? (noteProblem ?? undefined) : undefined}
+              >
+                <Textarea
+                  value={correctionNote}
+                  onChange={(_e, data) => setCorrectionNote(data.value)}
+                  resize="vertical"
+                  rows={3}
+                  aria-label="Correction note"
+                  data-testid="correction-note"
+                />
+              </Field>
+              <Text size={200} className={styles.noteCount} data-testid="correction-note-count">
+                {correctionNoteCounterText(correctionNote)}
+              </Text>
+            </div>
+          )}
           <div className={styles.summary}>
             <Text size={200} weight="semibold">
               Summary
             </Text>
+            {correction && <Text size={200}>Replaces invoice: {correction.firmInvoiceNumber}</Text>}
             {chosenFirm && <Text size={200}>Firm: {chosenFirm.name}</Text>}
+            {!chosenFirm && correction?.firmName && <Text size={200}>Firm: {correction.firmName}</Text>}
             <Text size={200}>
               Record: {chosenRecord ? `${recordLabel(chosenRecord)} (${KIND_LABEL[chosenRecord.kind]})` : '-'}
             </Text>
@@ -744,7 +843,8 @@ export const InvoiceSubmissionWizard: React.FC<InvoiceSubmissionWizardProps> = (
         chosenRecord !== null &&
         file !== null &&
         firmInvoiceNumberTrimmed.length > 0 &&
-        (!needsFirmStep || chosenFirm !== null),
+        (!needsFirmStep || chosenFirm !== null) &&
+        (correction === undefined || noteProblem === null),
     },
   ];
 

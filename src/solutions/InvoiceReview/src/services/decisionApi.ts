@@ -315,6 +315,25 @@ export interface RateHistoryContext {
   timekeepers: TimekeeperRateHistory[];
 }
 
+/**
+ * Task 095f-2e2b: `GET /api/finance/invoices/{invoiceId}/correction-prefill` (`CorrectionPrefillResponse`, camelCase): whether the invoice can
+ * be replaced by a corrected one, and its own firm, record and firm invoice number, which the corrected-invoice wizard prefills.
+ */
+export interface CorrectionPrefill {
+  invoiceId: string;
+  /** The invoice's firm; null when it has none. */
+  firm: { id: string; name: string } | null;
+  /** `entityType` is `Matter`, `Project` or `WorkAssignment`. */
+  coreRecord: { entityType: string; entityId: string; name: string };
+  invoiceStatus: string | null;
+  trackingNumber: string | null;
+  firmInvoiceNumber: string;
+  /** The intake's answer now. */
+  canCorrect: boolean;
+  /** When not `canCorrect`: `invoice_status`, `no_submission` or `submission_in_progress`; else null. */
+  reason: string | null;
+}
+
 export interface InvoiceContext {
   invoiceId: string;
   coreRecord: ContextSection<CoreRecordContext>;
@@ -512,6 +531,8 @@ export interface InvoiceDecisionApi {
   finishStranded(submissionId: string, reason: string, note?: string): Promise<ApiResult<BlockedDecisionResponse>>;
   getContext(invoiceId: string): Promise<ApiResult<InvoiceContext>>;
   getRelatedWork(invoiceId: string, lineId: string): Promise<ApiResult<RelatedWork>>;
+  /** Task 095f-2e2b: can this invoice be replaced by a corrected one, and what is its own firm, record and number. */
+  getCorrectionPrefill(invoiceId: string): Promise<ApiResult<CorrectionPrefill>>;
 }
 
 function trimBase(bffBaseUrl: string): string {
@@ -537,6 +558,7 @@ export const decisionRoutes = {
   returnBlocked: (base: string, submissionId: string) => `${trimBase(base)}/api/finance/submissions/${id(submissionId)}/return`,
   finishStranded: (base: string, submissionId: string) => `${trimBase(base)}/api/finance/submissions/${id(submissionId)}/finish-stranded`,
   context: (base: string, invoiceId: string) => `${trimBase(base)}/api/finance/invoices/${id(invoiceId)}/context`,
+  correctionPrefill: (base: string, invoiceId: string) => `${trimBase(base)}/api/finance/invoices/${id(invoiceId)}/correction-prefill`,
   relatedWork: (base: string, invoiceId: string, lineId: string) =>
     `${trimBase(base)}/api/finance/invoices/${id(invoiceId)}/lines/${id(lineId)}/related-work`,
 };
@@ -601,6 +623,14 @@ export function createInvoiceDecisionApi(fetchFn: AuthenticatedFetchFn, bffBaseU
       call(decisionRoutes.context(bffBaseUrl, invoiceId), 'GET', null, b => isObject(b) && isObject(b.coreRecord) && isObject(b.budget), 'context body'),
     getRelatedWork: (invoiceId, lineId) =>
       call(decisionRoutes.relatedWork(bffBaseUrl, invoiceId, lineId), 'GET', null, b => isObject(b) && typeof b.status === 'string' && Array.isArray(b.items), 'related work body'),
+    getCorrectionPrefill: invoiceId =>
+      call(
+        decisionRoutes.correctionPrefill(bffBaseUrl, invoiceId),
+        'GET',
+        null,
+        b => isObject(b) && typeof b.canCorrect === 'boolean' && isObject(b.coreRecord) && (b.firm === null || isObject(b.firm)),
+        'correction prefill body'
+      ),
   };
 }
 

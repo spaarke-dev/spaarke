@@ -11,11 +11,13 @@
  */
 
 import * as React from 'react';
+import { Button, MessageBar, MessageBarActions, MessageBarBody } from '@fluentui/react-components';
 import { InvoiceReviewPage, type InvoiceReviewPageProps, type PaneTabSlot } from './InvoiceReviewPage';
 import { ApprovalProvider, useApproval } from './decision/ApprovalProvider';
 import { AwaitingApprovers } from './decision/AwaitingApprovers';
 import { BlockedBanner } from './decision/BlockedBanner';
 import { DecideInvoiceAction } from './decision/DecideInvoiceAction';
+import { SubmitCorrectedInvoiceAction, type OpenCorrectionWizard } from './decision/SubmitCorrectedInvoiceAction';
 import type { NotifyStep } from './decision/InvoiceDecisionWizard';
 import { ContextTab } from './tabs/ContextTab';
 import { HistoryTab } from './tabs/HistoryTab';
@@ -26,6 +28,11 @@ export interface InvoiceReviewWithDecisionsProps extends Pick<InvoiceReviewPageP
   decisionApi: InvoiceDecisionApi;
   /** The optional firm-notice step of a reject or return (a slot: nothing is built in it). Absent: the wizard has no notify step. */
   notifyStep?: NotifyStep;
+  /**
+   * Task 095f-2e2b: opens the Create Invoice wizard in Correction mode for an invoice and resolves when it closes. Absent: the page has no
+   * "Submit corrected invoice" action (as before).
+   */
+  openCorrectionWizard?: OpenCorrectionWizard;
 }
 
 /**
@@ -37,7 +44,10 @@ function ReviewPageWithApproval(props: InvoiceReviewPageProps) {
   return <InvoiceReviewPage {...props} firmNeeded={state?.firmNeeded === true} />;
 }
 
-export function InvoiceReviewWithDecisions({ invoiceId, initialLineId, api, decisionApi, openRecord, pollIntervalMs, notifyStep }: InvoiceReviewWithDecisionsProps) {
+export function InvoiceReviewWithDecisions({ invoiceId, initialLineId, api, decisionApi, openRecord, pollIntervalMs, notifyStep, openCorrectionWizard }: InvoiceReviewWithDecisionsProps) {
+  // The plain sentence of a refused "Submit corrected invoice" (shown with the page's banners, not in the footer's one row).
+  const [correctionNotice, setCorrectionNotice] = React.useState<string | null>(null);
+
   const paneTabs = React.useMemo<PaneTabSlot[]>(
     () => [
       { value: 'context', label: 'Context', render: () => <ContextTab api={decisionApi} invoiceId={invoiceId} /> },
@@ -57,8 +67,36 @@ export function InvoiceReviewWithDecisions({ invoiceId, initialLineId, api, deci
         pollIntervalMs={pollIntervalMs}
         paneTabs={paneTabs}
         headerExtras={ctx => <AwaitingApprovers review={ctx.review} />}
-        banners={ctx => <BlockedBanner review={ctx.review} reload={ctx.reload} />}
-        invoiceActions={ctx => <DecideInvoiceAction review={ctx.review} canWrite={ctx.canWrite} reload={ctx.reload} notifyStep={notifyStep} />}
+        banners={ctx => (
+          <>
+            <BlockedBanner review={ctx.review} reload={ctx.reload} />
+            {correctionNotice && (
+              <MessageBar intent="warning" role="alert" data-testid="correction-notice">
+                <MessageBarBody>{correctionNotice}</MessageBarBody>
+                <MessageBarActions>
+                  <Button size="small" onClick={() => setCorrectionNotice(null)}>
+                    Dismiss
+                  </Button>
+                </MessageBarActions>
+              </MessageBar>
+            )}
+          </>
+        )}
+        invoiceActions={ctx => (
+          <>
+            <DecideInvoiceAction review={ctx.review} canWrite={ctx.canWrite} reload={ctx.reload} notifyStep={notifyStep} />
+            {openCorrectionWizard && (
+              <SubmitCorrectedInvoiceAction
+                review={ctx.review}
+                invoiceId={invoiceId}
+                api={decisionApi}
+                openCorrectionWizard={openCorrectionWizard}
+                reload={ctx.reload}
+                onNotice={setCorrectionNotice}
+              />
+            )}
+          </>
+        )}
       />
     </ApprovalProvider>
   );

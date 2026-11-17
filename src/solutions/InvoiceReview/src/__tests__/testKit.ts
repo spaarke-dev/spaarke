@@ -16,7 +16,7 @@ import type {
   ReviewFinding,
   ReviewLine,
 } from '../services/invoiceReviewApi';
-import type { ApprovalState, BlockedSubmission, ContextSection, InvoiceContext, InvoiceDecisionApi } from '../services/decisionApi';
+import type { ApprovalState, BlockedSubmission, ContextSection, CorrectionPrefill, InvoiceContext, InvoiceDecisionApi } from '../services/decisionApi';
 import { toFailure } from '../services/invoiceReviewApi';
 
 export const INVOICE_ID = '0d9178d3-9f32-7f46-ed9a-4dec59f66c1a';
@@ -295,7 +295,22 @@ export function decisionRecord(overrides: Partial<ReviewDecisionRecord> = {}): R
   };
 }
 
-export type MockDecisionApi = { [K in keyof InvoiceDecisionApi]: jest.Mock };
+/** The correction prefill (095f-2e2b) of an In Review invoice that can be replaced, unless overridden. */
+export function correctionPrefill(overrides: Partial<CorrectionPrefill> = {}): CorrectionPrefill {
+  return {
+    invoiceId: INVOICE_ID,
+    firm: { id: 'f1f1f1f1-0000-4000-8000-0000000000f1', name: 'Alpha LLP' },
+    coreRecord: { entityType: 'Matter', entityId: MATTER_ID, name: 'Example matter' },
+    invoiceStatus: 'InReview',
+    trackingNumber: 'INV-2025-78232.1',
+    firmInvoiceNumber: 'INV-2025-78232',
+    canCorrect: true,
+    reason: null,
+    ...overrides,
+  };
+}
+
+export type MockDecisionApi ={ [K in keyof InvoiceDecisionApi]: jest.Mock };
 
 const emptySection = <T>(data: T): ContextSection<T> => ({ status: 'available', data, code: null, message: null });
 
@@ -346,6 +361,7 @@ export function mockDecisionApi(initial: ApprovalState = approval()): MockDecisi
     overrideBlocked: jest.fn(async () => ok({ submissionId: SUBMISSION_ID, invoiceId: INVOICE_ID, outcome: 'Overridden', recordId: 'rec-12', alreadyDecided: false })),
     returnBlocked: jest.fn(async () => ok({ submissionId: SUBMISSION_ID, invoiceId: INVOICE_ID, outcome: 'Returned', recordId: 'rec-13', alreadyDecided: false })),
     finishStranded: jest.fn(async () => ok({ submissionId: SUBMISSION_ID, invoiceId: INVOICE_ID, outcome: 'Overridden', recordId: STRANDED_RECORD_ID, alreadyDecided: false })),
+    getCorrectionPrefill: jest.fn(async () => ok(correctionPrefill())),
     getContext: jest.fn(async () => ok(invoiceContext())),
     getRelatedWork: jest.fn(async (_i: string, id: string) =>
       ok({

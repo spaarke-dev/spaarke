@@ -29,6 +29,15 @@ export type {
 } from '../../../../client/shared/Spaarke.UI.Components/src/components/Wizard/wizardShellTypes';
 export type { IPdfHighlight, PdfBytes } from '../../../../client/shared/Spaarke.UI.Components/src/components/FilePreview/PdfHighlightViewer';
 export type { IPdfNormalisedBox } from '../../../../client/shared/Spaarke.UI.Components/src/components/FilePreview/pdfHighlightGeometry';
+// Task 095f-2e2b: the corrected-invoice words ("Submit corrected invoice" shows the shared wizard's own sentences for a refusal).
+export {
+  correctionPrefillErrorMessage,
+  correctionTargetFromPrefill,
+} from '../../../../client/shared/Spaarke.UI.Components/src/components/CreateInvoiceWizard/internalInvoiceSubmission';
+export {
+  CORRECTION_UNAVAILABLE_ERROR_CODE,
+  InvoiceSubmissionError,
+} from '../../../../client/shared/Spaarke.UI.Components/src/components/InvoiceSubmission/types';
 
 /** Stand-in for 108's viewer: renders the highlight as data and loads the bytes once through the page's loader. */
 export function PdfHighlightViewer(props: IPdfHighlightViewerProps) {
