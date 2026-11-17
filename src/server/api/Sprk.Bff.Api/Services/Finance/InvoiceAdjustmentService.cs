@@ -712,15 +712,25 @@ public sealed class InvoiceAdjustmentService
             return Incomplete(command.InvoiceId, TotalsStep, ex.GetType().Name);
         }
 
-        if (calculation.IsRefused && alreadyApplied)
+        if (calculation.IsRefused && alreadyApplied && !writeColumn)
         {
-            // A repeat: the line was applied by an earlier request and is not this one's to undo; the refusal is reported, nothing is written.
+            // A repeat whose add-adjustment record exists: the add finished (the record follows the totals), so it is not this request's to undo;
+            // the refusal is reported, nothing is written.
             return Refused(command.InvoiceId, calculation);
         }
 
         if (calculation.IsRefused)
         {
-            // Undo the line the refused calculation already counts (016 notes section 3): deactivate it so nothing stays half applied.
+            // Undo the line the refused calculation already counts (016 notes section 3): deactivate it so nothing stays half applied. ISS-030
+            // (F1): this also covers a repeat that finds the row active with no record, i.e. an add whose earlier undo failed (a record is
+            // written only after the totals succeed, so no record means the add never finished).
+            if (alreadyApplied)
+            {
+                _logger.LogWarning(
+                    "Adjustment on invoice {InvoiceId}: an earlier add of line {LineId} with no Decision Record was undone on a repeat (the totals are still refused); the stamp is left as it is.",
+                    command.InvoiceId, lineId);
+            }
+
             try
             {
                 await _entities.UpdateAsync(
@@ -728,7 +738,7 @@ public sealed class InvoiceAdjustmentService
             }
             catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
             {
-                return Incomplete(command.InvoiceId, TotalsStep, "undo:" + ex.GetType().Name);
+                return Incomplete(command.InvoiceId, UndoStep, ex.GetType().Name);
             }
 
             return Refused(command.InvoiceId, calculation);
@@ -816,7 +826,8 @@ public sealed class InvoiceAdjustmentService
         && existing.GetAttributeValue<EntityReference>(LineRule)?.Id == ruleId;
 
     /// <summary>095f-2b: the row was added (or, once removed, removed) by <paramref name="reviewer"/>: <c>sprk_reviewedby</c>, which the add and the
-    /// removal stamp and nothing else writes on an Adjustment line.</summary>
+    /// removal stamp. ISS-030: a refused removal's undo puts the prior stamp back (the adder's), and an undo on a repeat leaves the remover's; nothing
+    /// else writes it on an Adjustment line.</summary>
     private static bool IsReviewedBy(Entity row, Guid reviewer) =>
         row.GetAttributeValue<EntityReference>(InvoiceReviewReadService.LineReviewedBy)?.Id == reviewer;
 
@@ -1047,6 +1058,13 @@ public sealed class InvoiceAdjustmentService
     /// </summary>
     private async Task<AdjustmentResult> UndoRemovalAsync(Guid invoiceId, Guid lineId, Entity? priorRow, InvoiceTotalsCalculation calculation)
     {
+        if (priorRow is null)
+        {
+            _logger.LogWarning(
+                "Adjustment on invoice {InvoiceId}: an earlier removal of line {LineId} with no Decision Record was reverted on a repeat (the totals are still refused); the stamp is left as it is.",
+                invoiceId, lineId);
+        }
+
         try
         {
             await _entities.UpdateAsync(InvoiceReviewReadService.LineEntity, lineId, ReactivationFields(priorRow), CancellationToken.None).ConfigureAwait(false);
@@ -1130,12 +1148,13 @@ public sealed class InvoiceAdjustmentService
         return new AdjustmentResult(AdjustmentStatus.Unavailable, AdjustmentCodes.Unavailable, "The invoice could not be read; nothing was changed.");
     }
 
-    /// <summary>The line was written (or deactivated) but <paramref name="step"/> (<c>totals</c> or, 095f-2b, <c>record</c>) did not finish: 503, and a
-    /// repeat of the same request finishes it. <paramref name="detail"/> is an exception type name or a refusal reason, never request text.</summary>
+    /// <summary>The line was written (or deactivated) but <paramref name="step"/> did not finish: <c>totals</c>, 095f-2b <c>record</c>, or ISS-030
+    /// <c>undo</c> (a refused add or removal that could not be taken back): 503, and a repeat of the same request finishes it.
+    /// <paramref name="detail"/> is an exception type name or a refusal reason, never request text.</summary>
     private AdjustmentResult Incomplete(Guid invoiceId, string step, string detail, bool removal = false)
     {
         _logger.LogError(
-            "Adjustment on invoice {InvoiceId}: the line was written but the {Step} step failed ({Detail}); the caller repeats the same request to finish it.",
+            "Adjustment on invoice {InvoiceId}: the {Step} step did not finish ({Detail}); the caller repeats the same request to finish it.",
             invoiceId, step, detail);
         return new AdjustmentResult(
             AdjustmentStatus.Incomplete, AdjustmentCodes.Incomplete,
@@ -1144,6 +1163,7 @@ public sealed class InvoiceAdjustmentService
                 (true, RecordStep) => "The adjustment was removed and the invoice totals were updated, but the removal was not recorded. Repeat the same request to complete it.",
                 (false, RecordStep) => "The adjustment and the invoice totals were updated, but the adjustment was not recorded. Repeat the same request to complete it.",
                 (true, UndoStep) => "The adjustment removal was refused, but the adjustment could not be put back. Repeat the same request to complete it.",
+                (false, UndoStep) => "The adjustment was refused, but it could not be taken back. Repeat the same request to complete it.",
                 (true, _) => "The adjustment was removed but the invoice totals were not updated. Repeat the same request to complete it.",
                 _ => "The adjustment was saved but the invoice totals were not updated. Repeat the same request to complete it.",
             });
