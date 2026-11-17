@@ -21,7 +21,6 @@ public sealed partial class RecordCreationServicePipelineSeamTests
     {
         { "sprk_invoiceapproval", "sprk_Invoice_bind" },
         { "sprk_invoicesubmission", "sprk_Invoice_bind" },
-        { "sprk_invoicecorrection", "sprk_Invoice_bind" },
         { "sprk_externalidentifier", "sprk_RegardingInvoice_bind" },
     };
 
@@ -111,7 +110,7 @@ public sealed partial class RecordCreationServicePipelineSeamTests
     public static TheoryData<string, string> ApprovalOrCorrectionWithNoInvoice()
     {
         var data = new TheoryData<string, string>();
-        foreach (var table in new[] { "sprk_invoiceapproval", "sprk_invoicecorrection" })
+        foreach (var table in new[] { "sprk_invoiceapproval" })
             foreach (var invoice in new[] { "absent", "null" })
                 data.Add(table, invoice);
         return data;
@@ -131,7 +130,6 @@ public sealed partial class RecordCreationServicePipelineSeamTests
 
     [Theory]
     [InlineData("sprk_invoiceapproval")]
-    [InlineData("sprk_invoicecorrection")]
     public async Task CreateAsync_AnApprovalOrCorrectionBindingAnEmptyInvoiceId_Is400_AndWritesNothing(string table)
     {
         // The payload step refuses a binding to an empty id before any rule runs; the guard's own answer to an empty id (the

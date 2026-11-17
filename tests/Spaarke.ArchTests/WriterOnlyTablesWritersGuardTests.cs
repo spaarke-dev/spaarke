@@ -39,6 +39,9 @@ public class WriterOnlyTablesWritersGuardTests
         "Sprk.Bff.Api.Services.Signals.DecisionRecordWriter",
         "Sprk.Bff.Api.Services.Signals.Actions.ReviseBudgetExecutor",
         "Sprk.Bff.Api.Services.Signals.OntologyWriterDataverseClient",
+        // ebilling-r1 ISS-028 (EB-D-248): the two services that write correction rows (and their note); sprk_invoicecorrection is writer-only.
+        "Sprk.Bff.Api.Services.Finance.InvoiceCorrectionService",
+        "Sprk.Bff.Api.Services.Finance.InvoiceLineDecisionService",
     ];
 
     /// <summary>The general create, by full type name (a dependency on any of these is a route into it).</summary>
@@ -83,6 +86,8 @@ public class WriterOnlyTablesWritersGuardTests
         ("src/server/api/Sprk.Bff.Api/Services/Signals/SignalWriter.cs", null),
         ("src/server/api/Sprk.Bff.Api/Services/Signals/DecisionRecordWriter.cs", null),
         ("src/server/api/Sprk.Bff.Api/Services/Signals/OntologyWriterDataverseClient.cs", null),
+        ("src/server/api/Sprk.Bff.Api/Services/Finance/InvoiceCorrectionService.cs", null),
+        ("src/server/api/Sprk.Bff.Api/Services/Finance/InvoiceLineDecisionService.cs", null),
         ("src/server/api/Sprk.Bff.Api/Services/Signals/Actions/DecisionActionExecutors.cs", "ReviseBudgetExecutor"),
     ];
 

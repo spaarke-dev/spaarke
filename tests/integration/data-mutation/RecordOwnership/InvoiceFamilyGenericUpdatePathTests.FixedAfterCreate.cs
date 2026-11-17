@@ -26,7 +26,6 @@ public partial class InvoiceFamilyGenericUpdatePathTests
         {
             data.Add(path, "sprk_invoiceapproval", "sprk_invoice");
             data.Add(path, "sprk_invoicesubmission", "sprk_invoice");
-            data.Add(path, "sprk_invoicecorrection", "sprk_invoice");
             data.Add(path, "sprk_externalidentifier", InvoiceFamilyCoreRecordGuard.ExternalIdentifierInvoiceColumn);
         }
 
@@ -147,8 +146,6 @@ public partial class InvoiceFamilyGenericUpdatePathTests
     [Theory]
     [InlineData(GenericPath.PlaybookUpdate, "sprk_invoiceapproval")]
     [InlineData(GenericPath.OutputOrchestrator, "sprk_invoiceapproval")]
-    [InlineData(GenericPath.PlaybookUpdate, "sprk_invoicecorrection")]
-    [InlineData(GenericPath.OutputOrchestrator, "sprk_invoicecorrection")]
     public async Task AnApprovalOrCorrectionWhoseInvoiceIsCleared_IsRefusedInvoiceCleared_AndNothingIsWritten(GenericPath path, string table)
     {
         var outcome = await RunAsync(path, table, FamilyRow, Lookups(("sprk_invoice", null)), NoPlain,
@@ -304,8 +301,6 @@ public partial class InvoiceFamilyGenericUpdatePathTests
     [Theory]
     [InlineData(GenericPath.PlaybookUpdate, "sprk_invoiceapproval")]
     [InlineData(GenericPath.OutputOrchestrator, "sprk_invoiceapproval")]
-    [InlineData(GenericPath.PlaybookUpdate, "sprk_invoicecorrection")]
-    [InlineData(GenericPath.OutputOrchestrator, "sprk_invoicecorrection")]
     public async Task OnAPersonsRun_AnApprovalOrCorrectionsInvoiceCleared_IsRefusedInvoiceCleared_WhenThePersonReadsTheRow_AndReadFailedWhenNot(
         GenericPath path, string table)
     {
@@ -341,7 +336,6 @@ public partial class InvoiceFamilyGenericUpdatePathTests
         foreach (var path in Enum.GetValues<GenericPath>())
         {
             data.Add(path, "sprk_invoiceapproval", "sprk_invoice");
-            data.Add(path, "sprk_invoicecorrection", "sprk_invoice");
             data.Add(path, "sprk_invoicesubmission", "sprk_invoice");
             data.Add(path, "sprk_externalidentifier", InvoiceFamilyCoreRecordGuard.ExternalIdentifierInvoiceColumn);
         }

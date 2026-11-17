@@ -103,8 +103,8 @@ public class RecordTableRulesRegistryGuardTests
     {
         var found = WriterOnlyTablesIn(CreateTables(), IsWriterOnly);
 
-        Assert.True(RecordTableRules.All.Count(r => r.CreatedOnlyByItsWriter) == 3,
-            "Expected the three ontology writer tables to be flagged; the guard would check nothing.");
+        Assert.True(RecordTableRules.All.Count(r => r.CreatedOnlyByItsWriter) == 4,
+            "Expected the three ontology writer tables and the invoice correction to be flagged; the guard would check nothing.");
         Assert.True(found.Count == 0,
             "These create tables are created only by their writers (RecordTableRule.CreatedOnlyByItsWriter, owner decision " +
             "D-204; an invoice line: RecordTableRule.GenericCreateOnlyRefused, ebilling-r1 task 164a-1), so no fixed create " +
