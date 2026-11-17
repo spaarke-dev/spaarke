@@ -1,6 +1,7 @@
 /**
- * useDocumentActions — unit tests for the canonical hook moved into
- * @spaarke/document-operations by task 031 of spaarkeai-compose-r1.
+ * useDocumentActions — unit tests for the canonical hook. It moved into a shared
+ * document-operations package (spaarkeai-compose-r1 task 031), then into
+ * @spaarke/ui-components (reuse-governance-tightening-r1 task 033).
  *
  * KEEP category (per .claude/constraints/testing.md §1 / ADR-038 §7):
  *   - domain-logic (shared-lib unit tests). The hook is the unit of behavior;
@@ -27,7 +28,7 @@ jest.mock('@spaarke/auth', () => ({
 }));
 
 import { ApiError, AuthError, authenticatedFetch, type OkResponse, type OkStatus } from '@spaarke/auth';
-import { useDocumentActions } from '../../src/hooks/useDocumentActions';
+import { useDocumentActions } from '../useDocumentActions';
 
 const BFF = 'https://bff.example.com';
 const mockedFetch = authenticatedFetch as jest.MockedFunction<typeof authenticatedFetch>;
@@ -109,7 +110,6 @@ describe('useDocumentActions — openInWeb', () => {
     expect(result.current.actionError).toBeNull();
     expect(result.current.isActing).toBe(false);
   });
-
 });
 
 describe('useDocumentActions — openInDesktop', () => {
@@ -230,7 +230,6 @@ describe('useDocumentActions — deleteDocuments', () => {
     expect(mockedFetch).not.toHaveBeenCalled();
     expect(onSuccess).not.toHaveBeenCalled();
   });
-
 });
 
 describe('useDocumentActions — emailLink', () => {
@@ -262,7 +261,6 @@ describe('useDocumentActions — emailLink', () => {
 
     errSpy.mockRestore();
   });
-
 });
 
 describe('useDocumentActions — sendToIndex', () => {
@@ -281,7 +279,6 @@ describe('useDocumentActions — sendToIndex', () => {
     expect(mockedFetch).toHaveBeenCalledWith(`${BFF}/api/documents/b/analyze`, { method: 'POST' });
     expect(result.current.actionError).toBeNull();
   });
-
 });
 
 // ===========================================================================

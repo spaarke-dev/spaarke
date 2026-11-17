@@ -4,7 +4,7 @@
     <title>Deploy SpaarkeAi and SemanticSearch to DEV and smoke-test</title>
     <phase>4 Package reviews</phase>
     <gate>blocked until 031, 032, 033 and owner OK to deploy</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Deployment task in phase 4 (integration/deployment)</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -112,6 +112,7 @@
   </acceptance-criteria>
 
   <notes>If the owner declines a DEV deploy, mark this task deferred with the reason; 080 then notes that runtime behaviour is unverified.</notes>
+  <completion-notes>Completed 2026-11-15. Owner OK "Yes, deploy 035". SpaarkeAi deployed via Deploy-SpaarkeAi.ps1; SemanticSearch uploaded by the same Web API PATCH + PublishXml (owner choice, outside code-page-deploy steps). UI tests 1-4 pass (Open in web, Assistant context, Worklist/registry, SemanticSearch open + download, dark mode); Delete not run by owner choice. No new console error from Spaarke code. Details: notes/035-smoke.md. rework: none task 035</completion-notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

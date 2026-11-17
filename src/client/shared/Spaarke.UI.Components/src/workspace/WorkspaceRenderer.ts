@@ -60,7 +60,7 @@ import type * as React from 'react';
  *
  * # Why this type is defined inline (not imported)
  *
- * `IWebApi` lives in `@spaarke/legal-workspace` (a CONSUMER of this package).
+ * `IWebApi` lives in the LegalWorkspace solution (a CONSUMER of this package).
  * Importing it here would create a circular dependency. Defining the shape
  * structurally — methods REQUIRED, identical signatures — achieves the same
  * type-safety guarantee without the dependency cycle. TypeScript's structural

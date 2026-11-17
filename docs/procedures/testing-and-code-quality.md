@@ -642,7 +642,7 @@ dotnet sonarscanner end /d:sonar.token="$SONAR_TOKEN"
 One shared, **type-aware** ESLint 9 toolchain lints the client packages against each package's own tsconfig and blocks only **new** violations. It lives in `scripts/quality/client-lint/` (own `package.json`; packages do not get their own ESLint setups).
 
 - **Rule (P2):** `@typescript-eslint/no-unnecessary-condition` at `error`, on non-test `src/**`. It flags a dead `if (!res.ok)` / `res.status === 404` after `AuthenticatedFetchFn` (which resolves to `OkResponse`: `ok: true`, 2xx). Nothing else is enabled; existing rules are untouched.
-- **Covered:** Spaarke.UI.Components, AI.Widgets, Compose.Components, Communication.Components, DocumentOperations, DailyBriefing.Components, `src/solutions/{SpaarkeAi,LegalWorkspace,Reporting}`, `src/client/code-pages/SemanticSearch`. Not covered: external SPA and office-addins (their fetch returns non-2xx on purpose).
+- **Covered:** Spaarke.UI.Components, AI.Widgets, Compose.Components, Communication.Components, DailyBriefing.Components, `src/solutions/{SpaarkeAi,LegalWorkspace,Reporting}`, `src/client/code-pages/SemanticSearch`. Not covered: external SPA and office-addins (their fetch returns non-2xx on purpose).
 - **Type resolution:** the runner generates a lint tsconfig per package (`.generated/`, gitignored) that extends the package tsconfig and points every `@spaarke/*` at sibling **source**, so nothing has to be built first. Third-party types come from each package's own `node_modules`, hence the `install` step.
 
 ### Run it

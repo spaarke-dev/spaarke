@@ -2,7 +2,9 @@
 
 > **Purpose**: Honest assessment of whether the SpaarkeAi workspace pipeline (as it stands after Round 13 / Calendar widget + R10–R13 polish) is componentized and reusable. Catalogs every coupling and gap that affects maintenance + extendability, with prioritized remediation guidance.
 >
-> **Last reviewed**: 2026-05-22 (Task 123, Round 13). Refreshed from task 113 (Round 9) to incorporate the Calendar widget result (task 115) as the proven canonical "shared-lib widget + thin LW shim" pattern. Periodic review required — coupling lands as the codebase grows.
+> **Last Reviewed**: 2026-11-13 (reuse-governance-tightening-r1 task 032: one reference updated for the retired `@spaarke/legal-workspace` facade; the audit content is unchanged).
+>
+> **Content reviewed**: 2026-05-22 (Task 123, Round 13). Refreshed from task 113 (Round 9) to incorporate the Calendar widget result (task 115) as the proven canonical "shared-lib widget + thin LW shim" pattern. Periodic review required — coupling lands as the codebase grows.
 
 ---
 
@@ -58,7 +60,7 @@ The implementations REACH into LegalWorkspace-local context providers and servic
 **Can a non-LegalWorkspace Code Page use just one section today?** No.
 
 To use `quick-summary` from a new host:
-1. You'd have to import `quickSummaryRegistration` from LegalWorkspace's `src/sections/` — but those files are NOT exported from the `@spaarke/legal-workspace` package barrel.
+1. You'd have to import `quickSummaryRegistration` from LegalWorkspace's `src/sections/` — but those files are NOT exported from the LegalWorkspace barrel (`src/solutions/LegalWorkspace/src/index.ts`, imported as `legal-workspace`).
 2. Even if exported, you'd pull in `QuickSummaryRow` → `useQuickSummaryCounts` → LegalWorkspace's data shape.
 3. You'd also need a `WorkspaceShell` mount with a `SectionFactoryContext` populated by your new host (no SpaarkeAi-internal shortcut exists for "just render this one section").
 

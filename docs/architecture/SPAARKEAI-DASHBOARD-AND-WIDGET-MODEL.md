@@ -3,7 +3,9 @@
 > **Purpose**: Authoritative architectural framing of the SpaarkeAi two-wrapper model. Defines the three surfaces, the two intentionally-retained widget wrappers, the four mount sources, the dual-use pattern, and the LegalWorkspace-as-dashboard-engine framing. Future widget authors should be able to read this doc alone and pick the correct wrapper before writing code.
 >
 > **Status**: New architectural reference doc introduced in R4 (DR-01 / W-1).
-> **Last reviewed**: 2026-05-26 (R4 task 010 / W-1 — initial publication).
+> **Last Reviewed**: 2026-11-13 (reuse-governance-tightening-r1 task 032: §5.1 and §5.2 now describe the direct `legal-workspace` dependency that replaced the retired facade package).
+>
+> **Initial publication**: 2026-05-26 (R4 task 010 / W-1).
 > **Audience**: Widget authors, architects evaluating new placements, anyone wiring a new mount source.
 > **Predecessor framing**: This doc supersedes any earlier ad-hoc references to "one workspace pattern" / "the workspace widget" by codifying that there are intentionally **two** wrappers.
 >
@@ -247,7 +249,7 @@ R4 retires the **standalone LegalWorkspace code page** (`sprk_corporateworkspace
 |---|---|---|
 | `sprk_corporateworkspace` Code Page deploy | **Retired** (W-6) | The standalone surface is no longer the canonical home for LegalWorkspace functionality; SpaarkeAi embeds it. Maintaining two deployed entry points (standalone + embedded) doubles the surface area for theme / auth / data drift. |
 | `LegalWorkspaceApp` component | **Retained as library** | This IS the dashboard engine — it parses `sectionsJson`, mounts section factories, drives `WorkspaceShell` rendering. SpaarkeAi's `WorkspaceLayoutWidget` embeds it. |
-| `@spaarke/legal-workspace` package | **Retained** | The package barrel exports `LegalWorkspaceApp` for SpaarkeAi consumption. |
+| `@spaarke/legal-workspace` package | **Retired 2026-11-13** | SpaarkeAi imports the LegalWorkspace solution's barrel through `"legal-workspace": "file:../LegalWorkspace"` (the solution's `exports` entry). |
 | `src/solutions/LegalWorkspace/` source tree | **Retained** | Section factories, hooks (`useWorkspaceLayouts`, `useDailyBriefing`, etc.), local components, contexts (`FeedTodoSyncContext`), runtime-config singleton all live here. Deploy script for the standalone Code Page is removed in W-6; the source tree is otherwise untouched. |
 | R3 FR-25 / NFR-10 ("standalone LegalWorkspace continues to function identically") | **Superseded by W-6** | No longer applies forward. Standalone-vs-embedded parity is no longer an architectural constraint because there is no standalone. |
 
@@ -265,7 +267,7 @@ Dashboard wrapper (the abstraction)
 
 Everything in `src/solutions/LegalWorkspace/src/` that isn't a deploy artifact is **library code consumed by the engine**. Sections, hooks, contexts, the runtime-config singleton — all of it is dashboard-engine internals.
 
-A future host that wanted to embed a workspace from outside SpaarkeAi (e.g. Outlook side pane, Teams app) would do exactly what SpaarkeAi does: install `@spaarke/legal-workspace` + `setLegalWorkspaceRuntimeConfig(config)` + render `<LegalWorkspaceApp embedded initialWorkspaceId={layoutId} />`. The retirement of the standalone Code Page does not constrain this — it just means LegalWorkspace is no longer self-deployed.
+A future host that wanted to embed a workspace from outside SpaarkeAi (e.g. Outlook side pane, Teams app) would do exactly what SpaarkeAi does: declare a `file:` dependency on `legal-workspace` + `setLegalWorkspaceRuntimeConfig(config)` + render `<LegalWorkspaceApp embedded initialWorkspaceId={layoutId} />`. The retirement of the standalone Code Page does not constrain this — it just means LegalWorkspace is no longer self-deployed.
 
 ### 5.3 What this means for new widget authors
 
@@ -368,7 +370,7 @@ Widget authors do NOT need to decide the modal each time — the DataGrid framew
 ### 7.1 Architecture docs
 
 - [`SPAARKEAI-WORKSPACE-ARCHITECTURE.md`](./SPAARKEAI-WORKSPACE-ARCHITECTURE.md) — cold-load → widget render pipeline this model sits on (§2 cold-load, §3 component model, §5 BFF surface, §10 cross-references). **This doc is now cross-linked from §10 of the architecture doc.**
-- [`SPAARKEAI-COMPONENT-MODEL.md`](./SPAARKEAI-COMPONENT-MODEL.md) — inventory of `@spaarke/ui-components`, `@spaarke/ai-widgets`, `@spaarke/auth`, `@spaarke/legal-workspace`, `@spaarke/events-components` — the libraries that implement the wrappers.
+- [`SPAARKEAI-COMPONENT-MODEL.md`](./SPAARKEAI-COMPONENT-MODEL.md) — inventory of `@spaarke/ui-components`, `@spaarke/ai-widgets`, `@spaarke/auth`, `@spaarke/events-components` and the `legal-workspace` entry point — the libraries that implement the wrappers.
 - [`SPAARKEAI-COMPONENTIZATION-AUDIT.md`](./SPAARKEAI-COMPONENTIZATION-AUDIT.md) — honest reuse assessment. §2A is the Calendar canonical Pattern D reference. §3 explains why `WorkspaceLayoutWidget` is hard-wired to `LegalWorkspaceApp` (intentional COST of the Dashboard wrapper choice — see §8 remediation backlog).
 - [`LEGALWORKSPACE-EMBEDDED-MODE-CONTRACT.md`](./LEGALWORKSPACE-EMBEDDED-MODE-CONTRACT.md) — host requirements for embedding `LegalWorkspaceApp` (introduced by R4 C-2). Read this before any code that mounts `<LegalWorkspaceApp embedded ... />` outside SpaarkeAi.
 - [`LEGALWORKSPACE-RETIREMENT.md`](./LEGALWORKSPACE-RETIREMENT.md) — records the W-6 retirement of the standalone Code Page (introduced by R4 W-6). Companion to §5 of this doc.
