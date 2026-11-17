@@ -71,8 +71,21 @@ The 409 groups after round 2. **Kept open**: `ebilling.invoice.busy`, `ebilling.
 
 Counts after round 2: 405 passed, 405 total (13 suites), up from 388 (+17 tests). Typecheck: 0 surface errors (99 shared-lib errors ignored by the gate as before). `npm run build` passes.
 
+## Review round 3
+
+Base `883d2ef280`, fix commit `5829b1fba0` (source and tests together). Fail-before = the new and changed tests against the round-2 `components` and `services`: 9 failed, 410 passed, 419 total (3 suites failed). Client only.
+
+| # | Finding | Fix | Test (file) | Fails before |
+|---|---|---|---|---|
+| 1 | F1: the other-action guard had no way out. A repeat of the locked action answered with a definite refusal kept the lock and never re-read, so the reviewer was stuck until a browser reload | `isBlockedDefiniteRefusal` (`decisionApi.ts`): a 4xx that is not unknown (`isBlockedOutcomeUnknown`), not a refused note (400 note codes), and not the transient 409s `in_progress` / `still_processing`. When the form was locked (or a page lock exists) and the answer is definite, `submit()` clears the page lock, unlocks the form, shows the refusal and re-reads the page, the approval and the blocked view. A 5xx is never definite | `noteReviewRound1Decisions`: Override locked by a 503, then the repeat answered `decision_conflict`, `not_blocked`, `record_refused` and 403: lock cleared, refusal shown, page re-read, Return warns no more and is sent. Must-not-fire: a repeat answered 503, `concurrent_change`, `in_progress`, `still_processing` or no answer keeps the lock and Return still warns; a FIRST send answered `already_returned` is only an error (no extra re-read). `serverWordsPin`: the two transient codes are the server's, and the definite / not-definite classification | The four refusal cases and the pin test fail; the must-not-fire pass |
+| 2 | K2: the server also answers `concurrent_change` BEFORE the record (`SubmissionOverrideService.cs` ~1152 and ~1163) | Comments (`decisionApi.ts`, `BlockedBanner`), the `serverWordsPin` describe and the test names now say a record MAY have been written, and that locking is deliberately conservative (a repeat with the same text succeeds either way). The guard warning reads "An Override may have been saved in part. Submit it again to finish it before returning." (mirrored for Return) | The two guard-warning tests in `noteReviewRound1Decisions` assert the new text | Both fail on the old text |
+| 3 | `unsureSends` was too wide | Tracks only an unsure send: status 0, or a 503 that is `isIncomplete`. A plain 503 that saved nothing is no longer a mark. A header correction is tracked per field (`correct:header:<field>`; the draft key is unchanged), and cancelling the header dialog drops all of its marks | `noteReviewRound1Page`: a plain 503 then a resend answered already-applied still warns; an abandoned unsure send on header field X does not mute the first send for field Y; must-not-fire: the same header field resent after an unsure send is plain success | The first two fail; the control passes |
+
+Counts after round 3: 419 passed, 419 total (13 suites), up from 405 (+14 tests). Typecheck: 0 surface errors (99 shared-lib errors ignored by the gate as before). `npm run build` passes.
+
 ## Known limits
 
+- Round 3 finding 3 (not fixed): a second unsure outcome overwrites the first outcome's wizard lock (the `wizard` lock holds one outcome). For example a Reject that came back unsure, then a Return that also came back unsure, leaves only the Return locked. The server refuses the cross-outcome case, so nothing is filed twice.
 - The blocked view's `GET /blocked` returns the reason only, so the note is not shown there.
 - A dialog whose send was answered 503 incomplete closes and is finished with the page's Repeat (the exact request from the closure); the text is also kept as a draft for the next opening, but the page notice's Repeat is the way to finish it.
 - Reject/return: the server drops an edited note on a repeat after the record exists (K-1); mitigated by locking the reason and the note after an unsure send, and keeping that lock when the wizard is reopened.
