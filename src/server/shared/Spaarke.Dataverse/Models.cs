@@ -973,10 +973,13 @@ public record LookupNavigationMetadata
 /// <param name="Targets">A lookup column's target tables (logical names); <c>null</c> for any other column, or when not stated.</param>
 /// <param name="OptionValues">A choice column's option values (choice, multi-select choice, state, status); <c>null</c> for any
 /// other column, or when not stated.</param>
+/// <param name="ColumnNumber">The column's number in the table (<c>AttributeMetadata.ColumnNumber</c>), the number an update
+/// audit's <c>attributemask</c> lists for a changed column; <c>null</c> when not stated (field-mapping-server-write-path-r1
+/// task 052d: the repair pass's core-pair report decides from it whether an update changed a pair column).</param>
 public sealed record ColumnMetadata(
     string LogicalName, string? AttributeType, bool? IsValidForUpdate, bool? IsSecured, int? MaxLength,
     decimal? MinValue = null, decimal? MaxValue = null, IReadOnlyList<string>? Targets = null,
-    IReadOnlyList<int>? OptionValues = null);
+    IReadOnlyList<int>? OptionValues = null, int? ColumnNumber = null);
 
 /// <summary>
 /// A one-to-many relationship of a table along which an Assign (an <c>ownerid</c> write) cascades to the child rows

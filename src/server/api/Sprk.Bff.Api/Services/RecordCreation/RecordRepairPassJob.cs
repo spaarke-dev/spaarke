@@ -56,6 +56,10 @@ namespace Sprk.Bff.Api.Services.RecordCreation;
 /// writes the scheduled pass's state. It pages the window (id order) up to <see cref="DefaultOnDemandRowBudget"/> rows, then reports it as
 /// truncated with the last id covered, which the next run takes as <c>afterId</c>; it scans no later than the scheduled pass would
 /// (run start minus <see cref="SettleTime"/>) and reports a window that reached past that point as not clean.</para>
+/// <para><b>Report (task 052d).</b> Each scheduled run also reports, writing nothing, the Signal and Decision Record rows created
+/// at or after go-live that hold one half of the core pair only or whose pair columns were updated
+/// (<see cref="RecordRepairCorePairReport"/>, its own state entries), and each swept table's retry-set size and the ids abandoned
+/// this run, in the result JSON and the heartbeat.</para>
 /// <para><b>Placement</b> (ADR-052; CLAUDE.md §10): in the BFF on the in-process <c>Spaarke.Scheduling</c> host, registered with
 /// <c>AddScheduledJob</c> — BFF domain code (Repair mode, the ownership resolver, the field-mapping service) over BFF-owned
 /// tables, BFF identity, low volume (rows created outside the product). No new scheduler, store, package or endpoint.</para>
@@ -113,6 +117,9 @@ public sealed class RecordRepairPassJob : IScheduledJob
 
     /// <summary>How many runs ask a row again before it is logged as abandoned.</summary>
     internal const int MaxAttempts = 12;
+
+    /// <summary>Task 052d: the abandoned ids listed per table in the result and the heartbeat (every one is also logged).</summary>
+    internal const int MaxAbandonedIdsListed = 50;
 
     /// <summary>A window ends this long before the run starts, so a row still being written by its creator is left for the next run.</summary>
     internal static readonly TimeSpan SettleTime = TimeSpan.FromMinutes(2);
@@ -297,13 +304,19 @@ public sealed class RecordRepairPassJob : IScheduledJob
                     await RunTableAsync(table, entities, idempotency, state, repair, pass, until, counts, problems, context, cancellationToken)
                         .ConfigureAwait(false);
                 }
+
+                // Task 052d: the core-pair report over the two tables the pass never writes (reads only; its own state entries).
+                // Scheduled runs only: an on-demand run repairs one other table over one window.
+                counts.Report = await new RecordRepairCorePairReport(entities, idempotency, state, pass, _logger, context)
+                    .RunAsync(until, cancellationToken).ConfigureAwait(false);
+                problems.AddRange(counts.Report.Problems);
             }
 
             counts.MetadataReads = pass.MetadataReads;
             status = counts.ScanFailures > 0 || counts.StateFailures > 0
                 ? StatusError
                 : counts.ClaimHeld > 0 || counts.Truncated > 0 || counts.Failed > 0 || counts.PendingRetry > 0 || counts.OutsidePass > 0
-                  || counts.TablesWaiting > 0 || counts.NeedsRetry > 0 || counts.SettleClamped > 0
+                  || counts.TablesWaiting > 0 || counts.NeedsRetry > 0 || counts.SettleClamped > 0 || counts.Report is { IsClean: false }
                     ? StatusPartial
                     : StatusOk;
         }
@@ -534,6 +547,7 @@ public sealed class RecordRepairPassJob : IScheduledJob
                 {
                     state.Retry.Remove(id);
                     counts.Abandoned++;
+                    counts.AbandonedOf(table).Add(id);
                     _logger.LogError(
                         "{Prefix} {Table} {Id} was not repaired after {Attempts} runs ({Status} {Reason}); it is no longer asked. correlationId={CorrelationId}",
                         LogPrefix, table, id, counted, outcome.Status, ReasonOf(outcome), context.CorrelationId);
@@ -598,6 +612,7 @@ public sealed class RecordRepairPassJob : IScheduledJob
             }
 
             counts.PendingRetry += state.Retry.Count;
+            counts.RetrySets[table] = state.Retry.Count; // task 052d (K8): each table's retry-set size
             if (state.Retry.Count > 0)
             {
                 problems.Add($"{table}: {state.Retry.Count} row(s) to ask again next run.");
@@ -905,6 +920,32 @@ public sealed class RecordRepairPassJob : IScheduledJob
         var afterId = counts.AfterId?.ToString("D", CultureInfo.InvariantCulture);
         var lastIdCovered = counts.LastIdCovered?.ToString("D", CultureInfo.InvariantCulture);
 
+        // Task 052d (K6, K8): each swept table's retry-set size and the ids abandoned this run (listed up to MaxAbandonedIdsListed
+        // per table; each abandoned row is also logged on its own). The heartbeat names the tables whose set is not empty.
+        var retrySets = counts.RetrySets.Select(kv =>
+        {
+            var abandoned = counts.AbandonedIds.GetValueOrDefault(kv.Key) ?? [];
+            return new
+            {
+                table = kv.Key,
+                size = kv.Value,
+                abandoned = abandoned.Take(MaxAbandonedIdsListed).Select(id => id.ToString("D", CultureInfo.InvariantCulture)).ToArray(),
+                abandonedTruncated = abandoned.Count > MaxAbandonedIdsListed,
+            };
+        }).ToArray();
+        var retrySetsText = string.Join(",", counts.RetrySets.Where(kv => kv.Value > 0).Select(kv => $"{kv.Key}={kv.Value}"));
+        var abandonedText = string.Join(",", retrySets.Where(r => r.abandoned.Length > 0)
+            .Select(r => $"{r.table}:{string.Join("|", r.abandoned)}{(r.abandonedTruncated ? "|..." : string.Empty)}"));
+        var report = counts.Report;
+        var findings = report?.Findings.Select(f => new
+        {
+            table = f.Table,
+            id = f.Id.ToString("D", CultureInfo.InvariantCulture),
+            finding = f.Code,
+            auditTime = f.AuditTime?.ToString("O", CultureInfo.InvariantCulture),
+            changedBy = f.ChangedBy?.ToString("D", CultureInfo.InvariantCulture),
+        }).ToArray() ?? [];
+
         _logger.Log(
             status == StatusOk ? LogLevel.Information : LogLevel.Warning,
             "{Prefix} heartbeat status={Status} mode={Mode} table={Table} createdFrom={CreatedFrom} createdTo={CreatedTo} scanUntil={ScanUntil} "
@@ -913,14 +954,21 @@ public sealed class RecordRepairPassJob : IScheduledJob
             + "skipped={Skipped} failed={Failed} ownerRefused={OwnerRefused} ownerAssignCascades={OwnerAssignCascades} "
             + "tablesWaiting={TablesWaiting} outsidePass={OutsidePass} retried={Retried} "
             + "pendingRetry={PendingRetry} needsRetry={NeedsRetry} abandoned={Abandoned} claimHeld={ClaimHeld} truncated={Truncated} "
-            + "scanFailures={ScanFailures} stateFailures={StateFailures} metadataReads={MetadataReads} durationMs={DurationMs} "
+            + "scanFailures={ScanFailures} stateFailures={StateFailures} metadataReads={MetadataReads} "
+            + "retrySets={RetrySets} abandonedIds={AbandonedIds} corePairHalf={CorePairHalf} corePairChanged={CorePairChanged} "
+            + "corePairUndecided={CorePairUndecided} corePairRowsUnread={CorePairRowsUnread} reportTruncated={ReportTruncated} "
+            + "reportFailures={ReportFailures} durationMs={DurationMs} "
             + "trigger={Trigger} runId={RunId} correlationId={CorrelationId}",
             LogPrefix, status, mode, onDemand?.Table ?? "(all)", createdFrom ?? "-", createdTo ?? "-", scanUntil ?? "-", afterId ?? "-", lastIdCovered ?? "-", context.Attempt,
             goLive?.ToString("O", CultureInfo.InvariantCulture) ?? "(unset)", counts.Scanned,
             counts.Repaired, counts.NoOp, counts.Skipped, counts.Failed, counts.OwnerRefused, counts.OwnerAssignCascades,
             counts.TablesWaiting, counts.OutsidePass, counts.Retried,
             counts.PendingRetry, counts.NeedsRetry, counts.Abandoned, counts.ClaimHeld, counts.Truncated, counts.ScanFailures,
-            counts.StateFailures, counts.MetadataReads, (long)duration.TotalMilliseconds, context.Trigger, context.RunId,
+            counts.StateFailures, counts.MetadataReads,
+            retrySetsText.Length > 0 ? retrySetsText : "-", abandonedText.Length > 0 ? abandonedText : "-",
+            report?.Half ?? 0, report?.Changed ?? 0, report?.Undecided ?? 0, report?.RowsUnread ?? 0,
+            (report?.Truncated ?? 0) + (report?.FindingsTruncated == true ? 1 : 0), report?.Failures ?? 0,
+            (long)duration.TotalMilliseconds, context.Trigger, context.RunId,
             context.CorrelationId);
 
         return new JobRunResult(
@@ -961,6 +1009,18 @@ public sealed class RecordRepairPassJob : IScheduledJob
                     counts.ScanFailures,
                     counts.StateFailures,
                     counts.MetadataReads,
+                    retrySets,
+                    corePairHalf = report?.Half ?? 0,
+                    corePairChanged = report?.Changed ?? 0,
+                    corePairUndecided = report?.Undecided ?? 0,
+                    corePairRowsUnread = report?.RowsUnread ?? 0,
+                    reportRowsRead = report?.RowsRead ?? 0,
+                    reportAuditRowsRead = report?.AuditRowsRead ?? 0,
+                    reportTruncated = report?.Truncated ?? 0,
+                    reportFailures = report?.Failures ?? 0,
+                    reportClaimHeld = report?.ClaimHeld ?? 0,
+                    corePairFindingsTruncated = report?.FindingsTruncated ?? false,
+                    corePairFindings = findings,
                 },
                 JsonOptions));
     }
@@ -1019,5 +1079,17 @@ public sealed class RecordRepairPassJob : IScheduledJob
         public int ScanFailures;
         public int StateFailures;
         public int MetadataReads;
+
+        /// <summary>Task 052d (K8): each swept table's retry-set size after this run.</summary>
+        public SortedDictionary<string, int> RetrySets { get; } = new(StringComparer.Ordinal);
+
+        /// <summary>Task 052d (K6): the ids abandoned this run, per table.</summary>
+        public Dictionary<string, List<Guid>> AbandonedIds { get; } = new(StringComparer.Ordinal);
+
+        public List<Guid> AbandonedOf(string table) =>
+            AbandonedIds.TryGetValue(table, out var ids) ? ids : AbandonedIds[table] = [];
+
+        /// <summary>Task 052d: the core-pair report of a scheduled run; <c>null</c> when it did not run.</summary>
+        public RecordRepairCorePairReport.Result? Report;
     }
 }

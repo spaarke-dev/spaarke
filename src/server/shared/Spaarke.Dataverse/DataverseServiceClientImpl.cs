@@ -1907,7 +1907,7 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
                 .ToArray();
             columns[attribute.LogicalName] = new ColumnMetadata(
                 attribute.LogicalName, attribute.AttributeType?.ToString(), attribute.IsValidForUpdate, attribute.IsSecured, maxLength,
-                range.Min, range.Max, targets, options);
+                range.Min, range.Max, targets, options, attribute.ColumnNumber);
         }
 
         return columns;

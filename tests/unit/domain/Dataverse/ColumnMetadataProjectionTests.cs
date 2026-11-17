@@ -100,6 +100,19 @@ public sealed class ColumnMetadataProjectionTests
         DataverseServiceClientImpl.ColumnMetadataOf(Entity(new StringAttributeMetadata())).Should().BeEmpty();
     }
 
+    [Fact]
+    public void AColumnsNumber_IsCarried_AndAbsentWhenNotStated()
+    {
+        // Task 052d: an update audit's attributemask lists changed columns by this number.
+        var numbered = new LookupAttributeMetadata { LogicalName = "sprk_corerecordtype" };
+        typeof(AttributeMetadata).GetProperty(nameof(AttributeMetadata.ColumnNumber))!.SetValue(numbered, 31);
+
+        var columns = DataverseServiceClientImpl.ColumnMetadataOf(Entity(numbered, new StringAttributeMetadata { LogicalName = "sprk_corerecordid" }));
+
+        columns["sprk_corerecordtype"].ColumnNumber.Should().Be(31);
+        columns["sprk_corerecordid"].ColumnNumber.Should().BeNull();
+    }
+
     private static EntityMetadata Entity(params AttributeMetadata[] attributes)
     {
         var entity = new EntityMetadata { LogicalName = "sprk_matter" };
