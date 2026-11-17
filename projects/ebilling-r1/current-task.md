@@ -13,7 +13,8 @@
 
 - **095f-2b ✅ merged a3ef7e1c93** (fix 64c3e9ecbb: server-derived namespaced decision ids, neutral lookup 503; ontology-r1 PASS on catalog, exact-set amendment and fix; known limit ISS-030 / #2881).
 - **095f-2ui ✅ merged d3a61cc426** (review + 3 fix rounds + tweak). Page-level locks keep a partly saved decision exact on repeat; drafts survive 409s. Known limits are in its notes (locks are memory only; the Override/Return switch guard is client-only, see ISS-031 #2882). ISS-032 #2883 covers a decision stranded after its transition. Checklist section F added.
-- **Nothing in flight.** Next: 2e2 waits on owner pick (a); 130e-2 needs a POML; decide whether the 084h parent row closes.
+- **130e-2 ✅ merged 58dcc56689** (Rule Review firm description field; the server validator now folds the Turkish i in the name check and refuses default-ignorable runes; ontology-r1 PASS on the server part). The 084h parent row is closed (084h-1..4).
+- **Nothing in flight.** Next: 2e2 waits on owner pick (a). Remaining open tasks are larger or gated (116/117/121/123/124, 130-136, deploys).
 - **Per-task routine:**
   1. Implementer agent: named model, worktree, brief names the base sha and "never python".
   2. One adversarial review.
