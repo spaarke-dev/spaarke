@@ -37,6 +37,7 @@
 ## Waiting on the owner
 - Dev checks: To Do create (Office); Send budget inquiry text; **AI drafting retry in the email composer**; **composer template recheck** (195 live).
 - **EB-D-247 (ebilling/ontology): derivable record id, see the uac-r2 thread (private file `private-eb-d-247-*`).** Their merge waits on the owner's choice; my recommendation was sent.
+- **Correction rows: native write hardening (ebilling, EB-D-248; private file `private-correction-rows-*`).** Confirmed in source and on dev. It's ebilling's to fix in their iss028 PR, plus a guard rule; dev needs a scoped role edit or an import, either on the owner's typed OK (ebilling will ask).
 - SpaarkeMaster 1.3.2.0 publish/import; D-2 step 3; word-add-in #2829 dev check (firm-assign pane); provisioning #2871; ebilling task 112; #2764; 191i live steps; 193 PCF import; D-10 after U-3; #2786 part 2 scope; follow-ups #2826, #2549. Checklist: `notes/owner-test-checklist-2026-11-13.md`.
 
 ## Scratch
