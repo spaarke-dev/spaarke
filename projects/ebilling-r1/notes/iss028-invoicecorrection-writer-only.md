@@ -157,6 +157,6 @@ Dev gets the change by a direct scoped edit after merge (EB-D-250). Other enviro
   - Assign=NoCascade on all of them.
 - `scripts/Set-FeatureRolePrivileges.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com -Remove -Gap ISS028 -Apply` removed 5 entries and read each back absent on the root role and every business-unit copy. `-Verify` passed.
 - Read-back on all 6 Spaarke Core User roles: correction rows hold Read, Append and AppendTo at Deep, and nothing else.
-- After notice sent to uac-r2, which re-probes.
+- After notice sent to uac-r2. Its re-probe passed: all 6 Core User roles, and testuser1's effective privileges read three times, show no Create, Write, Delete, Assign or Share on correction rows. The dev side is closed.
 - Rollback: `-Restore -Gap ISS028 -Apply`.
 - Other environments get the change with the SpaarkeMaster import (1.3.2.0 expectations at the master merge).
