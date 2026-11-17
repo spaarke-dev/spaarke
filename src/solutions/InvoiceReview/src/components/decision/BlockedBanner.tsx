@@ -27,8 +27,10 @@ import {
   tokens,
 } from '@fluentui/react-components';
 import { FormModal } from '@spaarke/ui-components';
-import { decisionFailureMessage, isDecisionIncomplete, type BlockedFinding, type BlockedSubmission } from '../../services/decisionApi';
+import { decisionFailureMessage, isBlockedDefiniteRefusal, isBlockedOutcomeUnknown, type BlockedFinding, type BlockedSubmission } from '../../services/decisionApi';
 import type { ApiFailure, InvoiceReview } from '../../services/invoiceReviewApi';
+import { isNoteRefusal, noteArgs, noteProblem, noteRefusalMessage } from '../../services/noteModel';
+import { NoteField } from '../NoteField';
 import { useApproval } from './ApprovalProvider';
 
 const REASON_MAX = 2000;
@@ -64,7 +66,7 @@ export interface BlockedBannerProps {
 
 export function BlockedBanner({ review, reload }: BlockedBannerProps) {
   const s = useStyles();
-  const { api, refresh } = useApproval();
+  const { api, refresh, locks } = useApproval();
   const held = review.header.held;
   const submissionId = submissionIdOf(review);
 
@@ -76,6 +78,12 @@ export function BlockedBanner({ review, reload }: BlockedBannerProps) {
   const action = dialog?.action ?? null;
   const closeDialog = () => setDialog(prev => (prev ? { ...prev, open: false } : prev));
   const [reason, setReason] = React.useState('');
+  // Task 095f-2ui: the optional note. Like the reason, it is kept across a refusal (a 409 or 503) so the reviewer can resend. A decision saved
+  // in part (503), or one that got no answer (status 0), is repeated with the same reason and note, so both are locked from then on, and the
+  // locked request is kept at page level (`locks`) so closing and reopening the form does not lose it.
+  const [note, setNote] = React.useState('');
+  const [noteError, setNoteError] = React.useState<string | null>(null);
+  const [locked, setLocked] = React.useState(false);
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const alive = React.useRef(true);
@@ -102,29 +110,74 @@ export function BlockedBanner({ review, reload }: BlockedBannerProps) {
     if (held) void load();
   }, [held, load]);
 
+  // The hold is gone (the decision is done): nothing is left to repeat, so a lock kept from an unsure send is dropped.
+  React.useEffect(() => {
+    if (!held) locks.clear('blocked');
+  }, [held, locks]);
+
   if (!held || !submissionId) return null;
 
   const open = (a: Action) => {
-    setReason('');
+    // An Override or Return that came back unsure is reopened as it was sent, locked, so the repeat is the same request. Review round 2: the
+    // lock is KEPT when the other action is opened (the first may already be recorded, and the server finishes a repeat from what it
+    // stored). The other action opens with an empty, editable form that warns and cannot be submitted until the lock clears.
+    const kept = locks.get('blocked');
+    const same = kept && kept.action === a ? kept : undefined;
+    setReason(same ? same.reason : '');
+    setNote(same ? same.note : '');
+    setNoteError(null);
+    setLocked(!!same);
     setError(null);
     setDialog(prev => (prev?.open ? { ...prev, action: a } : { action: a, open: true, seq: (prev?.seq ?? 0) + 1 }));
   };
 
+  // An Override or Return of the OTHER action that came back unsure and is not finished: this form must not start a second decision.
+  const lock = locks.get('blocked');
+  const otherLock = action && lock && lock.action !== action ? lock : null;
+
   const submit = async () => {
-    if (!dialog?.open || !action || reason.trim() === '') return;
+    if (!dialog?.open || !action || otherLock || reason.trim() === '' || noteProblem(note) !== null) return;
     setBusy(true);
     setError(null);
-    const r = action === 'override' ? await api.overrideBlocked(submissionId, reason.trim()) : await api.returnBlocked(submissionId, reason.trim());
+    setNoteError(null);
+    const n = noteArgs(note);
+    const r =
+      action === 'override' ? await api.overrideBlocked(submissionId, reason.trim(), ...n) : await api.returnBlocked(submissionId, reason.trim(), ...n);
     if (!alive.current) return;
     if (r.ok) {
+      locks.clear('blocked');
       setBusy(false);
       closeDialog();
       await Promise.all([reload(), refresh(), load()]);
       return;
     }
-    // A 503 `ebilling.blocked.unavailable` can come after the decision stood (the Signals were not all closed): show the server's state
-    // (the hold may already be gone) before the error.
-    if (isDecisionIncomplete(r.failure)) {
+    // The server refused the note itself (400): the field message goes under the Note box, and the form keeps the reason and the note.
+    if (isNoteRefusal(r.failure)) {
+      setBusy(false);
+      setNoteError(noteRefusalMessage(r.failure));
+      return;
+    }
+    // A 503 saved part of the decision, no answer came back, or a 409 `concurrent_change` (the server answers it before AND after the Decision
+    // Record is written, so a record MAY have been written): the same request, repeated, finishes it, so the reason and the note are held as they
+    // were sent, here and at page level. Locking on `concurrent_change` is deliberately conservative: a repeat with the same text succeeds either way.
+    const unknown = isBlockedOutcomeUnknown(r.failure);
+    if (unknown) {
+      setLocked(true);
+      locks.set('blocked', { action, reason: reason.trim(), note });
+    }
+    // A 503 `ebilling.blocked.unavailable` can come after the decision stood (the Signals were not all closed), and a send with no answer may
+    // have been recorded: show the server's state (the hold may already be gone) before the error.
+    if (unknown) {
+      await Promise.all([reload(), refresh(), load()]);
+      if (!alive.current) return;
+    }
+    // Review round 3: the repeat of a locked decision got a DEFINITE refusal (`decision_conflict`, `record_refused`, `not_blocked`, a 403, ...):
+    // the server says this request is not going to finish, so the lock is a trap, not a protection. It is cleared (here and at page level), the
+    // form is editable again, the refusal is shown, and the page, the approval and the blocked view are re-read to show what the server holds.
+    // A transient answer (`in_progress`, `still_processing`) keeps the lock: the same request can still finish.
+    if (isBlockedDefiniteRefusal(r.failure) && (locked || locks.get('blocked'))) {
+      locks.clear('blocked');
+      setLocked(false);
       await Promise.all([reload(), refresh(), load()]);
       if (!alive.current) return;
     }
@@ -190,7 +243,7 @@ export function BlockedBanner({ review, reload }: BlockedBannerProps) {
           size="sm"
           title={title}
           submitLabel={action === 'override' ? 'Override' : 'Return'}
-          submitDisabled={reason.trim() === ''}
+          submitDisabled={otherLock !== null || reason.trim() === '' || noteProblem(note) !== null}
           busy={busy}
           onClose={() => {
             if (!busy) closeDialog();
@@ -203,6 +256,15 @@ export function BlockedBanner({ review, reload }: BlockedBannerProps) {
                 ? 'The invoice is released into the normal review. A reason is required and is recorded with your name.'
                 : 'The invoice goes back to the firm, which can correct and resubmit it. A reason is required and the firm sees it.'}
             </Text>
+            {otherLock && (
+              <MessageBar intent="warning" layout="multiline" data-testid="blocked-other-lock">
+                <MessageBarBody>
+                  {otherLock.action === 'override'
+                    ? 'An Override may have been saved in part. Submit it again to finish it before returning.'
+                    : 'A Return may have been saved in part. Submit it again to finish it before overriding.'}
+                </MessageBarBody>
+              </MessageBar>
+            )}
             <Field label="Reason" required>
               <Textarea
                 value={reason}
@@ -210,10 +272,28 @@ export function BlockedBanner({ review, reload }: BlockedBannerProps) {
                 resize="vertical"
                 rows={3}
                 maxLength={REASON_MAX}
+                readOnly={locked}
                 aria-label="Reason"
                 data-testid="blocked-reason"
               />
             </Field>
+            <NoteField
+              value={note}
+              onChange={v => {
+                setNote(v);
+                setNoteError(null);
+              }}
+              serverError={noteError}
+              readOnly={locked}
+              ariaLabel="Note"
+              testId="blocked-note"
+            />
+            {locked && (
+              <Caption1 className={s.muted} data-testid="blocked-note-locked">
+                This decision was saved in part, or no answer came back. Submitting again finishes it with the same reason and note, so they cannot be
+                changed now.
+              </Caption1>
+            )}
             {error && (
               <MessageBar intent="error" layout="multiline" data-testid="blocked-error">
                 <MessageBarBody>{error}</MessageBarBody>

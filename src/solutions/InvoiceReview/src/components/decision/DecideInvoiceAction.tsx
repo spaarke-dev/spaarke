@@ -21,8 +21,16 @@ export interface DecideInvoiceActionProps {
 }
 
 export function DecideInvoiceAction({ review, canWrite, reload, notifyStep }: DecideInvoiceActionProps) {
-  const { state, api, invoiceId, refresh } = useApproval();
+  const { state, api, invoiceId, refresh, locks } = useApproval();
   useApprovalSync(review);
+  // The server's state shows the decision is done: a request kept locked from an unsure send has nothing left to repeat.
+  const decided = !!state && (state.status !== 'Pending' || review.header.status !== 'InReview');
+  React.useEffect(() => {
+    if (decided) {
+      locks.clear('wizard');
+      locks.clear('adjust');
+    }
+  }, [decided, locks]);
   // The wizard is closed with `open={false}`, never unmounted while open, which would leave the page aria-hidden (#2658).
   // `seq` keys each opening and changes only while closed, so the form, the steps and the read-only choice start fresh.
   const [wizard, setWizard] = React.useState<{ open: boolean; seq: number } | null>(null);
@@ -61,6 +69,7 @@ export function DecideInvoiceAction({ review, canWrite, reload, notifyStep }: De
           reload={reload}
           refreshApproval={refreshApproval}
           notifyStep={notifyStep}
+          locks={locks}
         />
       )}
     </>
