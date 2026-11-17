@@ -353,7 +353,8 @@ public class ExternalDataService
     internal const string EventTypeRequiredErrorCode = "sdap.event.type_required";
     internal const string EventTypeImmutableErrorCode = "sdap.event.type_immutable";
     internal const string EventAssigneeNotAllowedErrorCode = "sdap.event.assignee_not_allowed";
-    internal const string EventAssigneeUpdateUnsupportedErrorCode = "sdap.event.assignee_update_unsupported";
+    /// <summary>R4 task 014c: an assignee change on an event that is not open work (<see cref="EventStatusCode.IsOpenWork"/>).</summary>
+    internal const string EventReassignNotOpenErrorCode = "sdap.event.reassign_not_open";
     internal const string EventDueDateRequiredErrorCode = "sdap.event.due_date_required";
     internal const string EventPriorityInvalidErrorCode = "sdap.event.priority_invalid";
     internal const string EventDescriptionTooLongErrorCode = "sdap.event.description_too_long";
@@ -3673,14 +3674,15 @@ public class ExternalDataService
     /// The COMPLETE PATCH body of an external event edit (R4 task 014b, FR-36): ONLY the agreed columns — <c>sprk_eventname</c>,
     /// <c>sprk_duedate</c>, <c>sprk_priority</c>, <c>sprk_description</c>, <c>statuscode</c> with its paired <c>statecode</c>
     /// (owner S-3) — and only those the request SENT. Never ownership, a core-ancestor stamp, <c>sprk_accesspermission</c>,
-    /// <c>sprk_issecure</c>, the event type (S-4) or the assignee (uac-r2 2026-11-16, condition 3). Pure; the route has
-    /// validated each value first, and anything out of shape throws here.
+    /// <c>sprk_issecure</c> or the event type (S-4) (uac-r2 2026-11-16, condition 3). The assignee is never emitted HERE: the
+    /// route adds the internal reassign's columns (R4 task 014c, <c>ExternalProjectDataEndpoints.BuildEventUpdateWithReassign</c>)
+    /// only after its own checks. Pure; the route has validated each value first, and anything out of shape throws here.
     /// </summary>
     internal static Dictionary<string, object?> BuildEventUpdatePayload(UpdateExternalEventRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
-        if (request.EventTypeIdSent || request.AssigneeSent)
-            throw new ArgumentOutOfRangeException(nameof(request), "The event type and the assignee are not written by this update.");
+        if (request.EventTypeIdSent)
+            throw new ArgumentOutOfRangeException(nameof(request), "The event type is not written by this update.");
 
         var body = new Dictionary<string, object?>(StringComparer.Ordinal);
         if (request.NameSent)
@@ -3720,10 +3722,16 @@ public class ExternalDataService
         return body;
     }
 
-    /// <summary>The columns <see cref="BuildEventUpdatePayload"/> may ever emit (its allow-list; pinned by tests).</summary>
+    /// <summary>
+    /// The columns an external event PATCH may ever write (<see cref="UpdateEventAsync"/>'s allow-list; pinned by tests):
+    /// <see cref="BuildEventUpdatePayload"/>'s, plus — R4 task 014c, uac-r2 condition — ONLY the internal reassign's assignee,
+    /// reassigned-date and reassigned-by, named exactly as <c>EventDueAssigneeWrite.AddReassignColumns</c> emits them (the
+    /// lookups' case-sensitive navigation-property binds). Its <c>statuscode</c> is already here.
+    /// </summary>
     internal static readonly IReadOnlySet<string> EventUpdateColumns = new HashSet<string>(StringComparer.Ordinal)
     {
         EventNameColumn, "sprk_duedate", EventPriorityColumn, EventDescriptionColumn, EventStatusColumn, "statecode",
+        "sprk_AssignedTo@odata.bind", "sprk_reassigneddate", "sprk_ReassignedBy@odata.bind",
     };
 
     /// <summary>

@@ -108,14 +108,15 @@ public sealed class ExternalRootEventReadTests : IClassFixture<ExternalRootEvent
         // The wire shape is the project route's: one envelope, one row shape, the creator stamps for Delete, and no
         // member that names another root (the extra lookups are read to withhold rows, never returned). R4 task 008 (uac-r2 C):
         // plus isTask. R4 task 014b (FR-36): plus the form fields — the type id and name, description, priority, the assignee's
-        // and creator's NAMES (never an id or email), and the row's edit affordances. Still no member that names another root.
+        // and creator's NAMES (never an id or email), and the row's edit affordances (R4 task 014c: plus canReassign, a boolean).
+        // Still no member that names another root.
         using var doc = JsonDocument.Parse(raw);
         var row = doc.RootElement.GetProperty("value")[0];
         row.EnumerateObject().Select(p => p.Name).Should().BeEquivalentTo(
             "sprk_eventid", "sprk_name", "sprk_duedate", "sprk_status", "createdon", "_sprk_regardingproject_value",
             "_sprk_createdbyperson_value", "_sprk_createdbycontact_value", "isTask",
             "eventTypeId", "eventTypeName", "sprk_description", "sprk_priority", "assignedToName", "createdByName",
-            "canEdit", "canChangeStatus", "allowedStatuses");
+            "canEdit", "canChangeStatus", "allowedStatuses", "canReassign");
     }
 
     // =====================================================================

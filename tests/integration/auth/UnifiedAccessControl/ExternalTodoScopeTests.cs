@@ -2056,12 +2056,17 @@ public sealed class ExternalTodoScopeTestFixture : ExternalCollaborationTestFixt
         /// <summary>The answer for every record (Known with nobody unless a test says otherwise).</summary>
         public RecordContactAccess Answer { get; set; } = new RecordContactAccess.Known(Array.Empty<RecordAccessContact>());
 
+        /// <summary>R4 task 014c: a per-record answer, which wins over <see cref="Answer"/> for that record id (an event filed
+        /// under several parents asks each).</summary>
+        public Dictionary<Guid, RecordContactAccess> AnswersByRecord { get; } = new();
+
         /// <summary>The records asked about (the load-bearing assertion that a refused request asked nothing).</summary>
         public List<(ExternalGrantRootType Type, Guid Id)> Calls { get; } = new();
 
         public void Reset()
         {
             Answer = new RecordContactAccess.Known(Array.Empty<RecordAccessContact>());
+            AnswersByRecord.Clear();
             Calls.Clear();
         }
 
@@ -2069,7 +2074,7 @@ public sealed class ExternalTodoScopeTestFixture : ExternalCollaborationTestFixt
             ExternalGrantRootType rootType, Guid rootId, CancellationToken ct)
         {
             Calls.Add((rootType, rootId));
-            return Task.FromResult(Answer);
+            return Task.FromResult(AnswersByRecord.TryGetValue(rootId, out var answer) ? answer : Answer);
         }
     }
 
@@ -2166,13 +2171,19 @@ public sealed class ExternalTodoScopeTestFixture : ExternalCollaborationTestFixt
 
         private static readonly ExternalDataService.EventTypeOption TaskType = new(EventTypeRef.Task, "Task", false, true);
 
+        /// <summary>R4 task 014c: single event reads (the app-only read of the event's own fields; G5 asserts none before the right).</summary>
+        public int EventByIdReads { get; private set; }
+
         public override Task<ExternalCollectionResponse<ExternalEventDto>> GetEventByIdAsync(
-            Guid eventId, CallerPrincipal caller, CancellationToken ct = default) =>
-            Task.FromResult(new ExternalCollectionResponse<ExternalEventDto>
+            Guid eventId, CallerPrincipal caller, CancellationToken ct = default)
+        {
+            EventByIdReads++;
+            return Task.FromResult(new ExternalCollectionResponse<ExternalEventDto>
             {
                 Value = EventsById.TryGetValue(eventId, out var dto) ? new[] { dto } : Array.Empty<ExternalEventDto>(),
                 Truncated = EventByIdTruncated,
             });
+        }
 
         public override Task<IReadOnlyList<ExternalDataService.EventTypeOption>> GetEventTypesAsync(CancellationToken ct = default)
         {
@@ -2250,6 +2261,7 @@ public sealed class ExternalTodoScopeTestFixture : ExternalCollaborationTestFixt
             Events.Clear();
             EventsById.Clear();
             EventByIdTruncated = false;
+            EventByIdReads = 0;
             EventTypes.Clear();
             EventTypes.Add(TaskType);
             EventTypesFault = false;
