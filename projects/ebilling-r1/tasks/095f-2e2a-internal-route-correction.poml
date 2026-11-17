@@ -4,7 +4,7 @@
     <title>Internal Correction path (B′), server: the internal multipart submission route accepts a Correction with a required note</title>
     <phase>5 Review — 095f part 2 (EB-D-243, EB-D-245)</phase>
     <gate>Branch from work/ebilling-r1 at the sha named in the agent brief.</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>BFF submission write path (.cs); invoice supersede.</rigor-reason>
     <model-tier>opus</model-tier>

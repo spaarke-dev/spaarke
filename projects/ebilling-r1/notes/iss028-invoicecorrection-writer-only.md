@@ -38,7 +38,7 @@ deterministic id). That call asks none of the writer-only refusals, so neither w
 | `SecureChildLineage.cs`, `RecordFamilyEdges.cs`, `RecordFamilyReader.cs`, `ParentLineage.cs` | No. Lineage and read registries. The secure-child reconciler re-owns rows with its own app-only writes after a re-file; it does not ask the refusals (the same as for Signals and Decision Records). |
 | `RecordCreatorPerson.cs`, `ExternalTeamShareSynchronizer.cs` (never-shared list), `ExternalInvoiceVisibility.cs` | No. Registries and read filters. |
 | `RecordRepairPassJob.cs` | Yes, by design: the table is no longer swept (see the table above). |
-| Client code, playbooks, config files and `scripts/ebilling/*.ps1` | No client code or playbook references the table, and no generic client caller exists. Several config files (`config/feature-role-privileges.json`, `config/secure-record-owner-role.json`, `config/external-collaborator-role.json`) and `scripts/ebilling/*.ps1` name it for provisioning; none of them writes rows, so none is affected. |
+| Client code, playbooks, config files and `scripts/ebilling/*.ps1` | No client code or playbook references the table, and no generic client caller exists. Some provisioning config files and `scripts/ebilling/*.ps1` name it; none of them writes rows, so none is affected. |
 
 No legitimate writer goes through a generic path the flag refuses, so nothing was widened.
 

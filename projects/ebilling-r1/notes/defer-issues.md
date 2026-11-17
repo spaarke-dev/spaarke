@@ -2265,3 +2265,23 @@ The invoice stays held for good. Before ISS-031 the other verb was a wrong but w
 **Estimated effort**: 1 day. **Blockers**: owner decision. **Related**: ISS-031, task 095f-2c.
 
 ---
+
+### ISS-035 — Invoice upload joins a repeated firmInvoiceNumber or poNumber field with a comma
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | someday |
+| **Filed** | 2026-11-17 |
+| **Source** | 095f-2e2a review (Opus), found in passing |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2889 |
+
+**Description**: the shared multipart reader (`InvoiceSubmissionHttp.ReadSubmissionFormAsync`, used by the internal upload routes and the external SPA route) reads `firmInvoiceNumber` and `poNumber` with `form[...].ToString()`, so a field sent twice becomes `"A,B"` and is validated and stored as one value. The invoice then gets a tracking number from `"A,B"` and does not match a later resubmission or Correction of `A`. The 095f-2e2a Correction fields already refuse a repeated field.
+
+**Entry-points**: `src/server/api/Sprk.Bff.Api/Api/Finance/InvoiceSubmissionHttp.cs:66-67`; `InvoiceSubmissionCorrectionFields.ReadForm` in `InvoiceSubmissionEndpoints.cs` (the "sent at most once" rule to reuse).
+
+**Suggested fix**: refuse a repeated `firmInvoiceNumber` or `poNumber` with a field error. It touches the external route, so spa-r4 reviews it.
+
+**Estimated effort**: 2 hours. **Blockers**: none. **Related**: task 095f-2e2a.
+
+---

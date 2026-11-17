@@ -103,3 +103,12 @@ No new endpoint, service, DI registration, package, column or file surface. New 
 - **K2, no retry identity on the upload.** Each upload is a new submission id. Two Corrections of the same invoice can both be received. The commit gate re-checks the target at commit, so only the first to commit supersedes it and the second is refused at its commit (the target is no longer In Review). This is the from-email channel's behaviour too. The wizard should disable resubmit while a request is in flight.
 - **K3, order of checks.** The field errors and the coded note 400 come after the route filter's record and firm checks and after the form is buffered (the multipart body must be read to see the fields). The tests prove the handler's order, not the filter's.
 - **K4, the 404 is checked before the service's own validation.** A Correction with a missing file or number still asks for Write on the invoice first, then gets the service's 400. This is from-document's order (its Write check comes before the service), and nothing is written.
+- **K5, a New upload now refuses stray Correction fields (intended tightening).** Before this change the internal route ignored `mode`, `invoiceId` and `correctionNote`; now a New upload carrying `invoiceId` or `correctionNote`, or an unknown `mode`, gets a field error. No current client sends them (the wizard sends none until 2e2b).
+- **K6, an invoice with no firm is refused `different_firm`.** The shared check answers `different_firm` when the target invoice has no firm at all; the text then reads as a mismatch. Nothing is written. Same answer on from-document and from-email.
+- **K7, the note limit is written twice.** `InvoiceSubmissionHttp.CorrectionContract` (OpenAPI text) states "at most 2000 characters" as a literal, beside the rule's own constant. A change to the limit must change both.
+
+## Review (Opus adversarial, one pass)
+
+No F-class finding; verdict "merge". Finding 1 (concurrent Corrections, K2) becomes 095f-2e2b's acceptance criterion "resubmit disabled while a request is in flight". Findings 2, 3, 5 and 7 are K5, K1, K6 and K7 above. Finding 4, found in passing (a repeated `firmInvoiceNumber` or `poNumber` is joined with a comma by the shared reader, which the external route uses too), is filed as ISS-035 (#2889) for a change spa-r4 reviews.
+
+Merged into `work/ebilling-r1` at cdb91493a9.

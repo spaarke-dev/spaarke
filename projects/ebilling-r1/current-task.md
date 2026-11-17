@@ -9,37 +9,21 @@
 
 ## NOW — read this first
 
-### Active (2026-11-17, checkpoint at 85% context)
+### Active (2026-11-17, after compaction)
 
 **State per task:**
-- **iss034a: MERGED into work at 02173d8497, not yet pushed.**
-  - Reviews: Opus review, then a second pass with no F-class findings. ontology-r1 PASS twice, uac-r2 PASS twice.
-  - **Next:**
-    - Add 3 known-limit lines to `notes/iss034a-operator-finish-stranded-decision.md`:
-      - (1) AC3 / EB-D-244 now mean one `FinishRequested` record per operator who tried; who completed the finish is not recorded. Owner to acknowledge.
-      - (2) Pre-fix data in a "record written, size refused" state stays stranded, failing closed (needs support).
-      - (4) `WithDistinctCreateIds` applies to all 7 SubmissionOverride suites.
-    - Filtered tests on the merged tree: `SubmissionOverride|DecisionNote|DecisionRecord|DecisionActionCatalog|BlockedSubmission|InvoiceRejectReturn`, plus ArchTests `Invoice|Decision|RouteAuthorization`, plus a `--warnaserror` build.
-    - Mark the POML completed and the TASK-INDEX row ✅.
-    - Remove the worktrees and branches:
-      - `task/ebilling-iss034a` and `worktree-agent-a2f3c0f3e3c0abfc1`;
-      - `task/ebilling-iss034a-r1` and `worktree-agent-a8c58bafe3f8abe77`;
-      - worktrees under `C:\code_files\spaarke\.claude\worktrees\agent-<id>`; unlock them, then `Remove-WorktreeSafe.ps1`.
-    - Push. Then iss034b (client; spec in its POML; codes `own_decision_pending` / `both_decisions_recorded`; GET hints `CanFinishAsOperator` / `StrandedDecision`).
-- **iss028 (EB-D-248):** built on `task/ebilling-iss028` at 4729f828b0 (agent worktree `agent-ad61c8dd11b5cbd15`). Its Opus review is running. Then fix if needed, merge, and ask uac-r2 for a scoped look at the `RecordTableRules` change.
-- **095f-2e2a (EB-D-245, B′ server):** built on `task/ebilling-095f-2e2a` at b2fd09c0ad (agent worktree `agent-a3c25c9d3d138c9f3`). Its Opus review is running. Form-field contract for 2e2b: in the notes file. Then 095f-2e2b (client; spa-r4 conditions; spa-r4 diff review).
-- **084h-5 (EB-D-247, derived Decision Record id):** built on `task/ebilling-084h-5` at 74a3b96bdb (agent worktree `agent-a09fc390b051663f5`).
-  - ontology-r1's full review is requested.
-  - **Merge blocked on the OWNER's pick** for the derivable-id known limit:
-    - 1 = HMAC with a per-environment key (uac-r2 recommends; needs Key Vault, provisioning and a fail-closed startup check);
-    - 2 = gate keeps random ids (switch line in `DerivedRecordIdEntriesByDefault`);
-    - 3 = accept as built.
-  - Public text names it only as "derivable record id, see uac-r2 thread". The details are in uac-r2's thread.
-- **Dev scan (read-only):** 138 Decision Records, 0 keys with more than one record.
+- **iss034a ✅** merged 02173d8497. K5 (the trail shows who asked to finish, not who completed) waits on the owner's acknowledgement. Next: iss034b (client; codes `own_decision_pending` / `both_decisions_recorded`; GET hints `CanFinishAsOperator` / `StrandedDecision`).
+- **095f-2e2a ✅** merged cdb91493a9. Gates passed: build clean, 2,222 BFF tests, 206 ArchTests. K5–K7 are in its notes. ISS-035 (#2889) filed for the comma-joined repeated field. Next: 095f-2e2b (client). Its POML now requires "resubmit disabled while a request is in flight". spa-r4 conditions 1–4 apply.
+- **iss028 🔄** code merged 332515309f (Opus review, round 1 fixed). ontology-r1 PASS on the writer-guard change. Gates running. The native write hardening waits on the owner's placement answer (questions below). In public text it is only "correction rows: native write hardening".
+- **084h-5:** ontology-r1's full review found F1 (the gate duplicate path skips the share when the retried create already committed) and F2 (the catch filters let a timeout `TaskCanceledException` escape). The fix round runs on `task/ebilling-084h-5-r1` from 74a3b96bdb. When it lands: send the diff to ontology-r1 (re-check of the fix and its callers), then our own scoped re-check. The merge still waits on the owner's 1/2/3 limit choice and on uac-r2. Old worktree `agent-a09fc390b051663f5` (branch `task/ebilling-084h-5`).
 
-**Owner decisions recorded today:** EB-D-244 (operator route), EB-D-245 (B′), EB-D-246 (no field security on the decision note), EB-D-247 (duplicate check), EB-D-248 (writer-only). All owner questions (a)–(f) are answered.
+**Open owner questions:**
+1. iss028 hardening: in iss028 now, or in deploy task 079?
+2. OK for a scoped dev edit after the merge, with uac-r2 notices?
+3. The 084h-5 limit choice: 1 = secret-keyed id; 2 = gate keeps random ids; 3 = accept as built.
+4. Acknowledge iss034a K5.
 
-**Open owner question:** the 084h-5 limit choice (1/2/3), above.
+**Before any master merge:** 5 CI shards, the publish-size delta against a fresh master build, and the owner's go.
 
 - **095f-2b ✅ merged a3ef7e1c93** (fix 64c3e9ecbb: server-derived namespaced decision ids, neutral lookup 503; ontology-r1 PASS on catalog, exact-set amendment and fix; known limit ISS-030 / #2881).
 - **095f-2ui ✅ merged d3a61cc426** (review + 3 fix rounds + tweak). Page-level locks keep a partly saved decision exact on repeat; drafts survive 409s. Known limits are in its notes (locks are memory only; the Override/Return switch guard is client-only, see ISS-031 #2882). ISS-032 #2883 covers a decision stranded after its transition. Checklist section F added.

@@ -4,7 +4,7 @@
     <title>ISS-028 (#2879): correction rows are written only by their writer (RecordTableRules CreatedOnlyByItsWriter)</title>
     <phase>Defect fix (owner question (e), EB-D-248)</phase>
     <gate>Branch from work/ebilling-r1 at the sha named in the agent brief.</gate>
-    <status>not-started</status>
+    <status>in-progress</status>
     <rigor>FULL</rigor>
     <rigor-reason>BFF record write path (.cs), shared record-creation rules.</rigor-reason>
     <model-tier>sonnet</model-tier>

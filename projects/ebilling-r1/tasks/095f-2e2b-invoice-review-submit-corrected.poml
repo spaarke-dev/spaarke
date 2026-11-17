@@ -32,6 +32,7 @@
   <acceptance-criteria>
     <criterion testable="true">Jest: with `correction` the wizard prefills the number, locks the record, requires the note and posts mode, invoiceId and correctionNote; without it every existing wizard test passes unchanged (must-not-fire).</criterion>
     <criterion testable="true">Jest: Invoice Review shows the action only for In Review, opens the wizard with the correction, refreshes after success, and shows each refusal message.</criterion>
+    <criterion testable="true">Jest: the submit is disabled while a request is in flight; a double click sends exactly one Correction (095f-2e2a K2: two Corrections of one invoice can both be received, and the second fails at commit).</criterion>
     <criterion testable="true">The shared library, CreateInvoiceWizard, InvoiceReview and external-spa Jest suites are green; npm run typecheck and npm run build succeed for each.</criterion>
   </acceptance-criteria>
 
