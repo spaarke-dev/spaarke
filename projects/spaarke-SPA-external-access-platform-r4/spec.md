@@ -132,6 +132,7 @@ Spaarke External Access is the external SPA (`src/client/external-spa`). R3 left
 - **FR-05 Icon map.** Record actions use the 20Regular icons below, from `@fluentui/react-icons`:
   - Refresh `ArrowClockwise`; Upload `ArrowUpload`; New message `ChatAdd`; Add to-do `TaskListAdd`; Add event `CalendarAdd`; Submit invoice `ReceiptAdd`; Copy link `Link`; Expand section `Open`.
   - Download, Delete, History and Send use `ArrowDownload`, `Delete`, `History` and `Send`.
+  - Edit `Edit20Regular` and Change status `ArrowSwap20Regular` (added by task 015, FR-36).
   - The map lives in one exported constant.
   - *Acceptance:* No record-modal action uses an icon outside the map. The closing phase proposes the map as a repo standard (FR-34).
 
@@ -259,7 +260,7 @@ Spaarke External Access is the external SPA (`src/client/external-spa`). R3 left
   - *Acceptance:* Evidence is recorded in project notes.
 
 - **FR-34 Standards proposals.** Draft the following for owner approval; `.claude/` edits happen in the main session:
-  - (a) the record-modal icon map as repo guidance;
+  - (a) the record-modal icon map as repo guidance (including `edit` `Edit20Regular` and `changeStatus` `ArrowSwap20Regular`, added by task 015);
   - (b) a `MODAL-DESIGN-SYSTEM.md` note that child dialogs mount inside the parent SprkModal;
   - (c) a `record-modal-selection.md` note on the Xrm-free SPA case (SprkModal `lg`).
   - *Acceptance:* The drafts are in project notes, and the owner's decision is recorded.
@@ -283,7 +284,7 @@ Spaarke External Access is the external SPA (`src/client/external-spa`). R3 left
     - A call-count test proves the type check is one read per request.
 
 - **FR-36 Event record: read, deep link, edit, status.** A seventh record template, `sprk_event`:
-  - It opens from an Events row as a child record over the current record (task-013 pattern), or top-level from `?record=sprk_event:{id}`.
+  - It opens from an Events row as a child record over the current record (task-013 pattern), or top-level from `?record=event:{id}`.
   - Information: type, status, due date, priority, assignee name, description, created on/by, regarding (a link).
   - Toolbar: Edit (title, due date, priority, assignee, description; **type is not editable**), Change status (**any** event status, `statecode` paired), Copy link, Delete (creator only, unchanged).
   - BFF:
