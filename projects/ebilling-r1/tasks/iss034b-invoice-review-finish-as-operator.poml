@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="iss034b" project="ebilling-r1">
+  <metadata>
+    <title>ISS-034 (#2888), client: Invoice Review offers "Finish as operator" on a stranded blocked decision</title>
+    <phase>Defect fix (owner question (f), EB-D-244)</phase>
+    <gate>iss034a merged into work. Branch from work/ebilling-r1 at the sha named in the agent brief.</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Client-only change to the Invoice Review code page; tests are modified, so Step 9.5 review runs.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+    <parallel-safe>true</parallel-safe>
+    <deps>iss034a</deps>
+    <tags>react, fluent-ui, frontend, testing</tags>
+    <estimated-effort>3-5 hours</estimated-effort>
+  </metadata>
+
+  <prompt>In src/solutions/InvoiceReview, when GET .../blocked reports CanFinishAsOperator with a StrandedDecision, BlockedBanner offers "Finish as operator": a dialog naming the pending decision (an Override or a Return recorded by another person), saying it will be finished exactly as recorded, with a required reason and an optional note (the existing reason rules and NoteField), posting to /api/finance/submissions/{id}/finish-stranded. Refusals map by errorCode as the existing blocked decisions do (the decisionLocks and staysInNoteDialog patterns).</prompt>
+
+  <goal>A billing admin can release an invoice stranded by a decider who is gone without leaving Invoice Review.</goal>
+
+  <constraints>
+    <constraint source="EB-D-244">Shown only from the server's CanFinishAsOperator; the client never decides authority. Never shown to the stored decider (they repeat their own decision).</constraint>
+    <constraint source="095f-2ui">Reuse the page-level decision lock and draft handling; an unknown outcome locks the dialog as the other decisions do.</constraint>
+    <constraint source="ADR-021">Fluent v9 tokens only; dark mode.</constraint>
+    <constraint source="project">Only src/solutions/InvoiceReview/** and a notes file. No shared-library or server change, no deploy.</constraint>
+  </constraints>
+
+  <acceptance-criteria>
+    <criterion testable="true">Jest: the action shows only with CanFinishAsOperator; a finish posts the reason (and the note when given) and refreshes the review; each refusal code shows its message; must-not-fire for the decider and a non-admin.</criterion>
+    <criterion testable="true">The full InvoiceReview Jest suite is green; npm run typecheck and npm run build succeed.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>
