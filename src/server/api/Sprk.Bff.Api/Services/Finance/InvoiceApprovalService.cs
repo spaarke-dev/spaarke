@@ -878,11 +878,14 @@ public sealed class InvoiceApprovalService
         }
 
         var amount = portion.GetAttributeValue<Money>(PortionAmount)?.Value ?? 0m;
-        // 095f-2a: the repeat's note, as the reason on a reject or return repeat; the decision note column already holds the first call's note.
         var decision = BuildDecision(decisionId, invoice, portion.Id, caller, amount, note, decidedOn, signals.Set);
         _logger.LogInformation("Approve of invoice {InvoiceId}: completing the caller's interrupted approval.", invoiceId);
-        return await FinishAsync(invoiceId, portion.Id, decision, portionStatus, recordId, decidedBy!.Id, signals.Set, ct,
-            refuseAlreadyRecorded: recorded.Count == 0).ConfigureAwait(false);
+        // 095f-2a review F1 (K-1, design 2 Change 3, as reject and return): once the writer-created record exists it is finished as it is, even
+        // when the portion is not yet linked to it (the first call stopped at "signals" or "link"): its stored set is closed and the link written;
+        // RecordAsync is never asked again, so a repeat with an edited (or no) note completes, and the edited note is dropped. Before the record
+        // exists the record takes the repeat's note, while the decision note column keeps what the first call's transition wrote.
+        return await FinishAsync(invoiceId, portion.Id, decision, portionStatus, recordId ?? (recorded.Count > 0 ? recorded[0] : null), decidedBy!.Id,
+            signals.Set, ct, refuseAlreadyRecorded: recorded.Count == 0).ConfigureAwait(false);
     }
 
     /// <summary>After the transition: the portion as Approved (re-asserting the decider), the record, the Signals, the link. Each step is idempotent.
@@ -911,9 +914,13 @@ public sealed class InvoiceApprovalService
         if (recordId is { } existing && existing != Guid.Empty)
         {
             var notClosed = await HumanDecisionSignalClose.CloseSetAsync(_closeActed, signals, existing, decider, _logger, ct).ConfigureAwait(false);
-            return notClosed > 0
-                ? Incomplete(invoiceId, decision.DecisionId, "signals", $"{notClosed} Signals not closed")
-                : Approved(invoiceId, decision.DecisionId, existing);
+            if (notClosed > 0)
+            {
+                return Incomplete(invoiceId, decision.DecisionId, "signals", $"{notClosed} Signals not closed");
+            }
+
+            // 095f-2a review F1: the record may exist without its link (a repeat that found it by its key): the link is written here, idempotently.
+            return await LinkAsync(invoiceId, approvalId, decision.DecisionId, existing, ct).ConfigureAwait(false);
         }
 
         BillingDecisionRecordResult recorded;
@@ -932,25 +939,32 @@ public sealed class InvoiceApprovalService
         }
 
         // ── D-122: the stored set, closed as Acted by the record (a repeat: AlreadyClosedByThisRecord). A close that failed (a fault or a
-        //    change since the read) leaves the approve Incomplete at "signals" BEFORE the link, so the claimant's repeat comes back through
-        //    here: the record answers AlreadyRecorded (no second record) and the remaining closes run over the same stored set. ──
+        //    change since the read) leaves the approve Incomplete at "signals" BEFORE the link, so the claimant's repeat finds the record by
+        //    its key and finishes it in the existing-record branch above (no second record): the remaining closes run over the same stored set,
+        //    then the link (095f-2a review F1). ──
         var failedCloses = await HumanDecisionSignalClose.CloseSetAsync(_closeActed, signals, recorded.RecordId, decider, _logger, ct).ConfigureAwait(false);
         if (failedCloses > 0)
         {
             return Incomplete(invoiceId, decision.DecisionId, "signals", $"{failedCloses} Signals not closed");
         }
 
+        return await LinkAsync(invoiceId, approvalId, decision.DecisionId, recorded.RecordId, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>The portion to its Decision Record; the last step, so Approved is answered only once it is written. Idempotent.</summary>
+    private async Task<ApprovalResult> LinkAsync(Guid invoiceId, Guid approvalId, Guid decisionId, Guid recordId, CancellationToken ct)
+    {
         try
         {
             await _entities.UpdateAsync(EligibleApproverResolver.ApprovalEntity, approvalId,
-                new Dictionary<string, object> { [PortionRecord] = new EntityReference(InvoiceReviewReadService.DecisionRecordEntity, recorded.RecordId) }, ct).ConfigureAwait(false);
+                new Dictionary<string, object> { [PortionRecord] = new EntityReference(InvoiceReviewReadService.DecisionRecordEntity, recordId) }, ct).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
-            return Incomplete(invoiceId, decision.DecisionId, "link", ex.GetType().Name);
+            return Incomplete(invoiceId, decisionId, "link", ex.GetType().Name);
         }
 
-        return Approved(invoiceId, decision.DecisionId, recorded.RecordId);
+        return Approved(invoiceId, decisionId, recordId);
     }
 
     private ApprovalResult Approved(Guid invoiceId, Guid decisionId, Guid recordId)

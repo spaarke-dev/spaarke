@@ -314,6 +314,112 @@ public sealed class InvoiceDecisionNoteTests
         w.ApproveRecords.Should().BeEmpty();
     }
 
+    [Theory(DisplayName = "095f-2a K-1 (approve, record exists): a repeat after 'signals' or 'link' with an EDITED note answers Approved, writes no second record, and the record and the column keep the first note")]
+    [InlineData("signals")]
+    [InlineData("link")]
+    public async Task Approve_K1_RepeatAfterTheRecord_DropsTheEditedNote(string failingStep)
+    {
+        var w = ApproveWorld();
+        var fails = w.AddInvoiceSignal("EB-TOTAL");
+        if (failingStep == "signals")
+        {
+            w.CloseFailsOnce[fails] = SignalAutomatedCloseOutcome.ChangedSinceRead;
+        }
+        else
+        {
+            w.FaultsOnce["link"] = new InvalidOperationException("dataverse down");
+        }
+
+        var first = await w.ApproveAs(AliceUser, "The first note");
+        first.Outcome.Should().Be(ApprovalOutcome.Incomplete);
+        first.FailedStep.Should().Be(failingStep);
+        var created = w.H.Created.Count;
+
+        var repeat = await w.ApproveAs(AliceUser, "An edited note");
+
+        // Had the repeat asked RecordAsync again with the edited note, the writer would have refused the different content (ReviewInvalid) and the
+        // call would be 503 at "record", not Approved: Approved with no new create proves the record was never asked again.
+        repeat.Outcome.Should().Be(ApprovalOutcome.Approved, repeat.Detail);
+        w.H.Created.Count.Should().Be(created, "no second Decision Record (no RecordAsync on the repeat)");
+        var record = w.ApproveRecords.Should().ContainSingle().Subject;
+        ValuesOf(record)["note"]!.GetValue<string>().Should().Be("The first note");
+        DecisionNote(w).Should().Be("The first note", "the column landed with the first transition");
+        w.Transitions.Should().Be(1, "the repeat does not transition again");
+        w.TransitionNotes.Should().Equal(["The first note"]);
+    }
+
+    [Fact(DisplayName = "095f-2a K-1 (approve, record not yet written): a repeat after 'record' with an EDITED note records the edited note, while the column keeps the first")]
+    public async Task Approve_K1_RepeatBeforeTheRecord_RecordsTheEditedNote_ColumnKeepsTheFirst()
+    {
+        var w = ApproveWorld();
+        var failOnce = true;
+        w.H.Org.Setup(o => o.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
+            .Returns((Entity row, CancellationToken _) =>
+            {
+                if (failOnce)
+                {
+                    failOnce = false;
+                    return Task.FromException<Guid>(new InvalidOperationException("dataverse down"));
+                }
+
+                row.Id = Guid.NewGuid();
+                w.H.Created.Add(row);
+                return Task.FromResult(row.Id);
+            });
+
+        var first = await w.ApproveAs(AliceUser, "The first note");
+        first.Outcome.Should().Be(ApprovalOutcome.Incomplete);
+        first.FailedStep.Should().Be("record");
+        w.ApproveRecords.Should().BeEmpty();
+
+        var repeat = await w.ApproveAs(AliceUser, "An edited note");
+
+        repeat.Outcome.Should().Be(ApprovalOutcome.Approved, repeat.Detail);
+        ValuesOf(w.ApproveRecords.Should().ContainSingle().Subject)["note"]!.GetValue<string>().Should().Be("An edited note");
+        DecisionNote(w).Should().Be("The first note", "the transition, and so the column, landed with the first call");
+        w.Transitions.Should().Be(1);
+    }
+
+    [Theory(DisplayName = "095f-2a review F1: an approve stranded after its record ('signals' or 'link') completes on a repeat with a different note or with none: the Signals close, the link is written, exactly one record (the first)")]
+    [InlineData("signals", "A different note")]
+    [InlineData("signals", null)]
+    [InlineData("link", "A different note")]
+    [InlineData("link", null)]
+    public async Task Approve_StrandedAfterTheRecord_CompletesOnARepeatWithAnotherNote(string failingStep, string? repeatNote)
+    {
+        var w = ApproveWorld();
+        var signal = w.AddInvoiceSignal("EB-TOTAL");
+        if (failingStep == "signals")
+        {
+            w.CloseFailsOnce[signal] = SignalAutomatedCloseOutcome.ChangedSinceRead;
+        }
+        else
+        {
+            w.FaultsOnce["link"] = new InvalidOperationException("dataverse down");
+        }
+
+        var first = await w.ApproveAs(AliceUser, "The first note");
+        first.Outcome.Should().Be(ApprovalOutcome.Incomplete);
+        first.FailedStep.Should().Be(failingStep);
+        w.InvoiceStatus.Should().Be(InvoiceStatusCodes.Approved, "the transition landed before the failure");
+        var recordId = w.ApproveRecords.Should().ContainSingle().Subject.Id;
+        w.Portion.GetAttributeValue<EntityReference>("sprk_decisionrecord").Should().BeNull("the first call stopped before the link");
+
+        var repeat = await w.ApproveAs(AliceUser, repeatNote);
+
+        repeat.Outcome.Should().Be(ApprovalOutcome.Approved, repeat.Detail);
+        repeat.DecisionRecordId.Should().Be(recordId, "the stored record is finished as it is");
+        w.ApproveRecords.Should().ContainSingle().Which.Id.Should().Be(recordId, "exactly one record, the first");
+        ValuesOf(w.ApproveRecords.Single())["note"]!.GetValue<string>().Should().Be("The first note");
+        w.SignalStatus(signal).Should().Be(SignalWriter.SignalStatusResolved, "the stored set is closed by the existing record");
+        w.ClosedBy[signal].Should().Be(recordId);
+        w.Portion.GetAttributeValue<EntityReference>("sprk_decisionrecord").Id.Should().Be(recordId, "the portion is linked to the existing record");
+        w.Portion.GetAttributeValue<OptionSetValue>("sprk_approvalstatus").Value.Should().Be(InvoiceApprovalService.PortionApproved);
+        w.Transitions.Should().Be(1);
+
+        (await w.ApproveAs(AliceUser, repeatNote)).Outcome.Should().Be(ApprovalOutcome.AlreadyApproved, "the approval is now complete");
+    }
+
     [Fact(DisplayName = "095f-2a (5.1 must-not-fire): the bulk accept an approve runs carries no note; only the approve record does")]
     public async Task Approve_BulkAccept_CarriesNoNote()
     {

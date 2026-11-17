@@ -653,21 +653,30 @@ public sealed class InvoiceApprovalServiceTests
         (await w.ApproveAs(BobUser)).Outcome.Should().Be(ApprovalOutcome.Approved, "the claimant completes it");
     }
 
-    [Fact(DisplayName = "103 K3 SEEDED: the approved amount is in the record's Values, so a repeat with a different frozen amount is refused, never answered as recorded")]
+    [Fact(DisplayName = "103 K3 SEEDED: the approved amount is in the record's Values; once the record exists a repeat with a different frozen amount finishes the stored record and never records the new amount")]
     public async Task ApprovedAmount_IsCoveredByTheHash()
     {
         var w = new ApprovalWorld();
         w.AddLine(InvoiceLineStatus.Accepted, approved: 100m);
         w.FaultsOnce["link"] = new InvalidOperationException("dataverse down");
         (await w.ApproveAs(AliceUser)).Outcome.Should().Be(ApprovalOutcome.Incomplete);
-        w.ApproveRecords.Should().ContainSingle();
+        var record = w.ApproveRecords.Should().ContainSingle().Subject;
+        var created = w.H.Created.Count;
+        var frozen = RecordedAmount(record);
 
         w.Portion["sprk_approvedamount"] = new Money(999m);
         var retried = await w.ApproveAs(AliceUser);
 
-        retried.Outcome.Should().Be(ApprovalOutcome.Incomplete);
-        retried.FailedStep.Should().Be("record");
-        w.ApproveRecords.Should().ContainSingle("the writer refuses other content under the same id");
+        // 095f-2a review F1: the record found by its key is finished as it is (as reject and return do); RecordAsync is never asked again, so
+        // the changed amount is neither recorded nor answered as recorded under another content.
+        retried.Outcome.Should().Be(ApprovalOutcome.Approved, retried.Detail);
+        retried.DecisionRecordId.Should().Be(record.Id);
+        w.H.Created.Count.Should().Be(created, "no second record");
+        RecordedAmount(record).Should().Be(frozen, "the stored record keeps the amount it froze").And.NotBe(999m);
+        w.Portion.GetAttributeValue<EntityReference>("sprk_decisionrecord").Id.Should().Be(record.Id);
+
+        static decimal RecordedAmount(Entity r) =>
+            System.Text.Json.Nodes.JsonNode.Parse(r.GetAttributeValue<string>("sprk_steps"))!["steps"]![0]!["values"]!["approvedAmount"]!.GetValue<decimal>();
     }
 
     [Theory(DisplayName = "103 K4: a portion with no or an unknown status is refused (409 status_unknown), never treated as Pending; GET shows Unknown")]
