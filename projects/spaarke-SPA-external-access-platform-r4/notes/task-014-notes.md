@@ -296,5 +296,15 @@ Questions:
     - Known limits accepted: open-work race, AppendTo, multi-parent intersection, transient `ContactUnreadable` 503.
     - Its run: 349/349 passed (forms, root-read, EventDueAssignee, TodoScope).
     - Merge on Router + Client lint green, with the owner's go.
+  - **Owner go 2026-11-16:** "Yes, merge on green".
+  - **Before merging:**
+    - Master (with uac-r2 #2867) was merged into the branch → head `39ebf3c523`. The 014c code is unchanged.
+    - Build 0 warnings; 188/188 for forms, EventDueAssignee and RecordContactAccess.
+    - Office scope run locally: 570 passed, 0 failed.
+  - **CI:** the office-scope legs hit their 20-min cap on both heads, which is the known #1474/#1718/#2767. Each leg passed on re-run; final state CLEAN.
+  - **MERGED** #2872 → squash `3c9a2ff4e1`. uac-r2 was sent the SHA for its next dev candidate.
+- **Task 014 COMPLETE** (014a #2852, 014b #2869, 014c #2872).
+  - Temp worktrees `C:\wt14a`/`C:\wt14m` removed.
+  - Index row 036's invalid `[superseded]` token was normalized to `[cancelled]` (POML too), so the drift check is clean.
 - **uac-r2 re-check PASS; UAC gate cleared for 014b at `67b99e2126`** (its own run: 170/170). Merge on Router + Client lint green, then send it the merge SHA for the next dev BFF candidate. #2867 is in CI; whoever merges second rebuilds.
 - **PR #2869 opened 2026-11-16** (head `9719d2f594`, base master `16771d1051`) and sent to uac-r2 for review. Next: uac-r2 OK + CI → merge (owner go) → hand uac-r2 the SHA for the dev BFF deploy → task 015 (SPA). The PATCH-assignee owner decision (a/b/c) is still open. **Publish size:** master `16771d1051` 42,349,704 B vs 014b `c28b4b1478` 42,374,782 B, **+25,078 B** (Compress-Archive, 191 files each, counts match). No CVEs (implementer check).: stated in the PR; the owner is told in this session's report.

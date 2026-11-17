@@ -4,7 +4,7 @@
     <title>Matter events show task type and assignee (FR-23, #2445, ontology D-199)</title>
     <phase>3 Grids, information, messages</phase>
     <gate>after 028 — data source confirmed (D-199 / D-129) and recorded before code</gate>
-    <status>superseded</status>
+    <status>cancelled</status>
     <rigor>FULL</rigor>
     <rigor-reason>Adds partner-visible columns (an internal person's name) to an external read on the shared BFF surface</rigor-reason>
     <model-tier>sonnet</model-tier>

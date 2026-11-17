@@ -21,7 +21,7 @@
 | 011 | SPA: Manage Access labels everywhere; Tasks = Task events; Add task (E2E rework, D-6, D-11) | 1 | ✅ [done] | 008, 009 | — | sonnet / high |
 | 012 | Record "Events": one list (Task = event type badge), one Add event with a Type choice (retest round 2) | 1 | ✅ [done] | 011 | — | sonnet / high |
 | 013 | Collapsible sections remembered per user; invoice/document rows open a child record modal (retest round 2) | 1 | ✅ [done] | 012 | — | sonnet / high |
-| 014 | BFF: event types, richer create, GET/PATCH /events/{id}, assignable people (FR-35–FR-37; retest round 3) — gated on uac-r2 UAC review | 1 | 🔲 [open] | 018 | — | opus / high |
+| 014 | BFF: event types, richer create, GET/PATCH /events/{id}, assignable people (FR-35–FR-37; retest round 3) — gated on uac-r2 UAC review — merged #2852, #2869, #2872 | 1 | ✅ [done] | 018 | — | opus / high |
 | 015 | SPA: Add event with type/priority/assignee/description; Event record (child + deep link) with Edit and Change status (FR-35–FR-37) | 1 | 🔲 [open] | 014 | — | sonnet / high |
 | 016 | Event forms deploy (BFF via uac-r2, SPA dev) + owner E2E | 1 | 🔲 [open] | 014, 015 | — (live) | sonnet / high |
 | 018 | P1 deploy (BFF via uac-r2, SPA dev) + E2E + first-E2E checks (FR-33) — redeploy + retest after 008–013 | 1 | ✅ [done] | 002, 004, 005, 006, 007, 008, 009, 010, 011, 012, 013 | — (live) | sonnet / high |
@@ -37,7 +37,7 @@
 | 034 | Messages refresh + new-message indicator (FR-21) | 3 | 🔲 [open] | 028 | Group C | sonnet / high |
 | 033 | DataGrid Money sort + formatted export (FR-20) | 3 | 🔲 [open] | 028, 032 | Group D | sonnet / high |
 | 035 | Message threads (FR-22) | 3 | 🔲 [open] | 028, 034 | Group D | sonnet / high |
-| 036 | Matter events: task type + assignee (FR-23) — superseded by 014/015 (owner 2026-11-15) | 3 | ⏭️ [superseded] | 028 | — | sonnet / high |
+| 036 | Matter events: task type + assignee (FR-23) — superseded by 014/015 (owner 2026-11-15) | 3 | 🚫 [cancelled] | 028 | — | sonnet / high |
 | 038 | P3 deploy (BFF allow-list via uac-r2, SPA dev) + E2E | 3 | 🔲 [open] | 028, 031, 032, 033, 034, 035, 036 | — (live) | sonnet / high |
 | 040 | Workforce-contact tabs scoped by grants (FR-24) | 4 | 🔲 [open] | 038 | Group E | opus / high |
 | 041 | Licensed user's first sign-in skips the profile form (FR-25) | 4 | 🔲 [open] | 038 | — (may edit `CallerPrincipalResolver.cs` with 043) | opus / high |
