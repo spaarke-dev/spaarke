@@ -71,7 +71,7 @@ public static class InvoiceLineReviewEndpoints
                 "records the decision. Repeating the request with the same decisionId records nothing twice. An optional note (at most 2000 " +
                 "characters; 400 ebilling.note_too_long or ebilling.note_invalid_characters, checked before any read) is saved on this line's own " +
                 "Decision Record and nowhere else. A repeat with the same decisionId must carry the same note: another note (or none) is refused by " +
-                "the record as a different decision, answered 503 ebilling.decision.incomplete (failedStep record), and the first note stays.")
+                "the record as a different decision, answered 503 ebilling.decision.incomplete (failedStep record); once the line's record exists, the first note stays on it. Use a new decisionId for a new note.")
             .Produces<LineDecisionResponse>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status401Unauthorized)

@@ -24,7 +24,7 @@ namespace Sprk.Bff.Api.Tests.DataMutation.Ebilling;
 /// <para><b>Repeat with another note.</b> The note is inside the content hash and a line decision's repeat always reaches the writer, so the same
 /// decision id with another note (or with the note dropped) is refused by the writer as other content (the existing behaviour for a changed reason
 /// or amount) and answered as 503 <c>ebilling.decision.incomplete</c>, failed step <c>record</c>, with no second record. The first note stays on the
-/// record. The line is rewritten with the same values first, so the repeat changes nothing else.</para>
+/// record. The line is rewritten with the same decision values first, but not untouched: the reviewed-on and reviewed-by fields take the repeat's time and caller (a new row version) and the invoice totals are recalculated (a new invoice version); the line status and amounts do not change.</para>
 /// </remarks>
 public sealed class InvoiceLineDecisionNoteTests
 {
@@ -345,7 +345,7 @@ public sealed class InvoiceLineDecisionNoteTests
         ValuesOf(record)!["note"]!.GetValue<string>().Should().Be("The first note");
         w.Row("sprk_billingevent", line.Id).GetAttributeValue<OptionSetValue>("sprk_linestatus").Value.Should()
             .Be((int)(action switch { LineDecisionAction.Accept => InvoiceLineStatus.Accepted, LineDecisionAction.Reduce => InvoiceLineStatus.Reduced, _ => InvoiceLineStatus.Disallowed }),
-                "the repeat rewrites the line with the same values and changes nothing else");
+                "the repeat rewrites the line with the same decision values (its status does not change)");
     }
 
     // ── Logs ──

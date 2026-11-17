@@ -26,7 +26,7 @@ Unchanged on purpose: `AcceptCleanAsync`, `AcceptCleanHeldAsync` (the approval's
 4. **Hash.** The note is inside the content hash. Without a note (null, empty or whitespace-only) the hash is byte-identical to before (golden values below).
 5. **Repeats (the line service's existing behaviour, tested).** A line decision's repeat always reaches the writer: the lines are rewritten with the same values, then the record is looked up by decision id.
    - **Same decision id, same note:** applied; every line answers `alreadyRecorded`; no second record.
-   - **Same decision id, another note, or the note dropped:** the writer refuses it as other content (the same refusal that a changed reason or amount already gets). The route answers 503 `ebilling.decision.incomplete` with `failedStep` `record`; no second record is written; the first note stays on the record. The line rows are rewritten with the same values first, so nothing else changes. A client that retries after a failure must resend the same note; a different note needs a new decision id.
+   - **Same decision id, another note, or the note dropped:** the writer refuses it as other content (the same refusal that a changed reason or amount already gets). The route answers 503 `ebilling.decision.incomplete` with `failedStep` `record`; no second record is written; once the line's record exists, the first note stays on it (if the first attempt failed before its record was written, the repeat records the new note and answers 200). The line rows are rewritten with the same decision values first, which is not a no-op: the reviewed-on and reviewed-by fields take the repeat's time and caller and the invoice totals are recalculated (new row versions); the line status and amounts do not change. A client that retries after a failure must resend the same note; a different note needs a new decision id.
    - This differs from reject and return (2a, K-1), where an edited note on a repeat after the record is silently dropped: those services never call the writer again once their record exists. The line service always does.
 6. **Logs.** The service logs ids, counts and exception type names only. No log line carries note text (tested over the service's and the recorder's loggers).
 7. **Firm visibility.** Nothing was added to any firm-facing reader or allow-list; the note is in `sprk_steps` of a Decision Record, which no external allow-list exposes.
@@ -140,3 +140,26 @@ The new surface is an optional `Note` on two request records and on the command,
 ## Process note
 
 One command in this session ran `python` by mistake (a bare `python -` on Windows, which hit the Store stub). It was stopped within seconds and a process check found no leaked python process. No python was used for any work.
+
+## Review and merge (2026-11-17)
+
+**Opus adversarial review of `545ba823dc..06fe43b3e5`:** no F1, F3 or F4. It confirmed:
+- every POML acceptance criterion;
+- the must-not-fire paths, in code: accept-clean, the held bulk accept and the approval call none with a note;
+- the 2a validation order;
+- that no note reaches a log line or 400 detail;
+- that the golden no-note hashes match base, checked by swapping in a base-equivalent `BuildDecision`: 8 golden cases pass, 23 note tests fail.
+
+ontology-r1 passed the three catalog lines.
+
+**Applied after the merge (main session):**
+- **F2, wording.** The test remark, an assertion message and rule 5 above said a refused repeat "changes nothing else". It does change things: `LineFields` rewrites the reviewed-on and reviewed-by fields and the totals are recalculated (new row versions). Behaviour is unchanged from before this task; only the claim was wrong. The route description now says the first note stays "once the line's record exists", and that a new note needs a new decisionId.
+
+**Known limits:**
+- **K2, an edited note on a repeat gets a 503 that can never complete** (ISS-029, #2880). With the same decisionId and another note, the route answers 503 "repeat to complete", and repeating never completes. That line's Signal close is skipped, and in a multi-line call whose earlier lines were recorded the notes can differ across lines. This extends the existing behaviour for a changed reason or amount.
+  - The shipped InvoiceReview client cannot reach it today: it mints a new decisionId on every submit and its Repeat resends the exact request.
+  - Fix later: map the writer's other-content refusal on a repeat to a 409, like `ebilling.adjustment.id_reused`.
+  - The 095f-2f client must keep the note inside Repeat.
+- **K4, accept-clean ignores a `note` in its body.** System.Text.Json skips unknown properties, which is pinned by `AcceptClean_IgnoresANote`. This matters only if 095f-2f offers a note on Accept all Clean, which it should not.
+- **K4, the publish size was measured against the branch base, not a fresh master build, and the file counts differed** (a stale `System.Security.Cryptography.Pkcs.dll` in a reused output folder). No csproj, props or lock file changed; the DLL and PDB delta is +2,816 B. To be re-measured at the master merge.
+- **K4, found in passing (pre-existing):** a repeat under the same decisionId by a different caller rewrites `sprk_reviewedby` before the writer refuses it. Client-minted random ids make this unreachable.

@@ -2137,3 +2137,29 @@ A BFF deploy can ship code that writes index fields the live index doesn't have.
 **Estimated effort**: 2-4 hours. **Blockers**: owner choice. **Related**: task 095f-2d2, EB-D-242, D-64.
 
 ---
+
+### ISS-029 — Line decision repeat with other content answers 503 "repeat to complete", which can never complete
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | next-round |
+| **Filed** | 2026-11-17 |
+| **Source** | Opus adversarial review of task 095f-2d1 (extends existing behaviour for a changed reason or amount) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2880 |
+
+**Description**: a line decision repeated with the same `decisionId` but another reason, amount or (since 095f-2d1) note is refused by the Decision Record writer as other content. The route answers 503 `ebilling.decision.incomplete` with `failedStep` `record` and the detail "Repeat the same decision ... to complete it", but repeating never succeeds. Each refused repeat:
+- rewrites the line's reviewed fields;
+- recalculates the invoice totals;
+- skips that line's Signal close;
+- counts a writer failure.
+
+In a multi-line call whose earlier lines were recorded, the remaining lines take the new content, so the lines disagree. The shipped InvoiceReview client cannot reach this today (it mints a new `decisionId` per submit and its Repeat resends the exact request), but any other client or a future change can.
+
+**Entry-points**: `src/server/api/Sprk.Bff.Api/Services/Finance/InvoiceLineDecisionService.cs` (the record loop, ~802-825, `Incomplete(..., "record", ...)`); `Api/Finance/InvoiceLineReviewEndpoints.cs` (route description); compare `ebilling.adjustment.id_reused`.
+
+**Suggested fix**: map the writer's other-content refusal on a repeat to 409 (e.g. `ebilling.decision.id_reused`), checked before the line rewrite so nothing is written; keep 503 only for retryable faults.
+
+**Estimated effort**: half a day. **Blockers**: none. **Related**: task 095f-2d1, 095f-2f (client).
+
+---
