@@ -269,8 +269,13 @@ public class ExternalDataService
     /// <summary>The lookup value column of <c>sprk_event.sprk_eventtype_ref</c>: read server-side only, never on the wire (task 008).</summary>
     internal const string EventTypeValueColumn = "_sprk_eventtype_ref_value";
 
-    /// <summary>The create bind of <c>sprk_event.sprk_eventtype_ref</c> (the shape Signals' assign-task writes).</summary>
-    internal const string EventTypeBindKey = "sprk_eventtype_ref@odata.bind";
+    /// <summary>
+    /// The create bind of <c>sprk_event.sprk_eventtype_ref</c>. An <c>@odata.bind</c> key is the NAVIGATION PROPERTY name and is
+    /// case-sensitive: it is <c>sprk_EventType_Ref</c> (verified against live relationship metadata, commit 9b32c1c8ab; the
+    /// internal event create in <c>DataverseWebApiService</c> writes the same key). The lowercase attribute name is refused by
+    /// Dataverse with a 400, which surfaced as a 500 on every typed external event create (R4 task 016 E2E, 2026-11-17).
+    /// </summary>
+    internal const string EventTypeBindKey = "sprk_EventType_Ref@odata.bind";
 
     private sealed class EventRow
     {
