@@ -1,6 +1,6 @@
 # Current Task State
 
-> **Last Updated**: 2026-11-17 (task 014 closed)
+> **Last Updated**: 2026-11-17 (task 014 closed; dev BFF `e46b6b453b` live)
 > **Format**: CURRENT state only. Each checkpoint REWRITES this file. Target ≤ 10 KB.
 
 ## Quick Recovery (READ THIS FIRST)
@@ -10,7 +10,7 @@
 | **Task** | **014 COMPLETE** (BFF event forms FR-35–FR-37). Next: **015** (SPA event forms), `tasks/015-*.poml`, then **016** (deploy via uac-r2 + owner E2E) |
 | **Step** | 015 not started. Run it through task-execute |
 | **Status** | 014 history + reviews: `notes/task-014-notes.md` |
-| **Next Action** | Invoke task-execute for 015. The SPA work uses the 014 contracts below. A dev deploy of the BFF (014a+b+c) waits on uac-r2's next candidate and the owner's SHA go |
+| **Next Action** | Invoke task-execute for 015. The SPA work uses the 014 contracts below. Dev BFF already carries 014a+b+c (`e46b6b453b`), so 015 can be exercised against dev |
 
 ## Task 014 merged
 - **014a** #2852 squash `16771d1051`: `RecordContactAccessService`; `QueryStrictAsync`.
@@ -27,7 +27,7 @@
 - Edit and Change status follow `canEdit`, `canChangeStatus` and `allowedStatuses` from the row.
 
 ## Live state
-- **Dev BFF** `be0420d763` (carries 014a only). 014b and 014c (+ #2867) are on master from `3c9a2ff4e1`. uac-r2 builds the next dev candidate; the owner gives the go per exact SHA; uac-r2 asks spa-r4 before a restart.
+- **Dev BFF** `e46b6b453b` (uac-r2 deploy, live since 2026-11-17T03:40Z, `/healthz` 200): master `3c9a2ff4e1` (014a/b/c, #2845 round 2) plus mcp spike-v2. Rollback = `be0420d763`. uac-r2 asks spa-r4 before any restart.
 - **Dev SPA** master `c1eb6e4a8e`. Roll back to `04dbd8df05` only together with BFF `5a9b687a0b`.
 
 ## Coordination
