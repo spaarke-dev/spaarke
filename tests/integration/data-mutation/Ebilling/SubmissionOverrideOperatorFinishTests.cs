@@ -715,6 +715,251 @@ public sealed class SubmissionOverrideOperatorFinishTests
         oneFaulted.CanFinishAsOperator.Should().BeFalse();
     }
 
+    // ── iss034c (EB-D-253): the stamp names the user whose call completed the decision ──
+
+    private const string CompletedMember = "completedBySystemUserId";
+
+    private static Guid? CompletedBy(JsonObject stamp) =>
+        stamp[CompletedMember] is { } node ? Guid.Parse(node.GetValue<string>()) : null;
+
+    [Theory(DisplayName = "iss034c AC1: a first-time Override and a first-time Return write the decider as the completer")]
+    [InlineData("override")]
+    [InlineData("return")]
+    public async Task AFirstTimeDecision_WritesTheDeciderAsTheCompleter(string verb)
+    {
+        var w = await World.CreateAsync();
+
+        (await Decide(w, verb)).Kind.Should().Be(BlockedDecisionKind.Decided);
+
+        var stamp = StampOf(w, verb);
+        CompletedBy(stamp).Should().Be(World.Caller);
+        Guid.Parse(stamp["bySystemUserId"]!.GetValue<string>()).Should().Be(World.Caller);
+    }
+
+    [Theory(DisplayName = "iss034c AC1: the decider's own repeat of a stranded decision writes the decider as the completer (no operator was involved)")]
+    [InlineData("override-release")]
+    [InlineData("override-closes-and-release")]
+    [InlineData("override-invoice-bound")]
+    [InlineData("return-transition")]
+    [InlineData("return-closes-and-transition")]
+    [InlineData("return-state-write")]
+    public async Task TheDecidersRepeat_WritesTheDeciderAsTheCompleter(string strand)
+    {
+        var w = await World.CreateAsync();
+        var verb = VerbOf(strand);
+        await StrandAsync(w, strand);
+        JsonNode.Parse(w.FindingsJson)![verb].Should().BeNull("the stranded write never reached the stamp, so no completer exists yet");
+        w.Probe.CallerSystemUserId = World.Caller;
+
+        (await Decide(w, verb)).Kind.Should().Be(BlockedDecisionKind.Decided);
+
+        var stamp = StampOf(w, verb);
+        CompletedBy(stamp).Should().Be(World.Caller);
+        Guid.Parse(stamp["bySystemUserId"]!.GetValue<string>()).Should().Be(World.Caller);
+    }
+
+    [Theory(DisplayName = "iss034c AC1: an operator finish writes the operator as the completer while bySystemUserId stays the stored decider; the Signal closes and the stored record still credit the decider")]
+    [InlineData("override-release")]
+    [InlineData("override-closes-and-release")]
+    [InlineData("override-invoice-bound")]
+    [InlineData("return-transition")]
+    [InlineData("return-closes-and-transition")]
+    [InlineData("return-state-write")]
+    public async Task AnOperatorFinish_WritesTheOperatorAsTheCompleter_AndKeepsTheDecider(string strand)
+    {
+        var w = await World.CreateAsync();
+        var verb = VerbOf(strand);
+        await StrandAsync(w, strand);
+        var decidedId = Records(w).Single().Id;
+        ActAsAdmin(w, World.Operator);
+
+        (await Finish(w)).Kind.Should().Be(BlockedDecisionKind.Decided);
+
+        var stamp = StampOf(w, verb);
+        CompletedBy(stamp).Should().Be(World.Operator, "the operator's call made the completing write");
+        Guid.Parse(stamp["bySystemUserId"]!.GetValue<string>()).Should().Be(World.Caller, "the stored decider is unchanged");
+        Guid.Parse(stamp["recordId"]!.GetValue<string>()).Should().Be(decidedId);
+        stamp["reason"]!.GetValue<string>().Should().Be(Reason);
+        w.Closes.Should().OnlyContain(c => c.DecidedBy == World.Caller, "the closes still credit the stored decider");
+    }
+
+    [Theory(DisplayName = "iss034c AC2: a finish that failed before the completing write leaves no completer; a later completion by someone else writes that person, never the earlier operator")]
+    [InlineData("override-release", "operator")]
+    [InlineData("return-transition", "operator")]
+    [InlineData("override-release", "decider")]
+    [InlineData("return-transition", "decider")]
+    public async Task AFailedFinish_WritesNoCompleter_AndALaterCompletionNamesItsOwnCaller(string strand, string laterCompleter)
+    {
+        var w = await World.CreateAsync();
+        var verb = VerbOf(strand);
+        await StrandAsync(w, strand);
+        await InterruptedOperatorFinishAsync(w, verb); // operator B's finish faulted after B's record, before the stamp
+        JsonNode.Parse(w.FindingsJson)![verb].Should().BeNull("B's interrupted finish wrote no stamp, so it named no completer");
+        w.FindingsJson.Should().NotContain(World.Operator.ToString("D"), "B appears nowhere in the findings");
+        var expected = laterCompleter == "decider" ? World.Caller : World.SecondOperator;
+        if (laterCompleter == "decider")
+        {
+            w.Probe.CallerSystemUserId = World.Caller;
+            (await Decide(w, verb)).Kind.Should().Be(BlockedDecisionKind.Decided);
+        }
+        else
+        {
+            ActAsAdmin(w, World.SecondOperator);
+            (await Finish(w, reason: "B is away; completing the finish.", note: null)).Kind.Should().Be(BlockedDecisionKind.Decided);
+        }
+
+        var stamp = StampOf(w, verb);
+        CompletedBy(stamp).Should().Be(expected);
+        Guid.Parse(stamp["bySystemUserId"]!.GetValue<string>()).Should().Be(World.Caller);
+    }
+
+    [Theory(DisplayName = "iss034c AC2: a refused finish (no admin marker, the decider as the caller) writes no stamp and no completer")]
+    [InlineData("no-marker")]
+    [InlineData("own-decision")]
+    public async Task ARefusedFinish_WritesNoCompleter(string refusal)
+    {
+        var w = await World.CreateAsync();
+        await StrandAsync(w, "override-release");
+        if (refusal == "no-marker")
+        {
+            ActAsAdmin(w, World.Operator);
+            ReleaseAdmin(w);
+        }
+        else
+        {
+            ActAsAdmin(w, World.Caller);
+        }
+
+        var before = Snapshot.Of(w);
+        (await Finish(w)).StatusCode.Should().Be(refusal == "no-marker" ? 403 : 409);
+
+        Snapshot.Of(w).Should().Be(before);
+        JsonNode.Parse(w.FindingsJson)![SubmissionOverrideService.OverrideMember].Should().BeNull();
+    }
+
+    [Fact(DisplayName = "iss034c AC3 must-not-fire: a stamp written before the completer existed reads as 'not recorded' (null completer, no fault); a malformed or empty member reads the same way")]
+    public void AStampWithoutTheMember_ReadsAsNotRecorded()
+    {
+        var recordId = Guid.NewGuid();
+        var decider = Guid.NewGuid();
+        var old = new JsonObject
+        {
+            ["override"] = new JsonObject
+            {
+                ["recordId"] = recordId.ToString("D"),
+                ["bySystemUserId"] = decider.ToString("D"),
+                ["on"] = "2026-11-03T10:00:00.0000000Z",
+                ["reason"] = "Because.",
+            },
+        };
+
+        var read = SubmissionOverrideService.ReadStamp(old, "override");
+
+        read.Should().NotBeNull();
+        read!.RecordId.Should().Be(recordId);
+        read.BySystemUserId.Should().Be(decider);
+        read.Reason.Should().Be("Because.");
+        read.CompletedBySystemUserId.Should().BeNull();
+        InvoiceBlockedHold.IsValidStamp(read).Should().BeTrue("an old stamp is still a valid release stamp");
+
+        foreach (var bad in new[] { "not-a-guid", "", Guid.Empty.ToString("D") })
+        {
+            old["override"]![CompletedMember] = bad;
+            SubmissionOverrideService.ReadStamp(old, "override")!.CompletedBySystemUserId.Should().BeNull($"'{bad}' is not a recorded completer");
+        }
+
+        var completer = Guid.NewGuid();
+        old["override"]![CompletedMember] = completer.ToString("D");
+        SubmissionOverrideService.ReadStamp(old, "override")!.CompletedBySystemUserId.Should().Be(completer);
+    }
+
+    [Fact(DisplayName = "iss034c AC3: WithStamp writes the member only for a stamp that names a completer, and keeps every other member")]
+    public void WithStamp_WritesTheMemberOnlyWhenTheStampNamesACompleter()
+    {
+        var stamp = new BlockedDecisionStamp(Guid.NewGuid(), Guid.NewGuid(), DateTimeOffset.Parse("2026-11-03T10:00:00Z"), "Because.");
+
+        var without = JsonNode.Parse(SubmissionOverrideService.WithStamp("{\"findings\":[]}", "return", stamp))!["return"]!.AsObject();
+        var completer = Guid.NewGuid();
+        var withIt = JsonNode.Parse(SubmissionOverrideService.WithStamp("{\"findings\":[]}", "return", stamp with { CompletedBySystemUserId = completer }))!.AsObject();
+
+        without.ContainsKey(CompletedMember).Should().BeFalse("no member is written for a stamp that names no completer");
+        withIt["findings"].Should().NotBeNull();
+        withIt["return"]![CompletedMember]!.GetValue<string>().Should().Be(completer.ToString("D"));
+    }
+
+    [Theory(DisplayName = "iss034c AC3: the GET view carries the completer on the stamp, and the wire name is completedBySystemUserId")]
+    [InlineData("override-release")]
+    [InlineData("return-transition")]
+    public async Task Get_CarriesTheCompleter(string strand)
+    {
+        var w = await World.CreateAsync();
+        var verb = VerbOf(strand);
+        await StrandAsync(w, strand);
+        ActAsAdmin(w, World.Operator);
+        (await Finish(w)).Kind.Should().Be(BlockedDecisionKind.Decided);
+
+        var view = (await w.Service.GetAsync(World.SubmissionId, World.Token, CancellationToken.None))!;
+
+        var stamp = (verb == "override" ? view.Override : view.Return)!;
+        stamp.CompletedBySystemUserId.Should().Be(World.Operator);
+        stamp.BySystemUserId.Should().Be(World.Caller);
+        var wire = JsonNode.Parse(System.Text.Json.JsonSerializer.Serialize(view, new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web)))!;
+        wire[verb]![CompletedMember]!.GetValue<string>().Should().Be(World.Operator.ToString("D"));
+    }
+
+    [Fact(DisplayName = "iss034c AC3 must-not-fire: the GET view of a submission whose stamp was written before the completer existed loads with a null completer")]
+    public async Task Get_OfAnOldStamp_HasNoCompleterAndDoesNotFault()
+    {
+        var w = await World.CreateAsync();
+        (await Decide(w, "override")).Kind.Should().Be(BlockedDecisionKind.Decided);
+        var root = JsonNode.Parse(w.FindingsJson)!.AsObject();
+        root["override"]!.AsObject().Remove(CompletedMember);
+        w.Submission[InvoiceSubmissionPersister.SubmissionFindingsJson] = root.ToJsonString();
+
+        var view = (await w.Service.GetAsync(World.SubmissionId, World.Token, CancellationToken.None))!;
+
+        view.Override.Should().NotBeNull();
+        view.Override!.CompletedBySystemUserId.Should().BeNull();
+        view.Override.BySystemUserId.Should().Be(World.Caller);
+    }
+
+    [Theory(DisplayName = "iss034c AC4: the findings_too_large pre-check counts the completer: a stamp that fits only without it is refused before any write, and one that fits with it is written")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ThePreCheck_CountsTheCompleter(bool fitsWithIt)
+    {
+        var w = await World.CreateAsync();
+        await StrandAsync(w, "override-release");
+        var decidedId = Records(w).Single().Id;
+        var plain = new BlockedDecisionStamp(decidedId, World.Caller, w.Clock.GetUtcNow(), Reason);
+        var withoutLength = SubmissionOverrideService.WithStamp(w.FindingsJson, SubmissionOverrideService.OverrideMember, plain).Length;
+        var withLength = SubmissionOverrideService.WithStamp(w.FindingsJson, SubmissionOverrideService.OverrideMember, plain with { CompletedBySystemUserId = World.Operator }).Length;
+        withLength.Should().BeGreaterThan(withoutLength, "the member adds length");
+        // Pad so the stamped findings are exactly the column's limit with the completer (fits) or exactly the limit without it (too long with it).
+        var target = fitsWithIt ? withLength : withoutLength;
+        var padding = InvoiceSubmissionPersister.FindingsJsonMaxLength - target - PaddingOverhead;
+        var root = JsonNode.Parse(w.FindingsJson)!.AsObject();
+        root["padding"] = new string('p', padding);
+        w.Submission[InvoiceSubmissionPersister.SubmissionFindingsJson] = root.ToJsonString();
+        ActAsAdmin(w, World.Operator);
+        var before = Snapshot.Of(w);
+
+        var result = await Finish(w);
+
+        if (fitsWithIt)
+        {
+            result.Kind.Should().Be(BlockedDecisionKind.Decided, "the stamp with its completer fits exactly");
+            CompletedBy(StampOf(w, "override")).Should().Be(World.Operator);
+            w.FindingsJson.Length.Should().BeLessThanOrEqualTo(InvoiceSubmissionPersister.FindingsJsonMaxLength);
+        }
+        else
+        {
+            result.StatusCode.Should().Be(409);
+            result.ErrorCode.Should().Be(BlockedSubmissionErrors.FindingsTooLarge);
+            Snapshot.Of(w).Should().Be(before, "refused before any write: no operator record, no close, no release");
+        }
+    }
+
     // ── The admin marker ──
 
     [Fact(DisplayName = "iss034a: the admin marker is BillingAdminAuthorization.Admin()'s checks (no new privilege)")]

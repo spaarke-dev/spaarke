@@ -188,8 +188,11 @@ public static class BlockedSubmissionErrors
 /// The decider is the authenticated caller.</summary>
 public sealed record BlockedDecisionRequest(string? Reason, string? Note = null);
 
-/// <summary>Who decided a blocked submission, when, why, and the Decision Record that holds it. Internal reviewers only.</summary>
-public sealed record BlockedDecisionStamp(Guid RecordId, Guid BySystemUserId, DateTimeOffset On, string Reason);
+/// <summary>Who decided a blocked submission, when, why, and the Decision Record that holds it. Internal reviewers only.
+/// <see cref="CompletedBySystemUserId"/> (ISS-034 iss034c, EB-D-253) is the user whose request made the write that completed the decision: the decider
+/// on their own decision or its repeat, the operator on an operator finish (then <see cref="BySystemUserId"/> stays the stored decider). It is written in
+/// the same write as the stamp and is null for a stamp written before it existed ("not recorded", never a fault).</summary>
+public sealed record BlockedDecisionStamp(Guid RecordId, Guid BySystemUserId, DateTimeOffset On, string Reason, Guid? CompletedBySystemUserId = null);
 
 /// <summary>One value a rule read (as stored on the submission, D-112 scrubbing already applied; none for a group withheld at read time, D-176).</summary>
 public sealed record BlockedValueRead(string? Name, string? Value, int? Line, string? Field, decimal? Confidence, bool BelowReliabilityThreshold);
@@ -1375,7 +1378,7 @@ public sealed class SubmissionOverrideService
         //    checked here is the length written. The check after the closes stays as a backstop. ──
         var withSet = storeSet ? WithHumanDecisionSet(findingsJson!, decisionId, signalSet, subjects) : null;
         var stampMember = verb == Verb.Override ? OverrideMember : ReturnMember;
-        if (WithStamp(withSet ?? findingsJson!, stampMember, new BlockedDecisionStamp(recordedSet?.RecordId ?? decisionId, decider, _time.GetUtcNow(), reason)).Length
+        if (WithStamp(withSet ?? findingsJson!, stampMember, new BlockedDecisionStamp(recordedSet?.RecordId ?? decisionId, decider, _time.GetUtcNow(), reason, operatorId)).Length
             > InvoiceSubmissionPersister.FindingsJsonMaxLength)
         {
             _logger.LogWarning("Submission {SubmissionId}: its {Verb} does not fit the stored findings; nothing was written", submissionId, verb);
@@ -1496,7 +1499,7 @@ public sealed class SubmissionOverrideService
             }
         }
 
-        var stamp = new BlockedDecisionStamp(recordId, decider, _time.GetUtcNow(), reason);
+        var stamp = new BlockedDecisionStamp(recordId, decider, _time.GetUtcNow(), reason, operatorId);
         var member = verb == Verb.Override ? OverrideMember : ReturnMember;
         var newJson = WithStamp(findingsJson!, member, stamp);
         if (newJson.Length > InvoiceSubmissionPersister.FindingsJsonMaxLength)
@@ -2017,6 +2020,7 @@ public sealed class SubmissionOverrideService
     private async Task<IReadOnlySet<string>> ReasonsAfterReleaseAsync(
         Entity invoice, Guid submissionId, string findingsJson, Guid decisionId, Guid decider, string reason, CancellationToken ct)
     {
+        // Never written, and the holds derivation reads only the record id and decider; the completer is left as "not recorded" (iss034c).
         var provisional = WithStamp(findingsJson, OverrideMember, new BlockedDecisionStamp(decisionId, decider, _time.GetUtcNow(), reason));
         return await InvoiceOpenHolds.ReasonsAfterAsync(
             _entities, invoice, submissionId, new InvoiceOpenHolds.StoredSubmission(SubmissionReasonCodes.Overridden, provisional), ct).ConfigureAwait(false);
@@ -2624,6 +2628,12 @@ public sealed class SubmissionOverrideService
             ["on"] = stamp.On.UtcDateTime.ToString("O", CultureInfo.InvariantCulture),
             ["reason"] = stamp.Reason,
         };
+        if (stamp.CompletedBySystemUserId is { } completer)
+        {
+            // ISS-034 iss034c (EB-D-253): written only by the write that completes the decision, never for a stamp that does not name one.
+            ((JsonObject)root[member]!)["completedBySystemUserId"] = completer.ToString("D");
+        }
+
         return root.ToJsonString();
     }
 
@@ -2637,7 +2647,9 @@ public sealed class SubmissionOverrideService
             return null;
         }
 
-        return new BlockedDecisionStamp(recordId, by, on, Text(node, "reason") ?? string.Empty);
+        // A stamp written before iss034c has no completer: not recorded (null), never a fault. A malformed member reads the same way.
+        Guid? completedBy = Guid.TryParse(Text(node, "completedBySystemUserId"), out var completer) && completer != Guid.Empty ? completer : null;
+        return new BlockedDecisionStamp(recordId, by, on, Text(node, "reason") ?? string.Empty, completedBy);
     }
 
     private static IReadOnlyList<BlockedFindingView> ReadFindings(JsonObject? root, bool overridden)
