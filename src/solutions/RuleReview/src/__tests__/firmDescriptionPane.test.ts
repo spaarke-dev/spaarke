@@ -22,12 +22,12 @@ jest.mock(
 
 import { ProposalDetailPane } from '../components/ProposalDetailPane';
 
-function render(p: ProposalView, extra: { canWrite?: boolean; firmRefusals?: readonly FirmRefusal[]; ruleSetName?: string } = {}): string {
+function render(p: ProposalView, extra: { canWrite?: boolean; editable?: boolean; firmRefusals?: readonly FirmRefusal[]; ruleSetName?: string } = {}): string {
   return renderToStaticMarkup(
     React.createElement(ProposalDetailPane, {
       proposal: p,
       canWrite: extra.canWrite ?? true,
-      editable: true,
+      editable: extra.editable ?? true,
       busy: false,
       ruleSetName: extra.ruleSetName ?? 'Acme guidelines',
       firmRefusals: extra.firmRefusals,
@@ -162,6 +162,14 @@ describe('the warning for a stored text a save would leave off (fix round 1 F6)'
 
     expect(textOf(html, 'firm-description-carry-warning')).toContain('This text no longer passes the checks');
     expect(textOf(html, 'firm-description-carry-warning')).toContain('Saving creates a new draft without it');
+  });
+
+  it('must-not-fire (fix round 2): a reader who cannot save, or a retired rule set, is not told what saving would do', () => {
+    const failing = inForce('Per the Acme guidelines, no.');
+
+    expect(render(failing, { canWrite: true })).toContain('firm-description-carry-warning');
+    expect(render(failing, { canWrite: false })).not.toContain('firm-description-carry-warning');
+    expect(render(failing, { canWrite: true, editable: false })).not.toContain('firm-description-carry-warning');
   });
 
   it('must-not-fire: a clean text, or a draft with a failing text, shows no warning', () => {

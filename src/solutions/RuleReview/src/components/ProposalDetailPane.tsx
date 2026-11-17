@@ -292,7 +292,7 @@ const RuleForm: React.FC<FormProps> = ({ proposal, canWrite, editable, busy, rul
               data-testid="edit-firm-description"
             />
           </Field>
-          {firm.carryWarning && (
+          {mayEdit && firm.carryWarning && (
             <Text size={200} className={mergeClasses(s.warn, s.notice)} data-testid="firm-description-carry-warning">
               This text no longer passes the checks. Saving creates a new draft without it.
             </Text>

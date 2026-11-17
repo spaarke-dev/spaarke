@@ -15,6 +15,17 @@ const VIEW = read('components/RuleSetDetailView.tsx');
 /** The text of `const name = ... {` up to its closing `  };` at two-space indent (a function the component defines). */
 const fnBody = (source: string, name: string): string => new RegExp(`const ${name} = [^\\n]*\\{\\n([\\s\\S]*?)\\n  \\};`).exec(source)?.[1] ?? '';
 
+describe('the scan itself (known limit: it is whitespace-sensitive)', () => {
+  // Accepted: the patterns match the source as formatted today (prettier keeps it so). A reformat that moves a token fails a test below, which is the
+  // safe direction (a failing scan is looked at; a scan that quietly matched nothing would not be). These controls show both sides.
+  it('(control) it finds the wiring as written, and does not find it in a reformatted copy', () => {
+    expect(/disabled=\{form\.saveDisabled\}[^\n]*data-testid="save-edit"/.test('<Button disabled={form.saveDisabled} onClick={go} data-testid="save-edit">')).toBe(true);
+    expect(/disabled=\{form\.saveDisabled\}[^\n]*data-testid="save-edit"/.test('<Button disabled={ form.saveDisabled } onClick={go} data-testid="save-edit">')).toBe(false);
+    expect(fnBody('  const save = async (): Promise<void> => {\n    await onSave(proposal, edit);\n  };', 'save')).toContain('onSave(');
+    expect(fnBody('const save = async () => { await onSave(); };', 'save')).toBe('');
+  });
+});
+
 describe('ProposalDetailPane uses the pure form state', () => {
   it('(control) the scan finds the functions it reads', () => {
     expect(fnBody(PANE, 'save')).toContain('onSave(');

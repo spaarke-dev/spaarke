@@ -7,6 +7,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import {
+  DEFAULT_IGNORABLE_RANGES,
   FIRM_DESCRIPTION_FIELD,
   FIRM_DESCRIPTION_MESSAGES,
   MAX_FIRM_DESCRIPTION,
@@ -102,6 +103,48 @@ describe('the 422', () => {
   it('an error entry carries policyId, rule, field, message and reason, in that JSON shape', () => {
     expect(SERVICE).toMatch(/record RuleSetError\(Guid\? PolicyId, string\? RuleName, string Field, string Message, string\? Reason\)/);
     expect(ENDPOINTS).toContain('new { policyId = e.PolicyId, rule = e.RuleName, field = e.Field, message = e.Message, reason = e.Reason }');
+  });
+});
+
+describe('the default-ignorable table (fix round 2 F1)', () => {
+  /** The `(0x00AD, 0x00AD)` tuples of the server's `DefaultIgnorableRanges`. */
+  const serverRanges = (): Array<[number, number]> => {
+    const body = /DefaultIgnorableRanges\s*=\s*\[([\s\S]*?)\];/.exec(RULES)?.[1] ?? '';
+    return [...body.matchAll(/\(\s*0x([0-9A-Fa-f]+)\s*,\s*0x([0-9A-Fa-f]+)\s*\)/g)].map(m => [parseInt(m[1], 16), parseInt(m[2], 16)]);
+  };
+
+  /** The `[0x00ad, 0x00ad]` pairs of the client's `DEFAULT_IGNORABLE_RANGES`, read from the TypeScript source (not the imported value). */
+  const clientRanges = (): Array<[number, number]> => {
+    const source = fs.readFileSync(path.join(__dirname, '../services/firmDescription.ts'), 'utf8');
+    const body = /DEFAULT_IGNORABLE_RANGES[^=]*=\s*\[([\s\S]*?)\n\];/.exec(source)?.[1] ?? '';
+    return [...body.matchAll(/\[\s*0x([0-9A-Fa-f]+)\s*,\s*0x([0-9A-Fa-f]+)\s*\]/g)].map(m => [parseInt(m[1], 16), parseInt(m[2], 16)]);
+  };
+
+  it('(control) the scan finds the 17 ranges of Unicode 16.0 on the server, from U+00AD to U+E0FFF', () => {
+    const ranges = serverRanges();
+    expect(ranges).toHaveLength(17);
+    expect(ranges[0]).toEqual([0x00ad, 0x00ad]);
+    expect(ranges[ranges.length - 1]).toEqual([0xe0000, 0xe0fff]);
+  });
+
+  it('the client table is the server table, range for range', () => {
+    expect(clientRanges()).toEqual(serverRanges());
+  });
+
+  it('the imported client value is the table in its source', () => {
+    expect(DEFAULT_IGNORABLE_RANGES.map(r => [...r])).toEqual(clientRanges());
+  });
+
+  it('a range is sorted and apart from the next (so a lookup cannot depend on order)', () => {
+    const ranges = serverRanges();
+    ranges.forEach(([first, last], i) => {
+      expect(first).toBeLessThanOrEqual(last);
+      if (i > 0) expect(first).toBeGreaterThan(ranges[i - 1][1] + 1);
+    });
+  });
+
+  it('the server runs the check beside the Control and Format test, with the invisible code', () => {
+    expect(RULES).toMatch(/if \(IsInvisibleControl\(rune\) \|\| IsDefaultIgnorable\(rune\)\)\s*\{\s*return Refused\(InvisibleCharacter\);/);
   });
 });
 

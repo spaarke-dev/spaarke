@@ -14,6 +14,8 @@ import {
   REASON_TOO_LONG,
   checkFirmDescription,
   comparable,
+  DEFAULT_IGNORABLE_RANGES,
+  isDefaultIgnorable,
   type FirmDescriptionContext,
   firmDescriptionRefusals,
   firmDescriptionToSend,
@@ -112,11 +114,11 @@ describe('checkFirmDescription: the server checks, early', () => {
   it.each([
     ['a line break', 'one\ntwo'],
     ['a tab', 'one\ttwo'],
-    ['a zero-width space (Format)', 'one​two'],
-    ['a right-to-left override (Format)', 'one‮two'],
-    ['a soft hyphen (Format)', 'one­two'],
-    ['a line separator', 'one two'],
-    ['a paragraph separator', 'one two'],
+    ['a zero-width space (Format)', 'one\u200Btwo'],
+    ['a right-to-left override (Format)', 'one\u202Etwo'],
+    ['a soft hyphen (Format)', 'one\u00ADtwo'],
+    ['a line separator', 'one\u2028two'],
+    ['a paragraph separator', 'one\u2029two'],
     ['a TAG character', 'one\u{E0041}two'],
     ['a lone high surrogate', `one${String.fromCharCode(0xd83d)}two`],
     ['a lone low surrogate', `one${String.fromCharCode(0xde00)}two`],
@@ -125,9 +127,65 @@ describe('checkFirmDescription: the server checks, early', () => {
     expect(reasonOf(text)).toBe(REASON_INVISIBLE);
   });
 
+  describe('default-ignorable code points that are not Control or Format (fix round 2 F1)', () => {
+    const cp = (n: number) => String.fromCodePoint(n);
+
+    it.each([
+      ['the combining grapheme joiner', 0x034f],
+      ['a Mongolian free variation selector', 0x180b],
+      ['variation selector 1', 0xfe00],
+      ['variation selector 16', 0xfe0f],
+      ['variation selector 17 (astral)', 0xe0100],
+      ['variation selector 256 (astral)', 0xe01ef],
+      ['the Hangul filler', 0x3164],
+      ['the halfwidth Hangul filler', 0xffa0],
+      ['the Hangul choseong filler', 0x115f],
+      ['the Khmer inherent AQ', 0x17b4],
+      ['an unassigned code point inside U+2060 to U+206F', 0x2065],
+      ['the last of U+E0000 to U+E0FFF', 0xe0fff],
+    ])('must-fire: %s is refused as invisible', (_n, code) => {
+      expect(isDefaultIgnorable(code)).toBe(true);
+      expect(reasonOf(`Rate${cp(code)} too high.`)).toBe(REASON_INVISIBLE);
+    });
+
+    it('must-fire: a mark inside a rule name no longer gets the name past the check (it is refused as invisible)', () => {
+      for (const code of [0x034f, 0xfe0f, 0xe0100, 0x180b]) {
+        const text = `Billed under the YIL${cp(code)}LIK SINIR.`;
+        expect(reasonOf(text, { ruleName: 'YILLIK SINIR' })).toBe(REASON_INVISIBLE);
+        expect(reasonOf(text, { ruleSetName: 'YILLIK SINIR' })).toBe(REASON_INVISIBLE);
+      }
+    });
+
+    it.each([
+      ['precomposed e acute', 'caf\u00E9 hours'],
+      ['decomposed e + combining acute (not default-ignorable)', 'cafe\u0301 hours'],
+      ['the registered sign, next to U+00AD', 'Registered \u00AE rates'],
+      ['either side of U+034F', 'Mark \u034E \u0350'],
+      ['after U+FE00 to U+FE0F', 'Presentation \uFE10 \uFE20'],
+      ['after U+2060 to U+206F', 'Superscript \u2070 \u2071'],
+      ['the Mongolian digit zero, after U+180B to U+180F', 'Digit \u1810'],
+    ])('must-not-fire: %s', (_n, text) => {
+      expect(reasonOf(text)).toBeNull();
+    });
+
+    it('a decomposed accent is composed by NFKC, so a decomposed name is still caught by the name check', () => {
+      expect(reasonOf('Per the cafe\u0301 rule.', { ruleName: 'CAF\u00C9' })).toBe(REASON_NAMES_RULE);
+      expect(reasonOf('Per the caf\u00E9 rule.', { ruleName: 'CAFE\u0301' })).toBe(REASON_NAMES_RULE);
+    });
+
+    it('the range ends and their neighbours', () => {
+      for (const [first, last] of DEFAULT_IGNORABLE_RANGES) {
+        expect([first, isDefaultIgnorable(first)]).toEqual([first, true]);
+        expect([last, isDefaultIgnorable(last)]).toEqual([last, true]);
+        expect([first - 1, isDefaultIgnorable(first - 1)]).toEqual([first - 1, false]);
+        expect([last + 1, isDefaultIgnorable(last + 1)]).toEqual([last + 1, false]);
+      }
+    });
+  });
+
   it('must-not-fire: a paired surrogate, accents and an ordinary space are fine', () => {
-    expect(reasonOf('Smile \u{1F600} and café hours')).toBeNull();
-    expect(reasonOf('One no-break space is white space, not invisible')).toBeNull();
+    expect(reasonOf('Smile \u{1F600} and caf\u00E9 hours')).toBeNull();
+    expect(reasonOf('One no-break\u00A0space is white space, not invisible')).toBeNull();
   });
 
   it('a Duplicate rule takes none', () => {
@@ -145,20 +203,20 @@ describe('checkFirmDescription: the server checks, early', () => {
     });
 
     it('fullwidth letters fold to the plain name (NFKC)', () => {
-      expect(reasonOf('See Ｄａｉｌｙ hours cap here')).toBe(REASON_NAMES_RULE);
+      expect(reasonOf('See \uFF24\uFF41\uFF49\uFF4C\uFF59 hours cap here')).toBe(REASON_NAMES_RULE);
     });
 
     it.each([
       ['a doubled space', 'Daily  hours cap'],
-      ['a no-break space', 'Daily hours cap'],
-      ['an ideographic space', 'Daily　hours cap'],
-      ['an en space and a tab-free run', 'Daily  hours cap'],
+      ['a no-break space', 'Daily\u00A0hours\u00A0cap'],
+      ['an ideographic space', 'Daily\u3000hours cap'],
+      ['an en space and a tab-free run', 'Daily\u2002\u2003hours cap'],
     ])('white space is folded: %s', (_n, text) => {
       expect(reasonOf(`Rule: ${text} was broken`)).toBe(REASON_NAMES_RULE);
     });
 
     it('a name written with odd white space is folded too', () => {
-      expect(reasonOf('Acme guidelines apply', { ruleSetName: 'Acme  guidelines', ruleName: RULE_NAME })).toBe(REASON_NAMES_RULE);
+      expect(reasonOf('Acme guidelines apply', { ruleSetName: 'Acme\u00A0 guidelines', ruleName: RULE_NAME })).toBe(REASON_NAMES_RULE);
     });
 
     it('must-fire on the rule name alone when the rule set name is absent, and on the set name alone', () => {
@@ -204,23 +262,23 @@ describe('checkFirmDescription: the server checks, early', () => {
     describe('JavaScript upper-casing against .NET OrdinalIgnoreCase on common scripts (fix round 1 F2 re-check)', () => {
       // Pairs the two engines agree on: a name and the same name in the other case must match, and a different letter must not.
       it.each([
-        ['Latin with accents', 'Café Rules', 'CAFÉ RULES'],
-        ['Greek', 'αβγ κανόνας', 'ΑΒΓ ΚΑΝΌΝΑΣ'],
-        ['Cyrillic', 'правило', 'ПРАВИЛО'],
-        ['German sharp s', 'Große Regel', 'Große Regel'],
+        ['Latin with accents', 'Caf\u00E9 Rules', 'CAF\u00C9 RULES'],
+        ['Greek', '\u03B1\u03B2\u03B3 \u03BA\u03B1\u03BD\u03CC\u03BD\u03B1\u03C2', '\u0391\u0392\u0393 \u039A\u0391\u039D\u038C\u039D\u0391\u03A3'],
+        ['Cyrillic', '\u043F\u0440\u0430\u0432\u0438\u043B\u043E', '\u041F\u0420\u0410\u0412\u0418\u041B\u041E'],
+        ['German sharp s', 'Gro\u00DFe Regel', 'Gro\u00DFe Regel'],
       ])('%s matches in either case', (_n, name, text) => {
         expect(reasonOf(`Per ${text}.`, { ruleName: name })).toBe(REASON_NAMES_RULE);
         expect(reasonOf(`Per ${name}.`, { ruleName: text })).toBe(REASON_NAMES_RULE);
       });
 
       it('the sharp s does not match "SS" (.NET keeps it too), and a final sigma matches a plain sigma (both engines upper-case both to the same letter)', () => {
-        expect(reasonOf('Per GROSSE REGEL.', { ruleName: 'Große Regel' })).toBeNull();
-        expect(reasonOf('Per κανόνας', { ruleName: 'κανόνασ' })).toBe(REASON_NAMES_RULE);
+        expect(reasonOf('Per GROSSE REGEL.', { ruleName: 'Gro\u00DFe Regel' })).toBeNull();
+        expect(reasonOf('Per \u03BA\u03B1\u03BD\u03CC\u03BD\u03B1\u03C2', { ruleName: '\u03BA\u03B1\u03BD\u03CC\u03BD\u03B1\u03C3' })).toBe(REASON_NAMES_RULE);
       });
     });
 
     it('a look-alike letter from another alphabet is NOT caught (known limit, said in the notice)', () => {
-      expect(reasonOf('Daily hours cаp')).toBeNull(); // Cyrillic a
+      expect(reasonOf('Daily hours c\u0430p')).toBeNull(); // Cyrillic a
     });
   });
 
@@ -229,12 +287,12 @@ describe('checkFirmDescription: the server checks, early', () => {
     expect(reasonOf('{<')).toBe(REASON_BRACES);
     expect(reasonOf('< daily hours cap')).toBe(REASON_MARKUP);
     expect(reasonOf(`${'a'.repeat(200)}\n`)).toBeNull(); // a trailing line break is trimmed first, so 200 + break still fits
-    expect(reasonOf(`{${'a'.repeat(300)}​`)).toBe(REASON_INVISIBLE);
+    expect(reasonOf(`{${'a'.repeat(300)}\u200B`)).toBe(REASON_INVISIBLE);
   });
 
   it('the text is trimmed the way the server trims it (U+FEFF is not white space there)', () => {
-    expect(checkFirmDescription(' 　 text  ', ctx).text).toBe('text');
-    expect(reasonOf('text﻿')).toBe(REASON_INVISIBLE);
+    expect(checkFirmDescription('\u00A0\u3000 text \u2003', ctx).text).toBe('text');
+    expect(reasonOf('text\uFEFF')).toBe(REASON_INVISIBLE);
   });
 });
 

@@ -37,7 +37,8 @@ public readonly record struct FirmDescriptionCheck(string? Text, string? Refusal
 /// <item>trim; a blank text means "no description" (valid, <c>null</c>);</item>
 /// <item>with a rule type (<see cref="Validate(string?, string?, string?, string?)"/>): a Duplicate rule takes none (<see cref="OnDuplicate"/>);</item>
 /// <item>no unpaired UTF-16 surrogate (<see cref="InvisibleCharacter"/>: it is no character at all, and rune enumeration would hide it as U+FFFD);</item>
-/// <item>no rune of category Control, Format, LineSeparator or ParagraphSeparator (<see cref="InvisibleCharacter"/>);</item>
+/// <item>no rune of category Control, Format, LineSeparator or ParagraphSeparator, and no Default_Ignorable_Code_Point (the combining grapheme joiner,
+/// the variation selectors and the like, which are category Mn and draw nothing; <see cref="IsDefaultIgnorable"/>) (<see cref="InvisibleCharacter"/>);</item>
 /// <item>at most <see cref="MaxRunes"/> Unicode scalars (runes, so a character outside the Basic Multilingual Plane counts once; <see cref="TooLong"/>);</item>
 /// <item>no <c>{</c> or <c>}</c>, so no template placeholder can exist (<see cref="Braces"/>);</item>
 /// <item>no <c>&lt;</c> or <c>&gt;</c>, no markup (<see cref="Markup"/>);</item>
@@ -61,7 +62,7 @@ public static class FirmDescriptionRules
     /// <summary>A <c>&lt;</c> or <c>&gt;</c>: markup.</summary>
     public const string Markup = "firm_description_markup";
 
-    /// <summary>A rune of category Control, Format, LineSeparator or ParagraphSeparator, or an unpaired UTF-16 surrogate.</summary>
+    /// <summary>A rune of category Control, Format, LineSeparator or ParagraphSeparator, a Default_Ignorable_Code_Point, or an unpaired UTF-16 surrogate.</summary>
     public const string InvisibleCharacter = "firm_description_invisible_character";
 
     /// <summary>The text contains the version's own rule set name or policy name (case-insensitive).</summary>
@@ -95,7 +96,7 @@ public static class FirmDescriptionRules
         foreach (var rune in text.EnumerateRunes())
         {
             runes++;
-            if (IsInvisibleControl(rune))
+            if (IsInvisibleControl(rune) || IsDefaultIgnorable(rune))
             {
                 return Refused(InvisibleCharacter);
             }
@@ -173,6 +174,35 @@ public static class FirmDescriptionRules
     public static bool IsInvisibleControl(Rune rune) =>
         Rune.GetUnicodeCategory(rune) is UnicodeCategory.Control or UnicodeCategory.Format
             or UnicodeCategory.LineSeparator or UnicodeCategory.ParagraphSeparator;
+
+    /// <summary>
+    /// 130e-2 fix round 2: the Default_Ignorable_Code_Point ranges (Unicode 16.0, DerivedCoreProperties.txt; the table was checked against the ICU data of
+    /// Node 22 for Unicode 16.0, rune for rune). .NET has no property for it. Several are category Mn (the combining grapheme joiner U+034F, the variation
+    /// selectors U+FE00 to U+FE0F and U+E0100 to U+E01EF, the Mongolian selectors U+180B to U+180D), so <see cref="IsInvisibleControl"/> lets them through and
+    /// NFKC keeps them: "YIL" + U+034F + "LIK SINIR" draws as the rule name and passed the name check. The write side refuses them; the read side
+    /// (<see cref="FirmRejectionFindings.ShownFirmReason"/>) keeps its own rule, so a text stored earlier shows as it did. The client holds the same table
+    /// (<c>DEFAULT_IGNORABLE_RANGES</c> in firmDescription.ts), and a source-scan test keeps the two equal.
+    /// </summary>
+    internal static readonly (int First, int Last)[] DefaultIgnorableRanges =
+    [
+        (0x00AD, 0x00AD), (0x034F, 0x034F), (0x061C, 0x061C), (0x115F, 0x1160), (0x17B4, 0x17B5), (0x180B, 0x180F), (0x200B, 0x200F),
+        (0x202A, 0x202E), (0x2060, 0x206F), (0x3164, 0x3164), (0xFE00, 0xFE0F), (0xFEFF, 0xFEFF), (0xFFA0, 0xFFA0), (0xFFF0, 0xFFF8),
+        (0x1BCA0, 0x1BCA3), (0x1D173, 0x1D17A), (0xE0000, 0xE0FFF),
+    ];
+
+    /// <summary>Whether <paramref name="rune"/> is a Default_Ignorable_Code_Point (<see cref="DefaultIgnorableRanges"/>).</summary>
+    public static bool IsDefaultIgnorable(Rune rune)
+    {
+        foreach (var (first, last) in DefaultIgnorableRanges)
+        {
+            if (rune.Value >= first && rune.Value <= last)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
 
     /// <summary>
     /// Fix round 2 (F3, C4): whether <paramref name="text"/> contains <paramref name="name"/>, compared as <see cref="Comparable"/> on both sides

@@ -64,6 +64,24 @@ const UNPAIRED_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBF
 const INVISIBLE = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u;
 
 /**
+ * The Default_Ignorable_Code_Point ranges (Unicode 16.0, DerivedCoreProperties.txt), the same table as the server's
+ * `FirmDescriptionRules.DefaultIgnorableRanges` (a source-scan test keeps them equal). Several are category Mn (the combining grapheme joiner U+034F,
+ * the variation selectors U+FE00 to U+FE0F and U+E0100 to U+E01EF, the Mongolian selectors U+180B to U+180D): they draw nothing, NFKC keeps them, and
+ * the Control/Format test above lets them through, so "YIL" + U+034F + "LIK SINIR" would pass the name check. A text holding one is refused as invisible.
+ */
+export const DEFAULT_IGNORABLE_RANGES: ReadonlyArray<readonly [number, number]> = [
+  [0x00ad, 0x00ad], [0x034f, 0x034f], [0x061c, 0x061c], [0x115f, 0x1160], [0x17b4, 0x17b5], [0x180b, 0x180f], [0x200b, 0x200f],
+  [0x202a, 0x202e], [0x2060, 0x206f], [0x3164, 0x3164], [0xfe00, 0xfe0f], [0xfeff, 0xfeff], [0xffa0, 0xffa0], [0xfff0, 0xfff8],
+  [0x1bca0, 0x1bca3], [0x1d173, 0x1d17a], [0xe0000, 0xe0fff],
+];
+
+/** Whether a code point is a Default_Ignorable_Code_Point (`DEFAULT_IGNORABLE_RANGES`). */
+export const isDefaultIgnorable = (codePoint: number): boolean => DEFAULT_IGNORABLE_RANGES.some(([first, last]) => codePoint >= first && codePoint <= last);
+
+const hasInvisible = (text: string): boolean =>
+  UNPAIRED_SURROGATE.test(text) || INVISIBLE.test(text) || [...text].some(ch => isDefaultIgnorable(ch.codePointAt(0) ?? 0));
+
+/**
  * NFKC, then every run of white space as one space, trimmed, the Turkish dotless i (U+0131) and dotted I (U+0130) as "i", then
  * simple-upper-cased per character (the server's `Comparable` + OrdinalIgnoreCase). The "i" fold comes first so `toUpperCase` never
  * decides those two (it would give "I" for U+0131 and keep U+0130, which the server's ordinal comparison does not).
@@ -115,7 +133,7 @@ export function checkFirmDescription(raw: string, ctx: FirmDescriptionContext = 
   const refused = (reason: string): FirmDescriptionCheck => ({ text, count, reason });
 
   if (ctx.isDuplicate) return refused(REASON_DUPLICATE);
-  if (UNPAIRED_SURROGATE.test(text) || INVISIBLE.test(text)) return refused(REASON_INVISIBLE);
+  if (hasInvisible(text)) return refused(REASON_INVISIBLE);
   if (count > MAX_FIRM_DESCRIPTION) return refused(REASON_TOO_LONG);
   if (/[{}]/.test(text)) return refused(REASON_BRACES);
   if (/[<>]/.test(text)) return refused(REASON_MARKUP);
