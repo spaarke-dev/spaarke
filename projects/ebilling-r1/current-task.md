@@ -9,15 +9,14 @@
 
 ## NOW — read this first
 
-### Active: none running. Next available: 130e-2
+### Active (2026-11-16 ~20:30): wave 1 of 084h / 095f part 2
 
-- **130e-1 ✅ merged into work `a6f1363070`** (from `56bf6dce82`). ontology-r1 O6 PASS and uac-r2 PASS on that tip. Column-first met: `sprk_firmdescription` was live on dev and `-Verify` passed before the merge. Any later push touching `Services/Signals/**` needs ontology-r1's re-glance.
-- **Next: 130e-2**, the Rule Review editor field (`src/solutions/RuleReview`). The contract is in `notes/130e-firm-description-writer.md`.
-  - Render the description as plain text, never HTML or markdown (ontology-r1).
-  - Show the "firms see this even when the rule set is hidden; do not quote the guideline or name the rule set" notice.
-  - Explain that a re-sent invalid published text is dropped, and that short names can over-refuse.
-  - There's no POML yet. Write it (STANDARD, sonnet) before building.
-- **Deploy order elsewhere:** the column first (task 079 syncs `sprk_firmdescription` and `sprk_rejectionreason` into SpaarkeMaster and empties `PolicyVersionColumnsGuardTests`' pending list), then a BFF carrying 130e-1. uac-r2's pre-deploy gate checks the column on dev.
+- **084h-2 BUILT** on `origin/task/ebilling-084h-2` (base 69745e926d; commits 209297ba75, 0202d84472, e3127757fa). Targeted suites pass 2420/0, ArchTests 2650/0, publish delta +42 KB, no CVE. **In progress:** an Opus adversarial review (background), plus ontology-r1's H-3 glance (asked). Next: triage findings → fix rounds if F → merge into work → remove agent worktree `C:\code_files\spaarke\.claude\worktrees\agent-a5e4401af0960ba9b` (unlock + Remove-WorktreeSafe) → delete remote branch.
+- **095f-2e1 ✅ merged into work 7d5a3a369a** (one adversarial pass, no F; K1-K3 in its notes). **095f-2s ✅ merged d6dafe032c** (pushed).
+- **Fixed a 130e-1 regression:** `FirmOutcomeScopeTests` "130c happy path" seeded no `billing.reason` evidence (efef15f29f, fixture only).
+- **UNPUSHED on work (≈7 commits, through caf4f1ce7e):** held until the full `Sprk.Bff.Api.Tests` run is clean. The first full run hung (a testhost at 16 GB / 1,759 threads after 2 h; killed). Re-running with `--blame-hang --blame-hang-timeout 10m` (background; trx under the session scratchpad `fulltest\`). If a hang is named: decide whether it is ours (130e-1 / 2e1) or pre-existing (file an ISS).
+- **Next waves:** 084h-3 (after 084h-2 merges; K1 retry classification from ontology-r1) + 095f-2a; then 084h-4, 095f-2c, 2d1, 2d2; then 095f-2b (ontology full review), 2ui; 095f-2e2 after the owner's pick. 130e-2 is still open (Rule Review editor field; no POML yet).
+- **Deploy order elsewhere:** columns first (079 syncs `sprk_firmdescription`, `sprk_rejectionreason`, and now `sprk_decisionnote` + `sprk_invoicecorrection.sprk_note`, and empties both pending lists), then a BFF carrying 130e-1. 079 takes the SpaarkeMaster version after uac-r2's 1.3.2.0 (merged 57431c8e6a) and keeps InvoiceFamilyFieldLockSourceGuardTests green.
 ### Done 2026-11-16 (pushed)
 
 - **ISS-022 / #2844 DONE.**
@@ -35,7 +34,7 @@
 
 ### Open owner questions
 
-1. ~~Ten design answers~~ ANSWERED 2026-11-16: EB-D-239 to EB-D-243 (decisions-log). POMLs written: 084h-2/3/4, 095f-2s/2a/2c/2d1/2e1/2b/2d2/2ui. **Open:** the owner picks the internal Correction path for 095f-2e2 (design §16 recommends B′: Correction on the internal multipart route, reached from Invoice Review), and gives the go for the dev apply of 095f-2s's two columns.
+1. ~~Ten design answers~~ ANSWERED 2026-11-16: EB-D-239 to EB-D-243 (decisions-log). POMLs written: 084h-2/3/4, 095f-2s/2a/2c/2d1/2e1/2b/2d2/2ui. **Open (asked 2026-11-16, unanswered):** (a) the internal Correction path for 095f-2e2: B′ recommended / A / D (design §16); (b) is the external allow-list enough for `sprk_decisionnote`, or field security so only reviewers see it (uac-r2: external-flagged licensed users can read it in the MDA by role depth); (c) the go for the dev apply of 095f-2s's two columns (uac-r2 notices before and after).
 2. ~~Second `word-add-in-r1` session~~ RESOLVED 2026-11-16 (owner): word-add-in-r1 runs on the Ryzen desktop, which is this machine (RGS_RYZEN9950X). The local `word-add-in-r1` session is the right one; the remote one is no longer listed.
 
 **Premise correction to log with EB-D-239+:**
@@ -71,4 +70,4 @@
 - **Hard rules:** NEVER run python. Never `--no-verify` or a bare `git stash`.
 - **Public repo:** security findings by mechanism only, and only privately to uac-r2. No identity, role or privilege names in notes, commits, PRs or issues.
 - **Ebilling Pester:** run each file on its declared version (5.7.1 or 3.4.0). Plain Invoke-Pester loads 6.2 and fails.
-- **Leftover folders a human must delete:** `C:\tmp\wt-iss021`, `C:\tmp\wt-ciw`, `...\.claude\worktrees\agent-a7122a26394c93f4f`.
+- **Leftover folders a human must delete:** `C:\tmp\wt-iss021`, `C:\tmp\wt-ciw`, `...\.claude\worktrees\agent-a7122a26394c93f4f`, `C:\wt084h2m-pub`, `C:\wt084h2b-pub`, `C:\wt084h2base-pub` (134 MB each, publish outputs).
