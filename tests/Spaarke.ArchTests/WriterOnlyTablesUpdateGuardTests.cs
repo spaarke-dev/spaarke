@@ -75,7 +75,7 @@ public class WriterOnlyTablesUpdateGuardTests
     public void TheUpdateRefusal_IsTheRegistryFlag_TheListTheCreateRefuses()
     {
         var flagged = RecordTableRules.All.Where(r => r.CreatedOnlyByItsWriter).Select(r => r.Table).Order(StringComparer.Ordinal).ToArray();
-        Assert.Equal(new[] { "sprk_budgetrevision", "sprk_decisionrecord", "sprk_signal" }, flagged);
+        Assert.Equal(new[] { "sprk_budgetrevision", "sprk_decisionrecord", "sprk_invoicecorrection", "sprk_signal" }, flagged);
 
         foreach (var rule in RecordTableRules.All)
         {

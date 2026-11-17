@@ -17,7 +17,7 @@ namespace Sprk.Bff.Api.Tests.Integration.DataMutation.RecordOwnership;
 /// </summary>
 public sealed partial class SecureChildOwnershipAiToolTests
 {
-    public static TheoryData<string> WriterOnlyTables => new() { "sprk_signal", "sprk_decisionrecord", "sprk_budgetrevision" };
+    public static TheoryData<string> WriterOnlyTables => new() { "sprk_signal", "sprk_decisionrecord", "sprk_budgetrevision", "sprk_invoicecorrection" };
 
     private Sprk.Bff.Api.Services.Ai.ToolValidationResult ChatValidateOf(string table, Guid recordId, params (string Column, JsonElement Value)[] item)
     {

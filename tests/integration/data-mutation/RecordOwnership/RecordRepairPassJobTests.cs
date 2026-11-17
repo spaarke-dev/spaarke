@@ -792,7 +792,7 @@ public sealed class RecordRepairPassJobTests
     {
         RecordRepairPassJob.DefaultCronSchedule.Should().Be("*/5 * * * *");
         RecordRepairPassJob.ExcludedTables.Should().Contain(
-            ["task", "account", "sprk_signal", "sprk_decisionrecord", "sprk_budgetrevision", "sprk_procedureversion"]);
+            ["task", "account", "sprk_signal", "sprk_decisionrecord", "sprk_budgetrevision", "sprk_invoicecorrection", "sprk_procedureversion"]);
         _pass.Job().Tables.Should().NotIntersectWith(RecordRepairPassJob.ExcludedTables).And.Contain(["sprk_event", "contact"]);
     }
 

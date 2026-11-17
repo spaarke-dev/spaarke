@@ -30,7 +30,6 @@ public sealed partial class SecureChildOwnershipAiToolTests
         { "sprk_invoicesubmission", "sprk_regardingmatter" },
         { "sprk_invoiceapproval", "sprk_regardingmatter" },
         { "sprk_externalidentifier", "sprk_regardingmatter" },
-        { "sprk_invoicecorrection", "sprk_regardingmatter" },
     };
 
     /// <summary>A stored family row filed under the ordinary matter, as the caller and the world read it.</summary>
