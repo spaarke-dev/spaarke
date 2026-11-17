@@ -9,14 +9,15 @@
 
 ## NOW — read this first
 
-### Active (2026-11-17): wave 2 of 084h / 095f part 2
+### Active (2026-11-17): wave 2 DONE; wave 3 next
 
-- **Wave 2 building (two Opus implementer agents, base 5508b576fe):** 084h-3 repair job → `task/ebilling-084h-3`; 095f-2a lifecycle/reject/return/approve notes → `task/ebilling-095f-2a`. Next per agent: one adversarial review, fix F, merge into work, remove the agent worktree (unlock + Remove-WorktreeSafe), delete the branch. 084h-3 goes to ontology-r1 for the K1 classification check; 095f-2a to ontology-r1 light (catalog `note` parameter).
-- **084h-2 ✅ merged into work 606812068a** (Opus review: F4 test gap fixed 93ead0d4b2; K-a..K-f in its notes; ontology H-3 PASS). Worktree and branch removed.
-- **095f-2e1 ✅ merged into work 7d5a3a369a** (one adversarial pass, no F; K1-K3 in its notes). **095f-2s ✅ merged d6dafe032c** (pushed).
-- **Fixed a 130e-1 regression:** `FirmOutcomeScopeTests` "130c happy path" seeded no `billing.reason` evidence (efef15f29f, fixture only).
-- **work pushed 2026-11-17 at 5508b576fe.** The single-process full BFF run times out under load on this machine (474/478 TaskCanceled; never run it that way). Gate = CI's five shards (scratchpad `run-shards.ps1`): 4 clean, `rest` 1 failure = known flaky #2543 (uac-r2), passes 3/3 alone. ArchTests 2656/0.
-- **Next waves:** 084h-4, 095f-2c, 2d1, 2d2 (after 2a / 084h-3 merge); then 095f-2b (ontology full review), 2ui; 095f-2e2 after the owner's pick. 130e-2 is still open (Rule Review editor field; no POML yet).
+- **Exact next action:** launch wave 3 from the pushed tip `8e0850d648`. Parallel-safe now: **084h-4** (RecordProcedures UI: Note box + NotRecorded warning; sonnet/high, STANDARD) and **095f-2d2** (correction-row `sprk_note`; sonnet/high, FULL). Then **095f-2c** (override/blocked-return notes; edits BuildReleaseTransaction — 2a's writers guard already allows it) and **095f-2d1** (line notes) — both parallel-safe=false, run after checking file overlap. Per task: implementer agent (named model, worktree, brief names base sha) → one adversarial review → fix rounds + scoped re-check → merge into work → remove worktree (unlock + `scripts/worktree/Remove-WorktreeSafe.ps1`) and branches (also the empty `worktree-agent-<id>` branch) → mark POML + TASK-INDEX → push. Then 095f-2b (ontology full review), 2ui; 2e2 after the owner's pick; 130e-2 (no POML).
+- **Wave 2 ✅ (pushed 8e0850d648):**
+  - **084h-3 ✅ merged bb4ad3f578.** Repair job; review fixes: OwnerRefused by code (only ParentUnresolved permanent), permanent → Poisoned (dead-letter keeps reason/note), refused lock → Failure, Ebilling:Enabled off → Poisoned, all 7 acts through the real service. ontology-r1 K1 + F1/F2 PASS. **ADR-004 receive-side atomicity: §6.5 Path A proposed (same as ontology 149 K2 / 084h-1 K-b), PENDING OWNER confirmation.**
+  - **095f-2a ✅ merged 7849bd05a0** + K3 test 8e0850d648. Two fix rounds: stranded approve completes on a repeat; closes use the STORED decider; tampered/unreadable stored amount refused. ontology-r1 catalog PASS.
+- **084h-2 ✅ 606812068a**, **095f-2e1 ✅ 7d5a3a369a**, **095f-2s ✅ d6dafe032c** (all pushed).
+- **Filed ISS-025 / #2876** (job pipeline redelivers back to back; repair jobs dead-letter in short outages). ontology-r1 is fixing its own GateDecisionRecordJob lock-refused → Success flaw.
+- **Test gate rule:** never run the whole BFF test project in one process on this machine (load timeouts). Use CI's five shards (scratchpad `run-shards.ps1`); known flaky #2543. Run the shards again before any master merge.
 - **HARD GATE before work → master (095f-2a review, 2026-11-17):** reject/return now always write `sprk_invoice.sprk_decisionnote`, so no BFF carrying 095f-2a may reach an environment before `Deploy-EbillingDecisionNoteColumns.ps1 -Apply` ran there (else every reject/return is 503 at "transition", claim held). Dev BFFs deploy from master (several projects) → the dev column apply (owner question (c), uac-r2 notices before/after) must precede the master merge; other environments get it via 079 SpaarkeMaster sync.
 - **Deploy order elsewhere:** columns first (079 syncs `sprk_firmdescription`, `sprk_rejectionreason`, and now `sprk_decisionnote` + `sprk_invoicecorrection.sprk_note`, and empties both pending lists), then a BFF carrying 130e-1. 079 takes the SpaarkeMaster version after uac-r2's 1.3.2.0 (merged 57431c8e6a) and keeps InvoiceFamilyFieldLockSourceGuardTests green.
 ### Done 2026-11-16 (pushed)
@@ -36,7 +37,7 @@
 
 ### Open owner questions
 
-1. ~~Ten design answers~~ ANSWERED 2026-11-16: EB-D-239 to EB-D-243 (decisions-log). POMLs written: 084h-2/3/4, 095f-2s/2a/2c/2d1/2e1/2b/2d2/2ui. **Open (asked 2026-11-16, unanswered):** (a) the internal Correction path for 095f-2e2: B′ recommended / A / D (design §16); (b) is the external allow-list enough for `sprk_decisionnote`, or field security so only reviewers see it (uac-r2: external-flagged licensed users can read it in the MDA by role depth); (c) the go for the dev apply of 095f-2s's two columns (uac-r2 notices before and after).
+1. ~~Ten design answers~~ ANSWERED 2026-11-16: EB-D-239 to EB-D-243 (decisions-log). POMLs written: 084h-2/3/4, 095f-2s/2a/2c/2d1/2e1/2b/2d2/2ui. **Open (asked 2026-11-16, unanswered):** (a) the internal Correction path for 095f-2e2: B′ recommended / A / D (design §16); (b) is the external allow-list enough for `sprk_decisionnote`, or field security so only reviewers see it (uac-r2: external-flagged licensed users can read it in the MDA by role depth); (c) the go for the dev apply of 095f-2s's two columns (uac-r2 notices before and after) — now a HARD GATE before any master merge; (d) [asked 2026-11-17] confirm the ADR-004 §6.5 Path A exception for 084h-3 (receive-side idempotency not atomic, #984; same as ontology 149 K2 and 084h-1 K-b; ontology-r1 no objection).
 2. ~~Second `word-add-in-r1` session~~ RESOLVED 2026-11-16 (owner): word-add-in-r1 runs on the Ryzen desktop, which is this machine (RGS_RYZEN9950X). The local `word-add-in-r1` session is the right one; the remote one is no longer listed.
 
 **Premise correction to log with EB-D-239+:**
