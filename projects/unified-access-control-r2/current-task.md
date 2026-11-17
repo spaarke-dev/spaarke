@@ -13,7 +13,7 @@
 |---|---|
 | **Mode** | Wrap-up, extended (round 90). `uac-r2` is authoritative, reviews peers, runs every dev deploy. Live actions need the owner's go IN THIS SESSION; the BFF needs the owner to name the exact SHA. ≤ 2 agents at once. |
 | **Dev BFF** | **`be0420d763`** = master `16771d1051` + mcp **spike-v2 `973776a5a6`** (local merge in `C:\wtdep12`, ledger 154→155, never pushed). Live ~22:21Z 2026-11-16 (owner "Go BFF be0420d763"). Read-back: 4 files SHA-256, healthz 200, anon /mcp, /external/me, /api/me 401; live deps.json M.E.AI 10.11.0 / MCP 2.3.1 / OpenAI 2.14.0; AI Search -VerifyOnly all OK (MI flag true). **30-min gate PASSED** (12 req, 0 5xx, 0 exceptions). Carries ontology 195 (`04f5c943f9`, template render; AFTER notice sent) and r4 014a (#2852). Does NOT carry r4 014b, #2845 round 2, or SpaarkeMaster 1.3.2.0 source. **Rollback = `5ef0a548df` (`C:\wtdep11`).** Dev SPA still `c1eb6e4a8e`. |
-| **Agents running** | None. |
+| **Agents running** | None. **Next dev candidate `e46b6b453b`** (`C:wtdep13` = master `3c9a2ff4e1` (round 2 + 014a/b/c + 1.3.2.0 source) + spike-v2; ledger = master's + the spike delta from be0420d763; never pushed): build/tests running → then ping mcp-r1, ask spa-r4, owner SHA go. |
 | **Next action** | **#2867 MERGED `9fc7edf6c6`** (#2845 round 2). Next: next dev candidate = master (round 2 + 014b + 1.3.2.0 source) + spike-v2 in a fresh `C:\wtdep13` (ledger: copy `C:\wtdep12`'s resolved Ledger.cs if master's ledger is unchanged since 16771d1051) → build/tests/CVE/deps.json → ping mcp-r1 + ask spa-r4 → owner SHA go → deploy → read-back → gate → measure external latency both planes → close #2845 if < 1 s. |
 
 ## Active work
