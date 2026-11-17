@@ -9,7 +9,15 @@
 
 ## NOW — read this first
 
-### Active (2026-11-17): nothing in flight; waiting on owner questions
+### Active (2026-11-17): iss034a in flight
+
+- **IN FLIGHT: iss034a** (ISS-034 #2888, owner chose option 1 → EB-D-244). Opus implementer in an agent worktree on branch `task/ebilling-iss034a` from 3ff10e65a4. **Next:**
+  - one Opus adversarial review, plus a second verifier pass (auth tag);
+  - ontology-r1 reviews the `finish-stranded-decision` catalog entry;
+  - send uac-r2 a private message about the new authorization surface;
+  - merge, run the filtered tests, mark done;
+  - then iss034b (client).
+- Owner questions (a)–(e) are still open (details were given to the owner 2026-11-17); (f) is answered.
 
 - **iss031 ✅ merged ececf32dbd** (ISS-031 #2882 closed). Review plus 2 rounds:
   - A blocked Override or Return refuses with 409 `other_decision_pending` (wording depends on the decider) while the other verb's record exists.
