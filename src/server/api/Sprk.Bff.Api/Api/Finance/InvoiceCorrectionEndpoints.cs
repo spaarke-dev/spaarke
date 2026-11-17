@@ -53,7 +53,7 @@ public static class InvoiceCorrectionEndpoints
                 "must be in the line's resolved code set (400 ebilling.code.not_in_set). A timekeeper or date correction re-resolves the approved rate; a " +
                 "timekeeper the resolution does not match for the line is refused (400 ebilling.correction.timekeeper_mismatch). Only while the invoice is " +
                 "In Review and the line is Clean or Flagged (a code of an uncoded invoice's Pending line is the re-code path). Never changes the line's " +
-                "approved amount or decision; its status follows the re-evaluation. Repeating the request writes no second row. An optional note (at most 2000 characters) is stored on the row (400 ebilling.note_too_long or ebilling.note_invalid_characters).")
+                "approved amount or decision; its status follows the re-evaluation. Repeating the request writes no second row. An optional note (at most 2000 characters; 400 ebilling.note_too_long or ebilling.note_invalid_characters) is stored on the correction row this call creates; a call that finds that row already written keeps the first note (or none).")
             .Produces<CorrectionResponse>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
@@ -72,7 +72,7 @@ public static class InvoiceCorrectionEndpoints
             .WithDescription(
                 "Fields: FirmInvoiceNumber, InvoiceDate, BillingPeriodStart, BillingPeriodEnd, Currency, TotalDue. Send a value, or confirm to keep the value as " +
                 "read. Writes one Corrected or Confirmed individually row and updates the invoice. " +
-                "Only while the invoice is In Review. Repeating the request writes no second row. An optional note (at most 2000 characters) is stored on the row (400 ebilling.note_too_long or ebilling.note_invalid_characters).")
+                "Only while the invoice is In Review. Repeating the request writes no second row. An optional note (at most 2000 characters; 400 ebilling.note_too_long or ebilling.note_invalid_characters) is stored on the correction row this call creates; a call that finds that row already written keeps the first note (or none).")
             .Produces<CorrectionResponse>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
@@ -184,9 +184,9 @@ public static class InvoiceCorrectionEndpoints
 /// <summary>
 /// Body of both correction routes: the field (<c>Hours</c>, <c>Amount</c>, <c>TaskCode</c>, <c>TotalDue</c> and so on) and either the final
 /// <c>value</c> as text or <c>confirm</c> true to keep the value as read. There is no outcome, role or reviewer in the body.
-/// Task 095f-2d2 (EB-D-242): an optional <c>note</c> (at most 2000 characters, no control character other than newline and tab) is stored on the
+/// Task 095f-2d2 (EB-D-242): an optional <c>note</c> (at most 2000 characters, no control character other than newline, carriage return and tab) is stored on the
 /// correction row this request creates; a blank note is no note, an over-long one is 400 <c>ebilling.note_too_long</c> and one with a refused
-/// control character is 400 <c>ebilling.note_invalid_characters</c>. A repeat with another note finds the same row and does not rewrite it.
+/// control character is 400 <c>ebilling.note_invalid_characters</c>. A call that finds the row already written (the latest Corrected or Confirmed row holds the requested final value, even when the line value is rewritten in that call) writes no row and stores no note; the first note (or none) stays.
 /// </summary>
 public sealed record CorrectionRequest(string? Field, string? Value, bool Confirm = false, string? Note = null);
 

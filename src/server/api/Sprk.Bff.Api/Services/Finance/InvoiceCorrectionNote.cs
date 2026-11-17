@@ -26,7 +26,9 @@ namespace Sprk.Bff.Api.Services.Finance;
 /// (2) Extension: the decision routes and the submission route check notes by one rule, and EB-D-240 adds a second column with the same text
 /// rule, so the column names, the rule and the decision routes' shared 400 codes are extended here rather than copied into each service.
 /// (3) Cost of doing nothing: each writer would carry its own length and control-character rule and drift, so the same note would be accepted
-/// by one route and refused (or truncated) by another.</para>
+/// by one route and refused (or truncated) by another.
+/// Task 095f-2d2 adds <see cref="CorrectionRowColumn"/> to the same type for the same reasons: the correct and confirm routes use the same check
+/// and the column name has one home (its one writer is <c>InvoiceCorrectionService.BuildRow</c>), with no new service, interface or registration.</para>
 /// </remarks>
 public static class InvoiceCorrectionNote
 {
@@ -41,9 +43,10 @@ public static class InvoiceCorrectionNote
     public const string DecisionColumn = "sprk_decisionnote";
 
     /// <summary>
-    /// Task 095f-2d2 (EB-D-242): the <c>sprk_invoicecorrection</c> column holding the note a reviewer's correct or confirm carries. Written only in the
-    /// same create as the correction row (<c>InvoiceCorrectionService</c>), never part of the row's derived id, never on an "Accepted in bulk" or
-    /// "Unreviewed" row, and never added to a firm-facing reader or allow-list. Added by <c>scripts/ebilling/Deploy-EbillingDecisionNoteColumns.ps1</c> (Memo 2000).
+    /// Task 095f-2d2 (EB-D-242): the <c>sprk_invoicecorrection</c> column holding the note a reviewer's correct or confirm carries. The correction
+    /// service (<c>InvoiceCorrectionService</c>) writes it only in the same create as the correction row; the generic record write paths are not yet
+    /// refused for this table (tracked separately as ISS-028). Never part of the row's derived id, never on an "Accepted in bulk" or "Unreviewed" row,
+    /// and never added to a firm-facing reader or allow-list. Added by <c>scripts/ebilling/Deploy-EbillingDecisionNoteColumns.ps1</c> (Memo 2000).
     /// </summary>
     public const string CorrectionRowColumn = "sprk_note";
 
