@@ -2183,3 +2183,42 @@ In a multi-line call whose earlier lines were recorded, the remaining lines take
 **Estimated effort**: 2-4 hours. **Blockers**: merge 095f-2b first (same file). **Related**: task 095f-2b.
 
 ---
+### ISS-031 — A blocked Return can run after a stranded Override (and the reverse), leaving two conflicting decisions
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | next-round |
+| **Filed** | 2026-11-17 |
+| **Source** | 095f-2ui round-1 re-check (Opus; found in passing; pre-existing server behaviour) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2882 |
+
+**Description**: an Override writes its Decision Record and closes the open Signals as Acted before it releases the hold. If the release then fails (503 `ebilling.blocked.unavailable`, or 409 `ebilling.blocked.concurrent_change` after the retries), the invoice stays In Review and held. A Return sent now looks up a stored record only under its own decision id (`ReturnDecisionIdFor`), finds none, reads the open Signals (none are left, because the Override closed them) and goes ahead. The invoice ends up Returned to Firm while carrying an Override Decision Record and Signals closed by that Override. The reverse order (a stranded Return, then an Override) has the same gap. The 095f-2ui client now blocks the switch while it holds the page lock, but a reload, another tab or another reviewer still reaches it.
+
+**Entry-points**: `src/server/api/Sprk.Bff.Api/Services/Finance/SubmissionOverrideService.cs`: the stored-record lookup at ~916-920 (it checks only the calling verb's id); the decision ids `OverrideDecisionIdFor` / `ReturnDecisionIdFor` at ~430-433.
+
+**Suggested fix**: before deciding, look up the OTHER verb's stored record as well. If it exists, refuse with 409 (a new code, e.g. `ebilling.blocked.other_decision_pending`) and tell the caller to repeat that decision to finish it. Test both orders, plus a must-not-fire case where neither record exists.
+
+**Estimated effort**: 3-5 hours. **Blockers**: none. **Related**: tasks 095f-2c, 095f-2ui.
+
+---
+
+### ISS-032 — An invoice decision stranded after its transition cannot be finished from Invoice Review once the wizard is closed
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | next-round |
+| **Filed** | 2026-11-17 |
+| **Source** | 095f-2ui round-1 re-check (Opus; found in passing; pre-existing) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2883 |
+
+**Description**: reject, return and approve make the status transition before they write the Decision Record and the after-steps. If a later step fails (503 incomplete, `failedStep` `record` or later), the invoice already shows Rejected, Returned or Approved. The open wizard can repeat the request, but once it is closed (or the page reloads), the page treats the invoice as decided and the wizard reopens read-only ("View decision"). Nothing in the UI then sends the repeat that writes the record and the note. The server's repeat would finish it; only the client has lost the path. The state is not visible to the reviewer.
+
+**Entry-points**: `src/solutions/InvoiceReview/src/components/decision/DecideInvoiceAction.tsx` (`decided` and `decisionAccess`); `src/solutions/InvoiceReview/src/services/decisionModel.ts`; server: `InvoiceRejectReturnService.cs` (~539, transition before the record), `InvoiceApprovalService.cs`.
+
+**Suggested fix**: let the approval-state read report "decision incomplete" (status changed, but no Decision Record yet for the decision id the server derives). The page then offers "Finish decision", which sends the repeat. Alternatively, have a repair job finish stranded decisions. Decide the approach with the 095f-2c known limits.
+
+**Estimated effort**: 1 day (server signal + client affordance). **Blockers**: none. **Related**: tasks 095f-2a, 095f-2c, 095f-2ui.
+
+---
