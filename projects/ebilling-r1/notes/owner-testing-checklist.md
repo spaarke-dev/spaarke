@@ -68,3 +68,15 @@ Not yet. #2839 (BFF) and #2840 (SPA) are merged to master. uac-r2 deploys the BF
 - [ ] A clean file opens in the browser.
 - [ ] An invoice of another firm cannot be opened. It looks the same as an invoice that doesn't exist.
 - [ ] Nothing in the portal still calls the old invoice-documents address (no "not found" error in the files section).
+
+## F. Decision notes (095f part 2): after the decision-note columns are applied (open question (c)), then a BFF and an Invoice Review page that carry 095f-2a..2ui
+
+Nothing here is testable until those deploys run. On an In Review invoice in Invoice Review:
+
+- [ ] Approve, Reject and Return each show an optional **Note** box with an n / 2000 counter. A note over 2000 shows a field error, and nothing is cut off silently.
+- [ ] Line decisions (accept, reduce, disallow), Correct value and Confirm as read each take a note. **Accept all Clean has no Note box.**
+- [ ] Add adjustment and Remove adjustment take a note.
+- [ ] On a blocked internal submission, Override and Return take a note.
+- [ ] A note with only spaces is treated as no note.
+- [ ] After a decision, the note appears on its Decision Record (and the reject/return note appears on the invoice's decision note). The firm does NOT see the note in the SPA.
+- [ ] Confirm a value that is already confirmed, with a note: the page says the note was not saved (instead of "Saved").
