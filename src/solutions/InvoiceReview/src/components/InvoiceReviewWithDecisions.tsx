@@ -71,7 +71,7 @@ export function InvoiceReviewWithDecisions({ invoiceId, initialLineId, api, deci
           <>
             <BlockedBanner review={ctx.review} reload={ctx.reload} />
             {/* ISS-032: a decision stranded before its Decision Record, and its Finish. */}
-            <IncompleteDecisionBanner reload={ctx.reload} />
+            <IncompleteDecisionBanner review={ctx.review} reload={ctx.reload} />
             {correctionNotice && (
               <MessageBar intent="warning" role="alert" data-testid="correction-notice">
                 <MessageBarBody>{correctionNotice}</MessageBarBody>

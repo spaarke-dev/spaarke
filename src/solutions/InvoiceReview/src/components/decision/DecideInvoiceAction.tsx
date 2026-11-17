@@ -27,14 +27,21 @@ import {
 import { FormModal } from '@spaarke/ui-components';
 import type { InvoiceReview } from '../../services/invoiceReviewApi';
 import { decisionFailureMessage, isOutcomeUnknown } from '../../services/decisionApi';
-import { decisionAccess, finishDecisionIntro, incompleteDecisionText, incompleteOutcome, type InvoiceOutcome } from '../../services/decisionModel';
+import {
+  decisionAccess,
+  finishDecisionIntro,
+  incompleteDecisionText,
+  incompleteOutcome,
+  isRecordedStage,
+  recordedReason,
+  type InvoiceOutcome,
+} from '../../services/decisionModel';
 import { isNoteRefusal, noteArgs, noteProblem, noteRefusalMessage } from '../../services/noteModel';
 import { NoteField } from '../NoteField';
 import { InvoiceDecisionWizard, type NotifyStep } from './InvoiceDecisionWizard';
 import { useApprovalSync } from './AwaitingApprovers';
 import { useApproval } from './ApprovalProvider';
-
-const REASON_MAX = 2000;
+import { REASON_MAX } from './steps';
 
 const useStyles = makeStyles({
   form: { display: 'flex', flexDirection: 'column', rowGap: tokens.spacingVerticalM },
@@ -107,6 +114,8 @@ export function DecideInvoiceAction({ review, canWrite, reload, notifyStep }: De
 }
 
 export interface IncompleteDecisionBannerProps {
+  /** The review the page shows: a recorded reject or return's reason comes from its invoice-level Decision Record. */
+  review: InvoiceReview;
   reload: () => Promise<InvoiceReview | null>;
 }
 
@@ -119,15 +128,21 @@ export interface IncompleteDecisionBannerProps {
  * when this page still holds the request it sent (an unsure send in this session, `locks`), that request is repeated as it was. A refusal or
  * a 503 is shown in the form with its code, and the banner keeps its Finish button while the server still reports the decision. The form
  * is not tied to the banner: when a re-read shows the hint gone, an open form stays open with its error.
+ *
+ * Review round 1 F4: when the record exists and only its follow-up steps did not finish (`failedStep` `link`), nothing is asked. The server
+ * finishes from the stored record and ignores the request's reason and note, but a reject or return still needs a non-empty reason, so the
+ * form sends the reason the record holds (`recordedReason`, from the review's invoice-level Decision Record), read-only, and no note. When the
+ * review does not carry it, Finish is disabled and the form says to reload; the user is never asked to type it again.
  */
-export function IncompleteDecisionBanner({ reload }: IncompleteDecisionBannerProps) {
+export function IncompleteDecisionBanner({ review, reload }: IncompleteDecisionBannerProps) {
   const s = useStyles();
   const { state, api, invoiceId, refresh, locks } = useApproval();
   const stranded = incompleteOutcome(state);
+  const recordedStage = isRecordedStage(state);
 
-  // The form, kept after it closes with `open={false}` (never unmounted while open, #2658). `seq` keys each opening; `outcome` is the
-  // decision the hint named when it opened, so a re-read under an open form does not change what it sends.
-  const [dialog, setDialog] = React.useState<{ open: boolean; seq: number; outcome: InvoiceOutcome } | null>(null);
+  // The form, kept after it closes with `open={false}` (never unmounted while open, #2658). `seq` keys each opening; `outcome` and
+  // `recorded` are what the hint said when it opened, so a re-read under an open form does not change what it sends.
+  const [dialog, setDialog] = React.useState<{ open: boolean; seq: number; outcome: InvoiceOutcome; recorded: boolean } | null>(null);
   const closeDialog = () => setDialog(prev => (prev ? { ...prev, open: false } : prev));
   const [reason, setReason] = React.useState('');
   const [note, setNote] = React.useState('');
@@ -150,17 +165,26 @@ export function IncompleteDecisionBanner({ reload }: IncompleteDecisionBannerPro
     // A decision this page sent and that came back unsure (the wizard's or this form's) is repeated as it was sent, locked.
     const kept = locks.get('wizard');
     const same = kept && kept.outcome === stranded ? kept : undefined;
-    setReason(same ? same.reason : '');
-    setNote(same ? same.note : '');
-    setLocked(!!same);
+    if (recordedStage) {
+      // The record exists: its reason (or, failing that, the one this page sent), read-only; no note, which the server would drop.
+      setReason(stranded === 'approve' ? '' : (recordedReason(review, stranded) ?? same?.reason ?? ''));
+      setNote('');
+      setLocked(true);
+    } else {
+      setReason(same ? same.reason : '');
+      setNote(same ? same.note : '');
+      setLocked(!!same);
+    }
     setNoteError(null);
     setError(null);
-    setDialog(prev => (prev?.open ? prev : { open: true, seq: (prev?.seq ?? 0) + 1, outcome: stranded }));
+    setDialog(prev => (prev?.open ? prev : { open: true, seq: (prev?.seq ?? 0) + 1, outcome: stranded, recorded: recordedStage }));
   };
 
   const outcome = dialog?.outcome ?? null;
+  const recorded = dialog?.recorded ?? false;
   const needsReason = outcome === 'reject' || outcome === 'return';
-  const incomplete = (needsReason && reason.trim() === '') || noteProblem(note) !== null;
+  const reasonMissing = needsReason && reason.trim() === '';
+  const incomplete = reasonMissing || noteProblem(note) !== null;
 
   const submit = async () => {
     if (!dialog?.open || !outcome || sending.current || incomplete) return;
@@ -214,7 +238,7 @@ export function IncompleteDecisionBanner({ reload }: IncompleteDecisionBannerPro
           <MessageBarBody>
             <MessageBarTitle>This decision did not finish</MessageBarTitle>
             <Text as="p" data-testid="incomplete-decision-text">
-              {incompleteDecisionText(stranded)}
+              {incompleteDecisionText(stranded, recordedStage)}
             </Text>
           </MessageBarBody>
           <MessageBarActions>
@@ -240,9 +264,16 @@ export function IncompleteDecisionBanner({ reload }: IncompleteDecisionBannerPro
           onSubmit={() => void submit()}
         >
           <div className={s.form}>
-            <Text data-testid="finish-decision-intro">{finishDecisionIntro(outcome, locked)}</Text>
-            {needsReason && (
-              <Field label="Reason" required>
+            <Text data-testid="finish-decision-intro">{finishDecisionIntro(outcome, locked, recorded)}</Text>
+            {needsReason && recorded && reasonMissing && (
+              <MessageBar intent="warning" layout="multiline" data-testid="finish-decision-no-reason">
+                <MessageBarBody>
+                  The reason on its Decision Record could not be read on this page. Reload the page, then finish the decision.
+                </MessageBarBody>
+              </MessageBar>
+            )}
+            {needsReason && !(recorded && reasonMissing) && (
+              <Field label={recorded ? 'Recorded reason' : 'Reason'} required={!recorded}>
                 <Textarea
                   value={reason}
                   onChange={(_, d) => setReason(d.value)}
@@ -255,18 +286,20 @@ export function IncompleteDecisionBanner({ reload }: IncompleteDecisionBannerPro
                 />
               </Field>
             )}
-            <NoteField
-              value={note}
-              onChange={v => {
-                setNote(v);
-                setNoteError(null);
-              }}
-              serverError={noteError}
-              readOnly={locked}
-              ariaLabel="Note"
-              testId="finish-decision-note"
-            />
-            {locked && (
+            {!recorded && (
+              <NoteField
+                value={note}
+                onChange={v => {
+                  setNote(v);
+                  setNoteError(null);
+                }}
+                serverError={noteError}
+                readOnly={locked}
+                ariaLabel="Note"
+                testId="finish-decision-note"
+              />
+            )}
+            {locked && !recorded && (
               <Caption1 className={s.muted} data-testid="finish-decision-locked">
                 This decision was saved in part, or no answer came back. Submitting again finishes it with the same{' '}
                 {needsReason ? 'reason and note, so they cannot' : 'note, so it cannot'} be changed now.

@@ -86,12 +86,15 @@ export interface ApprovalState {
   incompleteDecision?: IncompleteDecision | null;
 }
 
-/** ISS-032: a reject, return or approve that stopped after its status transition, before its Decision Record. */
+/** ISS-032: a reject, return or approve that stopped after its status transition, before it was complete (recorded AND linked). */
 export interface IncompleteDecision {
   /** `Approve`, `Reject` or `Return`. */
   verb: 'Approve' | 'Reject' | 'Return' | string;
-  /** `portion` or `record`: the step it stopped before. */
-  failedStep: string | null;
+  /**
+   * Where it stopped: `portion` or `record` (no Decision Record yet), or `link` (the record exists; its follow-up steps did not finish, and
+   * the repeat finishes from the stored record, ignoring the request's reason and note).
+   */
+  failedStep: 'portion' | 'record' | 'link' | string | null;
 }
 
 export interface ApproveResponse {

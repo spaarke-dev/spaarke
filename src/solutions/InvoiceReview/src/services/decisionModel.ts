@@ -95,7 +95,14 @@ const MAX_NAMES = 4;
 export function awaitingLine(approval: ApprovalState | null): AwaitingLine | null {
   if (!approval) return null;
   const stranded = incompleteOutcome(approval);
-  if (stranded) return { tone: 'warning', text: `${STATUS_WORD[stranded]}, not finished: the decision is not on record yet` };
+  if (stranded) {
+    return {
+      tone: 'warning',
+      text: isRecordedStage(approval)
+        ? `${STATUS_WORD[stranded]}, not finished: the decision is recorded, its follow-up steps are not`
+        : `${STATUS_WORD[stranded]}, not finished: the decision is not on record yet`,
+    };
+  }
   switch (approval.status) {
     case 'Approved':
     case 'Rejected':
@@ -171,17 +178,33 @@ const STATUS_WORD: Readonly<Record<InvoiceOutcome, string>> = { approve: 'Approv
 const PAST_WORDS: Readonly<Record<InvoiceOutcome, string>> = { approve: 'approved', reject: 'rejected', return: 'returned to the firm' };
 const NOUN_WORDS: Readonly<Record<InvoiceOutcome, string>> = { approve: 'approval', reject: 'rejection', return: 'return to the firm' };
 
+/**
+ * Review round 1 F4: the server says the decision's Decision Record exists and only the steps after it did not finish (`failedStep`
+ * `link`: closing its Signals, linking the approval to the record, or the approval's status). The repeat finishes from the stored record.
+ */
+export function isRecordedStage(approval: ApprovalState | null): boolean {
+  return approval?.incompleteDecision?.failedStep === 'link';
+}
+
 /** The stranded-decision banner's sentence: what happened and what finishing does. */
-export function incompleteDecisionText(outcome: InvoiceOutcome): string {
+export function incompleteDecisionText(outcome: InvoiceOutcome, recorded = false): string {
+  if (recorded) {
+    return `This invoice was ${PAST_WORDS[outcome]} and the decision is recorded, but its follow-up steps did not finish (closing its Signals and linking the approval to the Decision Record). Finish the decision to complete them.`;
+  }
   return `This invoice was ${PAST_WORDS[outcome]}, but the decision did not finish: its Decision Record was not written, so the ${NOUN_WORDS[outcome]} is not on record yet. Finish the decision to record it.`;
 }
 
 /**
- * The Finish dialog's sentence. A reject or return needs its reason again: the server keeps it only in the Decision Record, which was not
- * written. When this page still holds the request it sent (`repeatsSent`: an unsure send in this session), that request is repeated as it
- * was and nothing is asked again.
+ * The Finish dialog's sentence. Before the record (`recorded` false) a reject or return needs its reason again: the server keeps it only
+ * in the Decision Record, which was not written. When this page still holds the request it sent (`repeatsSent`: an unsure send in this
+ * session), that request is repeated as it was and nothing is asked again. Once the record exists (`recorded`), nothing is asked: the
+ * server finishes from the record, and the reason shown is the one it holds.
  */
-export function finishDecisionIntro(outcome: InvoiceOutcome, repeatsSent: boolean): string {
+export function finishDecisionIntro(outcome: InvoiceOutcome, repeatsSent: boolean, recorded = false): string {
+  if (recorded) {
+    const kept = outcome === 'approve' ? 'its recorded note is kept' : 'its recorded reason (shown below) and note are kept';
+    return `The ${NOUN_WORDS[outcome]} is already recorded. Finishing completes its follow-up steps; ${kept}, and nothing can be changed.`;
+  }
   const head = `Finishing records the ${NOUN_WORDS[outcome]} with your name.`;
   if (repeatsSent) return `${head} It repeats the request you sent, with the same ${outcome === 'approve' ? 'note' : 'reason and note'}.`;
   if (outcome === 'approve') return `${head} The approved amount is the one already set on it. A note is optional and is recorded with it.`;
@@ -189,6 +212,19 @@ export function finishDecisionIntro(outcome: InvoiceOutcome, repeatsSent: boolea
 }
 
 const INVOICE_ACTIONS: ReadonlySet<string> = new Set(['approve-invoice', 'reject-invoice', 'return-to-firm']);
+
+const OUTCOME_ACTION: Readonly<Record<InvoiceOutcome, string>> = { approve: 'approve-invoice', reject: 'reject-invoice', return: 'return-to-firm' };
+
+/**
+ * Review round 1 F4: the reason a recorded reject or return holds, from the invoice-level Decision Record the review already carries
+ * (`decisionHistory`, read by the invoice it regards, so a record not yet linked is there too). Null when the newest invoice record is not
+ * this decision's, or carries no reason: the page then sends nothing rather than a guess.
+ */
+export function recordedReason(review: Pick<InvoiceReview, 'decisionHistory'>, outcome: InvoiceOutcome): string | null {
+  const record = invoiceDecisionRecord(review);
+  const reason = record && record.actionCode === OUTCOME_ACTION[outcome] ? record.reason?.trim() : '';
+  return reason ? reason : null;
+}
 
 /** The invoice-level Decision Record of the invoice's decision (the newest), or null. */
 export function invoiceDecisionRecord(review: Pick<InvoiceReview, 'decisionHistory'>): ReviewDecisionRecord | null {

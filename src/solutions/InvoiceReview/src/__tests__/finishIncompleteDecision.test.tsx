@@ -12,7 +12,15 @@ import '@testing-library/jest-dom';
 import { configure, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { FluentProvider, webLightTheme } from '@fluentui/react-components';
 import { InvoiceReviewWithDecisions } from '../components/InvoiceReviewWithDecisions';
-import { awaitingLine, decisionAccess, finishDecisionIntro, incompleteDecisionText, incompleteOutcome } from '../services/decisionModel';
+import {
+  awaitingLine,
+  decisionAccess,
+  finishDecisionIntro,
+  incompleteDecisionText,
+  incompleteOutcome,
+  isRecordedStage,
+  recordedReason,
+} from '../services/decisionModel';
 import type { ApiResult, InvoiceReview } from '../services/invoiceReviewApi';
 import type { ApprovalState } from '../services/decisionApi';
 import {
@@ -20,6 +28,7 @@ import {
   approval,
   decidedApproval,
   decidedReview,
+  decisionRecord,
   failed,
   forbidden,
   line,
@@ -48,9 +57,9 @@ function renderDecisions(reviews: InvoiceReview | InvoiceReview[], decision: Moc
  * A decision API whose approval read answers `current` (switched by the test or by a finished repeat). The repeat of `verb` succeeds and the
  * next approval read then shows the decision finished, unless the test overrides the repeat.
  */
-function strandedApi(verb: Verb = 'Reject') {
+function strandedApi(verb: Verb = 'Reject', failedStep: 'portion' | 'record' | 'link' = 'record') {
   const decision = mockDecisionApi();
-  const world = { current: strandedApproval(verb) as ApprovalState };
+  const world = { current: strandedApproval(verb, { incompleteDecision: { verb, failedStep } }) as ApprovalState };
   decision.getApproval.mockImplementation(async () => ok(world.current));
   const finish = async () => {
     world.current = decidedApproval(verb);
@@ -347,7 +356,7 @@ describe('Finish decision: a refusal or a 503 keeps the affordance', () => {
   it('an unsure send whose re-read shows the hint gone keeps the open form with its error, so the same request can be sent again', async () => {
     const { decision, world } = strandedApi('Reject');
     decision.reject.mockImplementationOnce(async () => {
-      // The record got written and a later step failed: the re-read no longer reports the hint.
+      // No answer came back, and the re-read no longer reports the hint (another session finished it meanwhile).
       world.current = decidedApproval('Reject');
       return incomplete();
     });
@@ -360,5 +369,94 @@ describe('Finish decision: a refusal or a 503 keeps the affordance', () => {
     fireEvent.click(submitBtn(open));
     await waitFor(() => expect(decision.reject).toHaveBeenCalledTimes(2));
     expect(decision.reject.mock.calls[1]).toEqual(decision.reject.mock.calls[0]);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Review round 1 F4: stranded after its Decision Record (failedStep "link")
+// ─────────────────────────────────────────────────────────────────────────────
+
+const ACTION: Readonly<Record<Verb, string>> = { Approve: 'approve-invoice', Reject: 'reject-invoice', Return: 'return-to-firm' };
+const RECORDED_REASON = 'Rate card not followed';
+
+/** The decided invoice's review with its invoice-level Decision Record (the review reads it by the invoice, linked or not). */
+function recordedReview(verb: Verb, reason: string | null = verb === 'Approve' ? null : RECORDED_REASON): InvoiceReview {
+  const base = decidedReview(verb);
+  return {
+    ...base,
+    decisionHistory: [decisionRecord({ recordId: 'rec-20', actionCode: ACTION[verb], subject: 'invoice', lineId: null, outcome: null, reason })],
+  };
+}
+
+describe('Finish decision after the record ("link"): the follow-up steps', () => {
+  it('the lenses: "link" is the recorded stage; the reason comes from this decision\'s invoice-level record only', () => {
+    expect(isRecordedStage(strandedApproval('Reject', { incompleteDecision: { verb: 'Reject', failedStep: 'link' } }))).toBe(true);
+    expect(isRecordedStage(strandedApproval('Reject'))).toBe(false);
+    expect(isRecordedStage(null)).toBe(false);
+    expect(recordedReason(recordedReview('Reject'), 'reject')).toBe(RECORDED_REASON);
+    expect(recordedReason(recordedReview('Reject'), 'return')).toBeNull();
+    expect(recordedReason(recordedReview('Reject', '   '), 'reject')).toBeNull();
+    expect(recordedReason(decidedReview('Reject'), 'reject')).toBeNull();
+    expect(incompleteDecisionText('reject', true)).toMatch(/decision is recorded, but its follow-up steps did not finish/);
+    expect(incompleteDecisionText('reject', true)).not.toMatch(/not written|not on record/);
+    expect(finishDecisionIntro('reject', false, true)).toMatch(/already recorded/);
+    expect(finishDecisionIntro('reject', true, true)).not.toMatch(/not saved|enter it again/);
+  });
+
+  it.each(['Reject', 'Return'] as const)(
+    '%s: the banner says the decision is recorded; Finish sends the record\'s reason, read-only, with no note, exactly ONCE, and the decision shows read-only',
+    async verb => {
+      const { decision } = strandedApi(verb, 'link');
+      renderDecisions(recordedReview(verb), decision);
+      const banner = await screen.findByTestId('incomplete-decision-banner');
+      expect(within(banner).getByTestId('incomplete-decision-text')).toHaveTextContent('the decision is recorded, but its follow-up steps did not finish');
+      expect(within(banner).getByTestId('incomplete-decision-text')).not.toHaveTextContent('not written');
+      expect(await screen.findByTestId('awaiting')).toHaveTextContent('follow-up steps');
+
+      fireEvent.click(within(banner).getByTestId('finish-decision'));
+      const dialog = await finishDialog();
+      const intro = within(dialog).getByTestId('finish-decision-intro');
+      expect(intro).toHaveTextContent('already recorded');
+      expect(intro).not.toHaveTextContent('not saved');
+      expect(intro).not.toHaveTextContent('enter it again');
+      expect(reasonOf(dialog)).toHaveValue(RECORDED_REASON);
+      expect(reasonOf(dialog)).toHaveAttribute('readonly');
+      expect(within(dialog).queryByTestId('finish-decision-note')).not.toBeInTheDocument();
+      expect(submitBtn(dialog)).toBeEnabled();
+
+      fireEvent.click(submitBtn(dialog));
+      fireEvent.click(submitBtn(dialog));
+
+      await waitFor(() => expect(screen.queryByTestId('incomplete-decision-banner')).not.toBeInTheDocument());
+      expect(await screen.findByTestId('view-decision')).toBeInTheDocument();
+      const repeat = repeatOf(decision, verb);
+      expect(repeat).toHaveBeenCalledTimes(1);
+      expect(repeat).toHaveBeenCalledWith(INVOICE_ID, RECORDED_REASON);
+    }
+  );
+
+  it('Approve: nothing is asked (no reason, no note); the repeat is the approve alone, once', async () => {
+    const { decision } = strandedApi('Approve', 'link');
+    renderDecisions(recordedReview('Approve'), decision);
+    fireEvent.click(await screen.findByTestId('finish-decision'));
+    const dialog = await finishDialog();
+    expect(within(dialog).queryByTestId('finish-decision-reason')).not.toBeInTheDocument();
+    expect(within(dialog).queryByTestId('finish-decision-note')).not.toBeInTheDocument();
+    fireEvent.click(submitBtn(dialog));
+    await waitFor(() => expect(decision.approve).toHaveBeenCalledTimes(1));
+    expect(decision.approve).toHaveBeenCalledWith(INVOICE_ID);
+    expect(await screen.findByTestId('view-decision')).toBeInTheDocument();
+  });
+
+  it('a reject whose record the review does not carry: Finish is disabled and the form says to reload; nothing is typed or sent', async () => {
+    const { decision } = strandedApi('Reject', 'link');
+    renderDecisions(decidedReview('Reject'), decision);
+    fireEvent.click(await screen.findByTestId('finish-decision'));
+    const dialog = await finishDialog();
+    expect(within(dialog).getByTestId('finish-decision-no-reason')).toHaveTextContent('Reload the page');
+    expect(within(dialog).queryByTestId('finish-decision-reason')).not.toBeInTheDocument();
+    expect(submitBtn(dialog)).toBeDisabled();
+    fireEvent.click(submitBtn(dialog));
+    expect(decision.reject).not.toHaveBeenCalled();
   });
 });
