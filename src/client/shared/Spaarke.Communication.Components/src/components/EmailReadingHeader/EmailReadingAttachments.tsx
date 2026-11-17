@@ -260,6 +260,8 @@ export const EmailReadingAttachments: React.FC<IEmailReadingAttachmentsProps> = 
               } catch (err) {
                 console.error('[EmailReadingAttachments] Open in desktop failed:', err);
                 setOpenError(OPEN_IN_DESKTOP_FAILED_MESSAGE);
+                // The bar renders above the list; close the modal preview so the message is not hidden behind it.
+                setPreviewItem(null);
               }
             })();
           }}
