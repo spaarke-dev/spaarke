@@ -16,7 +16,7 @@ An invoice-level adjustment's add and its removal each file ONE Decision Record 
 | Add body gains `note`; the remove route takes an optional JSON body `{ "note": ... }` (`EmptyBodyBehavior.Allow`: no body, `{}` and `{"note":null}` all mean no note) | `Api/Finance/InvoiceAdjustmentEndpoints.cs` |
 | ArchTest: the totals path moves from the pending to the built `sprk_decisionnote` writers (its stale check now applies); the pending list is empty | `tests/Spaarke.ArchTests/InvoiceDecisionNoteWritersGuardTests.cs` |
 
-**Record content.** Decision id: the client's `AdjustmentId` for an add; `InvoiceLineDecisionService.IdOf("remove-{lineId}")` for a removal (`InvoiceAdjustmentService.RemoveDecisionIdFor`). Subject: the invoice. Values are the declared parameter codes only: add = `method` (`percent` / `fixed`), `value`, `rule` (only when cited), `note` (only when given); remove = `adjustment` (the line id), `note` (only when given). No note means no key, never `note: null` (the hash covers every key). Reason: the add's reason; none for a removal. Facts (outside the hash): invoice id, adjustment line id, amount (add), approved total. Written: the adjustment line. No writer literal was edited (every code outside the four line codes already maps to the invoice).
+**Record content.** Decision id (as amended in review round 1, below): `InvoiceAdjustmentService.AddDecisionIdFor(invoiceId, adjustmentId)` for an add, `RemoveDecisionIdFor(invoiceId, lineId)` for a removal, both namespaced hashes (first build: the raw client `AdjustmentId`, and `IdOf("remove-{lineId}")`). Subject: the invoice. Values are the declared parameter codes only: add = `method` (`percent` / `fixed`), `value`, `rule` (only when cited), `note` (only when given); remove = `adjustment` (the line id), `note` (only when given). No note means no key, never `note: null` (the hash covers every key). Reason: the add's reason; none for a removal. Facts (outside the hash): invoice id, adjustment line id, amount (add), approved total. Written: the adjustment line. No writer literal was edited (every code outside the four line codes already maps to the invoice).
 
 ## Rules as built
 
@@ -150,3 +150,40 @@ New file `tests/integration/data-mutation/Ebilling/InvoiceAdjustmentServiceTests
 
 - When a removal's totals recalculation is refused after the row was deactivated, the row stays inactive and the stored totals are stale until the next recalculation (the add path undoes its row; the remove path has no undo). Out of scope for 095f-2b; report to the coordinator for filing.
 - The pre-commit hook's lint-staged backs up the index with `git stash` (its own entry, dropped on completion). It touches the stash stack shared across worktrees (FAILURE-MODES G-18).
+
+## Review round 1
+
+Two reviews (Opus, ontology-r1) independently found F1. The fix is on `task/ebilling-095f-2b`, after `22d4c29d36`.
+
+### F1: the add's decision id is derived on the server
+
+- **Defect.** A client-supplied id could coincide with another decision's id on the invoice. The writer keys records by subject and decision id (no action code), and every other billing decision id is a deterministic namespaced hash, so the raw `AdjustmentId` used as the add's decision id could block a later decision on the same invoice.
+- **Fix.** `InvoiceAdjustmentService.AddDecisionIdFor(invoiceId, adjustmentId) = InvoiceLineDecisionService.IdOf("ebilling-add-adjustment-{invoiceId:D}-{adjustmentId:D}")`, following add-line's `DecisionIdFor`. It is used for the record, `IsRecordedAsync` on a repeat and the first-add pre-check. Idempotency per `AdjustmentId` is unchanged (the same invoice and id give the same decision id; the row and the id-reuse checks are as before).
+- **Removal id.** Renamed for namespace consistency: `RemoveDecisionIdFor(invoiceId, lineId) = IdOf("ebilling-remove-adjustment-{invoiceId:D}-{lineId:D}")` (was `IdOf("remove-{lineId:D}")`). Nothing is deployed, so there are no records under the old ids and nothing is migrated.
+- **Golden hashes.** Unchanged (`AddNoNoteHash`, `RemoveNoNoteHash`): the review hash covers the content (values, reason), not the decision id, so nothing was re-captured. The golden tests pass untouched.
+- **Tests** (`InvoiceAdjustmentServiceTests.DecisionRecords.cs`, region "Review round 1", 15 new test cases; the three existing tests that named the old ids now use the derived ones):
+  - the decision id is never the raw `AdjustmentId` (pure test, pinned to the hash input), and the record's key is the derived id;
+  - the same `AdjustmentId` or line id on two invoices gives different ids, and an add and a removal never share one;
+  - an add whose `AdjustmentId` equals approve's, reject's or return's decision id does not block that decision, in both orders (add then decision; decision then add);
+  - a decision filed under a removal's earlier id (`remove-{lineId}`) no longer blocks the removal (three decision kinds);
+  - same-content repeats still file one record, and a changed note is still 409 `id_reused`.
+- **Fail-before.** With only the two id functions set back to the first-build values (raw `adjustmentId`, `IdOf("remove-{lineId}")`) and the lookup wording below set back, 14 of the 15 new cases fail: the add-then-decision, decision-then-add and removal cases for all three decision kinds, the derived-key test, the two-invoice test, the pure id test and the two lookup-wording tests. The 15th (same-content repeats, 409 on a changed note) passes before and after by design, as it guards that idempotency did not change. With the fix restored, 15 of 15 pass. The set-back functions are the `22d4c29d36` behaviour for the ids and the wording; the file was restored from a copy afterwards.
+
+### F1 (low): a faulted stored-record lookup named the wrong step
+
+- **Defect.** When the stored-record lookup (`IsRecordedAsync`) faulted on a repeat, the answer was `Incomplete(RecordStep)`, whose text says the totals were updated. After a strand at the totals step they may not have been.
+- **Fix.** A new `LookupFailed` answers 503 `incomplete` with neutral wording: "The adjustment is not finished. Repeat the same request to complete it." (removal: "The removal is not finished. ..."). It names neither the totals nor the record step. The next repeat, with the lookup healed, finishes whatever is left. The path where `RecordAsync` itself faults keeps its record-step wording (the totals did land there).
+- **Tests.** An add and a removal each stranded at the totals step, then repeated with the stored-record lookup faulting: 503, the neutral wording, no claim that the totals were updated, no totals write by the faulted repeat; then a healed repeat is applied with one record. Both fail before, pass after.
+
+### Counts and gates
+
+- Filtered `Sprk.Bff.Api.Tests` (Adjustment, InvoiceTotals, DecisionRecordWriter, DecisionActionCatalog, DecisionNote, InvoiceLineDecision, InvoiceApproval, InvoiceRejectReturn, SubmissionOverride, DecisionCommit): 2236 passed, 0 failed (includes the 15 new). `Spaarke.ArchTests` (Invoice, Decision, Catalog): 151 passed. `dotnet build src/server/api/Sprk.Bff.Api/ --warnaserror`: 0 warnings, 0 errors.
+- Publish size: two small functions added; not re-measured this round (limit d).
+
+### Known limits (this round)
+
+- **(a)** A strand repeat can rewrite an older adjustment's note into `sprk_decisionnote` over a newer one. Narrow: a record-step fault, a second reviewer and a repeat. The column has no reader today; revisit if one is added (see K2).
+- **(b)** An unreadable stored record on a repeat is a 503 that no repeat finishes. This matches the add-line precedent (see K1).
+- **(c)** Behaviour change: a repeat by a different reviewer is 409 `id_reused` (see K5). On a removal this is reachable from a stale page; the 095f-2ui client should reload the list on that 409.
+- **(d)** Publish size was measured against the base sha, not a fresh master build; it will be re-measured at the master merge.
+- **(e)** ISS-030 (filed separately): a refused recalculation after a removal leaves the line deactivated with stale totals. Pre-existing; this task means its record is also never written.
