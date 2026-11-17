@@ -17,7 +17,14 @@
   - send uac-r2 a private message about the new authorization surface;
   - merge, run the filtered tests, mark done;
   - then iss034b (client).
-- Owner questions (a)–(e) are still open (details were given to the owner 2026-11-17); (f) is answered.
+- Review results:
+  - Opus review: no Critical findings.
+  - ontology-r1: catalog entry PASS (keep Tier4; ExternallyVisible suggested).
+  - uac-r2: authorization sound; F1 is a second operator being blocked after an interrupted finish. K2 is the static Single() lookup. They also asked about a disabled decider.
+  - Fix round 1 is running on `task/ebilling-iss034a-r1` from 63fc8c012b. A second verifier pass on the fix diff follows.
+- **In flight: iss028** (EB-D-248, Sonnet implementer, branch `task/ebilling-iss028` from 85ad9419f5).
+- **Next:** 084h-5 (EB-D-247, duplicate check: design with ontology-r1), then 095f-2e2 (EB-D-245, B′).
+- Found in passing (to file): the invoice decision lock expires after 2 minutes, so an overlong decision can overlap a second one and produce two records under one key. This is shared by every decision path.
 
 - **iss031 ✅ merged ececf32dbd** (ISS-031 #2882 closed). Review plus 2 rounds:
   - A blocked Override or Return refuses with 409 `other_decision_pending` (wording depends on the decider) while the other verb's record exists.
@@ -57,7 +64,7 @@
 - **Filed this wave:** ISS-026 / #2877 (RecordProcedures has no ESLint config, outside client-lint), ISS-027 / #2878 (Reason boxes cut at 2000 silently), ISS-028 / #2879 (correction rows not writer-only — owner question), ISS-029 / #2880 (line repeat with other content → 503 that never completes; the shipped client can't reach it).
 - **Wave 2 ✅:** 084h-3 bb4ad3f578 (ADR-004 Path A pending owner), 095f-2a 7849bd05a0; earlier 084h-2, 095f-2e1, 095f-2s.
 - **Test gate rule:** never run the whole BFF test project in one process on this machine (load timeouts). Use CI's five shards (scratchpad `run-shards.ps1`); known flaky #2543. Run the shards again before any master merge. Implementer agents use filtered runs.
-- **HARD GATE before work → master:** reject/return/override/blocked return always write `sprk_invoice.sprk_decisionnote`, so no BFF carrying 095f-2a/2c may reach an environment before `Deploy-EbillingDecisionNoteColumns.ps1 -Apply` ran there (else 503). Dev BFFs deploy from master (several projects), so the dev column apply (owner question (c), uac-r2 notices before and after; it also creates `sprk_invoicecorrection.sprk_note` for 2d2) must precede the master merge. Other environments get it via 079's SpaarkeMaster sync.
+- **Dev column gate CLEARED 2026-11-17:** `Deploy-EbillingDecisionNoteColumns.ps1` ran on dev with the owner's go (question (c)) and uac-r2 notices before and after: -WhatIf, -Apply and -Verify all exit 0. Both `sprk_invoice.sprk_decisionnote` and `sprk_invoicecorrection.sprk_note` are in SpaarkeMaster on dev. Every other environment still needs the columns before a BFF carrying 095f-2a/2c (else 503); they get them through 079's SpaarkeMaster sync.
 - **Deploy order elsewhere:**
   - Columns first: 079 syncs `sprk_firmdescription`, `sprk_rejectionreason`, `sprk_decisionnote` and `sprk_invoicecorrection.sprk_note`, and empties both pending lists. Then a BFF carrying 130e-1.
   - 079 takes the SpaarkeMaster version after uac-r2's 1.3.2.0 (merged 57431c8e6a) and keeps InvoiceFamilyFieldLockSourceGuardTests green.
@@ -79,7 +86,7 @@
 
 ### Open owner questions
 
-1. ~~Ten design answers~~ ANSWERED 2026-11-16: EB-D-239 to EB-D-243 (decisions-log). POMLs written: 084h-2/3/4, 095f-2s/2a/2c/2d1/2e1/2b/2d2/2ui. **Open (asked 2026-11-16, unanswered):** (a) the internal Correction path for 095f-2e2: B′ recommended / A / D (design §16); (b) is the external allow-list enough for `sprk_decisionnote`, or field security so only reviewers see it (uac-r2: external-flagged licensed users can read it in the MDA by role depth); (c) the go for the dev apply of 095f-2s's two columns (uac-r2 notices before and after) — now a HARD GATE before any master merge; (d) [asked 2026-11-17] confirm the ADR-004 §6.5 Path A exception for 084h-3 (receive-side idempotency not atomic, #984; same as ontology 149 K2 and 084h-1 K-b; ontology-r1 no objection); (e) [asked 2026-11-17] ISS-028 / #2879: make `sprk_invoicecorrection` writer-only in RecordTableRules (`CreatedOnlyByItsWriter`) or keep it generic-writable and add a writers guard; (f) [asked 2026-11-17] ISS-034 / #2888: an operator path for a blocked decision stranded by a decider who is gone (admin "finish as operator" route recommended), made reachable by the ISS-031 guard.
+1. ~~Ten design answers~~ ANSWERED 2026-11-16: EB-D-239 to EB-D-243 (decisions-log). POMLs written: 084h-2/3/4, 095f-2s/2a/2c/2d1/2e1/2b/2d2/2ui. **ALL ANSWERED 2026-11-17:** (a) B′ → EB-D-245 (task 095f-2e2; the SPA firm resubmission after Return already exists, task 104); (b) no field security → EB-D-246; (c) dev apply done (see the cleared gate above); (d) build a duplicate check, no Path A → EB-D-247 (task 084h-5, design with ontology-r1); (e) writer-only → EB-D-248 (task iss028); (f) option 1 → EB-D-244 (iss034a/b). The original questions, for reference: (a) the internal Correction path for 095f-2e2: B′ recommended / A / D (design §16); (b) is the external allow-list enough for `sprk_decisionnote`, or field security so only reviewers see it (uac-r2: external-flagged licensed users can read it in the MDA by role depth); (c) the go for the dev apply of 095f-2s's two columns (uac-r2 notices before and after) — now a HARD GATE before any master merge; (d) [asked 2026-11-17] confirm the ADR-004 §6.5 Path A exception for 084h-3 (receive-side idempotency not atomic, #984; same as ontology 149 K2 and 084h-1 K-b; ontology-r1 no objection); (e) [asked 2026-11-17] ISS-028 / #2879: make `sprk_invoicecorrection` writer-only in RecordTableRules (`CreatedOnlyByItsWriter`) or keep it generic-writable and add a writers guard; (f) [asked 2026-11-17] ISS-034 / #2888: an operator path for a blocked decision stranded by a decider who is gone (admin "finish as operator" route recommended), made reachable by the ISS-031 guard.
 2. ~~Second `word-add-in-r1` session~~ RESOLVED 2026-11-16 (owner): word-add-in-r1 runs on the Ryzen desktop, which is this machine (RGS_RYZEN9950X). The local `word-add-in-r1` session is the right one; the remote one is no longer listed.
 
 **Premise correction to log with EB-D-239+:**
