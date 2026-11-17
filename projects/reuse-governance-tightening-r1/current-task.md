@@ -1,56 +1,24 @@
 # Current Task — Reuse Governance Tightening R1
 
-> State, not history (root CLAUDE.md §5). Rewrite at each checkpoint; keep ≤ 10 KB.
-> Decisions live in `design.md` §11 and `notes/decisions.md`; narrative lives in the commit messages.
+> State, not history (root CLAUDE.md §5). Decisions: `design.md` §11 and `notes/decisions.md`; narrative: commit messages.
 
 ---
 
-**Checkpoint 2026-11-15** (after task 035). Branch `work/reuse-governance-tightening-r1`. Items 1–3 merged to master (PR #2751). Item-4 changes (031–034) and 040 are on the branch only — no PR yet (owner decides the item-4 PR shape; merging SpaarkeAi to master auto-deploys it to DEV).
+**Task ID**: none · **Status**: none · **Project**: Complete and archived (2026-11-17)
 
-**Done (15/19)**: 001, 002, 010, 011, 012, 020, 021, 030, 031, 032, 033, 034, 035, 041, 042.
-- 030–034: package reviews approved ("Approve all"); `@spaarke/ai-context`, `@spaarke/legal-workspace`, `@spaarke/document-operations` retired; six remaining actions filed as DEF-001..006 (#2801–#2806), ISS-004 #2807, ISS-005 #2808.
-- 035 (2026-11-15): SpaarkeAi + SemanticSearch deployed to DEV; all four POML ui-tests pass (Open in web, Assistant context, Worklist/registry, SemanticSearch open + Download, dark mode); Delete not run by owner choice; no hotfix. `notes/035-smoke.md`.
+**Next action**: Owner decides on the final docs PR. Then the worktree can be removed with `scripts/worktree/Remove-WorktreeSafe.ps1` whenever the owner wants.
 
-**Active task: 080 (in progress, FULL, opus/high)** — adversarial review of items 1–4 + PRs. Started 2026-11-15.
-- Done: step 1 — origin/master merged into the branch (clean, 368 commits); conflict-check soft warn only (#935 dormant draft on ADR-012 + census test; #909 dependabot on two workflows). Master introduced no new import of a retired package.
-- Step 2 running: ONE `adversarial-reviewer` (fable) launch over range A `8c05f5b70f` (items 1–3, merged as #2751 without this pass) + range B `origin/master...HEAD` minus 040's three files; report → scratchpad `080-review-report.md`, then save to `notes/080-review.md`. Do NOT launch a second fable pass (constraint) unless a fix changes the approach.
-- Lead to triage with the report: `src/solutions/LegalWorkspace/package-lock.json:207` still lists `@spaarke/document-operations` (stale lock; check whether any build path fails).
-- NEXT: triage (F fix / K record / out-of-scope file+report) → scoped sonnet re-check of fixes → builds/tests incl. `SharedPackageCensus` ArchTests → ask owner before each PR (items 1–3 are already on master via #2751, so likely only the item-4 PR, plus a fixes PR for any range-A findings).
+## State
 
-**Also in progress: task 040 (STANDARD)** — Learn MCP for the researcher. Committed + pushed in `cb613e3098` (`.mcp.json` `microsoft-learn` http server; `researcher.md` tool allow-list + research order + privacy line; `knowledge/README.md` approval note). Endpoint confirmed: no auth, streamable HTTP, three tools; escalation trigger not fired. Known limit (K): tool names may change → allow-list update.
-- NEXT for 040: the owner approves the `microsoft-learn` project MCP server on this machine (it loads at session start — open a new session in this worktree, or run `claude` here and approve in `/mcp`). Then: one `researcher` run whose answer cites a Learn MCP result → `notes/040-learn-mcp.md` → POML completed + TASK-INDEX ✅ → board 16 → owner OK → own PR from a temp worktree off origin/master + cherry-pick `cb613e3098` (only 040's files).
+- 19/19 tasks done. Merged to master: #2751 (items 1–3), #2705 (5c), #2706 (5e), #2843 (item 4), #2873 (5a). 5(f) C# LSP: not adopted. 5(b): deferred by design.
+- SpaarkeAi DEV auto-deploy from the #2843 merge succeeded (2026-11-17).
+- Issue #2682 closed; board Status Completed, Closed Date 2026-11-17, Tasks Completed 19, AI spend $184.30 / 1,461 calls. `.archived` marker written.
+- **Not yet on master** (branch `work/reuse-governance-tightening-r1` only): task 043 record (`notes/csharp-lsp-trial.md`, design.md §10 item 6, `docs/procedures/testing-and-code-quality.md` "Agent Code-Navigation Tools"), the ISS-001 pattern fix (`.claude/patterns/ai/node-executor-authoring.md`; issue #2683 already closed), the wrap-up docs (README, plan, TASK-INDEX, test-diet report, lessons learned, `.archived`), and the `scripts/ai-cost` item-list limit fix. They need one docs PR, which the owner must approve first.
 
-**Remaining after 040**: 043 (C# LSP A/B trial — needs the operator), 080 (one adversarial review over items 1–4, then the item-4 PR with owner OK and owner-chosen shape), 090 (wrap-up incl. `/test-diet`).
+## Open follow-ups (filed, stay open after close)
 
-**Open, reported to owner**
-- ISS-001 #2683 — `node-executor-authoring.md` still names `ActionType` (≈15 min; offered to fix here).
-- 042 known limits: S2 prose-only (K1); three integration-test projects set `TreatWarningsAsErrors=false` (K4, `notes/042-cs0618.md`).
-- DEV data (not code): Navigator recent items (`sprk_navitems`) point at deleted records → 404 console noise on Console load.
-
-**Registered**: Project Issue #2682 under Epic #427, Board #2 (item `PVTI_lAHODW0Pv84BEgWuzhHuX4E`, Tasks Completed field `PVTF_lAHODW0Pv84BEgWuzhWPlLY`), label `reuse-governance-tightening-r1`.
-
-## Standing directives (owner)
-
-- No PR unless the owner asks or approves. Never `git stash` (shared stack). Never commit secrets.
-- OQ-2: if the reuse scan needs effort above `low`, show the owner the measured token/cost impact first.
-- OQ-5 / NFR-10: the 3-package limit limits effort, never significance — every defect is fixed or reported by name.
-- Do not silently re-adopt design.md §10 rejected alternatives or §10.7 ROI cuts.
-- `.claude/` edits run in the main session only. DEV only; any further DEV deploy needs the owner's explicit OK.
-- Learn MCP queries never contain customer data, tenant names or secrets.
-- nightly-health changes: verify by `workflow_dispatch` on the branch (alerts dry-run off master).
-
-## Gotchas
-
-- `code-mapper` is read-only and fact-only; the orchestrator judges and writes `notes/reuse-scan.md`.
-- Repo-wide scanners must exclude `.claude/worktrees/agent-*/`.
-- Full `Sprk.Bff.Api.Tests` takes ~2 h here and times out host-based contract tests when other sessions load the machine (#1724). Verify failures by rerunning the affected classes in small chunks.
-- `Test-InstructionPaths.ps1` scans `git ls-files` — stage a new file before checking it. Archived skills go to `.claude/archive/YYYY-MM-DD/`.
-- Pre-commit hook needs prettier: prepend `C:\code_files\spaarke\node_modules\.bin` to PATH; no `--no-verify`. Commit with an explicit pathspec and `git commit -F <file>`. If prettier reformats a staged file, `git reset -q -- <path>` clears the stale index entry.
-- In-app browser DEV sign-in: choose **Work or school account** (the personal account with the same address fails with AADSTS50020).
-- `gh project item-list` can miss new items — resolve item ids via GraphQL `issue.projectItems`.
-- Bash can hang on this machine — prefer PowerShell; never `python3` in Bash (use `py -3`).
-
-## Context sources
-
-- `design.md` §11 (decisions), `spec.md`, `plan.md`, `notes/decisions.md`, `notes/defer-issues.md`, `notes/package-reviews.md`, `notes/035-smoke.md`.
-- Auto-memory: `project_reuse-governance-tightening-r1.md` in the `C--code-files-spaarke` memory folder.
+- DEF-001..006 (#2801–#2806): the six remaining package actions.
+- ISS-004 #2807, ISS-005 #2808, ISS-006 #2841, ISS-007 #2842.
+- OQ-8 sweep tuning after four weekly runs (the alert counts touched files as "new"; a real fix needs a baseline, cut in design.md §10.7). Alert #2866 is open.
+- `.claude/skills/devops-project-start/SKILL.md:57` uses `--limit 1000` for `gh project item-list` (board at 576 items).
+- Three docs outside `.claude/` still say `ActionType` (listed under ISS-001 in `notes/defer-issues.md`).

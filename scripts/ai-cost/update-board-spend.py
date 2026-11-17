@@ -52,6 +52,23 @@ F_ALLOC = "PVTF_lAHODW0Pv84BEgWuzhncDeA"   # "AI Cost (allocated)" - NUMBER
 # Re-derive these IDs if the board is ever rebuilt:
 #   gh project field-list 2 --owner spaarke-dev --format json
 
+# `gh project item-list` returns at most this many items. The board passed 500 items in 2026-11, and the
+# old `-L 500` silently dropped the newest projects, which then read as "not registered".
+ITEM_LIST_LIMIT = 5000
+
+
+def list_board_items():
+    """Every item on the board, from `gh project item-list`. Raises if the limit may have cut the list."""
+    r = subprocess.run(
+        ["gh", "project", "item-list", PROJECT_NUMBER, "--owner", OWNER,
+         "--format", "json", "-L", str(ITEM_LIST_LIMIT)],
+        capture_output=True, text=True, encoding="utf-8", errors="replace", check=True,
+    )
+    items = json.loads(r.stdout)["items"]
+    if len(items) >= ITEM_LIST_LIMIT:
+        raise SystemExit(f"gh project item-list returned {len(items)} items, the limit: raise ITEM_LIST_LIMIT")
+    return items
+
 def board_number(item, field_name):
     """Current numeric value of a custom field on a `gh project item-list` entry, or None if unset.
 
@@ -68,14 +85,8 @@ def board_projects():
     """Return [(item_id, slug, current_spend, current_calls), ...] for every Type=Project item.
 
     current_* is the figure already on the board (None if never set)."""
-    r = subprocess.run(
-        ["gh", "project", "item-list", PROJECT_NUMBER, "--owner", OWNER,
-         "--format", "json", "-L", "500"],
-        capture_output=True, text=True, encoding="utf-8", errors="replace", check=True,
-    )
-    items = json.loads(r.stdout)["items"]
     out = []
-    for i in items:
+    for i in list_board_items():
         if i.get("type") != "Project":
             continue
         m = re.search(r"\[Project\]:\s*(.+)", i["content"]["title"])
