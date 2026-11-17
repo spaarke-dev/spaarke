@@ -17,6 +17,7 @@
 - **Fixed a 130e-1 regression:** `FirmOutcomeScopeTests` "130c happy path" seeded no `billing.reason` evidence (efef15f29f, fixture only).
 - **work pushed 2026-11-17 at 5508b576fe.** The single-process full BFF run times out under load on this machine (474/478 TaskCanceled; never run it that way). Gate = CI's five shards (scratchpad `run-shards.ps1`): 4 clean, `rest` 1 failure = known flaky #2543 (uac-r2), passes 3/3 alone. ArchTests 2656/0.
 - **Next waves:** 084h-4, 095f-2c, 2d1, 2d2 (after 2a / 084h-3 merge); then 095f-2b (ontology full review), 2ui; 095f-2e2 after the owner's pick. 130e-2 is still open (Rule Review editor field; no POML yet).
+- **HARD GATE before work → master (095f-2a review, 2026-11-17):** reject/return now always write `sprk_invoice.sprk_decisionnote`, so no BFF carrying 095f-2a may reach an environment before `Deploy-EbillingDecisionNoteColumns.ps1 -Apply` ran there (else every reject/return is 503 at "transition", claim held). Dev BFFs deploy from master (several projects) → the dev column apply (owner question (c), uac-r2 notices before/after) must precede the master merge; other environments get it via 079 SpaarkeMaster sync.
 - **Deploy order elsewhere:** columns first (079 syncs `sprk_firmdescription`, `sprk_rejectionreason`, and now `sprk_decisionnote` + `sprk_invoicecorrection.sprk_note`, and empties both pending lists), then a BFF carrying 130e-1. 079 takes the SpaarkeMaster version after uac-r2's 1.3.2.0 (merged 57431c8e6a) and keeps InvoiceFamilyFieldLockSourceGuardTests green.
 ### Done 2026-11-16 (pushed)
 
