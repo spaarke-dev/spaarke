@@ -41,6 +41,8 @@ export interface AssignRequest {
   mode: AssignMode;
   pinnedVersionId?: string;
   reason?: string;
+  /** Task 084h-4: the optional note for the change's Decision Record. Blank is sent as absent. */
+  note?: string;
 }
 
 /** The body of `rule-overrides/exclude`: the reason is required; `firmId` limits the exclusion to one firm's invoices. */
@@ -48,6 +50,8 @@ export interface ExcludeRuleRequest {
   policyId: string;
   reason: string;
   firmId?: string;
+  /** Task 084h-4: the optional note for the change's Decision Record. Blank is sent as absent. */
+  note?: string;
 }
 
 /**
@@ -59,7 +63,23 @@ export interface ChangeRuleRequest {
   reason: string;
   firmId?: string;
   ruleBody: string;
+  /** Task 084h-4: the optional note for the change's Decision Record. Blank is sent as absent. */
+  note?: string;
 }
+
+/**
+ * Task 084h-4 (design 7.1): what became of a committed change's Decision Record, as the server answers it (`decisionRecord`). The member is
+ * absent from an older server's answer. `Recorded` and `Queued` (the server retries a queued record, task 084h-3) need no word from this page;
+ * `NotRecorded` means the change stands but its record could not be written or queued: the page warns.
+ */
+export interface DecisionRecordStatus {
+  status: string;
+  recordId?: string | null;
+  errorCode?: string | null;
+}
+
+/** The status a change's Decision Record has when it could not be written or queued (`OverrideDecisionRecord.NotRecorded`). */
+export const DECISION_RECORD_NOT_RECORDED = 'NotRecorded';
 
 /** What a created override row looks like (`OverrideView` on the server). */
 export interface OverrideCreated {
@@ -71,6 +91,8 @@ export interface OverrideCreated {
   policyId: string | null;
   firmId: string | null;
   reason: string | null;
+  /** Task 084h-4: absent when the server predates the member. */
+  decisionRecord?: DecisionRecordStatus | null;
 }
 
 /** The read-only confirmation before a removal (`OverrideRemovalPreview`). A plain removal has no warning and no count. */
@@ -92,6 +114,8 @@ export interface Removed {
   affectedText: string | null;
   visibleOpenInvoices: number | null;
   message: string | null;
+  /** Task 084h-4: absent when the server predates the member. */
+  decisionRecord?: DecisionRecordStatus | null;
 }
 
 /** What a change wrote (`RuleChangedView`): the Exclude row, the record rule that takes the rule's place, and what the close of the base rule's findings did. */
@@ -205,7 +229,8 @@ export interface OverridesApi {
   changeRule(core: CoreRoute, recordId: string, body: ChangeRuleRequest): Promise<WriteResult<RuleChanged>>;
   /** `signal` abandons the read (the wizard closed); a read that takes longer than the client's timeout is a failure with {@link CODE_TIMED_OUT} (readRace.ts). */
   removalPreview(core: CoreRoute, recordId: string, overrideId: string, signal?: AbortSignal): Promise<WriteResult<RemovalPreview>>;
-  removeOverride(core: CoreRoute, recordId: string, overrideId: string): Promise<WriteResult<Removed>>;
+  /** Task 084h-4: `note` (optional) travels as a JSON body `{ "note" }`; with none the DELETE has no body at all. */
+  removeOverride(core: CoreRoute, recordId: string, overrideId: string, note?: string): Promise<WriteResult<Removed>>;
   /** The versions of a Procedure, for the Pin picker (task 081's read). */
   procedureVersions(procedureId: string): Promise<WriteResult<PinnableVersion[]>>;
 }
@@ -228,6 +253,34 @@ const BAD_BODY: WriteFailure = { status: 200, errorCode: null, title: 'The serve
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 
 const JSON_HEADERS = { 'Content-Type': 'application/json' };
+
+/**
+ * Task 084h-4: the server's limit on a note, after trimming (`InvoiceCorrectionNote.MaxLength`; 400 `assignment.note_too_long` above it).
+ * The same number as a reason's, and the input's limit.
+ */
+export const MAX_NOTE_CHARS = 2000;
+
+/** What the server refuses in a note (`InvoiceCorrectionNote`): a control character other than newline, carriage return and tab. */
+// eslint-disable-next-line no-control-regex
+const REFUSED_CONTROL = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F]/;
+
+/** The note to send: trimmed, or undefined when it is blank (a blank note is absent, never null or ""). */
+export function noteToSend(note: string | null | undefined): string | undefined {
+  const t = (note ?? '').trim();
+  return t.length > 0 ? t : undefined;
+}
+
+/** Why a note cannot be sent (the server's 400 `assignment.note_too_long` / `assignment.note_invalid_characters`, said before the call), or null. */
+export function noteProblem(note: string | null | undefined): string | null {
+  const t = noteToSend(note);
+  if (t === undefined) return null;
+  if (t.length > MAX_NOTE_CHARS) return `The note may be at most ${MAX_NOTE_CHARS} characters.`;
+  if (REFUSED_CONTROL.test(t)) return 'The note holds a control character. Only line breaks and tabs are allowed.';
+  return null;
+}
+
+/** True when a change's answer says its Decision Record was neither written nor queued. Absent or any other status: false. */
+export const notRecorded = (v: { decisionRecord?: DecisionRecordStatus | null } | null | undefined): boolean => v?.decisionRecord?.status === DECISION_RECORD_NOT_RECORDED;
 
 /** Drop the members that are undefined or blank, so the body is exactly the route's request shape. */
 function compact<T extends object>(body: T): Record<string, unknown> {
@@ -256,7 +309,7 @@ export function createOverridesApi(fetchFn: AuthenticatedFetchFn, bffBaseUrl: st
         {
           method: 'POST',
           headers: JSON_HEADERS,
-          body: JSON.stringify(compact({ procedureId: body.procedureId, mode: body.mode, pinnedVersionId: body.pinnedVersionId, reason: body.reason?.trim() })),
+          body: JSON.stringify(compact({ procedureId: body.procedureId, mode: body.mode, pinnedVersionId: body.pinnedVersionId, reason: body.reason?.trim(), note: noteToSend(body.note) })),
         },
         created
       ),
@@ -264,14 +317,14 @@ export function createOverridesApi(fetchFn: AuthenticatedFetchFn, bffBaseUrl: st
     excludeRule: (core, recordId, body) =>
       run(
         excludeRuleUrl(bffBaseUrl, core, recordId),
-        { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify(compact({ policyId: body.policyId, reason: body.reason.trim(), firmId: body.firmId })) },
+        { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify(compact({ policyId: body.policyId, reason: body.reason.trim(), firmId: body.firmId, note: noteToSend(body.note) })) },
         created
       ),
 
     changeRule: (core, recordId, body) =>
       run(
         changeRuleUrl(bffBaseUrl, core, recordId),
-        { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify(compact({ policyId: body.policyId, reason: body.reason.trim(), firmId: body.firmId, ruleBody: body.ruleBody })) },
+        { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify(compact({ policyId: body.policyId, reason: body.reason.trim(), firmId: body.firmId, ruleBody: body.ruleBody, note: noteToSend(body.note) })) },
         b => (isObject(b) && isObject(b.override) && typeof b.override.id === 'string' && isObject(b.recordRule) ? (b as unknown as RuleChanged) : null)
       ),
 
@@ -290,10 +343,14 @@ export function createOverridesApi(fetchFn: AuthenticatedFetchFn, bffBaseUrl: st
       }
     },
 
-    removeOverride: (core, recordId, overrideId) =>
-      run(overrideUrl(bffBaseUrl, core, recordId, overrideId), { method: 'DELETE' }, b =>
+    removeOverride: (core, recordId, overrideId, note) => {
+      // A DELETE has a body only when a note is given (EB-D-239 Q8); otherwise it is exactly the request task 089 always took.
+      const sent = noteToSend(note);
+      const init: RequestInit = sent === undefined ? { method: 'DELETE' } : { method: 'DELETE', headers: JSON_HEADERS, body: JSON.stringify({ note: sent }) };
+      return run(overrideUrl(bffBaseUrl, core, recordId, overrideId), init, b =>
         isObject(b) && typeof b.overrideId === 'string' ? (b as unknown as Removed) : null
-      ),
+      );
+    },
 
     procedureVersions: procedureId =>
       run(procedureUrl(bffBaseUrl, procedureId), { method: 'GET' }, b => {

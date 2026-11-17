@@ -13,7 +13,7 @@
  */
 
 import type { OverrideView, ProcedureItem, RuleItem, RuleMark } from '../../services/recordProceduresApi';
-import type { AssignMode, OverridesApi, WriteFailure } from '../../services/overridesApi';
+import { notRecorded, type AssignMode, type DecisionRecordStatus, type OverridesApi, type WriteFailure } from '../../services/overridesApi';
 import type { CoreRoute } from '../../services/recordProceduresApi';
 import type { AllowedSteps } from '../../services/model';
 import { formFor } from './ruleForms';
@@ -411,23 +411,34 @@ export interface PlanRun {
   removed: Array<{ ruleSwitchedOff: boolean; closeComplete: boolean; affectedText: string | null; message: string | null }>;
   /** The `RuleChanged` answers (task 084c): what the close of the base rule's findings did, for the success screen. */
   changed: Array<{ closeComplete: boolean; affectedText: string | null; message: string | null }>;
+  /**
+   * Task 084h-4: true when an accepted call's answer said its Decision Record was NotRecorded (the change saved; its record was neither
+   * written nor queued). `Queued` and `Recorded`, and an answer with no `decisionRecord` member, leave it false.
+   */
+  notRecorded: boolean;
 }
 
-/** Runs the plan's calls in order and stops at the first refusal. */
-export async function executePlan(api: OverridesApi, core: CoreRoute, recordId: string, plan: Plan): Promise<PlanRun> {
-  const run: PlanRun = { ok: true, completed: 0, removed: [], changed: [] };
+/**
+ * Runs the plan's calls in order and stops at the first refusal. Task 084h-4: `note` (optional; blank means none) goes on every call of the
+ * plan, so a Pin-to-Follow plan (remove, then assign) sends the same note on both, and each call files its own Decision Record.
+ */
+export async function executePlan(api: OverridesApi, core: CoreRoute, recordId: string, plan: Plan, note?: string): Promise<PlanRun> {
+  const run: PlanRun = { ok: true, completed: 0, removed: [], changed: [], notRecorded: false };
   for (const step of plan.steps) {
     const result =
       step.kind === 'remove'
-        ? await api.removeOverride(core, recordId, step.overrideId)
+        ? await api.removeOverride(core, recordId, step.overrideId, note)
         : step.kind === 'assign'
-          ? await api.assignProcedure(core, recordId, { procedureId: step.procedureId, mode: step.mode, pinnedVersionId: step.pinnedVersionId, reason: step.reason })
+          ? await api.assignProcedure(core, recordId, { procedureId: step.procedureId, mode: step.mode, pinnedVersionId: step.pinnedVersionId, reason: step.reason, note })
           : step.kind === 'changeRule'
-            ? await api.changeRule(core, recordId, { policyId: step.policyId, reason: step.reason, firmId: step.firmId, ruleBody: step.ruleBody })
-            : await api.excludeRule(core, recordId, { policyId: step.policyId, reason: step.reason, firmId: step.firmId });
+            ? await api.changeRule(core, recordId, { policyId: step.policyId, reason: step.reason, firmId: step.firmId, ruleBody: step.ruleBody, note })
+            : await api.excludeRule(core, recordId, { policyId: step.policyId, reason: step.reason, firmId: step.firmId, note });
     if (!result.ok) return { ...run, ok: false, failure: result.failure };
     if (step.kind === 'remove') run.removed.push(result.value as PlanRun['removed'][number]);
     if (step.kind === 'changeRule') run.changed.push(result.value as PlanRun['changed'][number]);
+    // A change's answer carries the member once: on the row itself, or (a rule change) inside its `override`.
+    const v = result.value as { decisionRecord?: DecisionRecordStatus | null; override?: { decisionRecord?: DecisionRecordStatus | null } };
+    if (notRecorded(v) || notRecorded(v.override)) run.notRecorded = true;
     run.completed += 1;
   }
   return run;

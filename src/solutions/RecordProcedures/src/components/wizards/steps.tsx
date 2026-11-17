@@ -12,10 +12,10 @@
  */
 
 import * as React from 'react';
-import { Button, Caption1, MessageBar, MessageBarBody, MessageBarTitle, Radio, RadioGroup, Spinner, Text, makeStyles, tokens } from '@fluentui/react-components';
+import { Button, Caption1, Field, MessageBar, MessageBarBody, MessageBarTitle, Radio, RadioGroup, Spinner, Text, Textarea, makeStyles, tokens } from '@fluentui/react-components';
 import type { RemovalPreview, WriteFailure } from '../../services/overridesApi';
 import type { DryRunView } from '../../services/dryRunApi';
-import { NOT_ALLOWED_BOTH } from './plan';
+import { MAX_REASON_CHARS, NOT_ALLOWED_BOTH } from './plan';
 import { ADVISORY_LINE, NOT_LISTED, UNCHECKED_CLOSE_LINE, affectedLine, dryRunFailureText, impactChanges, previewFailureText, type ImpactChange } from './impact';
 
 export const useWizardStyles = makeStyles({
@@ -323,11 +323,16 @@ export const ImpactStep: React.FC<{
 // Confirm
 // ─────────────────────────────────────────────────────────────────────────────
 
+/** Task 084h-4 (EB-D-239 Q10): said when a change saved but its Decision Record was neither written nor queued. */
+export const NOT_RECORDED_LINE = 'The change was saved, but its decision record could not be written. Tell your administrator.';
+
 export const ConfirmStep: React.FC<{
   rows: ReadonlyArray<readonly [string, React.ReactNode]>;
   /** A removal that neither the dry run nor the removal preview could check: say so (it does not block). */
   uncheckedClose?: boolean;
-}> = ({ rows, uncheckedClose }) => {
+  /** Task 084h-4: the optional note for the change's Decision Record, and its edit. Absent: no Note box. */
+  note?: { value: string; onChange: (value: string) => void; problem: string | null };
+}> = ({ rows, uncheckedClose, note }) => {
   const s = useWizardStyles();
   return (
     <div className={s.step} data-testid="confirm-step">
@@ -337,6 +342,16 @@ export const ConfirmStep: React.FC<{
         </MessageBar>
       )}
       <KeyValues rows={rows} />
+      {note && (
+        <Field
+          label="Note"
+          hint={`Optional. Kept in the decision record of this change. At most ${MAX_REASON_CHARS} characters.`}
+          validationState={note.problem ? 'error' : 'none'}
+          validationMessage={note.problem ?? undefined}
+        >
+          <Textarea value={note.value} onChange={(_, d) => note.onChange(d.value)} resize="vertical" maxLength={MAX_REASON_CHARS} data-testid="confirm-note" />
+        </Field>
+      )}
       <Caption1 className={s.muted}>{O21_LINE}</Caption1>
     </div>
   );
