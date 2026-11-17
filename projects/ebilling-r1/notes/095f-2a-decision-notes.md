@@ -53,7 +53,7 @@ These are pinned in `InvoiceDecisionNoteTests` (`NoNote_HashesAsBefore_AndTheCol
 
 ## The writers guard
 
-`InvoiceDecisionNoteWritersGuardTests` scans IL string loads.
+`InvoiceDecisionNoteWritersGuardTests` scans IL string loads and, since review round 1, custom attribute arguments (see below).
 
 - **Decision-note writers.** `sprk_decisionnote` may be named only by:
   - `InvoiceLifecycleService.TransitionAsync`;
@@ -78,7 +78,7 @@ These are pinned in `InvoiceDecisionNoteTests` (`NoNote_HashesAsBefore_AndTheCol
 | The 2000-character and 1-character limits | `NoteUpToTheLimit_IsAccepted` |
 | 2001 characters, `\u0007` and `\u001b` are a 400 before any lock or read | `RefusedNote_Is400_BeforeAnyLockOrRead`, `Approve_RefusedNote_Is400_BeforeAnyLockOrRead` |
 | The reason is checked before the note | `MissingReason_IsRefusedBeforeTheNote` |
-| K-1 (both cases) | `K1_RepeatAfterTheRecord_DropsTheEditedNote`, `K1_RepeatBeforeTheRecord_RecordsTheEditedNote_ColumnKeepsTheFirst` |
+| K-1 (both cases) | `K1_RepeatAfterTheRecord_DropsTheEditedNote`, `K1_RepeatBeforeTheRecord_RecordsTheEditedNote_ColumnKeepsTheFirst`; approve: `Approve_K1_RepeatAfterTheRecord_DropsTheEditedNote`, `Approve_K1_RepeatBeforeTheRecord_RecordsTheEditedNote_ColumnKeepsTheFirst` (review round 1) |
 | No log line carries the note | `NoLogLine_CarriesTheNote` (lifecycle and services) |
 | Approve with no note is unchanged | `Approve_NoNote_IsUnchanged` (null, `""`, whitespace; golden; column unchanged) |
 | An approve note is recorded | `Approve_Note_IsInValuesAndInTheColumn` |
@@ -110,12 +110,10 @@ The goldens were captured on base before any source edit.
 
 ## Deviations and known limits
 
-1. **Approve K-1 gap (not in design §5.3).** In one window, a repeated approve with a different note gets 503 instead of a result:
-   - **The window.** The first approve fails after the writer's record exists but before the portion link (at "signals" or "link"). The claimant's repeat then calls `RecordAsync` again, because there is no link to find the stored record by.
-   - **Outcome with the first note, or no note in both.** The writer finds its record (same key, same hash), and the repeat completes as before this task.
-   - **Outcome with an edited or removed note.** The hash differs, the writer refuses, and the call answers 503 Incomplete at "record". It completes once repeated with the first note.
-
-   This is no new refusal of a valid decision, and nothing is lost. It is still a user-visible snag. The fix is for the approve completion to look up the stored record by key first, as reject and return do (`FindStoredResolvedSetAsync`). That is a change to the approve completion path, so it is left for the coordinator.
+1. **Approve K-1 (fixed in review round 1, F1).** Suppose the first approve fails after its record is written, at "signals" or "link". The claimant's repeat now completes whatever note it carries:
+   - Completion finds the writer-created record by its key and finishes it as it is. It closes the stored set and writes the portion link. It never calls `RecordAsync` again.
+   - The record and the column keep the first note. An edited or removed note is dropped, as K-1 specifies for reject and return.
+   - Before the record exists, the record takes the repeat's note. The column keeps what the first transition wrote.
 2. **Approve body binding.** Approve now binds an optional JSON body. No body, `{}` and `{"note":null}` behave exactly as before (tested). Two cases now fail where the body used to be ignored:
    - A malformed JSON body gets 400.
    - A non-JSON content type with a body gets 415.
@@ -123,3 +121,114 @@ The goldens were captured on base before any source edit.
    No client sends either today.
 3. **Pending decision-note writers in the guard.** The release transaction and the totals path are allowed by the design but do not name the column yet. The guard lists them as allowed without a staleness check, so the later tasks that wire them need no guard edit.
 4. **`reject-invoice` is `ExternallyVisible`.** The firm reads only `sprk_reason`, never the note; this task does not change that. The catalog note parameter is internal input to the record.
+
+## Review round 1
+
+An independent review confirmed these findings. Each is fixed on `task/ebilling-095f-2a`.
+
+### F1: an approve stranded after its record could never complete with another note
+
+**Before.** The first approve (note "A") failed at "signals" or "link" after the record was written. `CompleteOrNoOpAsync` counted a record as existing only when the portion linked to it. So a repeat with no note, or with "B", called `RecordAsync` with a different hash, and the writer refused it (ReviewInvalid). Every repeat answered 503 Incomplete at "record":
+
+- the invoice was Approved;
+- its Signals stayed open;
+- the portion was never linked.
+
+Only a repeat that retyped "A" exactly finished it.
+
+**Fix** (`Services/Finance/InvoiceApprovalService.cs`), the same shape as reject and return:
+
+- When the writer-created record exists (`recorded.Count > 0`) and the link is absent, completion passes `recorded[0]` to `FinishAsync` as the existing record. No second record is written.
+- `FinishAsync`'s existing-record branch closes the stored set, then writes the portion link. That is the new `LinkAsync`, shared with the record-write path.
+- The repeat keeps the FIRST record. An edited or removed note is dropped (K-1).
+
+**Tests** (`tests/integration/data-mutation/Ebilling/InvoiceDecisionNoteTests.cs`):
+
+| Test | Cases | On a29e59aa38 | After the fix |
+|---|---|---|---|
+| `Approve_K1_RepeatAfterTheRecord_DropsTheEditedNote` | "signals", "link" | 2 failed: Incomplete, not Approved | pass |
+| `Approve_StrandedAfterTheRecord_CompletesOnARepeatWithAnotherNote` | "signals" and "link", each with a different note and with no note | 4 failed: Incomplete at "record" | pass. Each case checks Approved, one record (the first), the Signal closed by that record, the portion linked and Approved, and that a further repeat answers AlreadyApproved |
+| `Approve_K1_RepeatBeforeTheRecord_RecordsTheEditedNote_ColumnKeepsTheFirst` | — | passed | pass |
+
+The before-the-record case was already correct. Its test pins the K-1 behaviour and was not expected to fail.
+
+Fail-before was shown by running the new tests on a29e59aa38's source before the service edit: 6 failed, 35 passed of 41.
+
+**Existing test restated.** `InvoiceApprovalServiceTests.ApprovedAmount_IsCoveredByTheHash` (103 K3 SEEDED) asserted the old stranding: a repeat after "link" with a tampered portion amount answered Incomplete at "record". With the fix, that repeat finishes the stored record:
+
+- the answer is Approved with the first record's id;
+- no second record is written;
+- the record's `approvedAmount` is still the frozen one, never 999;
+- the portion is linked.
+
+So the tampered amount is still never recorded. That the amount is inside the record's `Values`, and so inside the hash, stays proven by `Approve_Note_IsInValuesAndInTheColumn`.
+
+### F2: the writers guard missed names in attributes
+
+**Before.** `tests/Spaarke.ArchTests/InvoiceDecisionNoteWritersGuardTests.cs` read IL string loads only. A column passed as a custom attribute argument has no `ldstr`, so it was invisible to the guard. That covers `sprk_decisionnote` or `sprk_correctionnote` in, for example, `[JsonPropertyName("sprk_decisionnote")]` on a DTO.
+
+**Fix.** The guard also reads custom attribute arguments (`CustomAttributeData`) on every scanned type and on its declared members, parameters and return values. Constructor and named arguments are both read, with arrays flattened. A hit is attributed to its place:
+
+- a member of the outermost type: (outermost type, member name);
+- a parameter or return value: (outermost type, its method's name);
+- a type-level attribute: `(type)`;
+- anything on a nested type: `"{nested}.{member}"`, so it can never match an allowed method name.
+
+The "Not covered" list in the file now names what remains uncovered (limit (c) below).
+
+**Test.** The new fact `AttributeControls` covers both columns:
+
+- **Must fire.** One fixture per column names it only in attributes, in three places: the type (`[Description]`, a constructor argument), a DTO property (`[JsonPropertyName]`) and a parameter (a named array argument). Each place is reported.
+- **Must not fire.** The lifecycle and the persister report only their reviewed entries. Each fixture is silent on the other column. An attribute naming an unrelated column is not a hit.
+
+Fail-before was shown by commenting out the attribute scan (`naming.UnionWith(AttributesNaming(...))`) and running the guard. `AttributeControls` failed and the other 4 facts passed. The line was then restored. The real BFF and `Spaarke.Dataverse` scans stay green, so no attribute in either names a note column today.
+
+### F2: the note rule and the reason (documentation)
+
+`InvoiceCorrectionNote`'s summary said the type owns "the text rule, so the writers cannot drift apart". That is not the whole story. A reject or return with no note writes its REASON into `sprk_decisionnote`, and the reason is checked only by its own rule: required, trimmed, at most 2000 characters, and no control-character check.
+
+The summary now says that the text rule applies to notes, and that with no note the column takes the reason under the reason's own rule. Reason validation is unchanged, for contract stability. This is known limit (e) below.
+
+### F2: stale comment
+
+`tests/Spaarke.ArchTests/InvoiceNoteColumnsGuardTests.cs` said "the BFF names neither column today". It now says:
+
+- the BFF names `sprk_invoice.sprk_decisionnote`, through 095f-2a's lifecycle write;
+- it does not yet name `sprk_invoicecorrection.sprk_note`;
+- the pending list covers both.
+
+The client file `src/solutions/InvoiceReview/src/services/decisionApi.ts` is left to task 095f-2ui.
+
+### Gates (review round 1)
+
+| Gate | Result |
+|---|---|
+| `dotnet build src/server/api/Sprk.Bff.Api/ --warnaserror` | Succeeded, 0 warnings, 0 errors |
+| `dotnet test tests/unit/Sprk.Bff.Api.Tests --filter "FullyQualifiedName~Finance\|FullyQualifiedName~Signals\|FullyQualifiedName~Invoice\|FullyQualifiedName~Ebilling"` | 16832 passed, 0 failed, 12 skipped (16844) |
+| `dotnet test tests/Spaarke.ArchTests` | 2661 passed, 0 failed |
+
+### Known limits
+
+(a) **Deploy order.** Reject and return now always write `sprk_decisionnote`. This BFF must never reach an environment before `scripts/ebilling/Deploy-EbillingDecisionNoteColumns.ps1 -Apply` has created the column there:
+
+   - **On dev:** before the work branch merges to master. Several projects deploy dev BFFs from master.
+   - **In every other environment:** in SpaarkeMaster, through task 079.
+
+   Without the column, every reject and return fails 503 at "transition", with the claim held.
+
+(b) **The approve body binding.** Both cases below are answered by the framework before the endpoint filters run. No current caller sends either.
+
+   - Malformed JSON gets the framework's 400, with no `errorCode`.
+   - A non-JSON content type with a body gets 415.
+
+(c) **Guard scope.** The guard does not cover:
+
+   - **The pending writers' behaviour.** The release transaction and the totals path are allowed but not verified until their tasks move them to the built list.
+   - **Overloads.** The allow-lists are keyed by method NAME, so an overload that shares an allowed method's name is allowed too.
+   - **`Spaarke.Core`.** It is not scanned; only the BFF and `Spaarke.Dataverse` are.
+   - **Other metadata.** Assembly- and module-level attributes, const field values, default parameter values, embedded resources and constant data are not read.
+   - **Run-time names.** A name built at run time is not seen.
+
+(d) **Publish delta.** The +4,112 B above was measured against the branch base (5508b576fe), not master, because the work branch carries unmerged code. Review round 1 changes one source file (`InvoiceApprovalService.cs`, a small refactor into `LinkAsync`) plus a doc comment, so it adds no package.
+
+(e) **The column's text with no note is the reason.** That text is checked by the reason's rule (length only), not the note's control-character rule. Changing it would change the reject and return contract, so it is left as is.
