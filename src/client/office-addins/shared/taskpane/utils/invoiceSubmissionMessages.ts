@@ -312,6 +312,70 @@ export const SUBMISSION_ERROR_MESSAGES: Readonly<Record<string, Entry>> = {
   OFFICE_INTERNAL: `Spaarke had a problem saving the email. ${NOTHING}`,
 };
 
+/** ebilling 095g: the refusal that says the record already holds two firms (the view also offers "Open in Spaarke"). */
+export const FIRM_ASSIGN_SLOTS_FULL_CODE = 'ebilling.firm_assign.slots_full';
+
+/** A 400, a 404 with no code (the route is not deployed), a 4xx code this build does not know, or no readable answer. */
+export const FIRM_ASSIGN_GENERIC_MESSAGE = "Spaarke couldn't add the firm right now. Nothing was changed.";
+
+/**
+ * An add that failed with a 5xx the pane has no sentence for (or none at all): the server may have written the firm
+ * before it failed, so this never says nothing was changed. A repeat of the same add changes nothing, so it is safe.
+ */
+export const FIRM_ASSIGN_UNCONFIRMED_MESSAGE =
+  "Spaarke couldn't confirm the firm was added. Try again; adding the same firm again is safe.";
+
+/** The same, for the law-firm list (a search is not an add, so it does not say "add the firm"). */
+export const FIRM_LIST_GENERIC_MESSAGE = "Spaarke couldn't list the law firms right now. Try again.";
+
+/** The list's uniform 404 (an external caller, no user row, or no Read on organizations): not about a record or a firm. */
+export const FIRM_LIST_DENIED_MESSAGE = "You can't list law firms in Spaarke.";
+
+const FIRM_ASSIGN_RECORD_CHANGED_MESSAGE = 'The firms on this record changed. Check them and try again.';
+
+/**
+ * ebilling 095g, `POST /api/finance/core-records/{type}/{id}/firms` and `GET /api/finance/firms` (contract "Contract
+ * for word-add-in-r1 (as built)" in `projects/ebilling-r1/notes/095g-assign-firm.md`). Keyed on `errorCode ?? reasonCode`
+ * ONLY, never on `detail`: one code can carry different `detail` texts (the route's 503 and the filter's 503 do), and
+ * the same code also appears in {@link SUBMISSION_ERROR_MESSAGES} with a submission sentence, so this is its own table.
+ * The pane only ever adds a firm, so `revoke_confirmation_required` can't happen; it gets the "changed" sentence.
+ */
+export const FIRM_ASSIGN_ERROR_MESSAGES: Readonly<Record<string, Entry>> = {
+  'sdap.access.deny.record_unavailable': "This record or firm isn't available to you, or you can't change this record.",
+  'ebilling.firm_assign.record_restricted':
+    'This record is Restricted to internal users, so no firm can be given access to it.',
+  'ebilling.firm_assign.record_secure':
+    'This record is secure, so assigning a firm would give it no access. Use Manage Access to add named people.',
+  'ebilling.firm_assign.record_limited':
+    'This record is limited, so assigning a firm would give it no access. Use Manage Access to add named people.',
+  'ebilling.firm_assign.firm_inactive': 'This firm is inactive. Choose another firm.',
+  'ebilling.firm_assign.not_a_law_firm': 'This organization is not a law firm. Choose a law firm.',
+  'ebilling.firm_assign.firm_no_access': "This firm can't be given access to this record.",
+  [FIRM_ASSIGN_SLOTS_FULL_CODE]: 'Two firms are already assigned. Replace one of them in Spaarke.',
+  'ebilling.firm_assign.firm_already_assigned': 'That firm is already assigned to this record.',
+  'ebilling.firm_assign.record_changed': FIRM_ASSIGN_RECORD_CHANGED_MESSAGE,
+  'ebilling.firm_assign.revoke_confirmation_required': FIRM_ASSIGN_RECORD_CHANGED_MESSAGE,
+  'ebilling.submission.record_unavailable': "Spaarke couldn't do this right now. Try again.",
+  'ebilling.disabled': 'Invoice submission is turned off in Spaarke.',
+};
+
+/** The sentence for a refused or failed firm list / add-a-firm request; unknown or absent codes get the generic one. */
+export function describeFirmAssignRefusal(
+  refusal: { status: number; code: string | undefined },
+  purpose: 'add' | 'list' = 'add'
+): string {
+  const entry =
+    refusal.code !== undefined && Object.prototype.hasOwnProperty.call(FIRM_ASSIGN_ERROR_MESSAGES, refusal.code)
+      ? FIRM_ASSIGN_ERROR_MESSAGES[refusal.code]
+      : undefined;
+  // The list's uniform 404 is not about a record or a firm, so it does not use the add sentence for the same code.
+  if (purpose === 'list' && refusal.code === 'sdap.access.deny.record_unavailable') return FIRM_LIST_DENIED_MESSAGE;
+  if (entry !== undefined) return render(entry, { kind: 'refused', status: refusal.status, code: refusal.code });
+  if (purpose === 'list') return FIRM_LIST_GENERIC_MESSAGE;
+  // A 5xx with no code this build knows: the write may have happened. Only a 4xx can say nothing was changed.
+  return refusal.status >= 500 ? FIRM_ASSIGN_UNCONFIRMED_MESSAGE : FIRM_ASSIGN_GENERIC_MESSAGE;
+}
+
 /** §6 "RecordOwnerRefused reasonCode": the `record_owner_*` family (ProblemDetailsHelper.RecordOwnerRefused). */
 const RECORD_OWNER_PREFIX = 'record_owner_';
 const RECORD_OWNER_MESSAGE = `No owner could be assigned to the new invoice records. ${NOTHING} Ask an administrator to check the record's business unit.`;

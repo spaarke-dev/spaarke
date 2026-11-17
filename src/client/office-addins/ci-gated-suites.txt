@@ -404,3 +404,8 @@ shared/taskpane/components/views/__tests__/InvoiceView.correctionNote.test.tsx
 shared/taskpane/services/__tests__/invoiceSubmissionSeam.correctionNote.test.ts
 shared/taskpane/services/__tests__/invoiceSubmissionService.correctionNote.test.ts
 shared/taskpane/utils/__tests__/invoiceSubmissionMessages.correctionNote.test.ts
+# Task 134 slice C (2026-11-14): add a law firm to the record from the Invoice tab (ebilling 095g) - add only, keyed on the code.
+shared/taskpane/services/__tests__/invoiceSubmissionService.addFirm.test.ts
+shared/taskpane/utils/__tests__/invoiceSubmissionMessages.firmAssign.test.ts
+shared/taskpane/components/__tests__/AddFirmPanel.test.tsx
+shared/taskpane/components/views/__tests__/InvoiceView.addFirm.test.tsx
