@@ -823,4 +823,12 @@ Task 168, owner questions Q1 and Q2 (asked 2026-10-28, explained in detail 2026-
 - **Builder:** ebilling-r1, with a full ontology review (as for 095f-2b). It closes ontology 149 K2 and the invoice-lock overlap.
 - **Open:** one known limit of a derivable id was sent to uac-r2 and the owner by message (access detail kept out of the repo). The merge waits on both accepting it.
 - **Owner choice (2026-11-17, typed in this session): option 1.** Every keyed entry point, the gate included, derives its id with a keyed hash. The key is a per-environment value the BFF reads from Key Vault with its managed identity; if the value is missing, the BFF refuses to start. The value is not a credential: it falls in ADR-028 A6's Spaarke-generated category. An earlier relay of "option 2" (EB-D-251, ebilling-r1) contradicts this; ebilling asked for the owner's confirmation in their session. Creating the dev value is an Azure change that needs the owner's go.
+- **Superseded the same day: "Option 2 narrowed"** (owner, typed in uac-r2's session, relayed verbatim by uac-r2, 2026-11-17; it replaces both earlier answers).
+  - Gate and billing Decision Records keep random ids.
+  - Only condition-cleared and Procedure keep the derived id.
+  - No Key Vault value is created, so there is no keyed hash, startup check or provisioning step.
+  - ebilling-r1 makes the change on `task/ebilling-084h-5-r1`; we review that diff.
+  - Consequence: ontology **149 K2 stays open**. A gate retry is still guarded only by the lookup-first step, not by the id. Billing likewise.
+  - The derivable-id known limit applies to the two derived entries (detail by message only).
+  - Owner to say here if this is not what they meant (they typed "Option 1" in this session earlier).
 - **Rejected:** an alternate key on a new key column (schema change and backfill, same derivable handle); a check after the write (detects, doesn't prevent; deletes from an append-only table).
