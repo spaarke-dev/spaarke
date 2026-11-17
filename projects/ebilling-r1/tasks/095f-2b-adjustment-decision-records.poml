@@ -4,7 +4,7 @@
     <title>Decision notes, part 2b: adjustments get Decision Records (add-adjustment, remove-adjustment) and a note (EB-D-241)</title>
     <phase>5 Partner surfaces — 095f part 2</phase>
     <gate>095f-2a merged into work. Branch from work/ebilling-r1 at the sha named in the agent brief. ontology-r1 reviews the catalog entries and the exact-set test amendment before merge.</gate>
-    <status>open</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Amends ontology-owned catalog exact-set tests (D-100 "additive only", path-B amendment) and adds record writes to the adjustment path.</rigor-reason>
     <model-tier>opus</model-tier>

@@ -9,15 +9,17 @@
 
 ## NOW — read this first
 
-### Active (2026-11-17): wave 3 DONE; 095f-2b building
+### Active (2026-11-17): 095f-2b DONE; 095f-2ui building
 
-- **In flight:** **095f-2b** (adjustment Decision Records + note; opus/high, FULL), implementer agent on branch `task/ebilling-095f-2b` from `e171823a5b`.
-  - **Next steps:** one Opus adversarial review → fix rounds + scoped re-check → ontology-r1 reviews the catalog entries AND the exact-set test amendment (D-100 path B) → merge → clean up → push.
-  - **Then:** 095f-2ui (client Note boxes). Carry the client limits from 2c/2d1/2d2 notes:
+- **095f-2b ✅ merged a3ef7e1c93** (fix 64c3e9ecbb: server-derived namespaced decision ids, neutral lookup 503; ontology-r1 PASS on catalog, exact-set amendment and fix; known limit ISS-030 / #2881).
+- **In flight:** **095f-2ui** (client Note boxes; sonnet/high, STANDARD).
+  - **Next steps:** one adversarial review → fixes → merge → clean up → push.
+  - **Client limits the brief carries** (from the 2b/2c/2d1/2d2 notes):
     - keep the reason and note across 409/503;
     - don't reload on `concurrent_change`;
     - Repeat resends the exact request;
-    - no note on Accept all Clean.
+    - no note on Accept all Clean;
+    - reload the list on a removal 409 `id_reused`.
   - **Later:** 2e2 after the owner's pick; 130e-2 (no POML).
 - **Per-task routine:**
   1. Implementer agent: named model, worktree, brief names the base sha and "never python".

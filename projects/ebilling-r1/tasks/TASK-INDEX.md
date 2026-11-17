@@ -131,7 +131,7 @@ To begin: `work on task 001`. Wave W0-1 (001, 002, 003) and W2-1 (040, 041) have
 | 095f-2c | ✅ [merged into work 18733ac44a; fix round c7ffb82f5a; re-check fixes 9ae666fec8; ontology-r1 PASS catalog + writer; column on dev before master] | Override and blocked-return notes | FULL | sonnet / high | none | 095f-2a |
 | 095f-2d1 | ✅ [merged into work f9d63c555b; ontology-r1 PASS catalog; ISS-029 known limit] | Accept/reduce/disallow line notes; bulk carries none | FULL | sonnet / high | none | 095f-2a |
 | 095f-2e1 | ✅ [merged into work 7d5a3a369a; one adversarial pass, no F; K1-K3 in notes/095f-2e1-from-document-note.md] | from-document requires a note on a Correction (EB-D-237) | FULL | sonnet / high | none | — |
-| 095f-2b | 🔲 [open; ontology-r1 reviews the exact-set amendment] | Adjustment Decision Records add-adjustment/remove-adjustment + note (EB-D-241) | FULL | opus / high | none | 095f-2a |
+| 095f-2b | ✅ [merged into work a3ef7e1c93; fix 64c3e9ecbb (server-derived ids); ontology-r1 PASS catalog + exact-set amendment + fix; ISS-030 known limit] | Adjustment Decision Records add-adjustment/remove-adjustment + note (EB-D-241) | FULL | opus / high | none | 095f-2a |
 | 095f-2d2 | ✅ [merged into work 6ea1ceb837; fix round 740e5166fa; ISS-028 owner question; column on dev before master] | Correct/confirm note on the correction row (EB-D-242) | FULL | sonnet / high | none | 095f-2s |
 | 095f-2ui | 🔲 [open] | Invoice Review Note boxes on every decision | STANDARD | sonnet / high | none | 095f-2a, 2c, 2d1, 2b, 2d2 |
 | 095f-2e2 | 🔲 [owner picks the option; EB-D-243] | Internal Correction path (Create Invoice wizard Correction mode) | — | — | none | 095f-2e1 |
