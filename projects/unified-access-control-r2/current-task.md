@@ -5,7 +5,7 @@
 > - **History:** git log of this file. **Earlier checkpoints:** `notes/handoff-history/2026-11.md`.
 > - **NOTE:** master is ahead of this work branch on project files. Read master's TASK-INDEX and README for task status.
 
-> **Last Updated**: 2026-11-17 ~03:55Z (checkpoint #149, desktop session `uac-r2`). Private: `~/.claude/projects/c--code-files-spaarke-wt-unified-access-control-r2/private-*.md` (never copy into repo text).
+> **Last Updated**: 2026-11-17 ~14:30Z (checkpoint #150, desktop session `uac-r2`). Private: `~/.claude/projects/c--code-files-spaarke-wt-unified-access-control-r2/private-*.md` (never copy into repo text).
 
 ## Quick Recovery (READ THIS FIRST)
 
@@ -25,7 +25,7 @@
 ## Peer state
 - **ebilling-r1:** 130e-1 (DEF-060) on work/ebilling-r1 only; its BFF reaches dev only after 079 syncs SpaarkeMaster (next version after 1.3.2.0, must keep `InvoiceFamilyFieldLockSourceGuardTests` green). **Pre-deploy gate: confirm `sprk_firmdescription` exists before any BFF build carrying 130e-1** (not on master yet). Advance notice: EB-D-240/242 memo columns (`sprk_invoice.sprk_decisionnote`, `sprk_invoicecorrection.sprk_note`); I had no objection; dev apply on their owner go with before/after notices. #2844 re-sweep still theirs.
 - **provisioning-r1:** PR #2871 (S27 text names 1.3.2.0) waits on the owner; waits for my "1.3.2.0 published" notice.
-- **field-mapping-r1:** **D-2 step 3 is unblocked** but held for the owner's go; pair it with a BFF swap (the settings restart the BFF). Tell fm when it's live (then their 054c Move).
+- **field-mapping-r1:** **D-2 step 3 is unblocked** but held for the owner's go; pair it with a BFF swap (the settings restart the BFF). Tell fm when it's live (then their 054c Move). **#2875 (fm task 023): `sprk_createeventwizard` deployed to dev from master `3df5ee9e3f` on the owner's go (2026-11-17 14:24Z); stored = served sha256 `74bc9206…00a5`; rollback = previous bundle sha256 `60d2e6c3…2148` (modified 2026-11-15, saved in scratchpad `rollback-createeventwizard-20261115.html`; or rebuild from `3df5ee9e3f^1`). fm told; their live check waits on the owner. Owner confirmed fm [c7c3a0] is the owner's session (2026-11-17).**
 - **mcp-r1:** dev spike = spike-v2 `973776a5a6` (branch spike/spaarkeai-mcp-phase0, confirmed current). Never deploy `work/spaarkeai-mcp-bff-api-r1`. Ping before every swap; live notice after (sent for be0420d763).
 - **spa-r4:** not mid-E2E (next E2E = task 016 after 014b + 015 deploy); ask before a restart. 015 opens event rows from list data, GET for deep links only (K5).
 - **ontology-r1:** 195 live on dev; owner composer template recheck can go.
