@@ -388,8 +388,11 @@ public static class DecisionActionCatalog
     private static readonly DecisionActionDefinition[] DeclaredBilling =
     [
         // ---- Line decisions (subject: the invoice line) ------------------------------------------------------
+        // ebilling-r1 095f-2d1 (EB-D-236; design 8, Q6): "note" declared optional on the three line decisions, the Values key the line decision
+        // service writes on each line's own record when a note is given. The writer reads only required parameters, so declaring it changes no
+        // behaviour. (Accepted in bulk writes accept-line records with no note.)
         new("accept-line", "Accept line", DecisionLane.Decide, IsNextStep: false, WorkType: null,
-            [],
+            [NoteParameter()],
             ["Accepts the line at its billed amount"],
             Excludes: ["reduce-line", "disallow-line"],
             DecisionRecordClass.Routine)
@@ -399,6 +402,7 @@ public static class DecisionActionCatalog
             [
                 new("approvedAmount", "Approved amount", DecisionParameterKind.Money, Required: true),
                 new("reason", "Reason for reduction", DecisionParameterKind.TextArea, Required: true, Hint: ReasonHint),
+                NoteParameter(),
             ],
             ["Sets the line's approved amount below its billed amount", "Recomputes the invoice totals"],
             Excludes: ["disallow-line"],
@@ -406,7 +410,7 @@ public static class DecisionActionCatalog
         { Gate = new DecisionGateFactors(GateRiskTier.Tier2b, Reversible: true, RecordOfTruthImpact: true) },
 
         new("disallow-line", "Disallow line", DecisionLane.Decide, IsNextStep: false, WorkType: null,
-            [new("reason", "Reason for disallowing", DecisionParameterKind.TextArea, Required: true, Hint: ReasonHint)],
+            [new("reason", "Reason for disallowing", DecisionParameterKind.TextArea, Required: true, Hint: ReasonHint), NoteParameter()],
             ["Sets the line's approved amount to zero", "Recomputes the invoice totals"],
             Excludes: [],
             DecisionRecordClass.Judgement)
