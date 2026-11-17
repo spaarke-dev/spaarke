@@ -64,6 +64,10 @@ public sealed class InvoiceReviewReadServiceTests
         public List<Entity> History = [];
         public List<Entity> Roster = [];
 
+        /// <summary>ISS-034 iss034d: the users whose names the completer read returns; a fault makes that read throw.</summary>
+        public List<Entity> Users = [];
+        public bool UserFault;
+
         /// <summary>Task 092: the Servable Invoice PDF Stored Files the query returns (Dataverse applies the filter; the query shape is asserted).</summary>
         public List<Entity> Files = [];
         public readonly List<QueryExpression> Queries = [];
@@ -116,6 +120,7 @@ public sealed class InvoiceReviewReadServiceTests
                         "sprk_invoicesubmission" => new EntityCollection(Submission is null ? [] : [Requested(Submission, query.ColumnSet)]),
                         "sprk_decisionrecord" => new EntityCollection(History.ToList()),
                         "sprk_timekeeper" => new EntityCollection(Roster.ToList()),
+                        "systemuser" => UserFault ? throw new InvalidOperationException("users down") : new EntityCollection(Users.ToList()),
                         "sprk_storedfile" => new EntityCollection(Files.ToList()),
                         _ => throw new InvalidOperationException($"Unexpected read of {query.EntityName}"),
                     };
@@ -743,6 +748,153 @@ public sealed class InvoiceReviewReadServiceTests
         history[0].RecordClass.Should().Be("Judgement");
         history[0].Outcome.Should().Be("Authorized");
         history[0].DecidedBy!.Name.Should().Be("R. Reviewer");
+    }
+
+    // ── ISS-034 iss034d (EB-D-257): "Finished by" on the history entry of a blocked Override / Return an operator finished ──
+
+    private static readonly Guid Operator = Guid.Parse("10000000-0000-4000-8000-0000000000e3");
+    private static readonly Guid OtherOperator = Guid.Parse("10000000-0000-4000-8000-0000000000e4");
+
+    /// <summary>The stored findings with <paramref name="member"/> stamped as iss034c writes it (<paramref name="completer"/> null: a stamp without one).</summary>
+    private static string Stamped(string member, Entity record, Guid? completer, string? findings = null, Guid? bySystemUser = null) =>
+        SubmissionOverrideService.WithStamp(
+            findings ?? FindingsJson(), member,
+            new BlockedDecisionStamp(record.Id, bySystemUser ?? Reviewer, new DateTimeOffset(2026, 10, 1, 0, 0, 0, TimeSpan.Zero), "because", completer));
+
+    private static World FinishedWorld(string member, string action, Guid? completer, out Entity record, Guid? stampRecord = null)
+    {
+        var w = new World();
+        w.AddLine(1, InvoiceLineStatus.Flagged);
+        record = Record(action, null, new DateTime(2026, 10, 1, 0, 0, 0, DateTimeKind.Utc));
+        var other = Record(action, null, new DateTime(2026, 10, 2, 0, 0, 0, DateTimeKind.Utc));
+        w.History = [record, other];
+        w.Submission = SubmissionRow(
+            Stamped(member, stampRecord is { } id ? new Entity("sprk_decisionrecord", id) : record, completer), blocked: false);
+        w.Users = [new Entity("systemuser", Operator) { ["fullname"] = "O. Operator" }, new Entity("systemuser", Reviewer) { ["fullname"] = "R. Reviewer" }];
+        return w;
+    }
+
+    [Theory(DisplayName = "iss034d: an operator-finished Override or Return gives completedBy.name on that history entry only")]
+    [InlineData("override", "override-submission")]
+    [InlineData("return", "return-to-firm")]
+    public async Task OperatorFinished_GivesCompletedByOnItsEntry(string member, string action)
+    {
+        var w = FinishedWorld(member, action, Operator, out var record);
+
+        var history = (await w.Service().GetAsync(InvoiceId, Caller, CancellationToken.None))!.DecisionHistory;
+
+        history.Single(h => h.RecordId == record.Id).CompletedBy.Should().Be(new ReviewCompletedByDto("O. Operator"));
+        history.Single(h => h.RecordId != record.Id).CompletedBy.Should().BeNull("the stamp names the first record only");
+        history.Single(h => h.RecordId == record.Id).DecidedBy!.Name.Should().Be("R. Reviewer", "the decider stays");
+        w.Reads("systemuser").Should().Be(1);
+    }
+
+    [Fact(DisplayName = "iss034d: the completedBy member is on the wire only when present")]
+    public async Task CompletedBy_IsOnTheWireOnlyWhenPresent()
+    {
+        var with = FinishedWorld("override", "override-submission", Operator, out _);
+        var without = FinishedWorld("override", "override-submission", null, out _);
+
+        var a = JsonSerializer.Serialize((await with.Service().GetAsync(InvoiceId, Caller, CancellationToken.None))!.DecisionHistory, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        var b = JsonSerializer.Serialize((await without.Service().GetAsync(InvoiceId, Caller, CancellationToken.None))!.DecisionHistory, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+
+        a.Should().Contain("\"completedBy\":{\"name\":\"O. Operator\"}");
+        b.Should().NotContain("completedBy");
+    }
+
+    [Theory(DisplayName = "iss034d: no completedBy for the decider's own completion, a stamp without a completer, or a stamp naming another record (and no user read)")]
+    [InlineData("decider")]
+    [InlineData("none")]
+    [InlineData("otherRecord")]
+    public async Task NoCompleter_GivesNone_AndReadsNoUsers(string kind)
+    {
+        var w = kind switch
+        {
+            "decider" => FinishedWorld("override", "override-submission", Reviewer, out _),
+            "none" => FinishedWorld("override", "override-submission", null, out _),
+            _ => FinishedWorld("override", "override-submission", Operator, out _, stampRecord: Guid.NewGuid()),
+        };
+
+        var history = (await w.Service().GetAsync(InvoiceId, Caller, CancellationToken.None))!.DecisionHistory;
+
+        history.Should().OnlyContain(h => h.CompletedBy == null);
+        w.Reads("systemuser").Should().Be(0);
+    }
+
+    [Fact(DisplayName = "iss034d: a stamp for the verb whose record carries another action code gives none")]
+    public async Task StampNamingARecordOfAnotherVerb_GivesNone()
+    {
+        var w = FinishedWorld("return", "override-submission", Operator, out _);
+
+        (await w.Service().GetAsync(InvoiceId, Caller, CancellationToken.None))!.DecisionHistory.Should().OnlyContain(h => h.CompletedBy == null);
+    }
+
+    [Fact(DisplayName = "iss034d: a malformed stamp, an unreadable findings column and no history give none and the review still returns")]
+    public async Task UnreadableStamp_GivesNone_AndTheReviewReturns()
+    {
+        var w = FinishedWorld("override", "override-submission", Operator, out var record);
+        w.Submission = SubmissionRow("{ not json");
+        (await w.Service().GetAsync(InvoiceId, Caller, CancellationToken.None))!.DecisionHistory.Should().OnlyContain(h => h.CompletedBy == null);
+
+        w.Submission = SubmissionRow(SubmissionOverrideService.WithStamp(FindingsJson(), "override", new BlockedDecisionStamp(record.Id, Reviewer, DateTimeOffset.UtcNow, "x", Operator))
+            .Replace(Operator.ToString("D"), "not-a-guid"));
+        (await w.Service().GetAsync(InvoiceId, Caller, CancellationToken.None))!.DecisionHistory.Should().OnlyContain(h => h.CompletedBy == null);
+
+        w.Submission = null;
+        (await w.Service().GetAsync(InvoiceId, Caller, CancellationToken.None))!.DecisionHistory.Should().OnlyContain(h => h.CompletedBy == null);
+        w.History = [];
+        (await w.Service().GetAsync(InvoiceId, Caller, CancellationToken.None)).Should().NotBeNull();
+    }
+
+    [Theory(DisplayName = "iss034d: a fault reading the user, or a user with no name, gives none, logs ids only, and the review still returns")]
+    [InlineData("fault")]
+    [InlineData("missing")]
+    [InlineData("blank")]
+    public async Task UserReadProblem_GivesNone_AndTheReviewReturns(string kind)
+    {
+        var w = FinishedWorld("override", "override-submission", Operator, out _);
+        if (kind == "fault") w.UserFault = true;
+        if (kind == "missing") w.Users = [];
+        if (kind == "blank") w.Users = [new Entity("systemuser", Operator) { ["fullname"] = " " }];
+
+        var review = await w.Service().GetAsync(InvoiceId, Caller, CancellationToken.None);
+
+        review.Should().NotBeNull();
+        review!.DecisionHistory.Should().HaveCount(2).And.OnlyContain(h => h.CompletedBy == null);
+        review.Lines.Should().HaveCount(1);
+        if (kind == "fault")
+        {
+            w.Logger.Verify(
+                l => l.Log(
+                    LogLevel.Warning, It.IsAny<EventId>(),
+                    It.Is<It.IsAnyType>((state, _) => state.ToString()!.Contains(InvoiceId.ToString()) && !state.ToString()!.Contains("users down") && !state.ToString()!.Contains(Operator.ToString())),
+                    It.IsAny<Exception?>(), It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
+                Times.Once);
+        }
+    }
+
+    [Theory(DisplayName = "iss034d: the user reads do not grow with the history rows (one batched read for Override and Return together)")]
+    [InlineData(2)]
+    [InlineData(60)]
+    public async Task UserReads_DoNotGrowWithTheHistoryRows(int rows)
+    {
+        var w = FinishedWorld("override", "override-submission", Operator, out var overrideRecord);
+        var returnRecord = Record("return-to-firm", null, new DateTime(2026, 10, 3, 0, 0, 0, DateTimeKind.Utc));
+        var stamped = Stamped("override", overrideRecord, Operator);
+        w.Submission = SubmissionRow(Stamped("return", returnRecord, OtherOperator, stamped));
+        w.Users.Add(new Entity("systemuser", OtherOperator) { ["fullname"] = "P. Other" });
+        w.History = [overrideRecord, returnRecord];
+        for (var i = 0; i < rows - 2; i++)
+        {
+            w.History.Add(Record("reduce-line", null, new DateTime(2026, 10, 4, 0, 0, 0, DateTimeKind.Utc).AddMinutes(i)));
+        }
+
+        var history = (await w.Service().GetAsync(InvoiceId, Caller, CancellationToken.None))!.DecisionHistory;
+
+        history.Should().HaveCount(rows);
+        history.Where(h => h.CompletedBy != null).Select(h => h.CompletedBy!.Name).Should().BeEquivalentTo("O. Operator", "P. Other");
+        w.Reads("systemuser").Should().Be(1);
+        w.Queries.Single(q => q.EntityName == "systemuser").Criteria.Conditions.Single().Values.Should().HaveCount(2);
     }
 
     // ── NFR-02: the number of Dataverse reads does not depend on the number of lines ──

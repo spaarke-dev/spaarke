@@ -2600,7 +2600,7 @@ public sealed class SubmissionOverrideService
 
     // ── Stored findings (the JSON 049's persister wrote) ──
 
-    private static JsonObject? ParseRoot(string? json)
+    internal static JsonObject? ParseRoot(string? json)
     {
         if (string.IsNullOrWhiteSpace(json))
         {

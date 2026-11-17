@@ -206,7 +206,14 @@ public sealed record ReviewDecisionRecordDto(
     string? Outcome,
     DateTimeOffset? DecidedOn,
     ReviewRefDto? DecidedBy,
-    string? Reason);
+    string? Reason,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] ReviewCompletedByDto? CompletedBy = null);
+
+/// <summary>
+/// ISS-034 iss034d (EB-D-257): who completed a blocked Override or Return that someone else recorded (the name only, no id). Present only when the
+/// submission's stamp for that verb names this record and carries a completer who is not the decider.
+/// </summary>
+public sealed record ReviewCompletedByDto(string Name);
 
 /// <summary>What 049 stored on one line's <c>sprk_extractionconfidence</c> (FR-04), parsed tolerantly.</summary>
 internal sealed record LineExtraction(
@@ -352,6 +359,8 @@ public sealed class InvoiceReviewReadService
     internal const string SubmissionEntity = "sprk_invoicesubmission";
     internal const string DecisionRecordEntity = "sprk_decisionrecord";
     internal const string TimekeeperEntity = "sprk_timekeeper";
+    private const string SystemUserEntity = "systemuser";
+    private const string SystemUserName = "fullname";
 
     internal const string LineReason = "sprk_adjustmentreason";
     internal const string LineReviewedBy = "sprk_reviewedby";
@@ -463,8 +472,8 @@ public sealed class InvoiceReviewReadService
         await Task.WhenAll(submissionTask, historyTask, rosterTask, thresholdTask, pdfTask, canWriteTask).ConfigureAwait(false);
 
         var submission = submissionTask.Result;
-        var history = historyTask.Result;
         var threshold = thresholdTask.Result;
+        var history = await WithCompletersAsync(invoiceId, historyTask.Result, submission?.FindingsJson, ct).ConfigureAwait(false);
 
         var statusCode = invoice.GetAttributeValue<OptionSetValue>("statuscode")?.Value ?? 0;
         var known = InvoiceStatusCodes.TryFromStatusCode(statusCode, out var lifecycle);
@@ -657,6 +666,66 @@ public sealed class InvoiceReviewReadService
                 by is null ? null : new ReviewRefDto(by.Id, by.Name),
                 r.GetAttributeValue<string>("sprk_reason"));
         }).ToList();
+    }
+
+    /// <summary>
+    /// ISS-034 iss034d (EB-D-257): adds <c>completedBy</c> to the history entry of a blocked Override or Return that an operator finished for its
+    /// decider. The submission's stamp for the verb (<see cref="SubmissionOverrideService.ReadStamp"/>, read from the findings this request already
+    /// holds) must name that very record and carry a completer other than its decider. The names come from ONE batched read of the completers (none
+    /// when no entry qualifies; never one per history row). Read-only. A fault reading either leaves the history as it was, logged with ids only.
+    /// </summary>
+    private async Task<IReadOnlyList<ReviewDecisionRecordDto>> WithCompletersAsync(
+        Guid invoiceId, IReadOnlyList<ReviewDecisionRecordDto> history, string? findingsJson, CancellationToken ct)
+    {
+        try
+        {
+            var completers = new Dictionary<Guid, Guid>(); // history record id -> completer
+            if (history.Count > 0 && !string.IsNullOrWhiteSpace(findingsJson))
+            {
+                var root = SubmissionOverrideService.ParseRoot(findingsJson);
+                foreach (var (member, actionCode) in new[]
+                {
+                    (SubmissionOverrideService.OverrideMember, SubmissionOverrideService.OverrideActionCode),
+                    (SubmissionOverrideService.ReturnMember, SubmissionOverrideService.ReturnActionCode),
+                })
+                {
+                    if (SubmissionOverrideService.ReadStamp(root, member) is { CompletedBySystemUserId: { } completer } stamp
+                        && completer != stamp.BySystemUserId
+                        && history.Any(h => h.RecordId == stamp.RecordId && string.Equals(h.ActionCode, actionCode, StringComparison.Ordinal)))
+                    {
+                        completers[stamp.RecordId] = completer;
+                    }
+                }
+            }
+
+            if (completers.Count == 0)
+            {
+                return history;
+            }
+
+            var query = new QueryExpression(SystemUserEntity)
+            {
+                ColumnSet = new ColumnSet(SystemUserName),
+                Criteria = new FilterExpression(LogicalOperator.And),
+                PageInfo = new PagingInfo { PageNumber = 1, Count = PageSize },
+            };
+            query.Criteria.AddCondition($"{SystemUserEntity}id", ConditionOperator.In, completers.Values.Distinct().OrderBy(id => id).Cast<object>().ToArray());
+            query.AddOrder($"{SystemUserEntity}id", OrderType.Ascending);
+            var names = (await ReadPagedAsync(_entities, query, ct).ConfigureAwait(false))
+                .ToDictionary(r => r.Id, r => r.GetAttributeValue<string>(SystemUserName));
+
+            return history.Select(h =>
+                completers.TryGetValue(h.RecordId, out var completer) && names.TryGetValue(completer, out var name) && !string.IsNullOrWhiteSpace(name)
+                    ? h with { CompletedBy = new ReviewCompletedByDto(name) }
+                    : h).ToList();
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogWarning(
+                "Invoice review: who finished a blocked decision could not be read for invoice {InvoiceId} ({ExceptionType}); the history shows no completer.",
+                invoiceId, ex.GetType().Name);
+            return history;
+        }
     }
 
     private async Task<Dictionary<Guid, (string? Name, int? Classification)>> ReadRosterAsync(IReadOnlyList<Guid> ids, CancellationToken ct)
