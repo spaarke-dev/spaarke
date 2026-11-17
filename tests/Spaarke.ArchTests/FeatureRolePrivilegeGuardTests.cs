@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Xml.Linq;
+using Sprk.Bff.Api.Services.RecordCreation;
 using Xunit;
 
 namespace Spaarke.ArchTests;
@@ -1502,6 +1503,204 @@ public class FeatureRolePrivilegeGuardTests
         var container = doc.Descendants().First(e => e.Name.LocalName == "RolePrivileges");
         container.Add(new XElement(container.Name.Namespace + "RolePrivilege", new XAttribute("name", privilege), new XAttribute("level", level)));
         doc.Save(path);
+    }
+
+    // ── Correction rows: native write hardening (ebilling-r1 iss028, EB-D-249) ─────────────────────────────────────────────
+
+    /// <summary>The verbs no person role holds on a table <see cref="RecordTableRules"/> flags
+    /// <see cref="RecordTableRule.CreatedOnlyByItsWriter"/>.</summary>
+    internal static readonly string[] WriterOnlyNativeWriteVerbs = ["Create", "Write", "Delete", "Assign", "Share"];
+
+    /// <summary>The writer-only tables, read from the same registry flag the generic create, update and delete refusals read.</summary>
+    internal static IReadOnlySet<string> WriterOnlyTables() =>
+        RecordTableRules.All.Where(r => r.CreatedOnlyByItsWriter).Select(r => r.Table).ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>The ratchet baseline: (role, privilege). An entry found and not listed fails; a listed entry no longer found fails.</summary>
+    internal static readonly IReadOnlyList<(string Role, string Privilege)> WriterOnlyNativeWriteBaseline =
+    [
+        // known, tracked
+        (OntologyAdmin, "prvAssignsprk_Signal"),
+        (OntologyAdmin, "prvDeletesprk_BudgetRevision"),
+        (OntologyAdmin, "prvDeletesprk_Signal"),
+        (OntologyAdmin, "prvWritesprk_BudgetRevision"),
+    ];
+
+    private const string RoleFileSource = "role file";
+    private const string RuledChangeSource = "config/feature-role-privileges.json";
+
+    /// <summary>One finding: where it is (a role file, or a ruled change in the config), the role, the privilege and its depth.</summary>
+    internal sealed record WriterOnlyHold(string Source, string Role, string Privilege, string Depth)
+    {
+        public override string ToString() => $"{Source}: {Role}: {Privilege} at {Depth}";
+    }
+
+    /// <summary>The verb of a privilege name (<c>prv</c> + verb + table), or null (as <see cref="PrivilegeTable"/>).</summary>
+    internal static string? PrivilegeVerb(string privilege)
+    {
+        if (PrivilegeTable(privilege) is null) return null;
+        var rest = privilege[3..];
+        return PrivilegeVerbs.First(v => rest.StartsWith(v, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static bool IsWriterOnlyNativeWrite(string privilege, IReadOnlySet<string> tables) =>
+        PrivilegeVerb(privilege) is { } verb && WriterOnlyNativeWriteVerbs.Contains(verb, StringComparer.OrdinalIgnoreCase)
+        && PrivilegeTable(privilege) is { } table && tables.Contains(table);
+
+    /// <summary>Each person role (role files) and each ruled change (config) that holds a <see cref="WriterOnlyNativeWriteVerbs"/>
+    /// privilege on one of <paramref name="tables"/>. A ruled change for a role in <paramref name="appUsersRoles"/> is left out, as
+    /// <see cref="PersonRoles"/> leaves out its role file.</summary>
+    internal static List<WriterOnlyHold> WriterOnlyNativeWrites(
+        IReadOnlyDictionary<string, IReadOnlyDictionary<string, string>> personRoles,
+        IReadOnlyList<RuledChange> changes,
+        IReadOnlySet<string> tables,
+        IReadOnlyCollection<string> appUsersRoles)
+    {
+        var found = new List<WriterOnlyHold>();
+        foreach (var role in personRoles.Keys.Order(StringComparer.Ordinal))
+            foreach (var (privilege, depth) in personRoles[role].OrderBy(p => p.Key, StringComparer.OrdinalIgnoreCase))
+                if (IsWriterOnlyNativeWrite(privilege, tables))
+                    found.Add(new(RoleFileSource, role, privilege, depth));
+        foreach (var c in changes)
+            if (!appUsersRoles.Contains(c.Role, StringComparer.Ordinal) && IsWriterOnlyNativeWrite(c.Privilege, tables))
+                found.Add(new(RuledChangeSource, c.Role, c.Privilege, c.Depth));
+        return found;
+    }
+
+    /// <summary>The ratchet: findings not in the baseline (unlisted), and baseline entries with no finding (stale).</summary>
+    internal static (List<string> Unlisted, List<string> Stale) WriterOnlyRatchet(
+        IReadOnlyList<WriterOnlyHold> found, IReadOnlyList<(string Role, string Privilege)> baseline)
+    {
+        bool Listed(WriterOnlyHold f) => baseline.Any(b => b.Role == f.Role && Same(b.Privilege, f.Privilege));
+        var unlisted = found.Where(f => !Listed(f)).Select(f => f.ToString()).ToList();
+        var stale = baseline.Where(b => !found.Any(f => f.Role == b.Role && Same(f.Privilege, b.Privilege)))
+            .Select(b => $"{b.Role}: {b.Privilege} — in the baseline but no longer found; remove the entry").ToList();
+        return (unlisted, stale);
+    }
+
+    [Fact(DisplayName = "Correction rows, native write hardening: the role files and the ruled changes agree with the writer-only registry, outside the baseline")]
+    public void WriterOnlyTablesHaveNoNativeWritesOutsideTheBaseline()
+    {
+        var tables = WriterOnlyTables();
+        Assert.Contains("sprk_invoicecorrection", tables);
+        var entities = EntityNames(SolutionsDirectory);
+        Assert.All(tables, t => Assert.True(entities.Contains(t), $"Writer-only table '{t}' is not an entity under src/dataverse/solutions/**/Entities."));
+
+        // The baseline is well formed: each entry is a person role, a forbidden verb on a writer-only table, and listed once.
+        var personRoles = PersonRoles(SolutionsDirectory);
+        Assert.All(WriterOnlyNativeWriteBaseline, b =>
+        {
+            Assert.True(personRoles.ContainsKey(b.Role), $"'{b.Role}' is in the baseline but is not a person role file.");
+            Assert.True(IsWriterOnlyNativeWrite(b.Privilege, tables), $"{b.Privilege} is in the baseline but is not a forbidden verb on a writer-only table.");
+        });
+        Assert.Equal(WriterOnlyNativeWriteBaseline.Count,
+            WriterOnlyNativeWriteBaseline.Select(b => (b.Role, b.Privilege.ToLowerInvariant())).Distinct().Count());
+
+        var found = WriterOnlyNativeWrites(personRoles, LoadRuledChanges(RuledChangesPath), tables, ExpectedAppUsersRoles);
+        var (unlisted, stale) = WriterOnlyRatchet(found, WriterOnlyNativeWriteBaseline);
+        Assert.True(unlisted.Count == 0,
+            "A person role (or a ruled change for one) holds a privilege on a writer-only table (RecordTableRule.CreatedOnlyByItsWriter) "
+            + "that only the table's writer may hold:\n  " + string.Join("\n  ", unlisted));
+        Assert.True(stale.Count == 0, "The writer-only baseline lists entries that are no longer found:\n  " + string.Join("\n  ", stale));
+    }
+
+    [Fact(DisplayName = "Correction rows, native write hardening: must-fire and must-not-fire controls on synthetic roles and ruled changes")]
+    public void WriterOnlyNativeWriteControls()
+    {
+        var tables = new HashSet<string>(["sprk_invoicecorrection", "sprk_signal"], StringComparer.OrdinalIgnoreCase);
+
+        // must-fire: each forbidden verb, in any casing, on a writer-only table
+        foreach (var verb in WriterOnlyNativeWriteVerbs)
+        {
+            var roles = new Dictionary<string, IReadOnlyDictionary<string, string>>
+            {
+                ["Person"] = Privileges(($"PRV{verb.ToUpperInvariant()}SPRK_INVOICECORRECTION", "Basic")),
+            };
+            var found = WriterOnlyNativeWrites(roles, [], tables, [Writer]);
+            Assert.Equal(new[] { $"{RoleFileSource}: Person: PRV{verb.ToUpperInvariant()}SPRK_INVOICECORRECTION at Basic" }, found.Select(f => f.ToString()));
+        }
+
+        // must-not-fire: Read, Append and AppendTo on a writer-only table; a forbidden verb on another table
+        var allowed = new Dictionary<string, IReadOnlyDictionary<string, string>>
+        {
+            ["Person"] = Privileges(
+                ("prvReadsprk_invoicecorrection", "Deep"), ("prvAppendsprk_invoicecorrection", "Deep"), ("prvAppendTosprk_invoicecorrection", "Deep"),
+                ("prvCreatesprk_Matter", "Deep"), ("prvWritesprk_Matter", "Deep"), ("prvDeletesprk_Matter", "Deep")),
+        };
+        Assert.Empty(WriterOnlyNativeWrites(allowed, [], tables, [Writer]));
+
+        // must-fire: a ruled change that grants a forbidden verb to a person role; must-not-fire: the same for the writer's role,
+        // and a ruled change on another table
+        var changes = new RuledChange[]
+        {
+            new("X", "Person", "sprk_invoicecorrection", "prvSharesprk_invoicecorrection", "Deep", "None"),
+            new("X", Writer, "sprk_invoicecorrection", "prvCreatesprk_invoicecorrection", "Global", "None"),
+            new("X", "Person", "sprk_invoicecorrection", "prvAppendTosprk_invoicecorrection", "Deep", "None"),
+            new("X", "Person", "sprk_matter", "prvCreatesprk_Matter", "Deep", "None"),
+        };
+        Assert.Equal(new[] { $"{RuledChangeSource}: Person: prvSharesprk_invoicecorrection at Deep" },
+            WriterOnlyNativeWrites(new Dictionary<string, IReadOnlyDictionary<string, string>>(), changes, tables, [Writer]).Select(f => f.ToString()));
+
+        // the verb parse: AppendTo is not Append, and a name with no known verb has none
+        Assert.Equal("AppendTo", PrivilegeVerb("prvAppendTosprk_invoicecorrection"));
+        Assert.Equal("Append", PrivilegeVerb("prvAppendsprk_invoicecorrection"));
+        Assert.Null(PrivilegeVerb("prvMakesprk_invoicecorrection"));
+
+        // the ratchet: a listed finding passes, an unlisted one fails, a listed entry with no finding is stale
+        var finding = new List<WriterOnlyHold> { new(RoleFileSource, "Person", "prvDeletesprk_Signal", "Deep") };
+        Assert.Equal((0, 0), Counts(WriterOnlyRatchet(finding, [("Person", "PRVDELETESPRK_SIGNAL")])));
+        Assert.Equal((1, 0), Counts(WriterOnlyRatchet(finding, [])));
+        Assert.Equal((0, 1), Counts(WriterOnlyRatchet([], [("Person", "prvDeletesprk_Signal")])));
+
+        static (int, int) Counts((List<string> Unlisted, List<string> Stale) r) => (r.Unlisted.Count, r.Stale.Count);
+    }
+
+    [Fact(DisplayName = "Correction rows, native write hardening: seeded role files — a synthetic role document fails, the writer's role does not, a dropped baseline entry is stale")]
+    public void WriterOnlyNativeWriteFiresOnSeededRoleFiles()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "sprk-writer-only-roles-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var dir = Path.Combine(root, "SpaarkeMaster", "Roles");
+            Directory.CreateDirectory(dir);
+            foreach (var file in Directory.EnumerateFiles(RolesDirectory, "*.xml"))
+                File.Copy(file, Path.Combine(dir, Path.GetFileName(file)));
+            var tables = WriterOnlyTables();
+            var changes = LoadRuledChanges(RuledChangesPath);
+            (List<string> Unlisted, List<string> Stale) Run() =>
+                WriterOnlyRatchet(WriterOnlyNativeWrites(PersonRoles(root), changes, tables, ExpectedAppUsersRoles), WriterOnlyNativeWriteBaseline);
+
+            // must-not-fire: the copy as it is
+            var before = Run();
+            Assert.Empty(before.Unlisted);
+            Assert.Empty(before.Stale);
+
+            // must-fire: a synthetic role document granting Create on a correction row
+            File.WriteAllText(Path.Combine(dir, "Spaarke Synthetic.xml"),
+                "<Role name=\"Spaarke Synthetic\"><RolePrivileges>"
+                + "<RolePrivilege name=\"prvCreatesprk_invoicecorrection\" level=\"Deep\" />"
+                + "<RolePrivilege name=\"prvReadsprk_invoicecorrection\" level=\"Deep\" />"
+                + "<RolePrivilege name=\"prvAppendsprk_invoicecorrection\" level=\"Deep\" />"
+                + "<RolePrivilege name=\"prvAppendTosprk_invoicecorrection\" level=\"Deep\" />"
+                + "</RolePrivileges></Role>");
+            // must-not-fire: the writer's role (AppUsers) holding the same
+            AddPrivilege(dir, Writer, "prvCreatesprk_invoicecorrection", "Global");
+
+            var after = Run();
+            Assert.Equal(new[] { $"{RoleFileSource}: Spaarke Synthetic: prvCreatesprk_invoicecorrection at Deep" }, after.Unlisted);
+            Assert.Empty(after.Stale);
+
+            // must-fire: a baseline entry the role file no longer holds is stale
+            var adminPath = Path.Combine(dir, OntologyAdmin + ".xml");
+            var doc = XDocument.Parse(File.ReadAllText(adminPath));
+            var (role, privilege) = WriterOnlyNativeWriteBaseline[0];
+            doc.Descendants().Single(e => e.Name.LocalName == "RolePrivilege" && Same((string?)e.Attribute("name") ?? "", privilege)).Remove();
+            doc.Save(adminPath);
+            Assert.Equal(new[] { $"{role}: {privilege} — in the baseline but no longer found; remove the entry" }, Run().Stale);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
     }
 
     // ── Pinned whole privilege sets (ebilling-r1 DEF-059) ───────────────────────────────────────────────────────────────

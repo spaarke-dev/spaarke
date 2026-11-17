@@ -81,3 +81,49 @@ Tests that pinned the old, writable rule and were updated:
 | Re-file core in the guard's list | `Sprk.Bff.Api.Services.Dataverse.OwnedChildWrite` added to `GeneralUpdate`. No writer in `Services/Signals` or `Services/Finance` references it, so nothing legitimate is flagged. |
 | Pair-agreement theory data | `GenericPathFamilyTables` in `InvoiceFamilyGenericUpdatePathTests.PairAgreement.cs` is a hard-coded array of the three tables, not derived from `RefuseWriterOnlyTableUpdate`. |
 | Test names | The six tests named "ApprovalOrCorrection" now name the approval only (seam tests, two `InvoiceFamilyGenericUpdatePathTests.FixedAfterCreate` tests, the chat-update `InvoiceFamilyFixedAfterCreate` test). Tests in `InvoiceFamilyCoreRecordGuardTests` and the derive tests still cover both tables and keep their names. |
+
+## Part 2: native write hardening (EB-D-249)
+
+Correction rows: native write hardening. The role source now agrees with part 1: correction rows are written only by their writers.
+
+### Files changed
+
+- One role file under `src/dataverse/solutions/SpaarkeMaster/Roles/` (entries for `sprk_invoicecorrection` only; no other table touched).
+- `tests/Spaarke.ArchTests/FeatureRolePrivilegeGuardTests.cs`: the new guard section (from line 1508).
+- `config/feature-role-privileges.json`, `config/secure-record-owner-role.json` and `config/external-collaborator-role.json`: checked, unchanged.
+
+### Identity of the writers (verified before the edit)
+
+Both writers send correction rows through `IGenericEntityService.ExecuteTransactionAsync`
+(`InvoiceCorrectionService.cs:938`, `:960`, row built at `:1436`; `InvoiceLineDecisionService.cs:438`, `:790`, row built at `:1294`).
+`IGenericEntityService` is the singleton `DataverseServiceClientImpl` (`Infrastructure/DI/GraphModule.cs:145`), whose `ServiceClient`
+is built with the BFF's own application credential (`DataverseServiceClientImpl.cs:99-171`); `ExecuteTransactionAsync`
+(`DataverseServiceClientImpl.cs:3207-3214`) executes on that client, and the class sets no caller id. No write of a correction row runs
+as the calling user; the generic create, update and delete paths refuse the table (part 1).
+
+### Guard
+
+`FeatureRolePrivilegeGuardTests`, section "Correction rows: native write hardening". The writer-only tables are read from the registry
+(`RecordTableRules.All` where `CreatedOnlyByItsWriter`), which the ArchTests project already references, so a table added to the
+registry is covered without editing the test. The guard checks every person role file in every `Roles` folder under
+`src/dataverse/solutions` (`PersonRoles`, the same set the existing must-not-hold rules read; the repo has no packed or bundled copy of
+the roles) and every ruled change in `config/feature-role-privileges.json`. The writer's own role (`ExpectedAppUsersRoles`) is exempt.
+Findings outside a ratchet baseline fail; a baseline entry no longer found fails as stale. The baseline holds entries for other
+writer-only tables that predate this rule (known, tracked).
+
+Controls:
+- `WriterOnlyNativeWriteControls`: must-fire for each forbidden verb in any casing on a synthetic role and for a synthetic ruled change;
+  must-not-fire for the permitted verbs, for another table and for the writer's role; ratchet controls (listed, unlisted, stale).
+- `WriterOnlyNativeWriteFiresOnSeededRoleFiles`: on a copy of the role folder, a synthetic role document granting a forbidden verb fails,
+  the writer's role holding the same does not, and dropping a baseline entry's privilege makes it stale.
+- `WriterOnlyTablesHaveNoNativeWritesOutsideTheBaseline`: the repo as it is.
+
+### Tests
+
+- Before (the role file at `3d1efbcd30`): the real-repo test and the seeded test fail (5 findings, all on `sprk_invoicecorrection`).
+- After: `Spaarke.ArchTests` filter `FeatureRolePrivilege|WriterOnly|Role`: 365 passed, 0 failed.
+  `Sprk.Bff.Api.Tests` filter `InvoiceCorrection|InvoiceLineDecision|WriterOnly`: 682 passed, 0 failed.
+
+### Rollout
+
+Dev gets the change by a direct scoped edit after merge (EB-D-250). Other environments get it through the SpaarkeMaster import.
