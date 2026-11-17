@@ -1,0 +1,206 @@
+/**
+ * The firm description of a rule (ebilling-r1 task 130e-2, DEF-060, EB-D-212 / EB-D-213): the short text a firm sees when the rule rejects
+ * its invoice. The BFF is the authority (`FirmDescriptionRules.cs`, task 130e-1); this module mirrors its checks, in its order, so the
+ * admin gets an early field error, and decides what the save path sends. Free of React so it can be tested.
+ *
+ * The values pinned to the C# source (the reason codes, the limit, the request member) are checked by `__tests__/firmDescriptionPin.test.ts`.
+ *
+ * Known limits (also in notes/130e-2-rule-review-firm-description.md): look-alike letters from other alphabets are not caught by the name
+ * check (the server does not catch them either); the name check lower-cases per character, which can differ from the server's ordinal
+ * comparison for a few letters (the server stays authoritative).
+ */
+
+import type { ApiFailure } from './ruleSetApi';
+
+/** The most Unicode scalars a firm description may hold, after trimming (`FirmDescriptionRules.MaxRunes`). */
+export const MAX_FIRM_DESCRIPTION = 200;
+
+/** The request member of the PATCH body, the member of the GET view and the `field` of a refusal (`RuleSetService.FirmDescriptionField`). */
+export const FIRM_DESCRIPTION_FIELD = 'firmDescription';
+
+/** The six reason codes of a refused description (`FirmDescriptionRules`). */
+export const REASON_TOO_LONG = 'firm_description_too_long';
+export const REASON_BRACES = 'firm_description_braces';
+export const REASON_MARKUP = 'firm_description_markup';
+export const REASON_INVISIBLE = 'firm_description_invisible_character';
+export const REASON_NAMES_RULE = 'firm_description_names_rule';
+export const REASON_DUPLICATE = 'firm_description_duplicate';
+
+/** The `errorCode`s of a 422 that can carry a firm description refusal (an edit, a publish). */
+export const REFUSAL_ERROR_CODES: readonly string[] = ['ruleset.invalid', 'ruleset.publish_invalid'];
+
+/** One message per reason code, in the server's wording (`RuleSetService.FirmDescriptionMessage`). The text is never echoed. */
+export const FIRM_DESCRIPTION_MESSAGES: Readonly<Record<string, string>> = {
+  [REASON_DUPLICATE]: 'A Duplicate rule cannot carry a firm description: firms always see the standard duplicate wording.',
+  [REASON_TOO_LONG]: `The firm description is longer than ${MAX_FIRM_DESCRIPTION} characters.`,
+  [REASON_BRACES]: 'The firm description cannot contain { or }.',
+  [REASON_MARKUP]: 'The firm description cannot contain < or >.',
+  [REASON_INVISIBLE]: 'The firm description cannot contain line breaks, tabs or invisible characters.',
+  [REASON_NAMES_RULE]: 'The firm description cannot name the rule set or the rule: firms see it even when the rule set is hidden from them.',
+};
+
+const GENERIC_MESSAGE = 'The firm description is not valid.';
+
+/** The message for a reason code; an unknown code falls back to the server's own message, then to a generic line. */
+export const firmDescriptionMessage = (reason: string | null, serverMessage?: string | null): string =>
+  (reason ? FIRM_DESCRIPTION_MESSAGES[reason] : undefined) ?? (serverMessage || GENERIC_MESSAGE);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// The checks
+// ─────────────────────────────────────────────────────────────────────────────
+
+// .NET `char.IsWhiteSpace` (what the server's Trim and name comparison use): U+0009-000D, U+0020, U+0085, U+00A0, U+1680, U+2000-200A,
+// U+2028, U+2029, U+202F, U+205F, U+3000. JavaScript's `\s` differs (it holds U+FEFF and lacks U+0085), so the set is spelled out.
+const WS = '\\t-\\r \\u0085\\u00A0\\u1680\\u2000-\\u200A\\u2028\\u2029\\u202F\\u205F\\u3000';
+const TRIM = new RegExp(`^[${WS}]+|[${WS}]+$`, 'g');
+const WS_RUN = new RegExp(`[${WS}]+`, 'g');
+
+/** Trim as the server does. */
+export const trimLikeServer = (text: string): string => text.replace(TRIM, '');
+
+// A UTF-16 surrogate with no partner (no `u` flag: the pattern works on code units).
+const UNPAIRED_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
+// Unicode categories Control, Format, LineSeparator, ParagraphSeparator (`FirmDescriptionRules.IsInvisibleControl`).
+const INVISIBLE = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u;
+
+/**
+ * The Default_Ignorable_Code_Point ranges (Unicode 16.0, DerivedCoreProperties.txt), the same table as the server's
+ * `FirmDescriptionRules.DefaultIgnorableRanges` (a source-scan test keeps them equal). Several are category Mn (the combining grapheme joiner U+034F,
+ * the variation selectors U+FE00 to U+FE0F and U+E0100 to U+E01EF, the Mongolian selectors U+180B to U+180D): they draw nothing, NFKC keeps them, and
+ * the Control/Format test above lets them through, so "YIL" + U+034F + "LIK SINIR" would pass the name check. A text holding one is refused as invisible.
+ */
+export const DEFAULT_IGNORABLE_RANGES: ReadonlyArray<readonly [number, number]> = [
+  [0x00ad, 0x00ad], [0x034f, 0x034f], [0x061c, 0x061c], [0x115f, 0x1160], [0x17b4, 0x17b5], [0x180b, 0x180f], [0x200b, 0x200f],
+  [0x202a, 0x202e], [0x2060, 0x206f], [0x3164, 0x3164], [0xfe00, 0xfe0f], [0xfeff, 0xfeff], [0xffa0, 0xffa0], [0xfff0, 0xfff8],
+  [0x1bca0, 0x1bca3], [0x1d173, 0x1d17a], [0xe0000, 0xe0fff],
+];
+
+/** Whether a code point is a Default_Ignorable_Code_Point (`DEFAULT_IGNORABLE_RANGES`). */
+export const isDefaultIgnorable = (codePoint: number): boolean => DEFAULT_IGNORABLE_RANGES.some(([first, last]) => codePoint >= first && codePoint <= last);
+
+const hasInvisible = (text: string): boolean =>
+  UNPAIRED_SURROGATE.test(text) || INVISIBLE.test(text) || [...text].some(ch => isDefaultIgnorable(ch.codePointAt(0) ?? 0));
+
+/**
+ * NFKC, then every run of white space as one space, trimmed, the Turkish dotless i (U+0131) and dotted I (U+0130) as "i", then
+ * simple-upper-cased per character (the server's `Comparable` + OrdinalIgnoreCase). The "i" fold comes first so `toUpperCase` never
+ * decides those two (it would give "I" for U+0131 and keep U+0130, which the server's ordinal comparison does not).
+ */
+export function comparable(value: string): string {
+  const folded = value
+    .normalize('NFKC')
+    .replace(WS_RUN, ' ')
+    .replace(/^ | $/g, '')
+    .replace(/[\u0131\u0130]/g, 'i');
+  return [...folded]
+    .map(ch => {
+      const upper = ch.toUpperCase();
+      return [...upper].length === 1 ? upper : ch; // a mapping that grows ("ß" to "SS") is not a simple mapping: keep the letter
+    })
+    .join('');
+}
+
+const names = (text: string, name: string | null | undefined): boolean => {
+  if (!name || !trimLikeServer(name)) return false;
+  const needle = comparable(name);
+  return needle.length > 0 && comparable(text).includes(needle);
+};
+
+export interface FirmDescriptionContext {
+  /** The rule set's name (`RuleSetSummary.name`). */
+  ruleSetName?: string | null;
+  /** The rule's name (`ProposalView.name`, the policy name). */
+  ruleName?: string | null;
+  /** A Duplicate rule takes none. */
+  isDuplicate?: boolean;
+}
+
+export interface FirmDescriptionCheck {
+  /** The trimmed text; null when blank. */
+  text: string | null;
+  /** Unicode scalars in the trimmed text (a character outside the Basic Multilingual Plane counts once). */
+  count: number;
+  /** The first check it fails, as the server's reason code; null when it passes. */
+  reason: string | null;
+}
+
+/** The server's checks in the server's order: trim, blank is valid, Duplicate, unpaired surrogate, invisible, length, braces, markup, names. */
+export function checkFirmDescription(raw: string, ctx: FirmDescriptionContext = {}): FirmDescriptionCheck {
+  const text = trimLikeServer(raw);
+  if (!text) return { text: null, count: 0, reason: null };
+
+  const count = [...text].length;
+  const refused = (reason: string): FirmDescriptionCheck => ({ text, count, reason });
+
+  if (ctx.isDuplicate) return refused(REASON_DUPLICATE);
+  if (hasInvisible(text)) return refused(REASON_INVISIBLE);
+  if (count > MAX_FIRM_DESCRIPTION) return refused(REASON_TOO_LONG);
+  if (/[{}]/.test(text)) return refused(REASON_BRACES);
+  if (/[<>]/.test(text)) return refused(REASON_MARKUP);
+  if (names(text, ctx.ruleSetName) || names(text, ctx.ruleName)) return refused(REASON_NAMES_RULE);
+  return { text, count, reason: null };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// What the save path sends
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * The `firmDescription` member of the PATCH body, or `undefined` for "leave the key out". Only a change is sent (130e-1 contract):
+ * a changed text as typed (the server trims it), a cleared field as `""`, an untouched field not at all, so the member is never null by
+ * accident. A blank field over a rule with no text is not a change. A Duplicate rule sends only a removal: `""`, when it holds a stored
+ * text and the admin used Remove (the server accepts a blank on a Duplicate, and refuses any other text); never a text.
+ */
+export function firmDescriptionToSend(stored: string | null | undefined, current: string, isDuplicate = false): string | undefined {
+  const now = trimLikeServer(current);
+  if (isDuplicate) return now === '' && trimLikeServer(stored ?? '') !== '' ? '' : undefined;
+  if (now === trimLikeServer(stored ?? '')) return undefined;
+  return now === '' ? '' : current; // a blank field is a clear: say it as "", whatever white space was left in it
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Server refusals
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** One refusal of the firm description: the server's reason code and the message to show for it. */
+export interface FirmRefusal {
+  reason: string;
+  message: string;
+}
+
+/**
+ * The refusals of a 422 (`ruleset.invalid`, `ruleset.publish_invalid`) that name the firm description, by rule (`policyId`). An entry with
+ * no `policyId` belongs to `fallbackPolicyId` (the rule the call was about). One message per reason code per rule, in the order sent.
+ */
+export function firmDescriptionRefusals(failure: ApiFailure, fallbackPolicyId?: string): Record<string, FirmRefusal[]> {
+  const out: Record<string, FirmRefusal[]> = {};
+  if (failure.status !== 422 || !failure.errorCode || !REFUSAL_ERROR_CODES.includes(failure.errorCode)) return out;
+  for (const e of failure.errors) {
+    if (e.field !== FIRM_DESCRIPTION_FIELD) continue;
+    const policyId = e.policyId ?? fallbackPolicyId;
+    if (!policyId) continue;
+    const reason = e.reason ?? '';
+    const list = (out[policyId] ??= []);
+    if (!list.some(r => r.reason === reason)) list.push({ reason, message: firmDescriptionMessage(reason || null, e.message) });
+  }
+  return out;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Which refusals the page keeps (fix round 1 F4)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * The firm description refusals the rule set page holds, by rule, and which call they came from. A refusal of a SAVE is about the text the
+ * admin typed into one rule's form: it goes when another rule is selected. A refusal of an Accept or a Publish is about the STORED text, which
+ * does not change by looking at another rule, so it stays.
+ */
+export interface RefusalState {
+  from: 'edit' | 'other';
+  byRule: Record<string, FirmRefusal[]>;
+}
+
+export const NO_REFUSALS: RefusalState = { from: 'other', byRule: {} };
+
+/** The refusals after the selected rule changes: a save's go, the others stay. */
+export const refusalsAfterSelect = (state: RefusalState): RefusalState => (state.from === 'edit' ? NO_REFUSALS : state);

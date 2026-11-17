@@ -191,6 +191,121 @@ public class FirmDescriptionRulesTests
         FirmDescriptionRules.Validate(text, RuleSetName, PolicyName).IsValid.Should().BeTrue();
     }
 
+    // 130e-2 fix round 1 (F1): the Turkish dotless i (U+0131) and dotted I (U+0130) are not case pairs of i and I under OrdinalIgnoreCase, so a
+    // name like "YILLIK SINIR" was not found in "y\u0131ll\u0131k s\u0131n\u0131r". Both sides now read them as "i". The characters are written as escapes.
+    [Theory(DisplayName = "130e-2 fix round 1 F1 (C4): a Turkish dotless or dotted form of the name, or a plain text against a Turkish name, is refused (names_rule)")]
+    [InlineData("Billed under the y\u0131ll\u0131k s\u0131n\u0131r.", "YILLIK SINIR")]                // dotless text, plain upper name
+    [InlineData("Billed under the YILLIK SINIR.", "Y\u0131ll\u0131k S\u0131n\u0131r")]                 // plain text, dotless name
+    [InlineData("Billed under the Y\u0130LL\u0130K S\u0130N\u0130R.", "yillik sinir")]                // dotted capitals text, plain lower name
+    [InlineData("Billed under the yillik sinir.", "Y\u0130LL\u0130K S\u0130N\u0130R")]                // plain text, dotted capitals name
+    [InlineData("Billed under the y\u0131ll\u0131k s\u0131n\u0131r.", "Y\u0130LL\u0130K S\u0130N\u0130R")] // dotless text, dotted name
+    [InlineData("Billed under the Y\u0130LL\u0130K S\u0130N\u0130R.", "y\u0131ll\u0131k s\u0131n\u0131r")] // dotted text, dotless name
+    public void ATurkishCaseFormOfTheName_IsRefused(string text, string name)
+    {
+        FirmDescriptionRules.Validate(text, name, null).RefusalCode.Should().Be(FirmDescriptionRules.NamesTheRule, "the name is in the set slot");
+        FirmDescriptionRules.Validate(text, null, name).RefusalCode.Should().Be(FirmDescriptionRules.NamesTheRule, "and in the rule slot");
+        FirmDescriptionRules.Validate(text).IsValid.Should().BeTrue("the setup: the text alone is an allowed text");
+    }
+
+    [Theory(DisplayName = "130e-2 fix round 1 F1 must-not-fire: unrelated text holding a dotless or dotted i is accepted")]
+    [InlineData("Ak\u0131ll\u0131 hizmet bedeli uygulanm\u0131\u015Ft\u0131r.")]
+    [InlineData("\u0130stanbul office, hourly rates apply.")]
+    [InlineData("Billed under the y\u0131ll\u0131k tarife.")] // shares one word with the name only
+    public void UnrelatedTurkishText_IsAccepted(string text)
+    {
+        FirmDescriptionRules.Validate(text, "YILLIK SINIR", PolicyName).IsValid.Should().BeTrue();
+        FirmDescriptionRules.Validate(text, RuleSetName, "Y\u0131ll\u0131k S\u0131n\u0131r").IsValid.Should().BeTrue();
+    }
+
+    // -- 130e-2 fix round 2 (F1): Default_Ignorable_Code_Point. The code points are numbers so the source shows which character each row tests. --
+
+    [Theory(DisplayName = "130e-2 fix round 2 F1: a default-ignorable rune that is not category Format (combining grapheme joiner, variation selectors, Hangul fillers ...) is refused (invisible_character)")]
+    [InlineData(0x034F)]  // combining grapheme joiner (Mn)
+    [InlineData(0x180B)]  // Mongolian free variation selector one (Mn)
+    [InlineData(0x180D)]  // Mongolian free variation selector three (Mn)
+    [InlineData(0xFE00)]  // variation selector 1 (Mn)
+    [InlineData(0xFE0F)]  // variation selector 16 (Mn)
+    [InlineData(0xE0100)] // variation selector 17 (Mn)
+    [InlineData(0xE01EF)] // variation selector 256 (Mn)
+    [InlineData(0x115F)]  // Hangul choseong filler (Lo)
+    [InlineData(0x3164)]  // Hangul filler (Lo)
+    [InlineData(0xFFA0)]  // halfwidth Hangul filler (Lo)
+    [InlineData(0x17B4)]  // Khmer vowel inherent AQ (Mn)
+    [InlineData(0x1BCA0)] // shorthand format letter overlap (Cf)
+    [InlineData(0x1D173)] // musical symbol begin beam (Cf)
+    [InlineData(0x2065)]  // unassigned, inside U+2060 to U+206F
+    [InlineData(0xE0FFF)] // last of U+E0000 to U+E0FFF
+    public void ADefaultIgnorableRune_IsRefused(int codePoint)
+    {
+        var text = $"Rate{char.ConvertFromUtf32(codePoint)} too high.";
+
+        FirmDescriptionRules.IsDefaultIgnorable(new Rune(codePoint)).Should().BeTrue();
+        FirmDescriptionRules.Validate(text).RefusalCode.Should().Be(FirmDescriptionRules.InvisibleCharacter).And.Be("firm_description_invisible_character");
+        FirmDescriptionRules.Validate(text).Text.Should().BeNull();
+    }
+
+    [Theory(DisplayName = "130e-2 fix round 2 F1 (C4): an invisible mark inside a name no longer gets it past the check (refused as invisible_character, with or without the names)")]
+    [InlineData(0x034F)]
+    [InlineData(0xFE0F)]
+    [InlineData(0xE0100)]
+    [InlineData(0x180B)]
+    public void AnInvisibleMarkInsideAName_IsRefused(int codePoint)
+    {
+        var mark = char.ConvertFromUtf32(codePoint);
+        var text = "Billed under the YIL" + mark + "LIK SINIR.";
+
+        FirmDescriptionRules.Validate(text, "YILLIK SINIR", PolicyName).RefusalCode.Should().Be(FirmDescriptionRules.InvisibleCharacter);
+        FirmDescriptionRules.Validate(text, RuleSetName, "YILLIK SINIR").RefusalCode.Should().Be(FirmDescriptionRules.InvisibleCharacter);
+        FirmDescriptionRules.Validate(text).RefusalCode.Should().Be(FirmDescriptionRules.InvisibleCharacter, "the check does not need the names");
+    }
+
+    [Theory(DisplayName = "130e-2 fix round 2 F1 must-not-fire: text with accents (precomposed or decomposed), neighbours of the ranges and other combining marks are accepted")]
+    [InlineData("caf\u00E9 hours")]        // precomposed e acute
+    [InlineData("cafe\u0301 hours")]       // decomposed: e + combining acute (U+0301 is Mn, not default-ignorable)
+    [InlineData("na\u00EFve \u00C5ngstr\u00F6m")]
+    [InlineData("Registered \u00AE rates")] // U+00AE, next to U+00AD
+    [InlineData("Digit \u1810 and \u180A")] // Mongolian digit zero and the nirugu, either side of U+180B to U+180F
+    [InlineData("Mark \u034E \u0350")]      // either side of U+034F
+    [InlineData("Presentation \uFE10 \uFE20")] // after U+FE00 to U+FE0F
+    [InlineData("Superscript \u2070 \u2071")]  // after U+2060 to U+206F
+    [InlineData("Emoji \U0001F600 with tone \U0001F44D\U0001F3FD")]
+    public void OrdinaryAndNeighbouringText_IsAccepted(string text)
+    {
+        FirmDescriptionRules.Validate(text).Should().Be(new FirmDescriptionCheck(text, null));
+    }
+
+    [Fact(DisplayName = "130e-2 fix round 2 F1: a decomposed accent is composed by NFKC before the name comparison, so a decomposed name is still refused (names_rule)")]
+    public void ADecomposedNameIsStillCaught()
+    {
+        FirmDescriptionRules.Validate("Per the cafe\u0301 rule.", "CAF\u00C9", null).RefusalCode.Should().Be(FirmDescriptionRules.NamesTheRule);
+        FirmDescriptionRules.Validate("Per the caf\u00E9 rule.", "CAFE\u0301", null).RefusalCode.Should().Be(FirmDescriptionRules.NamesTheRule);
+    }
+
+    [Fact(DisplayName = "130e-2 fix round 2 F1: the range table is Unicode 16.0's Default_Ignorable_Code_Point, exactly (the client holds the same table; a source-scan test keeps them equal)")]
+    public void TheDefaultIgnorableTable_IsUnicode16()
+    {
+        FirmDescriptionRules.DefaultIgnorableRanges.Should().Equal(
+            (0x00AD, 0x00AD), (0x034F, 0x034F), (0x061C, 0x061C), (0x115F, 0x1160), (0x17B4, 0x17B5), (0x180B, 0x180F), (0x200B, 0x200F),
+            (0x202A, 0x202E), (0x2060, 0x206F), (0x3164, 0x3164), (0xFE00, 0xFE0F), (0xFEFF, 0xFEFF), (0xFFA0, 0xFFA0), (0xFFF0, 0xFFF8),
+            (0x1BCA0, 0x1BCA3), (0x1D173, 0x1D17A), (0xE0000, 0xE0FFF));
+
+        foreach (var (first, last) in FirmDescriptionRules.DefaultIgnorableRanges)
+        {
+            FirmDescriptionRules.IsDefaultIgnorable(new Rune(first)).Should().BeTrue($"U+{first:X4} starts a range");
+            FirmDescriptionRules.IsDefaultIgnorable(new Rune(last)).Should().BeTrue($"U+{last:X4} ends a range");
+            FirmDescriptionRules.IsDefaultIgnorable(new Rune(first - 1)).Should().BeFalse($"U+{first - 1:X4} is just before it");
+            FirmDescriptionRules.IsDefaultIgnorable(new Rune(last + 1)).Should().BeFalse($"U+{last + 1:X4} is just after it");
+        }
+    }
+
+    [Fact(DisplayName = "130e-2 fix round 2 F1: the read side keeps its own rule (IsInvisibleControl is unchanged): a variation selector is not Control or Format")]
+    public void TheReadSidePredicate_IsUnchanged()
+    {
+        FirmDescriptionRules.IsInvisibleControl(new Rune(0xFE0F)).Should().BeFalse();
+        FirmDescriptionRules.IsInvisibleControl(new Rune(0x034F)).Should().BeFalse();
+        FirmDescriptionRules.IsInvisibleControl(new Rune(0x200B)).Should().BeTrue();
+    }
+
     /// <summary>Printable ASCII mapped to its fullwidth form (U+FF01 to U+FF5E); the space is kept.</summary>
     private static string Fullwidth(string ascii) =>
         string.Concat(ascii.Select(c => c is >= '!' and <= '~' ? (char)(c + 0xFEE0) : c));
