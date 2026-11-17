@@ -10,7 +10,7 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import { CODE_ADJUSTMENT_ID_REUSED } from '../services/decisionApi';
+import { CODE_ADJUSTMENT_ID_REUSED, CODE_BLOCKED_CONCURRENT_CHANGE, isBlockedOutcomeUnknown } from '../services/decisionApi';
 import { staysInNoteDialog } from '../services/invoiceReviewApi';
 import { CODE_NOTE_INVALID_CHARACTERS, CODE_NOTE_TOO_LONG, NOTE_ERROR_CODES, NOTE_MAX_CHARS } from '../services/noteModel';
 
@@ -117,6 +117,27 @@ describe('the request bodies: `note` is the server\'s member name on every decis
   });
 });
 
+describe('the blocked-submission 409 that is answered after the Decision Record (review round 2)', () => {
+  const blockedCodes = () => stringConsts(read(`${BFF}/Services/Finance/SubmissionOverrideService.cs`));
+  const conflict = (errorCode: string | null, status = 409) => ({ status, errorCode, detail: null, signInFailed: false, failedStep: null, committedLineIds: [] });
+
+  it('is the server\'s BlockedSubmissionErrors.ConcurrentChange, and an unknown outcome for the form', () => {
+    expect(blockedCodes().ConcurrentChange).toBe('ebilling.blocked.concurrent_change');
+    expect(CODE_BLOCKED_CONCURRENT_CHANGE).toBe(blockedCodes().ConcurrentChange);
+    expect(isBlockedOutcomeUnknown(conflict(blockedCodes().ConcurrentChange))).toBe(true);
+  });
+
+  it('(must-not-fire) the 409s answered before any record is written are not unknown outcomes', () => {
+    const b = blockedCodes();
+    for (const code of [b.NotBlocked, b.AlreadyOverridden, b.AlreadyReturned, b.InvoiceNotHeld, b.InProgress, b.StillProcessing, b.DecisionConflict]) {
+      expect(typeof code).toBe('string');
+      expect(isBlockedOutcomeUnknown(conflict(code))).toBe(false);
+    }
+    // The same code on another status is not it.
+    expect(isBlockedOutcomeUnknown(conflict(blockedCodes().ConcurrentChange, 500))).toBe(false);
+  });
+});
+
 describe('the 409 codes a dialog keeps open for a resend (review round 1)', () => {
   const lineCodes = () => stringConsts(read(`${BFF}/Services/Finance/InvoiceLineDecisionService.cs`));
   const correctionCodes = () => stringConsts(read(`${BFF}/Services/Finance/InvoiceCorrectionService.cs`));
@@ -125,17 +146,26 @@ describe('the 409 codes a dialog keeps open for a resend (review round 1)', () =
   it('every server code the page keeps a dialog open for is one the server really sends', () => {
     const l = lineCodes();
     const c = correctionCodes();
-    const stays = [l.Busy, l.LinePending, l.CorrectionsPending, l.TotalsRefused, c.FirmMissing, c.CodeSetUnavailable, c.ExtractionUnavailable];
+    const stays = [l.Busy, l.LinePending, l.TotalsRefused, c.CodeSetUnavailable, c.ExtractionUnavailable];
     for (const code of stays) {
       expect(typeof code).toBe('string');
       expect(staysInNoteDialog(conflict(code))).toBe(true);
     }
   });
 
+  it('(round 2) a refusal whose cause lies outside the form closes the dialog: corrections pending on other lines, and no firm on the invoice', () => {
+    const l = lineCodes();
+    const c = correctionCodes();
+    for (const code of [l.CorrectionsPending, c.FirmMissing]) {
+      expect(typeof code).toBe('string');
+      expect(staysInNoteDialog(conflict(code))).toBe(false);
+    }
+  });
+
   it('(must-not-fire) the server codes that say the invoice or line is no longer what the form was about close the dialog', () => {
     const l = lineCodes();
     const c = correctionCodes();
-    const closes = [l.NotInReview, l.LineNotDecidable, l.LineChanged, c.InvoiceChanged, c.LineNotCorrectable, c.NoProvenance, c.ProcedureGap, c.TooLarge];
+    const closes = [l.NotInReview, l.LineNotDecidable, l.LineChanged, c.InvoiceChanged, c.LineNotCorrectable, c.NoProvenance, c.ProcedureGap, c.TooLarge, l.CorrectionsPending, c.FirmMissing];
     for (const code of closes) {
       expect(typeof code).toBe('string');
       expect(staysInNoteDialog(conflict(code))).toBe(false);

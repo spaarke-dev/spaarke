@@ -335,6 +335,12 @@ export function InvoiceReviewPage(props: InvoiceReviewPageProps) {
    * dialog reads it once, when it mounts.
    */
   const drafts = React.useRef(new Map<string, DialogDraft>());
+  /**
+   * Review round 2: the dialogs (by draft key) whose last send came back unsure (no answer, or a 503). That send may have saved the row WITH its
+   * note, so a later resend answered "already applied" is not a lost note: it gets the plain success text. Dropped with the draft, and when a
+   * send is saved.
+   */
+  const unsureSends = React.useRef(new Set<string>());
 
   const panes = useTwoPanelLayout({ defaultDetailWidth: 560, minPrimaryWidth: 520, minDetailWidth: 420, storageKey: 'sprk-invoice-review-pane' });
 
@@ -501,9 +507,10 @@ export function InvoiceReviewPage(props: InvoiceReviewPageProps) {
         noteLine?: string;
         /**
          * Review round 1: a sentence that replaces the plain success text for a write the server answered 200 but did not do in full (a
-         * correction or confirm that was already in place stores no note). Shown as a warning. Return null for the plain success.
+         * correction or confirm that was already in place stores no note). Shown as a warning. Return null for the plain success. `isRepeat` is
+         * true for the page's own Repeat (round 2: the first send saved the row WITH its note, so "already applied" is no loss of the note).
          */
-        warnAfter?: (value: T) => string | null;
+        warnAfter?: (value: T, isRepeat: boolean) => string | null;
       }
     ): Promise<boolean> => {
       setBusy(true);
@@ -517,7 +524,7 @@ export function InvoiceReviewPage(props: InvoiceReviewPageProps) {
         setBusy(false);
         // The write is saved; if the re-read failed, what is on the page is NOT the server's state: say so instead of a plain "Saved".
         // A write the server found already in place (and so did not store the note) is a warning, never a plain "Saved".
-        const warn = opts.warnAfter?.(result.value) ?? null;
+        const warn = opts.warnAfter?.(result.value, opts.isRepeat === true) ?? null;
         const text = warn ?? opts.success;
         setNotice(
           fresh
@@ -609,6 +616,24 @@ export function InvoiceReviewPage(props: InvoiceReviewPageProps) {
   const bulkKey = (r: BulkRequest) => `bulk:${r.action}:${r.lines.map(l => l.lineId).sort().join(',')}`;
   const correctKey = (t: CorrectTarget) => (t.lineId ? `correct:${t.lineId}:${t.field}` : 'correct:header');
   const confirmKey = (t: { line: ReviewLine; field: string }) => `confirm:${t.line.id}:${t.field}`;
+  /**
+   * The reviewer cancels a dialog. A dialog that stayed open after a refusal (a sentence or a Note-box message is showing) still holds what
+   * was sent, and the cancel keeps it for the next opening; a cancel with nothing refused drops any draft (review round 2).
+   */
+  const cancelDraft = (key: string) => {
+    if (dialogError === null && noteFault?.where !== 'dialog') {
+      drafts.current.delete(key);
+      unsureSends.current.delete(key);
+    }
+  };
+  /** A send of the dialog `key`, noting when it comes back unsure (no answer, or a 503) so a later "already applied" is read correctly. */
+  const trackUnsure =
+    <T,>(key: string, call: () => Promise<ApiResult<T>>) =>
+    async (): Promise<ApiResult<T>> => {
+      const r = await call();
+      if (!r.ok && (r.failure.status === 0 || r.failure.status === 503)) unsureSends.current.add(key);
+      return r;
+    };
 
   const submitBulk = (request: BulkRequest, reason: string | null, note?: string) => {
     const decisionId = newDecisionId();
@@ -644,17 +669,22 @@ export function InvoiceReviewPage(props: InvoiceReviewPageProps) {
     const key = correctKey(target);
     drafts.current.set(key, { field, value, note: note ?? '' });
     void runWrite(
-      () => (target.lineId ? api.correctLine(invoiceId, target.lineId, request) : api.correctHeader(invoiceId, request)),
+      trackUnsure(key, () => (target.lineId ? api.correctLine(invoiceId, target.lineId, request) : api.correctHeader(invoiceId, request))),
       {
         success: `Saved · ${label} corrected${target.lineSequence ? ` on line ${target.lineSequence}` : ''}; the rules ran again`,
         inDialog: true,
         noteField: 'dialog',
         staysInDialog: staysInNoteDialog,
-        // The server found the correction already in place (a repeat, or another reviewer's) and stored no note: say so.
-        warnAfter: v => (note !== undefined && v.alreadyApplied ? 'Already corrected to this value; the note was not saved.' : null),
+        // The server found the correction already in place (another reviewer's, or this one's earlier send) and stored no note: say so, on a
+        // FIRST send only. After a Repeat or a resend that followed an unsure answer, the earlier send saved the row with its note.
+        warnAfter: (v, isRepeat) =>
+          note !== undefined && v.alreadyApplied && !isRepeat && !unsureSends.current.has(key)
+            ? 'Already corrected to this value; the note was not saved.'
+            : null,
         closeDialog: () => setCorrect(null),
         after: (_, __, isRepeat) => {
           drafts.current.delete(key);
+          unsureSends.current.delete(key);
           if (!isRepeat) setCorrect(null);
         },
       }
@@ -704,16 +734,18 @@ export function InvoiceReviewPage(props: InvoiceReviewPageProps) {
     const { line, field } = target;
     const key = confirmKey(target);
     drafts.current.set(key, { note: note ?? '' });
-    void runWrite(() => api.correctLine(invoiceId, line.id, { field, value: null, confirm: true, ...noteMember(note) }), {
+    void runWrite(trackUnsure(key, () => api.correctLine(invoiceId, line.id, { field, value: null, confirm: true, ...noteMember(note) })), {
       success: `Saved · ${fieldLabel(field)} on line ${line.sequence} confirmed as read`,
       inDialog: true,
       noteField: 'dialog',
       staysInDialog: staysInNoteDialog,
-      // The server found it already confirmed and stored no note: say so.
-      warnAfter: v => (note !== undefined && v.alreadyApplied ? 'Already confirmed; the note was not saved.' : null),
+      // The server found it already confirmed and stored no note: say so, on a FIRST send only (see the correction above).
+      warnAfter: (v, isRepeat) =>
+        note !== undefined && v.alreadyApplied && !isRepeat && !unsureSends.current.has(key) ? 'Already confirmed; the note was not saved.' : null,
       closeDialog: () => setConfirming(null),
       after: (_, __, isRepeat) => {
         drafts.current.delete(key);
+        unsureSends.current.delete(key);
         if (!isRepeat) setConfirming(null);
       },
     });
@@ -1011,7 +1043,7 @@ export function InvoiceReviewPage(props: InvoiceReviewPageProps) {
           onNoteEdit={() => setNoteFault(null)}
           draft={drafts.current.get(correctKey(correct))}
           onClose={() => {
-            drafts.current.delete(correctKey(correct));
+            cancelDraft(correctKey(correct));
             setCorrect(null);
           }}
           onSubmit={(field, value, note) => submitCorrection(correct, field, value, note)}
@@ -1026,7 +1058,7 @@ export function InvoiceReviewPage(props: InvoiceReviewPageProps) {
           onNoteEdit={() => setNoteFault(null)}
           draft={drafts.current.get(confirmKey(confirming))}
           onClose={() => {
-            drafts.current.delete(confirmKey(confirming));
+            cancelDraft(confirmKey(confirming));
             setConfirming(null);
           }}
           onSubmit={note => submitConfirm(confirming, note)}
@@ -1049,7 +1081,7 @@ export function InvoiceReviewPage(props: InvoiceReviewPageProps) {
           onNoteEdit={() => setNoteFault(null)}
           draft={drafts.current.get(bulkKey(bulk))}
           onClose={() => {
-            drafts.current.delete(bulkKey(bulk));
+            cancelDraft(bulkKey(bulk));
             setBulk(null);
           }}
           onSubmit={(reason, note) => submitBulk(bulk, reason, note)}

@@ -130,6 +130,84 @@ describe('a correction or confirm the server found already in place stored no no
     fireEvent.click(within(dialog).getByRole('button', { name: 'Confirm as read', hidden: true }));
     expect(await screen.findByTestId('notice')).toHaveTextContent('Saved · Hours on line 7 confirmed as read');
   });
+
+  // Review round 2: a 503 `incomplete` has already committed the row WITH its note, so the repeat is answered "already applied" and the
+  // note WAS saved. The warning is only for a FIRST send that finds the value already in place.
+  const incompleteCorrection = () =>
+    failed(problem(503, 'ebilling.correction.incomplete', { detail: 'The correction was saved; the totals were not.', failedStep: 'totals' }));
+
+  it('(round 2) the page Repeat of a correction that saved in part is answered already-applied: plain success, no "note was not saved"', async () => {
+    const api = mockApi(lowHours());
+    api.correctLine.mockResolvedValueOnce(incompleteCorrection()).mockResolvedValueOnce(applied(true));
+    const { dialog } = await openCorrect(api);
+    fireEvent.change(within(dialog).getByLabelText('Note'), { target: { value: 'Per the timesheet' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save correction', hidden: true }));
+    fireEvent.click(await screen.findByTestId('notice-repeat'));
+    await waitFor(() => expect(api.correctLine).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(screen.getByTestId('notice')).toHaveAttribute('data-intent', 'success'));
+    expect(screen.getByTestId('notice')).toHaveTextContent('Saved · Hours corrected on line 7; the rules ran again');
+    expect(screen.getByTestId('notice')).not.toHaveTextContent('not saved');
+    expect(api.correctLine.mock.calls[1][2]).toEqual(api.correctLine.mock.calls[0][2]);
+  });
+
+  it('(round 2) the page Repeat of a confirm that saved in part is answered already-applied: plain success', async () => {
+    const api = mockApi(lowHours());
+    api.correctLine.mockResolvedValueOnce(incompleteCorrection()).mockResolvedValueOnce(applied(true));
+    const { dialog } = await openConfirm(api);
+    fireEvent.change(within(dialog).getByLabelText('Note'), { target: { value: 'Matches the PDF' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Confirm as read', hidden: true }));
+    fireEvent.click(await screen.findByTestId('notice-repeat'));
+    await waitFor(() => expect(api.correctLine).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(screen.getByTestId('notice')).toHaveAttribute('data-intent', 'success'));
+    expect(screen.getByTestId('notice')).toHaveTextContent('Saved · Hours on line 7 confirmed as read');
+    expect(screen.getByTestId('notice')).not.toHaveTextContent('not saved');
+  });
+
+  it('(round 2) a resend from the same dialog after a send with no answer, answered already-applied, is plain success', async () => {
+    const api = mockApi(lowHours());
+    api.correctLine.mockResolvedValueOnce(failed(new Error('Failed to fetch'))).mockResolvedValueOnce(applied(true));
+    const { dialog } = await openCorrect(api);
+    fireEvent.change(within(dialog).getByLabelText('Note'), { target: { value: 'Per the timesheet' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save correction', hidden: true }));
+    await within(dialog).findByTestId('correct-error');
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save correction', hidden: true }));
+    const notice = await screen.findByTestId('notice');
+    expect(notice).toHaveTextContent('Saved · Hours corrected on line 7; the rules ran again');
+    expect(notice).toHaveAttribute('data-intent', 'success');
+    expect(notice).not.toHaveTextContent('not saved');
+  });
+
+  it('(round 2) a resend after a 503 that closed the dialog, reopened from its draft and answered already-applied, is plain success', async () => {
+    const api = mockApi(lowHours());
+    api.correctLine.mockResolvedValueOnce(incompleteCorrection()).mockResolvedValueOnce(applied(true));
+    const { dialog, pane } = await openCorrect(api);
+    fireEvent.change(within(dialog).getByLabelText('Note'), { target: { value: 'Per the timesheet' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save correction', hidden: true }));
+    await screen.findByTestId('notice-repeat');
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    fireEvent.click(within(pane).getByTestId('correct-Hours'));
+    const again = await screen.findByRole('dialog');
+    expect(within(again).getByLabelText('Note')).toHaveValue('Per the timesheet');
+    fireEvent.click(within(again).getByRole('button', { name: 'Save correction', hidden: true }));
+    await waitFor(() => expect(api.correctLine).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(screen.getByTestId('notice')).toHaveAttribute('data-intent', 'success'));
+    expect(screen.getByTestId('notice')).not.toHaveTextContent('not saved');
+  });
+
+  it('(must-not-fire) a first send answered already-applied still warns, even after an earlier 409 that saved nothing', async () => {
+    const api = mockApi(lowHours());
+    api.correctLine
+      .mockResolvedValueOnce(failed(problem(409, 'ebilling.correction.code_set_unavailable', { detail: 'No code set.' })))
+      .mockResolvedValueOnce(applied(true));
+    const { dialog } = await openCorrect(api);
+    fireEvent.change(within(dialog).getByLabelText('Note'), { target: { value: 'Per the timesheet' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save correction', hidden: true }));
+    await within(dialog).findByTestId('correct-error');
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save correction', hidden: true }));
+    const notice = await screen.findByTestId('notice');
+    expect(notice).toHaveTextContent('Already corrected to this value; the note was not saved.');
+    expect(notice).toHaveAttribute('data-intent', 'warning');
+  });
 });
 
 describe('the bulk, correction and Confirm-as-read dialogs on a 409', () => {
@@ -220,7 +298,7 @@ describe('the bulk, correction and Confirm-as-read dialogs on a 409', () => {
     expect(within(fresh).getByLabelText('Note')).toHaveValue('');
   });
 
-  it('(must-not-fire) cancelling a dialog that stayed open on a busy 409 drops its text', async () => {
+  it('(round 2) cancelling a dialog that stayed open on a busy 409 KEEPS its text for the next opening', async () => {
     const api = mockApi(normal());
     api.decideLines.mockResolvedValueOnce(failed(problem(409, 'ebilling.invoice.busy', { detail: 'Busy.' })));
     const first = await openBulk(api);
@@ -231,17 +309,66 @@ describe('the bulk, correction and Confirm-as-read dialogs on a 409', () => {
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
     fireEvent.click(screen.getByTestId('bulk-disallow'));
     const again = await screen.findByRole('dialog');
-    expect(within(again).getByLabelText('Reason')).toHaveValue('');
-    expect(within(again).getByLabelText('Note')).toHaveValue('');
+    expect(within(again).getByLabelText('Reason')).toHaveValue('Duplicate entries');
+    expect(within(again).getByLabelText('Note')).toHaveValue('Same entry twice');
   });
 
-  it('a correction answered 409 invoice.busy stays open with the sentence, the value and the note', async () => {
+  it('(must-not-fire) cancelling a prefilled dialog with no failure showing drops its text', async () => {
+    const api = mockApi(normal());
+    api.decideLines.mockResolvedValueOnce(failed(problem(409, 'ebilling.line.changed', { detail: 'A line changed.' })));
+    const first = await openBulk(api);
+    typeBulk(first);
+    submitBulk(first);
+    await screen.findByTestId('notice-reload');
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    // The next opening is prefilled; the reviewer cancels it without sending (no failure is showing in it).
+    fireEvent.click(screen.getByTestId('bulk-disallow'));
+    const again = await screen.findByRole('dialog');
+    expect(within(again).getByLabelText('Reason')).toHaveValue('Duplicate entries');
+    fireEvent.click(within(again).getByRole('button', { name: 'Cancel', hidden: true }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    fireEvent.click(screen.getByTestId('bulk-disallow'));
+    const fresh = await screen.findByRole('dialog');
+    expect(within(fresh).getByLabelText('Reason')).toHaveValue('');
+    expect(within(fresh).getByLabelText('Note')).toHaveValue('');
+  });
+
+  it('(round 2) a bulk decision answered 409 line.corrections_pending closes the dialog (it cannot be fixed there), and the next opening keeps the text', async () => {
+    const api = mockApi(normal());
+    api.decideLines.mockResolvedValueOnce(failed(problem(409, 'ebilling.line.corrections_pending', { detail: 'Repeat the corrections on lines 2 and 4 first.' })));
+    const first = await openBulk(api);
+    typeBulk(first);
+    submitBulk(first);
+    expect(await screen.findByTestId('notice')).toHaveTextContent('Repeat the corrections on lines 2 and 4 first.');
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    fireEvent.click(screen.getByTestId('bulk-disallow'));
+    const again = await screen.findByRole('dialog');
+    expect(within(again).getByLabelText('Reason')).toHaveValue('Duplicate entries');
+    expect(within(again).getByLabelText('Note')).toHaveValue('Same entry twice');
+  });
+
+  it('(round 2) a correction answered 409 correction.firm_missing closes the dialog, and the next opening keeps the value and the note', async () => {
     const api = mockApi(lowHours());
-    api.correctLine.mockResolvedValueOnce(failed(problem(409, 'ebilling.invoice.busy', { detail: 'Another change to this invoice is in progress.' })));
+    api.correctLine.mockResolvedValueOnce(failed(problem(409, 'ebilling.correction.firm_missing', { detail: 'This invoice has no firm. Add the firm before correcting its values; nothing was changed.' })));
+    const { dialog, pane } = await openCorrect(api);
+    fireEvent.change(within(dialog).getByLabelText('Note'), { target: { value: 'Per the timesheet' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save correction', hidden: true }));
+    expect(await screen.findByTestId('notice')).toHaveTextContent('This invoice has no firm.');
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    fireEvent.click(within(pane).getByTestId('correct-Hours'));
+    const again = await screen.findByRole('dialog');
+    expect(within(again).getByLabelText('Correct value')).toHaveValue('2.5');
+    expect(within(again).getByLabelText('Note')).toHaveValue('Per the timesheet');
+  });
+
+  it('a correction answered 409 code_set_unavailable stays open with the sentence, the value and the note', async () => {
+    const detail = 'This line was not coded, so it has no code set to check a code against.';
+    const api = mockApi(lowHours());
+    api.correctLine.mockResolvedValueOnce(failed(problem(409, 'ebilling.correction.code_set_unavailable', { detail })));
     const { dialog } = await openCorrect(api);
     fireEvent.change(within(dialog).getByLabelText('Note'), { target: { value: 'Per the timesheet' } });
     fireEvent.click(within(dialog).getByRole('button', { name: 'Save correction', hidden: true }));
-    expect(await within(dialog).findByTestId('correct-error')).toHaveTextContent('Another change to this invoice is in progress.');
+    expect(await within(dialog).findByTestId('correct-error')).toHaveTextContent(detail);
     expect(within(dialog).getByLabelText('Correct value')).toHaveValue('2.5');
     expect(within(dialog).getByLabelText('Note')).toHaveValue('Per the timesheet');
     expect(screen.queryByTestId('notice')).not.toBeInTheDocument();
@@ -282,15 +409,15 @@ describe('the bulk, correction and Confirm-as-read dialogs on a 409', () => {
     expect(within(again).getByLabelText('Note')).toHaveValue('Typo on the scan');
   });
 
-  it('a confirm answered 409 invoice.busy stays open with the sentence and the note; 409 not_in_review closes it and keeps the note for the next opening', async () => {
+  it('a confirm answered 409 extraction_unavailable stays open with the sentence and the note; 409 not_in_review closes it and keeps the note for the next opening', async () => {
     const api = mockApi(lowHours());
     api.correctLine
-      .mockResolvedValueOnce(failed(problem(409, 'ebilling.invoice.busy', { detail: 'Another change to this invoice is in progress.' })))
+      .mockResolvedValueOnce(failed(problem(409, 'ebilling.correction.extraction_unavailable', { detail: 'The stored reading of this line is unavailable.' })))
       .mockResolvedValueOnce(failed(problem(409, 'ebilling.invoice.not_in_review', { detail: 'The invoice is no longer in review.' })));
     const { dialog, pane } = await openConfirm(api);
     fireEvent.change(within(dialog).getByLabelText('Note'), { target: { value: 'Matches the PDF' } });
     fireEvent.click(within(dialog).getByRole('button', { name: 'Confirm as read', hidden: true }));
-    expect(await within(dialog).findByTestId('confirm-error')).toHaveTextContent('Another change to this invoice is in progress.');
+    expect(await within(dialog).findByTestId('confirm-error')).toHaveTextContent('The stored reading of this line is unavailable.');
     expect(within(dialog).getByLabelText('Note')).toHaveValue('Matches the PDF');
     fireEvent.click(within(dialog).getByRole('button', { name: 'Confirm as read', hidden: true }));
     await screen.findByTestId('notice-reload');

@@ -27,7 +27,7 @@ import {
   tokens,
 } from '@fluentui/react-components';
 import { FormModal } from '@spaarke/ui-components';
-import { decisionFailureMessage, isOutcomeUnknown, type BlockedFinding, type BlockedSubmission } from '../../services/decisionApi';
+import { decisionFailureMessage, isBlockedOutcomeUnknown, type BlockedFinding, type BlockedSubmission } from '../../services/decisionApi';
 import type { ApiFailure, InvoiceReview } from '../../services/invoiceReviewApi';
 import { isNoteRefusal, noteArgs, noteProblem, noteRefusalMessage } from '../../services/noteModel';
 import { NoteField } from '../NoteField';
@@ -118,10 +118,10 @@ export function BlockedBanner({ review, reload }: BlockedBannerProps) {
   if (!held || !submissionId) return null;
 
   const open = (a: Action) => {
-    // An Override or Return that came back unsure is reopened as it was sent, locked, so the repeat is the same request. The other action is
-    // a different request: nothing stays locked.
+    // An Override or Return that came back unsure is reopened as it was sent, locked, so the repeat is the same request. Review round 2: the
+    // lock is KEPT when the other action is opened (the first may already be recorded, and the server finishes a repeat from what it
+    // stored). The other action opens with an empty, editable form that warns and cannot be submitted until the lock clears.
     const kept = locks.get('blocked');
-    if (kept && kept.action !== a) locks.clear('blocked');
     const same = kept && kept.action === a ? kept : undefined;
     setReason(same ? same.reason : '');
     setNote(same ? same.note : '');
@@ -131,8 +131,12 @@ export function BlockedBanner({ review, reload }: BlockedBannerProps) {
     setDialog(prev => (prev?.open ? { ...prev, action: a } : { action: a, open: true, seq: (prev?.seq ?? 0) + 1 }));
   };
 
+  // An Override or Return of the OTHER action that came back unsure and is not finished: this form must not start a second decision.
+  const lock = locks.get('blocked');
+  const otherLock = action && lock && lock.action !== action ? lock : null;
+
   const submit = async () => {
-    if (!dialog?.open || !action || reason.trim() === '' || noteProblem(note) !== null) return;
+    if (!dialog?.open || !action || otherLock || reason.trim() === '' || noteProblem(note) !== null) return;
     setBusy(true);
     setError(null);
     setNoteError(null);
@@ -153,15 +157,16 @@ export function BlockedBanner({ review, reload }: BlockedBannerProps) {
       setNoteError(noteRefusalMessage(r.failure));
       return;
     }
-    // A 503 saved part of the decision, or no answer came back: the same request, repeated, finishes it, so the reason and the note are held as
-    // they were sent, here and at page level.
-    if (isOutcomeUnknown(r.failure)) {
+    // A 503 saved part of the decision, no answer came back, or a 409 `concurrent_change` (the server answers it AFTER the Decision Record is
+    // written): the same request, repeated, finishes it, so the reason and the note are held as they were sent, here and at page level.
+    const unknown = isBlockedOutcomeUnknown(r.failure);
+    if (unknown) {
       setLocked(true);
       locks.set('blocked', { action, reason: reason.trim(), note });
     }
     // A 503 `ebilling.blocked.unavailable` can come after the decision stood (the Signals were not all closed), and a send with no answer may
     // have been recorded: show the server's state (the hold may already be gone) before the error.
-    if (isOutcomeUnknown(r.failure)) {
+    if (unknown) {
       await Promise.all([reload(), refresh(), load()]);
       if (!alive.current) return;
     }
@@ -227,7 +232,7 @@ export function BlockedBanner({ review, reload }: BlockedBannerProps) {
           size="sm"
           title={title}
           submitLabel={action === 'override' ? 'Override' : 'Return'}
-          submitDisabled={reason.trim() === '' || noteProblem(note) !== null}
+          submitDisabled={otherLock !== null || reason.trim() === '' || noteProblem(note) !== null}
           busy={busy}
           onClose={() => {
             if (!busy) closeDialog();
@@ -240,6 +245,15 @@ export function BlockedBanner({ review, reload }: BlockedBannerProps) {
                 ? 'The invoice is released into the normal review. A reason is required and is recorded with your name.'
                 : 'The invoice goes back to the firm, which can correct and resubmit it. A reason is required and the firm sees it.'}
             </Text>
+            {otherLock && (
+              <MessageBar intent="warning" layout="multiline" data-testid="blocked-other-lock">
+                <MessageBarBody>
+                  {otherLock.action === 'override'
+                    ? 'An Override was saved in part. Submit it again to finish it before returning.'
+                    : 'A Return was saved in part. Submit it again to finish it before overriding.'}
+                </MessageBarBody>
+              </MessageBar>
+            )}
             <Field label="Reason" required>
               <Textarea
                 value={reason}

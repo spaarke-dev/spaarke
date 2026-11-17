@@ -476,29 +476,28 @@ export function staysInAddLineForm(f: ApiFailure): boolean {
 }
 
 const CODE_LINE_PENDING = 'ebilling.line.pending';
-const CODE_CORRECTION_FIRM_MISSING = 'ebilling.correction.firm_missing';
 const CODE_CORRECTION_CODE_SET_UNAVAILABLE = 'ebilling.correction.code_set_unavailable';
 const CODE_CORRECTION_EXTRACTION_UNAVAILABLE = 'ebilling.correction.extraction_unavailable';
 
 /**
  * Task 095f-2ui (review round 1): a 409 that a dialog with a typed reason and note (the bulk decision, a correction, Confirm as read) keeps
  * open with the server's sentence, because sending the same form again can succeed once the cause passes: another change to the invoice is in
- * progress (`busy`), a line is still processing (`line.pending`), corrections are pending, the totals check refused (the form can be changed),
- * the firm is missing (EB-D-185: nothing changed), the code set or the extraction is unavailable for now, or a `*.concurrent_change`.
+ * progress (`busy`), a line is still processing (`line.pending`), the totals check refused (the form can be changed), the code set or the
+ * extraction is unavailable for now, or a `*.concurrent_change`.
  *
- * Every other 409 (`not_in_review`, `line.not_decidable`, `line.changed`, `invoice.changed`, `correction.line_not_correctable`,
- * `correction.no_provenance`, `correction.procedure_gap`, `correction.too_large`, and any code not listed) says the invoice or line is no
- * longer what the form was about: the dialog closes and the page offers Reload, and the typed reason and note wait in the page for the next
- * opening of the same dialog.
+ * Every other 409 says the form cannot be fixed from inside the dialog: the dialog closes and the page offers Reload, and the typed reason and
+ * note wait in the page for the next opening of the same dialog. That is the invoice or line no longer being what the form was about
+ * (`not_in_review`, `line.not_decidable`, `line.changed`, `invoice.changed`, `correction.line_not_correctable`, `correction.no_provenance`,
+ * `correction.procedure_gap`, `correction.too_large`), and, from review round 2, the two whose cause lies OUTSIDE the form: corrections are
+ * pending on another line (`line.corrections_pending`: they must be repeated first) and the invoice has no firm
+ * (`correction.firm_missing`: the firm is added elsewhere). Any code not listed closes the dialog too.
  */
 export function staysInNoteDialog(f: ApiFailure): boolean {
   if (f.status !== 409 || f.errorCode === null) return false;
   return (
     f.errorCode === CODE_BUSY ||
     f.errorCode === CODE_LINE_PENDING ||
-    f.errorCode === CODE_CORRECTIONS_PENDING ||
     f.errorCode === CODE_TOTALS_REFUSED ||
-    f.errorCode === CODE_CORRECTION_FIRM_MISSING ||
     f.errorCode === CODE_CORRECTION_CODE_SET_UNAVAILABLE ||
     f.errorCode === CODE_CORRECTION_EXTRACTION_UNAVAILABLE ||
     f.errorCode.endsWith('.concurrent_change')

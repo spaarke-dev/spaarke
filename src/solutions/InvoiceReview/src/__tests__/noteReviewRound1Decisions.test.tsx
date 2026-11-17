@@ -189,7 +189,7 @@ describe('the decision wizard: a refused note and an unsure send', () => {
     expect(reasonBox(again)).not.toHaveAttribute('readonly');
   });
 
-  it('going Back and choosing another outcome is a new request: nothing stays locked, here or after reopening', async () => {
+  it('going Back and choosing another outcome is a new request: the form is editable while that outcome is selected', async () => {
     const decision = mockDecisionApi();
     decision.reject.mockResolvedValueOnce(incomplete());
     renderDecisions(clean(), decision);
@@ -216,12 +216,13 @@ describe('the decision wizard: a refused note and an unsure send', () => {
     expect(decision.reject).toHaveBeenCalledTimes(1);
   });
 
-  it('the lock of the old outcome is dropped at page level too: reopening after changing the outcome starts empty', async () => {
+  it('(round 2) the lock outlives a change of outcome: choosing another outcome and closing without sending, the reopened wizard is still the locked Reject', async () => {
     const decision = mockDecisionApi();
     decision.reject.mockResolvedValueOnce(incomplete());
     renderDecisions(clean(), decision);
     const d = await openWizard();
     await toConfirm(d, /^Reject/, 'Duplicate of an earlier invoice');
+    fireEvent.change(noteBox(d), { target: { value: 'The first note' } });
     fireEvent.click(finishBtn(d, /Reject & record/));
     await within(d).findByTestId('decision-note-locked');
     fireEvent.click(back(d));
@@ -229,10 +230,43 @@ describe('the decision wizard: a refused note and an unsure send', () => {
     fireEvent.click(radio(d, /^Return/));
     await closeWizard(d);
     const again = await openWizard();
-    fireEvent.click(radio(again, /^Reject/));
+    expect(radio(again, /^Reject/)).toBeChecked();
     fireEvent.click(next(again));
-    expect(reasonBox(again).value).toBe('');
-    expect(reasonBox(again)).not.toHaveAttribute('readonly');
+    expect(reasonBox(again).value).toBe('Duplicate of an earlier invoice');
+    expect(reasonBox(again)).toHaveAttribute('readonly');
+  });
+
+  it('(round 2) A to B to A: coming back to the locked outcome restores what was sent and locks the form, and the repeat is the same request', async () => {
+    const decision = mockDecisionApi();
+    decision.reject.mockResolvedValueOnce(incomplete());
+    renderDecisions(clean(), decision);
+    const d = await openWizard();
+    await toConfirm(d, /^Reject/, 'Duplicate of an earlier invoice');
+    fireEvent.change(noteBox(d), { target: { value: 'The first note' } });
+    fireEvent.click(finishBtn(d, /Reject & record/));
+    await within(d).findByTestId('decision-note-locked');
+    // To Return: editable, the reviewer types something else.
+    fireEvent.click(back(d));
+    fireEvent.click(back(d));
+    fireEvent.click(radio(d, /^Return/));
+    fireEvent.click(next(d));
+    expect(reasonBox(d)).not.toHaveAttribute('readonly');
+    fireEvent.change(reasonBox(d), { target: { value: 'Something else entirely' } });
+    // And back to Reject: the locked reason and note are restored, and read-only again.
+    fireEvent.click(back(d));
+    fireEvent.click(radio(d, /^Reject/));
+    fireEvent.click(next(d));
+    expect(reasonBox(d)).toHaveAttribute('readonly');
+    expect(reasonBox(d).value).toBe('Duplicate of an earlier invoice');
+    fireEvent.click(next(d));
+    await within(d).findByTestId('confirm-decision');
+    expect(noteBox(d)).toHaveAttribute('readonly');
+    expect(noteBox(d).value).toBe('The first note');
+    expect(within(d).getByTestId('decision-note-locked')).toBeInTheDocument();
+    fireEvent.click(finishBtn(d, /Reject & record/));
+    await waitFor(() => expect(decision.reject).toHaveBeenCalledTimes(2));
+    expect(decision.reject.mock.calls[1]).toEqual(decision.reject.mock.calls[0]);
+    expect(decision.returnToFirm).not.toHaveBeenCalled();
   });
 });
 
@@ -283,7 +317,7 @@ describe('the blocked submission: an unsure Override or Return stays locked acro
     expect(decision.overrideBlocked.mock.calls[1]).toEqual(decision.overrideBlocked.mock.calls[0]);
   });
 
-  it('the other action is a new request: nothing is prefilled or locked, and the old lock is dropped', async () => {
+  it('(round 2) the other action opens editable but warns, cannot be submitted while the first is unfinished, and the lock is kept', async () => {
     const decision = mockDecisionApi(held());
     decision.overrideBlocked.mockResolvedValueOnce(failed(problem(503, 'ebilling.blocked.unavailable', { detail: 'Saved in part.' })));
     const dialog = await sendOverride(decision);
@@ -292,23 +326,89 @@ describe('the blocked submission: an unsure Override or Return stays locked acro
     await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Override the block', hidden: true })).not.toBeInTheDocument());
     fireEvent.click(await screen.findByTestId('return-blocked'));
     const other = await dialogOf('Return to firm');
+    // Nothing of the Override is prefilled (it is a different request), and the form can be typed in.
     expect(reasonOf(other).value).toBe('');
     expect(noteOf(other).value).toBe('');
     expect(reasonOf(other)).not.toHaveAttribute('readonly');
     expect(within(other).queryByTestId('blocked-note-locked')).not.toBeInTheDocument();
+    // But it says the Override is unfinished, and Return cannot be sent.
+    expect(within(other).getByTestId('blocked-other-lock')).toHaveTextContent('An Override was saved in part. Submit it again to finish it before returning.');
+    fireEvent.change(reasonOf(other), { target: { value: 'Please resubmit' } });
+    expect(within(other).getByRole('button', { name: 'Return', hidden: true })).toBeDisabled();
+    fireEvent.click(within(other).getByRole('button', { name: 'Return', hidden: true }));
+    expect(decision.returnBlocked).not.toHaveBeenCalled();
     cancel(other);
     await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Return to firm', hidden: true })).not.toBeInTheDocument());
-    // Going back to Override finds the old lock gone.
+    // Going back to Override finds the lock kept: the locked reason and note, and the repeat is the same request.
     fireEvent.click(await screen.findByTestId('override-block'));
     const back = await dialogOf('Override the block');
-    expect(reasonOf(back).value).toBe('');
-    expect(reasonOf(back)).not.toHaveAttribute('readonly');
+    expect(reasonOf(back).value).toBe('Known resubmission');
+    expect(noteOf(back).value).toBe('The first note');
+    expect(reasonOf(back)).toHaveAttribute('readonly');
+    expect(within(back).queryByTestId('blocked-other-lock')).not.toBeInTheDocument();
+    submit(back, 'Override');
+    await waitFor(() => expect(decision.overrideBlocked).toHaveBeenCalledTimes(2));
+    expect(decision.overrideBlocked.mock.calls[1]).toEqual(decision.overrideBlocked.mock.calls[0]);
   });
 
-  it('(must-not-fire) a 409 does not lock, and once the repeat finishes the next opening is empty', async () => {
+  it('(round 2) the same warning, mirrored, for a Return that came back unsure and an Override opened after it', async () => {
+    const decision = mockDecisionApi(held());
+    decision.returnBlocked.mockResolvedValueOnce(failed(problem(503, 'ebilling.blocked.unavailable', { detail: 'Saved in part.' })));
+    renderDecisions([heldReview(), heldReview()], decision);
+    fireEvent.click(await screen.findByTestId('return-blocked'));
+    const first = await dialogOf('Return to firm');
+    fireEvent.change(reasonOf(first), { target: { value: 'Please resubmit' } });
+    submit(first, 'Return');
+    await within(first).findByTestId('blocked-error');
+    cancel(first);
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Return to firm', hidden: true })).not.toBeInTheDocument());
+    fireEvent.click(await screen.findByTestId('override-block'));
+    const other = await dialogOf('Override the block');
+    expect(within(other).getByTestId('blocked-other-lock')).toHaveTextContent('A Return was saved in part. Submit it again to finish it before overriding.');
+    fireEvent.change(reasonOf(other), { target: { value: 'Known resubmission' } });
+    expect(within(other).getByRole('button', { name: 'Override', hidden: true })).toBeDisabled();
+  });
+
+  it('(must-not-fire) with no unfinished decision the other action opens with no warning and can be sent', async () => {
+    const decision = mockDecisionApi(held());
+    renderDecisions([heldReview(), heldReview()], decision);
+    fireEvent.click(await screen.findByTestId('return-blocked'));
+    const other = await dialogOf('Return to firm');
+    expect(within(other).queryByTestId('blocked-other-lock')).not.toBeInTheDocument();
+    fireEvent.change(reasonOf(other), { target: { value: 'Please resubmit' } });
+    expect(within(other).getByRole('button', { name: 'Return', hidden: true })).toBeEnabled();
+  });
+
+  it('(round 2) a 409 concurrent_change is answered after the record: it locks like a 503, and the repeat finishes it with the same text', async () => {
+    const decision = mockDecisionApi(held());
+    decision.overrideBlocked.mockResolvedValueOnce(failed(problem(409, 'ebilling.blocked.concurrent_change', { detail: 'The invoice changed.' })));
+    const dialog = await sendOverride(decision);
+    await within(dialog).findByTestId('blocked-error');
+    expect(reasonOf(dialog)).toHaveAttribute('readonly');
+    expect(noteOf(dialog)).toHaveAttribute('readonly');
+    // Closing and reopening keeps it locked, and the other action warns.
+    cancel(dialog);
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Override the block', hidden: true })).not.toBeInTheDocument());
+    fireEvent.click(await screen.findByTestId('override-block'));
+    const again = await dialogOf('Override the block');
+    expect(reasonOf(again).value).toBe('Known resubmission');
+    expect(reasonOf(again)).toHaveAttribute('readonly');
+    submit(again, 'Override');
+    await waitFor(() => expect(decision.overrideBlocked).toHaveBeenCalledTimes(2));
+    expect(decision.overrideBlocked.mock.calls[1]).toEqual(decision.overrideBlocked.mock.calls[0]);
+    // The repeat finished it (the mock's default answer): the lock goes with it.
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Override the block', hidden: true })).not.toBeInTheDocument());
+    fireEvent.click(await screen.findByTestId('override-block'));
+    const fresh = await dialogOf('Override the block');
+    expect(reasonOf(fresh).value).toBe('');
+    expect(noteOf(fresh).value).toBe('');
+    expect(reasonOf(fresh)).not.toHaveAttribute('readonly');
+  });
+
+  it('(must-not-fire) a 409 answered before any record does not lock, and a 503 after it does; once the repeat finishes the next opening is empty', async () => {
     const decision = mockDecisionApi(held());
     decision.overrideBlocked
-      .mockResolvedValueOnce(failed(problem(409, 'ebilling.blocked.concurrent_change', { detail: 'The invoice changed.' })))
+      .mockResolvedValueOnce(failed(problem(409, 'ebilling.blocked.already_returned', { detail: 'Already returned.' })))
       .mockResolvedValueOnce(failed(problem(503, 'ebilling.blocked.unavailable', { detail: 'Saved in part.' })));
     const dialog = await sendOverride(decision);
     await within(dialog).findByTestId('blocked-error');
@@ -466,6 +566,33 @@ describe('the invoice adjustment after an unsure send or a stale page', () => {
     fireEvent.click(repeat);
     await waitFor(() => expect(decision.addAdjustment).toHaveBeenCalledTimes(2));
     expect(decision.addAdjustment.mock.calls[1][1]).toEqual(decision.addAdjustment.mock.calls[0][1]);
+  });
+
+  it('(round 2) an add that SUCCEEDS after the reviewer left the step still re-reads and resets the form: Back shows an empty form, not the saved add', async () => {
+    const decision = mockDecisionApi();
+    let release!: (v: unknown) => void;
+    decision.addAdjustment.mockReturnValueOnce(new Promise(resolve => { release = resolve; }) as never);
+    const { api, d } = await toAdjust(decision, [clean(), withAdjustment()]);
+    const reads = api.getReview.mock.calls.length;
+    fireEvent.click(within(d).getByTestId('add-adjustment'));
+    await waitFor(() => expect(decision.addAdjustment).toHaveBeenCalledTimes(1));
+    // The step is left while the add is still out.
+    fireEvent.click(skip(d));
+    await within(d).findByTestId('confirm-decision');
+    release({
+      ok: true,
+      value: { adjustment: { lineId: lineId(90), adjustmentId: 'a1', method: 'percent', value: 5, amount: -250, reason: 'Courtesy', ruleId: null, reviewedOn: '2026-11-03T10:00:00Z' }, removedLineId: null, totals: null, alreadyApplied: false },
+    });
+    // The page reads the server's state even though the step is gone.
+    await waitFor(() => expect(api.getReview.mock.calls.length).toBeGreaterThan(reads));
+    fireEvent.click(back(d));
+    const value = await within(d).findByLabelText('Adjustment value');
+    // The add is saved: the form must not still hold it (a second send would file a second adjustment).
+    await waitFor(() => expect(value).toHaveValue(null));
+    expect(within(d).getByLabelText('Adjustment reason')).toHaveValue('');
+    expect(addNote(d).value).toBe('');
+    expect(within(d).getByTestId('add-adjustment')).toHaveTextContent('Add adjustment');
+    expect(within(d).getByTestId(`adjustment-${lineId(90)}`)).toBeInTheDocument();
   });
 
   it('closing and reopening the wizard keeps the unsure add: prefilled, locked, and Repeat sends the same id and note', async () => {

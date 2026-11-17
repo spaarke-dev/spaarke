@@ -241,20 +241,23 @@ export function AdjustStep() {
     });
     // The lock is wizard-level state, so it is kept even if this step was left while the send was out.
     if (!r.ok && (r.failure.status === 503 || r.failure.status === 0)) lockForm();
-    if (!alive.current) return;
+    // Review round 2: a SUCCESS is finished even when this step was left while the send was out. The re-read and the reset (or the lock) go
+    // through the wizard's form state and the page-level locks, which outlive the step; otherwise the form would keep the saved add's id
+    // unlocked and a second send of the same text would file a second adjustment.
+    if (!alive.current && !r.ok) return;
     if (r.ok) {
       // The server computed the amount and stored the totals; the page re-reads them and shows what the re-read returns.
       const fresh = await reload();
       if (!fresh) lockForm();
-      if (!alive.current) return;
       if (fresh) {
         locks.clear('adjust');
         set({ adjId: newAdjustmentId(), adjLocked: false, adjValue: '', adjReason: '', adjRule: '', adjNote: '' });
-      } else {
+      } else if (alive.current) {
         // Saved, but the page is not showing the server's totals. The form stays, locked, with the same id: Repeat answers "already applied"
         // and re-reads, so nothing is added twice and a new id is never minted over a saved adjustment.
         setError(`${REREAD_FAILED} Repeat to read them again; nothing is added twice.`);
       }
+      if (!alive.current) return;
     } else if (isNoteRefusal(r.failure)) {
       // The server refused the note itself (400, before any read): the field message goes under the Note box, and the form keeps everything.
       setAddNoteError(noteRefusalMessage(r.failure));

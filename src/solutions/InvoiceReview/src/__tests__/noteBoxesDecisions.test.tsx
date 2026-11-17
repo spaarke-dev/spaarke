@@ -327,7 +327,7 @@ describe('the blocked submission: the Note box on Override and Return', () => {
     expect(within(dialog).getByLabelText('Reason')).toHaveValue('Known resubmission');
   });
 
-  it('keeps the reason and the note across a 409 concurrent_change, does not reload the page, and a resend carries both', async () => {
+  it('a 409 concurrent_change (answered AFTER the record is written) locks the reason and the note, re-reads the page, and the resend is the same request', async () => {
     const decision = mockDecisionApi(held());
     decision.overrideBlocked.mockResolvedValueOnce(
       failed(problem(409, 'ebilling.blocked.concurrent_change', { detail: 'The invoice changed while the override was running.' }))
@@ -341,13 +341,32 @@ describe('the blocked submission: the Note box on Override and Return', () => {
     expect(await within(dialog).findByTestId('blocked-error')).toHaveTextContent('(ebilling.blocked.concurrent_change)');
     expect(blockedNote(dialog).value).toBe('Keep this note');
     expect(within(dialog).getByLabelText('Reason')).toHaveValue('Known resubmission');
-    // The page was not reloaded: no re-read of the review, the approval or the blocked view.
-    expect(api.getReview.mock.calls.length).toBe(reads);
-    expect(decision.getApproval.mock.calls.length).toBe(approvals);
-    expect(decision.getBlocked).toHaveBeenCalledTimes(1);
+    // Both are locked: a repeat finishes from the STORED reason and note, so an edit would be dropped without a word.
+    expect(blockedNote(dialog)).toHaveAttribute('readonly');
+    expect(within(dialog).getByLabelText('Reason')).toHaveAttribute('readonly');
+    expect(within(dialog).getByTestId('blocked-note-locked')).toBeInTheDocument();
+    // The page was read again, to show what the server holds (the hold may be gone).
+    await waitFor(() => expect(api.getReview.mock.calls.length).toBeGreaterThan(reads));
+    expect(decision.getApproval.mock.calls.length).toBeGreaterThan(approvals);
     fireEvent.click(within(dialog).getByRole('button', { name: 'Override', hidden: true }));
     await waitFor(() => expect(decision.overrideBlocked).toHaveBeenCalledTimes(2));
     expect(decision.overrideBlocked.mock.calls[1]).toEqual([SUBMISSION_ID, 'Known resubmission', 'Keep this note']);
+  });
+
+  it('(must-not-fire) a 409 answered BEFORE any record (not_blocked) keeps the form editable and does not re-read the page', async () => {
+    const decision = mockDecisionApi(held());
+    decision.overrideBlocked.mockResolvedValueOnce(failed(problem(409, 'ebilling.blocked.not_blocked', { detail: 'This submission is not blocked.' })));
+    const { api, dialog } = await openOverride(decision);
+    fireEvent.change(blockedNote(dialog), { target: { value: 'Keep this note' } });
+    await waitFor(() => expect(decision.getBlocked).toHaveBeenCalledTimes(1));
+    const reads = api.getReview.mock.calls.length;
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Override', hidden: true }));
+    expect(await within(dialog).findByTestId('blocked-error')).toHaveTextContent('(ebilling.blocked.not_blocked)');
+    expect(blockedNote(dialog)).not.toHaveAttribute('readonly');
+    expect(within(dialog).getByLabelText('Reason')).not.toHaveAttribute('readonly');
+    expect(within(dialog).queryByTestId('blocked-note-locked')).not.toBeInTheDocument();
+    expect(api.getReview.mock.calls.length).toBe(reads);
+    expect(decision.getBlocked).toHaveBeenCalledTimes(1);
   });
 
   it('after a 503 that saved part of the decision the note is locked and the repeat is the exact same request', async () => {

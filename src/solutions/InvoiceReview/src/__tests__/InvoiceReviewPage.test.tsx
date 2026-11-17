@@ -652,8 +652,9 @@ describe('InvoiceReviewPage: failures and recovery (task 110 fix round 2)', () =
     const dialog = await screen.findByRole('dialog');
     fireEvent.change(within(dialog).getByLabelText('Correct value'), { target: { value: '2' } });
     fireEvent.click(within(dialog).getByRole('button', { name: 'Save correction' }));
-    await waitFor(() => expect(screen.queryByTestId('correct-error')).not.toBeInTheDocument());
-    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    // Wait for the dialog itself to go (the error box is absent from the start, so waiting on it proved nothing).
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(screen.queryByTestId('correct-error')).not.toBeInTheDocument();
     expect(await screen.findByTestId('notice-reload')).toBeInTheDocument();
   });
 

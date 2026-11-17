@@ -364,6 +364,22 @@ export const isDecisionIncomplete = (f: ApiFailure): boolean =>
 export const isOutcomeUnknown = (f: ApiFailure): boolean => f.status === 0 || isDecisionIncomplete(f);
 
 /**
+ * 409 `SubmissionOverrideService.BlockedSubmissionErrors.ConcurrentChange`. For an Override or a Return of the blocked submission the server
+ * returns it AFTER the Decision Record is written (the release or the return ran out of retries), and a repeat by the same decider finishes
+ * from the STORED reason and note and ignores the request's text (095f-2c known limit (c)). So it is an unknown outcome for the form, like a
+ * 503. Pinned to the server's source by `__tests__/serverWordsPin.test.ts`.
+ */
+export const CODE_BLOCKED_CONCURRENT_CHANGE = 'ebilling.blocked.concurrent_change';
+
+/**
+ * Review round 2: an Override or Return of the blocked submission whose outcome is not known: `isOutcomeUnknown`, or a 409
+ * `ebilling.blocked.concurrent_change` (the record may already be written). The other blocked 409s (`not_blocked`, `already_overridden`,
+ * `already_returned`, `invoice_not_held`, `in_progress`, `still_processing`, `decision_conflict`) are answered before any record is written.
+ */
+export const isBlockedOutcomeUnknown = (f: ApiFailure): boolean =>
+  isOutcomeUnknown(f) || (f.status === 409 && f.errorCode === CODE_BLOCKED_CONCURRENT_CHANGE);
+
+/**
  * The sentence shown for a refused decision step. The server's `detail` is its own explanation (ADR-019) and is shown as is, followed by the
  * stable code in brackets (a 403 or 409 is shown with its code); a missing detail falls back to a fixed sentence per status. Raw transport
  * text never reaches here (`toFailure` drops it).

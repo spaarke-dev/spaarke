@@ -117,10 +117,14 @@ export function InvoiceDecisionWizard(props: InvoiceDecisionWizardProps) {
     invoiceId,
     reload,
     onOutcome: (outcome, handle) => {
-      // A different outcome is a different request: nothing stays locked (the text typed so far stays, editable).
-      if (live.current.form.locked && live.current.form.outcome !== outcome) {
-        set({ locked: false });
-        locks.clear('wizard');
+      // Review round 2: a decision that came back unsure may already be recorded, and the server finishes a repeat from what it STORED, so the
+      // lock entry outlives a change of outcome. The form is editable only while the selected outcome differs from the locked one (the text
+      // typed so far stays); coming back to the locked outcome restores what was sent and locks the form again. Only a success, or a reload
+      // that shows the decision is done, clears the entry.
+      const lock = locks.get('wizard');
+      if (lock) {
+        if (outcome === lock.outcome) set({ locked: true, reason: lock.reason, note: lock.note });
+        else if (live.current.form.locked) set({ locked: false });
       }
       syncSteps(outcome, handle);
     },
