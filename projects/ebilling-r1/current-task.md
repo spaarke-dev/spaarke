@@ -19,18 +19,20 @@
 - Index hygiene: 095f, 165, 116 (on master via #2724) and 130 (delivered by 130-0..130e-2) are marked ✅.
 
 **Running:**
-- **131** (firm notice Action), Sonnet implementer on `task/ebilling-131` from a93e30cedc.
-  - No dev seed. The seed of the Action and its Binding needs the owner's typed OK plus uac-r2 notices.
-  - Fallback wording goes to the owner for approval.
-  - Then: Opus review, fix rounds, merge.
+- **131** (firm notice Action) is built on `task/ebilling-131` at e5b74e4c77 (local; agent worktree agent-a143823240477d7d8).
+  - Gates: 127 new tests; unit filter 484/0; ArchTests filter 419/0; build clean; publish delta +0.012 MB.
+  - **Opus adversarial review running.** Focus: FR-50 prose screen, D-66 flag off, "post-decision draft has an empty findings table" (with EB-D-254 the email body is the firm's only record), and /healthz going Unhealthy until the Binding is seeded.
+  - Next: fix rounds, scoped re-check, merge `--no-ff`, mark the POML, TASK-INDEX and notes, remove the worktree, push.
+  - Leftover scratch folders for a human to delete: `C:\wt131a`, `C:\wt131b`.
+
+**Decided today:**
+- **EB-D-254 (owner, option b): no PDF report in R1.** 133 is withdrawn. 132 sends the findings table in the 131 notice body. 134 prints cleanly; spa-r4's guidance is in the 134 POML: use record sections or action hosts, and scope the print stylesheet to the report. FR-40 is amended.
 
 **Blocked on the owner:**
-1. **133 (PDF report):** the POML stores via Graph SPE format=pdf in the retired output container. EB-D-148/163 moved files to Blob Stored Files, and the BFF has no PDF renderer.
-   - (a) Add a PDF library (new package; BFF size and CVE check).
-   - (b) An HTML report instead of a PDF.
-   - (c) Keep an SPE conversion step (no container on stamps).
-2. **131:** OK to seed the Action and Binding on dev; approve the fallback wording.
-3. **iss034c:** show "Finished by" on the History tab in R1?
+1. **131:** OK to seed the Action and Binding on dev (live write; uac-r2 notices). Approve the fallback wording: four subject and paragraph pairs plus the fixed labels, verbatim in notes/131-firm-notice-action.md.
+2. **iss034c:** show "Finished by" on the History tab in R1? About half a day.
+
+**Master-merge obligation (new, from 131):** ConsumerTypes.All now includes invoice-firm-notice. Seed the Binding row in every environment before or with any BFF deploy that contains 131, or /healthz goes Unhealthy there. uac-r2 deploys dev from master.
 
 **Master-merge obligations (owner go needed):**
 - **iss028 PR:**
