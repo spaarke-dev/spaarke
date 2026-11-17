@@ -39,6 +39,6 @@
 - SpaarkeMaster 1.3.2.0 publish/import; D-2 step 3; word-add-in #2829; provisioning #2871; ebilling task 112; #2764; 191i live steps; 193 PCF import; D-10 after U-3; #2786 part 2 scope; follow-ups #2826, #2549. Checklist: `notes/owner-test-checklist-2026-11-13.md`.
 
 ## Scratch
-- Worktrees: `C:\wtdep12` (live merge; keep), `C:\wtdep11` (rollback; keep), `C:\wt2845b` (round 2), `C:\wtm16` (master 16771d1051 publish baseline; can go), `C:\wt2859`, `C:\wt2869`, `C:\wt2852`, `C:\wt130e`, `C:\wtdep10`, `C:\wtdep9`, `C:\wtdep8`, `C:\wt2845`, `C:\wt2833` (can go). Remove only with `scripts/worktree/Remove-WorktreeSafe.ps1`.
+- Worktrees: `C:wtcew` (#2875 wizard build; can go after fm's live check), `C:\wtdep12` (live merge; keep), `C:\wtdep11` (rollback; keep), `C:\wt2845b` (round 2), `C:\wtm16` (master 16771d1051 publish baseline; can go), `C:\wt2859`, `C:\wt2869`, `C:\wt2852`, `C:\wt130e`, `C:\wtdep10`, `C:\wtdep9`, `C:\wtdep8`, `C:\wt2845`, `C:\wt2833` (can go). Remove only with `scripts/worktree/Remove-WorktreeSafe.ps1`.
 - Gate: scratchpad `gate-be04.ps1 <t0 ISO>` (copy + rename prefix per deploy); index check `scripts/ai-search/Deploy-AllIndexes.ps1 -Environment dev -VerifyOnly` only if `AiSearch__ManagedIdentity__Enabled` is true.
 - The untracked 0-byte `tests/integration/data-mutation/ExternalAccess/DirectMessageParticipantSharesTests.cs` in this worktree: leave it alone.
