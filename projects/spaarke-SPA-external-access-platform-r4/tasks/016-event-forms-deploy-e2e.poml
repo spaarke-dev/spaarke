@@ -4,7 +4,7 @@
     <title>Event forms: BFF via uac-r2 + SPA dev deploy + owner E2E (FR-35, FR-36, FR-37)</title>
     <phase>1 Record template and actions (post-E2E rework, round 3)</phase>
     <gate>Owner go per exact BFF SHA (in uac-r2's session) and for the SPA deploy; a stated rollback for each</gate>
-    <status>not-started</status>
+    <status>in-progress</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Live deploy and E2E; no code</rigor-reason>
     <model-tier>sonnet</model-tier>

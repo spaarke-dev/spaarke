@@ -1,16 +1,16 @@
 # Current Task State
 
-> **Last Updated**: 2026-11-17 (task 015 complete, merged #2886 `242696586f`)
+> **Last Updated**: 2026-11-17 (task 016: dev SPA deployed, owner E2E pending)
 > **Format**: CURRENT state only. Each checkpoint REWRITES this file. Target ≤ 10 KB.
 
 ## Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
 |-------|-------|
-| **Task** | **016** Event forms deploy (BFF already live via uac-r2; SPA to dev) + owner E2E. Not started |
-| **Step** | — |
+| **Task** | **016** Event forms deploy + owner E2E, `tasks/016-event-forms-deploy-e2e.poml`. In progress (STANDARD, prescriptive) |
+| **Step** | Step 3: owner retest. Steps 1–2 done: dev SPA deployed from master `ed3a5c2752` (run 44153057447), bundle checked |
 | **Status** | 015 ✅ done: PR #2886 squash-merged to master as `242696586f` (CI 32 pass / 0 fail). Notes: `notes/task-015-notes.md` |
-| **Next Action** | Ask the owner for the go on the SPA dev deploy (task 016) with a stated rollback: the dev SPA is master `c1eb6e4a8e` today, so the rollback is a redeploy of that build. Then the owner runs the E2E. No live change without the owner's go |
+| **Next Action** | Record the owner's retest results in `notes/task-016-notes.md` (table of 8 checks); file findings via /project-defer-issue-tracking or a follow-up task; then mark 016 done. SPA rollback = rerun deploy-external-spa.yml (dev) on `c1eb6e4a8e` |
 
 ## Task 015 outcome (for 016's E2E)
 - Add event: Event Type required (options = `creatableEventTypes`), Due Date required by type, Priority, Assigned To ("Me" first), Description. Add event hidden when no type is offered.
@@ -20,7 +20,7 @@
 
 ## Live state
 - **Dev BFF** `e46b6b453b` (uac-r2 deploy, live since 2026-11-17T03:40Z): master `3c9a2ff4e1` (014a/b/c) plus mcp spike-v2. Rollback = `be0420d763`. uac-r2 asks spa-r4 before any restart.
-- **Dev SPA** master `c1eb6e4a8e` (does NOT yet have 015). Roll back to `04dbd8df05` only together with BFF `5a9b687a0b`.
+- **Dev SPA** master `ed3a5c2752` (015 included; deployed 2026-11-17 ~18:56Z, run 44153057447). Rollback = redeploy `c1eb6e4a8e` (runs against the same BFF). Roll back to `04dbd8df05` only together with BFF `5a9b687a0b`.
 
 ## Coordination
 - uac-r2 (session `uac-r2`) reviews BFF PRs as a gate and deploys the dev BFF. The owner gives the merge go each time. Peer messages are not owner approval.
