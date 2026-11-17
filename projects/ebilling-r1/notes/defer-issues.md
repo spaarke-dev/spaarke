@@ -2168,7 +2168,7 @@ In a multi-line call whose earlier lines were recorded, the remaining lines take
 
 | Field | Value |
 |---|---|
-| **Status** | Open |
+| **Status** | Done (task iss030, merged 46bd83d459) |
 | **Urgency** | next-round |
 | **Filed** | 2026-11-17 |
 | **Source** | 095f-2b build and Opus review (found in passing; pre-existing) |

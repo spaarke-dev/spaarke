@@ -9,12 +9,34 @@
 
 ## NOW — read this first
 
-### Active (2026-11-17): 095f part 2 DONE except 2e2 (owner pick)
+### Active (2026-11-17, checkpoint at ~85% context): iss031 fix round 1 running
+
+- **IN FLIGHT: iss031** (ISS-031 #2882, opus implementer agent `a44e4ad203dbce567`, worktree `C:\code_files\spaarke\.claude\worktrees\agent-a44e4ad203dbce567`, branch `task/ebilling-iss031`, round 0 tip 41d0d3b5f5 from base 0890908f68).
+  - Opus review round 0 done: no F in the guard.
+  - Fix round 1 sent:
+    - (1) choose the 409 detail by the stored decider;
+    - (2) found in passing: guard `InvoiceRejectReturnService` against a stranded Procedure-hold Override (return/reject/approve as reachable);
+    - (3) a both-records test;
+    - (4) notes corrections and a round table.
+  - **Next:**
+    - on its report, do a scoped re-check (inline or Sonnet);
+    - merge `--no-ff`;
+    - run the filtered tests `SubmissionOverride|DecisionNote|DecisionRecord|BlockedSubmission|InvoiceRejectReturn|InvoiceApproval` plus the Invoice|Decision ArchTests plus the `--warnaserror` build;
+    - mark the POML and TASK-INDEX, set the ISS-031 notes Status to Done, `gh issue close 2882`;
+    - remove the worktree and branches (`task/ebilling-iss031`, `worktree-agent-a44e4ad203dbce567`, the remote branch);
+    - push.
+- **iss030 ✅ merged 46bd83d459** (ISS-030 #2881 closed). A refused totals recalculation undoes the removal; the add-path twin was fixed in review. Known limit K2: a record-step strand plus a refusal from outside the BFF; it fails closed at approval.
+- **Uncommitted at checkpoint:** `notes/defer-issues.md` (ISS-030 Status → Done) and this file. Commit them with the next commit.
 
 - **095f-2b ✅ merged a3ef7e1c93** (fix 64c3e9ecbb: server-derived namespaced decision ids, neutral lookup 503; ontology-r1 PASS on catalog, exact-set amendment and fix; known limit ISS-030 / #2881).
 - **095f-2ui ✅ merged d3a61cc426** (review + 3 fix rounds + tweak). Page-level locks keep a partly saved decision exact on repeat; drafts survive 409s. Known limits are in its notes (locks are memory only; the Override/Return switch guard is client-only, see ISS-031 #2882). ISS-032 #2883 covers a decision stranded after its transition. Checklist section F added.
 - **130e-2 ✅ merged 58dcc56689** (Rule Review firm description field; the server validator now folds the Turkish i in the name check and refuses default-ignorable runes; ontology-r1 PASS on the server part). The 084h parent row is closed (084h-1..4).
-- **Nothing in flight.** Next: 2e2 waits on owner pick (a). Remaining open tasks are larger or gated (116/117/121/123/124, 130-136, deploys).
+- **After iss031:**
+  - 2e2 waits on owner pick (a).
+  - The remaining open tasks are larger or gated: 116/117/121/123/124, 130-136, deploys.
+  - Choose the next one with its dependencies met, or ask the owner.
+  - Filed today: ISS-030..034. ISS-032 #2883: a decision stranded after its transition can't be finished from the UI. ISS-033 #2885 is ontology-r1's (logged DI-156). ISS-034 #2888 is owner question (f).
+- **Peer note:** ontology-r1's PR #2884 (the gate-job lock fix from our 084h-3 review) merged to master at 0de88473b1. It reaches dev with uac-r2's next BFF build.
 - **Per-task routine:**
   1. Implementer agent: named model, worktree, brief names the base sha and "never python".
   2. One adversarial review.
@@ -35,7 +57,6 @@
   - **095f-2d1 ✅ merged f9d63c555b** (+ wording ac2e54840e). ontology-r1 catalog PASS. Known limit: ISS-029.
 - **Filed this wave:** ISS-026 / #2877 (RecordProcedures has no ESLint config, outside client-lint), ISS-027 / #2878 (Reason boxes cut at 2000 silently), ISS-028 / #2879 (correction rows not writer-only — owner question), ISS-029 / #2880 (line repeat with other content → 503 that never completes; the shipped client can't reach it).
 - **Wave 2 ✅:** 084h-3 bb4ad3f578 (ADR-004 Path A pending owner), 095f-2a 7849bd05a0; earlier 084h-2, 095f-2e1, 095f-2s.
-- **084h parent row** is still 🔲 although 084h-1..4 are all ✅. Decide whether it closes or holds remaining scope.
 - **Test gate rule:** never run the whole BFF test project in one process on this machine (load timeouts). Use CI's five shards (scratchpad `run-shards.ps1`); known flaky #2543. Run the shards again before any master merge. Implementer agents use filtered runs.
 - **HARD GATE before work → master:** reject/return/override/blocked return always write `sprk_invoice.sprk_decisionnote`, so no BFF carrying 095f-2a/2c may reach an environment before `Deploy-EbillingDecisionNoteColumns.ps1 -Apply` ran there (else 503). Dev BFFs deploy from master (several projects), so the dev column apply (owner question (c), uac-r2 notices before and after; it also creates `sprk_invoicecorrection.sprk_note` for 2d2) must precede the master merge. Other environments get it via 079's SpaarkeMaster sync.
 - **Deploy order elsewhere:**
