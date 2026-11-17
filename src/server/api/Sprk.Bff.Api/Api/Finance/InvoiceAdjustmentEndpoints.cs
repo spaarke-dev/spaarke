@@ -1,3 +1,5 @@
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.ModelBinding;
 using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Infrastructure.Auth;
 using Sprk.Bff.Api.Infrastructure.Authentication;
@@ -22,7 +24,11 @@ namespace Sprk.Bff.Api.Api.Finance;
 /// <para><b>Status codes.</b> 200 applied; 400 invalid (<c>errorCode</c> says which rule; <c>ebilling.adjustment.negative_total</c> when the
 /// approved total would go below zero, FR-32); 401; 403; 404 uniform (invoice or adjustment absent or unreadable); 409 (not In Review, another
 /// change in progress, the adjustment id reused, the adjustment changed); 503 <c>ebilling.disabled</c> or a transient failure; 503
-/// <c>ebilling.adjustment.incomplete</c> when the line was written but the totals step did not finish (repeat the same request).</para>
+/// <c>ebilling.adjustment.incomplete</c> when the line was written but the totals or the record step did not finish (repeat the same request).</para>
+/// <para><b>Notes and Decision Records (task 095f-2b, EB-D-241).</b> Add takes an optional <c>note</c> in its body; remove takes an optional JSON body
+/// <c>{ note }</c>. A refused note is 400 <c>ebilling.note_too_long</c> or <c>ebilling.note_invalid_characters</c> before any read. Each add and
+/// removal files one Decision Record (<c>add-adjustment</c>, <c>remove-adjustment</c>). A repeat with the same id and another note (or another
+/// reviewer) is 409 <c>ebilling.adjustment.id_reused</c>: the first note stays.</para>
 /// </remarks>
 public static class InvoiceAdjustmentEndpoints
 {
@@ -58,7 +64,8 @@ public static class InvoiceAdjustmentEndpoints
                 "Method percent (above 0, at most 100) or fixed (an amount above 0), a mandatory reason and an optional rule from the rule list. " +
                 "The server computes the amount and the invoice totals; an adjustment that would make the approved total negative is refused " +
                 "(400 ebilling.adjustment.negative_total) and nothing is written. Only while the invoice is In Review. Repeating the request with " +
-                "the same adjustmentId adds nothing twice.")
+                "the same adjustmentId adds nothing twice. An optional note is recorded on the adjustment's Decision Record; a repeat with another " +
+                "note is 409 ebilling.adjustment.id_reused.")
             .Produces<AdjustmentResponse>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
@@ -76,7 +83,8 @@ public static class InvoiceAdjustmentEndpoints
             .WithSummary("Remove an invoice-level adjustment")
             .WithDescription(
                 "Deactivates the Adjustment line (it is never deleted, NFR-09) and recomputes the invoice totals. Only while the invoice is " +
-                "In Review. Repeating the request for an already removed adjustment changes nothing.")
+                "In Review. Repeating the request for an already removed adjustment changes nothing. An optional JSON body { note } is recorded " +
+                "on the removal's Decision Record; a repeat with another note is 409 ebilling.adjustment.id_reused.")
             .Produces<AdjustmentResponse>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
@@ -110,19 +118,20 @@ public static class InvoiceAdjustmentEndpoints
         }
 
         var result = await service.AddAsync(
-            new AddAdjustmentCommand(invoiceId, body.AdjustmentId, body.Method, body.Value, body.Reason, body.RuleId, reviewer), ct);
+            new AddAdjustmentCommand(invoiceId, body.AdjustmentId, body.Method, body.Value, body.Reason, body.RuleId, reviewer, body.Note), ct);
         return ToResult(result, httpContext);
     }
 
     private static async Task<IResult> RemoveAdjustment(
-        Guid invoiceId, Guid lineId, InvoiceAdjustmentService service, HttpContext httpContext, CancellationToken ct)
+        Guid invoiceId, Guid lineId, [FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] RemoveAdjustmentRequest? body,
+        InvoiceAdjustmentService service, HttpContext httpContext, CancellationToken ct)
     {
         if (await ReviewerAsync(httpContext, ct) is not { } reviewer)
         {
             return ReviewerUnresolved(httpContext);
         }
 
-        var result = await service.RemoveAsync(new RemoveAdjustmentCommand(invoiceId, lineId, reviewer), ct);
+        var result = await service.RemoveAsync(new RemoveAdjustmentCommand(invoiceId, lineId, reviewer, body?.Note), ct);
         return ToResult(result, httpContext);
     }
 
@@ -150,8 +159,12 @@ public static class InvoiceAdjustmentEndpoints
     };
 }
 
-/// <summary>Body of the add route: <c>method</c> is <c>percent</c> or <c>fixed</c>; there is no amount and no total.</summary>
-public sealed record AddAdjustmentRequest(Guid AdjustmentId, string? Method, decimal? Value, string? Reason, Guid? RuleId);
+/// <summary>Body of the add route: <c>method</c> is <c>percent</c> or <c>fixed</c>; there is no amount and no total. Task 095f-2b: an optional
+/// <c>note</c> (EB-D-241).</summary>
+public sealed record AddAdjustmentRequest(Guid AdjustmentId, string? Method, decimal? Value, string? Reason, Guid? RuleId, string? Note = null);
+
+/// <summary>Task 095f-2b (EB-D-241): the optional body of the remove route. No body, <c>{}</c> and <c>{"note":null}</c> mean no note.</summary>
+public sealed record RemoveAdjustmentRequest(string? Note);
 
 /// <summary>200 body of an add or a remove: the adjustment (add) or the removed line id (remove), and the invoice totals as 016 stored them.</summary>
 public sealed record AdjustmentResponse(AdjustmentDto? Adjustment, Guid? RemovedLineId, ReviewTotalsDto? Totals, bool AlreadyApplied);
