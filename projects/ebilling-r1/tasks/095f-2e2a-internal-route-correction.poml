@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="095f-2e2a" project="ebilling-r1">
+  <metadata>
+    <title>Internal Correction path (B′), server: the internal multipart submission route accepts a Correction with a required note</title>
+    <phase>5 Review — 095f part 2 (EB-D-243, EB-D-245)</phase>
+    <gate>Branch from work/ebilling-r1 at the sha named in the agent brief.</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>BFF submission write path (.cs); invoice supersede.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <effort>high</effort>
+    <parallel-safe>true</parallel-safe>
+    <deps>095f-2e1</deps>
+    <tags>bff-api, finance, data-mutation, testing</tags>
+    <estimated-effort>1 day</estimated-effort>
+  </metadata>
+
+  <prompt>Implement the server half of option B′ in projects/ebilling-r1/notes/095f-part2-decision-notes-design.md §16 (EB-D-245). The internal multipart route (src/server/api/Sprk.Bff.Api/Api/Finance/InvoiceSubmissionEndpoints.cs ~758, InvoiceSubmissionService.SubmitAsync ~236 in Services/Finance/Submission/) accepts three more form fields: mode (New, the default, or Correction), invoiceId (the invoice being corrected) and correctionNote. A Correction calls the existing PrepareCorrectionAsync (the caller's Write on the target, else a uniform 404) and sets InvoiceSubmissionRequest.CorrectedInvoice. The correction check block that SubmitExistingDocumentAsync runs (~631-637) moves into ONE private method that both SubmitAsync and SubmitExistingDocumentAsync call, and the note reaches BuildJob (it already carries correctionNote) exactly as from-document passes it since 095f-2e1.</prompt>
+
+  <goal>An internal user can submit a corrected PDF for an invoice still In Review through the internal upload route, with the same eligibility checks, supersede and note handling as every other Correction channel.</goal>
+
+  <constraints>
+    <constraint source="EB-D-245">One eligibility check for every channel: no copy of CheckCorrectionAsync / JudgeCorrectionAsync logic. The commit gate (SubmissionCommitGate) and the persister's supersede path are reused unchanged.</constraint>
+    <constraint source="095f-2e1">A Correction without a note is refused as from-document refuses it (same code and status); the note follows the shared InvoiceCorrectionNote rules. A New submission never takes a note.</constraint>
+    <constraint source="EB-D-245">The external (SPA) route is untouched: it stays New only, and a mode or invoiceId field sent to it is ignored or refused exactly as today (pin it with a must-not-fire test).</constraint>
+    <constraint source="FR-10 / D-37">A Correction keeps the firm invoice number of its target (refused otherwise, as CheckCorrectionAsync does) and gets the next .n.</constraint>
+    <constraint source="design 16">Without mode (or with New) the route behaves byte-for-byte as today; the existing submission suites pass unchanged.</constraint>
+    <constraint source="project">Only the internal submission endpoint, InvoiceSubmissionService (and its contracts if a field is needed), tests, the endpoint's documented contract, and notes/095f-2e2a-internal-route-correction.md. No client change (095f-2e2b). No package change.</constraint>
+  </constraints>
+
+  <acceptance-criteria>
+    <criterion testable="true">Data-mutation tests: an internal Correction of an In Review invoice creates the new submission with sprk_resubmissionof set, the next .n, the note on the job, and at commit the old invoice is superseded; the tests fail before the change.</criterion>
+    <criterion testable="true">Refusals: no note, a target the caller cannot Write (uniform 404), another firm, another core record, a target not In Review, a different firm invoice number (409 CorrectionNotAllowed), all write nothing.</criterion>
+    <criterion testable="true">Must-not-fire: a New submission with no mode is unchanged; the external route ignores or refuses mode and invoiceId as before; from-document behaves as before (now through the shared method).</criterion>
+    <criterion testable="true">Filtered InvoiceSubmission|Correction|FromDocument|FromEmail|SubmissionCommitGate tests, the Invoice|RouteAuthorization ArchTests and the --warnaserror build pass.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>
