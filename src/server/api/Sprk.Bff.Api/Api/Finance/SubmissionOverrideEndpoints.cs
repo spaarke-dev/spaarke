@@ -26,7 +26,10 @@ namespace Sprk.Bff.Api.Api.Finance;
 /// <para><b>Responses.</b> 200 with <see cref="BlockedDecisionResponse"/> (a repeat is 200 with <c>alreadyDecided</c> and writes nothing); refusals
 /// are ProblemDetails with <c>errorCode</c> (<see cref="BlockedSubmissionErrors"/>); 401 unauthenticated; 503 <c>ebilling.disabled</c> when off.
 /// 2026-10-29: a decision whose Signal close failed is 503 <c>ebilling.blocked.unavailable</c> (never 200): the decision stands and the repeat
-/// completes the close with no second Decision Record, answering 200 <c>alreadyDecided</c> once every close is done.</para>
+/// completes the close with no second Decision Record, answering 200 <c>alreadyDecided</c> once every close is done.
+/// ISS-031: 409 <c>ebilling.blocked.other_decision_pending</c> when the OTHER decision (the override for a return, the return for an override)
+/// is recorded but not finished; nothing is written, and the detail names the pending decision, which the caller repeats to finish. It follows
+/// the 403s; a fault while checking for it is 503.</para>
 /// </remarks>
 public static class SubmissionOverrideEndpoints
 {

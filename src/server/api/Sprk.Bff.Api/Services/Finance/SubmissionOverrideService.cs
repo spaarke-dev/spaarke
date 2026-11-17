@@ -103,6 +103,25 @@ public static class BlockedSubmissionErrors
     /// the stored record and the request's reason and note are ignored (095f-2c review round 1).</summary>
     public const string DecisionConflict = "ebilling.blocked.decision_conflict";
 
+    /// <summary>409 (ISS-031): the OTHER decision on this blocked submission is already recorded but has not finished (an Override whose release
+    /// failed, or a Return whose transition or submission write failed), so this one is refused and nothing is written. A submission ends with one
+    /// decision. Only the pending decision's own decider can finish it by repeating it (<see cref="OtherDecisionPendingDetail"/> says which, and to
+    /// whom). Also answered by the invoice's reject and return (<see cref="InvoiceRejectReturnCodes.OverridePending"/>) while an Override of the
+    /// invoice's own submission is recorded but not released. The Invoice Review client has no mapping of its own for it: it shows this detail
+    /// with the code, and treats it as a definite refusal.</summary>
+    public const string OtherDecisionPending = "ebilling.blocked.other_decision_pending";
+
+    /// <summary>The sentence with <see cref="OtherDecisionPending"/>: which decision is pending (<paramref name="pendingIsOverride"/>: an Override,
+    /// else a Return), and who finishes it. Only the stored decider can (095f-2c's rule): <paramref name="callerIsDecider"/> is told to repeat it,
+    /// anyone else that the person who recorded it completes it.</summary>
+    public static string OtherDecisionPendingDetail(bool pendingIsOverride, bool callerIsDecider) => (pendingIsOverride, callerIsDecider) switch
+    {
+        (true, true) => "An override of this submission is recorded but has not finished, so it cannot also be returned. Repeat the override to finish it.",
+        (true, false) => "Another person's override of this submission has not finished, so it cannot also be returned. They complete it by repeating it.",
+        (false, true) => "A return of this submission to the firm is recorded but has not finished, so it cannot also be overridden. Repeat the return to finish it.",
+        (false, false) => "Another person's return of this submission to the firm has not finished, so it cannot also be overridden. They complete it by repeating it.",
+    };
+
     /// <summary>409: the Decision Record writer refused the decision for a reason a retry does not change (its subject or owner).</summary>
     public const string RecordRefused = "ebilling.blocked.record_refused";
 
@@ -294,7 +313,9 @@ public sealed record BlockedDecisionResult
 /// or returned, once), so a retry after any partial failure finds the same record and finishes; its content (decider and reason) is the
 /// same on every attempt, built only from the stored findings and the call (K-5). The decider is the authenticated caller's
 /// <c>systemuserid</c> from the on-behalf-of identity, never request input. The resolved Signals are the stored set (above), and the
-/// policy version is the first deciding finding's, read from the stored findings.</para>
+/// policy version is the first deciding finding's, read from the stored findings. A submission ends with ONE decision (ISS-031): while the
+/// OTHER verb's record exists (recorded, not finished), a decision is refused 409 <see cref="BlockedSubmissionErrors.OtherDecisionPending"/>
+/// with nothing written, after the rights check; the caller repeats the pending decision to finish it.</para>
 /// <para><b>Fail closed.</b> No privilege, a probe that faults, a caller that cannot be identified, a missing reason, an unreadable
 /// finding set, a lock or read that faults, and a transition the lifecycle does not allow all refuse. Logs carry ids and codes only.</para>
 /// <para><b>Component justification (CLAUDE.md section 11).</b> Existing: <see cref="BillingDecisionRecorder"/> (the record),
@@ -465,6 +486,19 @@ public sealed class SubmissionOverrideService
     /// </summary>
     internal static Disposition Classify(Entity submission) =>
         IsProcessing(submission) ? Disposition.StillProcessing : ClassifyRecorded(submission);
+
+    /// <summary>ISS-031 review round 1: the submission columns <see cref="IsHeldForOverride"/> reads (a reader outside this service, such as the
+    /// invoice's reject and return, reads exactly these).</summary>
+    internal static readonly string[] OverrideStateColumns =
+    [
+        ChannelColumn, InvoiceSubmissionPersister.SubmissionStatus, InvoiceSubmissionPersister.SubmissionReasonCode,
+        InvoiceSubmissionPersister.SubmissionInvoice, InvoiceSubmissionPersister.SubmissionFindingsJson,
+    ];
+
+    /// <summary>ISS-031 review round 1: whether <paramref name="submission"/> is still held in a state an Override releases (Blocked, or a
+    /// Procedure hold), by <see cref="Classify"/>, the one classification. False once an Override or a Return released it, and for every other
+    /// state. Pure.</summary>
+    internal static bool IsHeldForOverride(Entity submission) => Classify(submission) is Disposition.Blocked or Disposition.ProcedureHeld;
 
     /// <summary>The classification without the Processing check: the recorded outcome, else the columns.</summary>
     private static Disposition ClassifyRecorded(Entity submission) =>
@@ -991,6 +1025,44 @@ public sealed class SubmissionOverrideService
         if (await AuthorizeCloseAsync(submissionId, invoiceId, invoice!, authSet, authSubjects, token, ct).ConfigureAwait(false) is { } denied)
         {
             return denied;
+        }
+
+        // ── ISS-031 (#2882): one blocked submission ends with ONE decision. The OTHER verb's writer-created record is looked up through the same
+        //    lookup; when it exists, that decision was recorded but did not finish (its release, closes or transition failed: the submission is
+        //    still held, else the refusals above answered). Finishing this verb now would leave an Override record on a returned invoice, or a
+        //    Return record on a released one, so it is refused 409 and nothing is written; that decision's own decider repeats it to finish it (the
+        //    detail tells the caller whether that is them: review round 1, F1). After the
+        //    rights (403 first, as for the same verb's stored decider below) and the not-held checks above (a finished other decision already
+        //    answers already_overridden / already_returned / invoice_not_held there, and needs no read here), and BEFORE the same verb's stored
+        //    record is used, so a state with both records (reachable only before this fix) is never finished either way. A fault answers as the
+        //    same verb's lookup does: 503, nothing written. ──
+        var otherVerb = verb == Verb.Override ? Verb.Return : Verb.Override;
+        DecisionRecordWriter.BillingStoredResolvedSet? otherRecorded;
+        try
+        {
+            otherRecorded = await _findStored(
+                otherVerb == Verb.Override ? OverrideActionCode : ReturnActionCode,
+                invoiceId,
+                otherVerb == Verb.Override ? OverrideDecisionIdFor(submissionId) : ReturnDecisionIdFor(submissionId),
+                ct).ConfigureAwait(false);
+        }
+        catch (DecisionRecordRefusedException ex)
+        {
+            return RecordRefusal(submissionId, invoiceId, ex);
+        }
+        catch (Exception ex) when (!IsCallerCancellation(ex, ct))
+        {
+            _logger.LogWarning(ex, "Submission {SubmissionId}: whether its other decision is already recorded could not be checked", submissionId);
+            return Unavailable(submissionId, invoiceId);
+        }
+
+        if (otherRecorded is not null)
+        {
+            _logger.LogWarning("Submission {SubmissionId}: its {OtherVerb} is recorded ({RecordId}) but not finished, so a {Verb} is refused; nothing was changed",
+                submissionId, otherVerb, otherRecorded.RecordId, verb);
+            return BlockedDecisionResult.Refuse(submissionId, StatusCodes.Status409Conflict, BlockedSubmissionErrors.OtherDecisionPending,
+                BlockedSubmissionErrors.OtherDecisionPendingDetail(
+                    pendingIsOverride: otherVerb == Verb.Override, callerIsDecider: otherRecorded.ConfirmedByUserId == decider), invoiceId);
         }
 
         // ── 095f-2c review round 1 (F1, found in passing): a writer-created record already exists, so this call finishes THAT decision. As 105

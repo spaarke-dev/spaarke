@@ -190,8 +190,9 @@ public sealed class SubmissionOverrideDecisionNoteTests
     private static string StampReasonOf(World w, string member) =>
         JsonNode.Parse(w.FindingsJson)![member]!["reason"]!.GetValue<string>();
 
-    /// <summary>Strands a decision after its record was written: the first call is refused or fails at <paramref name="strand"/>.</summary>
-    private static async Task<BlockedDecisionResult> StrandAsync(World w, string strand, string? note)
+    /// <summary>Strands a decision after its record was written: the first call is refused or fails at <paramref name="strand"/>. Also used by
+    /// <see cref="SubmissionOverrideOtherDecisionTests"/> (ISS-031).</summary>
+    internal static async Task<BlockedDecisionResult> StrandAsync(World w, string strand, string? note)
     {
         var verb = strand.StartsWith("return", StringComparison.Ordinal) ? "return" : "override";
         switch (strand)

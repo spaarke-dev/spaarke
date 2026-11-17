@@ -119,6 +119,20 @@ public static class InvoiceRejectReturnCodes
         _ => RejectFirmMissingDetail,
     };
 
+    /// <summary>409 (ISS-031 review round 1): an Override of the invoice's own submission is recorded but not released (its release failed), so
+    /// the invoice is not rejected or returned; nothing was changed. The same wire code as the blocked-submission routes' other-decision refusal
+    /// (<see cref="BlockedSubmissionErrors.OtherDecisionPending"/>): the other decision on this held submission has not finished.</summary>
+    public const string OverridePending = BlockedSubmissionErrors.OtherDecisionPending;
+
+    /// <summary>The sentence with <see cref="OverridePending"/> for <paramref name="kind"/>: only the Override's own decider finishes it.</summary>
+    public static string OverridePendingDetail(InvoiceDecisionKind kind, bool callerIsDecider)
+    {
+        var refused = kind == InvoiceDecisionKind.Reject ? "rejected" : "returned to the firm";
+        return callerIsDecider
+            ? $"Your override of this invoice's submission is recorded but has not finished, so the invoice cannot be {refused}. Repeat the override to finish it."
+            : $"Another person's override of this invoice's submission has not finished, so the invoice cannot be {refused}. They complete it by repeating it.";
+    }
+
     /// <summary>409: 014 refused the transition.</summary>
     public const string TransitionRefused = "ebilling.invoice.decision_refused";
 
@@ -490,6 +504,30 @@ public sealed class InvoiceRejectReturnService
         if (await AuthorizeCloseAsync(verb, invoiceId, core, signals.Subjects, callerBearerToken, ct).ConfigureAwait(false) is { } denied)
         {
             return denied;
+        }
+
+        // ── ISS-031 review round 1: one held submission ends with ONE decision. A Procedure-held submission (an SPA one is Accepted, so the FR-20
+        //    hold above does not hold it) can be Overridden; an Override that recorded its Decision Record but whose release failed leaves the
+        //    submission held and the invoice In Review. Rejecting or returning the invoice now would leave that Override record on a rejected or
+        //    returned invoice, and its repeat could never release it (invoice_not_held / already_returned). So while the invoice's own submission is
+        //    still held for an Override AND its Override record exists, reject and return are refused 409 and nothing is written. Approve cannot
+        //    reach this: the Procedure hold (and the FR-20 hold) refuse it until the release lands. A finished (released) Override does not refuse:
+        //    the invoice is then decided in review as usual. A lookup fault answers 503. Round 2: after every 403 (not eligible above, the Signal
+        //    close rights here), as on the blocked routes, so a caller without the rights is never told a decision is pending; before the filing
+        //    check, the claim and every write. A repeat on an invoice already at the verb's target (CompleteOrNoOpAsync) never reaches it. ──
+        try
+        {
+            if (await PendingOverrideAsync(invoiceId, ct).ConfigureAwait(false) is { } pendingOverride)
+            {
+                _logger.LogWarning("{Verb} of invoice {InvoiceId}: an Override of its submission is recorded ({RecordId}) but not released; nothing changed.",
+                    Label(verb), invoiceId, pendingOverride.RecordId);
+                return new InvoiceDecisionResult(InvoiceDecisionOutcome.Conflict, InvoiceRejectReturnCodes.OverridePending,
+                    InvoiceRejectReturnCodes.OverridePendingDetail(verb.Kind, callerIsDecider: pendingOverride.ConfirmedByUserId == caller));
+            }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            return Unavailable(verb, invoiceId, "override-record", ex);
         }
 
         // ── The recorder files the record by the invoice's derived core stamp; it must be exactly the core above, before any write. ──
@@ -1069,6 +1107,25 @@ public sealed class InvoiceRejectReturnService
         };
         query.Criteria.AddCondition($"{InvoiceReviewReadService.InvoiceEntity}id", ConditionOperator.Equal, invoiceId);
         return (await _entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false)).Entities.FirstOrDefault();
+    }
+
+    /// <summary>
+    /// ISS-031 review round 1: the Decision Record of an Override of the invoice's OWN submission (the only one an Override decides, F1-a) that has
+    /// not released it: the submission is still held for an Override (<see cref="SubmissionOverrideService.IsHeldForOverride"/>) and the writer
+    /// holds that Override's record (<see cref="SubmissionOverrideService.OverrideDecisionIdFor"/>, the same lookup the Override itself uses).
+    /// Null otherwise (no own submission: the FR-20 hold has already refused; released, or never overridden). Throws on a read fault.
+    /// </summary>
+    private async Task<DecisionRecordWriter.BillingStoredResolvedSet?> PendingOverrideAsync(Guid invoiceId, CancellationToken ct)
+    {
+        if (await InvoiceBlockedHold.ReadOwnSubmissionAsync(_entities, invoiceId, SubmissionOverrideService.OverrideStateColumns, ct).ConfigureAwait(false)
+                is not { } own
+            || !SubmissionOverrideService.IsHeldForOverride(own))
+        {
+            return null;
+        }
+
+        return await _recorder.FindStoredResolvedSetAsync(
+            SubmissionOverrideService.OverrideActionCode, invoiceId, SubmissionOverrideService.OverrideDecisionIdFor(own.Id), ct).ConfigureAwait(false);
     }
 
     /// <summary>FR-20 / D-101: held while a blocked submission is undecided, decided only from server-written sources (task 165a,
