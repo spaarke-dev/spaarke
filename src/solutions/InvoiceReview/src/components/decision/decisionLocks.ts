@@ -23,9 +23,9 @@ export interface WizardLock {
   note: string;
 }
 
-/** An Override or Return of the blocked submission that came back unsure. */
+/** An Override, a Return or an operator finish (ISS-034) of the blocked submission that came back unsure. */
 export interface BlockedLock {
-  action: 'override' | 'return';
+  action: 'override' | 'return' | 'finish';
   /** The reason as sent (trimmed). */
   reason: string;
   /** The note as typed. */

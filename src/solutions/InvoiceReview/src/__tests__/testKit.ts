@@ -254,8 +254,23 @@ export function blockedSubmission(overrides: Partial<BlockedSubmission> = {}): B
     ],
     override: null,
     return: null,
+    strandedDecision: null,
+    canFinishAsOperator: false,
     ...overrides,
   };
+}
+
+export const STRANDED_RECORD_ID = 'c1c1c1c1-0000-4000-8000-0000000000c1';
+
+/** A blocked submission with another person's unfinished decision that the server says the caller may finish (ISS-034). */
+export function strandedSubmission(verb: 'Override' | 'Return' = 'Override', overrides: Partial<BlockedSubmission> = {}): BlockedSubmission {
+  return blockedSubmission({
+    canOverride: false,
+    canReturn: false,
+    strandedDecision: { verb, recordId: STRANDED_RECORD_ID, callerIsDecider: false },
+    canFinishAsOperator: true,
+    ...overrides,
+  });
 }
 
 /** A review whose invoice is held by a blocked submission. */
@@ -330,6 +345,7 @@ export function mockDecisionApi(initial: ApprovalState = approval()): MockDecisi
     getBlocked: jest.fn(async () => ok(blockedSubmission())),
     overrideBlocked: jest.fn(async () => ok({ submissionId: SUBMISSION_ID, invoiceId: INVOICE_ID, outcome: 'Overridden', recordId: 'rec-12', alreadyDecided: false })),
     returnBlocked: jest.fn(async () => ok({ submissionId: SUBMISSION_ID, invoiceId: INVOICE_ID, outcome: 'Returned', recordId: 'rec-13', alreadyDecided: false })),
+    finishStranded: jest.fn(async () => ok({ submissionId: SUBMISSION_ID, invoiceId: INVOICE_ID, outcome: 'Overridden', recordId: STRANDED_RECORD_ID, alreadyDecided: false })),
     getContext: jest.fn(async () => ok(invoiceContext())),
     getRelatedWork: jest.fn(async (_i: string, id: string) =>
       ok({

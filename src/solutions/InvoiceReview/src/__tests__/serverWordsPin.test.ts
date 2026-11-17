@@ -12,9 +12,16 @@ import * as fs from 'fs';
 import * as path from 'path';
 import {
   CODE_ADJUSTMENT_ID_REUSED,
+  BLOCKED_REFUSAL_SENTENCES,
+  CODE_BLOCKED_BOTH_DECISIONS_RECORDED,
   CODE_BLOCKED_CONCURRENT_CHANGE,
   CODE_BLOCKED_IN_PROGRESS,
+  CODE_BLOCKED_NOTHING_STRANDED,
+  CODE_BLOCKED_OPERATOR_NOT_PERMITTED,
+  CODE_BLOCKED_OWN_DECISION_PENDING,
+  CODE_BLOCKED_RECORD_UNAVAILABLE,
   CODE_BLOCKED_STILL_PROCESSING,
+  isFinishStaleRefusal,
   isBlockedDefiniteRefusal,
   isBlockedOutcomeUnknown,
 } from '../services/decisionApi';
@@ -163,6 +170,56 @@ describe('the blocked-submission 409 that may be answered after the Decision Rec
     }
     // The same code on another status is not it.
     expect(isBlockedOutcomeUnknown(conflict(blockedCodes().ConcurrentChange, 500))).toBe(false);
+  });
+});
+
+describe('Finish as operator (ISS-034, EB-D-244): the route, the hints and the refusal codes', () => {
+  const src = () => read(`${BFF}/Services/Finance/SubmissionOverrideService.cs`);
+  const codes = () => stringConsts(src());
+  const conflict = (errorCode: string | null, status = 409) => ({ status, errorCode, detail: null, signInFailed: false, failedStep: null, committedLineIds: [] });
+
+  it('the page posts to the route the server maps, with the body the other blocked decisions take (reason, note)', () => {
+    expect(read(`${BFF}/Api/Finance/SubmissionOverrideEndpoints.cs`)).toMatch(/MapPost\("\/\{submissionId:guid\}\/finish-stranded",\s*FinishStrandedAsync\)/);
+    expect(recordMembers(src(), 'BlockedDecisionRequest')).toEqual(['Reason', 'Note']);
+  });
+
+  it('the hints the page reads are the server\'s members: StrandedDecision(Verb, RecordId, CallerIsDecider) and CanFinishAsOperator', () => {
+    expect(recordMembers(src(), 'BlockedStrandedDecision')).toEqual(['Verb', 'RecordId', 'CallerIsDecider']);
+    expect(src()).toMatch(/public BlockedStrandedDecision\? StrandedDecision \{ get; init; \}/);
+    expect(src()).toMatch(/public bool CanFinishAsOperator \{ get; init; \}/);
+    expect(src()).toMatch(/verb == Verb\.Override \? "Override" : "Return"/);
+  });
+
+  it('the five new codes are the server\'s', () => {
+    const c = codes();
+    expect(CODE_BLOCKED_OPERATOR_NOT_PERMITTED).toBe(c.OperatorNotPermitted);
+    expect(CODE_BLOCKED_NOTHING_STRANDED).toBe(c.NothingStranded);
+    expect(CODE_BLOCKED_BOTH_DECISIONS_RECORDED).toBe(c.BothDecisionsRecorded);
+    expect(CODE_BLOCKED_OWN_DECISION_PENDING).toBe(c.OwnDecisionPending);
+    expect(CODE_BLOCKED_RECORD_UNAVAILABLE).toBe(c.RecordUnavailable);
+  });
+
+  it('every code with a fixed sentence is one the server defines, and the fixed sentences for the new codes are the server\'s own words', () => {
+    const c = codes();
+    const defined = new Set(Object.values(c));
+    for (const code of Object.keys(BLOCKED_REFUSAL_SENTENCES)) expect(defined.has(code)).toBe(true);
+    expect(BLOCKED_REFUSAL_SENTENCES[c.NothingStranded]).toBe(c.NothingStrandedDetail);
+    expect(BLOCKED_REFUSAL_SENTENCES[c.BothDecisionsRecorded]).toBe(c.BothDecisionsRecordedDetail);
+    expect(BLOCKED_REFUSAL_SENTENCES[c.OwnDecisionPending]).toBe(c.OwnDecisionDetail);
+  });
+
+  it('every finish refusal is a definite 4xx refusal (never an unknown outcome), except record_unavailable, which changed nothing and is a plain 503', () => {
+    const c = codes();
+    for (const code of [c.NothingStranded, c.BothDecisionsRecorded, c.OwnDecisionPending]) {
+      expect(isBlockedOutcomeUnknown(conflict(code))).toBe(false);
+      expect(isBlockedDefiniteRefusal(conflict(code))).toBe(true);
+      expect(isFinishStaleRefusal(conflict(code))).toBe(true);
+    }
+    expect(isBlockedDefiniteRefusal(conflict(c.OperatorNotPermitted, 403))).toBe(true);
+    expect(isFinishStaleRefusal(conflict(c.OperatorNotPermitted, 403))).toBe(true);
+    expect(isBlockedOutcomeUnknown(conflict(c.RecordUnavailable, 503))).toBe(false);
+    expect(isBlockedDefiniteRefusal(conflict(c.RecordUnavailable, 503))).toBe(false);
+    expect(isFinishStaleRefusal(conflict(c.RecordUnavailable, 503))).toBe(false);
   });
 });
 
