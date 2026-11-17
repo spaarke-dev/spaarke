@@ -154,6 +154,8 @@ The prototype contract (`src/template/types.ts`) is adopted with these changes:
 | Copy link | `Link20Regular` | repo also uses `CopyRegular` |
 | Expand section | `Open20Regular` | same |
 | Download / Delete / History / Send | `ArrowDownload` / `Delete` / `History` / `Send` 20Regular | same |
+| Edit | `Edit20Regular` | added by task 015 |
+| Change status | `ArrowSwap20Regular` | added by task 015 |
 
 **Standards notes to propose** (main session, owner approval for `.claude/` edits):
 - `MODAL-DESIGN-SYSTEM.md`: child dialogs mount inside the parent SprkModal.

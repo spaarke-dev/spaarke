@@ -49,6 +49,7 @@ vi.mock('../src/auth/bff-client', async () => {
 
 import { ApiError, AccessLevel } from '../src/types';
 import { EventsCalendar } from '../src/components/EventsCalendar';
+import { EVENT_TYPES, MEETING_TYPE, TASK_TYPE } from './eventFixtures';
 import { RecordTemplateModal } from '../src/components/record/RecordTemplateModal';
 import { RECORD_TEMPLATES } from '../src/components/record/recordTemplates';
 import { renderRecordSection } from '../src/components/record/sections';
@@ -851,14 +852,16 @@ describe('Add event: the list offers the section action and renders a FormModal'
   it(
     'EventsCalendar: no own button; the action is offered under the same rule; the dialog has Cancel left and posts the same payload',
     async () => {
-      const created = {
-        sprk_eventid: guid(801),
-        sprk_name: 'Court date',
-        sprk_duedate: '2026-04-01',
-      };
+      let rows: unknown[] = [];
       h.bffApiCall.mockImplementation(async (path: string, options?: RequestInit) => {
-        if (options?.method === 'POST') return created;
-        if (/\/events$/.test(path)) return { value: [] };
+        if (options?.method === 'POST') {
+          rows = [
+            { sprk_eventid: guid(801), sprk_name: 'Court date', sprk_duedate: '2026-04-01', eventTypeName: 'Task' },
+          ];
+          return rows[0];
+        }
+        if (/\/assignable-people$/.test(path)) return { value: [] };
+        if (/\/events$/.test(path)) return { value: rows, canCreate: true, creatableEventTypes: EVENT_TYPES };
         throw new Error(`unexpected BFF call ${path}`);
       });
       const { offer } = await offered(report => (
@@ -871,7 +874,10 @@ describe('Add event: the list offers the section action and renders a FormModal'
       const dialog = await screen.findByRole('dialog', { name: 'Create Event' });
       expectCancelLeft(dialog, 'Create Event');
       fireEvent.change(within(dialog).getByRole('textbox', { name: /Title/ }), { target: { value: 'Court date' } });
-      fireEvent.change(within(dialog).getByLabelText('Due Date'), { target: { value: '2026-04-01' } });
+      fireEvent.change(within(dialog).getByRole('combobox', { name: /Event Type/ }), {
+        target: { value: TASK_TYPE.id },
+      });
+      fireEvent.change(within(dialog).getByLabelText(/Due Date/), { target: { value: '2026-04-01' } });
       fireEvent.click(within(dialog).getByRole('button', { name: 'Create Event' }));
 
       await waitFor(() => {
@@ -880,6 +886,8 @@ describe('Add event: the list offers the section action and renders a FormModal'
         expect(JSON.parse(String((post?.[1] as RequestInit).body))).toEqual({
           sprk_name: 'Court date',
           sprk_duedate: '2026-04-01',
+          eventTypeId: TASK_TYPE.id,
+          sprk_priority: 100000001,
           'sprk_RegardingProject@odata.bind': `/sprk_projects(${PROJECT})`,
         });
       });
@@ -894,7 +902,8 @@ describe('Add event: the list offers the section action and renders a FormModal'
     async () => {
       h.bffApiCall.mockImplementation(async (path: string, options?: RequestInit) => {
         if (options?.method === 'POST') throw new ApiError(500, problem(500));
-        if (/\/events$/.test(path)) return { value: [] };
+        if (/\/assignable-people$/.test(path)) return { value: [] };
+        if (/\/events$/.test(path)) return { value: [], canCreate: true, creatableEventTypes: EVENT_TYPES };
         throw new Error(`unexpected BFF call ${path}`);
       });
       const { offer } = await offered(report => (
@@ -904,6 +913,9 @@ describe('Add event: the list offers the section action and renders a FormModal'
       act(() => offer()!.onClick());
       const dialog = await screen.findByRole('dialog', { name: 'Create Event' });
       fireEvent.change(within(dialog).getByRole('textbox', { name: /Title/ }), { target: { value: 'Court date' } });
+      fireEvent.change(within(dialog).getByRole('combobox', { name: /Event Type/ }), {
+        target: { value: MEETING_TYPE.id },
+      });
       fireEvent.click(within(dialog).getByRole('button', { name: 'Create Event' }));
       expect(await within(dialog).findByText(/^Failed to create event:/)).toBeTruthy();
       expect(screen.getByRole('dialog', { name: 'Create Event' })).toBeTruthy();

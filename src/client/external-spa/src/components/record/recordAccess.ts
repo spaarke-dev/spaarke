@@ -6,9 +6,9 @@
  *   (a) the right behind each of the record's create actions (Upload, New message, Add event; each in its own
  *       section's header since task 009): `createRightOf`, used by every list inside the record template, so they follow
  *       one rule; and the list-host rule of EventsCalendar and a project's DocumentLibrary, the same in and out of the
- *       template (`levelVerdictOf`, `listCreateRightOf`; D-9: the project page follows it too). Add event also offers the
- *       Task type on the list's `canCreateTask` (`createTaskRightOf`, tasks 011 / 012) and is shown when either right
- *       is a yes (`addEventRightOf`);
+ *       template (`levelVerdictOf`, `listCreateRightOf`; D-9: the project page follows it too). Add event is also shown
+ *       only when the list names at least one event type the caller may pick (`addEventRightOf`, `creatableEventTypes`,
+ *       task 015);
  *   (a2) whether "Submit invoice" is offered (task 007, FR-10): `submitInvoiceRightOf`, from `/me` `firms` and the
  *       firm-records answers (read by `actions/SubmitInvoiceAction.tsx`);
  *   (b) the header's "Your access" value: `yourAccessOf`, from `recordAccessFactsOf` (the caller's `/me` level for the
@@ -18,7 +18,7 @@
  *   SPA since task 011 / D-11).
  *
  * WHERE THE ANSWERS COME FROM (never a guess, ADR-003 fail closed):
- *   - each list's `canCreate` (and, for the Task type of an event, `canCreateTask`): the BFF's answer of the matching POST for this caller on
+ *   - each list's `canCreate` (and, for an event, its `creatableEventTypes`): the BFF's answer of the matching POST for this caller on
  *     this record (task 002 / 008: the documents, event and message lists of projects, matters and work assignments; the
  *     message thread of every record). It is the ONLY source for a matter, a work assignment, an invoice and a service
  *     request.
@@ -28,7 +28,7 @@
  *   - the LABEL ("Your access", task 011): `/me` `projects` for a project, `/me` `records` for a matter or work assignment
  *     (task 008). Display only. A `writeAccessPerRecord` caller is the composed READ view (uac-r2 A2), which would
  *     contradict their working create actions, so the line is not shown for them at all and their actions keep following
- *     the lists' `canCreate` / `canCreateTask`. A record `/me` has no entry for (an invoice, a service request, a
+ *     the lists' `canCreate` / `creatableEventTypes`. A record `/me` has no entry for (an invoice, a service request, a
  *     document, or a matter the BFF did not list) shows no level.
  * Unknown (the list still loading, failed, or silent; `/me` not read) is `null`: the action is hidden and nothing is said.
  *
@@ -155,37 +155,20 @@ export function listCreateRightOf(input: CreateRightInput): { right: CreateRight
 }
 
 /**
- * The right to create an event of the Task type (the "Task" choice of "Add event"; task 012): the list's own
- * `canCreateTask` (the BFF's answer for the Task type, task 008), decided on its own, NOT through the plain event's
- * `canCreate` (task 008 review F2-1: the two rights are separate answers). Today's BFF only sets `canCreateTask` when
- * `canCreate` is true (`ExternalProjectDataEndpoints.cs`), so the Task-only case is defensive. A `/me` level that decides (a level-decided
- * project caller, see `levelVerdictOf`) must also allow. Only an explicit `true` is a yes: a list that says nothing about
- * tasks (an older BFF, a failed read, not loaded) is unknown, never "can", so the Task choice stays hidden (hide, don't guess).
+ * The right behind "Add event" (tasks 012 / 015, FR-35): the caller's create right on the record (`eventRight`, the shared
+ * `listCreateRightOf` rule) AND at least one event type they may pick. Every event is typed (owner Q-2) and the type options
+ * are exactly the list's `creatableEventTypes`, so a caller with the create right but no creatable type could not complete the
+ * form: that is a "no" (014 K3), and the section's read-only line says so. A list that sent no `creatableEventTypes` at all
+ * (an older BFF) says nothing about types: unknown, never "any", so Add event stays hidden (hide, don't guess). This replaced
+ * the Task choice's own right (`canCreateTask`), which is no longer read.
  */
-export function createTaskRightOf({ loaded, listCanCreateTask, levelAllows }: TaskRightInput): CreateRight {
-  if (!loaded) return null;
-  if (levelAllows === false) return false;
-  return typeof listCanCreateTask === 'boolean' ? listCanCreateTask : null;
-}
-
-export interface TaskRightInput {
-  /** The list has answered (it is not on its first read and the read did not fail). */
-  loaded: boolean;
-  /** The list's `canCreateTask`; `null` / `undefined` when it said nothing. */
-  listCanCreateTask: boolean | null | undefined;
-  /** As `CreateRightInput.levelAllows`: set only for a project caller whose write access is not per record. */
-  levelAllows?: boolean;
-}
-
-/**
- * The right behind "Add event" (task 012): the action is offered when the caller may create a plain event OR a Task. Any
- * `true` offers it; otherwise a known `false` event right is a no (the read-only line says why); everything else is unknown.
- * A Task `false` with the event right unknown stays unknown, never "no" (the list has not decided the event).
- */
-export function addEventRightOf(eventRight: CreateRight, taskRight: CreateRight): CreateRight {
-  if (eventRight === true || taskRight === true) return true;
-  if (eventRight === false) return false;
-  return null;
+export function addEventRightOf(
+  eventRight: CreateRight,
+  creatableEventTypes: readonly unknown[] | null | undefined
+): CreateRight {
+  if (eventRight !== true) return eventRight;
+  if (!Array.isArray(creatableEventTypes)) return null;
+  return creatableEventTypes.length > 0;
 }
 
 /** Strict `/me` label → level: anything else is not an answer (unlike `mapAccessLevelString`, which defaults to ViewOnly). */
@@ -233,7 +216,7 @@ const RECORD_TYPE_OF_ROOT: Readonly<Record<string, string>> = {
  * DISPLAY ONLY (uac-r2 A2). A level decides a write only for a project caller without `writeAccessPerRecord`
  * (`decidingLevelOf`); a matter's or work assignment's `records` level never does. For a `writeAccessPerRecord` caller
  * the level is the composed READ view: `yourAccessOf` does not show it, `decidingLevelOf` answers `undefined`, and their
- * create actions keep following the lists' `canCreate` / `canCreateTask`.
+ * create actions keep following the lists' `canCreate` / `creatableEventTypes`.
  */
 export function recordLevelOf(
   root: string | undefined,
@@ -368,6 +351,37 @@ export function submitInvoiceRightOf(input: {
     if (!read || read === 'failed') return false;
     return (read[FIRM_RECORD_LIST_OF_KIND[kind]] ?? []).some(id => id.toLowerCase() === wanted);
   });
+}
+
+// ---------------------------------------------------------------------------
+// (a3) What the caller may do with ONE event (R4 task 015, FR-36 / S-1, S-3)
+// ---------------------------------------------------------------------------
+
+/** What an event row says about the caller's rights on it: the BFF's own answers (`PATCH /events/{id}` would admit it). */
+export interface EventRightsFacts {
+  canEdit?: boolean | null;
+  canChangeStatus?: boolean | null;
+  allowedStatuses?: readonly number[] | null;
+  canReassign?: boolean | null;
+}
+
+/** Edit is offered only on an explicit `canEdit: true`; absent (an older BFF) is "not said", never "can". */
+export function eventEditRightOf(event: EventRightsFacts | null | undefined): boolean {
+  return event?.canEdit === true;
+}
+
+/**
+ * The statuses a Change status dialog offers: exactly the BFF's `allowedStatuses`, and only when `canChangeStatus` is an
+ * explicit `true`. Empty = the action is not offered at all.
+ */
+export function eventStatusChoicesOf(event: EventRightsFacts | null | undefined): readonly number[] {
+  if (event?.canChangeStatus !== true || !Array.isArray(event.allowedStatuses)) return [];
+  return event.allowedStatuses.filter((s): s is number => typeof s === 'number');
+}
+
+/** Reassign (the Edit dialog's Assigned To) needs `canEdit` and an explicit `canReassign: true` (open work only). */
+export function eventReassignRightOf(event: EventRightsFacts | null | undefined): boolean {
+  return event?.canEdit === true && event.canReassign === true;
 }
 
 // ---------------------------------------------------------------------------
