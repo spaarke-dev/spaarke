@@ -1,0 +1,125 @@
+# Task 131: Firm notice Action `INVOICE-FIRM-NOTICE@v1` with template fallback
+
+Branch `task/ebilling-131`, from `a93e30cedc`. Rigor STANDARD. Model: Sonnet @ high. FR-50, D-60, D-52.
+
+**Held: no Dataverse write was made.** The Action row and the Binding row are authored as files only. Seeding them in dev waits on the owner's typed OK and on task 136 (see "Seeding commands").
+
+## What was built
+
+| Component | File | What it does |
+|---|---|---|
+| Action mirror | `infra/dataverse/actions/invoice-firm-notice.action.json` | JPS Action. Standard tier, temperature 0.2. Output `subject` and `body` (strings only). Nine instruction constraints (no digit, no rule-set name, no quoted clause, no link) and two digit-free examples. |
+| Output schema | `infra/dataverse/outputschemas/invoice-firm-notice.schema.json` | `subject` (max 120), `body` (max 1500), both required, `additionalProperties: false`, no numeric type. |
+| Input schema | `infra/dataverse/inputschemas/invoice-firm-notice.input.schema.json` | `outcome` (closed enum) and `findings` (strings only: rule-set name, rule name, consequence, issue). No numeric type. |
+| Binding row | `infra/dataverse/sprk_playbookconsumer-rows.json` | `invoice-firm-notice`, consumer code default, environment `*`, priority 500, enabled. |
+| Consumer type | `Services/Ai/PublicContracts/ConsumerTypes.cs` | `InvoiceFirmNotice` added to `All` in the same change as the Binding row (`RoutingConsumerTypeHealthCheck`). |
+| Composer | `Services/Finance/FirmNoticeComposer.cs` | Projects the outcome (130), drafts prose through `IInvoiceAi.DraftFirmNoticeAsync`, screens it, renders the HTML, falls back to fixed wording on any failure. |
+| Template | `Services/Finance/EmailTemplates/FirmNoticeTemplate.html` | Embedded resource (csproj glob, same precedent as `RegistrationEmailService`). Shell with four placeholders; no image, no link. |
+| Route | `Api/Finance/FirmNoticeEndpoints.cs` | `POST /api/finance/invoices/{invoiceId}/firm-notice/draft?kind=` (reviewer preview, read-only). |
+| DI, routes, csproj | `FinanceModule.cs`, `EndpointMappingExtensions.cs`, `Sprk.Bff.Api.csproj` | One line each. |
+| Arch ledger | `tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.Ledger.cs` | `GovernedFile` (RouteLevelGate) entry; endpoint file count 154 to 155. |
+| Eval case | `tests/integration/contract/Eval/golden-utterances.json` | GU-146 (the forcing function requires a case per `ConsumerTypes.All` entry). Shared append point. |
+
+## Behaviour
+
+1. **Where the data comes from.** Only the 130 projection (`FirmFindingsProjection`). The notice carries the tracking number, the billed and approved totals, and a findings table (item, decision, billed, approved, reason, rule). A rule is cited only when the projection cites it (the firm flag publishes the rule). The composer reads nothing else.
+2. **What the model sees.** `InvoiceFirmNoticeRequest` is strings only: the outcome name and up to 20 findings, each rule-set name, rule name, consequence name and an issue sentence. The issue is a fixed sentence per decision, or the projection's firm reason when it passes the same prose screen. Reviewer reasons, clauses and amounts never go to the model. No number can reach it.
+3. **What comes back.** `subject` and `body`. Every figure in the email (totals, line amounts) is rendered by code from the projection, never from the model.
+4. **The prose screen** (`FirmNoticeProse.Check`, second wall; the first is that nothing numeric goes in and the schema has no numeric property). The model's text is refused, and the template used, on: empty text, text over the length cap, a control or invisible character, any digit (any script), a currency symbol or code, an amount word (a small closed list: "percent", spelled-out numbers up to the list, "hundred", and similar), a link or an address.
+5. **Fallbacks.** The template wording is used, with a reason code in the draft, when: the AI setting is off (`ai.setting_off`), settings cannot be read (`ai.settings_unavailable`), the kill switch is engaged (`ai.disabled`), 30 s timeout (`ai.timeout`), any other model fault (`ai.error`), the Action is not bound (`ai.invoice.binding_missing`), the completion failed (`ai.invoice.completion_failed`), the output did not parse (`ai.invoice.output_invalid`), or the screen refused the prose (`prose.*`). A caller cancellation is never a fallback; it propagates.
+6. **Status and applicability.** `FirmNoticeStatus` is Composed, NotFound, NotApplicable or Unavailable. A kind that does not fit the invoice's state (for example a ReturnedToFirm notice for a Paid invoice) is NotApplicable.
+7. **Route.** `kind` is exactly `ReturnedToFirm` or `InvoiceRejected` (400 `ebilling.firm-notice.invalid_kind` otherwise, including empty, `SubmissionRejected`, a number, or a different case). Errors: 404 uniform (no such invoice), 409 `ebilling.firm-notice.not_applicable`, 503 `ebilling.firm-notice.unavailable` (the projection faulted). 200 returns `{ kind, subject, prose, html, source, actionVersion, fallbackReason }` with `Cache-Control: no-store`. Authorization: step 0 on the group, `AddFinanceAuthorizationFilter("ebilling.invoice.decide", invoice, routeKey: invoiceId)` (the same Write right as the Return and Reject routes), then `RequireEbillingEnabled`. It writes nothing and sends nothing. 132 owns sending and storage and re-renders edited prose through `FirmNoticeComposer.RenderHtml(outcome, prose)`.
+8. **Logging** (ADR-015): ids, kind, source, sizes, timings and codes only; never prose, findings or reasons (a test pins it).
+
+## Decisions
+
+- **Tier: Standard.** The task is bounded drafting of two short strings from a closed set; no multi-step reasoning is needed and the output is screened regardless. Premium would not change what is allowed through. (Revisit only if the owner finds the Standard prose weak.)
+- **One template, not one per outcome.** The brief allowed a template per outcome; the outcomes differ only in one fixed sentence and the findings table, so there is one HTML shell and a closed table of fixed wording per kind (`FirmNoticeFallbackText`). Fewer files to review; a change to wording is a code review.
+- **No currency in 130's contract.** The projection has amounts with no currency code, so the HTML shows plain figures (`9,876.54`), no symbol. If a currency is later added to the projection, `Money` is the one place to change.
+- **Submission-rejected notices** (`ComposeForSubmissionAsync`) read the projection with the decided flag passed unchanged; this is the entry point 132 uses for a rejected submission. It is not on the reviewer route (a rejected submission has no invoice to review).
+
+## Fallback wording for owner approval
+
+This is firm-facing correspondence, so the owner approves it before it ships. It states outcome facts only; no legal language is added. It is a closed table in `FirmNoticeFallbackText`, so a change is a reviewed code change.
+
+| Kind | Subject | Paragraph |
+|---|---|---|
+| SubmissionRejected | `Invoice submission rejected` | `Your invoice submission was rejected and was not accepted for review.` |
+| ReturnedToFirm | `Invoice returned to firm` | `Your invoice has been returned to you and is now closed. A corrected invoice can be submitted.` |
+| InvoiceRejected | `Invoice rejected` | `Your invoice has been rejected in full.` |
+| ApprovedWithAdjustments | `Invoice approved with adjustments` | `Your invoice has been approved with adjustments.` |
+
+Words around the data (also for approval):
+
+- Greeting: `Hello,`
+- Findings heading: `Findings`
+- Table headings: `Item`, `Decision`, `Billed`, `Approved`, `Reason`, `Rule`
+- Details lines: `Tracking number: ...`, `Billed total: ...`, `Approved total: ...`
+- Decision labels: `Reduced`, `Not allowed`, `Line added`, `Invoice adjustment`, `Rejection finding`
+- Fixed issue sentences (used instead of a firm reason that does not pass the screen): `A billed line was reduced.`, `A billed line was not allowed.`, `A line was added to the invoice.`, `An adjustment was applied to the invoice.`, `A finding led to the rejection.`
+- Overflow note (more than 20 findings): `{n} more findings are not shown here.`
+
+## Tests
+
+| Layer | File | Covers |
+|---|---|---|
+| Unit | `tests/unit/Sprk.Bff.Api.Tests/Services/Finance/FirmNoticeComposerTests.cs` | Action prose used; request has no digit or amount; every projected figure shown and nothing else; citation shown only when projected; rejected-submission rendering; refused prose (digit in any script, currency, amount word, link, control character, empty, too long); HTML encoding and single-pass placeholders; every fallback trigger; the applicability matrix; the fixed wording passes its own screen; the request's allow-list is pinned by reflection (no numeric member can be added unnoticed); logs carry no prose. |
+| Contract | `tests/integration/contract/Catalog/InvoiceFirmNoticeActionContractTests.cs` | Tier, action code, `ConsumerTypes.All` and the Binding row move together, prompt constraints, examples parse and pass the screen, schemas valid and numeric-free (with a must-fire control for the numeric walk), Binding row fields. |
+| Contract (route) | `tests/integration/contract/Api/Finance/FirmNoticeEndpointsAuthorizationContractTests.cs` | 401; 403 without Write, Read alone, and a right on another invoice (reads nothing, calls no model); step 0 must-fire and must-not-fire (task 099); fail-closed on a rights fault; `ebilling.disabled` 503 only for an authorized caller; 400 on a bad kind; 200 shape and `no-store`; 200 with the template and the reason when the Action is unavailable; 404, 409, 503. |
+| Seam (ADR-043) | `tests/integration/seam/Finance/FirmNoticeActionSeamTests.cs` | The production `InvoiceAi` over the real `ActionResolver`, `ActionRunner` and `PromptSchemaRenderer`, with the authored mirror as the catalog row. The authored prompt reaches the model; the rendered `## Input` section carries no number; figures are the projection's; a reply with digits falls back; parser-refused replies fall back with `output_invalid`; a missing Binding falls back with `binding_missing` and no model call; a completion failure falls back. |
+
+### Gate counts
+
+- Task tests (`FirmNotice`, `InvoiceFirmNotice`): 127 passed.
+- Wider unit filter (`FirmNotice|ConsumerType|RoutingConsumer|FirmFindings|InvoiceAi|GoldenUtterance|P2LoopInjection|CatalogInputSchema|PlaybookConsumer`): 484 passed, 0 failed.
+- ArchTests filter (`RouteAuthorizationGuard|Finance|Consumer|ExternalInvoice|Money|Ai`): 419 passed, 0 failed.
+- BFF build with `--warnaserror`: 0 warnings, 0 errors.
+- The full `Sprk.Bff.Api.Tests` and `Spaarke.ArchTests` suites were not run (brief: filtered gates only).
+
+### Fail-before proof
+
+Three mutations applied together on the committed code, tests run, then each file restored from a copy (no stash): the prose screen bypassed, the route's `AddFinanceAuthorizationFilter` removed, and `InvoiceFirmNotice` removed from `ConsumerTypes.All`.
+
+- Mutated: **40 failed / 159 passed** (199 tests in the proof set). Failures include the prose theory (all 19 cases), `AModelReplyWithAFigure_NeverReachesTheNotice_TheTemplateIsUsed` (seam), `Logs_Carry...`, the route's `Denied_*`, `NeedsWrite_ReadAloneIsNotEnough`, `RightOnAnotherInvoice_*`, `FailedRightsCheck_*` and the task 099 cases, `ConsumerTypesKey_MatchesTheActionCode_AndIsListedInAll_...` and the golden-utterance grounding case.
+- Restored: **0 failed / 199 passed**.
+
+## BFF hygiene (root §10)
+
+- No new package, so no CVE delta is expected and none was introduced.
+- New surface (§11): the composer is new because nothing existing both projects the firm-visible outcome and drafts screened prose (the 130 projection is read-only data, `InvoiceAi` is the model call only); extending either would mix responsibilities. The route is new because 132 needs a reviewer preview and the reject/return routes act on state. Without them: no firm notice exists, and no reviewer can see what the firm will receive before it is sent.
+- Placement: the composer is a scoped service in `Services/Finance` (`FinanceModule`); the AI call goes only through the `IInvoiceAi` facade (`PublicContracts`).
+- Publish-size delta: see below.
+
+## Publish-size delta
+
+Method: `git archive` of the base (`a93e30cedc`, this branch's parent) and the tip (`2388b3740b`) into fresh short-path trees (`C:\wt131a`, `C:\wt131b`), then `dotnet publish -c Release -r linux-x64 --self-contained false`, then `Compress-Archive -CompressionLevel Optimal`. PDBs are INCLUDED. The base is the branch parent rather than a fresh `origin/master`, because master is 45 commits ahead and would fold other tasks' growth into this task's number.
+
+| | Folder bytes | Zip bytes |
+|---|---|---|
+| Base `a93e30cedc` | 140,551,641 | 42,389,586 |
+| Tip `2388b3740b` | 140,592,861 | 42,402,461 |
+| Delta | +41,220 | **+12,875 (about 0.012 MB)** |
+
+Well under the +5 MB per-task line. The absolute zip size (about 40.4 MB with PDBs) is the existing level, not this task's; the 55 MB and 60 MB thresholds are not approached.
+
+## Seeding commands (NOT run; held for the owner's typed OK and task 136)
+
+1. Preview, then create the Action row, set the input schema and deploy the mirror (`Deploy-ActionMirrors.ps1` only patches existing rows, so use the ensure script):
+   `pwsh scripts/ebilling/Ensure-ActionRow.ps1 -ActionCode invoice-firm-notice -DryRun`
+   `pwsh scripts/ebilling/Ensure-ActionRow.ps1 -ActionCode invoice-firm-notice`
+2. Upsert the Binding row (diff first):
+   `pwsh scripts/dataverse/Seed-PlaybookConsumers.ps1 -DryRun`
+   `pwsh scripts/dataverse/Seed-PlaybookConsumers.ps1`
+3. Verify with read-only queries:
+   - `sprk_analysisactions?$filter=sprk_actioncode eq 'invoice-firm-notice'`
+   - `sprk_playbookconsumers?$filter=sprk_consumertype eq 'invoice-firm-notice'`
+
+Until the Binding row is seeded in an environment, `/healthz` there reports the routing health check Unhealthy (the type is in `ConsumerTypes.All` but has no row). Seed in the same deploy that ships this code. With no row, the composer still works: it falls back to the template with `ai.invoice.binding_missing`.
+
+## Known limits
+
+- The prose screen is heuristic. Digits, currency, links and a closed list of amount words are refused; an arbitrary spelled-out number outside the list is not caught. The first wall (nothing numeric reaches the model) is the main guarantee.
+- After a Return or Reject has been decided, 130 projects status and totals only, so the post-decision draft has an empty findings table; the reviewer's reason is not in the projection and is not sent to the firm by this task.
+- `golden-utterances.json`, `FinanceModule.cs` and `EndpointMappingExtensions.cs` are shared append points; expect a trivial merge there.
+- The model is Standard tier; the wording of model prose is the owner's to judge once the Action is seeded in dev.
+- 132 owns sending, storage and the in-app feed; this task returns a draft only.
