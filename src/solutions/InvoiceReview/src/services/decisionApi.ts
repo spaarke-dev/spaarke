@@ -25,7 +25,7 @@
 
 import type { AuthenticatedFetchFn } from '@spaarke/auth';
 import { toFailure, type ApiFailure, type ApiResult } from './invoiceReviewApi';
-import { noteMember } from './noteModel';
+import { isNoteRefusal, noteMember } from './noteModel';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Wire types
@@ -365,19 +365,38 @@ export const isOutcomeUnknown = (f: ApiFailure): boolean => f.status === 0 || is
 
 /**
  * 409 `SubmissionOverrideService.BlockedSubmissionErrors.ConcurrentChange`. For an Override or a Return of the blocked submission the server
- * returns it AFTER the Decision Record is written (the release or the return ran out of retries), and a repeat by the same decider finishes
- * from the STORED reason and note and ignores the request's text (095f-2c known limit (c)). So it is an unknown outcome for the form, like a
- * 503. Pinned to the server's source by `__tests__/serverWordsPin.test.ts`.
+ * returns it both BEFORE and AFTER the Decision Record is written (the release or the return ran out of retries), so a record MAY have been
+ * written, and a repeat by the same decider finishes from the STORED reason and note and ignores the request's text (095f-2c known limit (c)).
+ * So it is treated as an unknown outcome for the form, like a 503. That is deliberately conservative: a repeat with the same text succeeds
+ * either way. Pinned to the server's source by `__tests__/serverWordsPin.test.ts`.
  */
 export const CODE_BLOCKED_CONCURRENT_CHANGE = 'ebilling.blocked.concurrent_change';
 
 /**
  * Review round 2: an Override or Return of the blocked submission whose outcome is not known: `isOutcomeUnknown`, or a 409
- * `ebilling.blocked.concurrent_change` (the record may already be written). The other blocked 409s (`not_blocked`, `already_overridden`,
+ * `ebilling.blocked.concurrent_change` (a record may already be written). The other blocked 409s (`not_blocked`, `already_overridden`,
  * `already_returned`, `invoice_not_held`, `in_progress`, `still_processing`, `decision_conflict`) are answered before any record is written.
  */
 export const isBlockedOutcomeUnknown = (f: ApiFailure): boolean =>
   isOutcomeUnknown(f) || (f.status === 409 && f.errorCode === CODE_BLOCKED_CONCURRENT_CHANGE);
+
+/** 409: another request for this submission is running right now (retry, the same request can still finish). Pinned to the server by `serverWordsPin`. */
+export const CODE_BLOCKED_IN_PROGRESS = 'ebilling.blocked.in_progress';
+/** 409: the submission is still being processed (retry, the same request can still finish). Pinned to the server by `serverWordsPin`. */
+export const CODE_BLOCKED_STILL_PROCESSING = 'ebilling.blocked.still_processing';
+
+/**
+ * Review round 3: the server's DEFINITE refusal of an Override or Return: a 4xx that is not an unknown outcome (`isBlockedOutcomeUnknown`), not
+ * a refused note (400 note codes: the form is fixed and sent again), and not one of the two transient 409s (`in_progress`, `still_processing`).
+ * `decision_conflict`, `record_refused`, `findings_too_large`, `not_blocked`, `already_returned`, `already_overridden`, `invoice_not_held`
+ * and a 403 are all this. A repeat answered so will never finish, so a lock kept for it has to be released. A 5xx is never definite here.
+ */
+export const isBlockedDefiniteRefusal = (f: ApiFailure): boolean =>
+  f.status >= 400 &&
+  f.status < 500 &&
+  !isBlockedOutcomeUnknown(f) &&
+  !isNoteRefusal(f) &&
+  !(f.status === 409 && (f.errorCode === CODE_BLOCKED_IN_PROGRESS || f.errorCode === CODE_BLOCKED_STILL_PROCESSING));
 
 /**
  * The sentence shown for a refused decision step. The server's `detail` is its own explanation (ADR-019) and is shown as is, followed by the

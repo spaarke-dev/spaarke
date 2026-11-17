@@ -194,6 +194,67 @@ describe('a correction or confirm the server found already in place stored no no
     expect(screen.getByTestId('notice')).not.toHaveTextContent('not saved');
   });
 
+  // Review round 3: only an UNSURE send (no answer, or a 503 `incomplete`) can have saved the row with its note.
+  it('(round 3) a plain 503 that saved nothing does not mute the warning: a resend answered already-applied still warns', async () => {
+    const api = mockApi(lowHours());
+    api.correctLine
+      .mockResolvedValueOnce(failed(problem(503, 'ebilling.correction.unavailable', { detail: 'The service is busy. Try again.' })))
+      .mockResolvedValueOnce(applied(true));
+    const { dialog } = await openCorrect(api);
+    fireEvent.change(within(dialog).getByLabelText('Note'), { target: { value: 'Per the timesheet' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save correction', hidden: true }));
+    await within(dialog).findByTestId('correct-error');
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save correction', hidden: true }));
+    const notice = await screen.findByTestId('notice');
+    expect(notice).toHaveTextContent('Already corrected to this value; the note was not saved.');
+    expect(notice).toHaveAttribute('data-intent', 'warning');
+  });
+
+  it('(round 3) an abandoned unsure send on header field X does not mute the warning on a first send for field Y', async () => {
+    const api = mockApi(normal());
+    api.correctHeader.mockResolvedValueOnce(failed(new Error('Failed to fetch'))).mockResolvedValueOnce(applied(true));
+    renderPage(api);
+    await screen.findByTestId('review-title');
+    fireEvent.click(screen.getByTestId('correct-header'));
+    const first = await screen.findByRole('dialog');
+    fireEvent.change(within(first).getByLabelText('Correct value'), { target: { value: 'INV-2025-78233' } });
+    fireEvent.change(within(first).getByLabelText('Note'), { target: { value: 'Typo on the scan' } });
+    fireEvent.click(within(first).getByRole('button', { name: 'Save correction', hidden: true }));
+    await within(first).findByTestId('correct-error');
+    // Abandoned: cancelled with the refusal showing, so the draft and the unsure mark stay.
+    fireEvent.click(within(first).getByRole('button', { name: 'Cancel', hidden: true }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    // A first send for ANOTHER field, with a note, found already in place.
+    fireEvent.click(screen.getByTestId('correct-header'));
+    const again = await screen.findByRole('dialog');
+    fireEvent.click(within(again).getByRole('combobox', { hidden: true }));
+    fireEvent.click(await screen.findByRole('option', { name: 'Currency', hidden: true }));
+    fireEvent.change(within(again).getByLabelText('Correct value'), { target: { value: 'USD' } });
+    fireEvent.change(within(again).getByLabelText('Note'), { target: { value: 'Billed in USD' } });
+    fireEvent.click(within(again).getByRole('button', { name: 'Save correction', hidden: true }));
+    await waitFor(() => expect(api.correctHeader).toHaveBeenCalledTimes(2));
+    expect(api.correctHeader.mock.calls[1][1]).toMatchObject({ field: 'Currency' });
+    const notice = await screen.findByTestId('notice');
+    expect(notice).toHaveTextContent('Already corrected to this value; the note was not saved.');
+  });
+
+  it('(must-not-fire) the same header field resent after an unsure send is still plain success', async () => {
+    const api = mockApi(normal());
+    api.correctHeader.mockResolvedValueOnce(failed(new Error('Failed to fetch'))).mockResolvedValueOnce(applied(true));
+    renderPage(api);
+    await screen.findByTestId('review-title');
+    fireEvent.click(screen.getByTestId('correct-header'));
+    const dialog = await screen.findByRole('dialog');
+    fireEvent.change(within(dialog).getByLabelText('Correct value'), { target: { value: 'INV-2025-78233' } });
+    fireEvent.change(within(dialog).getByLabelText('Note'), { target: { value: 'Typo on the scan' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save correction', hidden: true }));
+    await within(dialog).findByTestId('correct-error');
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save correction', hidden: true }));
+    const notice = await screen.findByTestId('notice');
+    expect(notice).not.toHaveTextContent('not saved');
+    expect(notice).toHaveAttribute('data-intent', 'success');
+  });
+
   it('(must-not-fire) a first send answered already-applied still warns, even after an earlier 409 that saved nothing', async () => {
     const api = mockApi(lowHours());
     api.correctLine

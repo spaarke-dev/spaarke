@@ -327,7 +327,7 @@ describe('the blocked submission: the Note box on Override and Return', () => {
     expect(within(dialog).getByLabelText('Reason')).toHaveValue('Known resubmission');
   });
 
-  it('a 409 concurrent_change (answered AFTER the record is written) locks the reason and the note, re-reads the page, and the resend is the same request', async () => {
+  it('a 409 concurrent_change (a record MAY have been written; locking is conservative) locks the reason and the note, re-reads the page, and the resend is the same request', async () => {
     const decision = mockDecisionApi(held());
     decision.overrideBlocked.mockResolvedValueOnce(
       failed(problem(409, 'ebilling.blocked.concurrent_change', { detail: 'The invoice changed while the override was running.' }))

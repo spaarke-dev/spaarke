@@ -332,7 +332,7 @@ describe('the blocked submission: an unsure Override or Return stays locked acro
     expect(reasonOf(other)).not.toHaveAttribute('readonly');
     expect(within(other).queryByTestId('blocked-note-locked')).not.toBeInTheDocument();
     // But it says the Override is unfinished, and Return cannot be sent.
-    expect(within(other).getByTestId('blocked-other-lock')).toHaveTextContent('An Override was saved in part. Submit it again to finish it before returning.');
+    expect(within(other).getByTestId('blocked-other-lock')).toHaveTextContent('An Override may have been saved in part. Submit it again to finish it before returning.');
     fireEvent.change(reasonOf(other), { target: { value: 'Please resubmit' } });
     expect(within(other).getByRole('button', { name: 'Return', hidden: true })).toBeDisabled();
     fireEvent.click(within(other).getByRole('button', { name: 'Return', hidden: true }));
@@ -364,7 +364,7 @@ describe('the blocked submission: an unsure Override or Return stays locked acro
     await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Return to firm', hidden: true })).not.toBeInTheDocument());
     fireEvent.click(await screen.findByTestId('override-block'));
     const other = await dialogOf('Override the block');
-    expect(within(other).getByTestId('blocked-other-lock')).toHaveTextContent('A Return was saved in part. Submit it again to finish it before overriding.');
+    expect(within(other).getByTestId('blocked-other-lock')).toHaveTextContent('A Return may have been saved in part. Submit it again to finish it before overriding.');
     fireEvent.change(reasonOf(other), { target: { value: 'Known resubmission' } });
     expect(within(other).getByRole('button', { name: 'Override', hidden: true })).toBeDisabled();
   });
@@ -379,7 +379,72 @@ describe('the blocked submission: an unsure Override or Return stays locked acro
     expect(within(other).getByRole('button', { name: 'Return', hidden: true })).toBeEnabled();
   });
 
-  it('(round 2) a 409 concurrent_change is answered after the record: it locks like a 503, and the repeat finishes it with the same text', async () => {
+  // Review round 3: the way out of the other-action guard. A repeat of the locked action answered with a DEFINITE refusal will never finish, so
+  // the lock is released, the refusal shown and the page re-read; otherwise the reviewer is stuck until a browser reload.
+  it.each([
+    ['409 decision_conflict', () => failed(problem(409, 'ebilling.blocked.decision_conflict', { detail: 'A different decision is already recorded.' }))],
+    ['409 not_blocked', () => failed(problem(409, 'ebilling.blocked.not_blocked', { detail: 'This submission is not blocked.' }))],
+    ['409 record_refused', () => failed(problem(409, 'ebilling.blocked.record_refused', { detail: 'The record was refused.' }))],
+    ['403', () => failed(problem(403, 'ebilling.blocked.not_authorized', { detail: 'You may not override.' }))],
+  ])('(round 3) a repeat of the locked Override answered %s clears the lock, shows the refusal, re-reads the page, and Return can then be sent', async (_, refusal) => {
+    const decision = mockDecisionApi(held());
+    decision.overrideBlocked.mockResolvedValueOnce(failed(problem(503, 'ebilling.blocked.unavailable', { detail: 'Saved in part.' }))).mockResolvedValueOnce(refusal());
+    const dialog = await sendOverride(decision);
+    await waitFor(() => expect(reasonOf(dialog)).toHaveAttribute('readonly'));
+    const approvals = decision.getApproval.mock.calls.length;
+    const blockedReads = decision.getBlocked.mock.calls.length;
+    submit(dialog, 'Override');
+    await waitFor(() => expect(decision.overrideBlocked).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(reasonOf(dialog)).not.toHaveAttribute('readonly'));
+    expect(noteOf(dialog)).not.toHaveAttribute('readonly');
+    expect(within(dialog).getByTestId('blocked-error')).toBeInTheDocument();
+    await waitFor(() => expect(decision.getApproval.mock.calls.length).toBeGreaterThan(approvals));
+    expect(decision.getBlocked.mock.calls.length).toBeGreaterThan(blockedReads);
+    cancel(dialog);
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Override the block', hidden: true })).not.toBeInTheDocument());
+    // Return no longer warns and can be sent.
+    fireEvent.click(await screen.findByTestId('return-blocked'));
+    const other = await dialogOf('Return to firm');
+    expect(within(other).queryByTestId('blocked-other-lock')).not.toBeInTheDocument();
+    fireEvent.change(reasonOf(other), { target: { value: 'Please resubmit' } });
+    submit(other, 'Return');
+    await waitFor(() => expect(decision.returnBlocked).toHaveBeenCalledTimes(1));
+  });
+
+  it.each([
+    ['a 503 saved in part', () => failed(problem(503, 'ebilling.blocked.unavailable', { detail: 'Saved in part.' }))],
+    ['a 409 concurrent_change', () => failed(problem(409, 'ebilling.blocked.concurrent_change', { detail: 'The invoice changed.' }))],
+    ['a 409 in_progress (transient)', () => failed(problem(409, 'ebilling.blocked.in_progress', { detail: 'Another request is running.' }))],
+    ['a 409 still_processing (transient)', () => failed(problem(409, 'ebilling.blocked.still_processing', { detail: 'Still processing.' }))],
+    ['no answer at all', () => noAnswer()],
+  ])('(must-not-fire) a repeat of the locked Override answered %s keeps the lock, and Return still warns', async (_, again) => {
+    const decision = mockDecisionApi(held());
+    decision.overrideBlocked.mockResolvedValueOnce(failed(problem(503, 'ebilling.blocked.unavailable', { detail: 'Saved in part.' }))).mockResolvedValueOnce(again());
+    const dialog = await sendOverride(decision);
+    await waitFor(() => expect(reasonOf(dialog)).toHaveAttribute('readonly'));
+    submit(dialog, 'Override');
+    await waitFor(() => expect(decision.overrideBlocked).toHaveBeenCalledTimes(2));
+    await within(dialog).findByTestId('blocked-error');
+    expect(reasonOf(dialog)).toHaveAttribute('readonly');
+    expect(noteOf(dialog)).toHaveAttribute('readonly');
+    cancel(dialog);
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Override the block', hidden: true })).not.toBeInTheDocument());
+    fireEvent.click(await screen.findByTestId('return-blocked'));
+    const other = await dialogOf('Return to firm');
+    expect(within(other).getByTestId('blocked-other-lock')).toBeInTheDocument();
+    expect(within(other).getByRole('button', { name: 'Return', hidden: true })).toBeDisabled();
+  });
+
+  it('(must-not-fire) a FIRST send answered with a definite refusal is just an error: nothing to clear, no extra re-read', async () => {
+    const decision = mockDecisionApi(held());
+    decision.overrideBlocked.mockResolvedValueOnce(failed(problem(409, 'ebilling.blocked.already_returned', { detail: 'Already returned.' })));
+    const dialog = await sendOverride(decision);
+    await within(dialog).findByTestId('blocked-error');
+    expect(reasonOf(dialog)).not.toHaveAttribute('readonly');
+    expect(decision.getBlocked).toHaveBeenCalledTimes(1);
+  });
+
+  it('(round 2) a 409 concurrent_change may come after the record: it locks like a 503 (conservative), and the repeat finishes it with the same text', async () => {
     const decision = mockDecisionApi(held());
     decision.overrideBlocked.mockResolvedValueOnce(failed(problem(409, 'ebilling.blocked.concurrent_change', { detail: 'The invoice changed.' })));
     const dialog = await sendOverride(decision);

@@ -27,7 +27,7 @@ import {
   tokens,
 } from '@fluentui/react-components';
 import { FormModal } from '@spaarke/ui-components';
-import { decisionFailureMessage, isBlockedOutcomeUnknown, type BlockedFinding, type BlockedSubmission } from '../../services/decisionApi';
+import { decisionFailureMessage, isBlockedDefiniteRefusal, isBlockedOutcomeUnknown, type BlockedFinding, type BlockedSubmission } from '../../services/decisionApi';
 import type { ApiFailure, InvoiceReview } from '../../services/invoiceReviewApi';
 import { isNoteRefusal, noteArgs, noteProblem, noteRefusalMessage } from '../../services/noteModel';
 import { NoteField } from '../NoteField';
@@ -157,8 +157,9 @@ export function BlockedBanner({ review, reload }: BlockedBannerProps) {
       setNoteError(noteRefusalMessage(r.failure));
       return;
     }
-    // A 503 saved part of the decision, no answer came back, or a 409 `concurrent_change` (the server answers it AFTER the Decision Record is
-    // written): the same request, repeated, finishes it, so the reason and the note are held as they were sent, here and at page level.
+    // A 503 saved part of the decision, no answer came back, or a 409 `concurrent_change` (the server answers it before AND after the Decision
+    // Record is written, so a record MAY have been written): the same request, repeated, finishes it, so the reason and the note are held as they
+    // were sent, here and at page level. Locking on `concurrent_change` is deliberately conservative: a repeat with the same text succeeds either way.
     const unknown = isBlockedOutcomeUnknown(r.failure);
     if (unknown) {
       setLocked(true);
@@ -167,6 +168,16 @@ export function BlockedBanner({ review, reload }: BlockedBannerProps) {
     // A 503 `ebilling.blocked.unavailable` can come after the decision stood (the Signals were not all closed), and a send with no answer may
     // have been recorded: show the server's state (the hold may already be gone) before the error.
     if (unknown) {
+      await Promise.all([reload(), refresh(), load()]);
+      if (!alive.current) return;
+    }
+    // Review round 3: the repeat of a locked decision got a DEFINITE refusal (`decision_conflict`, `record_refused`, `not_blocked`, a 403, ...):
+    // the server says this request is not going to finish, so the lock is a trap, not a protection. It is cleared (here and at page level), the
+    // form is editable again, the refusal is shown, and the page, the approval and the blocked view are re-read to show what the server holds.
+    // A transient answer (`in_progress`, `still_processing`) keeps the lock: the same request can still finish.
+    if (isBlockedDefiniteRefusal(r.failure) && (locked || locks.get('blocked'))) {
+      locks.clear('blocked');
+      setLocked(false);
       await Promise.all([reload(), refresh(), load()]);
       if (!alive.current) return;
     }
@@ -249,8 +260,8 @@ export function BlockedBanner({ review, reload }: BlockedBannerProps) {
               <MessageBar intent="warning" layout="multiline" data-testid="blocked-other-lock">
                 <MessageBarBody>
                   {otherLock.action === 'override'
-                    ? 'An Override was saved in part. Submit it again to finish it before returning.'
-                    : 'A Return was saved in part. Submit it again to finish it before overriding.'}
+                    ? 'An Override may have been saved in part. Submit it again to finish it before returning.'
+                    : 'A Return may have been saved in part. Submit it again to finish it before overriding.'}
                 </MessageBarBody>
               </MessageBar>
             )}

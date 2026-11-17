@@ -10,7 +10,14 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import { CODE_ADJUSTMENT_ID_REUSED, CODE_BLOCKED_CONCURRENT_CHANGE, isBlockedOutcomeUnknown } from '../services/decisionApi';
+import {
+  CODE_ADJUSTMENT_ID_REUSED,
+  CODE_BLOCKED_CONCURRENT_CHANGE,
+  CODE_BLOCKED_IN_PROGRESS,
+  CODE_BLOCKED_STILL_PROCESSING,
+  isBlockedDefiniteRefusal,
+  isBlockedOutcomeUnknown,
+} from '../services/decisionApi';
 import { staysInNoteDialog } from '../services/invoiceReviewApi';
 import { CODE_NOTE_INVALID_CHARACTERS, CODE_NOTE_TOO_LONG, NOTE_ERROR_CODES, NOTE_MAX_CHARS } from '../services/noteModel';
 
@@ -117,14 +124,33 @@ describe('the request bodies: `note` is the server\'s member name on every decis
   });
 });
 
-describe('the blocked-submission 409 that is answered after the Decision Record (review round 2)', () => {
+describe('the blocked-submission 409 that may be answered after the Decision Record (review rounds 2 and 3)', () => {
   const blockedCodes = () => stringConsts(read(`${BFF}/Services/Finance/SubmissionOverrideService.cs`));
   const conflict = (errorCode: string | null, status = 409) => ({ status, errorCode, detail: null, signInFailed: false, failedStep: null, committedLineIds: [] });
 
-  it('is the server\'s BlockedSubmissionErrors.ConcurrentChange, and an unknown outcome for the form', () => {
+  it('is the server\'s BlockedSubmissionErrors.ConcurrentChange, and treated as an unknown outcome for the form (a record MAY have been written; locking is conservative)', () => {
     expect(blockedCodes().ConcurrentChange).toBe('ebilling.blocked.concurrent_change');
     expect(CODE_BLOCKED_CONCURRENT_CHANGE).toBe(blockedCodes().ConcurrentChange);
     expect(isBlockedOutcomeUnknown(conflict(blockedCodes().ConcurrentChange))).toBe(true);
+  });
+
+  it('(round 3) the two transient 409s are the server\'s, and every other 4xx refusal is definite (it releases a lock); unknown, note, transient and 5xx answers are not', () => {
+    const b = blockedCodes();
+    expect(CODE_BLOCKED_IN_PROGRESS).toBe(b.InProgress);
+    expect(CODE_BLOCKED_STILL_PROCESSING).toBe(b.StillProcessing);
+    for (const code of [b.DecisionConflict, b.RecordRefused, b.FindingsTooLarge, b.NotBlocked, b.AlreadyReturned, b.AlreadyOverridden, b.InvoiceNotHeld]) {
+      expect(typeof code).toBe('string');
+      expect(isBlockedDefiniteRefusal(conflict(code))).toBe(true);
+    }
+    expect(isBlockedDefiniteRefusal(conflict(b.NotAuthorized, 403))).toBe(true);
+    // Not definite: transient, unknown, a refused note, and anything that is not a 4xx.
+    expect(isBlockedDefiniteRefusal(conflict(b.InProgress))).toBe(false);
+    expect(isBlockedDefiniteRefusal(conflict(b.StillProcessing))).toBe(false);
+    expect(isBlockedDefiniteRefusal(conflict(b.ConcurrentChange))).toBe(false);
+    expect(isBlockedDefiniteRefusal(conflict(b.Unavailable, 503))).toBe(false);
+    expect(isBlockedDefiniteRefusal(conflict(null, 0))).toBe(false);
+    expect(isBlockedDefiniteRefusal(conflict('ebilling.note_too_long', 400))).toBe(false);
+    expect(isBlockedDefiniteRefusal(conflict(b.NotBlocked, 500))).toBe(false);
   });
 
   it('(must-not-fire) the 409s answered before any record is written are not unknown outcomes', () => {

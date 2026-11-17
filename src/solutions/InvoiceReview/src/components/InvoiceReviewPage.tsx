@@ -336,7 +336,7 @@ export function InvoiceReviewPage(props: InvoiceReviewPageProps) {
    */
   const drafts = React.useRef(new Map<string, DialogDraft>());
   /**
-   * Review round 2: the dialogs (by draft key) whose last send came back unsure (no answer, or a 503). That send may have saved the row WITH its
+   * Review round 2: the dialogs (by draft key) whose last send came back unsure (no answer, or a 503 `incomplete`; a header correction is kept per field). That send may have saved the row WITH its
    * note, so a later resend answered "already applied" is not a lost note: it gets the plain success text. Dropped with the draft, and when a
    * send is saved.
    */
@@ -624,14 +624,19 @@ export function InvoiceReviewPage(props: InvoiceReviewPageProps) {
     if (dialogError === null && noteFault?.where !== 'dialog') {
       drafts.current.delete(key);
       unsureSends.current.delete(key);
+      // The header dialog's unsure sends are kept per field (`correct:header:<field>`): all of them go with its draft.
+      for (const k of [...unsureSends.current]) if (k.startsWith(`${key}:`)) unsureSends.current.delete(k);
     }
   };
-  /** A send of the dialog `key`, noting when it comes back unsure (no answer, or a 503) so a later "already applied" is read correctly. */
+  /**
+   * A send of the dialog `key`, noting when it comes back UNSURE so a later "already applied" is read correctly: no answer at all (status 0), or
+   * a 503 `incomplete` (the row is committed WITH its note before the failing step). A plain 503 that saved nothing is not unsure (review round 3).
+   */
   const trackUnsure =
     <T,>(key: string, call: () => Promise<ApiResult<T>>) =>
     async (): Promise<ApiResult<T>> => {
       const r = await call();
-      if (!r.ok && (r.failure.status === 0 || r.failure.status === 503)) unsureSends.current.add(key);
+      if (!r.ok && (r.failure.status === 0 || (r.failure.status === 503 && isIncomplete(r.failure)))) unsureSends.current.add(key);
       return r;
     };
 
@@ -667,9 +672,11 @@ export function InvoiceReviewPage(props: InvoiceReviewPageProps) {
     const request = { field, value, confirm: false, ...noteMember(note) };
     const label = target.lineId ? target.label : (HEADER_FIELDS.find(h => h.field === field)?.label ?? field);
     const key = correctKey(target);
+    // The header dialog corrects one of several fields under ONE draft key: an unsure send is remembered for the field it sent.
+    const unsureKey = target.lineId ? key : `${key}:${field}`;
     drafts.current.set(key, { field, value, note: note ?? '' });
     void runWrite(
-      trackUnsure(key, () => (target.lineId ? api.correctLine(invoiceId, target.lineId, request) : api.correctHeader(invoiceId, request))),
+      trackUnsure(unsureKey, () => (target.lineId ? api.correctLine(invoiceId, target.lineId, request) : api.correctHeader(invoiceId, request))),
       {
         success: `Saved · ${label} corrected${target.lineSequence ? ` on line ${target.lineSequence}` : ''}; the rules ran again`,
         inDialog: true,
@@ -678,13 +685,13 @@ export function InvoiceReviewPage(props: InvoiceReviewPageProps) {
         // The server found the correction already in place (another reviewer's, or this one's earlier send) and stored no note: say so, on a
         // FIRST send only. After a Repeat or a resend that followed an unsure answer, the earlier send saved the row with its note.
         warnAfter: (v, isRepeat) =>
-          note !== undefined && v.alreadyApplied && !isRepeat && !unsureSends.current.has(key)
+          note !== undefined && v.alreadyApplied && !isRepeat && !unsureSends.current.has(unsureKey)
             ? 'Already corrected to this value; the note was not saved.'
             : null,
         closeDialog: () => setCorrect(null),
         after: (_, __, isRepeat) => {
           drafts.current.delete(key);
-          unsureSends.current.delete(key);
+          unsureSends.current.delete(unsureKey);
           if (!isRepeat) setCorrect(null);
         },
       }
