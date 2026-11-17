@@ -2163,3 +2163,23 @@ In a multi-line call whose earlier lines were recorded, the remaining lines take
 **Estimated effort**: half a day. **Blockers**: none. **Related**: task 095f-2d1, 095f-2f (client).
 
 ---
+
+### ISS-030 — A refused totals recalculation after an adjustment removal leaves the line deactivated and the totals stale
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | next-round |
+| **Filed** | 2026-11-17 |
+| **Source** | 095f-2b build and Opus review (found in passing; pre-existing) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2881 |
+
+**Description**: the add path undoes its new adjustment row when the totals recalculation is refused, but the remove path does not. If the recalculation after a removal is refused, the adjustment line stays deactivated, the invoice totals stay stale (they still include the removed adjustment), and no undo runs. Since 095f-2b the removal's Decision Record and note are also never written, because every repeat hits the same deterministic refusal. The trigger is narrow: removing an adjustment raises the total, so the negative-total check cannot fire; it needs lines changed outside the lock, or a dry run that disagrees with the stored rows.
+
+**Entry-points**: `src/server/api/Sprk.Bff.Api/Services/Finance/InvoiceAdjustmentService.cs` (remove path, ~1004-1007 at 22d4c29d36; compare the add path's undo).
+
+**Suggested fix**: on a refused recalculation after the deactivation, reactivate the row in the same pattern the add path uses to undo, and answer the refusal; test both paths.
+
+**Estimated effort**: 2-4 hours. **Blockers**: merge 095f-2b first (same file). **Related**: task 095f-2b.
+
+---
