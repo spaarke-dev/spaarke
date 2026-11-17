@@ -503,6 +503,26 @@ public static class DecisionActionCatalog
             Excludes: [],
             DecisionRecordClass.Judgement)
         { Gate = new DecisionGateFactors(GateRiskTier.Tier2b, Reversible: true, RecordOfTruthImpact: true) },
+
+        // ---- Operator finish of a stranded decision (ebilling-r1 ISS-034 / iss034a, EB-D-244; subject: the invoice) ----------------------
+        // Recorded only by SubmissionOverrideService's operator finish, never through the Signals commit route (BillingActions only). The
+        // operator's own step when finishing ANOTHER person's recorded-but-unfinished override-submission or blocked return-to-firm exactly as
+        // it was recorded: the finished record keeps its decider, reason, note and resolved Signals; this record names it ("finishedDecision",
+        // the finished code; "finishedRecord", its Decision Record) with the operator's required reason and optional note. Not reversible (the
+        // finish releases or returns the invoice), a record-of-truth change, and externally visible (a finished return reaches the firm, as
+        // return-to-firm's does), so it gates Tier4 as the most serious decision it can finish (ontology-r1 review: Tier4 and Judgement confirmed).
+        new("finish-stranded-decision", "Finish stranded decision", DecisionLane.Decide, IsNextStep: false, WorkType: null,
+            [
+                new("finishedDecision", "Finished decision", DecisionParameterKind.Choice, Required: true,
+                    Options: [new("override-submission", "Override blocking failure"), new("return-to-firm", "Return to firm")]),
+                new("finishedRecord", "Finished Decision Record", DecisionParameterKind.Lookup, Required: true, LookupEntity: "sprk_decisionrecord"),
+                new("reason", "Reason for finishing it", DecisionParameterKind.TextArea, Required: true, Hint: ReasonHint),
+                NoteParameter(),
+            ],
+            ["Finishes another person's recorded override or return exactly as it was recorded", "Records who finished it; the original decision and its decider are unchanged"],
+            Excludes: [],
+            DecisionRecordClass.Judgement)
+        { Gate = new DecisionGateFactors(GateRiskTier.Tier4, Reversible: false, ExternallyVisible: true, RecordOfTruthImpact: true) },
     ];
 
     /// <summary>The billing set with every exclusion made mutual. Its codes never overlap <see cref="Definitions"/> (checked at static

@@ -475,6 +475,96 @@ public sealed class SubmissionOverrideEndpointsAuthorizationContractTests
         response.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable);
     }
 
+    // ── The operator finish of a stranded decision (ISS-034, iss034a, EB-D-244) ──
+
+    [Fact(DisplayName = "iss034a: finish-stranded without a bearer is 401 and touches nothing")]
+    public async Task FinishStranded_Unauthenticated_Is401()
+    {
+        await using var host = await Host.StartAsync();
+
+        var response = await host.SendAsync(Request("POST", Url("finish-stranded"), ReasonBody(), authenticated: false));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+        host.World.Entities.Invocations.Should().BeEmpty();
+        host.World.AssertNothingChanged();
+    }
+
+    [Theory(DisplayName = "iss034a: finish-stranded carries the decide routes' filter: no rights, or Read without Write, on the submission is 403 before any privilege question or read")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task FinishStranded_WithoutWriteOnTheSubmission_Is403_BeforeAnyPrivilegeOrRead(bool readOnly)
+    {
+        await using var host = await Host.StartAsync();
+        if (readOnly)
+        {
+            host.Access.Grant(Set, SubmissionId, AccessRights.Read);
+        }
+
+        var response = await host.SendAsync(Request("POST", Url("finish-stranded"), ReasonBody()));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        host.World.Probe.Calls.Should().BeEmpty("the billing-admin marker is asked only after the route's rights pass");
+        host.World.Entities.Invocations.Should().BeEmpty();
+        host.World.AssertNothingChanged();
+    }
+
+    [Fact(DisplayName = "iss034a: finish-stranded with the route's rights but without the billing-admin marker is 403 operator_not_permitted (errorCode and reasonCode), before the submission is read")]
+    public async Task FinishStranded_WithoutTheAdminMarker_Is403OperatorNotPermitted_BeforeAnyRead()
+    {
+        await using var host = await Host.StartAsync();
+        host.GrantRights();
+
+        var response = await host.SendAsync(Request("POST", Url("finish-stranded"), ReasonBody()));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        var json = JsonNode.Parse(await response.Content.ReadAsStringAsync())!.AsObject();
+        json["errorCode"]!.GetValue<string>().Should().Be("ebilling.blocked.operator_not_permitted");
+        json["reasonCode"]!.GetValue<string>().Should().Be("ebilling.blocked.operator_not_permitted");
+        host.World.Probe.Calls.Select(c => c.Privilege).Should().Equal(SubmissionOverrideService.AdminMarkerChecks()[0].Operation);
+        host.World.Entities.Invocations.Should().BeEmpty("nothing about the submission is read before the marker");
+        host.World.AssertNothingChanged();
+    }
+
+    [Fact(DisplayName = "iss034a: finish-stranded by a billing admin with nothing stranded is 409 nothing_stranded, nothing written")]
+    public async Task FinishStranded_NothingStranded_Is409()
+    {
+        await using var host = await Host.StartAsync();
+        host.GrantRights();
+        host.HoldAdminMarker();
+
+        var response = await host.SendAsync(Request("POST", Url("finish-stranded"), ReasonBody()));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Conflict);
+        (await ErrorCodeAsync(response)).Should().Be("ebilling.blocked.nothing_stranded");
+        host.World.AssertNothingWritten();
+    }
+
+    [Fact(DisplayName = "iss034a review round 1: finish-stranded by a billing admin finishes another person's stranded override: 200 with the finished decision's outcome and A's record id, the submission released, one operator record")]
+    public async Task FinishStranded_ByABillingAdmin_Is200_AndFinishesTheStrandedDecision()
+    {
+        await using var host = await Host.StartAsync();
+        host.GrantRights();
+        // Decider A (the World's caller) records an override whose release then fails: the decision is stranded.
+        (await DataMutation.Ebilling.SubmissionOverrideDecisionNoteTests.StrandAsync(host.World, "override-release", null)).StatusCode.Should().Be(503);
+        var decidedId = host.World.Records.Created.Single(e => e.LogicalName == "sprk_decisionrecord").Id;
+        host.World.Probe.CallerSystemUserId = SubmissionOverrideServiceTests.World.Operator;
+        host.HoldAdminMarker();
+
+        var response = await host.SendAsync(Request("POST", Url("finish-stranded"),
+            Json("""{"reason":"The decider has left; finishing their recorded decision.","note":"Operator note"}""")));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var json = JsonNode.Parse(await response.Content.ReadAsStringAsync())!.AsObject();
+        json["outcome"]!.GetValue<string>().Should().Be("Overridden");
+        json["alreadyDecided"]!.GetValue<bool>().Should().BeFalse();
+        json["submissionId"]!.GetValue<Guid>().Should().Be(SubmissionId);
+        json["recordId"]!.GetValue<Guid>().Should().Be(decidedId, "the response names the finished decision's record, A's");
+        host.World.Status.Should().Be(InvoiceSubmissionStatus.Accepted);
+        var op = host.World.Records.Created.Should().ContainSingle(e => e.GetAttributeValue<string>("sprk_actioncode") == "finish-stranded-decision").Subject;
+        op.Id.Should().NotBe(decidedId);
+        op.GetAttributeValue<Microsoft.Xrm.Sdk.EntityReference>("sprk_confirmedby")!.Id.Should().Be(SubmissionOverrideServiceTests.World.Operator);
+    }
+
     // ── Helpers ──
 
     private static StringContent ReasonBody() => Json("""{"reason":"Negotiated rate is not yet in the rate card."}""");
@@ -549,6 +639,15 @@ public sealed class SubmissionOverrideEndpointsAuthorizationContractTests
         }
 
         public void GrantRights() => Access.Grant(Set, SubmissionId, AccessRights.Read | AccessRights.Write);
+
+        /// <summary>ISS-034: the caller holds the billing-admin marker (every check of <see cref="BillingAdminAuthorization.Admin"/>).</summary>
+        public void HoldAdminMarker()
+        {
+            foreach (var check in SubmissionOverrideService.AdminMarkerChecks())
+            {
+                World.Probe.Hold(check.Operation);
+            }
+        }
 
         public Task<HttpResponseMessage> SendAsync(HttpRequestMessage request) => _client.SendAsync(request);
 

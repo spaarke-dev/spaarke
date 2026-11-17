@@ -90,8 +90,8 @@ public static class BillingAdminAuthorization
 
     /// <summary>
     /// Create on <c>sprk_procedure</c>, as the live privilege table names it (lower case, spaarkedev1 2026-10-22; pinned by
-    /// <c>ProcedureEndpointsTests</c>). No solution role carries it until uac-r2 task 191 (Procedures are internal-only), so today only a
-    /// System Administrator passes.
+    /// <c>ProcedureEndpointsTests</c>). The check asks whether the caller holds this table privilege, as the caller; which callers hold it is
+    /// set by provisioning, not here.
     /// </summary>
     public const string CreateProcedurePrivilege = "prvCreatesprk_procedure";
 

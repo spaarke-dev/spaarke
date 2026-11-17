@@ -60,6 +60,28 @@ public sealed partial class DecisionRecordWriterTests
         }
     }
 
+    /// <summary>
+    /// ISS-034 review round 1 (F2): the shared harness answers EVERY create with the one <see cref="Harness.NewId"/>, so two records written in
+    /// one test cannot be told apart by id. This re-answers the create the way Dataverse does: the FIRST create still gets
+    /// <see cref="Harness.NewId"/> (so a test that reads it for a single record is unchanged), every later create its own new id, and each
+    /// created row carries its id (the lookups above find it by that id). Opt-in, so the shared harness (ontology-owned) stays byte-identical.
+    /// </summary>
+    internal static Harness WithDistinctCreateIds(Harness h)
+    {
+        h.Org.Setup(o => o.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
+            .Returns((Entity e, CancellationToken _) =>
+            {
+                if (e.Id == Guid.Empty)
+                {
+                    e.Id = h.Created.Count == 0 ? h.NewId : Guid.NewGuid();
+                }
+
+                h.Created.Add(e);
+                return Task.FromResult(e.Id);
+            });
+        return h;
+    }
+
     private static bool BillingSatisfies(ConditionExpression condition, Entity row)
     {
         object? actual = condition.AttributeName == row.LogicalName + "id"
@@ -199,6 +221,9 @@ public sealed partial class DecisionRecordWriterTests
             // 095f-2b (EB-D-241; design 3 option A, ontology-r1 amendment of D-100 "additive only"): an invoice-level adjustment and its removal
             // file under the invoice; the writer literal is unchanged (every code outside the four line codes maps to the invoice).
             ("add-adjustment", "sprk_invoice"), ("remove-adjustment", "sprk_invoice"),
+            // iss034a (EB-D-244; ontology-r1 reviews the amendment as for 095f-2b): the operator's finish of a stranded decision files under the
+            // invoice; the writer literal is unchanged.
+            ("finish-stranded-decision", "sprk_invoice"),
         }, "D-75, D-101: no submission subject; the override and the automatic rejection file under the invoice");
         DecisionRecordWriter.BillingSubjectEntityOf("mark-complete").Should().BeNull("a Signals code has no billing subject");
         DecisionActionCatalog.BillingActions.Should().OnlyContain(d => !d.Code.Contains('_') && !d.Code.Contains('%') && !d.Code.Contains('['),
