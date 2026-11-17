@@ -9,24 +9,15 @@
 
 ## NOW — read this first
 
-### Active (2026-11-17, checkpoint at ~85% context): iss031 fix round 1 running
+### Active (2026-11-17): nothing in flight; waiting on owner questions
 
-- **IN FLIGHT: iss031** (ISS-031 #2882, opus implementer agent `a44e4ad203dbce567`, worktree `C:\code_files\spaarke\.claude\worktrees\agent-a44e4ad203dbce567`, branch `task/ebilling-iss031`, round 0 tip 41d0d3b5f5 from base 0890908f68).
-  - Opus review round 0 done: no F in the guard.
-  - Fix round 1 sent:
-    - (1) choose the 409 detail by the stored decider;
-    - (2) found in passing: guard `InvoiceRejectReturnService` against a stranded Procedure-hold Override (return/reject/approve as reachable);
-    - (3) a both-records test;
-    - (4) notes corrections and a round table.
-  - **Next:**
-    - on its report, do a scoped re-check (inline or Sonnet);
-    - merge `--no-ff`;
-    - run the filtered tests `SubmissionOverride|DecisionNote|DecisionRecord|BlockedSubmission|InvoiceRejectReturn|InvoiceApproval` plus the Invoice|Decision ArchTests plus the `--warnaserror` build;
-    - mark the POML and TASK-INDEX, set the ISS-031 notes Status to Done, `gh issue close 2882`;
-    - remove the worktree and branches (`task/ebilling-iss031`, `worktree-agent-a44e4ad203dbce567`, the remote branch);
-    - push.
+- **iss031 ✅ merged ececf32dbd** (ISS-031 #2882 closed). Review plus 2 rounds:
+  - A blocked Override or Return refuses with 409 `other_decision_pending` (wording depends on the decider) while the other verb's record exists.
+  - Invoice-level reject and return refuse while the own submission's Override is stranded (guard placed after the close-rights 403).
+  - Owner question (f) is ISS-034 / #2888 (operator path); options were explained to the owner, with option 1 (admin finish route) recommended.
 - **iss030 ✅ merged 46bd83d459** (ISS-030 #2881 closed). A refused totals recalculation undoes the removal; the add-path twin was fixed in review. Known limit K2: a record-step strand plus a refusal from outside the BFF; it fails closed at approval.
-- **Uncommitted at checkpoint:** `notes/defer-issues.md` (ISS-030 Status → Done) and this file. Commit them with the next commit.
+- **Peer:** word-add-in-r1 reports that the firm-assign pane (slice C, a68b6e5e6f) is live on dev against BFF aa7d6345f3, and the 096 gate is unchanged.
+  - That message came over the remote bridge, while a local session also claims the name. The reply was NOT sent; the owner is asked which session is real.
 
 - **095f-2b ✅ merged a3ef7e1c93** (fix 64c3e9ecbb: server-derived namespaced decision ids, neutral lookup 503; ontology-r1 PASS on catalog, exact-set amendment and fix; known limit ISS-030 / #2881).
 - **095f-2ui ✅ merged d3a61cc426** (review + 3 fix rounds + tweak). Page-level locks keep a partly saved decision exact on repeat; drafts survive 409s. Known limits are in its notes (locks are memory only; the Override/Return switch guard is client-only, see ISS-031 #2882). ISS-032 #2883 covers a decision stranded after its transition. Checklist section F added.
