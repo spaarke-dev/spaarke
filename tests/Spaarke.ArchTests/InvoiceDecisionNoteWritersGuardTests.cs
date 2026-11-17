@@ -24,9 +24,9 @@ namespace Spaarke.ArchTests;
 /// (type, source method or member) pairs that name a column is checked against its reviewed set.</para>
 /// <para><b>The decision note's writers</b> (design 1.3 and section 15): the lifecycle transition (<see cref="DecisionNoteWriters"/>, built by
 /// 095f-2a: reject, return, approve and, since 095f-2c, the blocked return reach the column through it) and the override release transaction (built
-/// by 095f-2c); the totals path of an adjustment (095f-2b) is allowed but not built yet (<see cref="PendingDecisionNoteWriters"/>). The task that
-/// builds one moves it from the pending list to <see cref="DecisionNoteWriters"/> in the same change; the stale check applies only to the built list,
-/// so the pending entries do not fail before their task lands. Anything else that names the column fails, a firm-facing reader included (the external planes are also guarded by
+/// by 095f-2c) and the totals path of an adjustment (built by 095f-2b). <see cref="PendingDecisionNoteWriters"/> stages a reviewed writer whose task
+/// has not landed (empty since 095f-2b); the task that builds one moves it to <see cref="DecisionNoteWriters"/> in the same change; the stale check
+/// applies only to the built list, so the pending entries do not fail before their task lands. Anything else that names the column fails, a firm-facing reader included (the external planes are also guarded by
 /// <c>InvoiceNoteColumnsGuardTests.ExternalPlane_NeverNamesTheInternalDecisionNote</c>).</para>
 /// <para><b>The correction note's one writer</b> (EB-D-240: "<c>sprk_correctionnote</c> keeps its single writer"): the persister's create
 /// (<see cref="CorrectionNoteWriters"/>). The definition and its check are not loads of the name.</para>
@@ -58,14 +58,14 @@ public sealed class InvoiceDecisionNoteWritersGuardTests
         // 095f-2c (design 4): the override release adds the note (or the reason) to the invoice update of its one transaction. A blocked return
         // reaches the column through the lifecycle's TransitionAsync above, not here.
         (typeof(SubmissionOverrideService), "BuildReleaseTransaction"),
-    ];
-
-    /// <summary>Allowed writers of <c>sprk_decisionnote</c> whose task has not landed yet (design 1.3, section 15). May or may not name it.</summary>
-    internal static readonly (Type Type, string Method)[] PendingDecisionNoteWriters =
-    [
-        // 095f-2b (design 3 "Change, either option"): the adjustment's note in the totals write of the invoice.
+        // 095f-2b (design 3 "Change, either option"; EB-D-241): an adjustment's note (or an add's reason) in the totals' own conditional update
+        // of the invoice (the RecalculateAsync overload that takes the note). Moved from the pending list by 095f-2b.
         (typeof(InvoiceTotalsService), "RecalculateAsync"),
     ];
+
+    /// <summary>Allowed writers of <c>sprk_decisionnote</c> whose task has not landed yet (design 1.3, section 15). May or may not name it. Empty
+    /// since 095f-2b built the last one; kept so a future reviewed writer can be staged the same way.</summary>
+    internal static readonly (Type Type, string Method)[] PendingDecisionNoteWriters = [];
 
     /// <summary>The one writer of <c>sprk_correctionnote</c> (EB-D-225, EB-D-240): the persister's create of a Correction's invoice.</summary>
     internal static readonly (Type Type, string Method)[] CorrectionNoteWriters =
@@ -75,7 +75,7 @@ public sealed class InvoiceDecisionNoteWritersGuardTests
 
     private static readonly Assembly[] Scanned = [typeof(InvoiceSubmissionPersister).Assembly, typeof(IGenericEntityService).Assembly];
 
-    [Fact(DisplayName = "095f-2a EB-D-240: only the lifecycle transition (and the pending override release and totals path) names sprk_invoice.sprk_decisionnote")]
+    [Fact(DisplayName = "095f-2a EB-D-240: only the lifecycle transition, the override release and the totals path name sprk_invoice.sprk_decisionnote")]
     public void OnlyTheReviewedWritersNameTheDecisionNote()
     {
         var naming = MethodsNaming(Scanned.SelectMany(a => a.GetTypes()), DecisionColumn);

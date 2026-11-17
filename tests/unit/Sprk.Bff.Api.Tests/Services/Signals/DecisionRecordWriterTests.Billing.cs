@@ -196,6 +196,9 @@ public sealed partial class DecisionRecordWriterTests
             ("approve-invoice", "sprk_invoice"), ("reject-invoice", "sprk_invoice"), ("return-to-firm", "sprk_invoice"),
             ("override-submission", "sprk_invoice"), ("assign-firm", "sprk_invoice"),
             ("add-line", "sprk_billingevent"), // 164a-2 (EB-D-198): the subject is the line (D-75)
+            // 095f-2b (EB-D-241; design 3 option A, ontology-r1 amendment of D-100 "additive only"): an invoice-level adjustment and its removal
+            // file under the invoice; the writer literal is unchanged (every code outside the four line codes maps to the invoice).
+            ("add-adjustment", "sprk_invoice"), ("remove-adjustment", "sprk_invoice"),
         }, "D-75, D-101: no submission subject; the override and the automatic rejection file under the invoice");
         DecisionRecordWriter.BillingSubjectEntityOf("mark-complete").Should().BeNull("a Signals code has no billing subject");
         DecisionActionCatalog.BillingActions.Should().OnlyContain(d => !d.Code.Contains('_') && !d.Code.Contains('%') && !d.Code.Contains('['),

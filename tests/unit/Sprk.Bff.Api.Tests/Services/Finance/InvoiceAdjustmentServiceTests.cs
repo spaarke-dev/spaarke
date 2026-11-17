@@ -26,7 +26,7 @@ namespace Sprk.Bff.Api.Tests.Services.Finance;
 /// rows that the query's own filter must leave out), so each test proves the stored state (the row, <c>sprk_approvedtotal</c>), not the calls the
 /// service makes.
 /// </summary>
-public sealed class InvoiceAdjustmentServiceTests
+public sealed partial class InvoiceAdjustmentServiceTests
 {
     private static readonly Guid Reviewer = Guid.Parse("02000000-0000-4000-8000-000000000001");
     private static readonly Guid Remover = Guid.Parse("02000000-0000-4000-8000-000000000002");
@@ -68,7 +68,7 @@ public sealed class InvoiceAdjustmentServiceTests
 
     private sealed class World
     {
-        public readonly Guid InvoiceId = Guid.NewGuid();
+        public readonly Guid InvoiceId;
         public readonly Entity Invoice;
         public readonly List<Entity> Lines = [];
         /// <summary>095d-0: the submissions linked to the invoice (the firm gate reads their reason and stored findings).</summary>
@@ -98,8 +98,30 @@ public sealed class InvoiceAdjustmentServiceTests
         public Action? AfterDeactivate;
         private long _nextVersion = 100;
 
-        public World(decimal billedTotal = 1100m, int status = InvoiceStatusCodes.InReview, bool withLines = true)
+        /// <summary>095f-2b: the Decision Record writer's harness (its created records), over the billing lookups.</summary>
+        public readonly Sprk.Bff.Api.Tests.Services.Signals.DecisionRecordWriterTests.Harness H =
+            Sprk.Bff.Api.Tests.Services.Signals.DecisionRecordWriterTests.WithBillingLookups(new Sprk.Bff.Api.Tests.Services.Signals.DecisionRecordWriterTests.Harness());
+
+        /// <summary>095f-2b: the deciding user's linked contact, read only when a record is going to be written.</summary>
+        public readonly Mock<Sprk.Bff.Api.Services.Ai.Membership.IIdentityNormalizationService> Identity = new();
+
+        /// <summary>095f-2b: every field set the totals step wrote to the invoice, in order (the note column included when written).</summary>
+        public readonly List<Dictionary<string, object?>> TotalsWrites = [];
+
+        /// <summary>095f-2b: the service's and the recorder's log lines.</summary>
+        public readonly ApprovalListLogger<InvoiceAdjustmentService> Log = new();
+        public readonly ApprovalListLogger<BillingDecisionRecorder> RecorderLog = new();
+        public readonly ApprovalListLogger<InvoiceTotalsService> TotalsLog = new();
+
+        public BillingDecisionRecorder Recorder() => new(H.Writer, Identity.Object, RecorderLog);
+
+        /// <summary>095f-2b: the Decision Records the writer created.</summary>
+        public List<Entity> DecisionRecords => H.Created.Where(c => c.LogicalName == "sprk_decisionrecord").ToList();
+
+        /// <param name="invoiceId">095f-2b: a fixed invoice id (the golden content hashes name the invoice); a new one when null.</param>
+        public World(decimal billedTotal = 1100m, int status = InvoiceStatusCodes.InReview, bool withLines = true, Guid? invoiceId = null)
         {
+            InvoiceId = invoiceId ?? Guid.NewGuid();
             Invoice = new Entity("sprk_invoice", InvoiceId)
             {
                 ["statuscode"] = new OptionSetValue(status),
@@ -124,6 +146,12 @@ public sealed class InvoiceAdjustmentServiceTests
             }
 
             Ownership.Setup(o => o.ResolveOwnerAsync(It.IsAny<RecordOwnershipContext>(), It.IsAny<CancellationToken>())).ReturnsAsync(() => Owner);
+
+            // 095f-2b: the writer files the record under the invoice, whose core record it reads; the decider has a linked contact.
+            H.Rows[("sprk_invoice", InvoiceId)] = new Entity("sprk_invoice", InvoiceId) { ["sprk_project"] = new EntityReference("sprk_project", Core) };
+            Identity.Setup(i => i.ResolveAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((Guid user, CancellationToken _) =>
+                    new Sprk.Bff.Api.Services.Ai.Membership.Models.PersonIdentity(user, ContactId: Guid.Parse("02000000-0000-4000-8000-0000000000e1")));
 
             // Reads. The 'not an inactive Adjustment' filter is modelled as Dataverse evaluates it, so a query that does NOT carry it returns the
             // inactive rows and the tests fail; a row is also returned by id in any state (the service's own repeat / remove read).
@@ -217,9 +245,11 @@ public sealed class InvoiceAdjustmentServiceTests
                 .Callback((string _, Guid _, Dictionary<string, object?> fields, long _, CancellationToken _) =>
                 {
                     TotalsWriteCount++;
+                    TotalsWrites.Add(new Dictionary<string, object?>(fields));
                     foreach (var (name, value) in fields)
                     {
-                        Invoice[name] = new Money((decimal)value!);
+                        // 095f-2b: the decision note is text; every other field the totals write is money.
+                        Invoice[name] = value is string text ? text : new Money((decimal)value!);
                     }
                 })
                 .Returns(Task.CompletedTask);
@@ -257,7 +287,7 @@ public sealed class InvoiceAdjustmentServiceTests
 
         public InvoiceAdjustmentService Service()
         {
-            var totals = new InvoiceTotalsService(Records.Object, Entities.Object, NullLogger<InvoiceTotalsService>.Instance);
+            var totals = new InvoiceTotalsService(Records.Object, Entities.Object, TotalsLog);
             return new InvoiceAdjustmentService(
                 Entities.Object, totals, Locks, Resolver ?? Ownership.Object,
                 (firm, core, date, work, _) =>
@@ -268,7 +298,8 @@ public sealed class InvoiceAdjustmentServiceTests
                     // The loader's own pure selection (082c): one legacy version per policy in force on the date, plus the Procedure rules.
                     return Task.FromResult(BillingFactLoader.RulesInForceOn(Candidates.ToList(), Procedures, date, work));
                 },
-                NullLogger<InvoiceAdjustmentService>.Instance,
+                Recorder(),
+                Log,
                 new FixedTime(new DateTimeOffset(2026, 10, 20, 12, 0, 0, TimeSpan.Zero)),
                 Queue.Submitter);
         }
@@ -1384,7 +1415,8 @@ public sealed class InvoiceAdjustmentServiceTests
         var w = new World();
         var service = new InvoiceAdjustmentService(
             w.Entities.Object, Mock.Of<IInvoiceTotalsService>(), w.Locks, w.Ownership.Object,
-            (_, _, _, _, _) => Task.FromException<IReadOnlyList<BillingRuleCandidate>>(new TimeoutException()), NullLogger<InvoiceAdjustmentService>.Instance);
+            (_, _, _, _, _) => Task.FromException<IReadOnlyList<BillingRuleCandidate>>(new TimeoutException()), w.Recorder(),
+            NullLogger<InvoiceAdjustmentService>.Instance);
 
         var result = await service.ListRulesAsync(w.InvoiceId, CancellationToken.None);
 

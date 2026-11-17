@@ -474,6 +474,35 @@ public static class DecisionActionCatalog
             Excludes: [],
             DecisionRecordClass.Judgement)
         { Gate = new DecisionGateFactors(GateRiskTier.Tier2b, Reversible: true, RecordOfTruthImpact: true) },
+
+        // ---- Invoice-level adjustments (ebilling-r1 095f-2b, EB-D-241; design 3 option A; subject: the invoice) --------------------------
+        // Recorded only by the adjustment service, after the adjustment line and the totals land, never through the Signals commit route
+        // (BillingActions only). The gates follow add-line: a reviewer-made change to the invoice's totals that a later decision can undo; the
+        // firm sees the resulting totals, not the record. Each parameter code is its Values key. remove-adjustment declares no reason: the
+        // remove route takes none.
+        new("add-adjustment", "Add adjustment", DecisionLane.Decide, IsNextStep: false, WorkType: null,
+            [
+                new("method", "Method", DecisionParameterKind.Choice, Required: true,
+                    Options: [new("percent", "Percent of fees after line adjustments"), new("fixed", "Fixed amount")]),
+                new("value", "Value", DecisionParameterKind.Money, Required: true),
+                new("rule", "Billing rule", DecisionParameterKind.Lookup, Required: false, LookupEntity: "sprk_policyversion"),
+                new("reason", "Reason for the adjustment", DecisionParameterKind.TextArea, Required: true, Hint: ReasonHint),
+                NoteParameter(),
+            ],
+            ["Adds an invoice-level adjustment (a percent of fees or a fixed amount)", "Recomputes the invoice totals"],
+            Excludes: [],
+            DecisionRecordClass.Judgement)
+        { Gate = new DecisionGateFactors(GateRiskTier.Tier2b, Reversible: true, RecordOfTruthImpact: true) },
+
+        new("remove-adjustment", "Remove adjustment", DecisionLane.Decide, IsNextStep: false, WorkType: null,
+            [
+                new("adjustment", "Adjustment", DecisionParameterKind.Lookup, Required: true, LookupEntity: "sprk_billingevent"),
+                NoteParameter(),
+            ],
+            ["Removes an invoice-level adjustment (the line is kept, inactive)", "Recomputes the invoice totals"],
+            Excludes: [],
+            DecisionRecordClass.Judgement)
+        { Gate = new DecisionGateFactors(GateRiskTier.Tier2b, Reversible: true, RecordOfTruthImpact: true) },
     ];
 
     /// <summary>The billing set with every exclusion made mutual. Its codes never overlap <see cref="Definitions"/> (checked at static
