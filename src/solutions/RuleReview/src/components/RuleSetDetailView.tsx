@@ -29,6 +29,7 @@ import { ProposalsGrid } from './ProposalsGrid';
 import { PublishModal } from './PublishModal';
 import { RejectModal } from './RejectModal';
 import { useFirmNames } from './useFirmNames';
+import { firmDescriptionRefusals, type FirmRefusal } from '../services/firmDescription';
 import type { FirmLookup } from '../services/firmLookup';
 import {
   countProposals,
@@ -92,6 +93,8 @@ export const RuleSetDetailView: React.FC<RuleSetDetailViewProps> = ({
   const [publishOpen, setPublishOpen] = React.useState(false);
   const [publishNotice, setPublishNotice] = React.useState<Notice | null>(null);
   const [rejecting, setRejecting] = React.useState<ProposalView | null>(null);
+  // The server's refusals of a rule's firm description (422), by rule: shown under the field until the admin edits it or tries again.
+  const [refusals, setRefusals] = React.useState<Record<string, FirmRefusal[]>>({});
   const mounted = React.useRef(true);
   const firmNames = useFirmNames(firmLookup, [detail?.ruleSet.firmId ?? null]);
 
@@ -103,9 +106,10 @@ export const RuleSetDetailView: React.FC<RuleSetDetailViewProps> = ({
   }, []);
 
   const fail = React.useCallback(
-    (failure: ApiFailure, title?: string): void => {
+    (failure: ApiFailure, title?: string, policyId?: string): void => {
       onFailure(failure);
       setNotice(failureNotice(failure, title));
+      setRefusals(firmDescriptionRefusals(failure, policyId));
     },
     [onFailure]
   );
@@ -138,6 +142,7 @@ export const RuleSetDetailView: React.FC<RuleSetDetailViewProps> = ({
   const decide = async (shown: ProposalView, accept: boolean, reason = ''): Promise<void> => {
     setBusy(true);
     setNotice(null);
+    setRefusals({});
     const outcome = await decideProposal(api, ruleSetId, shown, accept, reason);
     if (!mounted.current) return;
     setBusy(false);
@@ -159,7 +164,7 @@ export const RuleSetDetailView: React.FC<RuleSetDetailViewProps> = ({
         changes: outcome.changes,
       });
     } else {
-      fail(outcome.failure, `The rule was not ${verb}`);
+      fail(outcome.failure, `The rule was not ${verb}`, shown.policyId);
     }
   };
 
@@ -167,6 +172,7 @@ export const RuleSetDetailView: React.FC<RuleSetDetailViewProps> = ({
   const save = async (shown: ProposalView, edit: RuleEdit): Promise<void> => {
     setBusy(true);
     setNotice(null);
+    setRefusals({});
     const outcome = await saveEdit(api, ruleSetId, shown.policyId, edit);
     if (!mounted.current) return;
     setBusy(false);
@@ -187,7 +193,7 @@ export const RuleSetDetailView: React.FC<RuleSetDetailViewProps> = ({
         text: 'It has been reloaded. Make your change again if it is still needed.',
       });
     } else {
-      fail(outcome.failure, 'The rule was not saved');
+      fail(outcome.failure, 'The rule was not saved', shown.policyId);
     }
   };
 
@@ -195,6 +201,7 @@ export const RuleSetDetailView: React.FC<RuleSetDetailViewProps> = ({
   const publish = async (effectiveDate: string): Promise<void> => {
     setBusy(true);
     setPublishNotice(null);
+    setRefusals({});
     const result = await api.publish(ruleSetId, effectiveDate);
     if (!mounted.current) return;
     setBusy(false);
@@ -209,6 +216,7 @@ export const RuleSetDetailView: React.FC<RuleSetDetailViewProps> = ({
       await load();
     } else {
       onFailure(result.failure);
+      setRefusals(firmDescriptionRefusals(result.failure));
       setPublishNotice(failureNotice(result.failure, 'Nothing was published'));
     }
   };
@@ -338,6 +346,8 @@ export const RuleSetDetailView: React.FC<RuleSetDetailViewProps> = ({
             canWrite={canWrite}
             editable={!retired}
             busy={busy || loading}
+            ruleSetName={summary.name}
+            firmRefusals={proposal ? refusals[proposal.policyId] : undefined}
             onAccept={p => void decide(p, true)}
             onReject={p => setRejecting(p)}
             onSave={save}

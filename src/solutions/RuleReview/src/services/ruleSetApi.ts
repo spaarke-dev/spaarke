@@ -73,6 +73,11 @@ export interface ProposalView {
    * firm, and the page only ever shows it on the draft detail.
    */
   rejectionReason: string | null;
+  /**
+   * The text a firm sees when this rule rejects its invoice (130e-1, DEF-060), as stored on the working version; null when there is none.
+   * Never carries a rule name (the server refuses one). A Duplicate rule never has one.
+   */
+  firmDescription: string | null;
 }
 
 export interface RuleSetDetail {
@@ -113,6 +118,11 @@ export interface RuleEdit {
   consequence?: Consequence;
   clauseReference?: string;
   clauseLocation?: string;
+  /**
+   * The firm description (130e-2). Sent ONLY when the admin changed it: the new text as typed (the server trims it), or `""` to clear it.
+   * Left out when untouched, so it is never null by accident (`firmDescriptionToSend`).
+   */
+  firmDescription?: string;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
