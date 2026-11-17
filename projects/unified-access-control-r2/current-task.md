@@ -28,7 +28,7 @@
 - **field-mapping-r1:** **D-2 step 3 is unblocked** but held for the owner's go; pair it with a BFF swap (the settings restart the BFF). Tell fm when it's live (then their 054c Move). **#2875 (fm task 023): `sprk_createeventwizard` deployed to dev from master `3df5ee9e3f` on the owner's go (2026-11-17 14:24Z); stored = served sha256 `74bc9206…00a5`; rollback = previous bundle sha256 `60d2e6c3…2148` (modified 2026-11-15, saved in scratchpad `rollback-createeventwizard-20261115.html`; or rebuild from `3df5ee9e3f^1`). fm told; their live check waits on the owner. Owner confirmed fm [c7c3a0] is the owner's session (2026-11-17).**
 - **mcp-r1:** dev spike = spike-v2 `973776a5a6` (branch spike/spaarkeai-mcp-phase0, confirmed current). Never deploy `work/spaarkeai-mcp-bff-api-r1`. Ping before every swap; live notice after (sent for be0420d763).
 - **spa-r4:** not mid-E2E (next E2E = task 016 after 014b + 015 deploy); ask before a restart. 015 opens event rows from list data, GET for deep links only (K5).
-- **ontology-r1:** 195 live on dev; owner composer template recheck can go.
+- **ontology-r1:** 195 live on dev; owner composer template recheck can go. **#2884 (`0de88473b1`, task 196) asked into the next dev BFF build** (no rush; any master-based candidate carries it). After deploy, a gate/assign-task job refused its lock dead-letters as MaxRetriesExceeded "ProcessingLockRefused" — intended, not a regression; tell ontology-r1 when it's live.
 - **word-add-in-r1:** #2829 merge needs the owner's go.
 
 ## Filed this session
