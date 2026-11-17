@@ -27,7 +27,7 @@
     - Amend the 1.3.2.0 release row to say three things: it removes privileges; it needs a managed stage-and-upgrade; dev rolls back with `Set-FeatureRolePrivileges.ps1 -Restore -Gap ISS028`.
     - Send uac-r2 the PR number to review those two hunks.
     - `NewestExpectationsFileCarriesTheRuledSet` fails until this is done.
-- **095f-2e2b:** built at 989b976a44 on `task/ebilling-095f-2e2b`. The Opus review gave fix-first: F1 (no Write gate on the action) plus three F2s. The fix round is running. Then a scoped re-check, then spa-r4's diff review (condition 4), then merge.
+- **095f-2e2b ✅** merged f160fadc24 (Opus + round 1, spa-r4 approved; shared lib 3.1.0). At the master merge the external-spa lockfile line may need a re-resolve after R4 015 (#2886). ISS-036 (#2891) filed: browser check that the open decision form stays visible to screen readers when the hold clears.
 - **084h-5:**
   - The option 2 switch is at f7b532d721 on `task/ebilling-084h-5-r1`. **DISPUTED — do not merge.** ontology-r1 reports the owner typed "Option 1" in its session.
   - uac-r2 withdrew acceptance of option 2 as built: billing DecisionIds are derived from submission or approval id plus the verb, so the outcome sits in the key.

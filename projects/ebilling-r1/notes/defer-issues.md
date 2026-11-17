@@ -2285,3 +2285,23 @@ The invoice stays held for good. Before ISS-031 the other verb was a wrong but w
 **Estimated effort**: 2 hours. **Blockers**: none. **Related**: task 095f-2e2a.
 
 ---
+
+### ISS-036 — Invoice Review: open decision form may be hidden from screen readers when the hold clears under it
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | next-round |
+| **Filed** | 2026-11-17 |
+| **Source** | 095f-2e2b test-flake investigation (finishAsOperator.test.tsx) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2891 |
+
+**Description**: when an open Override, blocked Return or Finish form stays open while a re-read clears the hold (iss034b round 1), its surface carries `aria-hidden="true"` in jsdom once the banner unmounts. If a browser does the same, a screen reader loses the form and its "saved in part: repeat it" message. Unconfirmed in a browser.
+
+**Entry-points**: `src/solutions/InvoiceReview/src/components/decision/BlockedBanner.tsx`; `src/solutions/InvoiceReview/src/__tests__/finishAsOperator.test.tsx` ("re-read shows the hold gone").
+
+**Suggested fix**: browser check on dev first; if it reproduces, keep the modal container mounted independently of the banner.
+
+**Estimated effort**: half a day. **Blockers**: Invoice Review deployed to dev. **Related**: iss034b, 095f-2e2b.
+
+---
