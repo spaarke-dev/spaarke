@@ -1,0 +1,88 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="052c" project="field-mapping-server-write-path-r1">
+  <metadata>
+    <title>Repair pass on-demand admin trigger: one table, one bounded window (FR-25, NFR-01)</title>
+    <phase>5 W5 Records created outside the product</phase>
+    <gate>052b on the work branch (merge b18d4fc394). Nothing here enables the pass on any environment.</gate>
+    <status>in-progress</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Security-critical: an admin route that makes the system principal write existing Dataverse rows; .cs in Sprk.Bff.Api; new auth tests at KEEP paths. Auth-tagged: two adversarial passes.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Forward-only guarantee and a write path reachable from an HTTP request; a mistake writes rows created before go-live or lets a non-admin start a write.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>W5-B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>The only other open work is 023's live check (no code). Touches the repair job, the admin jobs endpoints and tests.</parallel-reason>
+    <deps>052b</deps>
+    <tags>bff-api, jobs, security, auth, testing</tags>
+    <estimated-effort>1 session</estimated-effort>
+  </metadata>
+
+  <prompt>Slice c of task 052. Add an on-demand run of the repair pass for ONE registered table over ONE bounded window of `createdon`, started by an administrator. It covers the rows the scheduled pass has passed and will not revisit (052b notes K1, K6, the Assign-cascade note): rows skipped while the invoice-family guard was missing, rows abandoned after their attempts, rows whose owner was held back by the cascade allow-list. The run goes through the same job (`RecordRepairPassJob`), the same host lease, the same per-table claim, the same forward-only and product-principal rules and the same Repair mode; only the selection (table + window instead of watermark) differs.</prompt>
+  <role>SPAARKE platform developer, .NET 10 BFF, ADR-036 scheduled jobs, ADR-008 endpoint authorization. Security fails closed.</role>
+  <goal>An administrator can repair one table's rows created in a stated window; a non-admin cannot start it; a row created before go-live or by a product principal is never written; the scheduled pass's watermark, sweep cursor and retry set are unchanged by an on-demand run; the run is observable like a scheduled one.</goal>
+
+  <context>
+    <background>
+- Parent: `tasks/052-repair-pass-scheduled-job.poml` step 4 and its trigger criterion (admin policy on the route; 401 / 403 / 400; route ledger entry with a ProvenByTest). 052b: `tasks/052b-repair-job.poml`, `notes/task-052b-notes.md` (job design, K1-K12).
+- The host already carries parameters: `ScheduledJobHost.TriggerNowAsync(jobId, IDictionary&lt;string, object&gt;? parameters, ct)` merges them into `JobRunContext.Parameters` on top of the job's persisted `ConfigJson`, takes the job's lease (busy → `ScheduledJobBusyException` → 409; store down → 503) and returns 202 before the run ends. `JobsEndpoints.TriggerJobAsync` passes `parameters: null` today.
+- The admin group `/api/admin/jobs` is `RequireAuthorization("SystemAdmin")` (`Infrastructure/DI/AuthorizationModule.cs`). Existing route tests: `tests/integration/auth/Admin/RecordMatchingAdminPolicyTests.cs`, `tests/integration/regression/Issue975_ResultsWrappedProblemDetailsTests.cs`, `tests/integration/Sprk.Bff.Api.IntegrationTests/Admin/JobsEndpointsTests.cs`. Route ledger: `tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.cs`.
+- Route shape — decide after reading, record the choice: preferred is a typed route in the same SystemAdmin group for this job only (e.g. `POST /api/admin/jobs/record-repair-pass/runs` with a JSON body `{ table, createdFrom, createdTo }`), validated before any lease is taken. A generic body on `/{jobId}/trigger` that forwards arbitrary keys to every job is NOT acceptable (it would hand admin-chosen parameters to jobs that never validated them).
+- The on-demand keys must take effect only for a manual admin run: a scheduled tick ignores them, and keys that arrive through a job's persisted `ConfigJson` never switch the job into on-demand mode (decide how — e.g. the job reads a typed, endpoint-built value and checks `context.Trigger`; record it).
+    </background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/RecordCreation/RecordRepairPassJob.cs (on-demand mode: one table, one window; no watermark / cursor / retry-set change)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/Admin/JobsEndpoints.cs (the typed route, in the SystemAdmin group)</file>
+      <file role="read">src/server/shared/Spaarke.Scheduling/ScheduledJobHost.cs (TriggerNowAsync, parameters, lease)</file>
+      <file role="read">src/server/api/Sprk.Bff.Api/Services/RecordCreation/RecordRepairPassContext.cs, RecordCreationService.Repair.cs (pass context, forward-only re-check)</file>
+      <file role="modify">tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.cs (ledger entry with ProvenByTest)</file>
+      <file role="new">tests/integration/auth/RecordRepairPassTriggerAuthTests.cs (401 unauthenticated, 403 non-admin, 202 admin; 400 cases)</file>
+      <file role="modify">tests/integration/data-mutation/RecordOwnership/RecordRepairPassJobTests.cs (on-demand mode)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-008 / NFR-01 / root §9">The route declares the existing `SystemAdmin` policy (inherited from the group is fine if the ledger proves it). No new policy, scheme or role. If another policy seems needed, STOP and escalate.</constraint>
+    <constraint source="validation, before any lease">`table` must be one the scheduled pass repairs (its own table list; task, account and every table the pass excludes are refused). `createdFrom` &lt; `createdTo`; both ISO 8601 with an offset; `createdTo` not after now; the window at most a fixed bound (choose it, e.g. 31 days, a named constant, record why). Go-live unset → refuse (no run). `createdFrom` before go-live → 400 that says the pass is forward-only (do not silently clamp). Every refusal is a ProblemDetails with a stable reason code, no exception text, no row data.</constraint>
+    <constraint source="forward-only">The job re-checks the window against go-live itself (the endpoint is not the only guard): an on-demand run handed a window before go-live writes nothing and fails. Repair's own row re-check (pass context) stays in force; product principals are excluded as in the scheduled pass.</constraint>
+    <constraint source="isolation from the scheduled pass">An on-demand run never moves the table's watermark, sweep cursor or retry set, and never drops a row the scheduled pass is retrying. It takes the same per-table claim (owner = its run id); a held claim → nothing written, Success=false. Bound the rows one run reads (reuse the pass's page and row caps); a window with more rows reports truncated, Success=false, and the admin narrows it.</constraint>
+    <constraint source="scope">Do not edit SecureRootInheritance.cs, UAC-r2's files (DirectThreadAccessService.cs, DirectMessageParticipantShares.cs, SecureChildShareReconciliationJob.cs, SecureChildReconciler.cs), RecordTableRules.cs, OwnedChildWrite.cs, RecordCreationService.cs, ScheduledJobHost.cs, or anything under `.claude/`. The report (052d) and the cascade design (052e) are later tasks.</constraint>
+    <constraint source="public repo">Commits, comments, test names and notes state rules only.</constraint>
+    <constraint source="ADR-038 / §10 / §11">Tests at KEEP paths. Each must-fire shown to fail with its rule switched off. Never run Sprk.Bff.Api.Tests unfiltered (`&amp;FullyQualifiedName!~Api.Office.`). §11 answers and a Placement Justification in the notes; publish delta and CVE check are the main session's.</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step order="0">Branch `task/fm-052c` from the work branch tip; FULL rigor; read this POML, the parent 052 and 052b POMLs, 052b notes, ADR-008, ADR-036, the admin jobs endpoints and the host's TriggerNowAsync.</step>
+    <step order="1">Decide and record the route shape and how on-demand mode is made unreachable from a scheduled tick or a persisted ConfigJson.</step>
+    <step order="2">Job: on-demand mode (one table, one window), the job's own forward-only check, separate state, same claim, caps, heartbeat and result JSON (with `mode`, `table`, window).</step>
+    <step order="3">Route: validation, 202 with run id, 409 / 503 mapping as the existing trigger; ledger entry.</step>
+    <step order="4">Tests (ACs below). Build (0 warnings), ArchTests, filtered suites, `dotnet format whitespace --verify-no-changes`; `notes/task-052c-notes.md`. Commit on `task/fm-052c`; do not push.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">AC1 (auth): unauthenticated → 401; authenticated non-admin → 403; admin → 202 with a run id; the route is in RouteAuthorizationGuardTests with a ProvenByTest naming the auth test.</criterion>
+    <criterion testable="true">AC2 (must fire, validation): an unregistered or excluded table (task, account), `createdFrom` ≥ `createdTo`, a window longer than the bound, `createdTo` in the future, a missing offset, and `createdFrom` before go-live each return 400 with a stable reason code and start no run; go-live unset refuses and starts no run.</criterion>
+    <criterion testable="true">AC3 (must fire, forward-only in the job): an on-demand run handed a window that starts before go-live (bypassing the endpoint) writes nothing and returns Success=false; a row in the window whose `createdon` re-reads before go-live is not written.</criterion>
+    <criterion testable="true">AC4 (must fire, mode isolation): a scheduled tick whose context carries the on-demand keys (including through ConfigJson) runs the normal scheduled pass and writes nothing outside it.</criterion>
+    <criterion testable="true">AC5 (must fire, state): after an on-demand run the scheduled pass's watermark, sweep cursor and retry set for that table are unchanged.</criterion>
+    <criterion testable="true">AC6 (must fire, claim and lease): while another runner holds the table's claim the run writes nothing and returns Success=false; while the job's lease is held the route returns 409.</criterion>
+    <criterion testable="true">AC7 (must not fire): an admin run over a valid window repairs a native row created after go-live by a person (mapping, owner, stamp) and leaves a product-principal row alone; a second identical run writes nothing.</criterion>
+    <criterion testable="true">AC8 (cap): a window holding more rows than one run reads reports truncated and Success=false.</criterion>
+    <criterion testable="true">AC9: build 0 warnings; ArchTests and affected suites green; owner-write census unchanged.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>If the on-demand run cannot be kept out of the scheduled pass's state without changing ScheduledJobHost or adding a store, STOP and escalate.</trigger>
+    <trigger>If the route needs an authorization policy other than SystemAdmin, STOP and escalate (security-sensitive).</trigger>
+  </escalation>
+
+  <justification>
+    <existing>`POST /api/admin/jobs/{jobId}/trigger` runs a job by id with no parameters; `RecordRepairPassJob` repairs by watermark only.</existing>
+    <extension>The job is extended with an on-demand mode and the admin group gains one typed route; the generic trigger is not given a free-form body because every other job would receive unvalidated admin parameters.</extension>
+    <cost-of-doing-nothing>Rows the watermark has passed (skipped while the invoice-family guard was missing, abandoned after their attempts, owner held back by the cascade allow-list) are never repaired; 052b K1 and K6 name this trigger as their only path.</cost-of-doing-nothing>
+  </justification>
+
+  <notes>Split from task 052 (052a-e). Written 2026-11-17 in the main session while 023's live check waits for the owner's sign-in.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>
