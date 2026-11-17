@@ -14,7 +14,9 @@ using Sprk.Bff.Api.Services.Finance;
 using Sprk.Bff.Api.Services.Finance.Procedures;
 using Sprk.Bff.Api.Services.Finance.Submission;
 using Sprk.Bff.Api.Services.Signals;
+using Sprk.Bff.Api.Services.Signals.Actions;
 using Sprk.Bff.Api.Services.Signals.Billing;
+using Sprk.Bff.Api.Tests.Services.Signals;
 using Sprk.Bff.Api.Tests.TestInfrastructure;
 using Xunit;
 
@@ -203,8 +205,44 @@ public sealed partial class ProcedureAssignmentServiceTests
         public ProcedureAssignmentService Service(IRecordOwnershipResolver? ownership = null) =>
             new(H.Entities.Object, ownership ?? H.Ownership.Object, H.Service(), Closure.Object,
                 new AffectedInvoiceCounter(H.Entities.Object, Probe.Object, NullLogger<AffectedInvoiceCounter>.Instance),
-                Log)
+                Log,
+                d => { Preflighted.Add(d); (Preflight ?? RealPreflight)(d); },
+                (d, ct) =>
+                {
+                    Recorded.Add(d);
+                    RecordTokens.Add(ct);
+                    RowsAtRecord.Add(H.Rows.GetValueOrDefault(Assignment)?.Select(r => r.Id).ToHashSet() ?? new HashSet<Guid>());
+                    return OnRecord is null
+                        ? Task.FromResult(new BillingDecisionRecordResult(Guid.NewGuid(), false, RecordedDecisionClass.Routine))
+                        : Task.FromResult(OnRecord(d));
+                },
+                (d, ct) =>
+                {
+                    Enqueued.Add(d);
+                    EnqueueTokens.Add(ct);
+                    return EnqueueFault is null ? Task.CompletedTask : Task.FromException(EnqueueFault);
+                })
             { Clock = Clock };
+
+        // Task 084h-2: the change's Decision Record. The preflight is the real writer's (through the real recorder), so every built decision
+        // must pass it; the record and the enqueue are captured. RowsAtRecord: the override rows stored when the record was asked for (the
+        // record is the last write, after the commit).
+        public readonly List<RecordProcedureDecision> Preflighted = new();
+        public readonly List<RecordProcedureDecision> Recorded = new();
+        public readonly List<CancellationToken> RecordTokens = new();
+        public readonly List<HashSet<Guid>> RowsAtRecord = new();
+        public readonly List<RecordProcedureDecision> Enqueued = new();
+        public readonly List<CancellationToken> EnqueueTokens = new();
+        public Action<RecordProcedureDecision>? Preflight;
+        public Func<RecordProcedureDecision, BillingDecisionRecordResult>? OnRecord;
+        public Exception? EnqueueFault;
+        private BillingDecisionRecorder? _recorder;
+
+        public void RealPreflight(RecordProcedureDecision decision) =>
+            (_recorder ??= new BillingDecisionRecorder(
+                new DecisionRecordWriterTests.Harness().Writer,
+                new Mock<Sprk.Bff.Api.Services.Ai.Membership.IIdentityNormalizationService>().Object,
+                NullLogger<BillingDecisionRecorder>.Instance)).PreflightProcedure(decision);
 
         private Task<IReadOnlyList<OpenPolicySignal>> SelectReal(Guid policyId, bool withBillingSubject, CancellationToken ct) =>
             RealClosure().SelectOpenSignalsOfPolicyAsync(policyId, withBillingSubject, ct);
@@ -344,7 +382,7 @@ public sealed partial class ProcedureAssignmentServiceTests
         var w = new World();
         var procedure = w.Procedure();
 
-        var outcome = await w.Service().AssignProcedureAsync(Matter, MatterId, new(procedure, null, null, "  client asked  "), CallerOid, default);
+        var outcome = await w.Service().AssignProcedureAsync(Matter, MatterId, new(procedure, null, null, "  client asked  "), CallerOid, CallerUserId, default);
 
         outcome.Kind.Should().Be(RuleSetOutcomeKind.Done);
         outcome.Value!.Mode.Should().Be("FollowLatest");
@@ -374,7 +412,7 @@ public sealed partial class ProcedureAssignmentServiceTests
     {
         var w = new World();
 
-        var outcome = await w.Service().AssignProcedureAsync(Matter, MatterId, new(w.Procedure(), mode, null, null), CallerOid, default);
+        var outcome = await w.Service().AssignProcedureAsync(Matter, MatterId, new(w.Procedure(), mode, null, null), CallerOid, CallerUserId, default);
 
         outcome.Kind.Should().Be(RuleSetOutcomeKind.Done);
         w.Rows.Single().GetAttributeValue<OptionSetValue>("sprk_mode").Value.Should().Be(stored);
@@ -387,7 +425,7 @@ public sealed partial class ProcedureAssignmentServiceTests
         var procedure = w.Procedure();
         var superseded = w.ProcedureVersion(procedure, ProcedureEntity.VersionStatusSuperseded);
 
-        var pinned = await w.Service().AssignProcedureAsync(Matter, MatterId, new(procedure, "Pinned", superseded, null), CallerOid, default);
+        var pinned = await w.Service().AssignProcedureAsync(Matter, MatterId, new(procedure, "Pinned", superseded, null), CallerOid, CallerUserId, default);
 
         pinned.Kind.Should().Be(RuleSetOutcomeKind.Done);
         pinned.Value!.PinnedVersionId.Should().Be(superseded);
@@ -415,7 +453,7 @@ public sealed partial class ProcedureAssignmentServiceTests
                      new(procedure, "FollowLatest", active, null),
                  })
         {
-            var refused = await w.Service().AssignProcedureAsync(Matter, MatterId, request, CallerOid, default);
+            var refused = await w.Service().AssignProcedureAsync(Matter, MatterId, request, CallerOid, CallerUserId, default);
             refused.Kind.Should().Be(RuleSetOutcomeKind.Invalid, $"{request}");
             refused.ErrorCode.Should().Be("assignment.invalid");
             refused.Errors.Should().ContainSingle(e => e.Field == "pinnedVersionId");
@@ -430,9 +468,9 @@ public sealed partial class ProcedureAssignmentServiceTests
     {
         var w = new World();
 
-        var noProcedure = await w.Service().AssignProcedureAsync(Matter, MatterId, new(null, null, null, null), CallerOid, default);
-        var badMode = await w.Service().AssignProcedureAsync(Matter, MatterId, new(w.Procedure(), "Sometimes", null, null), CallerOid, default);
-        var longReason = await w.Service().AssignProcedureAsync(Matter, MatterId, new(w.Procedure(), null, null, new string('x', 2001)), CallerOid, default);
+        var noProcedure = await w.Service().AssignProcedureAsync(Matter, MatterId, new(null, null, null, null), CallerOid, CallerUserId, default);
+        var badMode = await w.Service().AssignProcedureAsync(Matter, MatterId, new(w.Procedure(), "Sometimes", null, null), CallerOid, CallerUserId, default);
+        var longReason = await w.Service().AssignProcedureAsync(Matter, MatterId, new(w.Procedure(), null, null, new string('x', 2001)), CallerOid, CallerUserId, default);
 
         noProcedure.Errors.Should().ContainSingle(e => e.Field == "procedureId");
         badMode.Errors.Should().ContainSingle(e => e.Field == "mode");
@@ -445,9 +483,9 @@ public sealed partial class ProcedureAssignmentServiceTests
     {
         var w = new World();
         var procedure = w.Procedure();
-        (await w.Service().AssignProcedureAsync(Matter, MatterId, new(procedure, null, null, null), CallerOid, default)).Kind.Should().Be(RuleSetOutcomeKind.Done);
+        (await w.Service().AssignProcedureAsync(Matter, MatterId, new(procedure, null, null, null), CallerOid, CallerUserId, default)).Kind.Should().Be(RuleSetOutcomeKind.Done);
 
-        var second = await w.Service().AssignProcedureAsync(Matter, MatterId, new(procedure, "Excluded", null, null), CallerOid, default);
+        var second = await w.Service().AssignProcedureAsync(Matter, MatterId, new(procedure, "Excluded", null, null), CallerOid, CallerUserId, default);
 
         second.StatusCode.Should().Be(409);
         second.ErrorCode.Should().Be("assignment.duplicate");
@@ -463,7 +501,7 @@ public sealed partial class ProcedureAssignmentServiceTests
         // The racing row is not yet visible to the read (it carries no matter lookup here), but it holds the derived id.
         w.H.Seed(new Entity(Assignment, ProcedureAssignmentService.AssignmentIdFor(Matter, MatterId, ProcedureAssignmentEntity.ProcedureColumn, procedure)));
 
-        var raced = await w.Service().AssignProcedureAsync(Matter, MatterId, new(procedure, null, null, null), CallerOid, default);
+        var raced = await w.Service().AssignProcedureAsync(Matter, MatterId, new(procedure, null, null, null), CallerOid, CallerUserId, default);
 
         raced.StatusCode.Should().Be(409);
         raced.ErrorCode.Should().Be("assignment.duplicate");
@@ -479,10 +517,10 @@ public sealed partial class ProcedureAssignmentServiceTests
         var otherMatter = Guid.NewGuid();
         var project = Guid.NewGuid();
 
-        var first = await w.Service().AssignProcedureAsync(Matter, MatterId, new(procedure, null, null, null), CallerOid, default);
-        var otherRecord = await w.Service().AssignProcedureAsync(Matter, otherMatter, new(procedure, null, null, null), CallerOid, default);
-        var otherTable = await w.Service().AssignProcedureAsync("sprk_project", project, new(procedure, null, null, null), CallerOid, default);
-        var otherProcedure = await w.Service().AssignProcedureAsync(Matter, MatterId, new(w.Procedure(), null, null, null), CallerOid, default);
+        var first = await w.Service().AssignProcedureAsync(Matter, MatterId, new(procedure, null, null, null), CallerOid, CallerUserId, default);
+        var otherRecord = await w.Service().AssignProcedureAsync(Matter, otherMatter, new(procedure, null, null, null), CallerOid, CallerUserId, default);
+        var otherTable = await w.Service().AssignProcedureAsync("sprk_project", project, new(procedure, null, null, null), CallerOid, CallerUserId, default);
+        var otherProcedure = await w.Service().AssignProcedureAsync(Matter, MatterId, new(w.Procedure(), null, null, null), CallerOid, CallerUserId, default);
 
         new[] { first, otherRecord, otherTable, otherProcedure }.Should().OnlyContain(o => o.Kind == RuleSetOutcomeKind.Done);
         w.Rows.Select(r => r.Id).Should().OnlyHaveUniqueItems().And.HaveCount(4);
@@ -494,8 +532,8 @@ public sealed partial class ProcedureAssignmentServiceTests
     {
         var w = new World();
 
-        var retired = await w.Service().AssignProcedureAsync(Matter, MatterId, new(w.Procedure(ProcedureEntity.StatusRetired), null, null, null), CallerOid, default);
-        var missing = await w.Service().AssignProcedureAsync(Matter, MatterId, new(Guid.NewGuid(), null, null, null), CallerOid, default);
+        var retired = await w.Service().AssignProcedureAsync(Matter, MatterId, new(w.Procedure(ProcedureEntity.StatusRetired), null, null, null), CallerOid, CallerUserId, default);
+        var missing = await w.Service().AssignProcedureAsync(Matter, MatterId, new(Guid.NewGuid(), null, null, null), CallerOid, CallerUserId, default);
 
         retired.StatusCode.Should().Be(409);
         retired.ErrorCode.Should().Be("assignment.procedure_retired");
@@ -519,7 +557,7 @@ public sealed partial class ProcedureAssignmentServiceTests
         var version = w.ProcedureVersion(procedure, ProcedureEntity.VersionStatusActive);
 
         var refused = await w.Service().AssignProcedureAsync(
-            Matter, MatterId, new(procedure, mode, mode == "Pinned" ? version : null, null), CallerOid, default);
+            Matter, MatterId, new(procedure, mode, mode == "Pinned" ? version : null, null), CallerOid, CallerUserId, default);
 
         refused.StatusCode.Should().Be(409);
         refused.ErrorCode.Should().Be(ProcedureAssignmentService.CodeProcedureNotBilling);
@@ -542,7 +580,7 @@ public sealed partial class ProcedureAssignmentServiceTests
             w.ProcedureVersion(procedure, ProcedureEntity.VersionStatusDraft);
         }
 
-        var outcome = await w.Service().AssignProcedureAsync(Matter, MatterId, new(procedure, null, null, null), CallerOid, default);
+        var outcome = await w.Service().AssignProcedureAsync(Matter, MatterId, new(procedure, null, null, null), CallerOid, CallerUserId, default);
 
         outcome.Kind.Should().Be(RuleSetOutcomeKind.Done);
         w.Rows.Should().ContainSingle().Which.GetAttributeValue<EntityReference>("sprk_procedure").Id.Should().Be(procedure);
@@ -559,7 +597,7 @@ public sealed partial class ProcedureAssignmentServiceTests
         var version = w.ProcedureVersion(procedure, ProcedureEntity.VersionStatusActive);
 
         var refused = await w.Service().AssignProcedureAsync(
-            Matter, MatterId, new(procedure, mode, mode == "Pinned" ? version : null, null), CallerOid, default);
+            Matter, MatterId, new(procedure, mode, mode == "Pinned" ? version : null, null), CallerOid, CallerUserId, default);
 
         refused.StatusCode.Should().Be(409);
         refused.ErrorCode.Should().Be(ProcedureAssignmentService.CodeProcedureInactive);
@@ -577,7 +615,7 @@ public sealed partial class ProcedureAssignmentServiceTests
         var w = new World();
         var procedure = w.Procedure(state: state);
 
-        var outcome = await w.Service().AssignProcedureAsync(Matter, MatterId, new(procedure, null, null, null), CallerOid, default);
+        var outcome = await w.Service().AssignProcedureAsync(Matter, MatterId, new(procedure, null, null, null), CallerOid, CallerUserId, default);
 
         outcome.Kind.Should().Be(RuleSetOutcomeKind.Done);
         w.Rows.Should().ContainSingle().Which.GetAttributeValue<EntityReference>("sprk_procedure").Id.Should().Be(procedure);
@@ -588,11 +626,11 @@ public sealed partial class ProcedureAssignmentServiceTests
     {
         var w = new World();
         var procedure = w.Procedure();
-        var assigned = await w.Service().AssignProcedureAsync(Matter, MatterId, new(procedure, null, null, null), CallerOid, default);
+        var assigned = await w.Service().AssignProcedureAsync(Matter, MatterId, new(procedure, null, null, null), CallerOid, CallerUserId, default);
         assigned.Kind.Should().Be(RuleSetOutcomeKind.Done);
         w.H.Row("sprk_procedure", procedure)["statecode"] = new OptionSetValue(1);
 
-        var removed = await w.Service().RemoveAsync(Matter, MatterId, assigned.Value!.Id, Token, default);
+        var removed = await w.Service().RemoveAsync(Matter, MatterId, assigned.Value!.Id, null, CallerUserId, Token, default);
 
         removed.Kind.Should().Be(RuleSetOutcomeKind.Done);
         w.Rows.Should().BeEmpty();
@@ -604,7 +642,7 @@ public sealed partial class ProcedureAssignmentServiceTests
         var w = new World();
         w.H.OwnerAnswer = RecordOwnerResolution.Refused("owner.no_team", "no team");
 
-        var outcome = await w.Service().AssignProcedureAsync(Matter, MatterId, new(w.Procedure(), null, null, null), CallerOid, default);
+        var outcome = await w.Service().AssignProcedureAsync(Matter, MatterId, new(w.Procedure(), null, null, null), CallerOid, CallerUserId, default);
 
         outcome.Kind.Should().Be(RuleSetOutcomeKind.OwnerRefused);
         outcome.OwnerRefusal!.RefusalCode.Should().Be("owner.no_team");
@@ -619,7 +657,7 @@ public sealed partial class ProcedureAssignmentServiceTests
         var procedure = w.Procedure();
         w.H.TransactionOutcomeUnknown = true;
 
-        var outcome = await w.Service().AssignProcedureAsync(Matter, MatterId, new(procedure, null, null, null), CallerOid, default);
+        var outcome = await w.Service().AssignProcedureAsync(Matter, MatterId, new(procedure, null, null, null), CallerOid, CallerUserId, default);
 
         outcome.StatusCode.Should().Be(500);
         outcome.ErrorCode.Should().Be("assignment.write_failed");
@@ -633,8 +671,8 @@ public sealed partial class ProcedureAssignmentServiceTests
         var w = new World();
         var procedure = w.Procedure();
 
-        var invoice = () => w.Service().AssignProcedureAsync("sprk_invoice", MatterId, new(procedure, null, null, null), CallerOid, default);
-        var empty = () => w.Service().ExcludeRuleAsync(Matter, Guid.Empty, new(Guid.NewGuid(), "x", null), CallerOid, default);
+        var invoice = () => w.Service().AssignProcedureAsync("sprk_invoice", MatterId, new(procedure, null, null, null), CallerOid, CallerUserId, default);
+        var empty = () => w.Service().ExcludeRuleAsync(Matter, Guid.Empty, new(Guid.NewGuid(), "x", null), CallerOid, CallerUserId, default);
 
         await invoice.Should().ThrowAsync<ArgumentException>();
         await empty.Should().ThrowAsync<ArgumentException>();
@@ -652,7 +690,7 @@ public sealed partial class ProcedureAssignmentServiceTests
         var policy = w.Rule();
         var setsBefore = w.H.Rows["sprk_ruleset"].Count;
 
-        var outcome = await w.Service().ExcludeRuleAsync(Matter, MatterId, new(policy, "agreed with the client", FirmId), CallerOid, default);
+        var outcome = await w.Service().ExcludeRuleAsync(Matter, MatterId, new(policy, "agreed with the client", FirmId), CallerOid, CallerUserId, default);
 
         outcome.Kind.Should().Be(RuleSetOutcomeKind.Done);
         outcome.Value!.Kind.Should().Be("RuleExcluded");
@@ -679,9 +717,9 @@ public sealed partial class ProcedureAssignmentServiceTests
         var w = new World();
         var policy = w.Rule();
 
-        var noReason = await w.Service().ExcludeRuleAsync(Matter, MatterId, new(policy, "  ", null), CallerOid, default);
-        var noFirm = await w.Service().ExcludeRuleAsync(Matter, MatterId, new(policy, "x", Guid.NewGuid()), CallerOid, default);
-        var noPolicy = await w.Service().ExcludeRuleAsync(Matter, MatterId, new(null, "x", null), CallerOid, default);
+        var noReason = await w.Service().ExcludeRuleAsync(Matter, MatterId, new(policy, "  ", null), CallerOid, CallerUserId, default);
+        var noFirm = await w.Service().ExcludeRuleAsync(Matter, MatterId, new(policy, "x", Guid.NewGuid()), CallerOid, CallerUserId, default);
+        var noPolicy = await w.Service().ExcludeRuleAsync(Matter, MatterId, new(null, "x", null), CallerOid, CallerUserId, default);
 
         noReason.Errors.Should().ContainSingle(e => e.Field == "reason");
         noFirm.Errors.Should().ContainSingle(e => e.Field == "firmId");
@@ -695,7 +733,7 @@ public sealed partial class ProcedureAssignmentServiceTests
         var w = new World();
         var policy = w.Rule();
 
-        var outcome = await w.Service().ExcludeRuleAsync(Matter, MatterId, new(policy, "x", FirmId), CallerOid, default);
+        var outcome = await w.Service().ExcludeRuleAsync(Matter, MatterId, new(policy, "x", FirmId), CallerOid, CallerUserId, default);
 
         outcome.Kind.Should().Be(RuleSetOutcomeKind.Done, outcome.Detail);
         var firmQuery = w.H.Queries.Where(q => q.EntityName == "sprk_organization").Should().ContainSingle().Subject;
@@ -714,8 +752,8 @@ public sealed partial class ProcedureAssignmentServiceTests
         w.H.AfterQuery = _ => throw new TimeoutException("simulated Dataverse read fault");
 
         var outcome = route == "assign"
-            ? await w.Service().AssignProcedureAsync(Matter, MatterId, new(procedure, null, null, null), CallerOid, default)
-            : await w.Service().ExcludeRuleAsync(Matter, MatterId, new(policy, "x", null), CallerOid, default);
+            ? await w.Service().AssignProcedureAsync(Matter, MatterId, new(procedure, null, null, null), CallerOid, CallerUserId, default)
+            : await w.Service().ExcludeRuleAsync(Matter, MatterId, new(policy, "x", null), CallerOid, CallerUserId, default);
 
         outcome.Kind.Should().Be(RuleSetOutcomeKind.Refused);
         outcome.StatusCode.Should().Be(503);
@@ -730,7 +768,7 @@ public sealed partial class ProcedureAssignmentServiceTests
         var w = new World();
         var system = w.RuleWithoutSet(BillingRuleCatalogue.SystemPolicyCode, "SubmissionIntegrity");
 
-        var outcome = await w.Service().ExcludeRuleAsync(Matter, MatterId, new(system, "why not", null), CallerOid, default);
+        var outcome = await w.Service().ExcludeRuleAsync(Matter, MatterId, new(system, "why not", null), CallerOid, CallerUserId, default);
 
         outcome.StatusCode.Should().Be(409);
         outcome.ErrorCode.Should().Be("assignment.system_rule");
@@ -743,7 +781,7 @@ public sealed partial class ProcedureAssignmentServiceTests
         var w = new World();
         var system = w.Rule("SYS-INTEGRITY", type: "SubmissionIntegrity", body: """{"type":"SubmissionIntegrity"}""");
 
-        var outcome = await w.Service().ExcludeRuleAsync(Matter, MatterId, new(system, "why not", null), CallerOid, default);
+        var outcome = await w.Service().ExcludeRuleAsync(Matter, MatterId, new(system, "why not", null), CallerOid, CallerUserId, default);
 
         outcome.StatusCode.Should().Be(409);
         outcome.ErrorCode.Should().Be("assignment.system_rule");
@@ -756,7 +794,7 @@ public sealed partial class ProcedureAssignmentServiceTests
         var w = new World();
         var ordinary = w.RuleWithoutSet("BILL-ORPHAN", "DailyHoursCap");
 
-        var outcome = await w.Service().ExcludeRuleAsync(Matter, MatterId, new(ordinary, "x", null), CallerOid, default);
+        var outcome = await w.Service().ExcludeRuleAsync(Matter, MatterId, new(ordinary, "x", null), CallerOid, CallerUserId, default);
 
         outcome.StatusCode.Should().Be(404);
         outcome.ErrorCode.Should().Be("assignment.rule_not_found");
@@ -772,7 +810,7 @@ public sealed partial class ProcedureAssignmentServiceTests
         var w = new World();
         var recordRule = w.Rule("BRR-1", scope: scope, withMatterLookup: withMatterLookup);
 
-        var outcome = await w.Service().ExcludeRuleAsync(Matter, MatterId, new(recordRule, "x", null), CallerOid, default);
+        var outcome = await w.Service().ExcludeRuleAsync(Matter, MatterId, new(recordRule, "x", null), CallerOid, CallerUserId, default);
 
         outcome.StatusCode.Should().Be(404);
         outcome.ErrorCode.Should().Be("assignment.rule_not_found");
@@ -790,7 +828,7 @@ public sealed partial class ProcedureAssignmentServiceTests
 
         foreach (var policy in new[] { Guid.NewGuid(), inactive, ontology })
         {
-            var outcome = await w.Service().ExcludeRuleAsync(Matter, MatterId, new(policy, "x", null), CallerOid, default);
+            var outcome = await w.Service().ExcludeRuleAsync(Matter, MatterId, new(policy, "x", null), CallerOid, CallerUserId, default);
             outcome.ErrorCode.Should().Be("assignment.rule_not_found");
         }
 
@@ -802,9 +840,9 @@ public sealed partial class ProcedureAssignmentServiceTests
     {
         var w = new World();
         var policy = w.Rule();
-        (await w.Service().ExcludeRuleAsync(Matter, MatterId, new(policy, "x", FirmId), CallerOid, default)).Kind.Should().Be(RuleSetOutcomeKind.Done);
+        (await w.Service().ExcludeRuleAsync(Matter, MatterId, new(policy, "x", FirmId), CallerOid, CallerUserId, default)).Kind.Should().Be(RuleSetOutcomeKind.Done);
 
-        var everyFirm = await w.Service().ExcludeRuleAsync(Matter, MatterId, new(policy, "y", null), CallerOid, default);
+        var everyFirm = await w.Service().ExcludeRuleAsync(Matter, MatterId, new(policy, "y", null), CallerOid, CallerUserId, default);
 
         everyFirm.StatusCode.Should().Be(409);
         everyFirm.ErrorCode.Should().Be("assignment.duplicate");
@@ -823,7 +861,7 @@ public sealed partial class ProcedureAssignmentServiceTests
             .WithRecord(Matter, MatterId, OwnershipDirectory.CustomerChildBu, owningTeam: OwnershipDirectory.CustomerChildTeam);
 
         var outcome = await w.Service(directory.Resolver())
-            .AssignProcedureAsync(Matter, MatterId, new(w.Procedure(), null, null, null), OwnershipDirectory.CallerOid, default);
+            .AssignProcedureAsync(Matter, MatterId, new(w.Procedure(), null, null, null), OwnershipDirectory.CallerOid, CallerUserId, default);
 
         outcome.Kind.Should().Be(RuleSetOutcomeKind.Done);
         var row = w.Rows.Single();
@@ -840,7 +878,7 @@ public sealed partial class ProcedureAssignmentServiceTests
             .WithRecord(Matter, MatterId, OwnershipDirectory.SecureBu, isSecure: true, owningTeam: OwnershipDirectory.SecureNamedTeam);
 
         var outcome = await w.Service(directory.Resolver())
-            .ExcludeRuleAsync(Matter, MatterId, new(policy, "x", null), OwnershipDirectory.CallerOid, default);
+            .ExcludeRuleAsync(Matter, MatterId, new(policy, "x", null), OwnershipDirectory.CallerOid, CallerUserId, default);
 
         outcome.Kind.Should().Be(RuleSetOutcomeKind.Done);
         ShouldBeOwnedByTheResolver(w.Rows.Single(), OwnershipDirectory.SecureNamedTeam, OwnershipDirectory.CallerUserId);
@@ -873,7 +911,7 @@ public sealed partial class ProcedureAssignmentServiceTests
         var policy = w.Rule();
         var baseVersion = CurrentVersionOf(w, policy);
 
-        var outcome = await w.Service().ChangeRuleAsync(Matter, MatterId, Change(policy), CallerOid, Token, default);
+        var outcome = await w.Service().ChangeRuleAsync(Matter, MatterId, Change(policy), CallerOid, CallerUserId, Token, default);
 
         outcome.Kind.Should().Be(RuleSetOutcomeKind.Done, outcome.Detail);
         var (setId, ruleId) = RecordRuleOf(policy);
@@ -950,7 +988,7 @@ public sealed partial class ProcedureAssignmentServiceTests
         var w = new World();
         var policy = w.Rule();
 
-        var outcome = await w.Service().ChangeRuleAsync(Matter, MatterId, Change(policy, firm: FirmId), CallerOid, Token, default);
+        var outcome = await w.Service().ChangeRuleAsync(Matter, MatterId, Change(policy, firm: FirmId), CallerOid, CallerUserId, Token, default);
 
         outcome.Kind.Should().Be(RuleSetOutcomeKind.Done, outcome.Detail);
         var (setId, _) = RecordRuleOf(policy, FirmId);
@@ -968,8 +1006,8 @@ public sealed partial class ProcedureAssignmentServiceTests
         var first = w.Rule("BILL-A");
         var second = w.Rule("BILL-B");
 
-        (await w.Service().ChangeRuleAsync(Matter, MatterId, Change(first), CallerOid, Token, default)).Kind.Should().Be(RuleSetOutcomeKind.Done);
-        var again = await w.Service().ChangeRuleAsync(Matter, MatterId, Change(second), CallerOid, Token, default);
+        (await w.Service().ChangeRuleAsync(Matter, MatterId, Change(first), CallerOid, CallerUserId, Token, default)).Kind.Should().Be(RuleSetOutcomeKind.Done);
+        var again = await w.Service().ChangeRuleAsync(Matter, MatterId, Change(second), CallerOid, CallerUserId, Token, default);
 
         again.Kind.Should().Be(RuleSetOutcomeKind.Done, again.Detail);
         var recordSets = w.RowsOf("sprk_ruleset").Where(RecordRuleSet.IsRecordScoped).ToList();
@@ -986,7 +1024,7 @@ public sealed partial class ProcedureAssignmentServiceTests
         var (setId, ruleId) = RecordRuleOf(policy);
         w.H.FailTransactionRequest = r => r is CreateRequest { Target.LogicalName: "sprk_policyversion" };
 
-        var failed = await w.Service().ChangeRuleAsync(Matter, MatterId, Change(policy), CallerOid, Token, default);
+        var failed = await w.Service().ChangeRuleAsync(Matter, MatterId, Change(policy), CallerOid, CallerUserId, Token, default);
 
         failed.Kind.Should().Be(RuleSetOutcomeKind.Refused);
         failed.StatusCode.Should().Be(500);
@@ -998,7 +1036,7 @@ public sealed partial class ProcedureAssignmentServiceTests
         w.H.Row("sprk_policy", policy).GetAttributeValue<bool>("sprk_enabled").Should().BeTrue("the base rule still checks the record");
 
         w.H.FailTransactionRequest = null;
-        var retried = await w.Service().ChangeRuleAsync(Matter, MatterId, Change(policy), CallerOid, Token, default);
+        var retried = await w.Service().ChangeRuleAsync(Matter, MatterId, Change(policy), CallerOid, CallerUserId, Token, default);
 
         retried.Kind.Should().Be(RuleSetOutcomeKind.Done, retried.Detail);
         w.RowsOf("sprk_ruleset").Count(s => s.Id == setId).Should().Be(1);
@@ -1014,8 +1052,8 @@ public sealed partial class ProcedureAssignmentServiceTests
         var set = w.H.RuleSet(RuleSetService.RuleSetPublished, scope: (int)RuleSetScope.Firm, firm: FirmId);
         var policy = w.H.Rule(set, "BILL-F", ProposalState.Accepted, current: true).Policy;
 
-        var other = await w.Service().ChangeRuleAsync(Matter, MatterId, Change(policy, firm: OtherFirmId), CallerOid, Token, default);
-        var all = await w.Service().ChangeRuleAsync(Matter, MatterId, Change(policy), CallerOid, Token, default);
+        var other = await w.Service().ChangeRuleAsync(Matter, MatterId, Change(policy, firm: OtherFirmId), CallerOid, CallerUserId, Token, default);
+        var all = await w.Service().ChangeRuleAsync(Matter, MatterId, Change(policy), CallerOid, CallerUserId, Token, default);
 
         foreach (var refused in new[] { other, all })
         {
@@ -1025,7 +1063,7 @@ public sealed partial class ProcedureAssignmentServiceTests
         }
 
         w.H.Transactions.Should().BeEmpty();
-        (await w.Service().ChangeRuleAsync(Matter, MatterId, Change(policy, firm: FirmId), CallerOid, Token, default))
+        (await w.Service().ChangeRuleAsync(Matter, MatterId, Change(policy, firm: FirmId), CallerOid, CallerUserId, Token, default))
             .Kind.Should().Be(RuleSetOutcomeKind.Done, "its own firm is accepted (must not fire)");
     }
 
@@ -1035,9 +1073,9 @@ public sealed partial class ProcedureAssignmentServiceTests
         var w = new World();
         var policy = w.Rule();
 
-        var badBody = await w.Service().ChangeRuleAsync(Matter, MatterId, Change(policy, body: """{"type":"DailyHoursCap"}"""), CallerOid, Token, default);
+        var badBody = await w.Service().ChangeRuleAsync(Matter, MatterId, Change(policy, body: """{"type":"DailyHoursCap"}"""), CallerOid, CallerUserId, Token, default);
         var badTemplate = await w.Service().ChangeRuleAsync(Matter, MatterId,
-            new RuleChangeRequest(policy, "x", null, null, "{{line.nope}}", null, null), CallerOid, Token, default);
+            new RuleChangeRequest(policy, "x", null, null, "{{line.nope}}", null, null), CallerOid, CallerUserId, Token, default);
 
         badBody.Kind.Should().Be(RuleSetOutcomeKind.Invalid);
         badBody.Errors.Should().Contain(e => e.Field == "ruleBody");
@@ -1053,9 +1091,9 @@ public sealed partial class ProcedureAssignmentServiceTests
         var w = new World();
         var policy = w.Rule();
 
-        var noReason = await w.Service().ChangeRuleAsync(Matter, MatterId, Change(policy, reason: " "), CallerOid, Token, default);
-        var noEdit = await w.Service().ChangeRuleAsync(Matter, MatterId, Change(policy, body: null), CallerOid, Token, default);
-        var badConsequence = await w.Service().ChangeRuleAsync(Matter, MatterId, Change(policy, consequence: "Maybe"), CallerOid, Token, default);
+        var noReason = await w.Service().ChangeRuleAsync(Matter, MatterId, Change(policy, reason: " "), CallerOid, CallerUserId, Token, default);
+        var noEdit = await w.Service().ChangeRuleAsync(Matter, MatterId, Change(policy, body: null), CallerOid, CallerUserId, Token, default);
+        var badConsequence = await w.Service().ChangeRuleAsync(Matter, MatterId, Change(policy, consequence: "Maybe"), CallerOid, CallerUserId, Token, default);
 
         noReason.Errors.Should().ContainSingle().Which.Field.Should().Be("reason");
         noEdit.Errors.Should().ContainSingle().Which.Field.Should().Be("edit");
@@ -1070,11 +1108,11 @@ public sealed partial class ProcedureAssignmentServiceTests
         var excluded = w.Rule("BILL-A");
         var changed = w.Rule("BILL-B");
 
-        (await w.Service().ExcludeRuleAsync(Matter, MatterId, new(excluded, "x", null), CallerOid, default)).Kind.Should().Be(RuleSetOutcomeKind.Done);
-        (await w.Service().ChangeRuleAsync(Matter, MatterId, Change(changed), CallerOid, Token, default)).Kind.Should().Be(RuleSetOutcomeKind.Done);
+        (await w.Service().ExcludeRuleAsync(Matter, MatterId, new(excluded, "x", null), CallerOid, CallerUserId, default)).Kind.Should().Be(RuleSetOutcomeKind.Done);
+        (await w.Service().ChangeRuleAsync(Matter, MatterId, Change(changed), CallerOid, CallerUserId, Token, default)).Kind.Should().Be(RuleSetOutcomeKind.Done);
 
-        var changeAfterExclude = await w.Service().ChangeRuleAsync(Matter, MatterId, Change(excluded), CallerOid, Token, default);
-        var excludeAfterChange = await w.Service().ExcludeRuleAsync(Matter, MatterId, new(changed, "x", null), CallerOid, default);
+        var changeAfterExclude = await w.Service().ChangeRuleAsync(Matter, MatterId, Change(excluded), CallerOid, CallerUserId, Token, default);
+        var excludeAfterChange = await w.Service().ExcludeRuleAsync(Matter, MatterId, new(changed, "x", null), CallerOid, CallerUserId, default);
 
         changeAfterExclude.ErrorCode.Should().Be("assignment.duplicate");
         excludeAfterChange.ErrorCode.Should().Be("assignment.duplicate");
@@ -1090,9 +1128,9 @@ public sealed partial class ProcedureAssignmentServiceTests
         var set = w.H.RuleSet(RuleSetService.RuleSetPublished);
         var drafted = w.H.Rule(set, "BILL-D", ProposalState.Proposed, current: false).Policy;
 
-        (await w.Service().ChangeRuleAsync(Matter, MatterId, Change(recordRule), CallerOid, Token, default)).ErrorCode.Should().Be("assignment.rule_not_found");
-        (await w.Service().ChangeRuleAsync(Matter, MatterId, Change(system), CallerOid, Token, default)).ErrorCode.Should().Be("assignment.system_rule");
-        (await w.Service().ChangeRuleAsync(Matter, MatterId, Change(drafted), CallerOid, Token, default)).ErrorCode.Should().Be("assignment.rule_not_in_force");
+        (await w.Service().ChangeRuleAsync(Matter, MatterId, Change(recordRule), CallerOid, CallerUserId, Token, default)).ErrorCode.Should().Be("assignment.rule_not_found");
+        (await w.Service().ChangeRuleAsync(Matter, MatterId, Change(system), CallerOid, CallerUserId, Token, default)).ErrorCode.Should().Be("assignment.system_rule");
+        (await w.Service().ChangeRuleAsync(Matter, MatterId, Change(drafted), CallerOid, CallerUserId, Token, default)).ErrorCode.Should().Be("assignment.rule_not_in_force");
         w.H.Transactions.Should().BeEmpty();
     }
 
@@ -1107,7 +1145,7 @@ public sealed partial class ProcedureAssignmentServiceTests
         row.GetAttributeValue<EntityReference>("sprk_currentversion").Should().NotBeNull();
         var (setId, ruleId) = RecordRuleOf(policy);
 
-        var outcome = await w.Service().ChangeRuleAsync(Matter, MatterId, Change(policy), CallerOid, Token, default);
+        var outcome = await w.Service().ChangeRuleAsync(Matter, MatterId, Change(policy), CallerOid, CallerUserId, Token, default);
 
         outcome.StatusCode.Should().Be(409);
         outcome.ErrorCode.Should().Be("assignment.rule_not_in_force");
@@ -1127,7 +1165,7 @@ public sealed partial class ProcedureAssignmentServiceTests
         var set = w.H.RuleSet(setStatus);
         var policy = w.H.Rule(set, "BILL-S", ProposalState.Accepted, current: true).Policy;
 
-        var outcome = await w.Service().ChangeRuleAsync(Matter, MatterId, Change(policy), CallerOid, Token, default);
+        var outcome = await w.Service().ChangeRuleAsync(Matter, MatterId, Change(policy), CallerOid, CallerUserId, Token, default);
 
         if (changes)
         {
@@ -1156,7 +1194,7 @@ public sealed partial class ProcedureAssignmentServiceTests
         OwnedBy(w, policy, w.Procedure(procedureStatus));
         w.H.Row("sprk_policy", policy).GetAttributeValue<bool?>("sprk_enabled").Should().BeTrue("the partly retired shape: the Procedure is retired, the rule is still on");
 
-        var outcome = await w.Service().ChangeRuleAsync(Matter, MatterId, Change(policy), CallerOid, Token, default);
+        var outcome = await w.Service().ChangeRuleAsync(Matter, MatterId, Change(policy), CallerOid, CallerUserId, Token, default);
 
         if (changes)
         {
@@ -1181,7 +1219,7 @@ public sealed partial class ProcedureAssignmentServiceTests
         var policy = w.Rule();
         OwnedBy(w, policy, w.Procedure(state: state));
 
-        var outcome = await w.Service().ChangeRuleAsync(Matter, MatterId, Change(policy), CallerOid, Token, default);
+        var outcome = await w.Service().ChangeRuleAsync(Matter, MatterId, Change(policy), CallerOid, CallerUserId, Token, default);
 
         if (changes)
         {
@@ -1203,7 +1241,7 @@ public sealed partial class ProcedureAssignmentServiceTests
         var policy = w.Rule();
         OwnedBy(w, policy, w.Procedure(state: 1));
 
-        await w.Service().ChangeRuleAsync(Matter, MatterId, Change(policy), CallerOid, Token, default);
+        await w.Service().ChangeRuleAsync(Matter, MatterId, Change(policy), CallerOid, CallerUserId, Token, default);
 
         w.H.Queries.Single(q => q.EntityName == "sprk_procedure").ColumnSet.Columns.Should().Contain("statecode");
     }
@@ -1215,7 +1253,7 @@ public sealed partial class ProcedureAssignmentServiceTests
         var policy = w.Rule();
         OwnedBy(w, policy, w.Procedure(state: 1));
 
-        (await w.Service().ExcludeRuleAsync(Matter, MatterId, new(policy, "x", null), CallerOid, default)).Kind.Should().Be(RuleSetOutcomeKind.Done);
+        (await w.Service().ExcludeRuleAsync(Matter, MatterId, new(policy, "x", null), CallerOid, CallerUserId, default)).Kind.Should().Be(RuleSetOutcomeKind.Done);
     }
 
     [Fact(DisplayName = "089c pass 2 F1: a rule of a set with no Procedure keeps its behaviour (changed), and the Procedure is not read")]
@@ -1231,7 +1269,7 @@ public sealed partial class ProcedureAssignmentServiceTests
             inner?.Invoke(q);
         };
 
-        var outcome = await w.Service().ChangeRuleAsync(Matter, MatterId, Change(policy), CallerOid, Token, default);
+        var outcome = await w.Service().ChangeRuleAsync(Matter, MatterId, Change(policy), CallerOid, CallerUserId, Token, default);
 
         outcome.Kind.Should().Be(RuleSetOutcomeKind.Done, outcome.Detail);
         procedureReads.Should().Be(0);
@@ -1248,7 +1286,7 @@ public sealed partial class ProcedureAssignmentServiceTests
             if (q.EntityName == "sprk_procedure") throw new HttpRequestException("simulated fault");
         };
 
-        var outcome = await w.Service().ChangeRuleAsync(Matter, MatterId, Change(policy), CallerOid, Token, default);
+        var outcome = await w.Service().ChangeRuleAsync(Matter, MatterId, Change(policy), CallerOid, CallerUserId, Token, default);
 
         outcome.StatusCode.Should().Be(503);
         outcome.ErrorCode.Should().Be("assignment.read_failed");
@@ -1263,7 +1301,7 @@ public sealed partial class ProcedureAssignmentServiceTests
         var policy = w.Rule();
         OwnedBy(w, policy, w.Procedure(ProcedureEntity.StatusRetired));
 
-        (await w.Service().ExcludeRuleAsync(Matter, MatterId, new(policy, "x", null), CallerOid, default)).Kind.Should().Be(RuleSetOutcomeKind.Done);
+        (await w.Service().ExcludeRuleAsync(Matter, MatterId, new(policy, "x", null), CallerOid, CallerUserId, default)).Kind.Should().Be(RuleSetOutcomeKind.Done);
     }
 
     [Fact(DisplayName = "089c review F1 (scope): Exclude still accepts a rule that is switched off or in an unpublished set")]
@@ -1275,8 +1313,8 @@ public sealed partial class ProcedureAssignmentServiceTests
         var draftSet = w.H.RuleSet(RuleSetService.RuleSetDraft);
         var unpublished = w.H.Rule(draftSet, "BILL-D", ProposalState.Accepted, current: true).Policy;
 
-        (await w.Service().ExcludeRuleAsync(Matter, MatterId, new(off, "x", null), CallerOid, default)).Kind.Should().Be(RuleSetOutcomeKind.Done);
-        (await w.Service().ExcludeRuleAsync(Matter, MatterId, new(unpublished, "x", null), CallerOid, default)).Kind.Should().Be(RuleSetOutcomeKind.Done);
+        (await w.Service().ExcludeRuleAsync(Matter, MatterId, new(off, "x", null), CallerOid, CallerUserId, default)).Kind.Should().Be(RuleSetOutcomeKind.Done);
+        (await w.Service().ExcludeRuleAsync(Matter, MatterId, new(unpublished, "x", null), CallerOid, CallerUserId, default)).Kind.Should().Be(RuleSetOutcomeKind.Done);
     }
 
     [Fact(DisplayName = "089c must-fire: a row at the record rule's id that is not this record's rule of this base rule is refused 409, never reused")]
@@ -1308,7 +1346,7 @@ public sealed partial class ProcedureAssignmentServiceTests
             ["sprk_basedonversion"] = new EntityReference("sprk_policyversion", CurrentVersionOf(w, other)),
         });
 
-        var outcome = await w.Service().ChangeRuleAsync(Matter, MatterId, Change(policy), CallerOid, Token, default);
+        var outcome = await w.Service().ChangeRuleAsync(Matter, MatterId, Change(policy), CallerOid, CallerUserId, Token, default);
 
         outcome.StatusCode.Should().Be(409);
         outcome.ErrorCode.Should().Be("assignment.record_rule_conflict");
@@ -1328,7 +1366,7 @@ public sealed partial class ProcedureAssignmentServiceTests
                 throw new HttpRequestException("simulated fault");
         };
 
-        var outcome = await w.Service().ChangeRuleAsync(Matter, MatterId, Change(policy), CallerOid, Token, default);
+        var outcome = await w.Service().ChangeRuleAsync(Matter, MatterId, Change(policy), CallerOid, CallerUserId, Token, default);
 
         outcome.StatusCode.Should().Be(503);
         outcome.ErrorCode.Should().Be("assignment.read_failed");
@@ -1340,7 +1378,7 @@ public sealed partial class ProcedureAssignmentServiceTests
     {
         var w = new World();
         var policy = w.Rule();
-        var changed = await w.Service().ChangeRuleAsync(Matter, MatterId, Change(policy), CallerOid, Token, default);
+        var changed = await w.Service().ChangeRuleAsync(Matter, MatterId, Change(policy), CallerOid, CallerUserId, Token, default);
         var (setId, ruleId) = (changed.Value!.RecordRule.RuleSetId, changed.Value.RecordRule.PolicyId);
         var ruleSets = w.H.Service();
 
@@ -1398,7 +1436,7 @@ public sealed partial class ProcedureAssignmentServiceTests
     {
         var w = new World();
         var policy = w.Rule();
-        var changed = await w.Service().ChangeRuleAsync(Matter, MatterId, Change(policy), CallerOid, Token, default);
+        var changed = await w.Service().ChangeRuleAsync(Matter, MatterId, Change(policy), CallerOid, CallerUserId, Token, default);
         var ruleId = changed.Value!.RecordRule.PolicyId;
         var (a, b, hidden) = (w.Invoice(), w.Invoice(), w.Invoice());
         w.Readable.UnionWith(new[] { a, b });
@@ -1448,8 +1486,8 @@ public sealed partial class ProcedureAssignmentServiceTests
     public async Task Preview_APlainRow_HasNoWarning()
     {
         var w = new World();
-        var excluded = await w.Service().ExcludeRuleAsync(Matter, MatterId, new(w.Rule(), "x", null), CallerOid, default);
-        var assigned = await w.Service().AssignProcedureAsync(Matter, MatterId, new(w.Procedure(), null, null, null), CallerOid, default);
+        var excluded = await w.Service().ExcludeRuleAsync(Matter, MatterId, new(w.Rule(), "x", null), CallerOid, CallerUserId, default);
+        var assigned = await w.Service().AssignProcedureAsync(Matter, MatterId, new(w.Procedure(), null, null, null), CallerOid, CallerUserId, default);
 
         var plain = await w.Service().PreviewRemovalAsync(Matter, MatterId, excluded.Value!.Id, Token, default);
         var procedure = await w.Service().PreviewRemovalAsync(Matter, MatterId, assigned.Value!.Id, Token, default);
@@ -1463,15 +1501,16 @@ public sealed partial class ProcedureAssignmentServiceTests
     public async Task Remove_APlainExclude_DeletesTheRow_AndClosesNothing()
     {
         var w = new World();
-        var excluded = await w.Service().ExcludeRuleAsync(Matter, MatterId, new(w.Rule(), "x", null), CallerOid, default);
+        var excluded = await w.Service().ExcludeRuleAsync(Matter, MatterId, new(w.Rule(), "x", null), CallerOid, CallerUserId, default);
 
-        var outcome = await w.Service().RemoveAsync(Matter, MatterId, excluded.Value!.Id, Token, default);
+        var outcome = await w.Service().RemoveAsync(Matter, MatterId, excluded.Value!.Id, null, CallerUserId, Token, default);
 
-        outcome.Value.Should().Be(new OverrideRemoved(excluded.Value.Id, "RuleExcluded", false, true, null, null, null));
+        outcome.Value.Should().Be(new OverrideRemoved(excluded.Value.Id, "RuleExcluded", false, true, null, null, null, outcome.Value!.DecisionRecord));
+        outcome.Value!.DecisionRecord!.Status.Should().Be(OverrideDecisionRecord.Recorded, "084h-2: the removal files its record");
         w.Rows.Should().BeEmpty("deleted, not deactivated: I-A1's duplicate check ignores state");
         w.H.Transactions.Last().Should().ContainSingle().Which.Should().BeOfType<DeleteRequest>();
         w.ClosedPolicies.Should().BeEmpty();
-        (await w.Service().ExcludeRuleAsync(Matter, MatterId, new(excluded.Value.PolicyId, "x", null), CallerOid, default))
+        (await w.Service().ExcludeRuleAsync(Matter, MatterId, new(excluded.Value.PolicyId, "x", null), CallerOid, CallerUserId, default))
             .Kind.Should().Be(RuleSetOutcomeKind.Done, "the subject can be overridden again");
     }
 
@@ -1480,9 +1519,10 @@ public sealed partial class ProcedureAssignmentServiceTests
     {
         var (w, overrideId, ruleId, basePolicy, baseSignal) = await ChangedWithFindingsAsync();
 
-        var outcome = await w.Service().RemoveAsync(Matter, MatterId, overrideId, Token, default);
+        var outcome = await w.Service().RemoveAsync(Matter, MatterId, overrideId, null, CallerUserId, Token, default);
 
-        outcome.Value.Should().Be(new OverrideRemoved(overrideId, "RuleChanged", true, true, "2 open invoices you can see are affected.", 2, null));
+        outcome.Value.Should().Be(new OverrideRemoved(overrideId, "RuleChanged", true, true, "2 open invoices you can see are affected.", 2, null, outcome.Value!.DecisionRecord));
+        outcome.Value!.DecisionRecord!.Status.Should().Be(OverrideDecisionRecord.Recorded, "084h-2: the removal files its record");
         w.Rows.Should().BeEmpty();
         w.H.Row("sprk_policy", ruleId).GetAttributeValue<bool>("sprk_enabled").Should().BeFalse();
         w.H.Transactions.Last().Select(r => r.GetType()).Should().Equal(typeof(DeleteRequest), typeof(UpdateRequest));
@@ -1500,7 +1540,7 @@ public sealed partial class ProcedureAssignmentServiceTests
         var (w, overrideId, ruleId, _, _) = await ChangedWithFindingsAsync();
         w.CloseFault = new InvalidOperationException("simulated close fault");
 
-        var outcome = await w.Service().RemoveAsync(Matter, MatterId, overrideId, Token, default);
+        var outcome = await w.Service().RemoveAsync(Matter, MatterId, overrideId, null, CallerUserId, Token, default);
 
         outcome.Kind.Should().Be(RuleSetOutcomeKind.Done);
         outcome.Value!.RuleSwitchedOff.Should().BeTrue();
@@ -1514,10 +1554,10 @@ public sealed partial class ProcedureAssignmentServiceTests
     {
         var w = new World();
         var policy = w.Rule();
-        var first = await w.Service().ChangeRuleAsync(Matter, MatterId, Change(policy), CallerOid, Token, default);
-        (await w.Service().RemoveAsync(Matter, MatterId, first.Value!.Override.Id, Token, default)).Kind.Should().Be(RuleSetOutcomeKind.Done);
+        var first = await w.Service().ChangeRuleAsync(Matter, MatterId, Change(policy), CallerOid, CallerUserId, Token, default);
+        (await w.Service().RemoveAsync(Matter, MatterId, first.Value!.Override.Id, null, CallerUserId, Token, default)).Kind.Should().Be(RuleSetOutcomeKind.Done);
 
-        var again = await w.Service().ChangeRuleAsync(Matter, MatterId, Change(policy, body: CapBodyOf(14)), CallerOid, Token, default);
+        var again = await w.Service().ChangeRuleAsync(Matter, MatterId, Change(policy, body: CapBodyOf(14)), CallerOid, CallerUserId, Token, default);
 
         again.Kind.Should().Be(RuleSetOutcomeKind.Done, again.Detail);
         var ruleId = first.Value.RecordRule.PolicyId;
@@ -1548,7 +1588,7 @@ public sealed partial class ProcedureAssignmentServiceTests
         var onLine = w.Signal(policy, b, line: w.Line(b));
         var onHidden = w.Signal(policy, hidden);
 
-        var outcome = await w.Service().ChangeRuleAsync(Matter, MatterId, Change(policy), CallerOid, Token, default);
+        var outcome = await w.Service().ChangeRuleAsync(Matter, MatterId, Change(policy), CallerOid, CallerUserId, Token, default);
 
         outcome.Kind.Should().Be(RuleSetOutcomeKind.Done, outcome.Detail);
         foreach (var s in new[] { onInvoice, onLine, onHidden })
@@ -1584,7 +1624,7 @@ public sealed partial class ProcedureAssignmentServiceTests
         var inactive = w.Signal(policy, inactiveInvoice);
         var noInvoice = w.Signal(policy, Guid.NewGuid());
 
-        var outcome = await w.Service().ChangeRuleAsync(Matter, MatterId, Change(policy), CallerOid, Token, default);
+        var outcome = await w.Service().ChangeRuleAsync(Matter, MatterId, Change(policy), CallerOid, CallerUserId, Token, default);
 
         outcome.Kind.Should().Be(RuleSetOutcomeKind.Done, outcome.Detail);
         foreach (var s in new[] { otherRecord, otherRule, approved, inactive, noInvoice })
@@ -1606,7 +1646,7 @@ public sealed partial class ProcedureAssignmentServiceTests
         var otherFirm = w.Signal(policy, w.Invoice(matter: MatterId, firm: OtherFirmId));
         var noFirm = w.Signal(policy, w.Invoice(matter: MatterId));
 
-        var outcome = await w.Service().ChangeRuleAsync(Matter, MatterId, Change(policy, firm: FirmId), CallerOid, Token, default);
+        var outcome = await w.Service().ChangeRuleAsync(Matter, MatterId, Change(policy, firm: FirmId), CallerOid, CallerUserId, Token, default);
 
         outcome.Kind.Should().Be(RuleSetOutcomeKind.Done, outcome.Detail);
         w.StatusOf(thisFirm).Should().Be(SignalWriter.SignalStatusResolved);
@@ -1624,7 +1664,7 @@ public sealed partial class ProcedureAssignmentServiceTests
         w.Readable.Add(invoice); // pass-1 F3: a count of the TARGETED findings would answer 1; only closed findings count
         w.SupersedeWriteFault = true;
 
-        var outcome = await w.Service().ChangeRuleAsync(Matter, MatterId, Change(policy), CallerOid, Token, default);
+        var outcome = await w.Service().ChangeRuleAsync(Matter, MatterId, Change(policy), CallerOid, CallerUserId, Token, default);
 
         outcome.Kind.Should().Be(RuleSetOutcomeKind.Done, outcome.Detail);
         outcome.Value!.CloseComplete.Should().BeFalse();
@@ -1643,7 +1683,7 @@ public sealed partial class ProcedureAssignmentServiceTests
         w.Signal(policy, w.Invoice(matter: MatterId));
         w.SelectFaultFor = policy;
 
-        var outcome = await w.Service().ChangeRuleAsync(Matter, MatterId, Change(policy), CallerOid, Token, default);
+        var outcome = await w.Service().ChangeRuleAsync(Matter, MatterId, Change(policy), CallerOid, CallerUserId, Token, default);
 
         outcome.Kind.Should().Be(RuleSetOutcomeKind.Done, outcome.Detail);
         outcome.Value!.CloseComplete.Should().BeFalse();
@@ -1664,7 +1704,7 @@ public sealed partial class ProcedureAssignmentServiceTests
         var otherRecord = w.Signal(policy, elsewhere, line: w.Line(elsewhere));
         w.H.Queries.Clear();
 
-        var outcome = await w.Service().ChangeRuleAsync(Matter, MatterId, Change(policy), CallerOid, Token, default);
+        var outcome = await w.Service().ChangeRuleAsync(Matter, MatterId, Change(policy), CallerOid, CallerUserId, Token, default);
 
         outcome.Kind.Should().Be(RuleSetOutcomeKind.Done, outcome.Detail);
         w.StatusOf(onLine).Should().Be(SignalWriter.SignalStatusResolved);
@@ -1702,7 +1742,7 @@ public sealed partial class ProcedureAssignmentServiceTests
         var elsewhere = w.Signal(policy, w.Invoice(matter: Guid.NewGuid()));
         w.H.Queries.Clear();
 
-        var outcome = await w.Service().ChangeRuleAsync(Matter, MatterId, Change(policy), CallerOid, Token, default);
+        var outcome = await w.Service().ChangeRuleAsync(Matter, MatterId, Change(policy), CallerOid, CallerUserId, Token, default);
 
         outcome.Value!.CloseComplete.Should().BeTrue();
         w.SubjectSelections.Should().BeEmpty();
@@ -1795,7 +1835,7 @@ public sealed partial class ProcedureAssignmentServiceTests
         var onProjectLine = w.Signal(policy, projectInvoice, line: w.Line(projectInvoice));
         w.Readable.Add(projectInvoice);
 
-        var outcome = await w.Service().ChangeRuleAsync(Matter, MatterId, Change(policy), CallerOid, Token, default);
+        var outcome = await w.Service().ChangeRuleAsync(Matter, MatterId, Change(policy), CallerOid, CallerUserId, Token, default);
 
         outcome.Kind.Should().Be(RuleSetOutcomeKind.Done, outcome.Detail);
         foreach (var s in new[] { own, onWorkAssignment, onProjectLine })
@@ -1824,7 +1864,7 @@ public sealed partial class ProcedureAssignmentServiceTests
         var sibling = WorkAssignmentUnder(w, Matter, otherMatter);
         var onSibling = w.Signal(policy, InvoiceOn(w, WorkAssignmentTable, sibling));
 
-        var outcome = await w.Service().ChangeRuleAsync(Matter, MatterId, Change(policy), CallerOid, Token, default);
+        var outcome = await w.Service().ChangeRuleAsync(Matter, MatterId, Change(policy), CallerOid, CallerUserId, Token, default);
 
         outcome.Value!.CloseComplete.Should().BeTrue();
         w.StatusOf(onChild).Should().Be(SignalWriter.SignalStatusResolved);
@@ -1858,7 +1898,7 @@ public sealed partial class ProcedureAssignmentServiceTests
         var onOtherFirmRow = w.Signal(policy, InvoiceOn(w, WorkAssignmentTable, otherFirmRow, firm: FirmId));
         var onProcedureLevel = w.Signal(policy, InvoiceOn(w, WorkAssignmentTable, procedureLevel, firm: FirmId));
 
-        var outcome = await w.Service().ChangeRuleAsync(Matter, MatterId, Change(policy), CallerOid, Token, default);
+        var outcome = await w.Service().ChangeRuleAsync(Matter, MatterId, Change(policy), CallerOid, CallerUserId, Token, default);
 
         outcome.Value!.CloseComplete.Should().BeTrue();
         w.StatusOf(onNearer).Should().Be(SignalWriter.SignalStatusOpen, "the child's own row decides the rule there (the nearer row wins)");
@@ -1880,7 +1920,7 @@ public sealed partial class ProcedureAssignmentServiceTests
         w.H.Row("sprk_invoice", twoCores)[Project] = new EntityReference(Project, Guid.NewGuid());
         var ambiguous = w.Signal(policy, twoCores);
 
-        var outcome = await w.Service().ChangeRuleAsync(Matter, MatterId, Change(policy, firm: FirmId), CallerOid, Token, default);
+        var outcome = await w.Service().ChangeRuleAsync(Matter, MatterId, Change(policy, firm: FirmId), CallerOid, CallerUserId, Token, default);
 
         outcome.Value!.CloseComplete.Should().BeTrue();
         w.StatusOf(thisFirm).Should().Be(SignalWriter.SignalStatusResolved);
@@ -1925,7 +1965,7 @@ public sealed partial class ProcedureAssignmentServiceTests
                 break;
         }
 
-        var outcome = await w.Service().ChangeRuleAsync(Matter, MatterId, Change(policy), CallerOid, Token, default);
+        var outcome = await w.Service().ChangeRuleAsync(Matter, MatterId, Change(policy), CallerOid, CallerUserId, Token, default);
 
         outcome.Kind.Should().Be(RuleSetOutcomeKind.Done, outcome.Detail);
         outcome.Value!.CloseComplete.Should().BeFalse();
@@ -1961,7 +2001,7 @@ public sealed partial class ProcedureAssignmentServiceTests
             FailQueriesWhen(w, q => q.EntityName == "sprk_billingevent" && q.Criteria.Conditions.Any(c => c.Values.Contains(ownInvoice)));
         }
 
-        var outcome = await w.Service().ChangeRuleAsync(Matter, MatterId, Change(policy), CallerOid, Token, default);
+        var outcome = await w.Service().ChangeRuleAsync(Matter, MatterId, Change(policy), CallerOid, CallerUserId, Token, default);
 
         outcome.Kind.Should().Be(RuleSetOutcomeKind.Done, outcome.Detail);
         outcome.Value!.CloseComplete.Should().BeFalse();
@@ -1981,7 +2021,7 @@ public sealed partial class ProcedureAssignmentServiceTests
         var children = Enumerable.Range(0, ProcedureAssignmentService.MaxChildRecords + 1).Select(_ => WorkAssignmentUnder(w, Matter, MatterId)).ToList();
         var onChild = w.Signal(policy, InvoiceOn(w, WorkAssignmentTable, children[0]));
 
-        var outcome = await w.Service().ChangeRuleAsync(Matter, MatterId, Change(policy), CallerOid, Token, default);
+        var outcome = await w.Service().ChangeRuleAsync(Matter, MatterId, Change(policy), CallerOid, CallerUserId, Token, default);
 
         outcome.Kind.Should().Be(RuleSetOutcomeKind.Done, outcome.Detail);
         outcome.Value!.CloseComplete.Should().BeFalse();
@@ -2018,7 +2058,7 @@ public sealed partial class ProcedureAssignmentServiceTests
         var onChangedRule = w.Signal(changed, invoice);
         var onPinnedRule = w.Signal(pinnedRule, invoice);
 
-        var outcome = await w.Service().ChangeRuleAsync(Matter, MatterId, Change(changed), CallerOid, Token, default);
+        var outcome = await w.Service().ChangeRuleAsync(Matter, MatterId, Change(changed), CallerOid, CallerUserId, Token, default);
 
         outcome.Value!.CloseComplete.Should().BeTrue();
         w.StatusOf(onChangedRule).Should().Be(SignalWriter.SignalStatusResolved, "the changed rule's finding closes: a Procedure-level pin does not decide a rule-level override");
@@ -2097,7 +2137,7 @@ public sealed partial class ProcedureAssignmentServiceTests
         var policy = w.Rule();
         var (_, findings) = DatedInvoice(w, policy, side, invoiceDate, lineDates.Length == 0 ? [] : lineDates.Split(','));
 
-        var outcome = await w.Service().ChangeRuleAsync(Matter, MatterId, Change(policy), CallerOid, Token, default);
+        var outcome = await w.Service().ChangeRuleAsync(Matter, MatterId, Change(policy), CallerOid, CallerUserId, Token, default);
 
         outcome.Kind.Should().Be(RuleSetOutcomeKind.Done, outcome.Detail);
         outcome.Value!.CloseComplete.Should().BeTrue("an invoice left open by its dates is not an incomplete close");
@@ -2117,7 +2157,7 @@ public sealed partial class ProcedureAssignmentServiceTests
         var (_, ownFindings) = DatedInvoice(w, policy, "d0", "2026-11-06", ["2026-11-05"], adjustmentLines: ["2026-10-30"]);
         var (_, childFindings) = DatedInvoice(w, policy, "d1", "2026-11-06", ["2026-11-05"], adjustmentLines: ["2026-10-30"]);
 
-        var outcome = await w.Service().ChangeRuleAsync(Matter, MatterId, Change(policy), CallerOid, Token, default);
+        var outcome = await w.Service().ChangeRuleAsync(Matter, MatterId, Change(policy), CallerOid, CallerUserId, Token, default);
 
         outcome.Value!.CloseComplete.Should().BeTrue();
         foreach (var finding in ownFindings.Concat(childFindings))
@@ -2135,7 +2175,7 @@ public sealed partial class ProcedureAssignmentServiceTests
         var (mixed, mixedFindings) = DatedInvoice(w, policy, "d1", "2026-11-06", ["2026-11-09", "2026-10-30"]);
         w.Readable.UnionWith(new[] { closing, mixed });
 
-        var outcome = await w.Service().ChangeRuleAsync(Matter, MatterId, Change(policy), CallerOid, Token, default);
+        var outcome = await w.Service().ChangeRuleAsync(Matter, MatterId, Change(policy), CallerOid, CallerUserId, Token, default);
 
         outcome.Value!.CloseComplete.Should().BeTrue();
         closingFindings.Should().OnlyContain(f => w.StatusOf(f) == SignalWriter.SignalStatusResolved);
@@ -2160,7 +2200,7 @@ public sealed partial class ProcedureAssignmentServiceTests
         var (_, onTheDay) = DatedInvoice(w, policy, "d0", "2026-11-05", ["2026-11-05"]);
         var (_, theDayBefore) = DatedInvoice(w, policy, "d0", "2026-11-05", ["2026-11-04"]);
 
-        var outcome = await w.Service().ChangeRuleAsync(Matter, MatterId, Change(policy), CallerOid, Token, default);
+        var outcome = await w.Service().ChangeRuleAsync(Matter, MatterId, Change(policy), CallerOid, CallerUserId, Token, default);
 
         outcome.Value!.CloseComplete.Should().BeTrue();
         onTheDay.Should().OnlyContain(f => w.StatusOf(f) == SignalWriter.SignalStatusResolved);
@@ -2178,7 +2218,7 @@ public sealed partial class ProcedureAssignmentServiceTests
         var children = Enumerable.Range(0, ProcedureAssignmentService.MaxChildRecords).Select(_ => WorkAssignmentUnder(w, Matter, MatterId)).ToList();
         var onLast = w.Signal(policy, InvoiceOn(w, WorkAssignmentTable, children[^1]));
 
-        var outcome = await w.Service().ChangeRuleAsync(Matter, MatterId, Change(policy), CallerOid, Token, default);
+        var outcome = await w.Service().ChangeRuleAsync(Matter, MatterId, Change(policy), CallerOid, CallerUserId, Token, default);
 
         outcome.Value!.CloseComplete.Should().BeTrue();
         w.StatusOf(onLast).Should().Be(SignalWriter.SignalStatusResolved);
@@ -2195,8 +2235,8 @@ public sealed partial class ProcedureAssignmentServiceTests
         var resolved = w.Signal(policy, invoice);
         w.H.Row("sprk_signal", resolved)["sprk_signalstatus"] = new OptionSetValue(SignalWriter.SignalStatusResolved);
 
-        var first = await w.Service().ChangeRuleAsync(Matter, MatterId, Change(policy), CallerOid, Token, default);
-        var again = await w.Service().ChangeRuleAsync(Matter, MatterId, Change(policy), CallerOid, Token, default);
+        var first = await w.Service().ChangeRuleAsync(Matter, MatterId, Change(policy), CallerOid, CallerUserId, Token, default);
+        var again = await w.Service().ChangeRuleAsync(Matter, MatterId, Change(policy), CallerOid, CallerUserId, Token, default);
 
         first.Kind.Should().Be(RuleSetOutcomeKind.Done, first.Detail);
         again.ErrorCode.Should().Be("assignment.duplicate");
@@ -2215,7 +2255,7 @@ public sealed partial class ProcedureAssignmentServiceTests
         w.Readable.Add(invoice);
         w.H.TransactionCommitsButAnswersUnknown = requests => requests.Count == 3; // stage 3: the Exclude row, the version, the switch-on
 
-        var outcome = await w.Service().ChangeRuleAsync(Matter, MatterId, Change(policy), CallerOid, Token, default);
+        var outcome = await w.Service().ChangeRuleAsync(Matter, MatterId, Change(policy), CallerOid, CallerUserId, Token, default);
 
         outcome.Kind.Should().Be(RuleSetOutcomeKind.Done, outcome.Detail);
         w.Rows.Should().ContainSingle("the Exclude row was committed");
@@ -2232,7 +2272,7 @@ public sealed partial class ProcedureAssignmentServiceTests
         var finding = w.Signal(policy, w.Invoice(matter: MatterId));
         w.H.TransactionGivesNoAnswer = requests => requests.Count == 3; // stage 3 only: stages 1 and 2 commit
 
-        var outcome = await w.Service().ChangeRuleAsync(Matter, MatterId, Change(policy), CallerOid, Token, default);
+        var outcome = await w.Service().ChangeRuleAsync(Matter, MatterId, Change(policy), CallerOid, CallerUserId, Token, default);
 
         w.H.Transactions.Should().Contain(t => t.Count == 3, "the change reached stage 3");
         outcome.StatusCode.Should().Be(500);
@@ -2270,7 +2310,7 @@ public sealed partial class ProcedureAssignmentServiceTests
             return true;
         };
 
-        var outcome = await w.Service().ChangeRuleAsync(Matter, MatterId, Change(policy), CallerOid, Token, default);
+        var outcome = await w.Service().ChangeRuleAsync(Matter, MatterId, Change(policy), CallerOid, CallerUserId, Token, default);
 
         w.Rows.Should().ContainSingle("the plain Exclude's row is there");
         versionId.Should().NotBeNull();
@@ -2310,7 +2350,7 @@ public sealed partial class ProcedureAssignmentServiceTests
             return true;
         };
 
-        var outcome = await w.Service().ChangeRuleAsync(Matter, MatterId, Change(policy), CallerOid, Token, default);
+        var outcome = await w.Service().ChangeRuleAsync(Matter, MatterId, Change(policy), CallerOid, CallerUserId, Token, default);
         return (outcome, w, finding);
     }
 
@@ -2359,14 +2399,14 @@ public sealed partial class ProcedureAssignmentServiceTests
     {
         var w = new World();
         var policy = w.Rule();
-        var first = await w.Service().ChangeRuleAsync(Matter, MatterId, Change(policy), CallerOid, Token, default);
-        (await w.Service().RemoveAsync(Matter, MatterId, first.Value!.Override.Id, Token, default)).Kind.Should().Be(RuleSetOutcomeKind.Done);
+        var first = await w.Service().ChangeRuleAsync(Matter, MatterId, Change(policy), CallerOid, CallerUserId, Token, default);
+        (await w.Service().RemoveAsync(Matter, MatterId, first.Value!.Override.Id, null, CallerUserId, Token, default)).Kind.Should().Be(RuleSetOutcomeKind.Done);
         var ruleId = first.Value.RecordRule.PolicyId;
         var finding = w.Signal(policy, w.Invoice(matter: MatterId));
         w.RowsOf("sprk_policyversion").Should().Contain(v => v.Id == RuleSetService.VersionIdFor(ruleId, 1), "the earlier version row exists");
         w.H.TransactionGivesNoAnswer = requests => requests.Count == 3;
 
-        var again = await w.Service().ChangeRuleAsync(Matter, MatterId, Change(policy, body: CapBodyOf(14)), CallerOid, Token, default);
+        var again = await w.Service().ChangeRuleAsync(Matter, MatterId, Change(policy, body: CapBodyOf(14)), CallerOid, CallerUserId, Token, default);
 
         again.StatusCode.Should().Be(500);
         again.ErrorCode.Should().Be("assignment.write_failed");
@@ -2402,7 +2442,7 @@ public sealed partial class ProcedureAssignmentServiceTests
             return true;
         };
 
-        var outcome = await w.Service().ChangeRuleAsync(Matter, MatterId, Change(policy), CallerOid, Token, cts.Token);
+        var outcome = await w.Service().ChangeRuleAsync(Matter, MatterId, Change(policy), CallerOid, CallerUserId, Token, cts.Token);
 
         outcome.Kind.Should().Be(RuleSetOutcomeKind.Done, outcome.Detail);
         w.StatusOf(finding).Should().Be(SignalWriter.SignalStatusResolved, "the change committed, so its close runs");
@@ -2453,11 +2493,11 @@ public sealed partial class ProcedureAssignmentServiceTests
         var w = new World();
         var otherMatter = Guid.NewGuid();
         w.H.Seed(new Entity(Matter, otherMatter));
-        var excluded = await w.Service().ExcludeRuleAsync(Matter, otherMatter, new(w.Rule(), "x", null), CallerOid, default);
+        var excluded = await w.Service().ExcludeRuleAsync(Matter, otherMatter, new(w.Rule(), "x", null), CallerOid, CallerUserId, default);
         var transactions = w.H.Transactions.Count;
 
-        var unknown = await w.Service().RemoveAsync(Matter, MatterId, Guid.NewGuid(), Token, default);
-        var others = await w.Service().RemoveAsync(Matter, MatterId, excluded.Value!.Id, Token, default);
+        var unknown = await w.Service().RemoveAsync(Matter, MatterId, Guid.NewGuid(), null, CallerUserId, Token, default);
+        var others = await w.Service().RemoveAsync(Matter, MatterId, excluded.Value!.Id, null, CallerUserId, Token, default);
         var preview = await w.Service().PreviewRemovalAsync(Matter, MatterId, excluded.Value.Id, Token, default);
 
         foreach (var refused in new[] { unknown.ErrorCode, others.ErrorCode, preview.ErrorCode })
@@ -2476,8 +2516,8 @@ public sealed partial class ProcedureAssignmentServiceTests
         var w = new World();
         var procedure = w.Procedure();
         var policy = w.Rule();
-        var assigned = await w.Service().AssignProcedureAsync(Matter, MatterId, new(procedure, null, null, null), CallerOid, default);
-        var changed = await w.Service().ChangeRuleAsync(Matter, MatterId, Change(policy), CallerOid, Token, default);
+        var assigned = await w.Service().AssignProcedureAsync(Matter, MatterId, new(procedure, null, null, null), CallerOid, CallerUserId, default);
+        var changed = await w.Service().ChangeRuleAsync(Matter, MatterId, Change(policy), CallerOid, CallerUserId, Token, default);
 
         (await w.Service().SubjectOfOverrideAsync(Matter, MatterId, assigned.Value!.Id, default)).Should().Be(new OverrideSubject("sprk_procedures", procedure));
         (await w.Service().SubjectOfOverrideAsync(Matter, MatterId, changed.Value!.Override.Id, default)).Should().Be(new OverrideSubject("sprk_policies", policy));
@@ -2487,17 +2527,632 @@ public sealed partial class ProcedureAssignmentServiceTests
     public async Task Remove_WhenAReadFaults_Is503()
     {
         var w = new World();
-        var excluded = await w.Service().ExcludeRuleAsync(Matter, MatterId, new(w.Rule(), "x", null), CallerOid, default);
+        var excluded = await w.Service().ExcludeRuleAsync(Matter, MatterId, new(w.Rule(), "x", null), CallerOid, CallerUserId, default);
         w.H.AfterQuery = q =>
         {
             if (q.EntityName == Assignment) throw new HttpRequestException("simulated fault");
         };
 
-        var removed = await w.Service().RemoveAsync(Matter, MatterId, excluded.Value!.Id, Token, default);
+        var removed = await w.Service().RemoveAsync(Matter, MatterId, excluded.Value!.Id, null, CallerUserId, Token, default);
         var previewed = await w.Service().PreviewRemovalAsync(Matter, MatterId, excluded.Value.Id, Token, default);
 
         removed.StatusCode.Should().Be(503);
         previewed.StatusCode.Should().Be(503);
         w.Rows.Should().ContainSingle();
+    }
+
+    // ───────────────────────────────────────────────────────────────────────────────────────────────
+    // Task 084h-2: each per-record Procedure change files its Decision Record (design notes/084h §11, S1-S10; H-3)
+    // ───────────────────────────────────────────────────────────────────────────────────────────────
+
+    private const string AssignReason = "client asked";
+    private const string RuleReason = "agreed with the client";
+    private const string SecretNote = "SECRET-NOTE-084h";
+
+    private static readonly string[] Acts =
+    {
+        "assign-procedure", "pin-procedure", "exclude-procedure", "exclude-rule", "change-rule", "unpin-procedure", "remove-override",
+    };
+
+    public static TheoryData<string> SevenActs()
+    {
+        var data = new TheoryData<string>();
+        foreach (var act in Acts)
+        {
+            data.Add(act);
+        }
+
+        return data;
+    }
+
+    /// <summary>What one act answered, and the reads and transactions it made (the setup of a removal is not counted).</summary>
+    private sealed record ActResult(
+        RuleSetOutcomeKind Kind, int StatusCode, string? ErrorCode, OverrideDecisionRecord? Record, Guid OverrideId, int Queries, int Transactions);
+
+    private static void ResetRecords(World w)
+    {
+        w.Preflighted.Clear();
+        w.Recorded.Clear();
+        w.RecordTokens.Clear();
+        w.RowsAtRecord.Clear();
+        w.Enqueued.Clear();
+        w.EnqueueTokens.Clear();
+    }
+
+    private static ActResult Result<T>(RuleSetOutcome<T> outcome, Func<T, (OverrideDecisionRecord?, Guid)> pick, World w, int queries, int transactions)
+        where T : class
+    {
+        var (record, id) = outcome.Kind == RuleSetOutcomeKind.Done ? pick(outcome.Value!) : (null, Guid.Empty);
+        return new(outcome.Kind, outcome.StatusCode, outcome.ErrorCode, record, id, w.H.Queries.Count - queries, w.H.Transactions.Count - transactions);
+    }
+
+    /// <summary>Runs one of the seven acts with <paramref name="note"/>. A removal first assigns the row it removes (pinned for an unpin), then
+    /// clears what that assign recorded.</summary>
+    private static async Task<ActResult> ActAsync(World w, string act, string? note = null, CancellationToken ct = default)
+    {
+        var service = w.Service();
+        switch (act)
+        {
+            case "unpin-procedure":
+            case "remove-override":
+                {
+                    var procedure = w.Procedure();
+                    var pinned = act == "unpin-procedure";
+
+                    // The setup assign runs with the real preflight and a working record; the test's substitutes apply to the removal only.
+                    var (preflight, onRecord, enqueueFault) = (w.Preflight, w.OnRecord, w.EnqueueFault);
+                    (w.Preflight, w.OnRecord, w.EnqueueFault) = (null, null, null);
+                    var assigned = await service.AssignProcedureAsync(Matter, MatterId,
+                        new(procedure, pinned ? "Pinned" : null, pinned ? w.ProcedureVersion(procedure, ProcedureEntity.VersionStatusActive) : null, AssignReason),
+                        CallerOid, CallerUserId, default);
+                    (w.Preflight, w.OnRecord, w.EnqueueFault) = (preflight, onRecord, enqueueFault);
+                    assigned.Kind.Should().Be(RuleSetOutcomeKind.Done, assigned.Detail);
+                    ResetRecords(w);
+                    var (q, t) = (w.H.Queries.Count, w.H.Transactions.Count);
+                    var removed = await service.RemoveAsync(
+                        Matter, MatterId, assigned.Value!.Id, note is null ? null : new OverrideRemovalRequest(note), CallerUserId, Token, ct);
+                    return Result(removed, v => (v.DecisionRecord, v.OverrideId), w, q, t);
+                }
+
+            case "exclude-rule":
+                {
+                    var policy = w.Rule();
+                    var (q, t) = (w.H.Queries.Count, w.H.Transactions.Count);
+                    var excluded = await service.ExcludeRuleAsync(Matter, MatterId, new(policy, RuleReason, FirmId, note), CallerOid, CallerUserId, ct);
+                    return Result(excluded, v => (v.DecisionRecord, v.Id), w, q, t);
+                }
+
+            case "change-rule":
+                {
+                    var policy = w.Rule();
+                    var (q, t) = (w.H.Queries.Count, w.H.Transactions.Count);
+                    var changed = await service.ChangeRuleAsync(
+                        Matter, MatterId, Change(policy, reason: RuleReason) with { Note = note }, CallerOid, CallerUserId, Token, ct);
+                    return Result(changed, v => (v.Override.DecisionRecord, v.Override.Id), w, q, t);
+                }
+
+            default:
+                {
+                    var procedure = w.Procedure();
+                    var request = act switch
+                    {
+                        "pin-procedure" => new ProcedureAssignmentRequest(
+                            procedure, "Pinned", w.ProcedureVersion(procedure, ProcedureEntity.VersionStatusActive), AssignReason, note),
+                        "exclude-procedure" => new ProcedureAssignmentRequest(procedure, "Excluded", null, AssignReason, note),
+                        _ => new ProcedureAssignmentRequest(procedure, null, null, AssignReason, note),
+                    };
+                    var (q, t) = (w.H.Queries.Count, w.H.Transactions.Count);
+                    var assigned = await service.AssignProcedureAsync(Matter, MatterId, request, CallerOid, CallerUserId, ct);
+                    return Result(assigned, v => (v.DecisionRecord, v.Id), w, q, t);
+                }
+        }
+    }
+
+    private static string[] ValueKeysOf(string act) => act switch
+    {
+        "assign-procedure" or "exclude-procedure" => ["procedure", "override"],
+        "pin-procedure" or "unpin-procedure" => ["procedure", "version", "override"],
+        "exclude-rule" => ["rule", "firm", "override"],
+        "change-rule" => ["rule", "override", "basedOnVersion", "recordRuleVersion"],
+        _ => ["procedure", "override", "kind"],
+    };
+
+    private static string OutcomeOf(string act) => act switch
+    {
+        "assign-procedure" => "Assigned",
+        "pin-procedure" => "Pinned",
+        "exclude-procedure" or "exclude-rule" => "Excluded",
+        "change-rule" => "Changed",
+        "unpin-procedure" => "Unpinned",
+        _ => "Removed",
+    };
+
+    private static string? ReasonOf(string act) => act switch
+    {
+        "assign-procedure" or "pin-procedure" or "exclude-procedure" => AssignReason,
+        "exclude-rule" or "change-rule" => RuleReason,
+        _ => null, // S9: an unpin or a removal carries no reason, though the removed row had one
+    };
+
+    [Fact(DisplayName = "084h-2 H-2: the recorded reason is the trimmed reason, and a blank optional reason is recorded as none")]
+    public async Task RecordedReason_IsTrimmed_AndBlankIsNone()
+    {
+        var w = new World();
+        var service = w.Service();
+
+        var padded = await service.ExcludeRuleAsync(Matter, MatterId, new(w.Rule(), "  " + RuleReason + "  ", FirmId, null), CallerOid, CallerUserId, default);
+        var blank = await service.AssignProcedureAsync(Matter, MatterId, new(w.Procedure(), null, null, "   "), CallerOid, CallerUserId, default);
+
+        (padded.Kind, blank.Kind).Should().Be((RuleSetOutcomeKind.Done, RuleSetOutcomeKind.Done));
+        w.Recorded.Select(d => d.Reason).Should().Equal(RuleReason, null);
+    }
+
+    [Theory(DisplayName = "084h-2 S1/S9 must-fire: each act on Done files ONE Decision Record on the core record, after the commit, with its code, Values, decider and reason")]
+    [MemberData(nameof(SevenActs))]
+    public async Task EachAct_OnDone_RecordsOnce_AfterTheCommit(string act)
+    {
+        var w = new World();
+
+        var result = await ActAsync(w, act);
+
+        result.Kind.Should().Be(RuleSetOutcomeKind.Done);
+        var decision = w.Recorded.Should().ContainSingle().Subject;
+        decision.ActionCode.Should().Be(act);
+        (decision.CoreTable, decision.RecordId).Should().Be((Matter, MatterId));
+        decision.DeciderSystemUserId.Should().Be(CallerUserId);
+        decision.DeciderRole.Should().Be("procedure-editor");
+        decision.Values.Keys.Should().BeEquivalentTo(ValueKeysOf(act), "the Values keys are the declared parameter codes plus the undeclared ids; no note was given");
+        decision.Values["override"].Should().Be(result.OverrideId);
+        decision.Outcome.Should().Be(OutcomeOf(act));
+        decision.Reason.Should().Be(ReasonOf(act));
+        decision.DecidedOn.Should().Be(World.InForceInstant);
+        decision.Written.Should().Equal(new DecisionRecordRef(Assignment, result.OverrideId));
+        w.Preflighted.Should().ContainSingle().Which.Should().BeSameAs(decision, "the decision id minted before the preflight is the one recorded");
+        w.Enqueued.Should().BeEmpty();
+        result.Record!.Status.Should().Be(OverrideDecisionRecord.Recorded);
+        result.Record.RecordId.Should().NotBeNull();
+        result.Record.ErrorCode.Should().BeNull();
+        if (act is "unpin-procedure" or "remove-override")
+        {
+            w.RowsAtRecord.Single().Should().NotContain(result.OverrideId, "the record is asked for after the delete committed");
+        }
+        else
+        {
+            w.RowsAtRecord.Single().Should().Contain(result.OverrideId, "the record is asked for after the create committed");
+        }
+    }
+
+    [Fact(DisplayName = "084h-2 K-4: a Pin-to-Follow plan (unpin, then assign) files two records")]
+    public async Task PinToFollow_FilesTwoRecords()
+    {
+        var w = new World();
+        var procedure = w.Procedure();
+        var version = w.ProcedureVersion(procedure, ProcedureEntity.VersionStatusActive);
+        var pinned = await w.Service().AssignProcedureAsync(Matter, MatterId, new(procedure, "Pinned", version, null), CallerOid, CallerUserId, default);
+        ResetRecords(w);
+
+        (await w.Service().RemoveAsync(Matter, MatterId, pinned.Value!.Id, null, CallerUserId, Token, default)).Kind.Should().Be(RuleSetOutcomeKind.Done);
+        (await w.Service().AssignProcedureAsync(Matter, MatterId, new(procedure, null, null, null), CallerOid, CallerUserId, default))
+            .Kind.Should().Be(RuleSetOutcomeKind.Done);
+
+        w.Recorded.Select(d => d.ActionCode).Should().Equal("unpin-procedure", "assign-procedure");
+        w.Recorded.Select(d => d.DecisionId).Should().OnlyHaveUniqueItems();
+        w.Recorded[0].Values["version"].Should().Be(version);
+    }
+
+    [Theory(DisplayName = "084h-2 S8: a removal of a Pinned row with its version files unpin-procedure; every other row files remove-override with its kind")]
+    [InlineData("pinned", "unpin-procedure", null)]
+    [InlineData("pinned-without-version", "remove-override", ProcedureAssignmentService.KindProcedure)]
+    [InlineData("follow", "remove-override", ProcedureAssignmentService.KindProcedure)]
+    [InlineData("excluded-procedure", "remove-override", ProcedureAssignmentService.KindProcedure)]
+    [InlineData("excluded-rule", "remove-override", ProcedureAssignmentService.KindRuleExcluded)]
+    [InlineData("changed-rule", "remove-override", ProcedureAssignmentService.KindRuleChanged)]
+    public async Task Remove_TheRowsModeDecidesTheCode(string row, string code, string? kind)
+    {
+        var w = new World();
+        var procedure = w.Procedure();
+        var version = w.ProcedureVersion(procedure, ProcedureEntity.VersionStatusActive);
+        var policy = w.Rule();
+        Guid overrideId = row switch
+        {
+            "pinned" or "pinned-without-version" => (await w.Service().AssignProcedureAsync(Matter, MatterId, new(procedure, "Pinned", version, AssignReason), CallerOid, CallerUserId, default)).Value!.Id,
+            "follow" => (await w.Service().AssignProcedureAsync(Matter, MatterId, new(procedure, null, null, AssignReason), CallerOid, CallerUserId, default)).Value!.Id,
+            "excluded-procedure" => (await w.Service().AssignProcedureAsync(Matter, MatterId, new(procedure, "Excluded", null, AssignReason), CallerOid, CallerUserId, default)).Value!.Id,
+            "excluded-rule" => (await w.Service().ExcludeRuleAsync(Matter, MatterId, new(policy, RuleReason, FirmId), CallerOid, CallerUserId, default)).Value!.Id,
+            _ => (await w.Service().ChangeRuleAsync(Matter, MatterId, Change(policy), CallerOid, CallerUserId, Token, default)).Value!.Override.Id,
+        };
+        if (row == "pinned-without-version")
+        {
+            w.H.Row(Assignment, overrideId).Attributes.Remove(ProcedureAssignmentEntity.PinnedVersionColumn);
+        }
+
+        ResetRecords(w);
+        var queries = w.H.Queries.Count;
+
+        var removed = await w.Service().RemoveAsync(Matter, MatterId, overrideId, null, CallerUserId, Token, default);
+
+        removed.Kind.Should().Be(RuleSetOutcomeKind.Done, removed.Detail);
+        var decision = w.Recorded.Should().ContainSingle().Subject;
+        decision.ActionCode.Should().Be(code);
+        decision.Reason.Should().BeNull("S9: the removed row's reason is not the removal's");
+        if (kind is null)
+        {
+            decision.Values["version"].Should().Be(version, "the row's sprk_pinnedversion");
+            decision.Values.Should().NotContainKey("kind");
+            w.H.Queries.Skip(queries).Where(q => q.EntityName == Assignment)
+                .Should().Contain(q => q.ColumnSet.Columns.Contains(ProcedureAssignmentEntity.PinnedVersionColumn), "the removal reads the pinned version");
+        }
+        else
+        {
+            decision.Values["kind"].Should().Be(kind);
+            decision.Values.Should().NotContainKey("version");
+        }
+
+        if (row is "excluded-rule" or "changed-rule")
+        {
+            decision.Values["rule"].Should().Be(policy);
+        }
+
+        if (row == "excluded-rule")
+        {
+            decision.Values["firm"].Should().Be(FirmId);
+        }
+    }
+
+    [Fact(DisplayName = "084h-2 S2 must-not-fire: a duplicate, a failed transaction, an owner refusal, an invalid request and a missing reason record nothing")]
+    public async Task RefusedWrites_RecordNothing()
+    {
+        var w = new World();
+        var procedure = w.Procedure();
+        (await w.Service().AssignProcedureAsync(Matter, MatterId, new(procedure, null, null, null), CallerOid, CallerUserId, default))
+            .Kind.Should().Be(RuleSetOutcomeKind.Done);
+        ResetRecords(w);
+
+        var duplicate = await w.Service().AssignProcedureAsync(Matter, MatterId, new(procedure, "Excluded", null, null), CallerOid, CallerUserId, default);
+        var invalid = await w.Service().AssignProcedureAsync(Matter, MatterId, new(w.Procedure(), "Sometimes", null, null), CallerOid, CallerUserId, default);
+        var noReason = await w.Service().ExcludeRuleAsync(Matter, MatterId, new(w.Rule("BILL-R"), "  ", null), CallerOid, CallerUserId, default);
+        w.H.TransactionThrows = new InvalidOperationException("simulated transport fault");
+        var failed = await w.Service().AssignProcedureAsync(Matter, MatterId, new(w.Procedure(), null, null, null), CallerOid, CallerUserId, default);
+        w.H.TransactionThrows = null;
+        w.H.OwnerAnswer = RecordOwnerResolution.Refused("owner.no_team", "no team");
+        var ownerRefused = await w.Service().AssignProcedureAsync(Matter, MatterId, new(w.Procedure(), null, null, null), CallerOid, CallerUserId, default);
+
+        duplicate.ErrorCode.Should().Be(ProcedureAssignmentService.CodeDuplicate);
+        invalid.ErrorCode.Should().Be(ProcedureAssignmentService.CodeInvalid);
+        noReason.ErrorCode.Should().Be(ProcedureAssignmentService.CodeInvalid);
+        failed.ErrorCode.Should().Be(ProcedureAssignmentService.CodeWriteFailed);
+        ownerRefused.Kind.Should().Be(RuleSetOutcomeKind.OwnerRefused);
+        w.Recorded.Should().BeEmpty();
+        w.Enqueued.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "084h-2 S2 must-not-fire: a removal that finds its row gone, or that conflicts with a concurrent edit, records nothing")]
+    public async Task GoneOrConflictedRemovals_RecordNothing()
+    {
+        var w = new World();
+        var assigned = await w.Service().AssignProcedureAsync(Matter, MatterId, new(w.Procedure(), null, null, null), CallerOid, CallerUserId, default);
+        var policy = w.Rule();
+        var changed = await w.Service().ChangeRuleAsync(Matter, MatterId, Change(policy), CallerOid, CallerUserId, Token, default);
+        var (_, recordRule) = RecordRuleOf(policy);
+        ResetRecords(w);
+
+        // Gone: the row is deleted by someone else between the read and the transaction.
+        w.H.FailTransactionRequest = r =>
+        {
+            if (r is DeleteRequest d && d.Target.Id == assigned.Value!.Id)
+            {
+                w.H.Rows[Assignment].RemoveAll(x => x.Id == d.Target.Id);
+            }
+
+            return false;
+        };
+        var gone = await w.Service().RemoveAsync(Matter, MatterId, assigned.Value!.Id, null, CallerUserId, Token, default);
+
+        // Conflict: the record rule is edited between the read and its conditional switch-off.
+        w.H.FailTransactionRequest = r =>
+        {
+            if (r is DeleteRequest)
+            {
+                w.H.ConcurrentWrite("sprk_policy", recordRule, new Dictionary<string, object> { ["sprk_name"] = "edited meanwhile" });
+            }
+
+            return false;
+        };
+        var conflicted = await w.Service().RemoveAsync(Matter, MatterId, changed.Value!.Override.Id, null, CallerUserId, Token, default);
+
+        gone.StatusCode.Should().Be(404);
+        conflicted.StatusCode.Should().Be(409);
+        conflicted.ErrorCode.Should().Be(ProcedureAssignmentService.CodeConcurrentEdit);
+        w.Recorded.Should().BeEmpty();
+        w.Enqueued.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "084h-2 S2 must-not-fire: a dry run of each act neither preflights nor records")]
+    public async Task DryRuns_RecordNothing()
+    {
+        var w = new World();
+        var procedure = w.Procedure();
+        var policy = w.Rule();
+        var assigned = await w.Service().AssignProcedureAsync(Matter, MatterId, new(procedure, null, null, null), CallerOid, CallerUserId, default);
+        ResetRecords(w);
+        var service = w.Service();
+        var reads = new WriteRefusingEntityService(w.H.Entities.Object);
+
+        (await service.PlanAssignProcedureAsync(reads, Matter, MatterId, new(w.Procedure(), null, null, null, "a note"), default)).Kind.Should().Be(RuleSetOutcomeKind.Done);
+        (await service.PlanExcludeRuleAsync(reads, Matter, MatterId, new(policy, RuleReason, null, "a note"), default)).Kind.Should().Be(RuleSetOutcomeKind.Done);
+        (await service.PlanChangeRuleAsync(reads, Matter, MatterId, Change(policy), World.InForceInstant.UtcDateTime, default)).Kind.Should().Be(RuleSetOutcomeKind.Done);
+        (await service.PlanRemoveAsync(reads, Matter, MatterId, assigned.Value!.Id, default)).Kind.Should().Be(RuleSetOutcomeKind.Done);
+
+        w.Preflighted.Should().BeEmpty();
+        w.Recorded.Should().BeEmpty();
+        w.Enqueued.Should().BeEmpty();
+    }
+
+    /// <summary>Assign with a transaction that gives no answer and applies nothing; meanwhile <paramref name="edit"/> (when given) shapes a row
+    /// at the same derived id from the row this assign built, as a concurrent write would leave it.</summary>
+    private static async Task<RuleSetOutcome<OverrideView>> AssignWithNoAnswerAsync(World w, Action<Entity>? edit, bool faultTheReadBack = false)
+    {
+        var procedure = w.Procedure();
+        var answered = false;
+        w.H.TransactionGivesNoAnswer = requests =>
+        {
+            answered = true;
+            if (edit is not null)
+            {
+                var mine = ((CreateRequest)requests[0]).Target;
+                var theirs = new Entity(mine.LogicalName, mine.Id);
+                foreach (var attribute in mine.Attributes)
+                {
+                    theirs[attribute.Key] = attribute.Value;
+                }
+
+                edit(theirs);
+                w.H.Seed(theirs);
+            }
+
+            return true;
+        };
+        var prior = w.H.AfterQuery;
+        w.H.AfterQuery = q =>
+        {
+            prior?.Invoke(q);
+            if (faultTheReadBack && answered && q.EntityName == Assignment)
+            {
+                throw new InvalidOperationException("simulated read-back fault");
+            }
+        };
+
+        return await w.Service().AssignProcedureAsync(Matter, MatterId, new(procedure, null, null, AssignReason), CallerOid, CallerUserId, default);
+    }
+
+    [Fact(DisplayName = "084h-2 S3 must-fire: no answer, and the read-back finds this caller's row as built: Done, recorded once")]
+    public async Task Assign_NoAnswer_ReadBackMatches_RecordsOnce()
+    {
+        var w = new World();
+
+        var outcome = await AssignWithNoAnswerAsync(w, _ => { });
+
+        outcome.Kind.Should().Be(RuleSetOutcomeKind.Done, outcome.Detail);
+        outcome.Value!.DecisionRecord!.Status.Should().Be(OverrideDecisionRecord.Recorded);
+        w.Recorded.Should().ContainSingle().Which.ActionCode.Should().Be("assign-procedure");
+        w.Log.Entries.Should().NotContain(e => e.Message.Contains(AssignReason));
+    }
+
+    [Fact(DisplayName = "084h-2 S3: a transaction that committed but gave no answer is read back as this caller's row: Done, recorded once")]
+    public async Task Assign_CommittedWithoutAnswer_RecordsOnce()
+    {
+        var w = new World();
+        w.H.TransactionCommitsButAnswersUnknown = requests => requests.Count == 1;
+
+        var outcome = await w.Service().AssignProcedureAsync(Matter, MatterId, new(w.Procedure(), null, null, AssignReason), CallerOid, CallerUserId, default);
+
+        outcome.Kind.Should().Be(RuleSetOutcomeKind.Done, outcome.Detail);
+        w.Recorded.Should().ContainSingle();
+    }
+
+    [Theory(DisplayName = "084h-2 S3 must-not-fire: no answer, and the row at the derived id is not this caller's as built: 500 'may or may not', nothing recorded")]
+    [InlineData("another creator")]
+    [InlineData("no creator")]
+    [InlineData("another reason")]
+    [InlineData("no reason")]
+    [InlineData("another mode")]
+    [InlineData("another procedure")]
+    public async Task Assign_NoAnswer_ReadBackMismatch_RecordsNothing_AndKeeps500(string mismatch)
+    {
+        var w = new World();
+
+        var outcome = await AssignWithNoAnswerAsync(w, row =>
+        {
+            switch (mismatch)
+            {
+                case "another creator": row[RecordCreatorPerson.Column] = new EntityReference("systemuser", Guid.NewGuid()); break;
+                case "no creator": row.Attributes.Remove(RecordCreatorPerson.Column); break;
+                case "another reason": row[ProcedureAssignmentEntity.ReasonColumn] = "someone else's reason"; break;
+                case "no reason": row.Attributes.Remove(ProcedureAssignmentEntity.ReasonColumn); break;
+                case "another mode": row[ProcedureAssignmentEntity.ModeColumn] = new OptionSetValue(ProcedureAssignmentEntity.ModeExcluded); break;
+                default: row[ProcedureAssignmentEntity.ProcedureColumn] = new EntityReference("sprk_procedure", Guid.NewGuid()); break;
+            }
+        });
+
+        outcome.StatusCode.Should().Be(500);
+        outcome.Detail.Should().Contain("may or may not");
+        w.Recorded.Should().BeEmpty();
+        w.Enqueued.Should().BeEmpty();
+    }
+
+    [Theory(DisplayName = "084h-2 S3 must-not-fire: no answer, and no row or a faulted read-back: 500, nothing recorded")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Assign_NoAnswer_NoRowOrReadFault_RecordsNothing(bool faultTheReadBack)
+    {
+        var w = new World();
+
+        var outcome = await AssignWithNoAnswerAsync(w, faultTheReadBack ? _ => { } : null, faultTheReadBack);
+
+        outcome.StatusCode.Should().Be(500);
+        outcome.Detail.Should().Contain("may or may not");
+        w.Recorded.Should().BeEmpty();
+        w.Log.Entries.Should().OnlyContain(e => !e.HasException || e.Message.Contains("returned no answer"),
+            "the read-back's own fault is logged by type name only");
+    }
+
+    [Fact(DisplayName = "084h-2 S3: a change committed without an answer, with this caller's Exclude row, is recorded once")]
+    public async Task Change_CommittedWithoutAnswer_RecordsOnce()
+    {
+        var w = new World();
+        var policy = w.Rule();
+        w.H.TransactionCommitsButAnswersUnknown = requests => requests.Count == 3;
+
+        var outcome = await w.Service().ChangeRuleAsync(Matter, MatterId, Change(policy), CallerOid, CallerUserId, Token, default);
+
+        outcome.Kind.Should().Be(RuleSetOutcomeKind.Done, outcome.Detail);
+        outcome.Value!.Override.DecisionRecord!.Status.Should().Be(OverrideDecisionRecord.Recorded);
+        w.Recorded.Should().ContainSingle().Which.ActionCode.Should().Be("change-rule");
+    }
+
+    [Fact(DisplayName = "084h-2 S3 must-not-fire: a change proven committed by another change's equal version row stays Done but records nothing (NotRecorded)")]
+    public async Task Change_NoAnswer_CommittedByAnotherChange_IsDone_ButNotRecorded()
+    {
+        var (outcome, w, _) = await ChangeWithAConcurrentVersionRowAsync(_ => { });
+
+        outcome.Kind.Should().Be(RuleSetOutcomeKind.Done, "089e fix round 3: equal content is a truthful committed");
+        outcome.Value!.Override.DecisionRecord.Should().Be(OverrideDecisionRecord.NotRecordedFailure);
+        w.Recorded.Should().BeEmpty("the Exclude row is not proven this caller's, so the record would name the wrong decider");
+        w.Enqueued.Should().BeEmpty();
+        w.Log.Entries.Should().ContainSingle(e => e.Level == LogLevel.Error && e.Message.Contains("not proven this caller's"));
+    }
+
+    [Theory(DisplayName = "084h-2 S4 must-fire: a record refused after Done keeps the 2xx, answers Queued, and queues the SAME decision once")]
+    [MemberData(nameof(SevenActs))]
+    public async Task EachAct_ARefusedRecord_IsQueued_WithTheSameDecision(string act)
+    {
+        var w = new World { OnRecord = _ => throw new DecisionRecordRefusedException(DecisionRecordRefusalReason.RecordProcedureLookupFailed, "simulated") };
+        using var cts = new CancellationTokenSource();
+
+        var result = await ActAsync(w, act, SecretNote, cts.Token);
+
+        result.Kind.Should().Be(RuleSetOutcomeKind.Done, "a landed change keeps its 2xx");
+        result.Record.Should().Be(OverrideDecisionRecord.QueuedForRepair);
+        var queued = w.Enqueued.Should().ContainSingle().Subject;
+        queued.Should().BeSameAs(w.Recorded.Single(), "the payload is the inline decision: same id, Values, outcome, decider, role, decided-on, reason and note");
+        queued.Values["note"].Should().Be(SecretNote);
+        w.RecordTokens.Should().Equal(CancellationToken.None);
+        w.EnqueueTokens.Should().Equal(CancellationToken.None);
+        var error = w.Log.Entries.Should().ContainSingle(e => e.Level == LogLevel.Error).Subject;
+        error.Message.Should().Contain("queued for repair").And.Contain(queued.DecisionId.ToString());
+        w.Log.Entries.Should().OnlyContain(e => !e.HasException);
+        w.Log.Entries.Should().NotContain(e => e.Message.Contains(SecretNote) || e.Message.Contains(AssignReason) || e.Message.Contains(RuleReason),
+            "no log line holds the note or the reason");
+    }
+
+    [Fact(DisplayName = "084h-2 S4: a record that throws and an enqueue that fails keep the 2xx and answer NotRecorded")]
+    public async Task ARecordFaultAndAFailedEnqueue_AnswerNotRecorded()
+    {
+        var w = new World { OnRecord = _ => throw new TimeoutException("simulated"), EnqueueFault = new InvalidOperationException("queue down") };
+
+        var result = await ActAsync(w, "exclude-rule", SecretNote);
+
+        result.Kind.Should().Be(RuleSetOutcomeKind.Done);
+        result.Record.Should().Be(new OverrideDecisionRecord(OverrideDecisionRecord.NotRecorded, null, "assignment.decision_record_failed"));
+        w.Enqueued.Should().ContainSingle();
+        w.Log.Entries.Should().ContainSingle(e => e.Level == LogLevel.Error).Which.Message.Should().Contain("could not be queued");
+        w.Log.Entries.Should().NotContain(e => e.Message.Contains(SecretNote) || e.Message.Contains(RuleReason));
+    }
+
+    [Theory(DisplayName = "084h-2 design 6.1 must-fire: a decision the writer would refuse refuses the change before anything is written")]
+    [MemberData(nameof(SevenActs))]
+    public async Task EachAct_APreflightRefusal_Is500_AndWritesNothing(string act)
+    {
+        var w = new World { Preflight = _ => throw new DecisionRecordRefusedException(DecisionRecordRefusalReason.RecordProcedureLookupFailed, "simulated") };
+
+        var result = await ActAsync(w, act);
+
+        result.StatusCode.Should().Be(500);
+        result.ErrorCode.Should().Be(ProcedureAssignmentService.CodeDecisionUnrecordable);
+        w.H.Transactions.Should().NotContain(t => t.Count == 3 || t.Any(r => r is DeleteRequest), "no stage-3 change and no delete was sent");
+        w.Rows.Should().HaveCount(act is "unpin-procedure" or "remove-override" ? 1 : 0);
+        w.Recorded.Should().BeEmpty();
+    }
+
+    public static TheoryData<string, string, string> BadNotes()
+    {
+        var data = new TheoryData<string, string, string>();
+        foreach (var act in Acts)
+        {
+            data.Add(act, new string('n', 2001), ProcedureAssignmentService.CodeNoteTooLong);
+            data.Add(act, "ring \u0007 bell", ProcedureAssignmentService.CodeNoteInvalidCharacters);
+        }
+
+        return data;
+    }
+
+    [Theory(DisplayName = "084h-2 S6 / H-3 must-fire: the service itself refuses a 2001-character note or a control character, before any read")]
+    [MemberData(nameof(BadNotes))]
+    public async Task EachAct_ABadNote_IsRefused400_BeforeAnyRead(string act, string note, string code)
+    {
+        var w = new World();
+
+        var result = await ActAsync(w, act, note);
+
+        result.StatusCode.Should().Be(400);
+        result.ErrorCode.Should().Be(code);
+        result.Queries.Should().Be(0, "the note is checked before any read");
+        result.Transactions.Should().Be(0);
+        w.Preflighted.Should().BeEmpty();
+        w.Recorded.Should().BeEmpty();
+    }
+
+    public static TheoryData<string, string, string?> GoodNotes()
+    {
+        var data = new TheoryData<string, string, string?>();
+        foreach (var act in Acts)
+        {
+            data.Add(act, new string('n', 2000), new string('n', 2000));
+            data.Add(act, "  line one\nline two\tend  ", "line one\nline two\tend");
+            data.Add(act, " \n\t ", null);
+        }
+
+        return data;
+    }
+
+    [Theory(DisplayName = "084h-2 S6 must-not-fire: 2000 characters, a newline and a tab are accepted (trimmed); whitespace-only is no note")]
+    [MemberData(nameof(GoodNotes))]
+    public async Task EachAct_AnAcceptedNote_IsRecordedTrimmed_OrNotAtAll(string act, string note, string? recorded)
+    {
+        var w = new World();
+
+        var result = await ActAsync(w, act, note);
+
+        result.Kind.Should().Be(RuleSetOutcomeKind.Done);
+        var decision = w.Recorded.Should().ContainSingle().Subject;
+        if (recorded is null)
+        {
+            decision.Values.Should().NotContainKey("note", "a whitespace-only note is none, and no null note key is added");
+        }
+        else
+        {
+            decision.Values["note"].Should().Be(recorded);
+        }
+
+        w.Rows.Should().NotContain(r => r.Attributes.Values.OfType<string>().Any(v => v.Contains("line one") || v.Contains("nnnnnnnnnn")),
+            "the note is stored only in the record, never on the override row");
+    }
+
+    [Fact(DisplayName = "084h-2 S5: a change's record carries no count, no close state and no Signal id, even when the close spans the record's invoices")]
+    public async Task Change_TheRecordCarriesNoCloseState()
+    {
+        var w = new World();
+        var policy = w.Rule();
+        var invoice = w.Invoice(matter: MatterId);
+        w.Signal(policy, invoice);
+        w.Readable.Add(invoice);
+
+        var outcome = await w.Service().ChangeRuleAsync(Matter, MatterId, Change(policy), CallerOid, CallerUserId, Token, default);
+
+        outcome.Value!.VisibleOpenInvoices.Should().Be(1, "the close ran");
+        var decision = w.Recorded.Should().ContainSingle().Subject;
+        decision.Values.Keys.Should().BeEquivalentTo(ValueKeysOf("change-rule"));
+        decision.Written.Should().Equal(new DecisionRecordRef(Assignment, outcome.Value.Override.Id));
+        BillingDecisionRecorder.ToRequest(decision).Facts.Keys.Should().BeEquivalentTo(new[] { "coreTable", "recordId" });
     }
 }

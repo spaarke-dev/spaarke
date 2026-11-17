@@ -153,12 +153,12 @@ public sealed class RecordProcedureDryRunContractTests
                 ? throw new InvalidOperationException("simulated selection fault")
                 : Task.FromResult<IReadOnlyList<OpenPolicySignal>>(
                     host.Findings.GetValueOrDefault(policy, []).Where(s => invoices.Contains(s.RegardingInvoiceId!.Value)).ToList()));
-        return new ProcedureAssignmentService(
+        // Task 084h-2: a dry run never reaches the Decision Record (any call to it throws).
+        return ProcedureDecisionRecords.NeverRecording(
             rig.Entities.Object, new Mock<IRecordOwnershipResolver>(MockBehavior.Strict).Object,
             rig.RuleSets,
             host.Closure.Object,
-            new AffectedInvoiceCounter(rig.Entities.Object, rig.Probe, NullLogger<AffectedInvoiceCounter>.Instance),
-            NullLogger<ProcedureAssignmentService>.Instance);
+            new AffectedInvoiceCounter(rig.Entities.Object, rig.Probe, NullLogger<AffectedInvoiceCounter>.Instance));
     }
 
     /// <summary>084d-2b: an invoice in the world: filed on <paramref name="table"/>(<paramref name="record"/>), of <paramref name="firm"/>, In Review unless stated.</summary>
