@@ -2117,3 +2117,23 @@ A BFF deploy can ship code that writes index fields the live index doesn't have.
 **Estimated effort**: 1-2 hours. **Blockers**: merge 084h-4 first (same files). **Related**: task 084h-4.
 
 ---
+
+### ISS-028 — Correction rows are not marked writer-only in the record table rules
+
+| Field | Value |
+|---|---|
+| **Status** | Open (owner question: mark the table writer-only, or keep and guard) |
+| **Urgency** | next-round |
+| **Filed** | 2026-11-17 |
+| **Source** | Opus adversarial review of task 095f-2d2 (found in passing; pre-existing) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2879 |
+
+**Description**: `sprk_invoicecorrection`'s entry in `RecordTableRules` sets neither `CreatedOnlyByItsWriter` nor `GenericCreateOnlyRefused`, unlike `sprk_decisionrecord` and `sprk_signal`. The BFF's generic record create and update paths therefore accept this table, so a row (and, since 095f-2d2, its note) can be written outside `InvoiceCorrectionService`: a later update can change a note that EB-D-242 says the first writer keeps, and a generic create can add a row carrying a label, which pollutes the D-47/D-64 calibration data. The second part predates 095f-2d2.
+
+**Entry-points**: `src/server/api/Sprk.Bff.Api/Services/RecordCreation/RecordTableRules.cs` (the `sprk_invoicecorrection` rule, ~line 437; compare the `CreatedOnlyByItsWriter = true` rules ~489-515); `InvoiceCorrectionNote.cs` (`CorrectionRowColumn` doc).
+
+**Suggested fix**: set `CreatedOnlyByItsWriter = true` on the rule (check that no generic caller writes correction rows today), with a must-fire test on the create and update refusals; or, if a generic writer must stay, a writers guard like `InvoiceDecisionNoteWritersGuardTests`.
+
+**Estimated effort**: 2-4 hours. **Blockers**: owner choice. **Related**: task 095f-2d2, EB-D-242, D-64.
+
+---
