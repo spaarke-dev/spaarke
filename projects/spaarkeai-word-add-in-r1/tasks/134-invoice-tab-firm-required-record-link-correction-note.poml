@@ -77,5 +77,6 @@ rework: fix-round-1 task 134
 - Remaining known limits:
   - K4: closing the pending view drops its Retry (the L4 job finishes the pass);
   - K4: the list Retry can double-send (dedup absorbs it).
-- Merge is held until 095g is on the dev BFF and the type code is seeded, then the owner's go.</notes>
+- Merge is held until 095g is on the dev BFF and the type code is seeded, then the owner's go.
+2026-11-17: #2829 merged on the owner's go ("Yes, merge #2829") as a68b6e5e6f. 095g has been live on dev BFF aa7d6345f3 since 2026-11-15, and the type code is seeded. Deploy run 44117344761 succeeded. Remaining: the owner's dev check (the testable="false" criterion).</notes>
 </task>
