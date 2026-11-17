@@ -387,13 +387,19 @@ export const CODE_BLOCKED_STILL_PROCESSING = 'ebilling.blocked.still_processing'
 
 /**
  * Review round 3: the server's DEFINITE refusal of an Override or Return: a 4xx that is not an unknown outcome (`isBlockedOutcomeUnknown`), not
- * a refused note (400 note codes: the form is fixed and sent again), and not one of the two transient 409s (`in_progress`, `still_processing`).
+ * a refused note (400 note codes: the form is fixed and sent again), not one of the two transient 409s (`in_progress`, `still_processing`), and
+ * not a 401, 408 or 429 (sign-in expired, timed out, rate limited: the same request can still finish later).
  * `decision_conflict`, `record_refused`, `findings_too_large`, `not_blocked`, `already_returned`, `already_overridden`, `invoice_not_held`
  * and a 403 are all this. A repeat answered so will never finish, so a lock kept for it has to be released. A 5xx is never definite here.
  */
 export const isBlockedDefiniteRefusal = (f: ApiFailure): boolean =>
   f.status >= 400 &&
   f.status < 500 &&
+  // Round 4: a 401 (expired sign-in), 408 (timeout) and 429 (rate limit) say nothing final: after a re-sign-in or a wait the same request can
+  // still finish, and the server finishes it from the STORED text, so the lock stays.
+  f.status !== 401 &&
+  f.status !== 408 &&
+  f.status !== 429 &&
   !isBlockedOutcomeUnknown(f) &&
   !isNoteRefusal(f) &&
   !(f.status === 409 && (f.errorCode === CODE_BLOCKED_IN_PROGRESS || f.errorCode === CODE_BLOCKED_STILL_PROCESSING));

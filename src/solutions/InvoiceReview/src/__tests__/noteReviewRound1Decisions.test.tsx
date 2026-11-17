@@ -417,6 +417,9 @@ describe('the blocked submission: an unsure Override or Return stays locked acro
     ['a 409 in_progress (transient)', () => failed(problem(409, 'ebilling.blocked.in_progress', { detail: 'Another request is running.' }))],
     ['a 409 still_processing (transient)', () => failed(problem(409, 'ebilling.blocked.still_processing', { detail: 'Still processing.' }))],
     ['no answer at all', () => noAnswer()],
+    ['a 401 (sign-in expired)', () => failed(problem(401, null, { detail: 'Sign in again.' }))],
+    ['a 408 (timed out)', () => failed(problem(408, null, { detail: 'The request timed out.' }))],
+    ['a 429 (rate limited)', () => failed(problem(429, null, { detail: 'Too many requests.' }))],
   ])('(must-not-fire) a repeat of the locked Override answered %s keeps the lock, and Return still warns', async (_, again) => {
     const decision = mockDecisionApi(held());
     decision.overrideBlocked.mockResolvedValueOnce(failed(problem(503, 'ebilling.blocked.unavailable', { detail: 'Saved in part.' }))).mockResolvedValueOnce(again());

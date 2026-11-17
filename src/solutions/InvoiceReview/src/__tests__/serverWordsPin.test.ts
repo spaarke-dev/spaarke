@@ -151,6 +151,8 @@ describe('the blocked-submission 409 that may be answered after the Decision Rec
     expect(isBlockedDefiniteRefusal(conflict(null, 0))).toBe(false);
     expect(isBlockedDefiniteRefusal(conflict('ebilling.note_too_long', 400))).toBe(false);
     expect(isBlockedDefiniteRefusal(conflict(b.NotBlocked, 500))).toBe(false);
+    // Round 4: a sign-in that expired, a timeout and a rate limit can still finish later.
+    for (const status of [401, 408, 429]) expect(isBlockedDefiniteRefusal(conflict(null, status))).toBe(false);
   });
 
   it('(must-not-fire) the 409s answered before any record is written are not unknown outcomes', () => {
