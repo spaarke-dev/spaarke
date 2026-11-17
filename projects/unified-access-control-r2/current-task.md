@@ -36,7 +36,7 @@
 
 ## Waiting on the owner
 - Dev checks: To Do create (Office); Send budget inquiry text; **AI drafting retry in the email composer**; **composer template recheck** (195 live).
-- **EB-D-247: resolved by the owner (ebilling EB-D-251), derivable record id, see the uac-r2 thread.** I accepted the residual for 084h-5 (2026-11-17); waiting for their final sha.
+- **EB-D-247 (derivable record id, see the uac-r2 thread): REOPENED.** The owner's choice is disputed between sessions, and a new fact affects billing (private file). ebilling's f7b532d721 is held, not merged. Choice: (A) keyed id for all, or (B) option 2 narrowed. I relay the owner's exact words to ebilling-r1.
 - **Correction rows: native write hardening (ebilling EB-D-248; private file `private-correction-rows-*`).** The owner decided (EB-D-249/250): it ships inside iss028 (role source + guard rule), and ebilling applies the scoped dev edit after merge. I review the diff, and I get notices before and after the dev edit; then I re-probe the live privileges.
 - SpaarkeMaster 1.3.2.0 publish/import; D-2 step 3; word-add-in #2829 dev check (firm-assign pane); provisioning #2871; ebilling task 112; #2764; 191i live steps; 193 PCF import; D-10 after U-3; #2786 part 2 scope; follow-ups #2826, #2549. Checklist: `notes/owner-test-checklist-2026-11-13.md`.
 
