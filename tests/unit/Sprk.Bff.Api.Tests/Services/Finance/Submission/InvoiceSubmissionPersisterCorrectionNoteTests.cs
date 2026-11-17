@@ -87,6 +87,26 @@ public partial class InvoiceSubmissionPersisterTests
         logger.Entries.Where(e => e.Level == Microsoft.Extensions.Logging.LogLevel.Warning && e.Message.Contains(NoNoteWarning)).Should().ContainSingle();
     }
 
+    // Task 095f-2e2a (EB-D-245): the internal upload route now takes a Correction. Its submission is an Internal upload (no source document, the
+    // PDF staged under the submission id) naming the replaced invoice's submission; the commit is the same as every other channel's.
+    [Fact(DisplayName = "095f-2e2a: an internal upload Correction commits like every channel's: the new invoice supersedes the old one, the old one closes Superseded in the same transaction, and the note is on the new invoice")]
+    public async Task InternalUploadCorrection_SupersedesTheOldInvoice_AndWritesTheNote()
+    {
+        var store = CorrectionStore();
+        store.Submission["sprk_channel"] = new OptionSetValue((int)InvoiceSubmissionChannel.Internal);
+        store.Submission.Attributes.Should().NotContainKey("sprk_document", "an upload names no source document");
+
+        var result = await store.Build().PersistAsync((await CorrectionOutcomeAsync()) with { CorrectionNote = NoteText }, null);
+
+        result.Status.Should().Be(SubmissionPersistStatus.Committed);
+        var transaction = store.Transactions.Should().ContainSingle().Subject;
+        var created = InvoiceCreate(store);
+        created.GetAttributeValue<EntityReference>("sprk_supersedesinvoice").Id.Should().Be(OldInvoiceId);
+        created.GetAttributeValue<string>("sprk_correctionnote").Should().Be(NoteText);
+        transaction.OfType<UpdateRequest>().Should().ContainSingle(u => u.Target.LogicalName == "sprk_invoice" && u.Target.Id == OldInvoiceId);
+        store.OldInvoiceStatus.Should().Be(InvoiceStatusCodes.Superseded);
+    }
+
     [Theory(DisplayName = "095f: a note over the column's length or with a control character is never written, never truncated")]
     [InlineData("tooLong")]
     [InlineData("control")]

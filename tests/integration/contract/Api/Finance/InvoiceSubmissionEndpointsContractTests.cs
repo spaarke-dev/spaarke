@@ -2690,6 +2690,312 @@ public sealed class InvoiceSubmissionEndpointsContractTests : IAsyncLifetime
         _h.JobsSent.Should().ContainSingle().Which.Payload!.RootElement.GetProperty("correctionNote").GetString().Should().Be(FromDocumentNote);
     }
 
+    // ── ebilling-r1 task 095f-2e2a (EB-D-245, design 16 option B'): the internal multipart route takes a Correction (mode, invoiceId,
+    //    correctionNote), through the same Write check (PrepareCorrectionAsync) and the same intake check (CheckCorrectionAsync) as from-document ──
+
+    /// <summary>The internal multipart form of a Correction (task 095f-2e2a). A null field is not sent; <paramref name="extra"/> adds raw fields.</summary>
+    private static MultipartFormDataContent CorrectionForm(
+        string? mode = "Correction", string? invoiceId = null, string? note = FromDocumentNote, string number = CorrectionSeed.Number,
+        params (string Name, string Value)[] extra)
+    {
+        var form = Form(number: number);
+        if (mode is not null)
+        {
+            form.Add(new StringContent(mode), "mode");
+        }
+
+        form.Add(new StringContent(invoiceId ?? CorrectionSeed.OldInvoiceId.ToString()), "invoiceId");
+        if (note is not null)
+        {
+            form.Add(new StringContent(note), "correctionNote");
+        }
+
+        foreach (var (name, value) in extra)
+        {
+            form.Add(new StringContent(value), name);
+        }
+
+        return form;
+    }
+
+    /// <summary>A correctable invoice (In Review, its own submission, this firm and matter) the caller may Write, for the internal upload.</summary>
+    private void CorrectableInvoiceForUpload(Entity? invoice = null, AccessRights rights = AccessRights.Read | AccessRights.Write)
+    {
+        GrantInternalSubmit();
+        CorrectionSeed.Seed(_h, invoice);
+        _sourceRights.Grant(FinanceAuthorizationFilter.InvoiceEntitySet, CorrectionSeed.OldInvoiceId, rights);
+    }
+
+    private void NoInvoiceAskedAbout()
+    {
+        _h.Entities.Verify(e => e.RetrieveAsync("sprk_invoice", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()), Times.Never());
+        _sourceRights.Calls.Should().NotContain(c => c.Set == FinanceAuthorizationFilter.InvoiceEntitySet, "the invoice's Write is not asked");
+    }
+
+    [Fact(DisplayName = "095f-2e2a: an internal upload Correction of an In Review invoice is 202; sprk_resubmissionof names the old invoice's submission, the same firm invoice number is allocated (the next .n), the note rides the job and the PDF is staged")]
+    public async Task Internal_upload_correction_is_202_with_the_target_the_number_and_the_note()
+    {
+        CorrectableInvoiceForUpload();
+        _h.Allocation = TrackingNumberResult.Created("INV-7.2", 2);
+
+        var response = await PostInternalAsync(CorrectionForm());
+
+        response.StatusCode.Should().Be(HttpStatusCode.Accepted, await response.Content.ReadAsStringAsync());
+        using (var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync()))
+        {
+            body.RootElement.GetProperty("trackingNumber").GetString().Should().Be("INV-7.2");
+        }
+
+        var allocation = _h.Allocations.Should().ContainSingle().Subject;
+        (allocation.FirmId, allocation.Number).Should().Be((FirmId, CorrectionSeed.Number), "the tracking sequence is the firm and its invoice number (D-37)");
+        allocation.Fields!["sprk_resubmissionof"].Should().Be(new EntityReference("sprk_invoicesubmission", CorrectionSeed.OldSubmissionId));
+        allocation.Fields["sprk_channel"].Should().Be(new OptionSetValue((int)InvoiceSubmissionChannel.Internal));
+        var job = _h.JobsSent.Should().ContainSingle().Subject;
+        job.Payload!.RootElement.GetProperty("correctionNote").GetString().Should().Be(FromDocumentNote);
+        job.Payload.RootElement.GetProperty("submissionId").GetGuid().Should().Be(allocation.SubmissionId);
+        _h.Stages.Should().ContainSingle("the corrected PDF is staged as any upload's");
+        _sourceRights.Calls.Should().Contain(c => c.Set == FinanceAuthorizationFilter.InvoiceEntitySet && c.Id == CorrectionSeed.OldInvoiceId && c.Token != null,
+            "the Write check is the caller's own (OBO)");
+    }
+
+    [Fact(DisplayName = "095f-2e2a: an internal upload Correction's note is trimmed and carried whole up to 2000 characters (line breaks and a tab kept)")]
+    public async Task Internal_upload_correction_note_of_the_maximum_length_rides_the_job_trimmed()
+    {
+        CorrectableInvoiceForUpload();
+        var note = "line one\r\n\tline two " + new string('y', InvoiceCorrectionNote.MaxLength - "line one\r\n\tline two ".Length);
+
+        var response = await PostInternalAsync(CorrectionForm(note: "  " + note + "  "));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Accepted, await response.Content.ReadAsStringAsync());
+        _h.JobsSent.Should().ContainSingle().Which.Payload!.RootElement.GetProperty("correctionNote").GetString().Should().Be(note);
+    }
+
+    [Theory(DisplayName = "095f-2e2a (must fire): an internal upload Correction with no note, an empty one or a blank one is 400 correction_note_required (from-document's code and words) with no invoice read, no Write asked, nothing written")]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   \r\n\t ")]
+    public async Task Internal_upload_correction_without_a_note_is_the_coded_400(string? note)
+    {
+        CorrectableInvoiceForUpload();
+
+        var response = await PostInternalAsync(CorrectionForm(note: note));
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest, await response.Content.ReadAsStringAsync());
+        using var problem = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        problem.RootElement.GetProperty("errorCode").GetString().Should().Be("ebilling.submission.correction_note_required");
+        problem.RootElement.GetProperty("detail").GetString().Should().Be("A correction needs a note saying why the invoice is corrected.");
+        NoInvoiceAskedAbout();
+        _h.SubmissionReads.Should().BeEmpty();
+        NothingWritten();
+    }
+
+    [Fact(DisplayName = "095f-2e2a (seed-proof, the Write guard): without the caller's own Write on the invoice the internal upload Correction is the uniform 404, byte-for-byte the answer for an unknown invoice; nothing read about it, nothing written")]
+    public async Task Internal_upload_correction_without_write_is_the_uniform_404()
+    {
+        CorrectableInvoiceForUpload(rights: AccessRights.Read);
+
+        var denied = await PostInternalAsync(CorrectionForm());
+        var unknown = await PostInternalAsync(CorrectionForm(invoiceId: Guid.NewGuid().ToString()));
+
+        denied.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        unknown.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        var deniedBody = await denied.Content.ReadAsStringAsync();
+        using (var problem = JsonDocument.Parse(deniedBody))
+        {
+            problem.RootElement.GetProperty("reasonCode").GetString().Should().Be("sdap.access.deny.record_unavailable");
+        }
+
+        var normalise = (string body) => System.Text.RegularExpressions.Regex.Replace(body, "\"correlationId\":\"[^\"]*\"", "\"correlationId\":\"x\"");
+        normalise(await unknown.Content.ReadAsStringAsync()).Should().Be(normalise(deniedBody), "the answer reveals nothing about the invoice");
+        deniedBody.Should().NotContain(CorrectionSeed.OldInvoiceId.ToString());
+        _h.Entities.Verify(e => e.RetrieveAsync("sprk_invoice", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()), Times.Never());
+        NothingWritten();
+    }
+
+    [Theory(DisplayName = "095f-2e2a (seed-proof, the shared intake check; must fire): an internal upload Correction the guard refuses (another firm, another core record, not In Review, another firm invoice number, no or an unfinished submission) is 409 correction_not_allowed with its reason; nothing staged or written")]
+    [MemberData(nameof(CorrectionRefusals))]
+    public async Task Internal_upload_correction_refused_is_409_with_its_reason(string reason)
+    {
+        CorrectableInvoiceForUpload(reason switch
+        {
+            "invoice_status" => CorrectionSeed.Invoice(status: Sprk.Bff.Api.Services.Finance.InvoiceStatusCodes.Approved),
+            "different_firm" => CorrectionSeed.Invoice(firm: Guid.NewGuid()),
+            "different_core_record" => CorrectionSeed.Invoice(coreId: Guid.NewGuid()),
+            _ => null,
+        });
+        if (reason == "no_submission")
+        {
+            _h.PriorSubmissions.Clear();
+        }
+
+        if (reason == "submission_in_progress")
+        {
+            _h.PriorSubmissions[0]["sprk_processingstatus"] = new OptionSetValue((int)InvoiceSubmissionStatus.Processing);
+        }
+
+        var response = await PostInternalAsync(CorrectionForm(number: reason == "different_invoice_number" ? "INV-8" : CorrectionSeed.Number));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Conflict, await response.Content.ReadAsStringAsync());
+        using var problem = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        problem.RootElement.GetProperty("errorCode").GetString().Should().Be("ebilling.submission.correction_not_allowed");
+        problem.RootElement.GetProperty("reason").GetString().Should().Be(reason);
+        if (reason == "invoice_status")
+        {
+            problem.RootElement.GetProperty("invoiceStatus").GetString().Should().Be("Approved");
+        }
+
+        NothingWritten();
+    }
+
+    public static TheoryData<string, string?, string?, string?, string, string> InternalUploadFieldErrors => new()
+    {
+        // name, mode, invoiceId ("-" = not sent), note, field, message
+        { "invalid mode", "Replace", null, FromDocumentNote, "mode", "mode must be New or Correction." },
+        { "empty mode", "", null, FromDocumentNote, "mode", "mode must be New or Correction." },
+        { "New naming an invoice", "New", null, null, "invoiceId", "invoiceId is not sent for mode New." },
+        { "no mode naming an invoice", null, null, null, "invoiceId", "invoiceId is not sent for mode New." },
+        { "Correction without an invoice", "Correction", "-", FromDocumentNote, "invoiceId", "invoiceId is required for mode Correction." },
+        { "Correction with an empty id", "Correction", "00000000-0000-0000-0000-000000000000", FromDocumentNote, "invoiceId", "invoiceId is required for mode Correction." },
+        { "Correction with a malformed id", "Correction", "not-a-guid", FromDocumentNote, "invoiceId", "invoiceId must be a GUID." },
+        { "Correction note over 2000", "Correction", null, new string('x', 2001), "correctionNote", "correctionNote may be at most 2000 characters." },
+        { "Correction note with a control character", "Correction", null, "bad\u0007note", "correctionNote", "correctionNote may not contain control characters other than a line break or a tab." },
+    };
+
+    [Theory(DisplayName = "095f-2e2a (must fire): an invalid mode, a New naming an invoice, a Correction without a usable invoiceId, or an invalid note is a field error before anything is asked; nothing written")]
+    [MemberData(nameof(InternalUploadFieldErrors))]
+    public async Task Internal_upload_invalid_correction_fields_are_400(string name, string? mode, string? invoiceId, string? note, string field, string message)
+    {
+        CorrectableInvoiceForUpload();
+        var form = Form(number: CorrectionSeed.Number);
+        if (mode is not null)
+        {
+            form.Add(new StringContent(mode), "mode");
+        }
+
+        if (invoiceId != "-")
+        {
+            form.Add(new StringContent(invoiceId ?? CorrectionSeed.OldInvoiceId.ToString()), "invoiceId");
+        }
+
+        if (note is not null)
+        {
+            form.Add(new StringContent(note), "correctionNote");
+        }
+
+        var response = await PostInternalAsync(form);
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest, name);
+        using var problem = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        problem.RootElement.GetProperty("errors").GetProperty(field)[0].GetString().Should().Be(message, name);
+        problem.RootElement.TryGetProperty("errorCode", out _).Should().BeFalse("a field error, not a coded 400");
+        NoInvoiceAskedAbout();
+        NothingWritten();
+    }
+
+    [Theory(DisplayName = "095f-2e2a (must fire): a note on a New upload (mode New, or no mode) is a field error on correctionNote, as on from-document; nothing written")]
+    [InlineData("New")]
+    [InlineData(null)]
+    public async Task Internal_upload_new_with_a_note_is_a_field_error(string? mode)
+    {
+        GrantInternalSubmit();
+        var form = Form();
+        if (mode is not null)
+        {
+            form.Add(new StringContent(mode), "mode");
+        }
+
+        form.Add(new StringContent("why"), "correctionNote");
+
+        var response = await PostInternalAsync(form);
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        using var problem = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        problem.RootElement.GetProperty("errors").GetProperty("correctionNote")[0].GetString().Should().Be("correctionNote is not sent for mode New.");
+        NothingWritten();
+    }
+
+    [Theory(DisplayName = "095f-2e2a (must fire): a Correction field sent twice is a field error (never joined or picked); nothing asked, nothing written")]
+    [InlineData("mode")]
+    [InlineData("invoiceId")]
+    [InlineData("correctionNote")]
+    public async Task Internal_upload_correction_field_sent_twice_is_400(string field)
+    {
+        CorrectableInvoiceForUpload();
+        var repeat = field switch
+        {
+            "mode" => "Correction",
+            "invoiceId" => CorrectionSeed.OldInvoiceId.ToString(),
+            _ => FromDocumentNote,
+        };
+
+        var response = await PostInternalAsync(CorrectionForm(extra: (field, repeat)));
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        using var problem = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        problem.RootElement.GetProperty("errors").GetProperty(field)[0].GetString().Should().Be($"{field} is sent at most once.");
+        NoInvoiceAskedAbout();
+        NothingWritten();
+    }
+
+    [Theory(DisplayName = "095f-2e2a (must not fire): an internal upload with no mode, or mode New, and no correction fields is unchanged: 202, no sprk_resubmissionof, no invoice asked about, no note on the job")]
+    [InlineData(null)]
+    [InlineData("New")]
+    public async Task Internal_upload_new_is_unchanged(string? mode)
+    {
+        CorrectableInvoiceForUpload();
+        var form = Form(number: CorrectionSeed.Number);
+        if (mode is not null)
+        {
+            form.Add(new StringContent(mode), "mode");
+        }
+
+        var response = await PostInternalAsync(form);
+
+        response.StatusCode.Should().Be(HttpStatusCode.Accepted, await response.Content.ReadAsStringAsync());
+        _h.Allocations.Should().ContainSingle().Which.Fields!.Should().NotContainKey("sprk_resubmissionof");
+        _h.JobsSent.Should().ContainSingle().Which.Payload!.RootElement.TryGetProperty("correctionNote", out _).Should().BeFalse();
+        NoInvoiceAskedAbout();
+        _h.Entities.Verify(e => e.RetrieveMultipleAsync(
+            It.Is<Microsoft.Xrm.Sdk.Query.QueryExpression>(q => q.EntityName == "sprk_invoicesubmission"), It.IsAny<CancellationToken>()), Times.Never());
+    }
+
+    [Fact(DisplayName = "095f-2e2a (must not fire): the external (SPA) route ignores mode, invoiceId and correctionNote as before: a New submission, no sprk_resubmissionof, no note on the job, no invoice asked about")]
+    public async Task External_upload_ignores_the_correction_fields()
+    {
+        CorrectionSeed.Seed(_h);
+        _sourceRights.Grant(FinanceAuthorizationFilter.InvoiceEntitySet, CorrectionSeed.OldInvoiceId, AccessRights.Read | AccessRights.Write);
+
+        var response = await PostExternalAsync(CorrectionForm(), $"?firmId={FirmId}");
+
+        response.StatusCode.Should().Be(HttpStatusCode.Accepted, await response.Content.ReadAsStringAsync());
+        var allocation = _h.Allocations.Should().ContainSingle().Subject;
+        allocation.Fields!.Should().NotContainKey("sprk_resubmissionof");
+        allocation.Fields!["sprk_channel"].Should().Be(new OptionSetValue((int)InvoiceSubmissionChannel.Spa));
+        _h.JobsSent.Should().ContainSingle().Which.Payload!.RootElement.TryGetProperty("correctionNote", out _).Should().BeFalse();
+        NoInvoiceAskedAbout();
+    }
+
+    [Fact(DisplayName = "095f-2e2a: the internal upload routes' OpenAPI contract names mode, invoiceId and correctionNote and lists 404; the external route's contract is unchanged")]
+    public void Upload_route_metadata_names_the_correction_fields_on_the_internal_routes_only()
+    {
+        var endpoints = _app.Services.GetServices<EndpointDataSource>().SelectMany(s => s.Endpoints).OfType<RouteEndpoint>().ToList();
+        foreach (var segment in new[] { "matters", "projects", "workassignments" })
+        {
+            var internalRoute = endpoints.Single(e => e.RoutePattern.RawText == $"/api/finance/{segment}/{{id:guid}}/invoice-submissions");
+            internalRoute.Metadata.GetMetadata<IEndpointDescriptionMetadata>()!.Description.Should()
+                .Contain("mode").And.Contain("invoiceId").And.Contain("correctionNote")
+                .And.Contain("correction_note_required").And.Contain("correction_not_allowed");
+            internalRoute.Metadata.GetOrderedMetadata<IProducesResponseTypeMetadata>().Select(m => m.StatusCode)
+                .Should().Contain(StatusCodes.Status404NotFound);
+
+            var externalRoute = endpoints.Single(e => e.RoutePattern.RawText == $"/api/v1/external/{segment}/{{id:guid}}/invoice-submissions");
+            externalRoute.Metadata.GetMetadata<IEndpointDescriptionMetadata>()!.Description.Should()
+                .NotContain("correctionNote").And.NotContain("invoiceId");
+            externalRoute.Metadata.GetOrderedMetadata<IProducesResponseTypeMetadata>().Select(m => m.StatusCode)
+                .Should().NotContain(StatusCodes.Status404NotFound);
+        }
+    }
+
     // ── ebilling-r1 task 118b-1: supportingDocumentIds on POST from-document (contract, the caller's Read, the same communication) ──
 
     private static readonly Guid SupportingA = Guid.Parse("118b0000-0000-4000-8000-0000000000a1");

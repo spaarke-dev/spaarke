@@ -162,17 +162,20 @@ public sealed record InvoiceSubmissionRequest
     /// <summary>
     /// ebilling-r1 task 097b (EB-D-179): a Correction's old invoice, as the route read it app-only AFTER the caller's own Write on it passed
     /// (<c>InvoiceSubmissionEndpoints.PrepareCorrectionAsync</c>), with <see cref="InvoiceSubmissionService.CorrectionInvoiceColumns"/>. Null
-    /// for a New submission: the request then behaves exactly as before 097b. Read only by
-    /// <see cref="InvoiceSubmissionService.SubmitExistingDocumentAsync"/>, which judges it (<see cref="InvoiceSubmissionService.CheckCorrectionAsync"/>)
-    /// and records the target on the new submission (<see cref="InvoiceSubmissionService.ResubmissionOfColumn"/>).
+    /// for a New submission: the request then behaves exactly as before 097b. Read by
+    /// <see cref="InvoiceSubmissionService.SubmitExistingDocumentAsync"/> and, since task 095f-2e2a (EB-D-245), by
+    /// <see cref="InvoiceSubmissionService.SubmitAsync"/> on the internal channel only (any other channel throws); both judge it by the one
+    /// shared check (<see cref="InvoiceSubmissionService.CheckCorrectionAsync"/>) and record the target on the new submission
+    /// (<see cref="InvoiceSubmissionService.ResubmissionOfColumn"/>).
     /// </summary>
     public Microsoft.Xrm.Sdk.Entity? CorrectedInvoice { get; init; }
 
     /// <summary>
-    /// ebilling-r1 task 095f-2e1 (EB-D-237): the firm's correction note of a from-document Correction, already checked by the route
-    /// (<see cref="InvoiceCorrectionNote.Check"/>: trimmed, within the length, no control characters) and required there when
-    /// <see cref="CorrectedInvoice"/> is set. Read only by <see cref="InvoiceSubmissionService.SubmitExistingDocumentAsync"/>, which carries it on the
-    /// processing job (<see cref="InvoiceSubmissionService.BuildJob"/>); the persister writes it to <c>sprk_correctionnote</c> on the new invoice.
+    /// ebilling-r1 task 095f-2e1 (EB-D-237): the firm's correction note of a from-document Correction (and, task 095f-2e2a, of an internal
+    /// upload Correction), already checked by the route (<see cref="InvoiceCorrectionNote.Check"/>: trimmed, within the length, no control
+    /// characters) and required there when <see cref="CorrectedInvoice"/> is set. Read by <see cref="InvoiceSubmissionService.SubmitExistingDocumentAsync"/>
+    /// and <see cref="InvoiceSubmissionService.SubmitAsync"/>, which carry it on the processing job (<see cref="InvoiceSubmissionService.BuildJob"/>)
+    /// only when <see cref="CorrectedInvoice"/> is set; the persister writes it to <c>sprk_correctionnote</c> on the new invoice.
     /// Null for a New submission and for every other entry (the job payload is then exactly what it was). Never part of the submission id and
     /// never compared with an earlier attempt: a retry of a still-Received Correction re-queues the job with the retry's note.
     /// </summary>

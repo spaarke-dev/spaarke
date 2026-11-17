@@ -237,6 +237,13 @@ public class InvoiceSubmissionService
     {
         ArgumentNullException.ThrowIfNull(request);
 
+        // Task 095f-2e2a (EB-D-245): only the internal upload route sends a Correction; the external (SPA) route is New only. A Correction on any
+        // other channel is a caller defect, refused before anything is read or written.
+        if (request.CorrectedInvoice is not null && request.Channel != InvoiceSubmissionChannel.Internal)
+        {
+            throw new ArgumentException("Only the internal channel submits a Correction through the upload entry.", nameof(request));
+        }
+
         // ── 1. The payload: nothing is read or written for a request that is not valid ──
         if (Validate(request) is { } invalid)
         {
@@ -293,8 +300,36 @@ public class InvoiceSubmissionService
                     "Invoice file storage is not configured, so the invoice cannot be stored. Nothing was saved.");
         }
 
-        return await WriteAsync(request, number, file, decision.Row!, decision.ResolverFields!, ct);
+        // ── 2c. Task 095f-2e2a (EB-D-245): a Correction's own checks, the SAME check the from-document entry runs (its step 4a), read-only and
+        //        before the first write (the stage), so a refused Correction stages, creates and queues nothing. ──
+        var (correctionRefusal, resubmissionOf) = await CheckRequestedCorrectionAsync(request, number, ct);
+        if (correctionRefusal is not null)
+        {
+            return correctionRefusal;
+        }
+
+        return await WriteAsync(request, number, file, decision.Row!, decision.ResolverFields!, resubmissionOf, ct);
     }
+
+    /// <summary>
+    /// Task 095f-2e2a (EB-D-245): the Correction check of an intake entry, shared by <see cref="SubmitAsync"/> (the internal upload) and
+    /// <see cref="SubmitExistingDocumentAsync"/> (from-document) so the two cannot drift: nothing for a New request
+    /// (<see cref="InvoiceSubmissionRequest.CorrectedInvoice"/> null, no read); otherwise <see cref="CheckCorrectionAsync"/> on the request's core
+    /// record, firm and trimmed firm invoice number, whose answer is a refusal (409 <see cref="InvoiceSubmissionErrors.CorrectionNotAllowed"/>
+    /// with its reason, or 503) or the submission to record in <see cref="ResubmissionOfColumn"/>. The caller's own Write on the invoice is the
+    /// route's (<c>InvoiceSubmissionEndpoints.PrepareCorrectionAsync</c>), asked before the request reaches here.
+    /// </summary>
+    private async Task<(InvoiceSubmissionOutcome? Refusal, Guid? ResubmissionOf)> CheckRequestedCorrectionAsync(
+        InvoiceSubmissionRequest request, string number, CancellationToken ct) =>
+        request.CorrectedInvoice is { } correctedInvoice
+            ? await CheckCorrectionAsync(request.CoreRecord, request.FirmId, number, correctedInvoice, ct)
+            : (null, null);
+
+    /// <summary>
+    /// Task 095f-2e1 / 095f-2e2a: the note a request's processing job carries: the Correction's note (the submission row has no column for it;
+    /// the persister writes it on the new invoice), or null for a New request, whose job payload is then exactly what it was.
+    /// </summary>
+    private static string? JobCorrectionNote(InvoiceSubmissionRequest request) => request.CorrectedInvoice is null ? null : request.CorrectionNote;
 
     /// <summary>
     /// ebilling-r1 082c-3 (brief 082c section 3(c), section 7 R4 item 4): the advisory pre-check the external (SPA) route runs on a RECEIVED
@@ -626,17 +661,12 @@ public class InvoiceSubmissionService
         }
 
         // ── 4a. Task 097b: a Correction's own checks (the invoice's firm, core record, status, submission and number), read-only, before
-        //        step A and the create. Only a NEW attempt reaches here: a retry was answered by its earlier submission above. ──
-        Guid? resubmissionOf = null;
-        if (request.CorrectedInvoice is { } correctedInvoice)
+        //        step A and the create. Only a NEW attempt reaches here: a retry was answered by its earlier submission above. Task 095f-2e2a:
+        //        the check is the one the upload entry runs too (CheckRequestedCorrectionAsync). ──
+        var (correctionRefusal, resubmissionOf) = await CheckRequestedCorrectionAsync(request, number, ct);
+        if (correctionRefusal is not null)
         {
-            var (correctionRefusal, target) = await CheckCorrectionAsync(request.CoreRecord, request.FirmId, number, correctedInvoice, ct);
-            if (correctionRefusal is not null)
-            {
-                return correctionRefusal;
-            }
-
-            resubmissionOf = target;
+            return correctionRefusal;
         }
 
         // ── 4a-supporting. Task 118b-2: the supporting documents, read-only, after every other read-only refusal and before step A, so
@@ -755,7 +785,7 @@ public class InvoiceSubmissionService
         }
 
         // Task 095f-2e1 (EB-D-237): a Correction's note rides the job (the submission row has no column for it), as on the from-email route.
-        if (!await TrySubmitJobAsync(jobId, submissionId, request.CorrelationId, request.CorrectedInvoice is null ? null : request.CorrectionNote))
+        if (!await TrySubmitJobAsync(jobId, submissionId, request.CorrelationId, JobCorrectionNote(request)))
         {
             return AfterFiling(NotQueued(), filed);
         }
@@ -828,7 +858,7 @@ public class InvoiceSubmissionService
         {
             ct.ThrowIfCancellationRequested();
             // Task 095f-2e1: the retry's own note (the route required one for a Correction), so a re-queued Correction's job carries it.
-            if (!await TrySubmitJobAsync(jobId, earlier.SubmissionId, request.CorrelationId, request.CorrectedInvoice is null ? null : request.CorrectionNote))
+            if (!await TrySubmitJobAsync(jobId, earlier.SubmissionId, request.CorrelationId, JobCorrectionNote(request)))
             {
                 return AfterFiling(NotQueued(), filed);
             }
@@ -2109,7 +2139,7 @@ public class InvoiceSubmissionService
 
     private async Task<InvoiceSubmissionOutcome> WriteAsync(
         InvoiceSubmissionRequest request, string number, InvoiceSubmissionFile file, Entity row, InvoiceFamilyResolverFields resolverFields,
-        CancellationToken ct)
+        Guid? resubmissionOf, CancellationToken ct)
     {
         var core = request.CoreRecord;
         var submissionId = Guid.NewGuid();
@@ -2175,6 +2205,12 @@ public class InvoiceSubmissionService
                 row["sprk_submitter"] = new EntityReference("contact", contactId);
             }
 
+            // Task 095f-2e2a: a Correction names the replaced invoice's submission (CheckRequestedCorrectionAsync's answer), as from-document does.
+            if (resubmissionOf is { } earlierSubmission)
+            {
+                row[ResubmissionOfColumn] = new EntityReference(SubmissionEntity, earlierSubmission);
+            }
+
             // The FR-05 guard on the payload exactly as written (one core lookup), the last check before the create.
             if (InvoiceFamilyCoreRecordGuard.Check(row) is { IsRefused: true } refused)
             {
@@ -2192,8 +2228,8 @@ public class InvoiceSubmissionService
                     "A tracking number could not be assigned right now, so nothing was saved. Try again shortly.");
             }
 
-            // 3. The job (ADR-004): payload { submissionId }, idempotency key = the submission id.
-            await _jobs.SubmitJobAsync(BuildJob(jobId, submissionId, request.CorrelationId), write);
+            // 3. The job (ADR-004): payload { submissionId } (and a Correction's note, task 095f-2e2a), idempotency key = the submission id.
+            await _jobs.SubmitJobAsync(BuildJob(jobId, submissionId, request.CorrelationId, JobCorrectionNote(request)), write);
 
             _logger.LogInformation(
                 "Invoice submission {SubmissionId} received through {Channel} for {Entity} {RecordId}; file {FileId} staged; job {JobId} enqueued",
@@ -2238,7 +2274,8 @@ public class InvoiceSubmissionService
         SubjectId = submissionId.ToString(),
         CorrelationId = correlationId ?? string.Empty,
         IdempotencyKey = submissionId.ToString(),
-        // Task 095f (EB-D-225): a from-email Correction's note rides the payload (the submission row has no column for it); every other job's
+        // Task 095f (EB-D-225): a Correction's note (from-email; from-document since 095f-2e1; the internal upload since 095f-2e2a) rides the
+        // payload (the submission row has no column for it); every other job's
         // payload is exactly what it was.
         Payload = JsonSerializer.SerializeToDocument(
             new InvoiceSubmissionJobPayload(submissionId, string.IsNullOrWhiteSpace(correctionNote) ? null : correctionNote),
