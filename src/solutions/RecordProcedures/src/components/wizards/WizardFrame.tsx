@@ -33,7 +33,7 @@ import { Button, MessageBar, MessageBarBody } from '@fluentui/react-components';
 import { CheckmarkCircle48Filled } from '@fluentui/react-icons';
 import { WizardShell, type IWizardShellHandle, type IWizardShellProps, type IWizardStepConfig, type IWizardSuccessConfig } from '@spaarke/ui-components';
 import type { CoreRoute, ProceduresQuery } from '../../services/recordProceduresApi';
-import { failureText, noteProblem, noteToSend, toWriteFailure, type OverridesApi, type RemovalPreview, type WriteFailure, type WriteResult } from '../../services/overridesApi';
+import { NOTE_ERROR_CODES, failureText, noteProblem, noteToSend, toWriteFailure, type OverridesApi, type RemovalPreview, type WriteFailure, type WriteResult } from '../../services/overridesApi';
 import { dryRunBody, dryRunRequestOf, requestFirmOf, type DryRunApi, type DryRunRequest, type DryRunView } from '../../services/dryRunApi';
 import { executePlan, removalOf, type Plan, type PlanRun } from './plan';
 import { asksRemovalPreview } from './impact';
@@ -55,9 +55,6 @@ export interface WizardNav {
 
 /** Said when Finish is reached with a plan that makes no call (it cannot be, since Confirm holds Finish off; this is the backstop). */
 export const EMPTY_PLAN_LINE = 'Nothing was saved: this change has nothing to send. Go back and choose again.';
-
-/** The stable codes of the server's 400 for a refused note (`assignment.note_too_long`, `assignment.note_invalid_characters`). */
-const NOTE_CODE_PREFIX = 'assignment.note_';
 
 /** The step order of the shell, for the dynamic "New values" step. */
 const STEP_ORDER = ['review', 'mode', 'values', 'impact', 'confirm'];
@@ -292,7 +289,7 @@ export const WizardFrame: React.FC<WizardFrameProps> = props => {
       const failure = run.failure as WriteFailure;
       p.onRefused?.(failure);
       // A refused note (400 assignment.note_too_long / note_invalid_characters) is shown as the server's title and detail, with its code named.
-      const noteCode = failure.errorCode?.startsWith(NOTE_CODE_PREFIX) ? `(${failure.errorCode})` : null;
+      const noteCode = failure.errorCode && NOTE_ERROR_CODES.includes(failure.errorCode) ? `(${failure.errorCode})` : null;
       const text = [failureText(failure), noteCode, p.refusalHint?.(failure, run.completed > 0), run.notRecorded ? NOT_RECORDED_LINE : null].filter((x): x is string => !!x).join(' ');
       if (run.completed > 0) {
         // The first call of the plan was accepted and the second was refused: the record's override changed, so the lists are read again,

@@ -256,9 +256,14 @@ const JSON_HEADERS = { 'Content-Type': 'application/json' };
 
 /**
  * Task 084h-4: the server's limit on a note, after trimming (`InvoiceCorrectionNote.MaxLength`; 400 `assignment.note_too_long` above it).
- * The same number as a reason's, and the input's limit.
+ * The one source of the limit in this page: a reason's `MAX_REASON_CHARS` (plan.ts) is this number. The Note box does not cut a longer text
+ * (a paste is never silently truncated): `noteProblem` holds Finish and says so, and the box shows a count against this limit.
+ * Pinned to the server's source by `__tests__/serverWordsPin.test.ts`.
  */
 export const MAX_NOTE_CHARS = 2000;
+
+/** The stable codes of the server's 400 for a refused note (`ProcedureAssignmentService.CodeNoteTooLong` / `CodeNoteInvalidCharacters`). */
+export const NOTE_ERROR_CODES: readonly string[] = ['assignment.note_too_long', 'assignment.note_invalid_characters'];
 
 /** What the server refuses in a note (`InvoiceCorrectionNote`): a control character other than newline, carriage return and tab. */
 // eslint-disable-next-line no-control-regex

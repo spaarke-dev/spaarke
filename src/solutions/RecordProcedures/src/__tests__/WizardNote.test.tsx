@@ -43,13 +43,14 @@ async function toExcludeConfirm() {
 }
 
 describe('the Note box: on the Confirm step of every plan, optional, and limited like a reason', () => {
-  it('is on the Confirm step, empty, optional, with the reason\'s input limit (2000)', async () => {
+  it('is on the Confirm step, empty, optional, with a count against the limit (2000) and no maxlength to cut a paste', async () => {
     renderHarness({ writes: respond({ assign: () => createdBody() }) });
     const d = await toExcludeConfirm();
     const box = noteBox(d);
     expect(box.value).toBe('');
     expect(box).not.toBeRequired();
-    expect(box.getAttribute('maxlength')).toBe(String(MAX_REASON_CHARS));
+    expect(box).not.toHaveAttribute('maxlength');
+    expect(within(d).getByTestId('confirm-step')).toHaveTextContent('0 / 2,000 characters');
     expect(MAX_NOTE_CHARS).toBe(MAX_REASON_CHARS);
     expect(MAX_REASON_CHARS).toBe(2000);
     expect(within(d).getByTestId('confirm-step')).toHaveTextContent(/Optional/);
@@ -90,6 +91,27 @@ describe('the Note box: on the Confirm step of every plan, optional, and limited
     fireEvent.click(button(d, 'Save override'));
     await within(d).findByTestId('success-body');
     expect(bodyOf(h.writeCalls[0]).note).toBe('x'.repeat(2000));
+  });
+
+  it('review round 1: a 2,600-character paste is kept whole in the box (never cut), the problem and the count are shown, Finish is held and nothing is sent', async () => {
+    const h = renderHarness({ writes: respond({ assign: () => createdBody() }) });
+    const d = await toExcludeConfirm();
+    typeNote(d, 'y'.repeat(2600));
+    expect(noteBox(d).value).toHaveLength(2600);
+    // jsdom does not cut a scripted change, a browser does cut a paste at maxlength: so the attribute itself must be absent.
+    expect(noteBox(d)).not.toHaveAttribute('maxlength');
+    await waitFor(() => expect(button(d, 'Save override')).toBeDisabled());
+    const step = within(d).getByTestId('confirm-step');
+    expect(step).toHaveTextContent('at most 2000 characters');
+    expect(step).toHaveTextContent('2,600 / 2,000 characters');
+    expect(writes(h.writeCalls)).toHaveLength(0);
+    // Cutting it back to the limit frees Finish and sends the whole 2,000, not a different cut.
+    typeNote(d, 'y'.repeat(2000));
+    expect(step).toHaveTextContent('2,000 / 2,000 characters');
+    await waitFor(() => expect(button(d, 'Save override')).toBeEnabled());
+    fireEvent.click(button(d, 'Save override'));
+    await within(d).findByTestId('success-body');
+    expect(bodyOf(h.writeCalls[0]).note).toBe('y'.repeat(2000));
   });
 });
 

@@ -13,7 +13,7 @@
  */
 
 import type { OverrideView, ProcedureItem, RuleItem, RuleMark } from '../../services/recordProceduresApi';
-import { notRecorded, type AssignMode, type DecisionRecordStatus, type OverridesApi, type WriteFailure } from '../../services/overridesApi';
+import { MAX_NOTE_CHARS, notRecorded, type AssignMode, type DecisionRecordStatus, type OverridesApi, type WriteFailure } from '../../services/overridesApi';
 import type { CoreRoute } from '../../services/recordProceduresApi';
 import type { AllowedSteps } from '../../services/model';
 import { formFor } from './ruleForms';
@@ -72,8 +72,8 @@ export function procedureChoices(p: ProcedureItem): ProcedureChoice[] {
   return out;
 }
 
-/** The server's limit on a reason, after trimming (`MaxReasonChars` in ProcedureAssignmentService.cs; `CheckReason` answers 400 above it). */
-export const MAX_REASON_CHARS = 2000;
+/** The server's limit on a reason, after trimming (`MaxReasonChars` in ProcedureAssignmentService.cs; `CheckReason` answers 400 above it). One number with the note's limit (`MAX_NOTE_CHARS`), so there is one source in the page. */
+export const MAX_REASON_CHARS = MAX_NOTE_CHARS;
 
 /** A reason the route accepts: not blank, and within the server's limit. */
 export const reasonValid = (reason: string | undefined): boolean => {
