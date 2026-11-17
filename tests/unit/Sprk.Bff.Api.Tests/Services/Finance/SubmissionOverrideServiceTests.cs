@@ -50,6 +50,10 @@ public partial class SubmissionOverrideServiceTests
         public static readonly Guid Matter = Guid.Parse("10500000-0000-4000-8000-0000000000a1");
         public static readonly Guid Caller = Guid.Parse("10500000-0000-4000-8000-0000000000c1");
         public static readonly Guid CallerContact = Guid.Parse("10500000-0000-4000-8000-0000000000c2");
+
+        /// <summary>ISS-034 (iss034a): a billing admin who is NOT the stranded decision's decider (its decider is <see cref="Caller"/>).</summary>
+        public static readonly Guid Operator = Guid.Parse("10500000-0000-4000-8000-0000000000c3");
+        public static readonly Guid OperatorContact = Guid.Parse("10500000-0000-4000-8000-0000000000c4");
         public static readonly Guid InvoiceId = InvoiceSubmissionPersister.InvoiceIdFor(SubmissionId);
         public const string Token = "caller-token";
         public static readonly DateTime CreatedOn = new(2026, 10, 20, 8, 0, 0, DateTimeKind.Utc);
@@ -385,6 +389,9 @@ public partial class SubmissionOverrideServiceTests
             var identity = new Mock<IIdentityNormalizationService>();
             identity.Setup(i => i.ResolveAsync(Caller, It.IsAny<CancellationToken>()))
                 .ReturnsAsync(new PersonIdentity(Caller, ContactId: CallerContact));
+            // ISS-034 (iss034a): the operator who finishes another person's stranded decision has a linked contact too.
+            identity.Setup(i => i.ResolveAsync(Operator, It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new PersonIdentity(Operator, ContactId: OperatorContact));
             Recorder = new BillingDecisionRecorder(Records.Writer, identity.Object, NullLogger<BillingDecisionRecorder>.Instance);
 
             Probe.CallerSystemUserId = Caller;

@@ -199,6 +199,9 @@ public sealed partial class DecisionRecordWriterTests
             // 095f-2b (EB-D-241; design 3 option A, ontology-r1 amendment of D-100 "additive only"): an invoice-level adjustment and its removal
             // file under the invoice; the writer literal is unchanged (every code outside the four line codes maps to the invoice).
             ("add-adjustment", "sprk_invoice"), ("remove-adjustment", "sprk_invoice"),
+            // iss034a (EB-D-244; ontology-r1 reviews the amendment as for 095f-2b): the operator's finish of a stranded decision files under the
+            // invoice; the writer literal is unchanged.
+            ("finish-stranded-decision", "sprk_invoice"),
         }, "D-75, D-101: no submission subject; the override and the automatic rejection file under the invoice");
         DecisionRecordWriter.BillingSubjectEntityOf("mark-complete").Should().BeNull("a Signals code has no billing subject");
         DecisionActionCatalog.BillingActions.Should().OnlyContain(d => !d.Code.Contains('_') && !d.Code.Contains('%') && !d.Code.Contains('['),

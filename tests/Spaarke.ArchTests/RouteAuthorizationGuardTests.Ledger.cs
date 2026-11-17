@@ -470,7 +470,11 @@ public partial class RouteAuthorizationGuardTests
             + "switch runs after it. The override additionally needs the caller's own Dataverse table privilege on sprk_ebillingoverride, asked of "
             + "Dataverse as the caller on EVERY call inside SubmissionOverrideService (EbillingOverridePrivilege, fail closed: 403 "
             + "ebilling.override.not_permitted); Return needs no privilege (D-73). The decider, the invoice, the findings and the decision id are "
-            + "derived server-side, never taken from the request."),
+            + "derived server-side, never taken from the request. ISS-034 (iss034a, EB-D-244) adds POST /{submissionId}/finish-stranded: the same "
+            + "Finance filter as the two decisions (Read and Write on the submission, ebilling.submission.decide) and the kill switch after it; "
+            + "inside the service, as the caller and fail closed, the billing-admin marker (BillingAdminAuthorization.Admin()'s check) before the "
+            + "submission is read, the eBilling Override privilege for a stranded Override (403 ebilling.blocked.operator_not_permitted), and the "
+            + "FR-51 close rights. The stranded verb, its record and its decider are derived server-side."),
         new GovernedFile("Api/Finance/InvoiceApprovalEndpoints.cs", Scope.RouteLevelGate,
             "GET /api/finance/invoices/{invoiceId}/approval and POST /api/finance/invoices/{invoiceId}/approve (ebilling-r1 task 103, FR-35, "
             + "FR-11, D-40, D-78) -- the approval state and the approve operation. Each route carries AddFinanceAuthorizationFilter as the caller on "

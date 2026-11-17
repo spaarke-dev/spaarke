@@ -30,6 +30,15 @@ namespace Sprk.Bff.Api.Api.Finance;
 /// ISS-031: 409 <c>ebilling.blocked.other_decision_pending</c> when the OTHER decision (the override for a return, the return for an override)
 /// is recorded but not finished; nothing is written, and the detail names the pending decision, which the caller repeats to finish. It follows
 /// the 403s; a fault while checking for it is 503.</para>
+/// <para><b>Finish a stranded decision (ISS-034, EB-D-244).</b> <c>POST .../finish-stranded</c> lets a billing admin finish ANOTHER person's
+/// Override or Return that was recorded but did not finish, exactly as recorded (the stored reason, note, Signal set and decider). The route's
+/// filter is the decide routes' (Read and Write on the submission). Inside the service, as the caller and failing closed: the billing-admin
+/// marker (<see cref="BillingAdminAuthorization.Admin"/>'s check) before anything about the submission is read, then the stranded verb, derived
+/// server-side; for an Override the eBilling Override privilege (both refusals 403 <c>ebilling.blocked.operator_not_permitted</c>); then, under
+/// the invoice lock, the FR-51 close rights (403 <c>ebilling.blocked.not_authorized</c>). 409 <c>ebilling.blocked.nothing_stranded</c> when no
+/// decision is recorded, <c>other_decision_pending</c> when both are, <c>decision_conflict</c> when the caller is the stored decider (they repeat
+/// their own decision). The operator's reason (required) and note (optional) go on the operator's own <c>finish-stranded-decision</c> Decision
+/// Record; a finished decision answers 200 <c>alreadyDecided</c> with no operator record.</para>
 /// </remarks>
 public static class SubmissionOverrideEndpoints
 {
@@ -79,6 +88,22 @@ public static class SubmissionOverrideEndpoints
             .ProducesProblem(StatusCodes.Status409Conflict)
             .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
 
+        // POST /api/finance/submissions/{submissionId}/finish-stranded (ISS-034, EB-D-244): Read and Write on the submission, as the decide routes;
+        // then, inside the service and as the caller, the billing-admin marker (before anything about the submission is read), the stranded verb's
+        // own privilege for an Override, and the FR-51 close rights.
+        group.MapPost("/{submissionId:guid}/finish-stranded", FinishStrandedAsync)
+            .AddFinanceAuthorizationFilter("ebilling.submission.decide", FinanceAuthorizationFilter.InvoiceSubmissionEntitySet, "submissionId")
+            .RequireEbillingEnabled()
+            .WithName("FinishStrandedBlockedDecision")
+            .WithSummary("Finish another person's recorded but unfinished override or return of a blocked submission, exactly as recorded (billing admin; reason required)")
+            .Produces<BlockedDecisionResponse>(StatusCodes.Status200OK)
+            .ProducesProblem(StatusCodes.Status400BadRequest)
+            .ProducesProblem(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status403Forbidden)
+            .ProducesProblem(StatusCodes.Status404NotFound)
+            .ProducesProblem(StatusCodes.Status409Conflict)
+            .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
+
         return app;
     }
 
@@ -103,6 +128,10 @@ public static class SubmissionOverrideEndpoints
     private static async Task<IResult> ReturnAsync(
         Guid submissionId, BlockedDecisionRequest? body, HttpContext http, SubmissionOverrideService service, CancellationToken ct) =>
         ToResult(await service.ReturnAsync(submissionId, body?.Reason, body?.Note, TokenHelper.ExtractBearerTokenOrNull(http), ct), http);
+
+    private static async Task<IResult> FinishStrandedAsync(
+        Guid submissionId, BlockedDecisionRequest? body, HttpContext http, SubmissionOverrideService service, CancellationToken ct) =>
+        ToResult(await service.FinishStrandedAsync(submissionId, body?.Reason, body?.Note, TokenHelper.ExtractBearerTokenOrNull(http), ct), http);
 
     /// <summary>200 with the outcome (a repeat is 200 with <c>alreadyDecided</c>), or the refusal as ProblemDetails (ADR-019).</summary>
     internal static IResult ToResult(BlockedDecisionResult result, HttpContext http) => result.Kind switch

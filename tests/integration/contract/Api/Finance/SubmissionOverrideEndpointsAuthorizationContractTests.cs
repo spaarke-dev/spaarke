@@ -475,6 +475,70 @@ public sealed class SubmissionOverrideEndpointsAuthorizationContractTests
         response.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable);
     }
 
+    // ── The operator finish of a stranded decision (ISS-034, iss034a, EB-D-244) ──
+
+    [Fact(DisplayName = "iss034a: finish-stranded without a bearer is 401 and touches nothing")]
+    public async Task FinishStranded_Unauthenticated_Is401()
+    {
+        await using var host = await Host.StartAsync();
+
+        var response = await host.SendAsync(Request("POST", Url("finish-stranded"), ReasonBody(), authenticated: false));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+        host.World.Entities.Invocations.Should().BeEmpty();
+        host.World.AssertNothingChanged();
+    }
+
+    [Theory(DisplayName = "iss034a: finish-stranded carries the decide routes' filter: no rights, or Read without Write, on the submission is 403 before any privilege question or read")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task FinishStranded_WithoutWriteOnTheSubmission_Is403_BeforeAnyPrivilegeOrRead(bool readOnly)
+    {
+        await using var host = await Host.StartAsync();
+        if (readOnly)
+        {
+            host.Access.Grant(Set, SubmissionId, AccessRights.Read);
+        }
+
+        var response = await host.SendAsync(Request("POST", Url("finish-stranded"), ReasonBody()));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        host.World.Probe.Calls.Should().BeEmpty("the billing-admin marker is asked only after the route's rights pass");
+        host.World.Entities.Invocations.Should().BeEmpty();
+        host.World.AssertNothingChanged();
+    }
+
+    [Fact(DisplayName = "iss034a: finish-stranded with the route's rights but without the billing-admin marker is 403 operator_not_permitted (errorCode and reasonCode), before the submission is read")]
+    public async Task FinishStranded_WithoutTheAdminMarker_Is403OperatorNotPermitted_BeforeAnyRead()
+    {
+        await using var host = await Host.StartAsync();
+        host.GrantRights();
+
+        var response = await host.SendAsync(Request("POST", Url("finish-stranded"), ReasonBody()));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        var json = JsonNode.Parse(await response.Content.ReadAsStringAsync())!.AsObject();
+        json["errorCode"]!.GetValue<string>().Should().Be("ebilling.blocked.operator_not_permitted");
+        json["reasonCode"]!.GetValue<string>().Should().Be("ebilling.blocked.operator_not_permitted");
+        host.World.Probe.Calls.Select(c => c.Privilege).Should().Equal(SubmissionOverrideService.AdminMarkerPrivilege);
+        host.World.Entities.Invocations.Should().BeEmpty("nothing about the submission is read before the marker");
+        host.World.AssertNothingChanged();
+    }
+
+    [Fact(DisplayName = "iss034a: finish-stranded by a billing admin with nothing stranded is 409 nothing_stranded, nothing written")]
+    public async Task FinishStranded_NothingStranded_Is409()
+    {
+        await using var host = await Host.StartAsync();
+        host.GrantRights();
+        host.World.Probe.Hold(SubmissionOverrideService.AdminMarkerPrivilege);
+
+        var response = await host.SendAsync(Request("POST", Url("finish-stranded"), ReasonBody()));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Conflict);
+        (await ErrorCodeAsync(response)).Should().Be("ebilling.blocked.nothing_stranded");
+        host.World.AssertNothingWritten();
+    }
+
     // ── Helpers ──
 
     private static StringContent ReasonBody() => Json("""{"reason":"Negotiated rate is not yet in the rate card."}""");

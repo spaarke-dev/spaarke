@@ -346,11 +346,11 @@ public class DecisionActionCatalogTests
     // =================================================================================================
 
     // 095f-2b (EB-D-241; design 3 option A): add-adjustment and remove-adjustment amend this exact set (ontology-r1 reviewed amendment of D-100's
-    // "additive only", not an addition).
+    // "additive only", not an addition). ISS-034 / iss034a (EB-D-244): finish-stranded-decision amends it the same way (ontology-r1 reviews it).
     private static readonly string[] BillingCodes =
     [
         "accept-line", "reduce-line", "disallow-line", "approve-invoice", "reject-invoice", "return-to-firm", "override-submission", "assign-firm", "add-line",
-        "add-adjustment", "remove-adjustment",
+        "add-adjustment", "remove-adjustment", "finish-stranded-decision",
     ];
 
     [Fact]
@@ -382,6 +382,7 @@ public class DecisionActionCatalogTests
     [InlineData("add-line", DecisionRecordClass.Judgement, GateRiskTier.Tier2b)] // 164a-2 (EB-D-198): Tier2b, reversible by a later disallow-line
     [InlineData("add-adjustment", DecisionRecordClass.Judgement, GateRiskTier.Tier2b)] // 095f-2b (EB-D-241): gates as add-line
     [InlineData("remove-adjustment", DecisionRecordClass.Judgement, GateRiskTier.Tier2b)] // 095f-2b (EB-D-241): gates as add-line
+    [InlineData("finish-stranded-decision", DecisionRecordClass.Judgement, GateRiskTier.Tier4)] // iss034a (EB-D-244): not reversible, a record-of-truth change
     public void EachBillingAction_HasItsRecordClassAndGateTier(string code, DecisionRecordClass recordClass, GateRiskTier tier)
     {
         DecisionActionCatalog.TryGetBilling(code, out var action).Should().BeTrue();
@@ -400,6 +401,7 @@ public class DecisionActionCatalogTests
     [InlineData("add-line", "reason")] // 164a-2 (EB-D-198): the reason is required
     [InlineData("add-adjustment", "method", "value", "reason")] // 095f-2b (EB-D-241): the rule and the note are optional
     [InlineData("remove-adjustment", "adjustment")] // 095f-2b (EB-D-241): no reason (the remove route takes none); the note is optional
+    [InlineData("finish-stranded-decision", "finishedDecision", "finishedRecord", "reason")] // iss034a (EB-D-244): the operator's note is optional
     [InlineData("accept-line")]
     [InlineData("approve-invoice")]
     public void BillingActions_RequireExactlyTheStatedParameters_AReasonForEveryAdverseDecisionAndOverride(string code, params string[] required)
@@ -427,6 +429,7 @@ public class DecisionActionCatalogTests
     [InlineData("override-submission")]
     [InlineData("add-adjustment")] // 095f-2b (EB-D-241)
     [InlineData("remove-adjustment")] // 095f-2b (EB-D-241)
+    [InlineData("finish-stranded-decision")] // iss034a (EB-D-244)
     public void InvoiceDecisions_DeclareNoteAsAnOptionalTextAreaParameter(string code)
     {
         DecisionActionCatalog.TryGetBilling(code, out var action).Should().BeTrue();
