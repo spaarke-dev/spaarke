@@ -68,7 +68,7 @@ public sealed class InvoiceRejectReturnServiceTests
         result.Outcome.Should().Be(InvoiceDecisionOutcome.Decided);
         result.Code.Should().Be("ok");
         w.InvoiceStatus.Should().Be(InvoiceStatusOf(kind));
-        w.Lifecycle.Verify(l => l.TransitionAsync(w.InvoiceId, TargetOf(kind), It.IsAny<CancellationToken>()), Times.Once);
+        w.Lifecycle.Verify(l => l.TransitionAsync(w.InvoiceId, TargetOf(kind), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Once);
         w.Transitions.Should().Be(1);
 
         var portion = w.Portion;
@@ -496,7 +496,7 @@ public sealed class InvoiceRejectReturnServiceTests
     public async Task TransitionRefused_RecordsNothing_AndClearsTheClaim(InvoiceDecisionKind kind)
     {
         var w = new ApprovalWorld();
-        w.Lifecycle.Setup(l => l.TransitionAsync(w.InvoiceId, TargetOf(kind), It.IsAny<CancellationToken>()))
+        w.Lifecycle.Setup(l => l.TransitionAsync(w.InvoiceId, TargetOf(kind), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new InvoiceTransitionResult(InvoiceTransitionOutcome.Refused, TargetOf(kind), InvoiceLifecycleStatus.InReview, "invoice-lifecycle.transition-not-allowed"));
 
         var result = await Decide(w, kind, AliceUser);

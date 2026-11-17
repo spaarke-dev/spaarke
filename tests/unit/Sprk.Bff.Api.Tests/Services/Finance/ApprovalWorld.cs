@@ -282,41 +282,60 @@ internal sealed class ApprovalWorld
 
         // 014: the status moves only from In Review; a repeat is AlreadyInTarget. Task 104: the same for Rejected and Returned to Firm.
         Lifecycle.Setup(l => l.TransitionAsync(It.IsAny<Guid>(), It.IsAny<InvoiceLifecycleStatus>(), It.IsAny<CancellationToken>()))
-            .Returns((Guid id, InvoiceLifecycleStatus target, CancellationToken _) =>
+            .Returns((Guid id, InvoiceLifecycleStatus target, CancellationToken _) => Transition(id, target, decisionNote: null));
+
+        // Task 095f-2a: the overload with the decision note, written with the status in the one write (or not at all), as 014 does.
+        Lifecycle.Setup(l => l.TransitionAsync(It.IsAny<Guid>(), It.IsAny<InvoiceLifecycleStatus>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .Returns((Guid id, InvoiceLifecycleStatus target, string? note, CancellationToken _) => Transition(id, target, note));
+    }
+
+    /// <summary>The decision notes the lifecycle was asked to write, in call order (task 095f-2a; null: the call named none).</summary>
+    public readonly List<string?> TransitionNotes = [];
+
+    private Task<InvoiceTransitionResult> Transition(Guid id, InvoiceLifecycleStatus target, string? decisionNote)
+    {
+        Interlocked.Increment(ref Transitions);
+        lock (Gate)
+        {
+            TransitionNotes.Add(decisionNote);
+        }
+
+        if (TakeFault("transition") is { } before)
+        {
+            return Task.FromException<InvoiceTransitionResult>(before);
+        }
+
+        var targetCode = InvoiceStatusCodes.StatusCodeOf(target);
+        lock (Gate)
+        {
+            var invoice = Rows[("sprk_invoice", id)];
+            var status = invoice.GetAttributeValue<OptionSetValue>("statuscode").Value;
+            if (status == targetCode)
             {
-                Interlocked.Increment(ref Transitions);
-                if (TakeFault("transition") is { } before)
-                {
-                    return Task.FromException<InvoiceTransitionResult>(before);
-                }
+                return Task.FromResult(new InvoiceTransitionResult(InvoiceTransitionOutcome.AlreadyInTarget, target, target, null));
+            }
 
-                var targetCode = InvoiceStatusCodes.StatusCodeOf(target);
-                lock (Gate)
-                {
-                    var invoice = Rows[("sprk_invoice", id)];
-                    var status = invoice.GetAttributeValue<OptionSetValue>("statuscode").Value;
-                    if (status == targetCode)
-                    {
-                        return Task.FromResult(new InvoiceTransitionResult(InvoiceTransitionOutcome.AlreadyInTarget, target, target, null));
-                    }
+            if (status != InvoiceStatusCodes.InReview)
+            {
+                return Task.FromResult(new InvoiceTransitionResult(InvoiceTransitionOutcome.Refused, target, null, "invoice-lifecycle.transition-not-allowed"));
+            }
 
-                    if (status != InvoiceStatusCodes.InReview)
-                    {
-                        return Task.FromResult(new InvoiceTransitionResult(InvoiceTransitionOutcome.Refused, target, null, "invoice-lifecycle.transition-not-allowed"));
-                    }
+            invoice["statuscode"] = new OptionSetValue(targetCode);
+            if (decisionNote is not null)
+            {
+                invoice[InvoiceCorrectionNote.DecisionColumn] = decisionNote;
+            }
 
-                    invoice["statuscode"] = new OptionSetValue(targetCode);
-                    WriteLog.Add("transition");
-                }
+            WriteLog.Add("transition");
+        }
 
-                if (TransitionThrowsAfterCommit)
-                {
-                    TransitionThrowsAfterCommit = false;
-                    return Task.FromException<InvoiceTransitionResult>(new TimeoutException("the commit landed, the answer did not"));
-                }
+        if (TransitionThrowsAfterCommit)
+        {
+            TransitionThrowsAfterCommit = false;
+            return Task.FromException<InvoiceTransitionResult>(new TimeoutException("the commit landed, the answer did not"));
+        }
 
-                return Task.FromResult(new InvoiceTransitionResult(InvoiceTransitionOutcome.Transitioned, target, InvoiceLifecycleStatus.InReview, null));
-            });
+        return Task.FromResult(new InvoiceTransitionResult(InvoiceTransitionOutcome.Transitioned, target, InvoiceLifecycleStatus.InReview, null));
     }
 
     // ── Builders ──
@@ -644,17 +663,17 @@ internal sealed class ApprovalWorld
         Entities.Object, Resolver(), Lifecycle.Object, Recorder(), Locks, CallerIdentity.Object, CoreAncestors(), Probe.Object,
         CloseAsync, RejectReturnLog, Clock);
 
-    public Task<InvoiceDecisionResult> RejectAs(Guid user, string? reason = "Rate card not followed") =>
-        RejectReturnService().RejectAsync(InvoiceId, user, reason, CallerToken, CancellationToken.None);
+    public Task<InvoiceDecisionResult> RejectAs(Guid user, string? reason = "Rate card not followed", string? note = null) =>
+        RejectReturnService().RejectAsync(InvoiceId, user, reason, note, CallerToken, CancellationToken.None);
 
-    public Task<InvoiceDecisionResult> ReturnAs(Guid user, string? reason = "Please correct the task codes") =>
-        RejectReturnService().ReturnAsync(InvoiceId, user, reason, CallerToken, CancellationToken.None);
+    public Task<InvoiceDecisionResult> ReturnAs(Guid user, string? reason = "Please correct the task codes", string? note = null) =>
+        RejectReturnService().ReturnAsync(InvoiceId, user, reason, note, CallerToken, CancellationToken.None);
 
     /// <summary>The GET as the endpoint calls it for <paramref name="user"/> (the decide right asked with the caller's own token).</summary>
     public Task<InvoiceApprovalStateDto?> GetAs(Guid? user) =>
         Service().GetAsync(InvoiceId, user, new InvoiceContextService.InvoiceCaller("oid", CallerToken), CancellationToken.None);
 
-    public Task<ApprovalResult> ApproveAs(Guid user) => Service().ApproveAsync(InvoiceId, user, CallerToken, CancellationToken.None);
+    public Task<ApprovalResult> ApproveAs(Guid user, string? note = null) => Service().ApproveAsync(InvoiceId, user, note, CallerToken, CancellationToken.None);
 
     // ── The in-memory Dataverse ──
 

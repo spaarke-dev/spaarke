@@ -231,7 +231,7 @@ public sealed class InvoiceApprovalServiceTests
     {
         var w = new ApprovalWorld();
         w.AddLine(InvoiceLineStatus.Accepted, approved: 100m);
-        w.Lifecycle.Setup(l => l.TransitionAsync(w.InvoiceId, InvoiceLifecycleStatus.Approved, It.IsAny<CancellationToken>()))
+        w.Lifecycle.Setup(l => l.TransitionAsync(w.InvoiceId, InvoiceLifecycleStatus.Approved, It.IsAny<string?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new InvoiceTransitionResult(InvoiceTransitionOutcome.Refused, InvoiceLifecycleStatus.Approved, InvoiceLifecycleStatus.InReview, "invoice-lifecycle.transition-not-allowed"));
 
         var result = await w.ApproveAs(AliceUser);
@@ -246,7 +246,7 @@ public sealed class InvoiceApprovalServiceTests
         w.WriteLog.Count(e => e == "claim:sprk_invoiceapproval").Should().Be(2, "the claim, then its conditional clear");
 
         // Another approver is not blocked by the refused attempt (K1 would refuse a live claim).
-        w.Lifecycle.Setup(l => l.TransitionAsync(w.InvoiceId, InvoiceLifecycleStatus.Approved, It.IsAny<CancellationToken>()))
+        w.Lifecycle.Setup(l => l.TransitionAsync(w.InvoiceId, InvoiceLifecycleStatus.Approved, It.IsAny<string?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new InvoiceTransitionResult(InvoiceTransitionOutcome.Transitioned, InvoiceLifecycleStatus.Approved, InvoiceLifecycleStatus.InReview, null));
         (await w.ApproveAs(BobUser)).Outcome.Should().Be(ApprovalOutcome.Approved);
     }
@@ -257,7 +257,7 @@ public sealed class InvoiceApprovalServiceTests
         var w = new ApprovalWorld();
         w.AddLine(InvoiceLineStatus.Accepted, approved: 100m);
         var clearAttempted = false;
-        w.Lifecycle.Setup(l => l.TransitionAsync(w.InvoiceId, InvoiceLifecycleStatus.Approved, It.IsAny<CancellationToken>()))
+        w.Lifecycle.Setup(l => l.TransitionAsync(w.InvoiceId, InvoiceLifecycleStatus.Approved, It.IsAny<string?>(), It.IsAny<CancellationToken>()))
             .Returns(() =>
             {
                 // Armed after the claim: the next conditional portion write is the clear. Between its re-read and its update another
@@ -287,7 +287,7 @@ public sealed class InvoiceApprovalServiceTests
     {
         var w = new ApprovalWorld();
         w.AddLine(InvoiceLineStatus.Accepted, approved: 100m);
-        w.Lifecycle.Setup(l => l.TransitionAsync(w.InvoiceId, InvoiceLifecycleStatus.Approved, It.IsAny<CancellationToken>()))
+        w.Lifecycle.Setup(l => l.TransitionAsync(w.InvoiceId, InvoiceLifecycleStatus.Approved, It.IsAny<string?>(), It.IsAny<CancellationToken>()))
             .Returns(() =>
             {
                 // Someone else's write lands on the portion between the claim and the refusal: it is no longer our claim.

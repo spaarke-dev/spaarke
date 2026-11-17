@@ -1358,7 +1358,8 @@ public class ExternalDocumentNarrowingGuardTests
         ["Sprk.Bff.Api.Services.Finance.Coding.CodeSetProposalService::ConfirmAsync"] =
             "Writes only sprk_DefaultBillingCodeSet@odata.bind (DefaultSetBind) on a matter type or practice area reference row.",
         ["Sprk.Bff.Api.Services.Finance.InvoiceLifecycleService::TransitionAsync"] =
-            "Writes only statuscode and statecode on sprk_invoice (InvoiceEntity), conditioned on the row version.",
+            "Writes only statuscode and statecode on sprk_invoice (InvoiceEntity), plus the blanked review detail and (095f-2a) the decision note, " +
+            "conditioned on the row version.",
         ["Sprk.Bff.Api.Services.Finance.InvoiceTotalsService::RecalculateAsync"] =
             "Writes only sprk_amount on an adjustment sprk_billingevent and the five totals columns on sprk_invoice (literal keys).",
         // ebilling-r1 task 103: the approval claim, conditioned on the approval portion's row version.
