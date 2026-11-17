@@ -12,7 +12,7 @@
 | `CorrectAsync` replaces the note with the checked, trimmed value (`null` when blank) once, so every later step sees one value | same file |
 | `BuildRow` adds `sprk_note` only when the note is non-blank, in the same `UpsertRequest` as the row and in the same transaction as the value update. The row's id is built before it from the field, version and final text and does not use the note | same file |
 | `InvoiceCorrectionNote.CorrectionRowColumn = "sprk_note"` (the one place the column name lives in the BFF) | `Services/Finance/InvoiceCorrectionNote.cs` |
-| Route descriptions and the endpoint remarks name the note and the two new 400 codes | `InvoiceCorrectionEndpoints.cs` |
+| Route descriptions and the endpoint remarks name the note and the two new 400 codes. The note is stored on the correction row the call creates; a call that finds that row already written (the latest Corrected or Confirmed row already holds the requested final value, including when the line value is rewritten in that call) keeps the first note, or none | `InvoiceCorrectionEndpoints.cs` |
 | ArchTest `ExternalPlane_NeverNamesTheCorrectionRowNote` plus controls `CorrectionRowNoteControls`; the stale comment ("not yet sprk_invoicecorrection.sprk_note") restated | `tests/Spaarke.ArchTests/InvoiceNoteColumnsGuardTests.cs` |
 
 ## Rules as built
@@ -67,3 +67,25 @@
 (d) **`sprk_note` is matched by name alone** in the column guard (as its remarks already say). The new external-plane test inherits that: a whole-word `sprk_note` in any external file fails it, whichever table it meant.
 (e) **No writers guard for `sprk_note`.** `InvoiceDecisionNoteWritersGuardTests` keys writers by method for the two invoice columns. A "who may write `sprk_note`" guard was not in the task and was not added; `InvoiceCorrectionNote.CorrectionRowColumn` has one use, in `InvoiceCorrectionService.BuildRow`.
 (f) **The commit hook.** The repository's pre-commit hook (lint-staged) takes its own temporary backup of the index during a commit and removes it; no stash of this session's work remains.
+
+## Review round 1
+
+Fixes from the adversarial review (branch `task/ebilling-095f-2d2-fix`, on top of 0059b26e88).
+
+| Finding | Fix | Tests |
+|---|---|---|
+| F2 firm-visibility ArchTest missed the likely leak (the constant, an all-columns read) | `InvoiceNoteColumnsGuardTests`: the firm-facing scans for the decision note and the correction row's note now match the literal column OR the constant (`InvoiceCorrectionNote.DecisionColumn`, `InvoiceCorrectionNote.CorrectionRowColumn`; whole word, case-sensitive so a local `decisionColumn` is not a hit). New fact `ExternalPlane_NeverReadsAllColumns` refuses `new ColumnSet(true)`, `ColumnSet = new(true)`, `AllColumns = true` in any firm-facing file, whichever table it reads (the scan cannot tell the table, and an all-columns read of `sprk_invoicecorrection` or `sprk_invoice` returns the internal notes). No firm-facing file does either today. The class remarks carry the maintenance procedure | Must fire: the constant, as a literal reference and through `using static`, on synthetic text and on the real `InvoiceCorrectionService.cs` and `InvoiceLifecycleService.cs` (neither holds the literal); each all-columns shape, synthetic and planted in the real external DI module. Must not fire: lookalike and lower-case names, a comment, an explicit column list without the note, the real module as it is, the correction and lifecycle services not being firm-facing files, and the BFF's all-columns reads outside the firm-facing planes (`AllColumnsReadControls`) |
+| F2 route descriptions overclaimed ("stored on the row") | Both route descriptions, the `CorrectionRequest` doc and this file: the note is stored on the correction row the call creates; a call that finds that row already written (including when the line value is rewritten in that call) keeps the first note, or none | Text only |
+| F2 doc accuracy | `CorrectionRequest` doc names carriage return as allowed (it matches `InvoiceCorrectionNote.Check`); `InvoiceCorrectionNote` section-11 remarks cover `CorrectionRowColumn`; the constant's doc says the correction service writes it only in the create, and that the generic record write paths are not yet refused for this table (ISS-028) | Text only |
+| K3 test gaps | `InvoiceCorrectionNoteTests`: `ARepeat_KeepsTheFirstNote_OnEveryShape` (line and header, correct and confirm; an edited and a removed note) and `HeaderRowId_IsThePreChangeDerivedId` (pinned from the key: invoice id, field, invoice version, final text) | New tests of existing behaviour: they pass before and after (must-not-fire coverage) |
+
+**Fail-before for the ArchTest controls.** The three new control groups were run with the detector reverted to its old shape (the constant alternation removed from both patterns, and the all-columns pattern replaced by one that never matches): `Controls`-style facts `CorrectionRowNoteControls`, `ExternalControls` and `AllColumnsReadControls` each failed on their first new must-fire assertion (3 failed, 7 passed of 10). The file was then restored and all 10 pass.
+
+**Runs.** `dotnet build src/server/api/Sprk.Bff.Api/ --warnaserror`: 0 warnings, 0 errors. Correction BFF tests (`FullyQualifiedName~InvoiceCorrection`): 389 passed, 0 failed. ArchTests (`InvoiceNote|InvoiceDecisionNote|Invoice|External`): 526 passed, 0 failed. `InvoiceCorrectionNoteTests`: 40 passed.
+
+### Known limits (review round 1)
+
+(a) **A note sent before the column exists.** On an environment without `sprk_invoicecorrection.sprk_note`, a correction that carries a note gets 503 "repeat the same request"; the repeat cannot succeed until the deploy script has run. It fails closed and nothing is written. No client sends `note` yet.
+(b) **Controls that also pass before the change.** `NoLogLine_CarriesTheNote`, `BulkAcceptedRows_CarryNoNote` and `TheListedRow_HasNoNote` are must-not-fire controls: they passed before the change as well as after. So do the two K3 tests above.
+(c) **Where the firm exclusion rests.** The firm's exclusion from the column rests on the table-level exclusion in `ExternalTeamShareSynchronizer`, not on a column-level control (the deploy script deliberately refuses a secured column).
+(d) **Generic record write paths.** The generic record write paths are not refused for `sprk_invoicecorrection`. This is pre-existing and tracked as ISS-028 (an owner question).

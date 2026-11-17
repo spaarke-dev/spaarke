@@ -128,6 +128,42 @@ public sealed class InvoiceCorrectionNoteTests
         world.Corrections.Single().Id.Should().Be(InvoiceLineDecisionService.IdOf($"ebilling-correction-edit-{W.FeeLineId:D}-Hours-{version}-2.5"));
     }
 
+    [Fact(DisplayName = "095f-2d2: the header row id is exactly the pre-change derived id (pinned from the key: invoice id, field, invoice version, final text)")]
+    public async Task HeaderRowId_IsThePreChangeDerivedId()
+    {
+        var corrected = new CorrectionWorld();
+        var confirmed = new CorrectionWorld();
+        var version = corrected.Invoice.GetAttributeValue<long>("versionnumber");
+
+        await corrected.Service().CorrectAsync(Header("TotalDue", "2400", Sentinel), CancellationToken.None);
+        await confirmed.Service().CorrectAsync(Header("TotalDue", null, Sentinel, confirm: true), CancellationToken.None);
+
+        corrected.Corrections.Single().Id.Should().Be(InvoiceLineDecisionService.IdOf($"ebilling-correction-edit-{W.InvoiceId:D}-TotalDue-{version}-2400.00"));
+        confirmed.Corrections.Single().Id.Should().Be(InvoiceLineDecisionService.IdOf($"ebilling-correction-edit-{W.InvoiceId:D}-TotalDue-{version}-2500.00"));
+    }
+
+    [Theory(DisplayName = "095f-2d2: on every shape (line and header, correct and confirm) a repeat with an edited or removed note keeps the first note and writes nothing")]
+    [MemberData(nameof(Shapes))]
+    public async Task ARepeat_KeepsTheFirstNote_OnEveryShape(string shape)
+    {
+        foreach (var repeatNote in new string?[] { "A second, edited note", null })
+        {
+            var world = new CorrectionWorld();
+            var service = world.Service();
+            await service.CorrectAsync(Of(shape, "The first note"), CancellationToken.None);
+            var id = world.Corrections.Single().Id;
+
+            var again = await service.CorrectAsync(Of(shape, repeatNote), CancellationToken.None);
+
+            again.IsApplied.Should().BeTrue();
+            again.AlreadyApplied.Should().BeTrue();
+            var row = world.Corrections.Should().ContainSingle().Subject;
+            row.Id.Should().Be(id);
+            row.GetAttributeValue<string>(Column).Should().Be("The first note", $"{shape}: an edited or removed note is not a new correction and is not rewritten");
+            world.RowTransactions.Should().Be(1, $"{shape}: the repeat wrote nothing");
+        }
+    }
+
     [Theory(DisplayName = "095f-2d2: a repeat with an edited or removed note finds the same row, is already applied and never rewrites the note")]
     [InlineData("A second, edited note")]
     [InlineData(null)]
