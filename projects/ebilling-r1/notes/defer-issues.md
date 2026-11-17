@@ -2057,3 +2057,23 @@ A BFF deploy can ship code that writes index fields the live index doesn't have.
 **Estimated effort**: minutes. **Blockers**: owner go. **Related**: ISS-022 / #2844, ISS-023 / #2849, task 130e-1.
 
 ---
+
+### ISS-025 — Job pipeline redelivers failed jobs back to back; repair jobs dead-letter during short outages
+
+| Field | Value |
+|---|---|
+| **Status** | Open (job platform; filed by ebilling-r1, which found it) |
+| **Urgency** | next-round |
+| **Filed** | 2026-11-17 |
+| **Source** | Opus adversarial review of task 084h-3 (`RecordProcedureDecisionJob`), finding 6 |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2876 |
+
+**Description**: `ServiceBusJobProcessor` abandons a failed job's message with no delay, so all `JobContract.MaxDeliveryCount` deliveries happen within seconds. A repair job (084h-3's `RecordProcedureDecisionJob`, ontology's `GateDecisionRecordJob`) that fails because Dataverse or Redis is down for a minute or more uses up every delivery and is dead-lettered as `MaxRetriesExceeded`; the decision is then recorded only if someone replays it by hand, and no resubmit tool exists. #2848 covers the missing dead-letter alert.
+
+**Entry-points**: `src/server/api/Sprk.Bff.Api/Services/Jobs/ServiceBusJobProcessor.cs` (retry branch: `AbandonMessageAsync(args.Message, null, ...)`); `JobContract.MaxDeliveryCount`.
+
+**Suggested fix**: on a retryable failure, complete and re-send with `ScheduledEnqueueTime` on an exponential backoff (or defer); add an operator resubmit tool by job type; coordinate with #2848.
+
+**Estimated effort**: 1-2 days. **Blockers**: none. **Related**: #2848, ADR-004, task 084h-3.
+
+---
