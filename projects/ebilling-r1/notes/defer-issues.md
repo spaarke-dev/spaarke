@@ -2241,3 +2241,27 @@ In a multi-line call whose earlier lines were recorded, the remaining lines take
 **Estimated effort**: under 1 hour. **Blockers**: none. **Related**: ontology 187 (#2754), task 130e-2.
 
 ---
+### ISS-034 — No operator path for a blocked decision stranded by a decider who is gone
+
+| Field | Value |
+|---|---|
+| **Status** | Open (owner question (f)) |
+| **Urgency** | next-round |
+| **Filed** | 2026-11-17 |
+| **Source** | iss031 review (Opus): made reachable by the ISS-031 guard |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2888 |
+
+**Description**: suppose decider A's Override (or blocked Return) writes its Decision Record and then fails before it finishes, and A then leaves or loses the privilege. Today:
+- nobody else can finish it: the stored-decider rule from 095f-2c answers 409 `decision_conflict`;
+- since the ISS-031 guard, nobody can take the other verb either: 409 `other_decision_pending`;
+- invoice-level decisions are refused while the hold is on.
+
+The invoice stays held for good. Before ISS-031 the other verb was a wrong but working way out (it produced two conflicting decisions). Decision Records are append-only, and there is no admin route or script that finishes a stranded decision.
+
+**Entry-points**: `src/server/api/Sprk.Bff.Api/Services/Finance/SubmissionOverrideService.cs` (the stored-decider check after the other-verb guard); `notes/095f-2c-override-blocked-return-notes.md` (the decider rule).
+
+**Suggested fix (owner decides)**: (1) an admin "finish as operator" route that repeats the stranded decision from its stored record, with the operator recorded as a step; or (2) let any caller holding the same privilege finish another person's stranded decision from the stored text; or (3) an operator script. Option 1 keeps the audit trail clearest.
+
+**Estimated effort**: 1 day. **Blockers**: owner decision. **Related**: ISS-031, task 095f-2c.
+
+---
