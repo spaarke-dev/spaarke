@@ -4,7 +4,7 @@
     <title>ISS-034 (#2888), server: an operator route that finishes a stranded blocked Override or Return as recorded</title>
     <phase>Defect fix (owner question (f), EB-D-244)</phase>
     <gate>Branch from work/ebilling-r1 at the sha named in the agent brief.</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>BFF decision write path and a new authorization surface (.cs); acting on another person's recorded decision.</rigor-reason>
     <model-tier>opus</model-tier>

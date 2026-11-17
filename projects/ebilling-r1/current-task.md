@@ -9,30 +9,37 @@
 
 ## NOW — read this first
 
-### Active (2026-11-17): iss034a in flight
+### Active (2026-11-17, checkpoint at 85% context)
 
-- **IN FLIGHT: iss034a** (ISS-034 #2888, owner chose option 1 → EB-D-244). Opus implementer in an agent worktree on branch `task/ebilling-iss034a` from 3ff10e65a4. **Next:**
-  - one Opus adversarial review, plus a second verifier pass (auth tag);
-  - ontology-r1 reviews the `finish-stranded-decision` catalog entry;
-  - send uac-r2 a private message about the new authorization surface;
-  - merge, run the filtered tests, mark done;
-  - then iss034b (client).
-- Review results:
-  - Opus review: no Critical findings.
-  - ontology-r1: catalog entry PASS (keep Tier4; ExternallyVisible suggested).
-  - uac-r2: authorization sound; F1 is a second operator being blocked after an interrupted finish. K2 is the static Single() lookup. They also asked about a disabled decider.
-  - Fix round 1 is running on `task/ebilling-iss034a-r1` from 63fc8c012b. A second verifier pass on the fix diff follows.
-- **In flight: iss028** (EB-D-248, Sonnet implementer, branch `task/ebilling-iss028` from 85ad9419f5).
-- **Next:** 084h-5 (EB-D-247, duplicate check: design with ontology-r1), then 095f-2e2 (EB-D-245, B′).
-- Found in passing (to file): the invoice decision lock expires after 2 minutes, so an overlong decision can overlap a second one and produce two records under one key. This is shared by every decision path.
+**State per task:**
+- **iss034a: MERGED into work at 02173d8497, not yet pushed.**
+  - Reviews: Opus review, then a second pass with no F-class findings. ontology-r1 PASS twice, uac-r2 PASS twice.
+  - **Next:**
+    - Add 3 known-limit lines to `notes/iss034a-operator-finish-stranded-decision.md`:
+      - (1) AC3 / EB-D-244 now mean one `FinishRequested` record per operator who tried; who completed the finish is not recorded. Owner to acknowledge.
+      - (2) Pre-fix data in a "record written, size refused" state stays stranded, failing closed (needs support).
+      - (4) `WithDistinctCreateIds` applies to all 7 SubmissionOverride suites.
+    - Filtered tests on the merged tree: `SubmissionOverride|DecisionNote|DecisionRecord|DecisionActionCatalog|BlockedSubmission|InvoiceRejectReturn`, plus ArchTests `Invoice|Decision|RouteAuthorization`, plus a `--warnaserror` build.
+    - Mark the POML completed and the TASK-INDEX row ✅.
+    - Remove the worktrees and branches:
+      - `task/ebilling-iss034a` and `worktree-agent-a2f3c0f3e3c0abfc1`;
+      - `task/ebilling-iss034a-r1` and `worktree-agent-a8c58bafe3f8abe77`;
+      - worktrees under `C:\code_files\spaarke\.claude\worktrees\agent-<id>`; unlock them, then `Remove-WorktreeSafe.ps1`.
+    - Push. Then iss034b (client; spec in its POML; codes `own_decision_pending` / `both_decisions_recorded`; GET hints `CanFinishAsOperator` / `StrandedDecision`).
+- **iss028 (EB-D-248):** built on `task/ebilling-iss028` at 4729f828b0 (agent worktree `agent-ad61c8dd11b5cbd15`). Its Opus review is running. Then fix if needed, merge, and ask uac-r2 for a scoped look at the `RecordTableRules` change.
+- **095f-2e2a (EB-D-245, B′ server):** built on `task/ebilling-095f-2e2a` at b2fd09c0ad (agent worktree `agent-a3c25c9d3d138c9f3`). Its Opus review is running. Form-field contract for 2e2b: in the notes file. Then 095f-2e2b (client; spa-r4 conditions; spa-r4 diff review).
+- **084h-5 (EB-D-247, derived Decision Record id):** built on `task/ebilling-084h-5` at 74a3b96bdb (agent worktree `agent-a09fc390b051663f5`).
+  - ontology-r1's full review is requested.
+  - **Merge blocked on the OWNER's pick** for the derivable-id known limit:
+    - 1 = HMAC with a per-environment key (uac-r2 recommends; needs Key Vault, provisioning and a fail-closed startup check);
+    - 2 = gate keeps random ids (switch line in `DerivedRecordIdEntriesByDefault`);
+    - 3 = accept as built.
+  - Public text names it only as "derivable record id, see uac-r2 thread". The details are in uac-r2's thread.
+- **Dev scan (read-only):** 138 Decision Records, 0 keys with more than one record.
 
-- **iss031 ✅ merged ececf32dbd** (ISS-031 #2882 closed). Review plus 2 rounds:
-  - A blocked Override or Return refuses with 409 `other_decision_pending` (wording depends on the decider) while the other verb's record exists.
-  - Invoice-level reject and return refuse while the own submission's Override is stranded (guard placed after the close-rights 403).
-  - Owner question (f) is ISS-034 / #2888 (operator path); options were explained to the owner, with option 1 (admin finish route) recommended.
-- **iss030 ✅ merged 46bd83d459** (ISS-030 #2881 closed). A refused totals recalculation undoes the removal; the add-path twin was fixed in review. Known limit K2: a record-step strand plus a refusal from outside the BFF; it fails closed at approval.
-- **Peer:** word-add-in-r1 reports that the firm-assign pane (slice C, a68b6e5e6f) is live on dev against BFF aa7d6345f3, and the 096 gate is unchanged.
-  - That message came over the remote bridge, while a local session also claims the name. The reply was NOT sent; the owner is asked which session is real.
+**Owner decisions recorded today:** EB-D-244 (operator route), EB-D-245 (B′), EB-D-246 (no field security on the decision note), EB-D-247 (duplicate check), EB-D-248 (writer-only). All owner questions (a)–(f) are answered.
+
+**Open owner question:** the 084h-5 limit choice (1/2/3), above.
 
 - **095f-2b ✅ merged a3ef7e1c93** (fix 64c3e9ecbb: server-derived namespaced decision ids, neutral lookup 503; ontology-r1 PASS on catalog, exact-set amendment and fix; known limit ISS-030 / #2881).
 - **095f-2ui ✅ merged d3a61cc426** (review + 3 fix rounds + tweak). Page-level locks keep a partly saved decision exact on repeat; drafts survive 409s. Known limits are in its notes (locks are memory only; the Override/Return switch guard is client-only, see ISS-031 #2882). ISS-032 #2883 covers a decision stranded after its transition. Checklist section F added.
