@@ -103,6 +103,9 @@ public partial class SubmissionOverrideServiceTests
 
         /// <summary>Thrown by the lookup of a decision's writer-created Decision Record (the stored-set read), as the writer throws it.</summary>
         public Exception? FindFault { get; set; }
+
+        /// <summary>ISS-031: thrown by the lookup of ONE decision id only (the other verb's record, say), as the writer throws it; null = no fault.</summary>
+        public Func<Guid, Exception?> FindFaultFor { get; set; } = _ => null;
         public List<string> SignalQueries { get; } = [];
         public int FindCalls { get; set; }
 
@@ -404,7 +407,7 @@ public partial class SubmissionOverrideServiceTests
                 (code, invoice, decisionId, ct) =>
                 {
                     FindCalls++;
-                    return FindFault is { } fault
+                    return (FindFault ?? FindFaultFor(decisionId)) is { } fault
                         ? Task.FromException<DecisionRecordWriter.BillingStoredResolvedSet?>(fault)
                         : Recorder.FindStoredResolvedSetAsync(code, invoice, decisionId, ct);
                 },
