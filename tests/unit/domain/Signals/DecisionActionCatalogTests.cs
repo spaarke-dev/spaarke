@@ -406,8 +406,12 @@ public class DecisionActionCatalogTests
 
     /// <summary>ebilling-r1 095f-2a (EB-D-236; design 8, Q6): every invoice-level decision declares the optional "note" its service writes to
     /// <c>Values["note"]</c> when a note is given. Must fire: reject-invoice and return-to-firm declared no note before 095f-2a, and
-    /// override-submission (the Override's code) none before 095f-2c.</summary>
+    /// override-submission (the Override's code) none before 095f-2c, and accept-line, reduce-line and disallow-line none before 095f-2d1 (the
+    /// line decision's note, one per line's own record).</summary>
     [Theory]
+    [InlineData("accept-line")]
+    [InlineData("reduce-line")]
+    [InlineData("disallow-line")]
     [InlineData("approve-invoice")]
     [InlineData("reject-invoice")]
     [InlineData("return-to-firm")]
