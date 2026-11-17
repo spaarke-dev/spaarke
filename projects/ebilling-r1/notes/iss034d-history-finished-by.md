@@ -57,5 +57,7 @@ One defaulted member on an existing DTO and one private method in an existing se
 
 - **K1. Not shown for a stamp whose completer is the decider** (nothing to add) or a stamp written before iss034c (no completer recorded). By design.
 - **K2. The name is the user's current `fullname`.** A renamed user shows the new name; a deleted or unreadable user shows nothing.
-- **K3. Only the submission's current stamp is read.** A later stamp for the same verb replaces the earlier one (the existing stamp contract), so an older record of the same verb would show none.
+- **K3. Only the submission's current stamp is read.** A later stamp for the same verb replaces the earlier one (the existing stamp contract), so an older record of the same verb would show none. A re-hold (`InvoiceSubmissionRerun` removes the override/return stamp) makes "Finished by" disappear from the old record; the operator's own finish record still shows who acted.
 - **K4. The shared library's `BlockedDecisionStamp` copy** is untouched (iss034c K3 stands).
+- **K5. Where the completer comes from.** The completer id is read from stored data with the app identity; only internal reviewers see the name; see uac-r2 thread.
+- **K6. A completer equal to the entry's own decider** (`decidedBy.id`) is dropped as well as one equal to the stamp's decider, so an entry never reads "Decided by X" and "Finished by X" together (review fix round 1).

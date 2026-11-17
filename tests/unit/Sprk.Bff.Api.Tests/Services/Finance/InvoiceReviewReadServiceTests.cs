@@ -821,6 +821,19 @@ public sealed class InvoiceReviewReadServiceTests
         w.Reads("systemuser").Should().Be(0);
     }
 
+    [Fact(DisplayName = "iss034d: no completedBy when the completer is the record's own decider, even if the stamp's decider differs (never 'Decided by X / Finished by X')")]
+    public async Task CompleterEqualToTheRecordsDecider_GivesNone_WhateverTheStampsDecider()
+    {
+        var w = FinishedWorld("override", "override-submission", Reviewer, out var record);
+        w.Submission = SubmissionRow(Stamped("override", record, Reviewer, bySystemUser: OtherOperator));
+
+        var history = (await w.Service().GetAsync(InvoiceId, Caller, CancellationToken.None))!.DecisionHistory;
+
+        history.Single(h => h.RecordId == record.Id).DecidedBy!.Id.Should().Be(Reviewer);
+        history.Should().OnlyContain(h => h.CompletedBy == null);
+        w.Reads("systemuser").Should().Be(0);
+    }
+
     [Fact(DisplayName = "iss034d: a stamp for the verb whose record carries another action code gives none")]
     public async Task StampNamingARecordOfAnotherVerb_GivesNone()
     {

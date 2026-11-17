@@ -691,7 +691,9 @@ public sealed class InvoiceReviewReadService
                 {
                     if (SubmissionOverrideService.ReadStamp(root, member) is { CompletedBySystemUserId: { } completer } stamp
                         && completer != stamp.BySystemUserId
-                        && history.Any(h => h.RecordId == stamp.RecordId && string.Equals(h.ActionCode, actionCode, StringComparison.Ordinal)))
+                        && history.Any(h => h.RecordId == stamp.RecordId
+                            && string.Equals(h.ActionCode, actionCode, StringComparison.Ordinal)
+                            && h.DecidedBy?.Id != completer))
                     {
                         completers[stamp.RecordId] = completer;
                     }
