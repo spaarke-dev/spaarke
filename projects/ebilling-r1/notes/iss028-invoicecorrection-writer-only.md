@@ -127,3 +127,16 @@ Controls:
 ### Rollout
 
 Dev gets the change by a direct scoped edit after merge (EB-D-250). Other environments get it through the SpaarkeMaster import.
+
+### Follow-up (same task)
+
+- `config/feature-role-privileges.json`: the correction-row write entries are in the `removals` block under gap `ISS028`, so
+  `scripts/Set-FeatureRolePrivileges.ps1 -Remove -Gap ISS028` applies exactly this change (dry run first, then `-Apply`, then
+  `-Remove -Verify -Gap ISS028`); `-Restore -Gap ISS028` is its rollback.
+- `scripts/ebilling/Deploy-EbillingRolePrivileges.ps1` (D-90 mirror) no longer lists `sprk_invoicecorrection` as a working table, so a
+  re-run cannot put the entries back. Pinned by `tests/scripts/Deploy-EbillingRolePrivileges.Tests.ps1` (Pester 5.7.1).
+- The new guard reads the config's `changes` only; a `removals` entry is must-not-fire (`WriterOnlyNativeWriteIgnoresConfigRemovals`).
+  `RemovalsAreAbsentFromTheRoleFilesAndForbidden` counts 86 removals and takes the writer-only guard as the coverage of the ISS028 ones.
+- `NewestExpectationsFileCarriesTheRuledSet` leaves gap `ISS028` out (`PendingNextReleaseRemovalGaps`); `PendingRemovalGapsAreARatchet`
+  fails once the newest expectations file carries an entry of a pending gap, so the gap then leaves the list.
+- Next release's role-privilege expectations must list the five removed entries (managed stage-and-upgrade): the correction-row write entries.
