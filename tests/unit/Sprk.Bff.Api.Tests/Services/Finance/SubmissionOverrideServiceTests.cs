@@ -66,6 +66,9 @@ public partial class SubmissionOverrideServiceTests
         public List<BillingDecision> Recorded { get; } = [];
         public List<Dictionary<string, object>> Updates { get; } = [];
         public List<InvoiceLifecycleStatus> Transitions { get; } = [];
+
+        /// <summary>095f-2c: the decision note each lifecycle transition was asked to write with the status (null = none).</summary>
+        public List<string?> TransitionNotes { get; } = [];
         public List<SubmissionDecidedNotification> Notified { get; } = [];
         public List<string> LockKeys { get; } = [];
         public HashSet<string> HeldKeys { get; } = new(StringComparer.Ordinal);
@@ -314,11 +317,13 @@ public partial class SubmissionOverrideServiceTests
                     return Task.CompletedTask;
                 });
 
-            Lifecycle.Setup(l => l.TransitionAsync(InvoiceId, It.IsAny<InvoiceLifecycleStatus>(), It.IsAny<CancellationToken>()))
-                .Returns((Guid _, InvoiceLifecycleStatus target, CancellationToken _) =>
+            // 095f-2c: a Return passes the decision note (the note, or the reason) to the lifecycle's four-argument overload.
+            Lifecycle.Setup(l => l.TransitionAsync(InvoiceId, It.IsAny<InvoiceLifecycleStatus>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+                .Returns((Guid _, InvoiceLifecycleStatus target, string? decisionNote, CancellationToken _) =>
                 {
                     Order.Add("transition");
                     Transitions.Add(target);
+                    TransitionNotes.Add(decisionNote);
                     if (TransitionFault is { } fault)
                     {
                         return Task.FromException<InvoiceTransitionResult>(fault);
@@ -1343,8 +1348,7 @@ public partial class SubmissionOverrideServiceTests
 
         retried.Kind.Should().Be(BlockedDecisionKind.Decided);
         w.RecordCreates.Should().Be(1, "the retry found the first attempt's record instead of writing another");
-        w.Recorded.Should().HaveCount(2);
-        w.Recorded.Select(d => d.DecisionId).Distinct().Should().ContainSingle();
+        w.Recorded.Should().ContainSingle("095f-2c round 1: the retry finishes from the stored record and never asks the writer to record again");
         w.Status.Should().Be(InvoiceSubmissionStatus.Accepted);
     }
 
@@ -3030,8 +3034,8 @@ public partial class SubmissionOverrideServiceTests
         };
         w.Entities.Setup(e => e.RetrieveAsync("sprk_invoice", AnotherInvoiceId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
             .Returns((string _, Guid _, string[] columns, CancellationToken _) => Task.FromResult(World.Copy(invoiceB, columns)));
-        w.Lifecycle.Setup(l => l.TransitionAsync(AnotherInvoiceId, It.IsAny<InvoiceLifecycleStatus>(), It.IsAny<CancellationToken>()))
-            .Returns((Guid _, InvoiceLifecycleStatus target, CancellationToken _) =>
+        w.Lifecycle.Setup(l => l.TransitionAsync(AnotherInvoiceId, It.IsAny<InvoiceLifecycleStatus>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .Returns((Guid _, InvoiceLifecycleStatus target, string? _, CancellationToken _) =>
             {
                 w.Order.Add("transition");
                 w.Transitions.Add(target);
@@ -3233,7 +3237,7 @@ public partial class SubmissionOverrideServiceTests
             "the version read after the Signal set was stored (our own write moved it)");
         requests[1].Target.LogicalName.Should().Be("sprk_invoice");
         requests[1].Target.RowVersion.Should().Be(invoiceVersion.ToString(System.Globalization.CultureInfo.InvariantCulture));
-        requests[1].Target.Attributes.Keys.Should().Equal([InvoiceReviewDetail.Column], "only the detail: no status, no firm");
+        requests[1].Target.Attributes.Keys.Should().BeEquivalentTo([InvoiceReviewDetail.Column, InvoiceCorrectionNote.DecisionColumn], "the detail and (095f-2c) the decision note: no status, no firm");
         requests[1].Target.Contains(InvoiceReviewDetail.Column).Should().BeTrue("a blank is written explicitly, never skipped");
         requests[1].Target.GetAttributeValue<OptionSetValue>(InvoiceReviewDetail.Column).Should().BeNull();
         w.Updates.Should().ContainSingle("the one transaction carries the submission's state");
@@ -3446,15 +3450,15 @@ public partial class SubmissionOverrideServiceTests
         returned.ErrorCode.Should().Be(BlockedSubmissionErrors.AlreadyOverridden);
     }
 
-    [Fact(DisplayName = "114: where the review detail column does not exist yet, the release still happens - the submission alone, by the single conditional write (the holds are the stored state)")]
-    public async Task Release_WhenTheDetailColumnIsMissing_StillReleases_WithoutTheInvoiceWrite()
+    [Fact(DisplayName = "114: where the review detail column does not exist yet, the release still happens - without the review detail (the holds are the stored state); 095f-2c: the invoice's decision note is still in the transaction")]
+    public async Task Release_WhenTheDetailColumnIsMissing_StillReleases_WithoutTheReviewDetail()
     {
         var w = await World.CreateHeldAsync(InvoiceSubmissionChannel.Spa, detailColumnPresent: false);
 
         var result = await w.OverrideAsync();
 
         result.Kind.Should().Be(BlockedDecisionKind.Decided);
-        w.Transactions.Should().BeEmpty();
+        InvoiceWriteOf(w).Target.Attributes.Keys.Should().Equal([InvoiceCorrectionNote.DecisionColumn], "no review detail where its column does not exist");
         w.Updates.Should().ContainSingle();
         InvoiceProcedureHold.ReasonsOf(w.Submission).Should().BeEmpty();
     }
@@ -3822,7 +3826,9 @@ public partial class SubmissionOverrideServiceTests
 
         gap.Recorded.Single().Facts.Keys.Should().BeEquivalentTo(ordinary.Recorded.Single().Facts.Keys);
         ordinary.Recorded.Single().Values!.Keys.Should().BeEquivalentTo(["submissionId", "trackingNumber"]);
-        ordinary.Transactions.Should().BeEmpty("an override that lifts no Procedure hold writes only the submission, as before");
+        // 095f-2c: every override's release transaction also carries the invoice's decision note; with no hold lifted it carries no review detail.
+        var invoiceWrite = InvoiceWriteOf(ordinary);
+        invoiceWrite.Target.Attributes.Keys.Should().Equal([InvoiceCorrectionNote.DecisionColumn], "an override that lifts no Procedure hold writes no review detail");
         ordinary.Updates.Should().ContainSingle();
     }
 

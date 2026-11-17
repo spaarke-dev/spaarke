@@ -437,8 +437,10 @@ public static class DecisionActionCatalog
         { Gate = new DecisionGateFactors(GateRiskTier.Tier4, Reversible: false, ExternallyVisible: true, RecordOfTruthImpact: true) },
 
         // ---- Override (D-24; subject: the invoice the accepted submission created) ----------------------------
+        // ebilling-r1 095f-2c (EB-D-236; design 8, Q6): "note" declared optional, the Values key the Override service writes when a note is given.
+        // The writer reads only required parameters, so declaring it changes no behaviour. (return-to-firm, the blocked return's code too, has it from 095f-2a.)
         new("override-submission", "Override blocking failure", DecisionLane.Decide, IsNextStep: false, WorkType: null,
-            [new("reason", "Reason for overriding", DecisionParameterKind.TextArea, Required: true, Hint: ReasonHint)],
+            [new("reason", "Reason for overriding", DecisionParameterKind.TextArea, Required: true, Hint: ReasonHint), NoteParameter()],
             ["Accepts the submission despite its blocking failure", "The overridden finding stays visible to the reviewer"],
             Excludes: [],
             DecisionRecordClass.Judgement)

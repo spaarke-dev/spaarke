@@ -92,10 +92,15 @@ public static class BlockedSubmissionErrors
     /// <summary>409: another decision on this invoice is running; retry in a moment.</summary>
     public const string InProgress = "ebilling.blocked.in_progress";
 
-    /// <summary>409: the submission or the invoice changed while the decision ran; nothing was left half done that a retry does not finish.</summary>
+    /// <summary>409: the submission or the invoice changed while the decision ran; nothing was left half done that a retry does not finish. An
+    /// override's release is retried inside the call when only the invoice's version moved (095f-2c review round 1); this answer means the bound was
+    /// used up, or the submission itself changed.</summary>
     public const string ConcurrentChange = "ebilling.blocked.concurrent_change";
 
-    /// <summary>409: the Decision Record for this decision already exists with another reason or another decider, so this call is not a repeat of it.</summary>
+    /// <summary>409: the Decision Record for this decision already exists and this call cannot finish it. Either another person recorded it (their
+    /// unfinished decision is theirs to complete by repeating it; nothing is written over it), or the record is ambiguous (more than one record, or
+    /// a stored Signal set the writer cannot read). A repeat by the SAME decider is not refused for carrying another reason or note: it finishes from
+    /// the stored record and the request's reason and note are ignored (095f-2c review round 1).</summary>
     public const string DecisionConflict = "ebilling.blocked.decision_conflict";
 
     /// <summary>409: the Decision Record writer refused the decision for a reason a retry does not change (its subject or owner).</summary>
@@ -130,8 +135,9 @@ public static class BlockedSubmissionErrors
     };
 }
 
-/// <summary>The body of the override and return routes. The reason is required and is the only input: the decider is the authenticated caller.</summary>
-public sealed record BlockedDecisionRequest(string? Reason);
+/// <summary>The body of the override and return routes. The reason is required; the note (task 095f-2c, EB-D-236, EB-D-240) is optional.
+/// The decider is the authenticated caller.</summary>
+public sealed record BlockedDecisionRequest(string? Reason, string? Note = null);
 
 /// <summary>Who decided a blocked submission, when, why, and the Decision Record that holds it. Internal reviewers only.</summary>
 public sealed record BlockedDecisionStamp(Guid RecordId, Guid BySystemUserId, DateTimeOffset On, string Reason);
@@ -246,7 +252,22 @@ public sealed record BlockedDecisionResult
 /// is re-derived from the holds that REMAIN after it, through the one derivation (<see cref="InvoiceOpenHolds.ReasonsAfterAsync"/>), and written in
 /// the SAME transaction as the submission's state, each row conditioned on the version this call read. The invoice is In Review (checked under
 /// the lock, and its version is the condition). The detail is blank only when nothing else holds the invoice: a firm hold still open keeps it
-/// "Waiting for the firm". An Override that lifts no Procedure hold writes only the submission, as before.</para>
+/// "Waiting for the firm". An Override that lifts no Procedure hold writes no review detail.</para>
+/// <para><b>The decision note (task 095f-2c; EB-D-236, EB-D-240).</b> The request may carry an optional note, checked by
+/// <see cref="InvoiceCorrectionNote.Check"/> after the reason and before any read, lock or write (400 <c>ebilling.note_too_long</c> /
+/// <c>ebilling.note_invalid_characters</c>; never truncated or stripped). Given, it is the Decision Record's <c>Values["note"]</c> (a key only
+/// when a note is given, so a decision with no note hashes as before). Every Override writes the invoice in the release transaction: the update
+/// carries <c>sprk_invoice.sprk_decisionnote</c> (the note, or with no note the required reason; the internal column, never shown to a firm),
+/// beside the review detail when a hold is lifted, and still no status. A version fault applies neither update. A Return passes the note (or the
+/// reason) to the lifecycle's <c>TransitionAsync</c> overload, so the column lands in the same conditional update as the status. The firm's own
+/// <c>sprk_correctionnote</c> is never written here. A repeat that arrives after the record was written but before the state change finishes THAT
+/// decision (review round 1): <see cref="DecisionRecordWriter.BillingStoredResolvedSet"/> carries the record's stored reason and note, and the
+/// repeat uses them (the column, the stamp, the transition) and never asks the writer to record again, so it need not recall the first text. The
+/// request's reason and note are ignored once a record exists. Only the stored decider may finish it (another person gets 409
+/// <see cref="BlockedSubmissionErrors.DecisionConflict"/>, as reject and return answer a claim held by another approver), and a record whose
+/// content cannot be read answers 503 with nothing written. The release's invoice update is conditioned on the invoice's row version; a fault on
+/// the invoice's request alone is retried under the lock after a re-read (<see cref="InvoiceReviewService.MaxConditionalWriteAttempts"/> attempts
+/// in all), a fault on the submission's is not.</para>
 /// <para><b>Signals (D-122, the human-decision close agreed with ontology-r1).</b> An override and a return each resolve every Open or
 /// Acknowledged Signal on the invoice and on its lines, of every policy: the set is read once and stored in <c>sprk_findingsjson</c> under
 /// <see cref="HumanDecisionSetMember"/> BEFORE the record (049's way, with this decision's id), the record lists it
@@ -670,18 +691,28 @@ public sealed class SubmissionOverrideService
     /// on every call, as the caller); the reason is required. A repeat is a no-op with no new Decision Record.
     /// </summary>
     public Task<BlockedDecisionResult> OverrideAsync(Guid submissionId, string? reason, string? callerBearerToken, CancellationToken ct) =>
-        DecideAsync(Verb.Override, submissionId, reason, callerBearerToken, ct);
+        OverrideAsync(submissionId, reason, note: null, callerBearerToken, ct);
+
+    /// <summary>Task 095f-2c (EB-D-236, EB-D-240): <see cref="OverrideAsync(Guid, string?, string?, CancellationToken)"/> with the optional decision
+    /// <paramref name="note"/> (null, empty or whitespace-only means none).</summary>
+    public Task<BlockedDecisionResult> OverrideAsync(Guid submissionId, string? reason, string? note, string? callerBearerToken, CancellationToken ct) =>
+        DecideAsync(Verb.Override, submissionId, reason, note, callerBearerToken, ct);
 
     /// <summary>
     /// Returns a blocked submission to the firm (D-73: no privilege; EB-D-203: a Blocked SPA submission too, also with no privilege, while the
     /// reviewer still needs Write on the invoice). The reason is required. A repeat is a no-op with no new Decision Record.
     /// </summary>
     public Task<BlockedDecisionResult> ReturnAsync(Guid submissionId, string? reason, string? callerBearerToken, CancellationToken ct) =>
-        DecideAsync(Verb.Return, submissionId, reason, callerBearerToken, ct);
+        ReturnAsync(submissionId, reason, note: null, callerBearerToken, ct);
+
+    /// <summary>Task 095f-2c (EB-D-236, EB-D-240): <see cref="ReturnAsync(Guid, string?, string?, CancellationToken)"/> with the optional decision
+    /// <paramref name="note"/> (null, empty or whitespace-only means none).</summary>
+    public Task<BlockedDecisionResult> ReturnAsync(Guid submissionId, string? reason, string? note, string? callerBearerToken, CancellationToken ct) =>
+        DecideAsync(Verb.Return, submissionId, reason, note, callerBearerToken, ct);
 
     internal enum Verb { Override, Return }
 
-    private async Task<BlockedDecisionResult> DecideAsync(Verb verb, Guid submissionId, string? reason, string? token, CancellationToken ct)
+    private async Task<BlockedDecisionResult> DecideAsync(Verb verb, Guid submissionId, string? reason, string? rawNote, string? token, CancellationToken ct)
     {
         // ── 1. Who is asking, and may they. Before anything is read, so a refusal says nothing about the submission. ──
         var decider = await ResolveCallerAsync(token, ct).ConfigureAwait(false);
@@ -713,6 +744,16 @@ public sealed class SubmissionOverrideService
             return BlockedDecisionResult.Refuse(submissionId, StatusCodes.Status400BadRequest, BlockedSubmissionErrors.ReasonTooLong,
                 $"The reason may be at most {ReasonMaxLength} characters.");
         }
+
+        // ── 2b. Task 095f-2c (design 1.1): the note by the one shared rule, after the reason and before any read, lock or write; never truncated
+        //    or stripped. ──
+        var checkedNote = InvoiceCorrectionNote.Check(rawNote);
+        if (InvoiceCorrectionNote.DecisionRefusalOf(checkedNote.Refusal) is { } noteRefusal)
+        {
+            return BlockedDecisionResult.Refuse(submissionId, StatusCodes.Status400BadRequest, noteRefusal.Code, noteRefusal.Detail);
+        }
+
+        var note = checkedNote.Value;
 
         // ── 3. Read, and every refusal that needs no write or lock. ──
         Entity? row;
@@ -788,7 +829,7 @@ public sealed class SubmissionOverrideService
 
         try
         {
-            return await DecideLockedAsync(verb, submissionId, invoiceId, trimmed, decider!.Value, token, ct).ConfigureAwait(false);
+            return await DecideLockedAsync(verb, submissionId, invoiceId, trimmed, note, decider!.Value, token, ct).ConfigureAwait(false);
         }
         finally
         {
@@ -805,7 +846,7 @@ public sealed class SubmissionOverrideService
     }
 
     private async Task<BlockedDecisionResult> DecideLockedAsync(
-        Verb verb, Guid submissionId, Guid invoiceId, string reason, Guid decider, string? token, CancellationToken ct)
+        Verb verb, Guid submissionId, Guid invoiceId, string reason, string? note, Guid decider, string? token, CancellationToken ct)
     {
         // Re-read under the lock: what was read before it may have been decided by the call that held it.
         Entity? row;
@@ -888,6 +929,30 @@ public sealed class SubmissionOverrideService
             return Unavailable(submissionId, invoiceId);
         }
 
+        // ── 095f-2c review round 1 (F1, found in passing): a writer-created record already exists, so this call finishes THAT decision. As 105
+        //    does for its Signals and as reject and return do for their repeat, it is finished as the record holds it: the request's reason and
+        //    note no longer matter, the column takes the STORED note (or reason), and the record is never asked for again (so a repeat that cannot
+        //    recall the first text is not refused). The decider is the stored one: another person's unfinished decision is theirs to complete
+        //    (the same rule as reject and return's "claimed"; nothing is written over it). A record that cannot be read fails closed. ──
+        if (recordedSet is not null)
+        {
+            if (recordedSet.ConfirmedByUserId != decider)
+            {
+                _logger.LogWarning("Submission {SubmissionId}: its {Verb} was recorded by another decider (or none); nothing was changed", submissionId, verb);
+                return BlockedDecisionResult.Refuse(submissionId, StatusCodes.Status409Conflict, BlockedSubmissionErrors.DecisionConflict,
+                    "Another person's decision on this submission has not finished. They complete it by repeating it.", invoiceId);
+            }
+
+            if (!recordedSet.StoredContentReadable || string.IsNullOrWhiteSpace(recordedSet.Reason))
+            {
+                _logger.LogWarning("Submission {SubmissionId}: the stored Decision Record {RecordId} of its {Verb} cannot be read as a decision; nothing was changed",
+                    submissionId, recordedSet.RecordId, verb);
+                return Unavailable(submissionId, invoiceId);
+            }
+
+            (reason, note) = (recordedSet.Reason, recordedSet.Note);
+        }
+
         InvoiceSubmissionAfterSteps.ResolvedSignalSet signalSet;
         IReadOnlyList<(string Entity, Guid Id)> subjects;
         // Task 114b F1: the set the caller's rights (FR-51) are asked on. It is the set as determined, BEFORE the hold filter below, because the
@@ -955,6 +1020,7 @@ public sealed class SubmissionOverrideService
         // ── Task 095d-0 (EB-D-185, ontology-r1 2026-11-05): a firm comes first. Override only (Return stays open). After the rights (403 first), and BEFORE
         //    the holds derivation, the set's store, the Decision Record and the Signal closes, so a refused request leaves nothing for a retry to
         //    trip over. A read fault answers 503 with nothing written. ──
+        long overrideInvoiceVersion = 0;
         if (verb == Verb.Override)
         {
             InvoiceFirmGateResult gate;
@@ -975,6 +1041,16 @@ public sealed class SubmissionOverrideService
                 return BlockedDecisionResult.Refuse(submissionId, StatusCodes.Status409Conflict, BlockedSubmissionErrors.FirmMissing,
                     BlockedSubmissionErrors.FirmDetailFor(gate), invoiceId);
             }
+
+            // Task 095f-2c: the release always writes the invoice (its internal decision note), so its version is the condition of the release
+            // transaction for every override, not only one that lifts a Procedure hold. Checked here, before any write.
+            if (RowVersionOf(invoice!) is not { } readInvoiceVersion)
+            {
+                _logger.LogWarning("Invoice {InvoiceId} was read without a row version; the release of submission {SubmissionId} is not written", invoiceId, submissionId);
+                return Unavailable(submissionId, invoiceId);
+            }
+
+            overrideInvoiceVersion = readInvoiceVersion;
         }
 
         // ── Task 114 (F4 review round; 114b order change): the holds that REMAIN are derived BEFORE any write (the set store, the Decision Record,
@@ -999,13 +1075,7 @@ public sealed class SubmissionOverrideService
                         _entities, invoice!, submissionId, new InvoiceOpenHolds.StoredSubmission(SubmissionReasonCodes.Overridden, provisional), ct).ConfigureAwait(false);
                     if (writesDetail)
                     {
-                        if (RowVersionOf(invoice!) is not { } invoiceVersion)
-                        {
-                            _logger.LogWarning("Invoice {InvoiceId} was read without a row version; the release of submission {SubmissionId} is not written", invoiceId, submissionId);
-                            return Unavailable(submissionId, invoiceId);
-                        }
-
-                        releaseDetail = (invoiceVersion, InvoiceReviewDetail.ReviewDetailOf(remaining));
+                        releaseDetail = (overrideInvoiceVersion, InvoiceReviewDetail.ReviewDetailOf(remaining));
                     }
                 }
             }
@@ -1035,16 +1105,21 @@ public sealed class SubmissionOverrideService
             subjects = kept.Select(s => (s.SubjectEntity, s.SubjectId)).Distinct().ToList();
         }
 
-        var decision = BuildDecision(verb, stored, submissionId, invoiceId, decider, reason, signalSet, ChannelNameOf(row));
-        try
+        // A decision whose record already exists (above) is not built again: it is finished from the stored record, never recorded a second time.
+        BillingDecision? decision = null;
+        if (recordedSet is null)
         {
-            _preflight(decision);
-        }
-        catch (DecisionRecordRefusedException ex)
-        {
-            _logger.LogWarning("Submission {SubmissionId}: the decision would be refused before any write ({Reason})", submissionId, ex.Reason);
-            return BlockedDecisionResult.Refuse(submissionId, StatusCodes.Status400BadRequest, BlockedSubmissionErrors.DecisionInvalid,
-                "The decision is not valid.", invoiceId);
+            decision = BuildDecision(verb, stored, submissionId, invoiceId, decider, reason, signalSet, ChannelNameOf(row), note);
+            try
+            {
+                _preflight(decision);
+            }
+            catch (DecisionRecordRefusedException ex)
+            {
+                _logger.LogWarning("Submission {SubmissionId}: the decision would be refused before any write ({Reason})", submissionId, ex.Reason);
+                return BlockedDecisionResult.Refuse(submissionId, StatusCodes.Status400BadRequest, BlockedSubmissionErrors.DecisionInvalid,
+                    "The decision is not valid.", invoiceId);
+            }
         }
 
         // ── The set is stored BEFORE the record (049's way), so a retry closes exactly it. ──
@@ -1092,27 +1167,38 @@ public sealed class SubmissionOverrideService
             findingsJson = reread;
         }
 
-        // ── Record first (074 K-3): a refusal here leaves the submission and the invoice exactly as they were. ──
-        BillingDecisionRecordResult recorded;
-        try
+        // ── Record first (074 K-3): a refusal here leaves the submission and the invoice exactly as they were. A decision whose record
+        //    already exists is not recorded again (095f-2c review round 1): its stored record is the one the state change below names. ──
+        Guid recordId;
+        var alreadyRecorded = recordedSet is not null;
+        if (recordedSet is not null)
         {
-            recorded = await _record(decision, ct).ConfigureAwait(false);
+            recordId = recordedSet.RecordId;
         }
-        catch (DecisionRecordRefusedException ex)
+        else
         {
-            return RecordRefusal(submissionId, invoiceId, ex);
-        }
-        catch (Exception ex) when (!IsCallerCancellation(ex, ct))
-        {
-            _logger.LogError(ex, "Submission {SubmissionId}: the Decision Record could not be written", submissionId);
-            return BlockedDecisionResult.Refuse(submissionId, StatusCodes.Status503ServiceUnavailable, BlockedSubmissionErrors.RecordUnavailable,
-                "The decision could not be recorded right now. Nothing was changed. Try again.", invoiceId);
+            try
+            {
+                var recorded = await _record(decision!, ct).ConfigureAwait(false);
+                (recordId, alreadyRecorded) = (recorded.RecordId, recorded.AlreadyRecorded);
+            }
+            catch (DecisionRecordRefusedException ex)
+            {
+                return RecordRefusal(submissionId, invoiceId, ex);
+            }
+            catch (Exception ex) when (!IsCallerCancellation(ex, ct))
+            {
+                _logger.LogError(ex, "Submission {SubmissionId}: the Decision Record could not be written", submissionId);
+                return BlockedDecisionResult.Refuse(submissionId, StatusCodes.Status503ServiceUnavailable, BlockedSubmissionErrors.RecordUnavailable,
+                    "The decision could not be recorded right now. Nothing was changed. Try again.", invoiceId);
+            }
         }
 
         // ── The stored set, closed as Acted by the record naming the decider (a retry: AlreadyClosedByThisRecord). Every Signal is still
         //    attempted and the state change below still runs (the decision stands, as for a line decision), but a close that failed is
-        //    counted: nothing else closes that Signal later, so the answer is 503 unavailable, never Decided (F2). ──
-        var signalsNotClosed = await HumanDecisionSignalClose.CloseSetAsync(_closeActed, signalSet, recorded.RecordId, decider, _logger, ct).ConfigureAwait(false);
+        //    counted: nothing else closes that Signal later, so the answer is 503 unavailable, never Decided (F2). A finished decision
+        //    closes under the STORED decider (095f-2a round 2; it is the caller's, checked above). ──
+        var signalsNotClosed = await HumanDecisionSignalClose.CloseSetAsync(_closeActed, signalSet, recordId, recordedSet?.ConfirmedByUserId ?? decider, _logger, ct).ConfigureAwait(false);
 
         // ── Then change state. A failure from here on leaves a record a retry finds and finishes. ──
         if (verb == Verb.Return && invoiceStatus == InvoiceLifecycleStatus.InReview)
@@ -1120,7 +1206,10 @@ public sealed class SubmissionOverrideService
             InvoiceTransitionResult moved;
             try
             {
-                moved = await _lifecycle.TransitionAsync(invoiceId, InvoiceLifecycleStatus.ReturnedToFirm, ct).ConfigureAwait(false);
+                // 095f-2c (EB-D-240): the invoice's internal decision note lands in the same conditional update as the status, holding the
+                // note, or with no note the required reason. A repeat that finds the invoice already Returned to Firm moves nothing and so
+                // writes no note (the column keeps the first one).
+                moved = await _lifecycle.TransitionAsync(invoiceId, InvoiceLifecycleStatus.ReturnedToFirm, note ?? reason, ct).ConfigureAwait(false);
             }
             catch (Exception ex) when (!IsCallerCancellation(ex, ct))
             {
@@ -1137,7 +1226,7 @@ public sealed class SubmissionOverrideService
             }
         }
 
-        var stamp = new BlockedDecisionStamp(recorded.RecordId, decider, _time.GetUtcNow(), reason);
+        var stamp = new BlockedDecisionStamp(recordId, decider, _time.GetUtcNow(), reason);
         var member = verb == Verb.Override ? OverrideMember : ReturnMember;
         var newJson = WithStamp(findingsJson!, member, stamp);
         if (newJson.Length > InvoiceSubmissionPersister.FindingsJsonMaxLength)
@@ -1163,39 +1252,73 @@ public sealed class SubmissionOverrideService
         }
 
         // ── Task 114 (ontology D-205 writer 5): an Override that lifts a Procedure hold writes the invoice's review detail, derived BEFORE the
-        //    record (above) from the holds that REMAIN, in the SAME transaction as the submission's state, each row conditioned on the version read. ──
-        IReadOnlyList<OrganizationRequest>? releaseTransaction = releaseDetail is { } release
-            ? BuildReleaseTransaction(submissionId, fields, version, invoiceId, release.InvoiceVersion, release.ReviewDetail)
-            : null;
+        //    record (above) from the holds that REMAIN, in the SAME transaction as the submission's state, each row conditioned on the version read.
+        //    Task 095f-2c (EB-D-240): every Override writes that transaction, because the invoice's internal decision note (the note, or with no
+        //    note the required reason) lands with the release; the review detail is in it only when a Procedure hold is lifted. ──
+        //
+        //    095f-2c review round 1 (F1): the invoice's version is the release's condition, so ANY unrelated write to the invoice between the
+        //    read and the release (a totals recalculation, a line decision, a form edit; none takes this lock) faults the release on the invoice's
+        //    request. That is retried under the same lock, as the lifecycle's TransitionAsync retries its own conditional write: the invoice is
+        //    re-read, must still be In Review with its firm gate open, the review detail is re-derived when it is written, and the release is sent
+        //    again, up to MaxConditionalWriteAttempts in all. A fault of the submission's request is not retried, and an exhausted bound answers
+        //    as before (409 concurrent_change, nothing applied).
+        var releaseAttempt = 0;
+        while (true)
+        {
+            releaseAttempt++;
+            IReadOnlyList<OrganizationRequest>? releaseTransaction = verb == Verb.Override
+                ? BuildReleaseTransaction(submissionId, fields, version, invoiceId, overrideInvoiceVersion,
+                    writesReviewDetail: releaseDetail is not null, releaseDetail?.ReviewDetail, note ?? reason)
+                : null;
 
-        try
-        {
-            if (releaseTransaction is null)
+            try
             {
-                await _entities.BulkUpdateIfRowVersionsMatchAsync(Entity, [(submissionId, fields, version)], ct).ConfigureAwait(false);
-            }
-            else
-            {
-                await _entities.ExecuteTransactionAsync(releaseTransaction, ct).ConfigureAwait(false);
-            }
-        }
-        catch (Exception ex) when (IsVersionConflict(ex))
-        {
-            var afterConflict = await AfterConflictAsync(verb, submissionId, invoiceId, recorded.RecordId, ct).ConfigureAwait(false);
+                if (releaseTransaction is null)
+                {
+                    await _entities.BulkUpdateIfRowVersionsMatchAsync(Entity, [(submissionId, fields, version)], ct).ConfigureAwait(false);
+                }
+                else
+                {
+                    await _entities.ExecuteTransactionAsync(releaseTransaction, ct).ConfigureAwait(false);
+                }
 
-            // A concurrent run finished the state change, but this run's closes failed: the repeat (AlreadyDecided) re-runs them.
-            return signalsNotClosed > 0 && afterConflict.Kind == BlockedDecisionKind.AlreadyDecided
-                ? Unavailable(submissionId, invoiceId)
-                : afterConflict;
-        }
-        catch (Exception ex) when (!IsCallerCancellation(ex, ct))
-        {
-            _logger.LogError(ex, "Submission {SubmissionId}: the decision could not be written to it", submissionId);
-            return Unavailable(submissionId, invoiceId);
+                break;
+            }
+            catch (Exception ex) when (IsVersionConflict(ex))
+            {
+                var conflictSide = releaseTransaction is null ? ReleaseConflictSide.Submission : ConflictSideOf(ex);
+                if (conflictSide == ReleaseConflictSide.Invoice && releaseAttempt < InvoiceReviewService.MaxConditionalWriteAttempts)
+                {
+                    _logger.LogWarning("Submission {SubmissionId}: invoice {InvoiceId} changed before its release was written (attempt {Attempt} of {MaxAttempts}); re-reading it",
+                        submissionId, invoiceId, releaseAttempt, InvoiceReviewService.MaxConditionalWriteAttempts);
+                    var reread = await ReReadInvoiceForReleaseAsync(
+                        submissionId, invoiceId, releaseDetail is not null, findingsJson!, decisionId, decider, reason, ct).ConfigureAwait(false);
+                    if (reread.Refusal is { } stop)
+                    {
+                        return stop;
+                    }
+
+                    overrideInvoiceVersion = reread.InvoiceVersion;
+                    releaseDetail = releaseDetail is null ? null : (reread.InvoiceVersion, reread.ReviewDetail);
+                    continue;
+                }
+
+                var afterConflict = await AfterConflictAsync(verb, submissionId, invoiceId, recordId, ct, conflictSide).ConfigureAwait(false);
+
+                // A concurrent run finished the state change, but this run's closes failed: the repeat (AlreadyDecided) re-runs them.
+                return signalsNotClosed > 0 && afterConflict.Kind == BlockedDecisionKind.AlreadyDecided
+                    ? Unavailable(submissionId, invoiceId)
+                    : afterConflict;
+            }
+            catch (Exception ex) when (!IsCallerCancellation(ex, ct))
+            {
+                _logger.LogError(ex, "Submission {SubmissionId}: the decision could not be written to it", submissionId);
+                return Unavailable(submissionId, invoiceId);
+            }
         }
 
         _logger.LogInformation("Submission {SubmissionId} {Outcome} by {Decider}; invoice {InvoiceId}, Decision Record {RecordId}, already recorded {AlreadyRecorded}, Signals not closed {SignalsNotClosed}",
-            submissionId, verb == Verb.Override ? "overridden" : "returned", decider, invoiceId, recorded.RecordId, recorded.AlreadyRecorded, signalsNotClosed);
+            submissionId, verb == Verb.Override ? "overridden" : "returned", decider, invoiceId, recordId, alreadyRecorded, signalsNotClosed);
 
         // Task 152 (FR-43): an override releases the hold without a status move (a Return moves the status, and the lifecycle service re-indexes
         // that), so the index document is rebuilt here. The change is the override's decision id (one per submission). Best effort; never fails the decision.
@@ -1216,7 +1339,7 @@ public sealed class SubmissionOverrideService
             // Record link. The repeat finds the decided submission (AlreadyDecided) and re-runs the close over the writer-created record's set
             // (RecloseAsync): no second record, and the answer is Decided / AlreadyDecided only once every close is done.
             _logger.LogWarning("Submission {SubmissionId}: {Count} Signal close(s) of Decision Record {RecordId} did not finish; answering unavailable so the decision is repeated to complete them",
-                submissionId, signalsNotClosed, recorded.RecordId);
+                submissionId, signalsNotClosed, recordId);
             return Unavailable(submissionId, invoiceId);
         }
 
@@ -1225,21 +1348,25 @@ public sealed class SubmissionOverrideService
             Kind = BlockedDecisionKind.Decided,
             SubmissionId = submissionId,
             InvoiceId = invoiceId,
-            RecordId = recorded.RecordId,
+            RecordId = recordId,
             Outcome = verb == Verb.Override ? "Overridden" : "Returned",
         };
     }
 
     /// <summary>
-    /// Task 114 (ontology D-205 writer 5): the release as ONE transaction, in this order: the submission's state (<paramref name="submissionFields"/>),
-    /// then the invoice's review detail (<paramref name="reviewDetail"/>, null = blank). Each row is conditioned on the version this call read
+    /// Task 114 (ontology D-205 writer 5) and task 095f-2c (EB-D-236, EB-D-240): the release as ONE transaction, in this order: the submission's
+    /// state (<paramref name="submissionFields"/>), then the invoice's columns. The invoice update always carries the internal decision note
+    /// (<see cref="InvoiceCorrectionNote.DecisionColumn"/>: <paramref name="decisionNote"/>, which the caller sets to the note, or with no note
+    /// the required reason), and the review detail (<paramref name="reviewDetail"/>, null = blank) only when <paramref name="writesReviewDetail"/>
+    /// (an Override that lifts a Procedure hold). Each row is conditioned on the version this call read
     /// (<see cref="ConcurrencyBehavior.IfRowVersionMatches"/>), so a submission or an invoice that changed since (the invoice no longer In
-    /// Review, its firm set, a status move) faults the transaction and nothing is applied. It writes no other invoice column and no status: the
-    /// invoice stays In Review (the caller checked that under the lock and the invoice's version is the condition that it still is).
+    /// Review, its firm set, a status move) faults the transaction and neither update is applied. It writes no status and no other invoice
+    /// column: the invoice stays In Review (the caller checked that under the lock and the invoice's version is the condition that it still is).
+    /// It never writes <c>sprk_correctionnote</c>, the firm's own text (EB-D-240).
     /// </summary>
     internal static IReadOnlyList<OrganizationRequest> BuildReleaseTransaction(
         Guid submissionId, IReadOnlyDictionary<string, object> submissionFields, long submissionVersion,
-        Guid invoiceId, long invoiceVersion, int? reviewDetail)
+        Guid invoiceId, long invoiceVersion, bool writesReviewDetail, int? reviewDetail, string decisionNote)
     {
         var submission = new Microsoft.Xrm.Sdk.Entity(Entity, submissionId) { RowVersion = submissionVersion.ToString(CultureInfo.InvariantCulture) };
         foreach (var (column, value) in submissionFields)
@@ -1250,14 +1377,122 @@ public sealed class SubmissionOverrideService
         var invoice = new Microsoft.Xrm.Sdk.Entity(InvoiceReviewService.InvoiceEntity, invoiceId)
         {
             RowVersion = invoiceVersion.ToString(CultureInfo.InvariantCulture),
-            [InvoiceReviewDetail.Column] = InvoiceReviewDetail.ValueOf(reviewDetail),
+            [InvoiceCorrectionNote.DecisionColumn] = decisionNote,
         };
+        if (writesReviewDetail)
+        {
+            invoice[InvoiceReviewDetail.Column] = InvoiceReviewDetail.ValueOf(reviewDetail);
+        }
 
         return
         [
             new UpdateRequest { Target = submission, ConcurrencyBehavior = ConcurrencyBehavior.IfRowVersionMatches },
             new UpdateRequest { Target = invoice, ConcurrencyBehavior = ConcurrencyBehavior.IfRowVersionMatches },
         ];
+    }
+
+    /// <summary>The position of the submission's update in <see cref="BuildReleaseTransaction"/> (Dataverse names the request that faulted by index).</summary>
+    internal const int ReleaseSubmissionRequestIndex = 0;
+
+    /// <summary>The position of the invoice's update in <see cref="BuildReleaseTransaction"/>.</summary>
+    internal const int ReleaseInvoiceRequestIndex = 1;
+
+    /// <summary>Which row's version a release fault names (095f-2c review round 1).</summary>
+    private enum ReleaseConflictSide
+    {
+        /// <summary>The submission's request faulted (or the single conditional update of a Return): never retried.</summary>
+        Submission,
+
+        /// <summary>The invoice's request faulted: an unrelated write to the invoice, retried after a re-read.</summary>
+        Invoice,
+
+        /// <summary>Dataverse did not say which request faulted: not retried (as before), and the answer names neither row.</summary>
+        Unknown,
+    }
+
+    /// <summary>The side of the release transaction a version fault names, from the transaction exception's failed request index.</summary>
+    private static ReleaseConflictSide ConflictSideOf(Exception ex)
+    {
+        for (var current = ex; current is not null; current = current.InnerException)
+        {
+            if (current is DataverseTransactionException { FailedRequestIndex: { } index })
+            {
+                return index switch
+                {
+                    ReleaseInvoiceRequestIndex => ReleaseConflictSide.Invoice,
+                    ReleaseSubmissionRequestIndex => ReleaseConflictSide.Submission,
+                    _ => ReleaseConflictSide.Unknown,
+                };
+            }
+        }
+
+        return ReleaseConflictSide.Unknown;
+    }
+
+    /// <summary>What a re-read of the invoice for a retried release found: a refusal to answer, or the version the release is now conditioned on
+    /// and the review detail re-derived against it (null = blank, or none is written).</summary>
+    private sealed record ReleaseReread(BlockedDecisionResult? Refusal, long InvoiceVersion = 0, int? ReviewDetail = null);
+
+    /// <summary>
+    /// 095f-2c review round 1 (F1): after the invoice's request of the release faulted on its version. Under the same lock: the invoice is re-read
+    /// and must still be In Review (else 409, as at the first check) with its firm gate open (else 409 firm_missing), it must carry a row version
+    /// (else 503), and, when the release writes the review detail, the holds that remain are derived again against the invoice as it is now. Nothing
+    /// is written here; a fault reading is 503.
+    /// </summary>
+    private async Task<ReleaseReread> ReReadInvoiceForReleaseAsync(
+        Guid submissionId, Guid invoiceId, bool writesDetail, string findingsJson, Guid decisionId, Guid decider, string reason, CancellationToken ct)
+    {
+        try
+        {
+            if (await ReadInvoiceAsync(invoiceId, InvoiceDecisionColumns, ct).ConfigureAwait(false) is not { } invoice
+                || StatusOf(invoice) != InvoiceLifecycleStatus.InReview)
+            {
+                _logger.LogWarning("Submission {SubmissionId}: invoice {InvoiceId} is no longer held In Review; its release is not retried", submissionId, invoiceId);
+                return new ReleaseReread(BlockedDecisionResult.Refuse(submissionId, StatusCodes.Status409Conflict, BlockedSubmissionErrors.InvoiceNotHeld,
+                    "The invoice is not held for review, so there is nothing to release.", invoiceId));
+            }
+
+            var gate = await InvoiceFirmGate.CheckAsync(_entities, invoice, ct).ConfigureAwait(false);
+            if (gate != InvoiceFirmGateResult.Open)
+            {
+                _logger.LogWarning("Override of submission {SubmissionId}: invoice {InvoiceId} is not open for decisions ({Gate}); its release is not retried", submissionId, invoiceId, gate);
+                return new ReleaseReread(BlockedDecisionResult.Refuse(submissionId, StatusCodes.Status409Conflict, BlockedSubmissionErrors.FirmMissing,
+                    BlockedSubmissionErrors.FirmDetailFor(gate), invoiceId));
+            }
+
+            if (RowVersionOf(invoice) is not { } version)
+            {
+                _logger.LogWarning("Invoice {InvoiceId} was re-read without a row version; the release of submission {SubmissionId} is not written", invoiceId, submissionId);
+                return new ReleaseReread(Unavailable(submissionId, invoiceId));
+            }
+
+            int? detail = null;
+            if (writesDetail)
+            {
+                var remaining = await ReasonsAfterReleaseAsync(invoice, submissionId, findingsJson, decisionId, decider, reason, ct).ConfigureAwait(false);
+                detail = InvoiceReviewDetail.ReviewDetailOf(remaining);
+            }
+
+            return new ReleaseReread(null, version, detail);
+        }
+        catch (Exception ex) when (!IsCallerCancellation(ex, ct))
+        {
+            // The type only: a message can name rows. The record and the closes stand; the repeat finishes the release.
+            _logger.LogWarning("Submission {SubmissionId}: invoice {InvoiceId} could not be re-read for its release ({ExceptionType}); nothing more was written",
+                submissionId, invoiceId, ex.GetType().Name);
+            return new ReleaseReread(Unavailable(submissionId, invoiceId));
+        }
+    }
+
+    /// <summary>The holds that remain on the invoice once this submission reads as released, through a provisional stamp (the decision id; the real
+    /// stamp, with the record id, is written with the release): the retry's second run of the derivation <see cref="DecideLockedAsync"/> makes
+    /// before the record, the same one (<see cref="InvoiceOpenHolds.ReasonsAfterAsync"/>).</summary>
+    private async Task<IReadOnlySet<string>> ReasonsAfterReleaseAsync(
+        Entity invoice, Guid submissionId, string findingsJson, Guid decisionId, Guid decider, string reason, CancellationToken ct)
+    {
+        var provisional = WithStamp(findingsJson, OverrideMember, new BlockedDecisionStamp(decisionId, decider, _time.GetUtcNow(), reason));
+        return await InvoiceOpenHolds.ReasonsAfterAsync(
+            _entities, invoice, submissionId, new InvoiceOpenHolds.StoredSubmission(SubmissionReasonCodes.Overridden, provisional), ct).ConfigureAwait(false);
     }
 
     /// <summary>A row version that no longer matches, from either write: the single conditional update, or the release transaction (whose fault
@@ -1287,10 +1522,12 @@ public sealed class SubmissionOverrideService
             : stored.Kind == SubmissionEvaluationKind.Blocked && (stored.DecidingIndexes.Count > 0 || stored.ProcedureHolds().Count > 0);
 
     /// <summary>
-    /// The submission changed between the read and the conditional write. Re-read once: already decided this way means a concurrent run
-    /// finished it (a no-op); anything else means it changed under us and the caller retries (the record is found again).
+    /// The submission or its invoice changed between the read and the conditional write. Re-read once: already decided this way means a concurrent
+    /// run finished it (a no-op); anything else means it changed under us and the caller retries (the record is found again).
+    /// <paramref name="side"/> words the 409 for the row that changed (095f-2c review round 1).
     /// </summary>
-    private async Task<BlockedDecisionResult> AfterConflictAsync(Verb verb, Guid submissionId, Guid invoiceId, Guid? recordId, CancellationToken ct)
+    private async Task<BlockedDecisionResult> AfterConflictAsync(
+        Verb verb, Guid submissionId, Guid invoiceId, Guid? recordId, CancellationToken ct, ReleaseConflictSide side = ReleaseConflictSide.Submission)
     {
         Entity? row;
         try
@@ -1309,9 +1546,14 @@ public sealed class SubmissionOverrideService
             return AlreadyDecided(verb, submissionId, invoiceId, recordId);
         }
 
-        _logger.LogWarning("Submission {SubmissionId} changed while its {Verb} was written; nothing more was changed", submissionId, verb);
+        _logger.LogWarning("Submission {SubmissionId} or its invoice changed while its {Verb} was written ({Side}); nothing more was changed", submissionId, verb, side);
         return BlockedDecisionResult.Refuse(submissionId, StatusCodes.Status409Conflict, BlockedSubmissionErrors.ConcurrentChange,
-            "The submission changed while the decision was written. Try again.", invoiceId);
+            side switch
+            {
+                ReleaseConflictSide.Invoice => "The invoice changed while the decision was written. Try again.",
+                ReleaseConflictSide.Submission => "The submission changed while the decision was written. Try again.",
+                _ => "The submission or its invoice changed while the decision was written. Try again.",
+            }, invoiceId);
     }
 
     /// <summary>The reason code a column-state repair logs (the table and row id only, ADR-015).</summary>
@@ -1440,7 +1682,7 @@ public sealed class SubmissionOverrideService
         {
             DecisionRecordRefusalReason.ReviewInvalid => BlockedDecisionResult.Refuse(submissionId, StatusCodes.Status409Conflict,
                 BlockedSubmissionErrors.DecisionConflict,
-                "This decision is already recorded with another reason or decider. Repeat it as it was first made.", invoiceId),
+                "This decision is already recorded and cannot be completed from this request. The person who recorded it completes it by repeating it.", invoiceId),
             DecisionRecordRefusalReason.FactSnapshotMissing or DecisionRecordRefusalReason.SubjectUnsupported
                 or DecisionRecordRefusalReason.SubjectUnfileable or DecisionRecordRefusalReason.RecordClassUnderivable
                 or DecisionRecordRefusalReason.CoreUnsupported or DecisionRecordRefusalReason.OwnerRefused
@@ -1483,7 +1725,7 @@ public sealed class SubmissionOverrideService
     /// </summary>
     internal static BillingDecision BuildDecision(
         Verb verb, InvoiceSubmissionAfterSteps.StoredFindings stored, Guid submissionId, Guid invoiceId, Guid decider, string reason,
-        InvoiceSubmissionAfterSteps.ResolvedSignalSet signals, string channel = "Internal")
+        InvoiceSubmissionAfterSteps.ResolvedSignalSet signals, string channel = "Internal", string? note = null)
     {
         var deciding = stored.DecidingIndexes
             .Select(i => stored.Findings.TryGetValue(i, out var f) ? f : null)
@@ -1527,6 +1769,14 @@ public sealed class SubmissionOverrideService
             ["submissionId"] = submissionId.ToString("D"),
             ["trackingNumber"] = stored.TrackingNumber,
         };
+
+        // Task 095f-2c (design 1.2): the note is a value only when one is given, never a null-valued key (the hash covers every key, so
+        // "note": null would hash differently from no key); a decision without a note hashes exactly as before. The caller passes the checked,
+        // trimmed note (null for none).
+        if (!string.IsNullOrWhiteSpace(note))
+        {
+            values["note"] = note;
+        }
 
         // Task 114: an override that releases a Procedure hold names what it released, from the stored hold (reader members: the Procedure's
         // name and the first gapped work date, or the cause; never an id). The action's own parameter dictionary, so the record's shape is the
