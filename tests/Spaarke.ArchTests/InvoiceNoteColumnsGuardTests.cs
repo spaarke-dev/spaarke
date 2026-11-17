@@ -24,8 +24,19 @@ namespace Spaarke.ArchTests;
 /// (<c>sprk_notes</c> is a different word and does not match). If one is added, this guard will report it; give the new column another
 /// name or narrow the scan here.</para>
 /// <para><b>Internal means internal (EB-D-240).</b> <see cref="ExternalPlane"/> files (the external server code, the external DI module and
-/// the external SPA) never name <c>sprk_decisionnote</c>: not in a read allow-list, a projection, a type or a constant.
+/// the external SPA) never name <c>sprk_decisionnote</c> (or <c>sprk_note</c>, EB-D-242): not in a read allow-list, a projection, a type or a constant.
 /// <see cref="Controls"/> proves both directions on synthetic text and on the real DI module with the column planted in it.</para>
+/// <para><b>What counts as naming a note (095f-2d2 review, F2).</b> BFF code names the notes through constants, not literals
+/// (<c>InvoiceCorrectionNote.DecisionColumn</c>, <c>InvoiceCorrectionNote.CorrectionRowColumn</c>), so the firm-facing scans match the literal
+/// column OR the constant name (whole word, case-sensitive for the constant), and <see cref="ExternalPlane_NeverReadsAllColumns"/> refuses an
+/// all-columns read (<c>new ColumnSet(true)</c>, <c>AllColumns = true</c>) in any firm-facing file, whichever table it reads, because such a read
+/// returns the notes without naming them. A read that selects no columns by another route (for example a Web API call with no <c>$select</c>)
+/// is not detected; the firm-facing readers use explicit allow-lists.</para>
+/// <para><b>Maintenance.</b> When a new internal note column, or a new constant for one, is added: (1) add the column to
+/// <see cref="EntityFolderOf"/> and <see cref="PendingSchema"/> until the SpaarkeMaster sync carries it; (2) add its literal and its constant name to
+/// <c>DecisionNoteNames</c> or <c>CorrectionRowNoteNames</c> (or a new pattern with its own firm-facing test); (3) add a must-fire control (the literal,
+/// the constant, and the real writer's source) and a must-not-fire control (lookalike names, a comment, an explicit column list without the note, and
+/// the constant used outside the firm-facing planes). To check a control has teeth, revert the detector change and run it: it must fail.</para>
 /// </remarks>
 public class InvoiceNoteColumnsGuardTests
 {
@@ -88,13 +99,41 @@ public class InvoiceNoteColumnsGuardTests
     internal static IReadOnlyList<string> Stale(IReadOnlyDictionary<string, string> pending, IReadOnlyDictionary<string, IReadOnlySet<string>> attributes) =>
         pending.Keys.Where(c => attributes[c].Contains(c)).OrderBy(c => c, StringComparer.Ordinal).ToList();
 
-    /// <summary>The files that name the internal decision note (pure): the firm-facing planes must have none.</summary>
-    internal static IReadOnlyList<string> NamesDecisionNote(IEnumerable<(string File, string Code)> sources) =>
-        sources.Where(s => ColumnPatterns[0].IsMatch(s.Code)).Select(s => s.File).OrderBy(f => f, StringComparer.Ordinal).ToList();
+    /// <summary>
+    /// The decision note as the firm-facing planes could name it: the literal column, or the constant that holds it
+    /// (<c>InvoiceCorrectionNote.DecisionColumn</c>; matched case-sensitively so a local called <c>decisionColumn</c> is not a hit).
+    /// </summary>
+    private static readonly Regex DecisionNoteNames = new(
+        $@"(?<![A-Za-z0-9_]){DecisionNote}(?![A-Za-z0-9_])|(?-i:\bDecisionColumn\b)", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
 
-    /// <summary>The files that name the correction row's note, <c>sprk_note</c> (pure): the firm-facing planes must have none (095f-2d2, EB-D-242).</summary>
+    /// <summary>The correction row's note as the firm-facing planes could name it: the literal column, or <c>InvoiceCorrectionNote.CorrectionRowColumn</c> (case-sensitive).</summary>
+    private static readonly Regex CorrectionRowNoteNames = new(
+        $@"(?<![A-Za-z0-9_]){CorrectionNote}(?![A-Za-z0-9_])|(?-i:\bCorrectionRowColumn\b)", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+
+    /// <summary>
+    /// An all-columns read: <c>new ColumnSet(true)</c> (also <c>allColumns: true</c>), a target-typed <c>ColumnSet = new(true)</c>, or
+    /// <c>AllColumns = true</c>. Such a read returns every column of its table, so on <c>sprk_invoicecorrection</c> or <c>sprk_invoice</c> it returns
+    /// the internal notes without naming them (095f-2d2 review, F2).
+    /// </summary>
+    private static readonly Regex AllColumnsRead = new(
+        @"\bnew\s+ColumnSet\s*\(\s*(?:allColumns\s*:\s*)?true\s*\)|\bColumnSet\s*=\s*new\s*\(\s*(?:allColumns\s*:\s*)?true\s*\)|\bAllColumns\s*=\s*true\b",
+        RegexOptions.CultureInvariant);
+
+    /// <summary>The files that name the internal decision note (pure): the literal <c>sprk_decisionnote</c> or the constant <c>DecisionColumn</c>. The firm-facing planes must have none.</summary>
+    internal static IReadOnlyList<string> NamesDecisionNote(IEnumerable<(string File, string Code)> sources) =>
+        sources.Where(s => DecisionNoteNames.IsMatch(s.Code)).Select(s => s.File).OrderBy(f => f, StringComparer.Ordinal).ToList();
+
+    /// <summary>The files that name the correction row's note (pure): the literal <c>sprk_note</c> or the constant <c>CorrectionRowColumn</c>. The firm-facing planes must have none (095f-2d2, EB-D-242).</summary>
     internal static IReadOnlyList<string> NamesCorrectionRowNote(IEnumerable<(string File, string Code)> sources) =>
-        sources.Where(s => ColumnPatterns[1].IsMatch(s.Code)).Select(s => s.File).OrderBy(f => f, StringComparer.Ordinal).ToList();
+        sources.Where(s => CorrectionRowNoteNames.IsMatch(s.Code)).Select(s => s.File).OrderBy(f => f, StringComparer.Ordinal).ToList();
+
+    /// <summary>
+    /// The files that read all columns of a table (pure). In a firm-facing file this is refused whichever table it reads: the scan cannot tell the
+    /// table from the text (it may be a parameter or a constant), and an all-columns read of <c>sprk_invoicecorrection</c> or <c>sprk_invoice</c> returns
+    /// the internal notes. No external-plane file reads all columns today.
+    /// </summary>
+    internal static IReadOnlyList<string> ReadsAllColumns(IEnumerable<(string File, string Code)> sources) =>
+        sources.Where(s => AllColumnsRead.IsMatch(s.Code)).Select(s => s.File).OrderBy(f => f, StringComparer.Ordinal).ToList();
 
     private static IEnumerable<(string File, string Code)> BffSources() =>
         SourceScan.ServerSourceFiles().Select(f => (SourceScan.Relative(f), SourceScan.CodeText(File.ReadLines(f))));
@@ -195,6 +234,63 @@ public class InvoiceNoteColumnsGuardTests
         Assert.Empty(NamesCorrectionRowNote([("ExternalAccessModule.cs", module)]));
         Assert.Empty(NamesCorrectionRowNote([("c.cs", "\"sprk_notes\", \"sprk_notebook\", \"sprk_correctionnote\", \"sprk_decisionnote\", \"new_sprk_note\"")]));
         Assert.Empty(NamesCorrectionRowNote([("d.cs", SourceScan.CodeText(["var x = 1; // never sprk_note"]))]));
+
+        // Must fire, the constant (095f-2d2 review F2): code names the column through InvoiceCorrectionNote.CorrectionRowColumn, not the literal.
+        Assert.Equal(["e.cs"], NamesCorrectionRowNote([("e.cs", "var cols = new[] { \"sprk_name\", InvoiceCorrectionNote.CorrectionRowColumn };"), ("f.cs", "no note here")]));
+        Assert.Equal(["g.cs"], NamesCorrectionRowNote([("g.cs", "using static Sprk.Bff.Api.Services.Finance.InvoiceCorrectionNote; var c = CorrectionRowColumn;")]));
+
+        // Must fire, real file: the correction service writes the note through the constant, so the detector must see it (the literal is not in that file).
+        var service = SourceScan.CodeText(File.ReadLines(Path.Combine(SourceScan.RepoRoot, "src", "server", "api", "Sprk.Bff.Api", "Services", "Finance", "InvoiceCorrectionService.cs")));
+        Assert.DoesNotContain(CorrectionNote, service, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(["InvoiceCorrectionService.cs"], NamesCorrectionRowNote([("InvoiceCorrectionService.cs", service)]));
+
+        // Must not fire: a lookalike constant, a local of a similar name, a comment, and an explicit column list without the note.
+        Assert.Empty(NamesCorrectionRowNote([("h.cs", "var CorrectionRowColumns = 1; var correctionRowColumn = 2; var MyCorrectionRowColumn = 3;")]));
+        Assert.Empty(NamesCorrectionRowNote([("i.cs", SourceScan.CodeText(["var x = 1; // never CorrectionRowColumn"]))]));
+        Assert.Empty(NamesCorrectionRowNote([("j.cs", "var cols = new[] { \"sprk_name\", \"sprk_fieldname\", \"sprk_finalvalue\", \"sprk_outcometype\" };")]));
+        Assert.Empty(NamesCorrectionRowNote([("k.cs", "var cols = new ColumnSet(\"sprk_name\", \"sprk_finalvalue\");")]));
+
+        // Must not fire, the constant outside the external plane: the correction service names it and is not a firm-facing file.
+        Assert.DoesNotContain(ExternalPlaneFiles(), f => f.EndsWith("InvoiceCorrectionService.cs", StringComparison.Ordinal));
+    }
+
+    [Fact(DisplayName = "095f-2d2 review F2: no firm-facing file (external server code, external DI module, external SPA) reads all columns of a table (the notes would come with them)")]
+    public void ExternalPlane_NeverReadsAllColumns()
+    {
+        var files = ExternalPlaneFiles().ToList();
+        Assert.NotEmpty(files);
+        var hits = ReadsAllColumns(files.Select(f => (SourceScan.Relative(f), SourceScan.CodeText(File.ReadLines(f)))));
+        Assert.True(hits.Count == 0,
+            "An all-columns read (new ColumnSet(true), AllColumns = true) returns every column of sprk_invoicecorrection or sprk_invoice, including the INTERNAL notes "
+            + "(EB-D-240, EB-D-242). Firm-facing code lists the columns it reads:\n" + string.Join("\n", hits));
+    }
+
+    [Fact(DisplayName = "095f-2d2 review F2 controls: an all-columns read planted in a firm-facing file is reported (must fire, synthetic and the real external DI module); explicit column lists are not (must not fire)")]
+    public void AllColumnsReadControls()
+    {
+        // Must fire, synthetic: each shape of an all-columns read.
+        Assert.Equal(["a.cs"], ReadsAllColumns([("a.cs", "var r = svc.Retrieve(\"sprk_invoicecorrection\", id, new ColumnSet(true));"), ("b.cs", "no read")]));
+        Assert.Equal(["c.cs"], ReadsAllColumns([("c.cs", "var q = new QueryExpression(\"sprk_invoice\") { ColumnSet = new ColumnSet( true ) };")]));
+        Assert.Equal(["d.cs"], ReadsAllColumns([("d.cs", "var q = new QueryExpression(\"sprk_invoice\"); q.ColumnSet.AllColumns = true;")]));
+        Assert.Equal(["e.cs"], ReadsAllColumns([("e.cs", "var q = new QueryExpression(\"sprk_invoice\") { ColumnSet = new(true) };")]));
+        Assert.Equal(["f.cs"], ReadsAllColumns([("f.cs", "var set = new ColumnSet(allColumns: true);")]));
+
+        // Must fire, real file: the external DI module with an all-columns read planted in it.
+        var module = SourceScan.CodeText(File.ReadLines(ExternalAccessDiModule()));
+        Assert.Equal(["ExternalAccessModule.cs"], ReadsAllColumns([("ExternalAccessModule.cs", module + "\nvar all = new ColumnSet(true);")]));
+
+        // Must not fire: the real module as it is, explicit column lists, a false flag, a lookalike name and a comment.
+        Assert.Empty(ReadsAllColumns([("ExternalAccessModule.cs", module)]));
+        Assert.Empty(ReadsAllColumns([("g.cs", "var set = new ColumnSet(\"sprk_name\", \"sprk_finalvalue\"); var q = new QueryExpression(\"sprk_invoice\") { ColumnSet = new ColumnSet(Columns) };")]));
+        Assert.Empty(ReadsAllColumns([("h.cs", "var set = new ColumnSet(false); q.ColumnSet.AllColumns = false; var AllColumnsSeen = true; var x = new ColumnSetBuilder(true);")]));
+        Assert.Empty(ReadsAllColumns([("i.cs", SourceScan.CodeText(["var x = 1; // never new ColumnSet(true)"]))]));
+
+        // Must not fire, outside the external plane: the BFF reads all columns elsewhere (the guard scans the firm-facing planes only).
+        var plane = ExternalPlaneFiles().ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var elsewhere = SourceScan.ServerSourceFiles()
+            .Where(f => !plane.Contains(f))
+            .Select(f => (SourceScan.Relative(f), SourceScan.CodeText(File.ReadLines(f))));
+        Assert.NotEmpty(ReadsAllColumns(elsewhere));
     }
 
     [Fact(DisplayName = "095f-2s controls: a planted BFF select is reported (must fire); pending or carried columns and lookalike names are not (must not fire)")]
@@ -253,5 +349,22 @@ public class InvoiceNoteColumnsGuardTests
         // Must not fire: the correction note and the firm's own correction text are firm-facing by design; a comment is not code.
         Assert.Empty(NamesDecisionNote([("c.cs", "\"sprk_correctionnote\", \"sprk_note\", \"sprk_notes\"")]));
         Assert.Empty(NamesDecisionNote([("d.cs", SourceScan.CodeText(["var x = 1; // never sprk_decisionnote"]))]));
+
+        // Must fire, the constant (095f-2d2 review F2): code names the column through InvoiceCorrectionNote.DecisionColumn, not the literal.
+        Assert.Equal(["e.cs"], NamesDecisionNote([("e.cs", "var cols = new[] { \"sprk_name\", InvoiceCorrectionNote.DecisionColumn };"), ("f.cs", "no note here")]));
+        Assert.Equal(["g.cs"], NamesDecisionNote([("g.cs", "using static Sprk.Bff.Api.Services.Finance.InvoiceCorrectionNote; var c = DecisionColumn;")]));
+
+        // Must fire, real file: the lifecycle service writes the decision note through the constant, so the detector must see it (the literal is not in that file).
+        var lifecycle = SourceScan.CodeText(File.ReadLines(Path.Combine(SourceScan.RepoRoot, "src", "server", "api", "Sprk.Bff.Api", "Services", "Finance", "InvoiceLifecycleService.cs")));
+        Assert.DoesNotContain(DecisionNote, lifecycle, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(["InvoiceLifecycleService.cs"], NamesDecisionNote([("InvoiceLifecycleService.cs", lifecycle)]));
+
+        // Must not fire: a lookalike constant, a local of a similar name, a comment, and an explicit column list without the note.
+        Assert.Empty(NamesDecisionNote([("h.cs", "var DecisionColumns = 1; var decisionColumn = 2; var MyDecisionColumn = 3;")]));
+        Assert.Empty(NamesDecisionNote([("i.cs", SourceScan.CodeText(["var x = 1; // never DecisionColumn"]))]));
+        Assert.Empty(NamesDecisionNote([("j.cs", "var cols = new[] { \"sprk_name\", \"sprk_invoicenumber\", \"sprk_currency\" };")]));
+
+        // Must not fire, the constant outside the external plane: the lifecycle service names it and is not a firm-facing file.
+        Assert.DoesNotContain(ExternalPlaneFiles(), f => f.EndsWith("InvoiceLifecycleService.cs", StringComparison.Ordinal));
     }
 }
