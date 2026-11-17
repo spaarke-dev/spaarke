@@ -815,3 +815,11 @@ Task 168, owner questions Q1 and Q2 (asked 2026-10-28, explained in detail 2026-
   - The step stays compose-only, as built in tasks 160 and 190.
 - **Follow-up:** task 192 adds the default through the plan route's `DefaultSource` mechanism (task 167, D-193). The owner confirms the wording before execution.
 - **Rejected:** wiring templates and AI into the decision step. The owner said they are not needed here, and the step blocks fetches on purpose.
+
+## D-225 — Decision Record duplicate check: deterministic primary id on keyed writes (main session, 2026-11-17, ebilling-r1 EB-D-247 (d); owner asked for "a check")
+
+- **Finding:** keyed writes (gate, condition-cleared, billing, Procedure) look up `sprk_steps` for their key, then create. Two concurrent attempts can both miss and both create: the processing lock fails open (#984), and the invoice decision lock expires after 2 minutes. `sprk_decisionrecord` has no key column, so Dataverse never refuses the second create. `StoredSetOf` then refuses that key permanently.
+- **Decision:** every keyed entry point sets the record's primary id to a value derived from its key alone (not the code, own prefix), in the one `CreateAsync`. A DuplicateRecord fault re-reads the stored row and applies the existing already-recorded rules (same code and hash → AlreadyRecorded; otherwise the existing refusals). The `sprk_steps` lookup stays first, for older rows. The commit route's client-keyed review path keeps random ids.
+- **Builder:** ebilling-r1, with a full ontology review (as for 095f-2b). It closes ontology 149 K2 and the invoice-lock overlap.
+- **Open:** one known limit of a derivable id was sent to uac-r2 and the owner by message (access detail kept out of the repo). The merge waits on both accepting it.
+- **Rejected:** an alternate key on a new key column (schema change and backfill, same derivable handle); a check after the write (detects, doesn't prevent; deletes from an append-only table).
