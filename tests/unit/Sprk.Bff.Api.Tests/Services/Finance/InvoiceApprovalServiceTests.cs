@@ -679,6 +679,47 @@ public sealed class InvoiceApprovalServiceTests
             System.Text.Json.Nodes.JsonNode.Parse(r.GetAttributeValue<string>("sprk_steps"))!["steps"]![0]!["values"]!["approvedAmount"]!.GetValue<decimal>();
     }
 
+    [Theory(DisplayName = "095f-2a review round 2 F1: a stranded approve repeated by someone the (tampered) portion names completes with the STORED decider on every Signal close, never the repeater")]
+    [InlineData("signals")]
+    [InlineData("link")]
+    public async Task StrandedApprove_RepeatedByAnother_ClosesForTheStoredDecider(string failingStep)
+    {
+        var w = new ApprovalWorld();
+        w.AddLine(InvoiceLineStatus.Accepted, approved: 100m);
+        var signal = w.AddInvoiceSignal("EB-TOTAL");
+        var other = w.AddInvoiceSignal("EB-DUP");
+        StrandAt(w, failingStep, signal);
+        (await w.ApproveAs(AliceUser)).FailedStep.Should().Be(failingStep);
+        var record = w.ApproveRecords.Should().ContainSingle().Subject;
+        var created = w.H.Created.Count;
+
+        // The portion's decided-by is a column a person can edit: Bob names himself and repeats.
+        w.Portion["sprk_decidedby"] = new EntityReference("contact", Bob);
+        w.CloseDeciders.Clear();
+        var repeat = await w.ApproveAs(BobUser);
+
+        repeat.Outcome.Should().Be(ApprovalOutcome.Approved, repeat.Detail);
+        repeat.DecisionRecordId.Should().Be(record.Id);
+        w.CloseDeciders.Should().NotBeEmpty().And.OnlyContain(d => d == AliceUser, "named for the stored record's decider, never for whoever repeats");
+        w.H.Created.Count.Should().Be(created, "one record");
+        w.ApproveRecords.Should().ContainSingle();
+        w.Portion.GetAttributeValue<EntityReference>("sprk_decisionrecord").Id.Should().Be(record.Id, "the link is written");
+        w.SignalStatus(signal).Should().Be(SignalWriter.SignalStatusResolved);
+        w.SignalStatus(other).Should().Be(SignalWriter.SignalStatusResolved);
+    }
+
+    private static void StrandAt(ApprovalWorld w, string failingStep, Guid signal)
+    {
+        if (failingStep == "signals")
+        {
+            w.CloseFailsOnce[signal] = SignalAutomatedCloseOutcome.ChangedSinceRead;
+        }
+        else
+        {
+            w.FaultsOnce["link"] = new InvalidOperationException("dataverse down");
+        }
+    }
+
     [Theory(DisplayName = "103 K4: a portion with no or an unknown status is refused (409 status_unknown), never treated as Pending; GET shows Unknown")]
     [InlineData(null)]
     [InlineData(999)]

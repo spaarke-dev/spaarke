@@ -884,8 +884,9 @@ public sealed class InvoiceApprovalService
         // when the portion is not yet linked to it (the first call stopped at "signals" or "link"): its stored set is closed and the link written;
         // RecordAsync is never asked again, so a repeat with an edited (or no) note completes, and the edited note is dropped. Before the record
         // exists the record takes the repeat's note, while the decision note column keeps what the first call's transition wrote.
+        // Review round 2 F1: the closes name the stored record's decider (signals.StoredDeciderUserId), never this caller; the caller only finishes it.
         return await FinishAsync(invoiceId, portion.Id, decision, portionStatus, recordId ?? (recorded.Count > 0 ? recorded[0] : null), decidedBy!.Id,
-            signals.Set, ct, refuseAlreadyRecorded: recorded.Count == 0).ConfigureAwait(false);
+            signals.Set, ct, refuseAlreadyRecorded: recorded.Count == 0, storedDeciderUserId: signals.StoredDeciderUserId).ConfigureAwait(false);
     }
 
     /// <summary>After the transition: the portion as Approved (re-asserting the decider), the record, the Signals, the link. Each step is idempotent.
@@ -893,10 +894,12 @@ public sealed class InvoiceApprovalService
     /// "already recorded" answer names a record that is not one under the completion's filter; it is refused, not linked or closed against.</summary>
     private async Task<ApprovalResult> FinishAsync(
         Guid invoiceId, Guid approvalId, BillingDecision decision, int? portionStatus, Guid? recordId, Guid deciderContactId,
-        InvoiceSubmissionAfterSteps.ResolvedSignalSet signals, CancellationToken ct, bool refuseAlreadyRecorded = false)
+        InvoiceSubmissionAfterSteps.ResolvedSignalSet signals, CancellationToken ct, bool refuseAlreadyRecorded = false, Guid? storedDeciderUserId = null)
     {
         var amount = decision.Facts["approvedAmount"] is decimal d ? d : 0m;
-        var decider = decision.Decider.SystemUserId ?? Guid.Empty;
+        // 095f-2a review round 2 F1 (#2507 K1, as reject and return): a repeat names the closes for the decider the stored record names, never
+        // for whoever repeats; a first attempt (no stored record) is the caller's own decision.
+        var decider = storedDeciderUserId ?? decision.Decider.SystemUserId ?? Guid.Empty;
         if (portionStatus != PortionApproved)
         {
             try
@@ -1040,7 +1043,9 @@ public sealed class InvoiceApprovalService
 
     // ── EB-D-172: the invoice's Signals ──
 
-    private sealed record SignalRead(InvoiceSubmissionAfterSteps.ResolvedSignalSet Set, ApprovalResult? Failure);
+    /// <param name="StoredDeciderUserId">095f-2a review round 2 F1: the stored record's <c>sprk_confirmedby</c> when the set was read from it (as
+    /// reject and return carry it); null on a first attempt.</param>
+    private sealed record SignalRead(InvoiceSubmissionAfterSteps.ResolvedSignalSet Set, ApprovalResult? Failure, Guid? StoredDeciderUserId = null);
 
     /// <summary>The invoice-level Open or Acknowledged Signals created at or before <paramref name="decidedOnUtc"/>, ordered by id (the record's hash).</summary>
     private async Task<SignalRead> ReadInvoiceSignalsAsync(Guid invoiceId, DateTime decidedOnUtc, CancellationToken ct)
@@ -1085,7 +1090,8 @@ public sealed class InvoiceApprovalService
                 new InvoiceSubmissionAfterSteps.ResolvedSignalSet(
                     stored.SetReadAtUtc ?? DateTime.MinValue,
                     stored.Signals.Select(s => new InvoiceSubmissionAfterSteps.ResolvedSignal(s.SignalId, s.PolicyCode)).ToList()),
-                null);
+                null,
+                StoredDeciderUserId: stored.ConfirmedByUserId);
         }
 
         return await ReadInvoiceSignalsAsync(invoiceId, decidedOnUtc, ct).ConfigureAwait(false);
