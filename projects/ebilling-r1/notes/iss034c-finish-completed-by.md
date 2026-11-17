@@ -71,10 +71,10 @@ All in `SubmissionOverrideOperatorFinishTests` (the shared `World`, `StrandAsync
 | `dotnet build src/server/api/Sprk.Bff.Api/ --warnaserror` | 0 warnings, 0 errors |
 | BFF tests, filter `SubmissionOverride\|BlockedSubmission` | 538 passed, 0 failed |
 | BFF tests, filter `InvoiceOpenHolds\|InvoiceRejectReturn\|InvoiceBlockedHold\|DecisionNote` (other readers of the stamp) | 345 passed, 0 failed |
-| ArchTests, filter `Finance
+| ArchTests, filter `Finance|Route` | 195 passed, 0 failed |
 | InvoiceReview `npx jest` | 15 suites, 530 passed, 0 failed |
 | InvoiceReview `npm run typecheck` | surface-owned errors 0 (48 pre-existing in shared libs, as on the base) |
-| InvoiceReview `npm run build` | succeeded |\|Route` | 195 passed, 0 failed |
+| InvoiceReview `npm run build` | succeeded |
 
 ## Component justification (CLAUDE.md section 11)
 
