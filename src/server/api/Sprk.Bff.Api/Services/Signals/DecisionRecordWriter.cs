@@ -512,12 +512,18 @@ public sealed class DecisionRecordRefusedException : Exception
     /// <summary>The ownership resolver's refusal code when <see cref="Reason"/> is owner_refused.</summary>
     public string? OwnerRefusalCode { get; }
 
+    /// <summary>True only for the keyed "same decision id, same action code, other readable content" refusal (billing and Procedure entries,
+    /// <c>AlreadyRecordedOrRefuse</c>). Typed so a caller never reads <see cref="Exception.Message"/> to tell it from the other
+    /// <see cref="DecisionRecordRefusalReason.ReviewInvalid"/> refusals.</summary>
+    public bool IsOtherContent { get; }
+
     public DecisionRecordRefusedException(
-        string reason, string message, string? ownerRefusalCode = null, Exception? innerException = null)
+        string reason, string message, string? ownerRefusalCode = null, Exception? innerException = null, bool isOtherContent = false)
         : base(message, innerException)
     {
         Reason = reason;
         OwnerRefusalCode = ownerRefusalCode;
+        IsOtherContent = isOtherContent;
     }
 }
 
@@ -1896,7 +1902,8 @@ public sealed class DecisionRecordWriter
         {
             throw new DecisionRecordRefusedException(
                 DecisionRecordRefusalReason.ReviewInvalid,
-                sameCode.Any(r => r.Hash is null) ? contentUnreadableRefusal : otherContentRefusal);
+                sameCode.Any(r => r.Hash is null) ? contentUnreadableRefusal : otherContentRefusal,
+                isOtherContent: sameCode.All(r => r.Hash is not null));
         }
 
         return (existing, hash);

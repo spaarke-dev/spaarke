@@ -368,6 +368,7 @@ public sealed partial class DecisionRecordWriterTests
         first.AlreadyRecorded.Should().BeFalse();
         ex.Reason.Should().Be(DecisionRecordRefusalReason.ReviewInvalid);
         ex.Message.Should().Contain("another billing action", "refused by the lookup, not by validation");
+        ex.IsOtherContent.Should().BeFalse("another billing action under the id is not other content");
         h.Lookups.Where(q => q.EntityName == "sprk_decisionrecord").Should().HaveCount(2, "both calls reached the lookup");
         h.Created.Should().ContainSingle("the first decision's record only")
             .Which.GetAttributeValue<string>("sprk_actioncode").Should().Be("reject-invoice");
@@ -652,6 +653,7 @@ public sealed partial class DecisionRecordWriterTests
         // ebilling-r1 164a fix round K2: same reason, but the message says the content cannot be read, so a caller does not read it as proven
         // other content (Add line answers id_reused only for DecisionRecordWriter.BillingOtherContentRefusal).
         ex.Message.Should().Be(DecisionRecordWriter.BillingContentUnreadableRefusal);
+        ex.IsOtherContent.Should().BeFalse("an unreadable recorded content is not proven other content");
         h.Created.Should().BeEmpty();
     }
 
@@ -665,6 +667,7 @@ public sealed partial class DecisionRecordWriterTests
 
         ex.Reason.Should().Be(DecisionRecordRefusalReason.ReviewInvalid);
         ex.Message.Should().Be(DecisionRecordWriter.BillingOtherContentRefusal);
+        ex.IsOtherContent.Should().BeTrue("the typed marker, not the message, is what a caller reads");
         h.Created.Should().BeEmpty();
     }
 

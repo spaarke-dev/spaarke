@@ -259,6 +259,7 @@ public sealed partial class DecisionRecordWriterTests
 
         ex.Reason.Should().Be(DecisionRecordRefusalReason.ReviewInvalid);
         ex.Message.Should().Be(DecisionRecordWriter.RecordProcedureOtherContentRefusal);
+        ex.IsOtherContent.Should().BeTrue();
         h.Created.Should().ContainSingle();
     }
 
