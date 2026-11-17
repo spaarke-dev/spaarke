@@ -302,6 +302,33 @@ public sealed class SubmissionOverrideDecisionNoteTests
         w.RecordCreates.Should().Be(1);
     }
 
+    [Theory(DisplayName = "095f-2c re-check: another person WITHOUT the rights gets 403 (the rights come first), not the 409 that would tell them a decision is pending; nothing written")]
+    [InlineData("override-closes-and-release")]
+    [InlineData("return-transition")]
+    public async Task Strand_RepeatByAnotherDeciderWithoutRights_Is403_AndWritesNothing(string strand)
+    {
+        var w = await World.CreateAsync();
+        var verb = strand.StartsWith("return", StringComparison.Ordinal) ? "return" : "override";
+        if (verb == "return")
+        {
+            w.AddSignal("sprk_invoice", World.InvoiceId, "EB-AGE"); // the rights are asked only when the decision closes a Signal (105)
+        }
+
+        await StrandAsync(w, strand, "First note");
+        var transitionsBefore = w.Transitions.Count;
+        w.Probe.CallerSystemUserId = Guid.Parse("10500000-0000-4000-8000-0000000000c9");
+        w.Probe.Rights = (_, _) => Spaarke.Dataverse.AccessRights.Read;
+
+        var other = await Decide(w, verb, "First note");
+
+        other.Kind.Should().Be(BlockedDecisionKind.Refused);
+        other.StatusCode.Should().Be(403, "the caller's rights are asked before a stored decider is compared");
+        w.Transactions.Should().BeEmpty();
+        w.Updates.Should().BeEmpty();
+        w.Transitions.Should().HaveCount(transitionsBefore);
+        w.RecordCreates.Should().Be(1);
+    }
+
     [Theory(DisplayName = "095f-2c round 1 F1: a stored record that cannot be read as a decision (no reason, no values, a note that is not text) is refused 503 and nothing is written")]
     [InlineData("override", "reason-missing")]
     [InlineData("override", "values-missing")]

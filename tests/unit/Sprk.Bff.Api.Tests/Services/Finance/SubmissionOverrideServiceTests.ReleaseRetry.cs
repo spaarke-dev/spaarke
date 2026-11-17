@@ -93,7 +93,7 @@ public partial class SubmissionOverrideServiceTests
         w.Invoice.GetAttributeValue<string>(InvoiceCorrectionNote.DecisionColumn).Should().Be("First note");
     }
 
-    [Fact(DisplayName = "095f-2c round 1 F1: a re-read that finds the invoice no longer In Review stops without writing (409 invoice_not_held); a repeat is refused the same way")]
+    [Fact(DisplayName = "095f-2c round 1 F1: a re-read that finds the invoice no longer In Review stops without writing (409 invoice_not_held)")]
     public async Task ReleaseRetry_AReReadThatFindsTheInvoiceNoLongerInReview_StopsWithoutWriting()
     {
         var w = await World.CreateAsync();

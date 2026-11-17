@@ -929,30 +929,6 @@ public sealed class SubmissionOverrideService
             return Unavailable(submissionId, invoiceId);
         }
 
-        // ── 095f-2c review round 1 (F1, found in passing): a writer-created record already exists, so this call finishes THAT decision. As 105
-        //    does for its Signals and as reject and return do for their repeat, it is finished as the record holds it: the request's reason and
-        //    note no longer matter, the column takes the STORED note (or reason), and the record is never asked for again (so a repeat that cannot
-        //    recall the first text is not refused). The decider is the stored one: another person's unfinished decision is theirs to complete
-        //    (the same rule as reject and return's "claimed"; nothing is written over it). A record that cannot be read fails closed. ──
-        if (recordedSet is not null)
-        {
-            if (recordedSet.ConfirmedByUserId != decider)
-            {
-                _logger.LogWarning("Submission {SubmissionId}: its {Verb} was recorded by another decider (or none); nothing was changed", submissionId, verb);
-                return BlockedDecisionResult.Refuse(submissionId, StatusCodes.Status409Conflict, BlockedSubmissionErrors.DecisionConflict,
-                    "Another person's decision on this submission has not finished. They complete it by repeating it.", invoiceId);
-            }
-
-            if (!recordedSet.StoredContentReadable || string.IsNullOrWhiteSpace(recordedSet.Reason))
-            {
-                _logger.LogWarning("Submission {SubmissionId}: the stored Decision Record {RecordId} of its {Verb} cannot be read as a decision; nothing was changed",
-                    submissionId, recordedSet.RecordId, verb);
-                return Unavailable(submissionId, invoiceId);
-            }
-
-            (reason, note) = (recordedSet.Reason, recordedSet.Note);
-        }
-
         InvoiceSubmissionAfterSteps.ResolvedSignalSet signalSet;
         IReadOnlyList<(string Entity, Guid Id)> subjects;
         // Task 114b F1: the set the caller's rights (FR-51) are asked on. It is the set as determined, BEFORE the hold filter below, because the
@@ -1017,6 +993,31 @@ public sealed class SubmissionOverrideService
             return denied;
         }
 
+        // ── 095f-2c review round 1 (F1, found in passing): a writer-created record already exists, so this call finishes THAT decision. As 105
+        //    does for its Signals and as reject and return do for their repeat, it is finished as the record holds it: the request's reason and
+        //    note no longer matter, the column takes the STORED note (or reason), and the record is never asked for again (so a repeat that cannot
+        //    recall the first text is not refused). The decider is the stored one: another person's unfinished decision is theirs to complete
+        //    (the same rule as reject and return's "claimed"; nothing is written over it). A record that cannot be read fails closed. After the
+        //    rights (re-check: a caller without them gets 403, as before the fix, not a 409 that tells them a decision is pending). ──
+        if (recordedSet is not null)
+        {
+            if (recordedSet.ConfirmedByUserId != decider)
+            {
+                _logger.LogWarning("Submission {SubmissionId}: its {Verb} was recorded by another decider (or none); nothing was changed", submissionId, verb);
+                return BlockedDecisionResult.Refuse(submissionId, StatusCodes.Status409Conflict, BlockedSubmissionErrors.DecisionConflict,
+                    "Another person's decision on this submission has not finished. They complete it by repeating it.", invoiceId);
+            }
+
+            if (!recordedSet.StoredContentReadable || string.IsNullOrWhiteSpace(recordedSet.Reason))
+            {
+                _logger.LogWarning("Submission {SubmissionId}: the stored Decision Record {RecordId} of its {Verb} cannot be read as a decision; nothing was changed",
+                    submissionId, recordedSet.RecordId, verb);
+                return Unavailable(submissionId, invoiceId);
+            }
+
+            (reason, note) = (recordedSet.Reason, recordedSet.Note);
+        }
+
         // ── Task 095d-0 (EB-D-185, ontology-r1 2026-11-05): a firm comes first. Override only (Return stays open). After the rights (403 first), and BEFORE
         //    the holds derivation, the set's store, the Decision Record and the Signal closes, so a refused request leaves nothing for a retry to
         //    trip over. A read fault answers 503 with nothing written. ──
@@ -1070,9 +1071,8 @@ public sealed class SubmissionOverrideService
                 var writesDetail = liftsProcedureHold && await ReviewDetailProbe.IsPresentAsync(_entities, _logger, ct).ConfigureAwait(false);
                 if (writesDetail || holdBearingOpen)
                 {
-                    var provisional = WithStamp(findingsJson!, OverrideMember, new BlockedDecisionStamp(decisionId, decider, _time.GetUtcNow(), reason));
-                    remaining = await InvoiceOpenHolds.ReasonsAfterAsync(
-                        _entities, invoice!, submissionId, new InvoiceOpenHolds.StoredSubmission(SubmissionReasonCodes.Overridden, provisional), ct).ConfigureAwait(false);
+                    // 095f-2c re-check F2: the one derivation, shared with the release retry (ReReadInvoiceForReleaseAsync), so both write the same detail.
+                    remaining = await ReasonsAfterReleaseAsync(invoice!, submissionId, findingsJson!, decisionId, decider, reason, ct).ConfigureAwait(false);
                     if (writesDetail)
                     {
                         releaseDetail = (overrideInvoiceVersion, InvoiceReviewDetail.ReviewDetailOf(remaining));
@@ -1485,8 +1485,9 @@ public sealed class SubmissionOverrideService
     }
 
     /// <summary>The holds that remain on the invoice once this submission reads as released, through a provisional stamp (the decision id; the real
-    /// stamp, with the record id, is written with the release): the retry's second run of the derivation <see cref="DecideLockedAsync"/> makes
-    /// before the record, the same one (<see cref="InvoiceOpenHolds.ReasonsAfterAsync"/>).</summary>
+    /// stamp, with the record id, is written with the release). The ONE derivation of the Override release (<see cref="InvoiceOpenHolds.ReasonsAfterAsync"/>):
+    /// <see cref="DecideLockedAsync"/> calls it before the record and the release retry calls it again, so both write the same detail (095f-2c re-check F2;
+    /// pinned by InvoiceReviewDetailWritersGuardTests).</summary>
     private async Task<IReadOnlySet<string>> ReasonsAfterReleaseAsync(
         Entity invoice, Guid submissionId, string findingsJson, Guid decisionId, Guid decider, string reason, CancellationToken ct)
     {

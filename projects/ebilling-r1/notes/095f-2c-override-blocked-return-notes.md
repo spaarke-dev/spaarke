@@ -151,3 +151,16 @@ One existing test was restated: `Override_ARetryAfterTheSubmissionWriteFailed_Fi
 - **Live check of the failed request index.** The retry keys on `FailedRequestIndex == 1`, which `MapTransactionFailure` sets from the transaction fault's `FaultedRequestIndex`. It is proven against the double that reports the index as `MapTransactionFailure` words it; it has not been seen against a live version-mismatch fault. If Dataverse reported no index, the behaviour is the old one (409 `concurrent_change`, a repeat finishes it).
 - **A stranded decision belongs to its decider.** If the decider cannot return to it, no one else can finish it from the route (409 `decision_conflict`). This is the rule reject and return already apply to a claimed approval; changing it needs an owner decision.
 - **Client (095f-2ui).** Keep the reason and note across a 409 or 503 so the reviewer can resend, and do not reload the page on `concurrent_change`: the retry inside the call makes it rare, and a repeat finishes it.
+
+## Re-check of the fix round and merge (2026-11-17)
+
+**Re-check (Opus, scoped to `9414f92d9b..c7ffb82f5a` and direct callers):** no F1. The retry loop (request index, no repeated side effects, exhaustion unchanged, lock held) and the stored-record finish hold; all 24 new tests fail on the old source (2 controls pass by design). ontology-r1 signed off the `DecisionRecordWriter` change (the stored step is always the decision's own; no other `StoredSetOf` caller changes) and, earlier, the catalog line.
+
+**Applied on the work branch after the merge (main session):**
+- **F2, one derivation:** `DecideLockedAsync` now calls `ReasonsAfterReleaseAsync` for its first derivation, so the first attempt and the retry run the same code. `InvoiceReviewDetailWritersGuardTests.TheOverrideReleaseDerivesThroughOpenHolds` now also pins that only `ReasonsAfterReleaseAsync` calls `InvoiceOpenHolds.ReasonsAfterAsync`, that both `DecideLockedAsync` and `ReReadInvoiceForReleaseAsync` call it, and that the retry calls `ReviewDetailOf`. Must-fire: re-inlining the derivation in `DecideLockedAsync` fails the guard.
+- **Found in passing, order:** the stored-decider check (409 `decision_conflict`) and the unreadable-record check (503) moved after the caller's rights check, so a caller without the rights gets 403 as before the fix, not a 409 saying a decision is pending. Test `Strand_RepeatByAnotherDeciderWithoutRights_Is403_AndWritesNothing` (override and return): fails 2/2 on the merged source before the move, passes after.
+- **F2, test name:** `ReleaseRetry_AReReadThatFindsTheInvoiceNoLongerInReview_StopsWithoutWriting` no longer promises a repeat it does not make.
+
+**Gates on the merged tip:** BFF build `--warnaserror` 0 warnings; BFF slice (override, writer, notes, reject/return, lifecycle, approval, review detail, billing decision, corrections, procedures) 2956 passed; ArchTests `Invoice|Decision` 147 passed.
+
+**Owner note (not a defect):** a repeat by the decider with an edited reason or note answers 200 `Decided` and keeps the first text (record, column and stamp agree). 095f-2ui may want a response flag to say so.
