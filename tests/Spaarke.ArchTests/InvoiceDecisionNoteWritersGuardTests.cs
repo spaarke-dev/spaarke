@@ -1,4 +1,6 @@
+using System.ComponentModel;
 using System.Reflection;
+using System.Text.Json.Serialization;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Services.Finance;
 using Sprk.Bff.Api.Services.Finance.Submission;
@@ -16,7 +18,10 @@ namespace Spaarke.ArchTests;
 /// <remarks>
 /// <para><b>How.</b> Over the compiled IL (<see cref="IlCallScan.StringLoads"/>), as <see cref="InvoiceReviewDetailWritersGuardTests"/>: both column
 /// names are <c>const</c>s, so every use compiles to an <c>ldstr</c> in the method that uses it (lambdas and state machines count for the method they
-/// were written in). The set of (type, source method) pairs that load a column is checked against its reviewed set.</para>
+/// were written in). Review F2: a name passed as a custom attribute argument (a DTO's <c>[JsonPropertyName("sprk_decisionnote")]</c>, on a type, a
+/// member, a parameter or a return value; constructor and named arguments, arrays flattened) is metadata with no <c>ldstr</c>, so the attributes of
+/// every scanned type and its declared members are read as well and a hit is attributed to its declaring type and member. The set of
+/// (type, source method or member) pairs that name a column is checked against its reviewed set.</para>
 /// <para><b>The decision note's writers</b> (design 1.3 and section 15): the lifecycle transition (<see cref="DecisionNoteWriters"/>, built by
 /// 095f-2a: reject, return and approve reach the column through it); the override release transaction (095f-2c) and the totals path of an
 /// adjustment (095f-2b) are allowed but not built yet (<see cref="PendingDecisionNoteWriters"/>). The task that builds one moves it from the pending
@@ -29,8 +34,15 @@ namespace Spaarke.ArchTests;
 /// lifecycle overload, or keep the firm's note where the persister writes it), or it is a reviewed new writer and is added to the matching list
 /// with its task and decision. <b>Enforced by this test</b> (CLAUDE.md section 16 ladder): a type cannot say "only these methods write this
 /// column", so the rule is an ArchTest with must-fire and must-not-fire controls (<see cref="DecisionNoteControls"/>,
-/// <see cref="CorrectionNoteControls"/>). <b>Not covered:</b> a writer that builds the column name at run time, and the generic write paths, which
-/// are governed by their own allow-lists.</para>
+/// <see cref="CorrectionNoteControls"/>, <see cref="AttributeControls"/>).</para>
+/// <para><b>Not covered:</b>
+/// a writer that builds the column name at run time (concatenation, formatting, a name read from configuration or data);
+/// the generic write paths, which are governed by their own allow-lists;
+/// assembly- and module-level attributes, a const field's value (the definition, not a use), a default parameter value, embedded resources and
+/// UTF-8 or array constant data (<c>"…"u8</c>);
+/// assemblies other than the BFF and <c>Spaarke.Dataverse</c> (<c>Spaarke.Core</c> is not scanned);
+/// whether the pending writers write the column correctly once built (they are allowed, not verified, until their task moves them to the built list);
+/// overloads: the allow-lists are keyed by method NAME, so an overload sharing an allowed method's name is allowed too.</para>
 /// </remarks>
 public sealed class InvoiceDecisionNoteWritersGuardTests
 {
@@ -124,6 +136,31 @@ public sealed class InvoiceDecisionNoteWritersGuardTests
         Assert.Empty(MethodsNaming(IlCallScan.WithNested(typeof(NoteColumnsUnrelatedControlFixture)), CorrectionColumn));
     }
 
+    [Fact(DisplayName = "095f-2a review F2 controls: either column named only in a custom attribute argument (type, DTO property, parameter) is reported (must fire); the allowed sets and an unrelated attribute are not (must not fire)")]
+    public void AttributeControls()
+    {
+        static string[] Expected(Type fixture) =>
+            [Key((fixture, nameof(DecisionNoteAttributeControlFixture.Bind))), Key((fixture, nameof(DecisionNoteAttributeControlFixture.Note))), Key((fixture, TypeLevel))];
+
+        // Must fire: no IL loads either name in these fixtures; only their attributes do.
+        Assert.Equal(
+            Expected(typeof(DecisionNoteAttributeControlFixture)).Order(StringComparer.Ordinal),
+            Unreviewed(MethodsNaming(IlCallScan.WithNested(typeof(DecisionNoteAttributeControlFixture)), DecisionColumn),
+                DecisionNoteWriters.Concat(PendingDecisionNoteWriters)));
+        Assert.Equal(
+            Expected(typeof(CorrectionNoteAttributeControlFixture)).Order(StringComparer.Ordinal),
+            Unreviewed(MethodsNaming(IlCallScan.WithNested(typeof(CorrectionNoteAttributeControlFixture)), CorrectionColumn), CorrectionNoteWriters));
+
+        // Must not fire: the allowed writers' own types (attributes included) report only their reviewed entries; each fixture names only its
+        // own column; an attribute naming another column is not a hit.
+        Assert.Empty(Unreviewed(MethodsNaming(IlCallScan.WithNested(typeof(InvoiceLifecycleService)), DecisionColumn), DecisionNoteWriters));
+        Assert.Empty(Unreviewed(MethodsNaming(IlCallScan.WithNested(typeof(InvoiceSubmissionPersister)), CorrectionColumn), CorrectionNoteWriters));
+        Assert.Empty(MethodsNaming(IlCallScan.WithNested(typeof(DecisionNoteAttributeControlFixture)), CorrectionColumn));
+        Assert.Empty(MethodsNaming(IlCallScan.WithNested(typeof(CorrectionNoteAttributeControlFixture)), DecisionColumn));
+        Assert.Empty(MethodsNaming(IlCallScan.WithNested(typeof(NoteColumnsUnrelatedControlFixture)), DecisionColumn));
+        Assert.Empty(MethodsNaming(IlCallScan.WithNested(typeof(NoteColumnsUnrelatedControlFixture)), CorrectionColumn));
+    }
+
     private static string Key((Type Type, string Method) entry) => $"{entry.Type.FullName}::{entry.Method}";
 
     /// <summary>The naming methods outside <paramref name="reviewed"/> (pure), ordered.</summary>
@@ -133,11 +170,66 @@ public sealed class InvoiceDecisionNoteWritersGuardTests
         return naming.Where(n => !allowed.Contains(n)).OrderBy(n => n, StringComparer.Ordinal).ToList();
     }
 
-    private static HashSet<string> MethodsNaming(IEnumerable<Type> types, string column) =>
-        IlCallScan.StringLoads(types)
+    /// <summary>What a type-level attribute hit is attributed to: the type itself, never one of its method names.</summary>
+    internal const string TypeLevel = "(type)";
+
+    private const BindingFlags DeclaredMembers =
+        BindingFlags.DeclaredOnly | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static;
+
+    /// <summary>The methods whose IL loads <paramref name="column"/>, plus the types and members whose custom attributes name it.</summary>
+    private static HashSet<string> MethodsNaming(IEnumerable<Type> types, string column)
+    {
+        var list = types.ToList();
+        var naming = IlCallScan.StringLoads(list)
             .Where(s => s.Value.Contains(column, StringComparison.OrdinalIgnoreCase))
             .Select(s => Key((IlCallScan.Outermost(s.Caller), IlCallScan.SourceMethodName(s.Caller, s.CallerMethod))))
             .ToHashSet(StringComparer.Ordinal);
+        naming.UnionWith(AttributesNaming(list, column));
+        return naming;
+    }
+
+    /// <summary>
+    /// 095f-2a review F2: the types, members and parameters whose custom attribute arguments (constructor and named, arrays flattened) name
+    /// <paramref name="column"/>, e.g. <c>[JsonPropertyName("sprk_decisionnote")]</c> on a DTO property: metadata, not an <c>ldstr</c>, so the IL scan
+    /// cannot see it. A hit is keyed as (outermost type, member): a member of the outermost type by its name (a parameter or return value by its
+    /// method's name), the type itself by <see cref="TypeLevel"/>, and anything on a nested type as <c>"{nested type}.{member}"</c>, so it never
+    /// satisfies an allowed method name by accident.
+    /// </summary>
+    private static IEnumerable<string> AttributesNaming(IEnumerable<Type> types, string column)
+    {
+        static IEnumerable<object?> Flatten(CustomAttributeTypedArgument argument) =>
+            argument.Value is IReadOnlyCollection<CustomAttributeTypedArgument> items ? items.SelectMany(Flatten) : new[] { argument.Value };
+
+        bool Names(IEnumerable<CustomAttributeData> attributes) =>
+            attributes.Any(a => a.ConstructorArguments.Concat(a.NamedArguments.Select(n => n.TypedValue)).SelectMany(Flatten)
+                .Any(v => v is string text && text.Contains(column, StringComparison.OrdinalIgnoreCase)));
+
+        foreach (var type in types)
+        {
+            var outermost = IlCallScan.Outermost(type);
+            string Where(string member) => type == outermost ? member : $"{type.Name}.{member}";
+
+            if (Names(type.CustomAttributes))
+            {
+                yield return Key((outermost, Where(TypeLevel)));
+            }
+
+            foreach (var member in type.GetMembers(DeclaredMembers).Where(m => m.MemberType != MemberTypes.NestedType))
+            {
+                IEnumerable<ParameterInfo> parameters = member switch
+                {
+                    MethodInfo info => info.GetParameters().Append(info.ReturnParameter),
+                    MethodBase method => method.GetParameters(),
+                    PropertyInfo property => property.GetIndexParameters(),
+                    _ => [],
+                };
+                if (Names(member.CustomAttributes) || parameters.Any(p => Names(p.CustomAttributes)))
+                {
+                    yield return Key((outermost, Where(member.Name)));
+                }
+            }
+        }
+    }
 }
 
 /// <summary>Names the decision note outside the allowed writers (must-fire). Never run; only its IL is read.</summary>
@@ -152,8 +244,43 @@ internal static class CorrectionNotePlantedDecisionPathControlFixture
     public static Dictionary<string, object?> Decide(string note) => new() { ["statuscode"] = 2, [InvoiceCorrectionNote.Column] = note };
 }
 
-/// <summary>Names neither note column (must-not-fire).</summary>
-internal static class NoteColumnsUnrelatedControlFixture
+/// <summary>Names neither note column, in its IL or its attributes (must-not-fire).</summary>
+[Description("sprk_reviewdetail")]
+internal sealed class NoteColumnsUnrelatedControlFixture
 {
-    public static string Write() => "sprk_reviewdetail";
+    [JsonPropertyName("sprk_reviewdetail")]
+    public string? Detail { get; init; }
+
+    public static string Write([NoteColumnControl(Names = ["sprk_reason"])] string value) => "sprk_reviewdetail" + value;
+}
+
+/// <summary>
+/// Review F2 (must-fire): the decision note named only in custom attribute arguments, on the type (<see cref="DescriptionAttribute"/>, a
+/// constructor argument), a DTO property (<see cref="JsonPropertyNameAttribute"/>) and a method parameter (a named array argument). No IL loads it.
+/// Never run; only its metadata is read.
+/// </summary>
+[Description(InvoiceCorrectionNote.DecisionColumn)]
+internal sealed class DecisionNoteAttributeControlFixture
+{
+    [JsonPropertyName(InvoiceCorrectionNote.DecisionColumn)]
+    public string? Note { get; init; }
+
+    public static string Bind([NoteColumnControl(Names = ["sprk_reason", InvoiceCorrectionNote.DecisionColumn])] string value) => value;
+}
+
+/// <summary>Review F2 (must-fire): the firm's correction note named only in custom attribute arguments, in the same three shapes.</summary>
+[Description(InvoiceCorrectionNote.Column)]
+internal sealed class CorrectionNoteAttributeControlFixture
+{
+    [JsonPropertyName(InvoiceCorrectionNote.Column)]
+    public string? Note { get; init; }
+
+    public static string Bind([NoteColumnControl(Names = ["sprk_reason", InvoiceCorrectionNote.Column])] string value) => value;
+}
+
+/// <summary>A stand-in binding attribute with a named array argument, for the attribute controls.</summary>
+[AttributeUsage(AttributeTargets.All)]
+internal sealed class NoteColumnControlAttribute : Attribute
+{
+    public string[] Names { get; set; } = [];
 }

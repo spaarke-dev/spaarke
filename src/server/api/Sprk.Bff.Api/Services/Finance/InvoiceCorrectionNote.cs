@@ -4,8 +4,11 @@ namespace Sprk.Bff.Api.Services.Finance;
 /// The invoice notes (ebilling-r1 task 095f, EB-D-225; task 095f-2a, EB-D-236, EB-D-240). <c>sprk_invoice.sprk_correctionnote</c> is the firm's
 /// own "why corrected" text, written only by the submission persister in a Correction's create (never by a decision). <c>sprk_invoice.sprk_decisionnote</c>
 /// (<see cref="DecisionColumn"/>) is the INTERNAL note of the latest invoice-level decision, never shown to a firm; it is written only in the same
-/// conditional update as the decision's own invoice change. This type owns both column names, the length and the text rule, so the writers
-/// cannot drift apart (one server-side owner per invariant).
+/// conditional update as the decision's own invoice change. This type owns both column names, and the length and text rule for NOTES, so every
+/// route that takes a note checks it the same way (one server-side owner per invariant). The rule applies to notes only: when a reject or return
+/// has no note, <c>sprk_decisionnote</c> takes the decision's required reason (EB-D-240), and that reason is checked by the reason's own rule
+/// (required, trimmed, at most 2000 characters; no control-character check), not this one. Changing the reason rule would change the reject and return
+/// contract, so it is left as is (095f-2a review, a known limit).
 /// </summary>
 /// <remarks>
 /// <para><b>Length.</b> 2000 characters, the length of every reason a reviewer already types (reject, return, line decision, adjustment,
