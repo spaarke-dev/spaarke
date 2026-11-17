@@ -21,7 +21,7 @@ namespace Sprk.Bff.Api.Api.Finance;
 /// the invoice and its lines (D-122), closed by the app-identity writer, so when there are any the service also asks, as the caller, for
 /// AppendTo on the invoice's core record and Write on each Signal's subject: 403 <c>ebilling.blocked.not_authorized</c> without them, nothing
 /// written.</para>
-/// <para><b>Inputs.</b> The submission id is the route; the only body field is <c>reason</c>. The decider is the authenticated caller, and the
+/// <para><b>Inputs.</b> The submission id is the route; the body fields are <c>reason</c> (required) and <c>note</c> (optional; task 095f-2c: it is checked before anything is read, and a refused note is a coded 400). The decider is the authenticated caller, and the
 /// invoice, the findings and the decision id are all derived server-side; none comes from the request.</para>
 /// <para><b>Responses.</b> 200 with <see cref="BlockedDecisionResponse"/> (a repeat is 200 with <c>alreadyDecided</c> and writes nothing); refusals
 /// are ProblemDetails with <c>errorCode</c> (<see cref="BlockedSubmissionErrors"/>); 401 unauthenticated; 503 <c>ebilling.disabled</c> when off.

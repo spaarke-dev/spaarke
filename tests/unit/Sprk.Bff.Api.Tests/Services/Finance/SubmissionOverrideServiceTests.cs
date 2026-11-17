@@ -1348,8 +1348,7 @@ public partial class SubmissionOverrideServiceTests
 
         retried.Kind.Should().Be(BlockedDecisionKind.Decided);
         w.RecordCreates.Should().Be(1, "the retry found the first attempt's record instead of writing another");
-        w.Recorded.Should().HaveCount(2);
-        w.Recorded.Select(d => d.DecisionId).Distinct().Should().ContainSingle();
+        w.Recorded.Should().ContainSingle("095f-2c round 1: the retry finishes from the stored record and never asks the writer to record again");
         w.Status.Should().Be(InvoiceSubmissionStatus.Accepted);
     }
 

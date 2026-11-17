@@ -21,8 +21,9 @@ namespace Sprk.Bff.Api.Tests.DataMutation.Ebilling;
 /// <para><b>Golden hashes (N2).</b> Captured from the code BEFORE 095f-2c (base a5ad76a8de) on the same fixed worlds: an ordinary blocked internal
 /// submission overridden and returned with the world's default reason, and a Procedure-gap hold overridden. A decision without a note, or with a
 /// whitespace-only one, must hash byte-identically, so a retry of a pre-change decision is never refused by the writer.</para>
-/// <para><b>Repeat.</b> A repeat after the record was written but before the state change must carry the first note: another note is refused by
-/// the writer as a decision conflict (the same as another reason), not silently dropped.</para>
+/// <para><b>Repeat (review round 1).</b> A repeat after the record was written but before the state change finishes THAT decision from the stored
+/// record: it need not recall the first reason or note, the column and the stamp hold the stored text, and the writer is never asked to record again.
+/// Only the stored decider may finish it; a record that cannot be read fails closed (503).</para>
 /// </remarks>
 public sealed class SubmissionOverrideDecisionNoteTests
 {
@@ -184,27 +185,170 @@ public sealed class SubmissionOverrideDecisionNoteTests
         }
     }
 
-    [Fact(DisplayName = "095f-2c: a repeat after the record but before the state change must carry the first note; another note is a 409 decision_conflict (as for another reason) and writes nothing")]
-    public async Task Override_RepeatBeforeTheState_WithAnotherNote_IsRefused_AndTheSameNoteCompletes()
+    // ── A stranded decision (the record written, the state not yet changed): the repeat finishes from the STORED record (review round 1, F1) ──
+
+    private static string StampReasonOf(World w, string member) =>
+        JsonNode.Parse(w.FindingsJson)![member]!["reason"]!.GetValue<string>();
+
+    /// <summary>Strands a decision after its record was written: the first call is refused or fails at <paramref name="strand"/>.</summary>
+    private static async Task<BlockedDecisionResult> StrandAsync(World w, string strand, string? note)
+    {
+        var verb = strand.StartsWith("return", StringComparison.Ordinal) ? "return" : "override";
+        switch (strand)
+        {
+            case "override-release":
+            case "return-state-write":
+                w.UpdateFault = new TimeoutException("dataverse");
+                break;
+            case "override-closes-and-release":
+                w.AddSignal("sprk_invoice", World.InvoiceId, "EB-AGE");
+                w.CloseFault = _ => new TimeoutException("dataverse");
+                w.UpdateFault = new TimeoutException("dataverse");
+                break;
+            case "override-invoice-bound":
+                w.OnUpdate = () => w.Invoice!["versionnumber"] = w.Invoice.GetAttributeValue<long>("versionnumber") + 1;
+                break;
+            case "return-transition":
+                w.TransitionFault = new TimeoutException("dataverse");
+                break;
+        }
+
+        var first = await Decide(w, verb, note);
+        w.UpdateFault = null;
+        w.OnUpdate = null;
+        w.TransitionFault = null;
+        w.CloseFault = _ => null;
+        return first;
+    }
+
+    [Theory(DisplayName = "095f-2c round 1 F1: a decision stranded at each post-record step is finished by a repeat with ANOTHER reason and note (or none): the column and the stamp hold the STORED text, one record, the writer is never asked again")]
+    [InlineData("override-release", "First note", "Another note")]
+    [InlineData("override-release", "First note", null)]
+    [InlineData("override-release", null, "A note nobody sent first")]
+    [InlineData("override-closes-and-release", "First note", "Another note")]
+    [InlineData("override-invoice-bound", "First note", null)]
+    [InlineData("return-transition", "First note", "Another note")]
+    [InlineData("return-transition", null, "A note nobody sent first")]
+    [InlineData("return-state-write", "First note", null)]
+    public async Task Strand_RepeatWithAnotherText_FinishesFromTheStoredRecord(string strand, string? firstNote, string? repeatNote)
     {
         var w = await World.CreateAsync();
-        w.UpdateFault = new TimeoutException("dataverse");
-        (await Decide(w, "override", "First note")).StatusCode.Should().Be(503);
-        w.UpdateFault = null;
+        var verb = strand.StartsWith("return", StringComparison.Ordinal) ? "return" : "override";
+        var first = await StrandAsync(w, strand, firstNote);
+        first.Kind.Should().Be(BlockedDecisionKind.Refused, "the first call stranded");
+        w.RecordCreates.Should().Be(1, "the record was written before the strand");
+        w.Code.Should().Be(SubmissionReasonCodes.Blocked, "the submission is still held");
+        var expectedColumn = firstNote ?? Reason;
 
-        var another = await Decide(w, "override", "Another note");
+        var repeat = await Decide(w, verb, repeatNote, reason: "Another reason entirely.");
 
-        another.Kind.Should().Be(BlockedDecisionKind.Refused);
-        another.StatusCode.Should().Be(409);
-        another.ErrorCode.Should().Be(BlockedSubmissionErrors.DecisionConflict);
+        repeat.Kind.Should().Be(BlockedDecisionKind.Decided);
+        w.RecordCreates.Should().Be(1, "no second record");
+        w.Recorded.Should().ContainSingle("the repeat finished from the stored record and never asked the writer again");
+        w.Code.Should().Be(verb == "override" ? SubmissionReasonCodes.Overridden : SubmissionReasonCodes.Returned);
+        StampReasonOf(w, verb == "override" ? "override" : "return").Should().Be(Reason, "the stamp holds the stored reason, not the repeat's");
+        if (firstNote is null)
+        {
+            ValuesOf(w).Should().NotContainKey("note");
+        }
+        else
+        {
+            ValuesOf(w)["note"]!.GetValue<string>().Should().Be(firstNote);
+        }
+
+        if (verb == "override")
+        {
+            DecisionNoteOf(w).Should().Be(expectedColumn, "the column holds the stored note, or the stored reason when there was no note");
+            w.Transactions.Should().ContainSingle();
+        }
+        else
+        {
+            w.TransitionNotes.Where(n => n is not null).Should().OnlyContain(n => n == expectedColumn, "every note the lifecycle was given is the stored one");
+            w.InvoiceStatus.Should().Be(InvoiceLifecycleStatus.ReturnedToFirm);
+        }
+
+        if (strand == "override-closes-and-release")
+        {
+            w.Closes.Should().NotBeEmpty();
+            w.Closes.Select(c => c.RecordId).Distinct().Should().Equal([repeat.RecordId!.Value], "the repeat closes under the stored record, as the first attempt did");
+            w.Closes.Last().DecidedBy.Should().Be(World.Caller, "and under the stored decider");
+        }
+    }
+
+    [Theory(DisplayName = "095f-2c round 1 F1: another person cannot finish a stranded decision: 409 decision_conflict (reject and return's \"claimed\" rule), nothing written; the stored decider then finishes it")]
+    [InlineData("override-release")]
+    [InlineData("return-transition")]
+    public async Task Strand_RepeatByAnotherDecider_IsRefused_AndWritesNothing(string strand)
+    {
+        var w = await World.CreateAsync();
+        var verb = strand.StartsWith("return", StringComparison.Ordinal) ? "return" : "override";
+        await StrandAsync(w, strand, "First note");
+        var transitionsBefore = w.Transitions.Count;
+        w.Probe.CallerSystemUserId = Guid.Parse("10500000-0000-4000-8000-0000000000c9");
+
+        var other = await Decide(w, verb, "First note");
+
+        other.Kind.Should().Be(BlockedDecisionKind.Refused);
+        other.StatusCode.Should().Be(409);
+        other.ErrorCode.Should().Be(BlockedSubmissionErrors.DecisionConflict);
         w.Transactions.Should().BeEmpty();
-        DecisionNoteOf(w).Should().BeNull();
-
-        var same = await Decide(w, "override", "First note");
-
-        same.Kind.Should().Be(BlockedDecisionKind.Decided);
+        w.Updates.Should().BeEmpty();
+        w.Transitions.Should().HaveCount(transitionsBefore);
         w.RecordCreates.Should().Be(1);
-        DecisionNoteOf(w).Should().Be("First note");
+        w.Code.Should().Be(SubmissionReasonCodes.Blocked);
+
+        w.Probe.CallerSystemUserId = World.Caller;
+        (await Decide(w, verb, null)).Kind.Should().Be(BlockedDecisionKind.Decided);
+        w.RecordCreates.Should().Be(1);
+    }
+
+    [Theory(DisplayName = "095f-2c round 1 F1: a stored record that cannot be read as a decision (no reason, no values, a note that is not text) is refused 503 and nothing is written")]
+    [InlineData("override", "reason-missing")]
+    [InlineData("override", "values-missing")]
+    [InlineData("override", "note-not-text")]
+    [InlineData("return", "reason-missing")]
+    [InlineData("return", "values-missing")]
+    [InlineData("return", "note-not-text")]
+    public async Task Strand_AnUnreadableStoredRecord_IsRefused_AndWritesNothing(string verb, string damage)
+    {
+        var w = await World.CreateAsync();
+        await StrandAsync(w, verb == "override" ? "override-release" : "return-transition", "First note");
+        var record = DecisionRecordOf(w);
+        var transitionsBefore = w.Transitions.Count;
+        switch (damage)
+        {
+            case "reason-missing":
+                record.Attributes.Remove("sprk_reason");
+                break;
+            case "values-missing":
+            case "note-not-text":
+                var steps = Steps(record);
+                var step = steps["steps"]!.AsArray().Single()!.AsObject();
+                if (damage == "values-missing")
+                {
+                    step.Remove("values");
+                }
+                else
+                {
+                    step["values"]!["note"] = 7;
+                }
+
+                record["sprk_steps"] = steps.ToJsonString();
+                break;
+        }
+
+        var repeat = await Decide(w, verb, "First note");
+
+        repeat.Kind.Should().Be(BlockedDecisionKind.Refused);
+        repeat.StatusCode.Should().Be(503, "fail closed");
+        repeat.ErrorCode.Should().Be(BlockedSubmissionErrors.Unavailable);
+        w.Transactions.Should().BeEmpty();
+        w.Updates.Should().BeEmpty();
+        w.Transitions.Should().HaveCount(transitionsBefore, "no move");
+        w.RecordCreates.Should().Be(1);
+        w.Recorded.Should().ContainSingle();
+        w.Code.Should().Be(SubmissionReasonCodes.Blocked);
+        DecisionNoteOf(w).Should().BeNull();
     }
 
     [Fact(DisplayName = "095f-2c: a repeat of a released Override writes nothing: no second transaction, the column keeps the first note")]

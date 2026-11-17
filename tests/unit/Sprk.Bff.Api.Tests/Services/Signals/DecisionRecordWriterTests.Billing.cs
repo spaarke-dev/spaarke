@@ -1181,8 +1181,8 @@ public sealed partial class DecisionRecordWriterTests
         query.Criteria.Conditions.Should().Contain(c => c.AttributeName == "sprk_actioncode" && c.Operator == ConditionOperator.In);
         query.Criteria.Conditions.Should().Contain(c => c.AttributeName == "sprk_steps" && c.Operator == ConditionOperator.Like
             && ((string)c.Values.Single()).Contains(BillingDecisionKey.IdOf("sprk_billingevent", LineId, BillingDecision).ToString("D"), StringComparison.Ordinal));
-        query.ColumnSet.Columns.Should().BeEquivalentTo(["sprk_actioncode", "sprk_steps", "sprk_factsnapshot", "sprk_confirmedby"],
-            "ids, read time, codes and the decider only, never record text");
+        query.ColumnSet.Columns.Should().BeEquivalentTo(["sprk_actioncode", "sprk_steps", "sprk_factsnapshot", "sprk_confirmedby", "sprk_reason"],
+            "ids, read time, codes, the decider and (095f-2c round 1) the stored reason, so a repeat can finish a stranded decision from its record; the note rides in sprk_steps");
         h.Created.Should().BeEmpty("a read writes nothing");
     }
 
@@ -1201,6 +1201,56 @@ public sealed partial class DecisionRecordWriterTests
         stored.SetReadAtUtc!.Value.Kind.Should().Be(DateTimeKind.Utc);
         stored.Signals.Should().Equal((BillingSignal, "EB-RATE"));
         stored.ConfirmedByUserId.Should().Be(Reviewer, "the decider as the writer wrote it (sprk_confirmedby), for a repeat's close");
+    }
+
+    [Theory(DisplayName = "095f-2c round 1: the stored set carries the record's stored reason and note (a note that is absent is readable and means none), so a repeat can finish the decision from its record")]
+    [InlineData("A note", "A note")]
+    [InlineData(null, null)]
+    public async Task Billing_StoredSet_CarriesTheStoredReasonAndNote(string? note, string? expectedNote)
+    {
+        var h = BillingHarness();
+        var values = new Dictionary<string, object?> { ["submissionId"] = "s-1" }; // the override's own values are never empty
+        if (note is not null)
+        {
+            values["note"] = note;
+        }
+
+        await h.Writer.WriteBillingDecisionAsync(Billing("override-submission", reason: "The stored reason.", values: values, facts: FactsWithSet()));
+
+        var stored = (await h.Writer.FindBillingDecisionResolvedSetAsync(new DecisionRecordRef("sprk_invoice", InvoiceId), BillingDecision))!;
+
+        stored.Reason.Should().Be("The stored reason.");
+        stored.Note.Should().Be(expectedNote);
+        stored.StoredContentReadable.Should().BeTrue();
+    }
+
+    [Theory(DisplayName = "095f-2c round 1: a stored record whose step has no values, or whose note is not text, is not readable as a decision (the caller fails closed)")]
+    [InlineData("values-missing")]
+    [InlineData("note-not-text")]
+    [InlineData("blank-note")]
+    public async Task Billing_StoredSet_ADamagedStep_IsNotReadable(string damage)
+    {
+        var h = BillingHarness();
+        await h.Writer.WriteBillingDecisionAsync(Billing(
+            "override-submission", reason: "The stored reason.", values: new Dictionary<string, object?> { ["note"] = "A note" }, facts: FactsWithSet()));
+        var record = h.Created.Single(e => e.LogicalName == "sprk_decisionrecord");
+        var steps = System.Text.Json.Nodes.JsonNode.Parse(record.GetAttributeValue<string>("sprk_steps"))!;
+        var step = steps["steps"]!.AsArray().Single()!.AsObject();
+        if (damage == "values-missing")
+        {
+            step.Remove("values");
+        }
+        else
+        {
+            step["values"]!["note"] = damage == "note-not-text" ? 7 : "   ";
+        }
+
+        record["sprk_steps"] = steps.ToJsonString();
+
+        var stored = (await h.Writer.FindBillingDecisionResolvedSetAsync(new DecisionRecordRef("sprk_invoice", InvoiceId), BillingDecision))!;
+
+        stored.StoredContentReadable.Should().BeFalse();
+        stored.Note.Should().BeNull();
     }
 
     [Fact]

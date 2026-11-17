@@ -2106,8 +2106,14 @@ public sealed class DecisionRecordWriter
     /// <param name="SetReadAtUtc">Null when the record lists no Signal and stored no set (a record written before the set was stored).</param>
     /// <param name="ConfirmedByUserId">The record's <c>sprk_confirmedby</c> (the deciding person's <c>systemuserid</c>, as the writer wrote
     /// it); null for a system decision. A repeat names this decider, never one read from a column a person can edit.</param>
+    /// <param name="Reason">The record's <c>sprk_reason</c> as stored (095f-2c review round 1); null when the column is empty.</param>
+    /// <param name="Note">The record's stored <c>values.note</c> (095f-2c review round 1); null when the decision took no note.</param>
+    /// <param name="StoredContentReadable">True only when <see cref="StoredSetOf"/> could read the record's step and its <c>values</c> (a
+    /// note that is absent or null is readable and means none). False (the default) means <see cref="Reason"/> and <see cref="Note"/> must not
+    /// be trusted: a caller that finishes a decision from the stored content refuses (fail closed).</param>
     internal sealed record BillingStoredResolvedSet(
-        Guid RecordId, DateTime? SetReadAtUtc, IReadOnlyList<(Guid SignalId, string PolicyCode)> Signals, Guid? ConfirmedByUserId = null);
+        Guid RecordId, DateTime? SetReadAtUtc, IReadOnlyList<(Guid SignalId, string PolicyCode)> Signals, Guid? ConfirmedByUserId = null,
+        string? Reason = null, string? Note = null, bool StoredContentReadable = false);
 
     /// <summary>
     /// ebilling-r1 tasks 100 and 105 (D-122, additive; ontology-r1 approved): the set the billing decision <paramref name="decisionId"/> on
@@ -2154,7 +2160,7 @@ public sealed class DecisionRecordWriter
     }
 
     /// <summary>The columns <see cref="StoredSetOf"/> reads.</summary>
-    private static readonly string[] BillingStoredSetColumns = ["sprk_actioncode", "sprk_steps", "sprk_factsnapshot", "sprk_confirmedby"];
+    private static readonly string[] BillingStoredSetColumns = ["sprk_actioncode", "sprk_steps", "sprk_factsnapshot", "sprk_confirmedby", "sprk_reason"];
 
     private static bool IsBillingRow(Entity r) =>
         r.Id != Guid.Empty && r.GetAttributeValue<string>("sprk_actioncode") is { } code && BillingSubjectByCode.ContainsKey(code);
@@ -2267,11 +2273,66 @@ public sealed class DecisionRecordWriter
                 "The recorded billing decision lists Signals whose stored set cannot be read; nothing was written.");
         }
 
+        var (note, contentReadable) = StoredNoteOf(row);
         return new BillingStoredResolvedSet(
             row.Id,
             stored?.ReadAt,
             ids.Select(id => (id, stored!.Value.Codes[id])).ToList(),
-            row.GetAttributeValue<EntityReference>("sprk_confirmedby")?.Id is { } by && by != Guid.Empty ? by : null);
+            row.GetAttributeValue<EntityReference>("sprk_confirmedby")?.Id is { } by && by != Guid.Empty ? by : null,
+            row.GetAttributeValue<string>("sprk_reason") is { Length: > 0 } reason ? reason : null,
+            note,
+            contentReadable);
+    }
+
+    private const string NoteValueKey = "note";
+
+    /// <summary>
+    /// 095f-2c review round 1: the optional note a billing record stored (<c>sprk_steps</c>: the record's own taken step, <c>values.note</c>,
+    /// which <see cref="BillingDecisionHash"/> covers), read the way approve reads its stored amount. <c>Readable</c> is false when the step
+    /// or its <c>values</c> cannot be read, or the note is not a non-blank string (a note that is absent or JSON null is readable and means none).
+    /// </summary>
+    private static (string? Note, bool Readable) StoredNoteOf(Entity row)
+    {
+        try
+        {
+            using var steps = JsonDocument.Parse(row.GetAttributeValue<string>("sprk_steps") ?? "{}");
+            var code = row.GetAttributeValue<string>("sprk_actioncode");
+            if (steps.RootElement.ValueKind != JsonValueKind.Object
+                || !steps.RootElement.TryGetProperty("steps", out var list) || list.ValueKind != JsonValueKind.Array)
+            {
+                return (null, false);
+            }
+
+            foreach (var step in list.EnumerateArray())
+            {
+                if (step.ValueKind != JsonValueKind.Object
+                    || !step.TryGetProperty("code", out var stepCode) || stepCode.ValueKind != JsonValueKind.String || stepCode.GetString() != code
+                    || !step.TryGetProperty("taken", out var taken) || taken.ValueKind != JsonValueKind.True)
+                {
+                    continue;
+                }
+
+                if (!step.TryGetProperty("values", out var values) || values.ValueKind != JsonValueKind.Object)
+                {
+                    return (null, false);
+                }
+
+                if (!values.TryGetProperty(NoteValueKey, out var note) || note.ValueKind == JsonValueKind.Null)
+                {
+                    return (null, true);
+                }
+
+                return note.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(note.GetString())
+                    ? (note.GetString(), true)
+                    : (null, false);
+            }
+
+            return (null, false);
+        }
+        catch (JsonException)
+        {
+            return (null, false);
+        }
     }
 
     /// <summary>The record's <c>resolvedSignalIds</c> from <c>sprk_steps</c>; null when unreadable.</summary>
