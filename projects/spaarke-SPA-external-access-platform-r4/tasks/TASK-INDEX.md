@@ -22,7 +22,7 @@
 | 012 | Record "Events": one list (Task = event type badge), one Add event with a Type choice (retest round 2) | 1 | ✅ [done] | 011 | — | sonnet / high |
 | 013 | Collapsible sections remembered per user; invoice/document rows open a child record modal (retest round 2) | 1 | ✅ [done] | 012 | — | sonnet / high |
 | 014 | BFF: event types, richer create, GET/PATCH /events/{id}, assignable people (FR-35–FR-37; retest round 3) — gated on uac-r2 UAC review — merged #2852, #2869, #2872 | 1 | ✅ [done] | 018 | — | opus / high |
-| 015 | SPA: Add event with type/priority/assignee/description; Event record (child + deep link) with Edit and Change status (FR-35–FR-37) | 1 | 🔄 [wip] | 014 | — | sonnet / high |
+| 015 | SPA: Add event with type/priority/assignee/description; Event record (child + deep link) with Edit and Change status (FR-35–FR-37) | 1 | ✅ [done] | 014 | — | sonnet / high |
 | 016 | Event forms deploy (BFF via uac-r2, SPA dev) + owner E2E | 1 | 🔲 [open] | 014, 015 | — (live) | sonnet / high |
 | 018 | P1 deploy (BFF via uac-r2, SPA dev) + E2E + first-E2E checks (FR-33) — redeploy + retest after 008–013 | 1 | ✅ [done] | 002, 004, 005, 006, 007, 008, 009, 010, 011, 012, 013 | — (live) | sonnet / high |
 | 020 | Review detail (082c) + held-Accepted badge (FR-11, FR-12) | 2 | 🔲 [open] | 018 | Group B | sonnet / high |

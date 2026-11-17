@@ -4,7 +4,7 @@
     <title>SPA: Add event with type/priority/assignee/description; Event record template (child record + deep link) with Edit and Change status (FR-35, FR-36, FR-37)</title>
     <phase>1 Record template and actions (post-E2E rework, round 3)</phase>
     <gate>014 merged (its contract is the source of truth; build against the merged DTOs, not the design)</gate>
-    <status>in-progress</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>.tsx in the SPA; a new record template; nested child dialogs; hide-don't-disable rules</rigor-reason>
     <model-tier>sonnet</model-tier>
