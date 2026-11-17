@@ -18,7 +18,7 @@ public sealed partial class ProcedureAssignmentServiceTests
         var policy = w.Rule();
         w.H.Row("sprk_policyversion", CurrentVersionOf(w, policy))[RuleSetService.FirmDescriptionColumn] = "Travel is billed at half the agreed rate.";
 
-        var outcome = await w.Service().ChangeRuleAsync(Matter, MatterId, Change(policy), CallerOid, Token, default);
+        var outcome = await w.Service().ChangeRuleAsync(Matter, MatterId, Change(policy), CallerOid, CallerUserId, Token, default);
 
         outcome.Kind.Should().Be(RuleSetOutcomeKind.Done, outcome.Detail);
         var (_, ruleId) = RecordRuleOf(policy);
@@ -35,7 +35,7 @@ public sealed partial class ProcedureAssignmentServiceTests
         var policy = w.Rule();
         w.H.Row("sprk_policyversion", CurrentVersionOf(w, policy))[RuleSetService.FirmDescriptionColumn] = stored;
 
-        var outcome = await w.Service().ChangeRuleAsync(Matter, MatterId, Change(policy), CallerOid, Token, default);
+        var outcome = await w.Service().ChangeRuleAsync(Matter, MatterId, Change(policy), CallerOid, CallerUserId, Token, default);
 
         outcome.Kind.Should().Be(RuleSetOutcomeKind.Done, outcome.Detail);
         var (_, ruleId) = RecordRuleOf(policy);
@@ -56,7 +56,7 @@ public sealed partial class ProcedureAssignmentServiceTests
         w.H.Row("sprk_ruleset", baseSet)["sprk_name"] = "Acme Panel Guidelines 2026";
         w.H.Row("sprk_policyversion", CurrentVersionOf(w, policy))[RuleSetService.FirmDescriptionColumn] = stored;
 
-        var outcome = await w.Service().ChangeRuleAsync(Matter, MatterId, Change(policy), CallerOid, Token, default);
+        var outcome = await w.Service().ChangeRuleAsync(Matter, MatterId, Change(policy), CallerOid, CallerUserId, Token, default);
 
         outcome.Kind.Should().Be(RuleSetOutcomeKind.Done, outcome.Detail);
         var (_, ruleId) = RecordRuleOf(policy);
@@ -80,7 +80,7 @@ public sealed partial class ProcedureAssignmentServiceTests
         var w = new World();
         var policy = w.Rule();
 
-        (await w.Service().ChangeRuleAsync(Matter, MatterId, Change(policy), CallerOid, Token, default)).Kind.Should().Be(RuleSetOutcomeKind.Done);
+        (await w.Service().ChangeRuleAsync(Matter, MatterId, Change(policy), CallerOid, CallerUserId, Token, default)).Kind.Should().Be(RuleSetOutcomeKind.Done);
 
         var (_, ruleId) = RecordRuleOf(policy);
         w.H.Row("sprk_policyversion", RuleSetService.VersionIdFor(ruleId, 1)).Contains(RuleSetService.FirmDescriptionColumn).Should().BeFalse();

@@ -34,15 +34,40 @@ public static class ProcedureAssignmentEntity
     public const int ModeExcluded = 100000002;
 }
 
-/// <summary>Assign a Procedure to a record: <c>FollowLatest</c> (default), <c>Pinned</c> (with a version of that Procedure) or <c>Excluded</c>.</summary>
-public sealed record ProcedureAssignmentRequest(Guid? ProcedureId, string? Mode, Guid? PinnedVersionId, string? Reason);
+/// <summary>Assign a Procedure to a record: <c>FollowLatest</c> (default), <c>Pinned</c> (with a version of that Procedure) or <c>Excluded</c>.
+/// Task 084h-2 (EB-D-236, EB-D-239): <see cref="Note"/> is optional, kept only in the change's Decision Record, never on the override row.</summary>
+public sealed record ProcedureAssignmentRequest(Guid? ProcedureId, string? Mode, Guid? PinnedVersionId, string? Reason, string? Note = null);
 
-/// <summary>Exclude one rule for a record (for one firm's invoices when <see cref="FirmId"/> is set). The reason is required.</summary>
-public sealed record RuleExcludeRequest(Guid? PolicyId, string? Reason, Guid? FirmId);
+/// <summary>Exclude one rule for a record (for one firm's invoices when <see cref="FirmId"/> is set). The reason is required. The optional
+/// <see cref="Note"/> is kept only in the change's Decision Record (task 084h-2).</summary>
+public sealed record RuleExcludeRequest(Guid? PolicyId, string? Reason, Guid? FirmId, string? Note = null);
 
-/// <summary>One override row as written: a Procedure-level row (<c>Procedure</c>) or a rule-level Exclude (<c>RuleExcluded</c>).</summary>
+/// <summary>Task 084h-2 (EB-D-239 Q8): the optional JSON body of a removal, <c>{ "note": "..." }</c>; an empty body is no note.</summary>
+public sealed record OverrideRemovalRequest(string? Note);
+
+/// <summary>
+/// Task 084h-2 (design notes/084h section 7.1): what became of a committed change's Decision Record. <see cref="Status"/> is
+/// <see cref="Recorded"/> (with <see cref="RecordId"/>), <see cref="Queued"/> (the inline record failed and its repair was queued) or
+/// <see cref="NotRecorded"/> (it failed and could not be queued, with <see cref="ErrorCode"/>). The change itself stands in every case.
+/// </summary>
+public sealed record OverrideDecisionRecord(string Status, Guid? RecordId, string? ErrorCode)
+{
+    public const string Recorded = "Recorded";
+    public const string Queued = "Queued";
+    public const string NotRecorded = "NotRecorded";
+
+    internal static OverrideDecisionRecord RecordedAs(Guid recordId) => new(Recorded, recordId, null);
+
+    internal static OverrideDecisionRecord QueuedForRepair { get; } = new(Queued, null, null);
+
+    internal static OverrideDecisionRecord NotRecordedFailure { get; } = new(NotRecorded, null, ProcedureAssignmentService.CodeDecisionRecordFailed);
+}
+
+/// <summary>One override row as written: a Procedure-level row (<c>Procedure</c>) or a rule-level Exclude (<c>RuleExcluded</c>). Task 084h-2:
+/// <see cref="DecisionRecord"/> says what became of the write's Decision Record (set on every write answer, once: a change carries it here).</summary>
 public sealed record OverrideView(
-    Guid Id, string Kind, string Mode, Guid? ProcedureId, Guid? PinnedVersionId, Guid? PolicyId, Guid? FirmId, string? Reason);
+    Guid Id, string Kind, string Mode, Guid? ProcedureId, Guid? PinnedVersionId, Guid? PolicyId, Guid? FirmId, string? Reason,
+    OverrideDecisionRecord? DecisionRecord = null);
 
 /// <summary>
 /// Change one rule for a record (task 089c, model 6.3): the rule is excluded for the record and a record rule takes its place, based on the
@@ -50,7 +75,8 @@ public sealed record OverrideView(
 /// firm's invoices, and must be the rule's own firm when the rule applies to one firm only.
 /// </summary>
 public sealed record RuleChangeRequest(
-    Guid? PolicyId, string? Reason, Guid? FirmId, string? RuleBody, string? MessageTemplate, string? ShortHeadline, string? Consequence);
+    Guid? PolicyId, string? Reason, Guid? FirmId, string? RuleBody, string? MessageTemplate, string? ShortHeadline, string? Consequence,
+    string? Note = null);
 
 /// <summary>The record rule a change wrote: its record-scoped set, its policy, and the Published version based on the rule's version in force.</summary>
 public sealed record RecordRuleView(
@@ -76,9 +102,11 @@ public sealed record RuleChangedView(
 public sealed record OverrideRemovalPreview(
     Guid OverrideId, string Kind, bool ClosesRule, string? Warning, string? AffectedText, int? VisibleOpenInvoices);
 
-/// <summary>What a removal did. The row is deleted. For a changed rule, the record rule is also Off and its open findings are closed <c>PolicyRetired</c>.</summary>
+/// <summary>What a removal did. The row is deleted. For a changed rule, the record rule is also Off and its open findings are closed <c>PolicyRetired</c>.
+/// Task 084h-2: <see cref="DecisionRecord"/> says what became of the removal's Decision Record.</summary>
 public sealed record OverrideRemoved(
-    Guid OverrideId, string Kind, bool RuleSwitchedOff, bool CloseComplete, string? AffectedText, int? VisibleOpenInvoices, string? Message);
+    Guid OverrideId, string Kind, bool RuleSwitchedOff, bool CloseComplete, string? AffectedText, int? VisibleOpenInvoices, string? Message,
+    OverrideDecisionRecord? DecisionRecord = null);
 
 /// <summary>What a stored override row overrides (the Procedure, or the rule it excludes or changes), as the entity set the caller's Read is asked on.</summary>
 public sealed record OverrideSubject(string EntitySet, Guid Id);
@@ -230,6 +258,23 @@ public static class RecordRuleSet
 }
 
 /// <summary>
+/// Stable <see cref="EventId"/>s of a per-record Procedure change's Decision Record (ebilling-r1 task 084h-2, design notes/084h section 7.2),
+/// in the ontology / billing range that <c>OntologyEventIdUniquenessGuardTests</c> keeps unique. Block 50320-50329: this service uses
+/// 50320-50322; 50323-50329 are left for 084h-3's enqueuer and handler. Ids only in every line: never the note or the reason text.
+/// </summary>
+public static class ProcedureDecisionRecordEvents
+{
+    /// <summary>Error: the change committed, its inline Decision Record was refused or failed, and the repair was queued.</summary>
+    public static readonly EventId RecordFailedQueued = new(50320, nameof(RecordFailedQueued));
+
+    /// <summary>Error: the change committed, its inline Decision Record failed, and the repair could not be queued (NotRecorded).</summary>
+    public static readonly EventId RecordFailedNotQueued = new(50321, nameof(RecordFailedNotQueued));
+
+    /// <summary>Error: a change that gave no answer was proven committed, but not as this caller's row, so no record was filed (NotRecorded).</summary>
+    public static readonly EventId RecordUnproven = new(50322, nameof(RecordUnproven));
+}
+
+/// <summary>
 /// The assignment and override service (ebilling-r1 task 089b, EB-D-148; procedure model 5.1, 6.2, 6.3, 6.5 I-A1): assign, pin or exclude a
 /// Procedure for one core record, and exclude one rule for it. Task 089c adds change rule and remove with preview to this service.
 /// </summary>
@@ -280,6 +325,16 @@ public class ProcedureAssignmentService
     internal const string CodeRecordRuleConflict = "assignment.record_rule_conflict";
     internal const string CodeOverrideNotFound = "assignment.override_not_found";
 
+    // Task 084h-2 (design notes/084h sections 6.1, 7.1, 9).
+    internal const string CodeNoteTooLong = "assignment.note_too_long";
+    internal const string CodeNoteInvalidCharacters = "assignment.note_invalid_characters";
+    internal const string CodeDecisionUnrecordable = "assignment.decision_unrecordable";
+    internal const string CodeDecisionRecordFailed = "assignment.decision_record_failed";
+    internal const string CodeDeciderUnresolved = "assignment.decider_unresolved";
+
+    /// <summary>The decider role every per-record Procedure change records (design section 3.2).</summary>
+    internal const string DeciderRole = "procedure-editor";
+
     internal const string KindProcedure = "Procedure";
     internal const string KindRuleExcluded = "RuleExcluded";
     internal const string KindRuleChanged = "RuleChanged";
@@ -323,18 +378,46 @@ public class ProcedureAssignmentService
     private readonly SignalClosureService _closure;
     private readonly AffectedInvoiceCounter _counter;
     private readonly ILogger<ProcedureAssignmentService> _logger;
+    private readonly Action<RecordProcedureDecision> _preflight;
+    private readonly Func<RecordProcedureDecision, CancellationToken, Task<BillingDecisionRecordResult>> _record;
+    private readonly Func<RecordProcedureDecision, CancellationToken, Task> _enqueue;
 
     /// <summary>The clock a change's record-rule version is put in force by (<c>sprk_inforcefrom</c>) and its close dated by (082c C19 fix round 1).
     /// A test sets it; production uses the system clock.</summary>
     internal TimeProvider Clock { get; init; } = TimeProvider.System;
 
+    /// <param name="recorder">Task 084h-2: each committed change's Decision Record (<see cref="BillingDecisionRecorder.RecordProcedureAsync"/>) and
+    /// its preflight before the transaction.</param>
+    /// <param name="enqueuer">Task 084h-2: the repair queue of a record that failed after the change committed (task 084h-3 registers it). With
+    /// none registered, such a failure answers <see cref="OverrideDecisionRecord.NotRecorded"/>, never <see cref="OverrideDecisionRecord.Queued"/>.</param>
     public ProcedureAssignmentService(
         IGenericEntityService entities,
         IRecordOwnershipResolver ownership,
         RuleSetService ruleSets,
         SignalClosureService closure,
         AffectedInvoiceCounter counter,
-        ILogger<ProcedureAssignmentService> logger)
+        ILogger<ProcedureAssignmentService> logger,
+        BillingDecisionRecorder recorder,
+        IRecordProcedureDecisionEnqueuer? enqueuer = null)
+        : this(
+            entities, ownership, ruleSets, closure, counter, logger,
+            (recorder ?? throw new ArgumentNullException(nameof(recorder))).PreflightProcedure,
+            recorder.RecordProcedureAsync,
+            enqueuer is null ? NoEnqueuer : enqueuer.EnqueueAsync)
+    {
+    }
+
+    /// <summary>The seam the unit tests use: the record's preflight, its write and the repair queue are passed as calls (assign-firm's pattern).</summary>
+    internal ProcedureAssignmentService(
+        IGenericEntityService entities,
+        IRecordOwnershipResolver ownership,
+        RuleSetService ruleSets,
+        SignalClosureService closure,
+        AffectedInvoiceCounter counter,
+        ILogger<ProcedureAssignmentService> logger,
+        Action<RecordProcedureDecision> preflight,
+        Func<RecordProcedureDecision, CancellationToken, Task<BillingDecisionRecordResult>> record,
+        Func<RecordProcedureDecision, CancellationToken, Task> enqueue)
     {
         _entities = entities ?? throw new ArgumentNullException(nameof(entities));
         _ownership = ownership ?? throw new ArgumentNullException(nameof(ownership));
@@ -342,7 +425,14 @@ public class ProcedureAssignmentService
         _closure = closure ?? throw new ArgumentNullException(nameof(closure));
         _counter = counter ?? throw new ArgumentNullException(nameof(counter));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _preflight = preflight ?? throw new ArgumentNullException(nameof(preflight));
+        _record = record ?? throw new ArgumentNullException(nameof(record));
+        _enqueue = enqueue ?? throw new ArgumentNullException(nameof(enqueue));
     }
+
+    /// <summary>No repair queue is registered (before task 084h-3): the enqueue fails, so the answer is NotRecorded, never a false Queued.</summary>
+    private static Task NoEnqueuer(RecordProcedureDecision decision, CancellationToken ct) =>
+        Task.FromException(new InvalidOperationException("No repair queue for per-record Procedure Decision Records is registered."));
 
     // ───────────────────────────────────────────────────────────────────────────────────────────────
     // Procedure-level: assign, pin, exclude (model 6.2)
@@ -353,14 +443,23 @@ public class ProcedureAssignmentService
     /// pinned version must be a version of that Procedure that has been in force (Active or Superseded; EB-D-155: a pin grandfathers the
     /// record's invoices to it). A retired Procedure is refused.
     /// </summary>
+    /// <remarks>Task 084h-2 (design notes/084h section 6.1): the note is checked before any read; the decision id is minted, the change's
+    /// Decision Record is preflighted before the transaction, and on Done it is recorded as the last write (<see cref="RecordChangeAsync"/>).
+    /// <paramref name="deciderSystemUserId"/> is the caller's <c>systemuserid</c>, resolved by the route.</remarks>
     public virtual async Task<RuleSetOutcome<OverrideView>> AssignProcedureAsync(
-        string coreTable, Guid recordId, ProcedureAssignmentRequest request, Guid? callerObjectId, CancellationToken ct)
+        string coreTable, Guid recordId, ProcedureAssignmentRequest request, Guid? callerObjectId, Guid deciderSystemUserId, CancellationToken ct)
     {
         RequireCore(coreTable, recordId);
         ArgumentNullException.ThrowIfNull(request);
+        var note = InvoiceCorrectionNote.Check(request.Note);
+        if (NoteRefusal<OverrideView>(note) is { } refusedNote)
+        {
+            return refusedNote;
+        }
+
         try
         {
-            return await AssignProcedureCoreAsync(coreTable, recordId, request, callerObjectId, ct);
+            return await AssignProcedureCoreAsync(coreTable, recordId, request, callerObjectId, deciderSystemUserId, note.Value, ct);
         }
         catch (ReadFailedException ex)
         {
@@ -369,18 +468,36 @@ public class ProcedureAssignmentService
     }
 
     private async Task<RuleSetOutcome<OverrideView>> AssignProcedureCoreAsync(
-        string coreTable, Guid recordId, ProcedureAssignmentRequest request, Guid? callerObjectId, CancellationToken ct)
+        string coreTable, Guid recordId, ProcedureAssignmentRequest request, Guid? callerObjectId, Guid decider, string? note, CancellationToken ct)
     {
+        var decisionId = Guid.NewGuid();
         var (row, refusal) = await PlanAssignmentRowAsync<OverrideView>(_entities, coreTable, recordId, request, ct);
         if (refusal is not null)
         {
             return refusal;
         }
 
-        return await CreateRowAsync(row!, callerObjectId, "assign", ct) is { } failed
-            ? failed
-            : RuleSetOutcome<OverrideView>.Done(new OverrideView(
-                row!.Id, KindProcedure, ModeName(row.Mode), row.ProcedureId, row.PinnedVersionId, null, null, row.Reason));
+        var (code, outcome) = row!.Mode switch
+        {
+            ProcedureAssignmentEntity.ModePinned => ("pin-procedure", "Pinned"),
+            ProcedureAssignmentEntity.ModeExcluded => ("exclude-procedure", "Excluded"),
+            _ => ("assign-procedure", "Assigned"),
+        };
+        var values = DecisionValues(note, ("procedure", row.ProcedureId), ("version", row.PinnedVersionId), ("override", row.Id));
+        var decision = Decision(decisionId, code, coreTable, recordId, decider, values, outcome, row.Reason, row.Id);
+        if (PreflightRefusal<OverrideView>(decision) is { } unrecordable)
+        {
+            return unrecordable;
+        }
+
+        if (await CreateRowAsync(row, callerObjectId, decider, "assign", ct) is { } failed)
+        {
+            return failed;
+        }
+
+        return RuleSetOutcome<OverrideView>.Done(new OverrideView(
+            row.Id, KindProcedure, ModeName(row.Mode), row.ProcedureId, row.PinnedVersionId, null, null, row.Reason,
+            await RecordChangeAsync(decision)));
     }
 
     /// <summary>
@@ -501,14 +618,22 @@ public class ProcedureAssignmentService
     /// owned through the resolver with the core record as its parent. The rule must be a live Billing rule outside any record-scoped set, and
     /// not the system rule.
     /// </summary>
+    /// <remarks>Task 084h-2: as <see cref="AssignProcedureAsync"/> (the note before any read, the preflight before the transaction, the record
+    /// after Done).</remarks>
     public virtual async Task<RuleSetOutcome<OverrideView>> ExcludeRuleAsync(
-        string coreTable, Guid recordId, RuleExcludeRequest request, Guid? callerObjectId, CancellationToken ct)
+        string coreTable, Guid recordId, RuleExcludeRequest request, Guid? callerObjectId, Guid deciderSystemUserId, CancellationToken ct)
     {
         RequireCore(coreTable, recordId);
         ArgumentNullException.ThrowIfNull(request);
+        var note = InvoiceCorrectionNote.Check(request.Note);
+        if (NoteRefusal<OverrideView>(note) is { } refusedNote)
+        {
+            return refusedNote;
+        }
+
         try
         {
-            return await ExcludeRuleCoreAsync(coreTable, recordId, request, callerObjectId, ct);
+            return await ExcludeRuleCoreAsync(coreTable, recordId, request, callerObjectId, deciderSystemUserId, note.Value, ct);
         }
         catch (ReadFailedException ex)
         {
@@ -517,18 +642,30 @@ public class ProcedureAssignmentService
     }
 
     private async Task<RuleSetOutcome<OverrideView>> ExcludeRuleCoreAsync(
-        string coreTable, Guid recordId, RuleExcludeRequest request, Guid? callerObjectId, CancellationToken ct)
+        string coreTable, Guid recordId, RuleExcludeRequest request, Guid? callerObjectId, Guid decider, string? note, CancellationToken ct)
     {
+        var decisionId = Guid.NewGuid();
         var (row, refusal) = await PlanExcludeRowAsync<OverrideView>(_entities, coreTable, recordId, request, ct);
         if (refusal is not null)
         {
             return refusal;
         }
 
-        return await CreateRowAsync(row!, callerObjectId, "exclude rule", ct) is { } failed
-            ? failed
-            : RuleSetOutcome<OverrideView>.Done(new OverrideView(
-                row!.Id, KindRuleExcluded, ModeName(ProcedureAssignmentEntity.ModeExcluded), null, null, row.ExcludedPolicyId, row.FirmId, row.Reason));
+        var values = DecisionValues(note, ("rule", row!.ExcludedPolicyId), ("firm", row.FirmId), ("override", row.Id));
+        var decision = Decision(decisionId, "exclude-rule", coreTable, recordId, decider, values, "Excluded", row.Reason, row.Id);
+        if (PreflightRefusal<OverrideView>(decision) is { } unrecordable)
+        {
+            return unrecordable;
+        }
+
+        if (await CreateRowAsync(row, callerObjectId, decider, "exclude rule", ct) is { } failed)
+        {
+            return failed;
+        }
+
+        return RuleSetOutcome<OverrideView>.Done(new OverrideView(
+            row.Id, KindRuleExcluded, ModeName(ProcedureAssignmentEntity.ModeExcluded), null, null, row.ExcludedPolicyId, row.FirmId, row.Reason,
+            await RecordChangeAsync(decision)));
     }
 
     /// <summary>The read-and-validate half of a rule Exclude (084d-1: shared by the write and its dry run). Reads only, through <paramref name="entities"/>.</summary>
@@ -601,15 +738,26 @@ public class ProcedureAssignmentService
     /// does, and the result says whether it completed, what it covered, and how many of those invoices the caller can see. A transaction that
     /// gives no answer (pass-1 K2) is read back: when the record rule's version row is there (stage 3 alone writes it; fix round 2), the change
     /// committed and the close runs.</para>
+    /// <para>Task 084h-2: the note is checked before any read. The Decision Record is preflighted once the record rule's version id is known
+    /// (after stages 1 and 2, which leave at most an Off rule and an empty set, as a failed stage 3 does) and before stage 3, and it is recorded
+    /// after the close and the count. A no-answer transaction proven committed by the version read-back is recorded only when the Exclude row
+    /// read back is this caller's with this reason; otherwise the change stays committed and the answer says NotRecorded.</para>
     /// </remarks>
     public virtual async Task<RuleSetOutcome<RuleChangedView>> ChangeRuleAsync(
-        string coreTable, Guid recordId, RuleChangeRequest request, Guid? callerObjectId, string? callerBearerToken, CancellationToken ct)
+        string coreTable, Guid recordId, RuleChangeRequest request, Guid? callerObjectId, Guid deciderSystemUserId, string? callerBearerToken,
+        CancellationToken ct)
     {
         RequireCore(coreTable, recordId);
         ArgumentNullException.ThrowIfNull(request);
+        var note = InvoiceCorrectionNote.Check(request.Note);
+        if (NoteRefusal<RuleChangedView>(note) is { } refusedNote)
+        {
+            return refusedNote;
+        }
+
         try
         {
-            return await ChangeRuleCoreAsync(coreTable, recordId, request, callerObjectId, callerBearerToken, ct);
+            return await ChangeRuleCoreAsync(coreTable, recordId, request, callerObjectId, deciderSystemUserId, note.Value, callerBearerToken, ct);
         }
         catch (ReadFailedException ex)
         {
@@ -618,8 +766,10 @@ public class ProcedureAssignmentService
     }
 
     private async Task<RuleSetOutcome<RuleChangedView>> ChangeRuleCoreAsync(
-        string coreTable, Guid recordId, RuleChangeRequest request, Guid? callerObjectId, string? callerBearerToken, CancellationToken ct)
+        string coreTable, Guid recordId, RuleChangeRequest request, Guid? callerObjectId, Guid decider, string? note, string? callerBearerToken,
+        CancellationToken ct)
     {
+        var decisionId = Guid.NewGuid();
         var (basis, refusal) = await PlanChangeBasisAsync<RuleChangedView>(_entities, coreTable, recordId, request, ct);
         if (refusal is not null)
         {
@@ -649,6 +799,15 @@ public class ProcedureAssignmentService
         var exclude = ChangeExcludeRow(coreTable, recordId, request, baseRule);
         var reason = exclude.Reason;
 
+        var values = DecisionValues(
+            note, ("rule", policyId), ("firm", request.FirmId), ("override", exclude.Id), ("basedOnVersion", baseVersion.Id),
+            ("recordRuleVersion", versionId));
+        var decision = Decision(decisionId, "change-rule", coreTable, recordId, decider, values, "Changed", reason, exclude.Id);
+        if (PreflightRefusal<RuleChangedView>(decision) is { } unrecordable)
+        {
+            return unrecordable;
+        }
+
         var excludeCreate = await AssignmentCreateAsync(exclude, callerObjectId, imageOnly: false, ct);
         if (excludeCreate.Refused is { } excludeOwner)
         {
@@ -670,9 +829,14 @@ public class ProcedureAssignmentService
         }
 
         var sent = await SendAsync(new OrganizationRequest[] { excludeCreate.Request!, versionCreate.Request!, switchOn }, exclude.Id, "change rule");
+        var recordProven = true;
         if (sent == SendResult.Unknown && await CommittedAfterNoAnswerAsync(exclude.Id, versionId, recordRule.Id, number, merged, baseVersion.Id))
         {
             sent = SendResult.Done;
+
+            // Equal content is a truthful "committed" (fix round 3), but it may be another caller's change: the record names this caller as
+            // the decider, so it is filed only when the Exclude row read back is this caller's, with this reason.
+            recordProven = await CreatedAfterNoAnswerAsync(excludeCreate.Request!.Target, decider, "change rule");
         }
 
         if (sent != SendResult.Done)
@@ -697,8 +861,22 @@ public class ProcedureAssignmentService
             count = null;
         }
 
+        OverrideDecisionRecord decisionRecord;
+        if (recordProven)
+        {
+            decisionRecord = await RecordChangeAsync(decision);
+        }
+        else
+        {
+            _logger.LogError(ProcedureDecisionRecordEvents.RecordUnproven,
+                "Override {AssignmentId}: the change committed, but the row read back was not proven this caller's; Decision Record {DecisionId} was not filed",
+                exclude.Id, decisionId);
+            decisionRecord = OverrideDecisionRecord.NotRecordedFailure;
+        }
+
         return RuleSetOutcome<RuleChangedView>.Done(new RuleChangedView(
-            new OverrideView(exclude.Id, KindRuleChanged, ModeName(ProcedureAssignmentEntity.ModeExcluded), null, null, policyId, request.FirmId, reason),
+            new OverrideView(
+                exclude.Id, KindRuleChanged, ModeName(ProcedureAssignmentEntity.ModeExcluded), null, null, policyId, request.FirmId, reason, decisionRecord),
             new RecordRuleView(setId, recordRule.Id, code, versionId, number, baseVersion.Id, request.FirmId is null ? "Record" : "FirmRecord", request.FirmId),
             close.Outcome.IsComplete, ProcedureService.AffectedText(count), count, close.Message));
     }
@@ -1473,10 +1651,21 @@ public class ProcedureAssignmentService
     /// confirm time. A close that fails leaves the rule Off, so the nightly sweep closes the rest, and the result says the close is
     /// incomplete. The result's count is the caller-scoped count of the invoices whose findings closed.
     /// </summary>
+    /// <remarks>Task 084h-2: the note (the DELETE's JSON body, optional) is checked before any read. A Pinned row with its version files
+    /// <c>unpin-procedure</c>; every other row files <c>remove-override</c>. The record is preflighted before the delete and recorded after
+    /// it (after the close and the count, for a changed rule). A delete that gave no answer files none (design K-1).</remarks>
     public virtual async Task<RuleSetOutcome<OverrideRemoved>> RemoveAsync(
-        string coreTable, Guid recordId, Guid overrideId, string? callerBearerToken, CancellationToken ct)
+        string coreTable, Guid recordId, Guid overrideId, OverrideRemovalRequest? request, Guid deciderSystemUserId, string? callerBearerToken,
+        CancellationToken ct)
     {
         RequireCore(coreTable, recordId);
+        var note = InvoiceCorrectionNote.Check(request?.Note);
+        if (NoteRefusal<OverrideRemoved>(note) is { } refusedNote)
+        {
+            return refusedNote;
+        }
+
+        var decisionId = Guid.NewGuid();
         Entity? row;
         Entity? changed;
         try
@@ -1492,6 +1681,12 @@ public class ProcedureAssignmentService
         catch (ReadFailedException ex)
         {
             return ReadFailed<OverrideRemoved>(ex, "remove");
+        }
+
+        var decision = RemovalDecision(decisionId, coreTable, recordId, deciderSystemUserId, row, changed is not null, note.Value);
+        if (PreflightRefusal<OverrideRemoved>(decision) is { } unrecordable)
+        {
+            return unrecordable;
         }
 
         var requests = new List<OrganizationRequest> { new DeleteRequest { Target = new EntityReference(AssignmentTable, row.Id) } };
@@ -1520,7 +1715,7 @@ public class ProcedureAssignmentService
         if (changed is null)
         {
             _logger.LogInformation("Override {AssignmentId} removed ({Kind}); nothing to close", row.Id, kind);
-            return RuleSetOutcome<OverrideRemoved>.Done(new OverrideRemoved(row.Id, kind, false, true, null, null, null));
+            return RuleSetOutcome<OverrideRemoved>.Done(new OverrideRemoved(row.Id, kind, false, true, null, null, null, await RecordChangeAsync(decision)));
         }
 
         // The removal is committed and the record rule is Off: nothing from here on may turn that into an error.
@@ -1555,7 +1750,35 @@ public class ProcedureAssignmentService
             row.Id, changed.Id, outcome.Closed, outcome.IsComplete);
         return RuleSetOutcome<OverrideRemoved>.Done(new OverrideRemoved(
             row.Id, KindRuleChanged, true, outcome.IsComplete, ProcedureService.AffectedText(count), count,
-            outcome.IsComplete ? null : "Some findings could not be closed now. The rule is off, so the nightly run closes the rest."));
+            outcome.IsComplete ? null : "Some findings could not be closed now. The rule is off, so the nightly run closes the rest.",
+            await RecordChangeAsync(decision)));
+    }
+
+    /// <summary>
+    /// Task 084h-2 (design section 4.1): a removal's Decision Record. A Procedure row Pinned to a version is an unpin (<c>unpin-procedure</c>,
+    /// with that version); every other row (a plain Procedure row, an Excluded Procedure, an excluded or changed rule) is
+    /// <c>remove-override</c>, which says what was removed in <c>kind</c>. Neither carries a reason.
+    /// </summary>
+    private RecordProcedureDecision RemovalDecision(
+        Guid decisionId, string coreTable, Guid recordId, Guid decider, Entity row, bool changed, string? note)
+    {
+        var procedureId = row.GetAttributeValue<EntityReference>(ProcedureAssignmentEntity.ProcedureColumn)?.Id;
+        var pinnedVersionId = row.GetAttributeValue<EntityReference>(ProcedureAssignmentEntity.PinnedVersionColumn)?.Id;
+        var mode = row.GetAttributeValue<OptionSetValue>(ProcedureAssignmentEntity.ModeColumn)?.Value;
+        if (procedureId is not null && mode == ProcedureAssignmentEntity.ModePinned && pinnedVersionId is not null)
+        {
+            return Decision(decisionId, "unpin-procedure", coreTable, recordId, decider,
+                DecisionValues(note, ("procedure", procedureId), ("version", pinnedVersionId), ("override", row.Id)), "Unpinned", null, row.Id);
+        }
+
+        var values = DecisionValues(
+            note,
+            ("procedure", procedureId),
+            ("rule", row.GetAttributeValue<EntityReference>(ProcedureAssignmentEntity.ExcludedPolicyColumn)?.Id),
+            ("firm", row.GetAttributeValue<EntityReference>(ProcedureAssignmentEntity.FirmColumn)?.Id),
+            ("override", row.Id),
+            ("kind", KindOf(row, changed)));
+        return Decision(decisionId, "remove-override", coreTable, recordId, decider, values, "Removed", null, row.Id);
     }
 
     /// <summary>This record's override row <paramref name="overrideId"/>, or null (another record's row, or none).</summary>
@@ -1568,9 +1791,10 @@ public class ProcedureAssignmentService
 
         var query = new QueryExpression(AssignmentTable)
         {
+            // Task 084h-2: the pinned version, so a removal of a Pinned row records the unpin with its version.
             ColumnSet = new ColumnSet(
                 coreTable, ProcedureAssignmentEntity.ProcedureColumn, ProcedureAssignmentEntity.ExcludedPolicyColumn,
-                ProcedureAssignmentEntity.FirmColumn, ProcedureAssignmentEntity.ModeColumn),
+                ProcedureAssignmentEntity.FirmColumn, ProcedureAssignmentEntity.ModeColumn, ProcedureAssignmentEntity.PinnedVersionColumn),
             TopCount = 1,
         };
         query.Criteria.AddCondition("sprk_procedureassignmentid", ConditionOperator.Equal, overrideId);
@@ -2387,7 +2611,10 @@ public class ProcedureAssignmentService
     /// Creates one override row in its own transaction (assign, exclude rule). Returns null when the row was created, else the refusal. A
     /// refused owner writes nothing.
     /// </summary>
-    private async Task<RuleSetOutcome<OverrideView>?> CreateRowAsync(AssignmentRow spec, Guid? callerObjectId, string what, CancellationToken ct)
+    /// <remarks>Task 084h-2 (design 6.1, review item 5): a transaction that gave no answer is read back. The create committed as THIS caller's
+    /// write only when the row at the derived id holds what was built, its creator person being <paramref name="decider"/>
+    /// (<see cref="CreatedAfterNoAnswerAsync"/>); then it counts as Done, so its Decision Record is filed. Anything else keeps the 500.</remarks>
+    private async Task<RuleSetOutcome<OverrideView>?> CreateRowAsync(AssignmentRow spec, Guid? callerObjectId, Guid decider, string what, CancellationToken ct)
     {
         var create = await AssignmentCreateAsync(spec, callerObjectId, imageOnly: false, ct);
         if (create.Refused is { } owner)
@@ -2398,7 +2625,159 @@ public class ProcedureAssignmentService
         }
 
         var sent = await SendAsync(new OrganizationRequest[] { create.Request! }, spec.Id, what);
+        if (sent == SendResult.Unknown && await CreatedAfterNoAnswerAsync(create.Request!.Target, decider, what))
+        {
+            sent = SendResult.Done;
+        }
+
         return sent == SendResult.Done ? null : WriteRefused<OverrideView>(sent, spec.Id);
+    }
+
+    /// <summary>The override-row columns a no-answer read-back compares (design 6.1): the core lookup is added per row.</summary>
+    private static readonly string[] ReadBackAssignmentColumns =
+    {
+        ProcedureAssignmentEntity.ModeColumn, ProcedureAssignmentEntity.ProcedureColumn, ProcedureAssignmentEntity.PinnedVersionColumn,
+        ProcedureAssignmentEntity.ExcludedPolicyColumn, ProcedureAssignmentEntity.FirmColumn, ProcedureAssignmentEntity.ReasonColumn,
+        RecordCreatorPerson.Column,
+    };
+
+    /// <summary>
+    /// Task 084h-2: after a create that gave no answer, whether THIS caller's row committed: the row at the built row's derived id holds the
+    /// built mode, Procedure, pinned version, excluded rule, firm, reason and core lookup, and its creator person is <paramref name="decider"/>
+    /// (a concurrent create of the same derived id by someone else, or with another reason, is not this write). The read runs on
+    /// <see cref="CancellationToken.None"/>; a read fault is no proof, so the caller keeps its 500. Never logs the reason.
+    /// </summary>
+    private async Task<bool> CreatedAfterNoAnswerAsync(Entity built, Guid decider, string what)
+    {
+        var coreTable = built.Attributes.Keys.FirstOrDefault(k => InvoiceFamilyCoreRecordGuard.FilingCoreTables.Contains(k));
+        try
+        {
+            var columns = coreTable is null ? ReadBackAssignmentColumns : ReadBackAssignmentColumns.Append(coreTable).ToArray();
+            var stored = await LoadByIdAsync(AssignmentTable, built.Id, columns, CancellationToken.None);
+            var proven = stored is not null
+                && coreTable is not null
+                && decider != Guid.Empty
+                && stored.GetAttributeValue<EntityReference>(RecordCreatorPerson.Column)?.Id == decider
+                && columns.Where(c => c != RecordCreatorPerson.Column).All(c => SameValue(built.GetAttributeValue<object>(c), stored.GetAttributeValue<object>(c)));
+            _logger.LogWarning("Override {AssignmentId}: the {What} transaction gave no answer; read back: {Outcome}",
+                built.Id, what, proven ? "this caller's row committed" : "not proven");
+            return proven;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError("Override {AssignmentId}: the {What} transaction gave no answer, and the read back failed ({ExceptionType})",
+                built.Id, what, ex.GetType().Name);
+            return false;
+        }
+    }
+
+    /// <summary>Whether a built and a stored column value are the same (a lookup by id, a choice by value, a text ordinally; missing equals empty).</summary>
+    private static bool SameValue(object? built, object? stored) => (built, stored) switch
+    {
+        (null, null) => true,
+        (EntityReference a, EntityReference b) => a.Id == b.Id,
+        (OptionSetValue a, OptionSetValue b) => a.Value == b.Value,
+        (string or null, string or null) => SameText(built as string, stored as string),
+        _ => false,
+    };
+
+    // ───────────────────────────────────────────────────────────────────────────────────────────────
+    // The Decision Record of a change (task 084h-2; design notes/084h sections 2, 4, 6, 7)
+    // ───────────────────────────────────────────────────────────────────────────────────────────────
+
+    /// <summary>The note's refusal (400, before any read; H-3: the service enforces it, not only the route), or null for an accepted or empty note.</summary>
+    private static RuleSetOutcome<T>? NoteRefusal<T>(InvoiceCorrectionNote.Checked note) where T : class => note.Refusal switch
+    {
+        InvoiceCorrectionNote.Refusal.TooLong => Refused<T>(StatusCodes.Status400BadRequest, CodeNoteTooLong,
+            $"The note is longer than {InvoiceCorrectionNote.MaxLength} characters."),
+        InvoiceCorrectionNote.Refusal.ControlCharacter => Refused<T>(StatusCodes.Status400BadRequest, CodeNoteInvalidCharacters,
+            "The note holds a control character. Only line breaks and tabs are allowed."),
+        _ => null,
+    };
+
+    /// <summary>A record's Values: the declared parameter codes with a value (a null id adds no key), and the note only when one was given.</summary>
+    private static Dictionary<string, object?> DecisionValues(string? note, params (string Code, object? Value)[] values)
+    {
+        var result = new Dictionary<string, object?>(StringComparer.Ordinal);
+        foreach (var (code, value) in values)
+        {
+            if (value is not null)
+            {
+                result[code] = value;
+            }
+        }
+
+        if (note is not null)
+        {
+            result["note"] = note;
+        }
+
+        return result;
+    }
+
+    /// <summary>A change's Decision Record, on the core record, decided now by <paramref name="decider"/>; the override row is what it wrote.</summary>
+    private RecordProcedureDecision Decision(
+        Guid decisionId, string actionCode, string coreTable, Guid recordId, Guid decider, IReadOnlyDictionary<string, object?> values,
+        string outcome, string? reason, Guid overrideId) =>
+        new(decisionId, actionCode, coreTable, recordId, decider, DeciderRole, values, outcome, string.IsNullOrWhiteSpace(reason) ? null : reason,
+            Clock.GetUtcNow(), new[] { new DecisionRecordRef(AssignmentTable, overrideId) });
+
+    /// <summary>
+    /// The writer's refusal without I/O, run before the transaction (design 6.1): a decision the writer would refuse refuses the change, so
+    /// nothing is written that could not be recorded. Logs ids only.
+    /// </summary>
+    private RuleSetOutcome<T>? PreflightRefusal<T>(RecordProcedureDecision decision) where T : class
+    {
+        try
+        {
+            _preflight(decision);
+            return null;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError("Override {AssignmentId}: Decision Record {DecisionId} ({ActionCode}) would be refused ({ExceptionType}); nothing was written",
+                decision.Written?.FirstOrDefault()?.Id, decision.DecisionId, decision.ActionCode, ex.GetType().Name);
+            return Refused<T>(StatusCodes.Status500InternalServerError, CodeDecisionUnrecordable,
+                "The change could not be recorded, so nothing was changed. Contact support.");
+        }
+    }
+
+    /// <summary>
+    /// Files the committed change's Decision Record, the last write (design 7.1, 7.2). The change has landed, so nothing here turns the answer
+    /// into an error: a refusal or a fault queues the same decision for repair (Queued), and a failed enqueue answers NotRecorded. One Error
+    /// log with ids and the exception's type only (never the note, the reason or the exception text). Runs on
+    /// <see cref="CancellationToken.None"/>: a caller who went away must not lose the record.
+    /// </summary>
+    private async Task<OverrideDecisionRecord> RecordChangeAsync(RecordProcedureDecision decision)
+    {
+        string failure;
+        try
+        {
+            var recorded = await _record(decision, CancellationToken.None);
+            return OverrideDecisionRecord.RecordedAs(recorded.RecordId);
+        }
+        catch (Exception ex)
+        {
+            failure = ex.GetType().Name;
+        }
+
+        var overrideId = decision.Written?.FirstOrDefault()?.Id;
+        try
+        {
+            await _enqueue(decision, CancellationToken.None);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ProcedureDecisionRecordEvents.RecordFailedNotQueued,
+                "Override {AssignmentId}: Decision Record {DecisionId} ({ActionCode}) failed ({ExceptionType}) and could not be queued ({EnqueueExceptionType})",
+                overrideId, decision.DecisionId, decision.ActionCode, failure, ex.GetType().Name);
+            return OverrideDecisionRecord.NotRecordedFailure;
+        }
+
+        _logger.LogError(ProcedureDecisionRecordEvents.RecordFailedQueued,
+            "Override {AssignmentId}: Decision Record {DecisionId} ({ActionCode}) failed ({ExceptionType}); queued for repair",
+            overrideId, decision.DecisionId, decision.ActionCode, failure);
+        return OverrideDecisionRecord.QueuedForRepair;
     }
 
     /// <summary>

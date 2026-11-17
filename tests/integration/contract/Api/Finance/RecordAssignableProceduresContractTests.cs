@@ -127,10 +127,9 @@ public sealed class RecordAssignableProceduresContractTests
     {
         var writer = (SignalWriter)RuntimeHelpers.GetUninitializedObject(typeof(SignalWriter));
         var closure = new Mock<SignalClosureService>(MockBehavior.Strict, writer, rig.Entities.Object, TimeProvider.System, NullLogger<SignalClosureService>.Instance);
-        return new ProcedureAssignmentService(
+        return ProcedureDecisionRecords.NeverRecording(
             rig.Entities.Object, new Mock<IRecordOwnershipResolver>(MockBehavior.Strict).Object, rig.RuleSets, closure.Object,
-            new AffectedInvoiceCounter(rig.Entities.Object, rig.Probe, NullLogger<AffectedInvoiceCounter>.Instance),
-            NullLogger<ProcedureAssignmentService>.Instance);
+            new AffectedInvoiceCounter(rig.Entities.Object, rig.Probe, NullLogger<AffectedInvoiceCounter>.Instance));
     }
 
     private static HttpRequestMessage Get(string segment, Guid record, string query = "?date=2026-02-01") =>
@@ -1285,7 +1284,7 @@ public sealed class RecordAssignableProceduresContractTests
 
             var before = await w.Rig.Service.ListProceduresAsync(table, record, firm, date, Token, CancellationToken.None);
             before.Status.Should().Be(RecordProcedureReadStatus.Done);
-            var outcome = await w.Writer.AssignProcedureAsync(table, record, new(seeded[name], "FollowLatest", null, null), RecordProcedureWriteRig.CallerObjectId, CancellationToken.None);
+            var outcome = await w.Writer.AssignProcedureAsync(table, record, new(seeded[name], "FollowLatest", null, null), RecordProcedureWriteRig.CallerObjectId, RecordProcedureWriteRig.Decider, CancellationToken.None);
             var gains = false;
             ProcedureListItem? written = null;
             if (outcome.Kind == RuleSetOutcomeKind.Done)

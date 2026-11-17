@@ -1,3 +1,5 @@
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.ModelBinding;
 using Spaarke.Core.Auth;
 using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Infrastructure.Auth;
@@ -45,18 +47,23 @@ namespace Sprk.Bff.Api.Api.Finance;
 /// <list type="bullet">
 /// <item>401: no caller, or an <c>oid</c> that is not a GUID (the service is never run with no requester).</item>
 /// <item>404: step 0, or the uniform record not found.</item>
-/// <item>403: <c>sdap.access.deny.*</c> (not for an unreadable override subject: that is the 404 below).</item>
+/// <item>403: <c>sdap.access.deny.*</c> (not for an unreadable override subject: that is the 404 below). Task 084h-2: 403
+/// <c>assignment.decider_unresolved</c> on the writes when the caller's user cannot be identified (after the 401, before the service).</item>
 /// <item>400: a missing body id.</item>
 /// <item>503: <c>ebilling.disabled</c>.</item>
 /// <item>From the service:
 ///   <list type="bullet">
-///   <item>400 <c>assignment.invalid</c> with <c>errors</c>.</item>
+///   <item>400 <c>assignment.invalid</c> with <c>errors</c>; task 084h-2: 400 <c>assignment.note_too_long</c> or
+///   <c>assignment.note_invalid_characters</c> for the optional note (the three POST bodies, and the DELETE's optional JSON body
+///   <c>{ "note" }</c>).</item>
 ///   <item>404 <c>assignment.procedure_not_found</c>, <c>assignment.rule_not_found</c> or <c>assignment.override_not_found</c>.</item>
 ///   <item>409 <c>assignment.duplicate</c>, <c>assignment.procedure_retired</c>, <c>assignment.procedure_inactive</c> (EB-D-232: deactivated in Dataverse),
 ///   <c>assignment.procedure_not_billing</c> (EB-D-228),
 ///   <c>assignment.system_rule</c>,
 ///   <c>assignment.rule_not_in_force</c>, <c>assignment.record_rule_conflict</c>, <c>assignment.concurrent_edit</c>, or the owner reason code.</item>
-///   <item>500 <c>assignment.write_failed</c>.</item>
+///   <item>500 <c>assignment.write_failed</c>; task 084h-2: 500 <c>assignment.decision_unrecordable</c> when the change's Decision Record
+///   would be refused, before anything is written. A change that committed keeps its 2xx; its <c>decisionRecord</c> says Recorded,
+///   Queued or NotRecorded.</item>
 ///   <item>503 <c>assignment.read_failed</c>: a Dataverse read before the write faulted, and nothing was written.</item>
 ///   </list></item>
 /// </list></para>
@@ -85,7 +92,7 @@ public static class ProcedureAssignmentEndpoints
         // ── Matter ──────────────────────────────────────────────────────────────────────────────────────────────
         group.MapPost("/matters/{recordId:guid}/procedure-assignments",
                 (Guid recordId, ProcedureAssignmentRequest body, ProcedureAssignmentService service, HttpContext http, CancellationToken ct) =>
-                    Created(http, oid => service.AssignProcedureAsync(MatterTable, recordId, body, oid, ct), v => v.Id))
+                    Created(http, (oid, decider) => service.AssignProcedureAsync(MatterTable, recordId, body, oid, decider, ct), v => v.Id, ct))
             .AddFinanceAuthorizationFilter(context => RecordTargets(context, FinanceAuthorizationFilter.MatterEntitySet), FinanceDenial.UniformNotFound)
             .AddFinanceAuthorizationFilter(AssignTargets, FinanceDenial.Forbidden)
             .RequireEbillingEnabled()
@@ -95,7 +102,7 @@ public static class ProcedureAssignmentEndpoints
 
         group.MapPost("/matters/{recordId:guid}/rule-overrides/exclude",
                 (Guid recordId, RuleExcludeRequest body, ProcedureAssignmentService service, HttpContext http, CancellationToken ct) =>
-                    Created(http, oid => service.ExcludeRuleAsync(MatterTable, recordId, body, oid, ct), v => v.Id))
+                    Created(http, (oid, decider) => service.ExcludeRuleAsync(MatterTable, recordId, body, oid, decider, ct), v => v.Id, ct))
             .AddFinanceAuthorizationFilter(context => RecordTargets(context, FinanceAuthorizationFilter.MatterEntitySet), FinanceDenial.UniformNotFound)
             .AddFinanceAuthorizationFilter(ExcludeTargets, FinanceDenial.Forbidden)
             .RequireEbillingEnabled()
@@ -105,7 +112,7 @@ public static class ProcedureAssignmentEndpoints
 
         group.MapPost("/matters/{recordId:guid}/rule-overrides/change",
                 (Guid recordId, RuleChangeRequest body, ProcedureAssignmentService service, HttpContext http, CancellationToken ct) =>
-                    Created(http, oid => service.ChangeRuleAsync(MatterTable, recordId, body, oid, TokenHelper.ExtractBearerTokenOrNull(http), ct), v => v.Override.Id))
+                    Created(http, (oid, decider) => service.ChangeRuleAsync(MatterTable, recordId, body, oid, decider, TokenHelper.ExtractBearerTokenOrNull(http), ct), v => v.Override.Id, ct))
             .AddFinanceAuthorizationFilter(context => RecordTargets(context, FinanceAuthorizationFilter.MatterEntitySet), FinanceDenial.UniformNotFound)
             .AddFinanceAuthorizationFilter(ChangeTargets, FinanceDenial.Forbidden)
             .RequireEbillingEnabled()
@@ -125,8 +132,9 @@ public static class ProcedureAssignmentEndpoints
             .ProducesOverride<OverrideRemovalPreview>(StatusCodes.Status200OK);
 
         group.MapDelete("/matters/{recordId:guid}/overrides/{overrideId:guid}",
-                (Guid recordId, Guid overrideId, ProcedureAssignmentService service, HttpContext http, CancellationToken ct) =>
-                    AsCaller(http, () => service.RemoveAsync(MatterTable, recordId, overrideId, TokenHelper.ExtractBearerTokenOrNull(http), ct)))
+                (Guid recordId, Guid overrideId, [FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] OverrideRemovalRequest? body, ProcedureAssignmentService service,
+                    HttpContext http, CancellationToken ct) =>
+                    AsDecider(http, decider => service.RemoveAsync(MatterTable, recordId, overrideId, body, decider, TokenHelper.ExtractBearerTokenOrNull(http), ct), ct))
             .AddFinanceAuthorizationFilter(context => RecordTargets(context, FinanceAuthorizationFilter.MatterEntitySet), FinanceDenial.UniformNotFound)
             .AddFinanceAuthorizationFilter(RemoveTargets, FinanceDenial.Forbidden)
             .RequireEbillingEnabled()
@@ -138,7 +146,7 @@ public static class ProcedureAssignmentEndpoints
         // ── Project ──────────────────────────────────────────────────────────────────────────────────────────────
         group.MapPost("/projects/{recordId:guid}/procedure-assignments",
                 (Guid recordId, ProcedureAssignmentRequest body, ProcedureAssignmentService service, HttpContext http, CancellationToken ct) =>
-                    Created(http, oid => service.AssignProcedureAsync(ProjectTable, recordId, body, oid, ct), v => v.Id))
+                    Created(http, (oid, decider) => service.AssignProcedureAsync(ProjectTable, recordId, body, oid, decider, ct), v => v.Id, ct))
             .AddFinanceAuthorizationFilter(context => RecordTargets(context, FinanceAuthorizationFilter.ProjectEntitySet), FinanceDenial.UniformNotFound)
             .AddFinanceAuthorizationFilter(AssignTargets, FinanceDenial.Forbidden)
             .RequireEbillingEnabled()
@@ -148,7 +156,7 @@ public static class ProcedureAssignmentEndpoints
 
         group.MapPost("/projects/{recordId:guid}/rule-overrides/exclude",
                 (Guid recordId, RuleExcludeRequest body, ProcedureAssignmentService service, HttpContext http, CancellationToken ct) =>
-                    Created(http, oid => service.ExcludeRuleAsync(ProjectTable, recordId, body, oid, ct), v => v.Id))
+                    Created(http, (oid, decider) => service.ExcludeRuleAsync(ProjectTable, recordId, body, oid, decider, ct), v => v.Id, ct))
             .AddFinanceAuthorizationFilter(context => RecordTargets(context, FinanceAuthorizationFilter.ProjectEntitySet), FinanceDenial.UniformNotFound)
             .AddFinanceAuthorizationFilter(ExcludeTargets, FinanceDenial.Forbidden)
             .RequireEbillingEnabled()
@@ -158,7 +166,7 @@ public static class ProcedureAssignmentEndpoints
 
         group.MapPost("/projects/{recordId:guid}/rule-overrides/change",
                 (Guid recordId, RuleChangeRequest body, ProcedureAssignmentService service, HttpContext http, CancellationToken ct) =>
-                    Created(http, oid => service.ChangeRuleAsync(ProjectTable, recordId, body, oid, TokenHelper.ExtractBearerTokenOrNull(http), ct), v => v.Override.Id))
+                    Created(http, (oid, decider) => service.ChangeRuleAsync(ProjectTable, recordId, body, oid, decider, TokenHelper.ExtractBearerTokenOrNull(http), ct), v => v.Override.Id, ct))
             .AddFinanceAuthorizationFilter(context => RecordTargets(context, FinanceAuthorizationFilter.ProjectEntitySet), FinanceDenial.UniformNotFound)
             .AddFinanceAuthorizationFilter(ChangeTargets, FinanceDenial.Forbidden)
             .RequireEbillingEnabled()
@@ -178,8 +186,9 @@ public static class ProcedureAssignmentEndpoints
             .ProducesOverride<OverrideRemovalPreview>(StatusCodes.Status200OK);
 
         group.MapDelete("/projects/{recordId:guid}/overrides/{overrideId:guid}",
-                (Guid recordId, Guid overrideId, ProcedureAssignmentService service, HttpContext http, CancellationToken ct) =>
-                    AsCaller(http, () => service.RemoveAsync(ProjectTable, recordId, overrideId, TokenHelper.ExtractBearerTokenOrNull(http), ct)))
+                (Guid recordId, Guid overrideId, [FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] OverrideRemovalRequest? body, ProcedureAssignmentService service,
+                    HttpContext http, CancellationToken ct) =>
+                    AsDecider(http, decider => service.RemoveAsync(ProjectTable, recordId, overrideId, body, decider, TokenHelper.ExtractBearerTokenOrNull(http), ct), ct))
             .AddFinanceAuthorizationFilter(context => RecordTargets(context, FinanceAuthorizationFilter.ProjectEntitySet), FinanceDenial.UniformNotFound)
             .AddFinanceAuthorizationFilter(RemoveTargets, FinanceDenial.Forbidden)
             .RequireEbillingEnabled()
@@ -191,7 +200,7 @@ public static class ProcedureAssignmentEndpoints
         // ── Work assignment ──────────────────────────────────────────────────────────────────────────────────────
         group.MapPost("/workassignments/{recordId:guid}/procedure-assignments",
                 (Guid recordId, ProcedureAssignmentRequest body, ProcedureAssignmentService service, HttpContext http, CancellationToken ct) =>
-                    Created(http, oid => service.AssignProcedureAsync(WorkAssignmentTable, recordId, body, oid, ct), v => v.Id))
+                    Created(http, (oid, decider) => service.AssignProcedureAsync(WorkAssignmentTable, recordId, body, oid, decider, ct), v => v.Id, ct))
             .AddFinanceAuthorizationFilter(context => RecordTargets(context, FinanceAuthorizationFilter.WorkAssignmentEntitySet), FinanceDenial.UniformNotFound)
             .AddFinanceAuthorizationFilter(AssignTargets, FinanceDenial.Forbidden)
             .RequireEbillingEnabled()
@@ -201,7 +210,7 @@ public static class ProcedureAssignmentEndpoints
 
         group.MapPost("/workassignments/{recordId:guid}/rule-overrides/exclude",
                 (Guid recordId, RuleExcludeRequest body, ProcedureAssignmentService service, HttpContext http, CancellationToken ct) =>
-                    Created(http, oid => service.ExcludeRuleAsync(WorkAssignmentTable, recordId, body, oid, ct), v => v.Id))
+                    Created(http, (oid, decider) => service.ExcludeRuleAsync(WorkAssignmentTable, recordId, body, oid, decider, ct), v => v.Id, ct))
             .AddFinanceAuthorizationFilter(context => RecordTargets(context, FinanceAuthorizationFilter.WorkAssignmentEntitySet), FinanceDenial.UniformNotFound)
             .AddFinanceAuthorizationFilter(ExcludeTargets, FinanceDenial.Forbidden)
             .RequireEbillingEnabled()
@@ -211,7 +220,7 @@ public static class ProcedureAssignmentEndpoints
 
         group.MapPost("/workassignments/{recordId:guid}/rule-overrides/change",
                 (Guid recordId, RuleChangeRequest body, ProcedureAssignmentService service, HttpContext http, CancellationToken ct) =>
-                    Created(http, oid => service.ChangeRuleAsync(WorkAssignmentTable, recordId, body, oid, TokenHelper.ExtractBearerTokenOrNull(http), ct), v => v.Override.Id))
+                    Created(http, (oid, decider) => service.ChangeRuleAsync(WorkAssignmentTable, recordId, body, oid, decider, TokenHelper.ExtractBearerTokenOrNull(http), ct), v => v.Override.Id, ct))
             .AddFinanceAuthorizationFilter(context => RecordTargets(context, FinanceAuthorizationFilter.WorkAssignmentEntitySet), FinanceDenial.UniformNotFound)
             .AddFinanceAuthorizationFilter(ChangeTargets, FinanceDenial.Forbidden)
             .RequireEbillingEnabled()
@@ -231,8 +240,9 @@ public static class ProcedureAssignmentEndpoints
             .ProducesOverride<OverrideRemovalPreview>(StatusCodes.Status200OK);
 
         group.MapDelete("/workassignments/{recordId:guid}/overrides/{overrideId:guid}",
-                (Guid recordId, Guid overrideId, ProcedureAssignmentService service, HttpContext http, CancellationToken ct) =>
-                    AsCaller(http, () => service.RemoveAsync(WorkAssignmentTable, recordId, overrideId, TokenHelper.ExtractBearerTokenOrNull(http), ct)))
+                (Guid recordId, Guid overrideId, [FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] OverrideRemovalRequest? body, ProcedureAssignmentService service,
+                    HttpContext http, CancellationToken ct) =>
+                    AsDecider(http, decider => service.RemoveAsync(WorkAssignmentTable, recordId, overrideId, body, decider, TokenHelper.ExtractBearerTokenOrNull(http), ct), ct))
             .AddFinanceAuthorizationFilter(context => RecordTargets(context, FinanceAuthorizationFilter.WorkAssignmentEntitySet), FinanceDenial.UniformNotFound)
             .AddFinanceAuthorizationFilter(RemoveTargets, FinanceDenial.Forbidden)
             .RequireEbillingEnabled()
@@ -633,24 +643,49 @@ public static class ProcedureAssignmentEndpoints
 
     /// <summary>
     /// Runs a create as the caller. A caller whose <c>oid</c> is not a GUID is 401 (CallerResolution: "null means 401"): the service
-    /// is never run with no requester, as the owner write stamps the creator person from it.
+    /// is never run with no requester, as the owner write stamps the creator person from it. Task 084h-2: then the decider (the caller's
+    /// <c>systemuserid</c>, never request input) is resolved; an unresolved one is 403 <c>assignment.decider_unresolved</c> before the service
+    /// runs, because the change's Decision Record names its decider.
     /// </summary>
-    private static async Task<IResult> Created<T>(HttpContext http, Func<Guid, Task<RuleSetOutcome<T>>> call, Func<T, Guid> idOf) where T : class
+    private static async Task<IResult> Created<T>(
+        HttpContext http, Func<Guid, Guid, Task<RuleSetOutcome<T>>> call, Func<T, Guid> idOf, CancellationToken ct) where T : class
     {
         if (CallerOid(http) is not { } callerOid)
         {
             return NoRequester();
         }
 
-        var outcome = await call(callerOid);
+        if (await DeciderAsync(http, ct) is not { } decider)
+        {
+            return DeciderUnresolved(http);
+        }
+
+        var outcome = await call(callerOid, decider);
         return outcome.Kind == RuleSetOutcomeKind.Done
             ? Results.Created($"{http.Request.Path}/{idOf(outcome.Value!)}", outcome.Value)
             : Map(outcome, http);
     }
 
-    /// <summary>Runs a removal or its preview, after the same 401 rule as <see cref="Created{T}"/>: no requester, no call.</summary>
+    /// <summary>Runs a removal's preview, after the same 401 rule as <see cref="Created{T}"/>: no requester, no call.</summary>
     private static async Task<IResult> AsCaller<T>(HttpContext http, Func<Task<RuleSetOutcome<T>>> call) where T : class =>
         CallerOid(http) is null ? NoRequester() : Map(await call(), http);
+
+    /// <summary>Runs a removal after the 401 rule and the decider's 403 of <see cref="Created{T}"/> (task 084h-2).</summary>
+    private static async Task<IResult> AsDecider<T>(HttpContext http, Func<Guid, Task<RuleSetOutcome<T>>> call, CancellationToken ct) where T : class
+    {
+        if (CallerOid(http) is null)
+        {
+            return NoRequester();
+        }
+
+        return await DeciderAsync(http, ct) is { } decider ? Map(await call(decider), http) : DeciderUnresolved(http);
+    }
+
+    private static async Task<Guid?> DeciderAsync(HttpContext http, CancellationToken ct) =>
+        await PlaybookAuthorizationFilter.ResolveCallerSystemUserIdAsync(http, ct) is { } decider && decider != Guid.Empty ? decider : null;
+
+    private static IResult DeciderUnresolved(HttpContext http) => ProblemDetailsHelper.Forbidden(
+        ProcedureAssignmentService.CodeDeciderUnresolved, "Your user could not be identified, so nothing was changed.", http.TraceIdentifier);
 
     internal static IResult NoRequester() => Results.Problem(
         statusCode: StatusCodes.Status401Unauthorized,
