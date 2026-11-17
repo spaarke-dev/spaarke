@@ -1006,8 +1006,7 @@ public sealed class InvoiceLineAddService
     /// billing action under the id, more than one record under the key) is not proof that the caller changed its request.
     /// </summary>
     private static bool IsOtherContent(DecisionRecordRefusedException ex) =>
-        ex.Reason == DecisionRecordRefusalReason.ReviewInvalid
-        && string.Equals(ex.Message, DecisionRecordWriter.BillingOtherContentRefusal, StringComparison.Ordinal);
+        ex.Reason == DecisionRecordRefusalReason.ReviewInvalid && ex.IsOtherContent;
 
     /// <summary>
     /// 164a fix round K2: a repeat is the same add only when it comes from the caller stamped on the row (<see cref="RecordCreatorPerson.Column"/>).

@@ -1237,8 +1237,7 @@ public sealed class InvoiceAdjustmentService
     /// <summary>The writer's "same id, same billing action, other content" refusal: the only record refusal answered <c>id_reused</c> (as Add line,
     /// 164a fix round K2). A recorded content that cannot be read, or another billing action under the id, is not proof the caller changed its request.</summary>
     private static bool IsOtherContent(DecisionRecordRefusedException ex) =>
-        ex.Reason == DecisionRecordRefusalReason.ReviewInvalid
-        && string.Equals(ex.Message, DecisionRecordWriter.BillingOtherContentRefusal, StringComparison.Ordinal);
+        ex.Reason == DecisionRecordRefusalReason.ReviewInvalid && ex.IsOtherContent;
 
     private AdjustmentResult Refused(Guid invoiceId, InvoiceTotalsCalculation calculation)
     {
