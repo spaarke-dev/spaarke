@@ -124,7 +124,7 @@ export interface RuntimeConfigStore {
 
   /**
    * BFF API base URL resolved from Dataverse Environment Variables at runtime.
-   * HOST ONLY — the `/api` suffix is stripped by `normalizeUrl()` in `@spaarke/auth`.
+   * HOST ONLY — the `/api` suffix is stripped by `normalizeBffBaseUrl()` in `@spaarke/auth`.
    * All fetch URLs must include `/api` prefix themselves:
    * `${getBffBaseUrl()}/api/documents/...`.
    *
