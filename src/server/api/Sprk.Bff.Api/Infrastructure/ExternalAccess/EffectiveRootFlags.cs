@@ -90,7 +90,7 @@ internal static class EffectiveRootFlags
     /// the record's answer Unverifiable, so <see cref="Fold(RootRecordFlags, SecureParentsAnswer?)"/> counts it as secure.</param>
     internal static async Task<IReadOnlyDictionary<Guid, SecureParentsAnswer>?> ReadAncestryAsync(
         IGenericEntityService? dataverse, ILogger logger, string entityType, IReadOnlyCollection<Guid> ids, CancellationToken ct,
-        bool absentParentIsUnknown = false)
+        bool absentParentIsUnknown = false, RequestAccessMemo? requestMemo = null)
     {
         if (!SecureRootInheritance.Inherits(entityType))
         {
@@ -116,7 +116,8 @@ internal static class EffectiveRootFlags
             if (distinct.Count == 1)
             {
                 var one = await SecureRootInheritance
-                    .ReadSecureParentsAsync(dataverse, logger, entityType, distinct[0], ct, maxDepth: SecureRootInheritance.MaxFilingDepth,
+                    .ReadSecureParentsAsync(dataverse, logger, entityType, distinct[0], ct, recordTypes: requestMemo?.RecordTypes,
+                        maxDepth: SecureRootInheritance.MaxFilingDepth,
                         absentIsUnknown: absentParentIsUnknown)
                     .ConfigureAwait(false);
                 return new Dictionary<Guid, SecureParentsAnswer> { [distinct[0]] = one };
@@ -124,7 +125,7 @@ internal static class EffectiveRootFlags
 
             return await SecureRootInheritance
                 .ReadSecureParentsOfManyAsync(dataverse, logger, entityType, distinct, ct, maxDepth: SecureRootInheritance.MaxFilingDepth,
-                    absentIsUnknown: absentParentIsUnknown)
+                    absentIsUnknown: absentParentIsUnknown, requestMemo: requestMemo)
                 .ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)

@@ -134,7 +134,12 @@ export async function streamSummarize(
 // Result normalization
 // ---------------------------------------------------------------------------
 
-function normalizeResult(raw: unknown): ISummarizeResult {
+/**
+ * Normalises the summarize playbook's output into {@link ISummarizeResult}: unwraps the `rawResponse` envelope and
+ * coerces `fileHighlights`, `practiceAreas` and `mentionedParties`. Exported (ontology task 195) so the Email documents
+ * wizard's Summary step reads the same playbook output the same way instead of copying this.
+ */
+export function normalizeResult(raw: unknown): ISummarizeResult {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let result: any = raw;
 

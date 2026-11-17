@@ -34,11 +34,20 @@ const onListEmailTemplatesSentinel = jest.fn();
 const onRenderEmailTemplateSentinel = jest.fn();
 const onDraftWithAiSentinel = jest.fn();
 const onUploadLocalAttachmentSentinel = jest.fn();
+// Task 193 (owner D-219 Q1): the side-pane recipient lookup and the Related-to record lookup.
+const onLookupRecipientsSentinel = jest.fn();
+const recordLookupCatalogSentinel = [{ logicalName: "sprk_matter", displayName: "Matter" }];
+const onLookupRecordSentinel = jest.fn();
+const onAddRelationshipSentinel = jest.fn();
 const createXrmEmailComposeHandlersMock = jest.fn(() => ({
   onListEmailTemplates: onListEmailTemplatesSentinel,
   onRenderEmailTemplate: onRenderEmailTemplateSentinel,
   onDraftWithAi: onDraftWithAiSentinel,
   onUploadLocalAttachment: onUploadLocalAttachmentSentinel,
+  onLookupRecipients: onLookupRecipientsSentinel,
+  recordLookupCatalog: recordLookupCatalogSentinel,
+  onLookupRecord: onLookupRecordSentinel,
+  onAddRelationship: onAddRelationshipSentinel,
 }));
 
 jest.mock("@spaarke/ui-components", () => {
@@ -130,6 +139,16 @@ describe("ConversationPane — Send Email dialog compose handlers (task 186, D-2
     expect(newEmailDialogProps()?.onRenderEmailTemplate).toBe(onRenderEmailTemplateSentinel);
     expect(newEmailDialogProps()?.onDraftWithAi).toBe(onDraftWithAiSentinel);
     expect(newEmailDialogProps()?.onUploadLocalAttachment).toBe(onUploadLocalAttachmentSentinel);
+  });
+
+  it("passes the side-pane recipient lookup and the Related-to record lookup handlers (task 193)", () => {
+    renderPane();
+
+    // From the same handler object as the template/AI handlers (the one the pane builds), not a second factory call.
+    expect(newEmailDialogProps()?.onLookupRecipients).toBe(onLookupRecipientsSentinel);
+    expect(newEmailDialogProps()?.recordLookupCatalog).toBe(recordLookupCatalogSentinel);
+    expect(newEmailDialogProps()?.onLookupRecord).toBe(onLookupRecordSentinel);
+    expect(newEmailDialogProps()?.onAddRelationship).toBe(onAddRelationshipSentinel);
   });
 
   it("builds the handlers from the pane's authenticatedFetch and BFF base URL", () => {

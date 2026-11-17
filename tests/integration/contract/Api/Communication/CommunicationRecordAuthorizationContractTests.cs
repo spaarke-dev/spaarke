@@ -1248,7 +1248,7 @@ public class CommunicationRecordAuthorizationContractTests : IClassFixture<Commu
         // The handler's own answer for a template that does not exist (readable to the caller, gone for the app).
         _host.Query.Visible("templates", template);
         _host.Templates
-            .Setup(t => t.FetchAndRenderAsync(template, It.IsAny<Dictionary<string, object?>>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Setup(t => t.FetchAndRenderAsync(template, It.IsAny<Dictionary<string, object?>>(), It.IsAny<string?>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(EmailTemplateResult.Fail($"Email template not found: {template}"));
         var absent = await _host.SendAsync(Request(HttpMethod.Post, "/api/communications/template/render", new { templateId = template }));
 
@@ -1266,8 +1266,8 @@ public class CommunicationRecordAuthorizationContractTests : IClassFixture<Commu
         _host.Probe.Grant(MatterSet, matter, AccessRights.Read);
         Dictionary<string, object?>? variables = null;
         _host.Templates
-            .Setup(t => t.FetchAndRenderAsync(template, It.IsAny<Dictionary<string, object?>>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .Callback<Guid, Dictionary<string, object?>, string, string, CancellationToken>((_, vars, _, _, _) => variables = vars)
+            .Setup(t => t.FetchAndRenderAsync(template, It.IsAny<Dictionary<string, object?>>(), It.IsAny<string?>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Callback<Guid, Dictionary<string, object?>, string?, string, string, CancellationToken>((_, vars, _, _, _, _) => variables = vars)
             .ReturnsAsync(EmailTemplateResult.Ok("Re: Acme v Widgets", "<p>body</p>", isHtml: true));
 
         var response = await _host.SendAsync(Request(HttpMethod.Post, "/api/communications/template/render",
@@ -1313,7 +1313,7 @@ public class CommunicationRecordAuthorizationContractTests : IClassFixture<Commu
         var template = Guid.NewGuid();
         _host.Query.Visible("templates", template);
         _host.Templates
-            .Setup(t => t.FetchAndRenderAsync(template, It.IsAny<Dictionary<string, object?>>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Setup(t => t.FetchAndRenderAsync(template, It.IsAny<Dictionary<string, object?>>(), It.IsAny<string?>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(EmailTemplateResult.Ok("Subject", "<p>Body</p>", isHtml: true));
 
         var response = await _host.SendAsync(Request(HttpMethod.Post, "/api/communications/template/render", new { templateId = template }));

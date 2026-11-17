@@ -39,6 +39,17 @@ namespace Sprk.Bff.Api.Infrastructure.Dataverse;
 internal static class CallerWhoAmIMemo
 {
     /// <summary>The <see cref="HttpContext.Items"/> key of this request's answers. A private object, so no other code can reach it.</summary>
+    /// <remarks>
+    /// <b>ItemsLockRemarks (#2851).</b> Both <c>Items</c> accesses below first lock the REQUEST, then <c>request.Items</c>: the
+    /// <c>Items</c> getter is itself lazy and unsynchronized, so two threads touching it first at once can each get their own
+    /// dictionary (and each lock a different one), losing an answer or corrupting the feature collection. The inner lock is
+    /// the one <see cref="ExternalAccess.RequestAccessMemo.For"/> takes, so writes to the shared dictionary still exclude each
+    /// other (lock order: request, then Items; <c>For</c> takes the same two in the same order, #2845 F-R2, so there is no
+    /// cycle). This memo is asked
+    /// from fan-outs it does not own (concurrent <see cref="ExternalAccess.CallerRecordAccessProbe"/> checks, for example
+    /// <c>CallerWriteAuthorization</c>'s), so it cannot rely on a caller creating <c>Items</c> first; locking the request
+    /// makes its own first touch single-threaded, as <see cref="ExternalAccess.RequestAccessMemo.For"/> now does too.
+    /// </remarks>
     private static readonly object ItemsKey = new();
 
     /// <summary>
@@ -135,16 +146,20 @@ internal static class CallerWhoAmIMemo
         try
         {
             ConcurrentDictionary<string, Answer> answers;
-            lock (request.Items)
+            lock (request) // #2851: the first touch of Items, single-threaded — see ItemsLockRemarks
             {
-                if (request.Items.TryGetValue(ItemsKey, out var held) && held is ConcurrentDictionary<string, Answer> existing)
+                var items = request.Items;
+                lock (items) // and the dictionary itself, shared with RequestAccessMemo.For's writes
                 {
-                    answers = existing;
-                }
-                else
-                {
-                    answers = new ConcurrentDictionary<string, Answer>(StringComparer.Ordinal);
-                    request.Items[ItemsKey] = answers;
+                    if (items.TryGetValue(ItemsKey, out var held) && held is ConcurrentDictionary<string, Answer> existing)
+                    {
+                        answers = existing;
+                    }
+                    else
+                    {
+                        answers = new ConcurrentDictionary<string, Answer>(StringComparer.Ordinal);
+                        items[ItemsKey] = answers;
+                    }
                 }
             }
 
@@ -173,9 +188,13 @@ internal static class CallerWhoAmIMemo
         try
         {
             object? held;
-            lock (request.Items) // Items is a plain dictionary; Remember may be adding to it on another thread of this request
+            lock (request) // #2851: the first touch of Items, single-threaded — see ItemsLockRemarks
             {
-                request.Items.TryGetValue(ItemsKey, out held);
+                var items = request.Items;
+                lock (items) // Items is a plain dictionary; Remember or RequestAccessMemo.For may be adding to it on another thread
+                {
+                    items.TryGetValue(ItemsKey, out held);
+                }
             }
 
             return held is ConcurrentDictionary<string, Answer> answers
