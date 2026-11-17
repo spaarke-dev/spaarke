@@ -208,6 +208,7 @@ export interface InvoiceSubmissionWizardProps extends InvoiceSubmissionCallbacks
    * - `submit` receives `correction: { invoiceId, note }`; a second Submit while one is in flight joins that request (it does not send another), so one
    *   click sequence sends exactly one Correction (two Corrections of one invoice can both be received; the second then fails at commit).
    * `hideTitle`, `embedded` and the close guard behave as without it.
+   * Pass it when the wizard mounts; changing it later is not supported (the initial number and the steps are fixed at mount).
    */
   correction?: InvoiceCorrectionTarget;
   /** Optional (task 052): passed to the result screen (`InvoiceSubmissionOutcome.keepPolling`). */

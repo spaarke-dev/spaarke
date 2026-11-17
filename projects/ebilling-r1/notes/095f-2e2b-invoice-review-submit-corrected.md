@@ -103,6 +103,14 @@ All new test files are named for the task or the correction:
 - **K fixes.** The `correction` prop comment says a second Submit joins the request in flight; the `MockDecisionApi` spacing; the dark-mode test now asserts the provider carries the dark tokens (and differs from light) and that the button has no inline colour.
 - **Builds run:** Invoice Review `npm run build`, and the Create Invoice wizard solution's build (see the task report for results and any failure that is already on the base).
 
+## Fix to iss034b's test: `finishAsOperator.test.tsx` flake
+
+Not part of 2e2b's behaviour; the file is iss034b's and flaked in several full-suite runs here (never when run alone).
+- **Cause (found, not a timeout).** Every async wait in the file is already on the file's 5 s `configure({ asyncUtilTimeout })` (it is module-level, so it covers `findBy*` and `waitFor` in every helper; none is on the 1 s default). The failing line was a SYNCHRONOUS `screen.getByRole('dialog', { name: title, hidden: true })` in the "re-read shows the hold gone" describe, right after the banner went. With the banner gone the open form's surface comes to carry `aria-hidden="true"` (Fluent's focus handling, once the trigger inside the banner is removed), and an `aria-hidden` element's accessible name is empty, so a query by name misses a form that is still open. It reproduced in 6 of 8 parallel runs of that describe (instrumented) and 1 of 6 (not). The form's own state stayed `open: true` throughout, so this is not a lost form in the page's state.
+- **Fix.** The three checks that depended on the name now use the element: the sync check is `expect(anyDialog()).toBe(dialog)` plus the title text inside it, and the negative "form is gone" waits (which could pass early on an empty name) use the role-only `anyDialog()`. The opening waits (`dialogOf(title)`, by name) are unchanged: they run before the surface is hidden and keep covering the accessible name.
+- **Possible product issue, not verified in a browser:** if the same `aria-hidden` appears in a real browser, a screen reader would lose the open form when the hold clears under it. jsdom cannot tell. Filed as an observation for the operator, not changed here (iss034b's component, outside this task).
+- **Proof:** the describe, 8 parallel runs: 0 failed (was 6 of 8 failing). Full Invoice Review suite (15 suites, 530 tests): 3 runs in a row with default workers, 3 of 3 green, and one `--runInBand`, green.
+
 ## Gates
 
 Typecheck, build and test results are in the task report. Pre-existing on the base: Invoice Review's `tsc-surface-gate` reports 48 errors in shared libraries (none in this change, none surface-owned); `src/solutions/CreateInvoiceWizard` has no typecheck script (K6).
