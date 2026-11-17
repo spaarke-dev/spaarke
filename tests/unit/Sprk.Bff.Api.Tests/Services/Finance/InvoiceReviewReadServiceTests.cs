@@ -10,13 +10,16 @@ using Moq;
 using Spaarke.Core.Auth;
 using Spaarke.Core.Auth.Rules;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Services.Finance;
 using Sprk.Bff.Api.Services.Finance.Files;
 using Sprk.Bff.Api.Services.Finance.Models;
+using Sprk.Bff.Api.Services.Finance.Procedures;
 using Sprk.Bff.Api.Services.Finance.Submission;
 using Sprk.Bff.Api.Services.Signals;
 using Sprk.Bff.Api.Services.Signals.Billing;
+using Sprk.Bff.Api.Tests.Services.Finance.Procedures;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Services.Finance;
@@ -75,6 +78,9 @@ public sealed class InvoiceReviewReadServiceTests
         public readonly List<string> CallerPaths = [];
         public Func<string, Task<DataverseUserResponse>>? CallerFault;
         public readonly Mock<ILogger<InvoiceReviewReadService>> Logger = new();
+
+        /// <summary>Task 113: the Dataverse the Procedure-change banner reads (a separate evaluating double); by default the strict one above, which refuses its reads.</summary>
+        public Mock<IGenericEntityService>? BannerEntities;
 
         public World(int status = InvoiceStatusCodes.InReview)
         {
@@ -144,7 +150,8 @@ public sealed class InvoiceReviewReadServiceTests
                 .Returns((string path, CancellationToken _) => AnswerCaller(path));
             return new InvoiceReviewReadService(
                 Entities.Object, authorization, settings.Object, caller.Object,
-                new EarlierInvoiceReadability(NullLogger<EarlierInvoiceReadability>.Instance), Logger.Object);
+                new EarlierInvoiceReadability(NullLogger<EarlierInvoiceReadability>.Instance),
+                new ProcedureChangeBanner(BannerEntities?.Object ?? Entities.Object, NullLogger<ProcedureChangeBanner>.Instance), Logger.Object);
         }
 
         public int CallerReads(string set) => CallerPaths.Count(p => p.StartsWith(set + "?", StringComparison.Ordinal));
@@ -762,6 +769,107 @@ public sealed class InvoiceReviewReadServiceTests
         w.Reads("sprk_billingevent").Should().Be(1);
         w.Reads("sprk_decisionrecord").Should().Be(1);
         w.Reads("sprk_timekeeper").Should().Be(1);
+    }
+
+    // ── ebilling-r1 task 113 (model 8.2): the Procedure-change banner on the review ──
+
+    /// <summary>
+    /// A review World whose invoice sits on the banner world's matter and firm, with stored findings that carry the snapshot of the banner world's
+    /// rows as they stand now. The banner reads its own Dataverse double, so the review's strict one still refuses any other entity.
+    /// </summary>
+    private static async Task<(World Review, ProcedureBannerWorld Banner)> BannerWorldAsync(int status = InvoiceStatusCodes.InReview, int lines = 2, bool changed = true)
+    {
+        var banner = new ProcedureBannerWorld();
+        var (_, _, rule, _) = banner.Simple("RATE-1");
+        var w = new World(status) { BannerEntities = banner.Entities };
+        w.Invoice!["sprk_vendororg"] = new EntityReference("sprk_organization", ProcedureBannerWorld.F);
+        w.Invoice["sprk_matter"] = new EntityReference("sprk_matter", ProcedureBannerWorld.M);
+        for (var i = 1; i <= lines; i++)
+        {
+            w.AddLine(i, InvoiceLineStatus.Flagged, extraction: Extraction, timekeeper: TimekeeperId);
+        }
+
+        // The invoice and its lines are dated 2026-09-30 and 2026-09-01: the stored snapshot judged exactly those dates.
+        var stored = JsonNode.Parse(await banner.StoredFindingsAsync(ProcedureBannerWorld.F, new DateOnly(2026, 9, 1), new DateOnly(2026, 9, 30)))!.AsObject();
+        var findings = JsonNode.Parse(FindingsJson())!.AsObject();
+        findings[ProcedureSnapshot.Member] = stored[ProcedureSnapshot.Member]!.DeepClone();
+        findings["receivedOn"] = "2026-10-02";
+        w.Submission = SubmissionRow(findings.ToJsonString());
+        if (changed) banner.ExcludeRule(ProcedureBannerWorld.M, rule); // the rows changed after the invoice was judged
+        return (w, banner);
+    }
+
+    [Fact(DisplayName = "113 (model 8.2): an internal caller of an open invoice gets Changed once the rows changed; the same request, rows unchanged, gets NotChanged")]
+    public async Task Banner_InternalCaller_OpenInvoice_ReflectsTheRows()
+    {
+        var (w, banner) = await BannerWorldAsync();
+
+        var changed = await w.Service().GetAsync(InvoiceId, Caller, FinanceStepZeroVerdict.Internal, CancellationToken.None);
+
+        changed!.ProcedureChange.Should().Be(new ProcedureChangeBannerDto("Changed", "The procedures that apply to this invoice have changed; re-check to apply them."));
+
+        var (unchangedWorld, _) = await BannerWorldAsync(changed: false);
+
+        var same = await unchangedWorld.Service().GetAsync(InvoiceId, Caller, FinanceStepZeroVerdict.Internal, CancellationToken.None);
+
+        same!.ProcedureChange.Should().Be(new ProcedureChangeBannerDto("NotChanged", null));
+        banner.Wrote.Should().BeFalse();
+    }
+
+    [Fact(DisplayName = "113 (model 8.2) must-not-fire: a request without the Internal step-0 verdict (the two-argument entry, or an explicit null) gets no member, and the banner's Dataverse is not read")]
+    public async Task Banner_NoVerdict_IsAbsent_AndReadsNothing()
+    {
+        var (w, banner) = await BannerWorldAsync();
+        var before = banner.Reads;
+
+        var viaOldEntry = await w.Service().GetAsync(InvoiceId, Caller, CancellationToken.None);
+        var viaNull = await w.Service().GetAsync(InvoiceId, Caller, stepZero: null, CancellationToken.None);
+
+        viaOldEntry!.ProcedureChange.Should().BeNull();
+        viaNull!.ProcedureChange.Should().BeNull();
+        banner.Reads.Should().Be(before);
+        JsonSerializer.Serialize(viaNull, new JsonSerializerOptions(JsonSerializerDefaults.Web)).Should().NotContainEquivalentOf("procedureChange", "an absent member is omitted, not null");
+    }
+
+    [Fact(DisplayName = "113 (model 8.2) must-not-fire: a decided invoice keeps its snapshot and gets no banner, even for an internal caller")]
+    public async Task Banner_DecidedInvoice_IsAbsent()
+    {
+        var (w, banner) = await BannerWorldAsync(InvoiceStatusCodes.Approved);
+        var before = banner.Reads;
+
+        var review = await w.Service().GetAsync(InvoiceId, Caller, FinanceStepZeroVerdict.Internal, CancellationToken.None);
+
+        review!.ProcedureChange.Should().BeNull();
+        banner.Reads.Should().Be(before);
+    }
+
+    [Fact(DisplayName = "113 (model 8.2): the member is serialised as its state and text only")]
+    public async Task Banner_Serialised_CarriesTheStateAndTheTextOnly()
+    {
+        var (w, _) = await BannerWorldAsync();
+
+        var review = await w.Service().GetAsync(InvoiceId, Caller, FinanceStepZeroVerdict.Internal, CancellationToken.None);
+
+        var json = JsonNode.Parse(JsonSerializer.Serialize(review, new JsonSerializerOptions(JsonSerializerDefaults.Web)))!.AsObject();
+        json["procedureChange"]!.ToJsonString().Should().Be(
+            """{"state":"Changed","text":"The procedures that apply to this invoice have changed; re-check to apply them."}""");
+    }
+
+    [Theory(DisplayName = "113 (model 8.2, NFR-02): the banner's reads are one resolution per request; the same count for 3 and 150 lines; the page's own queries are unchanged")]
+    [InlineData(3)]
+    [InlineData(150)]
+    public async Task Banner_ReadCount_DoesNotGrowWithTheLineCount(int lineCount)
+    {
+        var (w, banner) = await BannerWorldAsync(lines: lineCount);
+        w.Roster = [new Entity("sprk_timekeeper", TimekeeperId) { ["sprk_name"] = "Jane Smith" }];
+        var before = banner.World.Queries.Count;
+
+        var review = await w.Service().GetAsync(InvoiceId, Caller, FinanceStepZeroVerdict.Internal, CancellationToken.None);
+
+        review!.Lines.Should().HaveCount(lineCount);
+        review.ProcedureChange!.State.Should().Be("Changed");
+        (banner.World.Queries.Count - before).Should().Be(7, "the resolver's reads, once, whatever the number of lines");
+        w.Queries.Should().HaveCount(6, "the page's own reads are exactly as before the banner");
     }
 
     // ── canDecide, tolerance, absence ──

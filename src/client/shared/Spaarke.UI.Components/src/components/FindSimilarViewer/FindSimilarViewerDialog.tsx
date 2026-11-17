@@ -54,6 +54,11 @@
  *     production. See `projects/spaarke-modal-system/notes/
  *     task-061-completion.md` for the full per-copy investigation.
  *
+ * Opt-in `yieldToFrameSidePane` (ontology task 194): a PCF host (SemanticSearchControl) renders this dialog in the
+ * same document as the Dataverse lookup side pane, so a lookup opened by the framed viewer would sit behind it. With
+ * the opt-in the dialog is non-blocking and yields to the pane while the viewer reports an open lookup. Other hosts
+ * (code pages, already framed) leave it off and render as before.
+ *
  * @see ADR-021 for Fluent UI v9 requirements
  * @see ADR-012 for shared component library patterns
  * @see ADR-050 / docs/standards/MODAL-DESIGN-SYSTEM.md for the SprkModal shell
@@ -64,6 +69,7 @@ import { makeStyles, tokens, Dialog, DialogSurface, DialogBody, Button, Tooltip 
 import { ArrowExpandRegular } from '@fluentui/react-icons';
 
 import { SprkModal, getSurfaceStyle } from '../SprkModal';
+import { isSidePaneLookupMessage } from '../SprkModal/sidePaneFrameSignal';
 import type { IDataService } from '../../types/serviceInterfaces';
 import type { AuthenticatedFetchFn } from '../../utils/fetchTypes';
 
@@ -107,6 +113,24 @@ export interface IFindSimilarViewerDialogProps {
    * (task-100 gate fix — the one re-based dialog that missed the passthrough).
    */
   uiScale?: number;
+  /**
+   * Opt-in (default path only): for a host that renders this dialog in the same document as the host's lookup side
+   * pane (a PCF on a Dataverse form). The dialog renders non-blocking, and while the framed page reports an open lookup
+   * (`postSidePaneLookupToParent`, e.g. the Document Relationship Viewer's Email documents To/Cc/Bcc) it yields to the
+   * pane with `SprkModal` `yieldToSidePane`, then returns to its normal layer when the lookup settles. Only messages
+   * from this dialog's own iframe count. Default `false`: renders as before.
+   *
+   * @since ontology task 194
+   */
+  yieldToFrameSidePane?: boolean;
+  /**
+   * With {@link yieldToFrameSidePane}: called with `true` when the framed page's lookup opens and `false` when it
+   * settles or the yield is reset, so the host can make another of its own modals yield too (a preview open under this
+   * dialog would otherwise cover the pane).
+   *
+   * @since ontology task 194
+   */
+  onFrameSidePaneLookupChange?: (open: boolean) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -160,8 +184,43 @@ export const FindSimilarViewerDialog: React.FC<IFindSimilarViewerDialogProps> = 
   url,
   embedded = false,
   uiScale,
+  yieldToFrameSidePane = false,
+  onFrameSidePaneLookupChange,
 }) => {
   const styles = useStyles();
+  const frameRef = React.useRef<HTMLIFrameElement>(null);
+
+  // Task 194: while the framed page has the host's lookup pane open, this dialog yields to it. Reset whenever the
+  // dialog, its URL or the opt-in changes, and when the frame (re)loads, so a page that unloads mid-lookup cannot leave
+  // the dialog dimmed and inert.
+  const [frameLookupOpen, setFrameLookupOpen] = React.useState(false);
+  React.useEffect(() => {
+    setFrameLookupOpen(false);
+    if (!yieldToFrameSidePane || embedded || !open || !url) return undefined;
+    let frameOrigin: string;
+    try {
+      frameOrigin = new URL(url, window.location.href).origin;
+    } catch {
+      return undefined; // an unparseable URL loads no page that could ask
+    }
+    const onMessage = (event: MessageEvent): void => {
+      const frameWindow = frameRef.current?.contentWindow;
+      if (!frameWindow || event.source !== frameWindow || event.origin !== frameOrigin) return;
+      if (!isSidePaneLookupMessage(event.data)) return;
+      setFrameLookupOpen(event.data.open);
+    };
+    window.addEventListener('message', onMessage);
+    return () => window.removeEventListener('message', onMessage);
+  }, [yieldToFrameSidePane, embedded, open, url]);
+  const handleFrameLoad = React.useCallback(() => setFrameLookupOpen(false), []);
+  const frameLookupChangeRef = React.useRef(onFrameSidePaneLookupChange);
+  frameLookupChangeRef.current = onFrameSidePaneLookupChange;
+  const reportedOpenRef = React.useRef(false);
+  React.useEffect(() => {
+    if (reportedOpenRef.current === frameLookupOpen) return;
+    reportedOpenRef.current = frameLookupOpen;
+    frameLookupChangeRef.current?.(frameLookupOpen);
+  }, [frameLookupOpen]);
 
   const handleExpand = React.useCallback(() => {
     if (url) {
@@ -169,7 +228,9 @@ export const FindSimilarViewerDialog: React.FC<IFindSimilarViewerDialogProps> = 
     }
   }, [url]);
 
-  const frame = url ? <iframe src={url} title="Document Relationships" className={styles.frame} /> : null;
+  const frame = url ? (
+    <iframe ref={frameRef} src={url} title="Document Relationships" className={styles.frame} onLoad={handleFrameLoad} />
+  ) : null;
 
   // Embedded hosts (e.g. a PCF panel already inside a Dataverse form) supply
   // their own navigation chrome. `SprkModal`'s header (title + window
@@ -199,6 +260,8 @@ export const FindSimilarViewerDialog: React.FC<IFindSimilarViewerDialogProps> = 
       size="xl"
       padded={false}
       uiScale={uiScale}
+      nonBlocking={yieldToFrameSidePane}
+      yieldToSidePane={yieldToFrameSidePane && frameLookupOpen}
       headerActions={
         <Tooltip content="Open in new tab" relationship="label">
           <Button

@@ -8,7 +8,7 @@
  * |------------------|----------------------------------|--------------------------|------------------------------------------|-----------------------------------------------------------|
  * | Matter, Project  | Information, Documents, Invoices | Messages, Events         | Refresh, Copy link                       | Documents: Upload; Invoices: Submit invoice; Messages: New message; Events: Add event |
  * | Work assignment  | Information, Documents           | Messages, Events         | Refresh, Submit invoice, Copy link       | Documents: Upload; Messages: New message; Events: Add event |
- * | Invoice          | Information, Files               | Messages                 | Refresh, Copy link                       | Messages: New message (Files keeps its own Upload)        |
+ * | Invoice          | Information, Files               | Messages                 | Refresh, Copy link                       | Messages: New message (Files is read-only)                |
  * | Service request  | Information, Documents           | Messages                 | Refresh, Copy link, Delete request       | Documents: Upload; Messages: New message                  |
  * | Document         | Information, Preview             | —                        | Refresh, Download, Copy link             | —                                                         |
  *

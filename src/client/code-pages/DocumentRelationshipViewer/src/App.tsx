@@ -69,6 +69,7 @@ import {
   type IDocumentEmailWizardItem,
 } from '@spaarke/ui-components/components/DocumentEmailWizard';
 import { createXrmEmailComposeHandlers } from '@spaarke/ui-components/components/EmailComposer';
+import { postSidePaneLookupToParent } from '@spaarke/ui-components/components/SprkModal/sidePaneFrameSignal';
 import type { IDataService } from '@spaarke/ui-components/types/serviceInterfaces';
 import { getXrm } from '@spaarke/ui-components/utils/xrmContext';
 
@@ -843,6 +844,9 @@ export const App: React.FC<AppProps> = ({ params, isDark = false, apiBaseUrl }) 
         bffBaseUrl={apiBaseUrl}
         dataService={dataService}
         emailComposeHandlers={emailComposeHandlers}
+        // Task 194: the To/Cc/Bcc pane opens in the window above this page. Inside Semantic Search's Find Similar
+        // dialog that dialog must yield to it, so tell the parent while a lookup is open (ignored elsewhere).
+        onSidePaneLookupChange={postSidePaneLookupToParent}
       />
     </div>
   );

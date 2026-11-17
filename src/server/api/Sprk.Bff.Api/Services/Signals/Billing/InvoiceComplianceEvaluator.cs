@@ -265,7 +265,8 @@ public sealed class InvoiceComplianceEvaluator
 
         // 082c C9: the Procedure stream, resolved once per distinct subject date from the one resolution the loader read. Its rules are the
         // resolver's choice for the date: never IsCurrent, IsInForceOn or SelectVersion. A resolution fault on a date propagates.
-        var onDate = subjects.Select(s => s.Date).Distinct().Order().ToDictionary(d => d, d => loaded.Procedures.RulesOn(d));
+        // The distinct dates are BillingJudgedDates' (task 113: the review banner and the Procedure change's close resolve the same set).
+        var onDate = BillingJudgedDates.Of(invoiceDate, request.Lines.Select(l => l.Date)).ToDictionary(d => d, d => loaded.Procedures.RulesOn(d));
         var procedureCandidates = new Dictionary<Guid, BillingRuleCandidate>();
         BillingRuleCandidate ProcedureCandidateOf(ResolvedRule rule)
         {

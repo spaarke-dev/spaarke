@@ -60,8 +60,7 @@ export interface RecordDetailEntity {
   extraColumns?: readonly string[];
   /**
    * The task 031 route root (`/api/v1/external/{root}/{id}/documents`) that serves this record's documents; absent = no
-   * documents section. An invoice uses the `invoices` root (owner decision 2026-10-11, option A: access inherited from the
-   * invoice's matter and project).
+   * documents section. An invoice has none: its Files section reads ebilling's `/invoices/{id}/files` routes (R4 task 021).
    */
   documentsRoot?: DocumentRoot;
   /** `sprk_invoice` lookup that ties invoices to this record; absent = no invoices section. */
@@ -146,7 +145,6 @@ export const RECORD_DETAIL_ENTITIES: Readonly<Record<string, RecordDetailEntity>
       { attribute: 'sprk_project', label: 'Project', kind: 'lookup' },
       { attribute: 'sprk_matter', label: 'Matter', kind: 'lookup' },
     ],
-    documentsRoot: 'invoices',
     showsEventsAndTasks: false,
   },
   sprk_servicerequest: {

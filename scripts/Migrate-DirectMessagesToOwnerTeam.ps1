@@ -262,6 +262,8 @@ $headers = @{
     'OData-MaxVersion' = '4.0'
     'OData-Version'    = '4.0'
     'Content-Type'     = 'application/json; charset=utf-8'
+    # #2833: strongly consistent reads - attribute metadata (IsSecured) is cached per server; a plain read can be stale.
+    Consistency        = 'Strong'
 }
 function Invoke-DvGet([string]$Path) { Invoke-RestMethod -Uri "$Api/$Path" -Headers $headers -Method Get }
 # Every page of a GET. Callers wrap the call in @(...) so Count means rows.

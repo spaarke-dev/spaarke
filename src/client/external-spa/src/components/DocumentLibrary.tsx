@@ -1,6 +1,6 @@
 /**
  * DocumentLibrary component — Document management for the Project page Documents tab AND the record detail view
- * (task 054: project, matter, work assignment, service request, invoice - the task 031 routes).
+ * (task 054: project, matter, work assignment, service request - the task 031 routes).
  *
  * ROOT (task 054). `root` + `recordId` pick the task 031 routes (`/api/v1/external/{projects|matters|workassignments|
  * servicerequests}/{id}/documents[/...]`); a service request's documents are reachable ONLY through its own route. The
@@ -90,7 +90,7 @@ import {
 } from './createAction';
 import { bffApiCall, bffApiBlob, problemMessage } from '../auth/bff-client';
 import { childRecordAttributesOf } from './record/childRecord';
-import { levelVerdictOf, listCreateRightOf, type CreateRight } from './record/recordAccess';
+import { levelVerdictOf, listCreateRightOf } from './record/recordAccess';
 import { AccessLevel, ApiError } from '../types';
 
 // ---------------------------------------------------------------------------
@@ -327,7 +327,7 @@ interface DocumentVersionsResponse {
 /**
  * Format a file size in bytes to a human-readable string.
  */
-function formatFileSize(bytes: number | null | undefined): string {
+export function formatFileSize(bytes: number | null | undefined): string {
   if (bytes == null || bytes <= 0) return '—';
   const units = ['B', 'KB', 'MB', 'GB'];
   let value = bytes;
@@ -342,7 +342,7 @@ function formatFileSize(bytes: number | null | undefined): string {
 /**
  * Format a Dataverse ISO date string for display.
  */
-function formatDate(isoDate: string | null | undefined): string {
+export function formatDate(isoDate: string | null | undefined): string {
   if (!isoDate) return '—';
   try {
     return new Intl.DateTimeFormat('en-US', {
@@ -361,7 +361,6 @@ const RECORD_NOUN: Readonly<Record<DocumentRoot, string>> = {
   matters: 'matter',
   workassignments: 'work assignment',
   servicerequests: 'service request',
-  invoices: 'invoice',
 };
 
 /**
@@ -391,12 +390,16 @@ export async function downloadDocumentFile(
   documentId: string,
   fileName: string
 ): Promise<void> {
-  let objectUrl: string | undefined;
+  saveBlobAs(await bffApiBlob(documentContentPath(root, recordId, documentId)), fileName);
+}
+
+/**
+ * Hands bytes to the browser under a file name (an object URL and a temporary anchor). Shared by the document download and
+ * the invoice Files list (R4 task 021), whose content route sends no file name of its own.
+ */
+export function saveBlobAs(blob: Blob, fileName: string): void {
+  const objectUrl = window.URL.createObjectURL(blob);
   try {
-    const blob = await bffApiBlob(documentContentPath(root, recordId, documentId));
-
-    objectUrl = window.URL.createObjectURL(blob);
-
     // Trigger browser download via a temporary anchor element
     const anchor = window.document.createElement('a');
     anchor.href = objectUrl;
@@ -407,10 +410,7 @@ export async function downloadDocumentFile(
     window.document.body.removeChild(anchor);
   } finally {
     // Revoke on the next tick - revoking synchronously can cancel the in-flight navigation the anchor click just started.
-    if (objectUrl) {
-      const toRevoke = objectUrl;
-      window.setTimeout(() => window.URL.revokeObjectURL(toRevoke), 0);
-    }
+    window.setTimeout(() => window.URL.revokeObjectURL(objectUrl), 0);
   }
 }
 
@@ -791,12 +791,6 @@ export type DocumentLibraryProps = DocumentLibraryTarget & {
   /** Called with `true` while an upload is in flight and `false` otherwise (and on unmount), so the host can hold. */
   onBusyChange?: (busy: boolean) => void;
   /**
-   * Record template, a list that keeps its own Upload button (the invoice Files list; task 006 fix round 1): told the
-   * Upload right as the shared rule reads it (`createRightOf`: `true` / `false`, `null` while unknown, and `null` on
-   * unmount), so the record's "Your access" and the Files card's read-only line follow it. Changes nothing on screen here.
-   */
-  onUploadRightChange?: (right: CreateRight) => void;
-  /**
    * Record template only (task 013, owner 2026-11-14). When given, a document's name is a link-style button that calls this
    * with the document's id and the button (focus returns to it when the record opened over this one closes); a document with
    * no file (`hasFile === false`) is still opened (FR-15: its record shows Information only). Omit it everywhere else: the
@@ -837,7 +831,6 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
   writeAccessPerRecord = false,
   onCreateActionChange,
   onBusyChange,
-  onUploadRightChange,
   onOpenDocument,
 }) => {
   const styles = useStyles();
@@ -884,7 +877,7 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
     listCanCreate,
     levelAllows,
   });
-  // The list's own button (outside the template, and the invoice Files list inside it). A project follows the shared
+  // The list's own button (outside the template). A project follows the shared
   // rule; every other record keeps its R3 rule, unchanged: the host's `canUpload`, else the list's `canCreate`, else
   // `accessLevel`.
   const showUpload =
@@ -892,19 +885,6 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
   // In the record template the section's Upload replaces this list's button (task 004 / 009), and the dialog stays here.
   const ownUploadButton = onCreateActionChange === undefined;
   useOfferCreateAction(onCreateActionChange, uploadAllowed, upload.show, right);
-  // The same right, told to a host that wants it without a header action (the invoice Files list). Read through a ref, so
-  // a new callback identity never re-reports; unmount reports "unknown".
-  const onUploadRightChangeRef = React.useRef(onUploadRightChange);
-  onUploadRightChangeRef.current = onUploadRightChange;
-  React.useEffect(() => {
-    onUploadRightChangeRef.current?.(right);
-  }, [right]);
-  React.useEffect(
-    () => () => {
-      onUploadRightChangeRef.current?.(null);
-    },
-    []
-  );
   // Whether Upload is available at all: the list's own button outside the template, the section's inside it.
   const uploadAvailable = ownUploadButton ? showUpload : uploadAllowed;
   // Download / version history need only Read on the record (the server checks it). A per-record caller's level says only

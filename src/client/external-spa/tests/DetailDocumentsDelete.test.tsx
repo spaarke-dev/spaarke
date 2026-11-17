@@ -1342,7 +1342,7 @@ describe('the record detail view', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Owner decisions 2026-10-11: delete a service request (the requester), recall when it has activity, invoice documents
+// Owner decisions 2026-10-11: delete a service request (the requester), recall when it has activity
 // ---------------------------------------------------------------------------
 
 const SR_ROUTE = `/api/v1/external/servicerequests/${SERVICE_REQUEST}`;
@@ -1850,118 +1850,6 @@ describe('service request: 409 has_related_records and the recall request', () =
       const error = await within(box).findByTestId('recall-error', undefined, SLOW);
       expect(error.textContent).toMatch(/do not have permission to post messages on this record/);
       expect(screen.getByRole('dialog', { name: 'Send recall request' })).toBeTruthy();
-    },
-    SLOW
-  );
-});
-
-describe('invoice documents on the detail view', () => {
-  it(
-    'list: read from the invoices documents route, with download through the invoice content route',
-    async () => {
-      installDetailNet('invoice', emptyNet({ documents: [doc(1, 'Invoice.pdf')], documentsCanCreate: false }));
-      const dialog = await openDetail('invoice');
-      const docs = await within(dialog).findByTestId('record-detail-documents');
-      await within(docs).findByText('Invoice.pdf');
-      expect(bffApiCall.mock.calls.map(c => String(c[0]))).toContain(`/api/v1/external/invoices/${INVOICE}/documents`);
-
-      const createObjectURL = vi.fn(() => 'blob:test');
-      Object.assign(window.URL, { createObjectURL, revokeObjectURL: vi.fn() });
-      vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined);
-      bffApiBlob.mockResolvedValue(new Blob(['bytes']));
-      fireEvent.click(within(docs).getByRole('button', { name: 'Download Invoice.pdf' }));
-      await waitFor(() => expect(createObjectURL).toHaveBeenCalledTimes(1));
-      expect(bffApiBlob).toHaveBeenCalledWith(`/api/v1/external/invoices/${INVOICE}/documents/${guid(901)}/content`);
-    },
-    SLOW
-  );
-
-  it.each([
-    [true, true],
-    [false, false],
-    [undefined, false],
-  ])(
-    "upload follows the list's canCreate (%s): Upload shown = %s",
-    async (canCreate, shown) => {
-      installDetailNet('invoice', emptyNet({ documents: [doc(1, 'Invoice.pdf')], documentsCanCreate: canCreate }));
-      const dialog = await openDetail('invoice');
-      const docs = await within(dialog).findByTestId('record-detail-documents');
-      await within(docs).findByText('Invoice.pdf');
-      if (shown) {
-        expect(within(docs).getByRole('button', { name: /Upload Document/ })).toBeTruthy();
-      } else {
-        expect(within(docs).queryByRole('button', { name: /Upload Document/ })).toBeNull();
-      }
-    },
-    SLOW
-  );
-
-  it(
-    'no Create (empty list): no Upload in the empty state either; with Create the empty state offers it',
-    async () => {
-      installDetailNet('invoice', emptyNet({ documents: [], documentsCanCreate: false }));
-      const denied = await openDetail('invoice');
-      const deniedDocs = await within(denied).findByTestId('record-detail-documents');
-      await within(deniedDocs).findByText(/No documents have been uploaded to this invoice yet\.$/);
-      expect(within(deniedDocs).queryByRole('button', { name: /Upload Document/ })).toBeNull();
-      cleanup();
-
-      installDetailNet('invoice', emptyNet({ documents: [], documentsCanCreate: true }));
-      const allowed = await openDetail('invoice');
-      const allowedDocs = await within(allowed).findByTestId('record-detail-documents');
-      await within(allowedDocs).findByText(/No documents have been uploaded to this invoice yet\./);
-      expect(within(allowedDocs).getByRole('button', { name: /Upload Document/ })).toBeTruthy();
-    },
-    SLOW
-  );
-
-  it(
-    'upload with Create posts multipart to the invoice documents route (the id is the route, never the body)',
-    async () => {
-      installDetailNet('invoice', emptyNet({ documents: [], documentsCanCreate: true }));
-      const dialog = await openDetail('invoice');
-      const docs = await within(dialog).findByTestId('record-detail-documents');
-      bffApiCall.mockImplementation(async (path: string, options?: RequestInit) => {
-        if (options?.method === 'POST') return { sprk_documentid: guid(999) };
-        if (/\/documents$/.test(path)) return { value: [], canCreate: true };
-        if (path === '/api/v1/external/me') return { contactId: ME, projects: [] };
-        if (/\/messages$/.test(path)) return { value: [] };
-        throw new Error(`unexpected BFF call ${path}`);
-      });
-      fireEvent.click(await within(docs).findByRole('button', { name: /Upload Document/ }));
-      const input = await waitFor(() => {
-        const el = document.querySelector('input[type="file"]');
-        if (!el) throw new Error('no file input yet');
-        return el as HTMLInputElement;
-      });
-      fireEvent.change(input, { target: { files: [new File(['%PDF'], 'inv.pdf', { type: 'application/pdf' })] } });
-      fireEvent.click(await screen.findByRole('button', { name: 'Upload' }));
-      await waitFor(() => {
-        const post = bffApiCall.mock.calls.find(
-          c => (c[1] as RequestInit | undefined)?.method === 'POST' && /\/documents$/.test(String(c[0]))
-        );
-        expect(post?.[0]).toBe(`/api/v1/external/invoices/${INVOICE}/documents`);
-        expect((post?.[1] as RequestInit).body).toBeInstanceOf(FormData);
-      });
-    },
-    SLOW
-  );
-
-  it(
-    "an invoice document is deletable like any other when the caller created it (the document's own delete route)",
-    async () => {
-      installDetailNet(
-        'invoice',
-        emptyNet({ documents: mixedDocs(), documentsCanCreate: true, onDelete: () => undefined })
-      );
-      const dialog = await openDetail('invoice');
-      const docs = await within(dialog).findByTestId('record-detail-documents');
-      await within(docs).findByText('Mine.pdf');
-      await waitFor(() => expect(within(docs).queryAllByRole('button', { name: /^Delete / })).toHaveLength(1));
-      fireEvent.click(within(docs).getByRole('button', { name: 'Delete Mine.pdf' }));
-      fireEvent.click(within(await confirmDialog()).getByRole('button', { name: 'Delete' }));
-      await waitFor(() => expect(within(docs).queryByText('Mine.pdf')).toBeNull());
-      expect(deleteCalls().map(c => c[0])).toEqual([`/api/v1/external/documents/${guid(901)}`]);
     },
     SLOW
   );

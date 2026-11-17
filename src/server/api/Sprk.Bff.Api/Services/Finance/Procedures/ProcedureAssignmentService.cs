@@ -2128,13 +2128,9 @@ public class ProcedureAssignmentService
         var lines = (await LinesOfInvoicesAsync(reads, invoices.Select(i => i.InvoiceId).ToList())).ToLookup(l => l.InvoiceId);
         return invoices.Select(i => i with
         {
-            JudgedOn = lines[i.InvoiceId]
-                .Where(l => l.CostType is (int)InvoiceLineCostType.Fee or (int)InvoiceLineCostType.Expense)
-                .Select(l => l.Date ?? i.InvoiceDate!.Value)
-                .Prepend(i.InvoiceDate!.Value)
-                .Distinct()
-                .Order()
-                .ToList(),
+            // The one shared rule (BillingJudgedDates, also the evaluator's and the review banner's); behaviour unchanged.
+            JudgedOn = BillingJudgedDates.Of(
+                i.InvoiceDate!.Value, lines[i.InvoiceId].Where(l => BillingJudgedDates.IsEvaluated(l.CostType)).Select(l => l.Date)),
         }).ToList();
     }
 

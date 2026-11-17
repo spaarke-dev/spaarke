@@ -780,6 +780,11 @@ internal static class AssignedAccessTestDoubles
                 _rows.Single(r => r.Id == id).StateCode = 1;
         }
 
+        /// <summary>The grant core's strict root-row read (#2852) answers from the same data as every other read.</summary>
+        public override Task<List<T>> QueryStrictAsync<T>(string entitySetName, string? filter = null, string? select = null,
+            int? top = null, int? skip = null, CancellationToken cancellationToken = default)
+            => QueryAsync<T>(entitySetName, filter, select, top, skip, cancellationToken);
+
         public override Task<List<T>> QueryAsync<T>(string entitySetName, string? filter = null, string? select = null,
             int? top = null, int? skip = null, CancellationToken cancellationToken = default)
         {
@@ -1130,6 +1135,11 @@ internal static class AssignedAccessTestDoubles
                 NullLogger<DataverseWebApiClient>.Instance,
                 NoCredential.Instance)
             => _target = target;
+
+        /// <summary>The grant core's strict root-row read (#2852) answers from the same data as every other read.</summary>
+        public override Task<List<T>> QueryStrictAsync<T>(string entitySetName, string? filter = null, string? select = null,
+            int? top = null, int? skip = null, CancellationToken cancellationToken = default)
+            => _target().QueryStrictAsync<T>(entitySetName, filter, select, top, skip, cancellationToken);
 
         public override Task<List<T>> QueryAsync<T>(string entitySetName, string? filter = null, string? select = null,
             int? top = null, int? skip = null, CancellationToken cancellationToken = default)

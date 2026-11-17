@@ -259,7 +259,9 @@ try {
 
     # --- 2. Solution membership ----------------------------------------------------------------------------------------
     if ($roleExists) {
-        $headers = @{ Authorization = "Bearer $(Get-DataverseToken)"; Accept = 'application/json'; 'OData-MaxVersion' = '4.0'; 'OData-Version' = '4.0' }
+        # Strongly consistent reads: attribute metadata (IsSecured) is cached per server, and a plain read soon after a change can
+        # come back stale (a secured column reported as unsecured). The header is ignored on data requests.
+        $headers = @{ Authorization = "Bearer $(Get-DataverseToken)"; Accept = 'application/json'; 'OData-MaxVersion' = '4.0'; 'OData-Version' = '4.0'; Consistency = 'Strong' }
         $inSolution = Test-DvInSolution -Membership (Get-DvSolutionMembership -Api $State.ApiBase -Headers $headers -SolutionId $solution[0].solutionid) -ComponentId $RoleId
         if ($inSolution) {
             $script:Skipped.Add("role in $SolutionUniqueName"); Write-Host "  skipped  role is in solution $SolutionUniqueName" -ForegroundColor Yellow

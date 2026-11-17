@@ -326,6 +326,8 @@ function Invoke-Dv {
         "OData-Version"    = "4.0"
         "Accept"           = "application/json"
         "Content-Type"     = "application/json; charset=utf-8"
+        # #2833: strongly consistent reads - attribute metadata (IsSecured) is cached per server; a plain read can be stale.
+        "Consistency"     = "Strong"
     }
     foreach ($k in $ExtraHeaders.Keys) { $headers[$k] = $ExtraHeaders[$k] }
     $params = @{ Uri = "$Api/$Endpoint"; Method = $Method; Headers = $headers }
@@ -382,7 +384,7 @@ function Read-State {
     $found = @($sol.value).Count -gt 0
     $membership = $null
     if ($found) {
-        $dvHeaders = @{ Authorization = "Bearer $Token"; Accept = 'application/json'; 'OData-MaxVersion' = '4.0'; 'OData-Version' = '4.0' }
+        $dvHeaders = @{ Authorization = "Bearer $Token"; Accept = 'application/json'; 'OData-MaxVersion' = '4.0'; 'OData-Version' = '4.0'; Consistency = 'Strong' }
         $membership = Get-DvSolutionMembership -Api $Api -Headers $dvHeaders -SolutionId $sol.value[0].solutionid
     }
     $states = @()

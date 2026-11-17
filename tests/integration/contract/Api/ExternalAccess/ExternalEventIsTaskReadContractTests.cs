@@ -99,12 +99,17 @@ public sealed class ExternalEventIsTaskReadContractTests : IClassFixture<Externa
         using var client = _fixture.CreateAuthenticatedClient();
         var raw = await client.GetStringAsync($"/api/v1/external/{segment}/{Record}/events");
 
-        raw.Should().NotContainEquivalentOf(EventTypeRef.TaskId, "the Task row id stays server-side");
-        raw.Should().NotContainEquivalentOf(OtherEventType.ToString(), "no type id is ever emitted");
-        raw.Should().NotContainEquivalentOf("eventtype", "neither the lookup column nor a type name is on the wire");
+        // R4 task 014b (FR-36, uac-r2 review of task 014 C/Q5) superseded task 008's "no type id on the wire": the event forms
+        // need the type, so each row carries eventTypeId (and its FormattedValue name). The raw lookup column still never does.
+        raw.Should().NotContainEquivalentOf("_sprk_eventtype_ref_value", "the lookup column itself stays server-side");
         using var doc = JsonDocument.Parse(raw);
         foreach (var row in doc.RootElement.GetProperty("value").EnumerateArray())
+        {
             row.GetProperty("isTask").ValueKind.Should().BeOneOf(JsonValueKind.True, JsonValueKind.False);
+            var isTask = row.GetProperty("isTask").GetBoolean();
+            Guid.Parse(row.GetProperty("eventTypeId").GetString()!).Should().Be(isTask ? EventTypeRef.Task : OtherEventType,
+                "isTask and eventTypeId describe the same type");
+        }
     }
 
     [Theory]

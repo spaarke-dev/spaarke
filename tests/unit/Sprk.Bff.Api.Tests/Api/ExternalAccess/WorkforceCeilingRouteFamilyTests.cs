@@ -52,7 +52,7 @@ public sealed class WorkforceCeilingRouteFamilyTests : IClassFixture<ExternalDel
         { "GET", $"/projects/{Project}", None, "sprk_project", AccessRights.Read },
         { "GET", $"/projects/{Project}/contacts", None, "contact", AccessRights.Read },
         { "GET", $"/projects/{Project}/organizations", None, "account", AccessRights.Read },
-        // Documents on project, matter, work assignment, invoice (list, content, versions, upload)
+        // Documents on project, matter, work assignment (list, content, versions, upload)
         { "GET", $"/projects/{Project}/documents", None, "sprk_document", AccessRights.Read },
         { "GET", $"/projects/{Project}/documents/{Item}/content", None, "sprk_document", AccessRights.Read },
         { "GET", $"/projects/{Project}/documents/{Item}/versions", None, "sprk_project", AccessRights.Read },
@@ -65,10 +65,9 @@ public sealed class WorkforceCeilingRouteFamilyTests : IClassFixture<ExternalDel
         { "GET", $"/workassignments/{WorkAssignment}/documents/{Item}/content", None, "sprk_workassignment", AccessRights.Read },
         { "GET", $"/workassignments/{WorkAssignment}/documents/{Item}/versions", None, "sprk_document", AccessRights.Read },
         { "POST", $"/workassignments/{WorkAssignment}/documents", File, "sprk_workassignment", AccessRights.AppendTo },
-        { "GET", $"/invoices/{Invoice}/documents", None, "sprk_invoice", AccessRights.Read },
-        { "GET", $"/invoices/{Invoice}/documents/{Item}/content", None, "sprk_document", AccessRights.Read },
-        { "GET", $"/invoices/{Invoice}/documents/{Item}/versions", None, "sprk_invoice", AccessRights.Read },
-        { "POST", $"/invoices/{Invoice}/documents", File, "sprk_invoice", AccessRights.AppendTo },
+        // Invoice files (ebilling-r1 task 093; the four invoice document routes retired): Read on the invoice
+        { "GET", $"/invoices/{Invoice}/files", None, "sprk_invoice", AccessRights.Read },
+        { "GET", $"/invoices/{Invoice}/files/{Item}/content", None, "sprk_invoice", AccessRights.Read },
         // To-dos
         { "GET", $"/projects/{Project}/todos", None, "sprk_todo", AccessRights.Read },
         { "POST", $"/projects/{Project}/todos", Json, "sprk_todo", AccessRights.Create },

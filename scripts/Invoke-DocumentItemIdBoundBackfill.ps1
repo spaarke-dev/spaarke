@@ -83,6 +83,8 @@ $headers = @{
     'OData-Version'    = '4.0'
     'Content-Type'     = 'application/json; charset=utf-8'
     Prefer             = "odata.maxpagesize=$PageSize"
+    # #2833: strongly consistent reads - attribute metadata (IsSecured) is cached per server; a plain read can be stale.
+    Consistency        = 'Strong'
 }
 
 $IsDryRun = -not $Apply.IsPresent

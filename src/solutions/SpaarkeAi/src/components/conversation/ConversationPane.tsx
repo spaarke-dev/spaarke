@@ -915,8 +915,9 @@ export function ConversationPane(): React.JSX.Element {
     (query: string) => searchUsersAndContacts(emailLookupDataService, query),
     [emailLookupDataService]
   );
-  // D-219 Q3 (task 186): the Send Email dialog shows the compose template picker and the AI-draft
-  // sparkle only when the host passes these handlers (EmailComposer hides both otherwise). The same
+  // D-219 Q3 (task 186) + Q1 (task 193): the Send Email dialog shows the compose template picker, the AI-draft
+  // sparkle, the side-pane To/Cc/Bcc buttons and the Related-to picker only when the host passes these handlers
+  // (EmailComposer hides each otherwise). The same
   // Xrm-backed factory the per-item cards (EmailPerItemCards) and EmailWorkspaceWidget use; one
   // instance for this pane's dialog.
   const emailComposeHandlers = React.useMemo(
@@ -3606,6 +3607,10 @@ export function ConversationPane(): React.JSX.Element {
         onRenderEmailTemplate={emailComposeHandlers.onRenderEmailTemplate}
         onDraftWithAi={emailComposeHandlers.onDraftWithAi}
         onUploadLocalAttachment={emailComposeHandlers.onUploadLocalAttachment}
+        onLookupRecipients={emailComposeHandlers.onLookupRecipients}
+        recordLookupCatalog={emailComposeHandlers.recordLookupCatalog}
+        onLookupRecord={emailComposeHandlers.onLookupRecord}
+        onAddRelationship={emailComposeHandlers.onAddRelationship}
         onSent={() => setEmailSeed(null)}
       />
 

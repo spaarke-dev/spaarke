@@ -137,7 +137,9 @@ public static class InvoiceLineReviewEndpoints
             CallerResolution.ResolveObjectId(httpContext.User) ?? string.Empty,
             TokenHelper.ExtractBearerTokenOrNull(httpContext));
 
-        var review = await service.GetAsync(invoiceId, caller, ct);
+        // Task 113 (model 8.2): step 0's verdict decides who gets the Procedure-change banner; it is read from the request, never resolved again.
+        var review = await service.GetAsync(
+            invoiceId, caller, FinanceAuthorizationFilter.StepZeroClassedInternal(httpContext) ? FinanceStepZeroVerdict.Internal : null, ct);
         return review is null
             ? FinanceAuthorizationFilter.UniformRecordNotFound(httpContext)
             : TypedResults.Ok(review);

@@ -52,12 +52,15 @@
     LIVE ORDER: dev BFF deployed from master -> THIS SCRIPT (-Apply, then -Verify) -> Direct setup (UAC-r2: the
     DirectMessage:* settings) -> 054c Stamp -> piece 3 -> 054c Move.
 
-    A NEW ENVIRONMENT: provisioning runs this script after the SpaarkeMaster import, scripts/Set-DirectRecipientSchema.ps1
-    -Apply and scripts/Set-RecordCreatorPersonSchema.ps1 -Apply: dry run, then -Apply, then -Verify (each must exit 0). The
-    import alone is not enough: the solution source marks sprk_sentby, the message's sprk_communicationthread,
-    sprk_threadtype and sprk_isdefaultthread IsSecured and carries both profiles' permissions on them, but the profiles'
-    members (every business unit's default team, the BFF application users) are per environment, and sprk_directrecipient
-    is not in the solution source at all.
+    A NEW ENVIRONMENT (not a customer stamp): run this script after the SpaarkeMaster import,
+    scripts/Set-DirectRecipientSchema.ps1 -Apply and scripts/Set-RecordCreatorPersonSchema.ps1 -Apply: dry run, then -Apply,
+    then -Verify (each must exit 0). The import alone is not enough: the solution source marks sprk_sentby, the message's
+    sprk_communicationthread, sprk_threadtype and sprk_isdefaultthread IsSecured and carries both profiles' permissions on
+    them, but the profiles' members (every business unit's default team, the BFF application users) are per environment,
+    and sprk_directrecipient is not in the solution source at all.
+    A CUSTOMER STAMP: provisioning does NOT run this script. H7b adds the profiles' members and its S28 (customer-
+    provisioning-orchestration-r1 task 270) refuses the stamp unless the four packaged columns' lock is whole; the direct
+    recipient is absent there, so the Direct-message feature stays off (deployment guide §7.4).
 
     AFTER EVERY SpaarkeMaster IMPORT: run -Verify. A non-zero exit is a gap: -Apply, then -Verify again.
 
@@ -141,6 +144,8 @@ $headers = @{
     'OData-Version'    = '4.0'
     'Content-Type'     = 'application/json; charset=utf-8'
     Prefer             = 'odata.maxpagesize=500'
+    # #2833: strongly consistent reads - attribute metadata (IsSecured) is cached per server; a plain read can be stale.
+    Consistency        = 'Strong'
 }
 function Invoke-DvGet([string]$Path) { Invoke-RestMethod -Uri "$Api/$Path" -Headers $headers -Method Get }
 function Invoke-DvGetAll([string]$Path) {

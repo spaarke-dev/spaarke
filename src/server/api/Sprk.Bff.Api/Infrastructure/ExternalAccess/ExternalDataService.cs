@@ -301,9 +301,80 @@ public class ExternalDataService
             ExternalMultiRootRule.StampOf(_regardingWorkAssignmentRead, _regardingWorkAssignment));
         [JsonPropertyName(CreatedByPersonValueAttribute)] public string? CreatedByPersonValue { get; set; }
         [JsonPropertyName(CreatedByContactValueAttribute)] public string? CreatedByContactValue { get; set; }
+
+        // R4 task 014b (FR-35/FR-36; uac-r2 review of task 014 C + Q5): the new readable columns (EventReadColumns). A lookup's
+        // NAME is its FormattedValue (the collection read's Prefer asks for them); the assignee's id is selected only as the
+        // annotation's anchor and never mapped onto the wire.
+        [JsonPropertyName(EventTypeValueColumn + FormattedValueSuffix)] public string? EventTypeName { get; set; }
+        [JsonPropertyName(EventDescriptionColumn)] public string? SprkDescription { get; set; }
+        [JsonPropertyName(EventPriorityColumn)] public int? SprkPriority { get; set; }
+        [JsonPropertyName(EventAssignedToValueColumn + FormattedValueSuffix)] public string? AssignedToName { get; set; }
+        [JsonPropertyName(CreatedByPersonValueAttribute + FormattedValueSuffix)] public string? CreatedByPersonName { get; set; }
+        [JsonPropertyName(CreatedByContactValueAttribute + FormattedValueSuffix)] public string? CreatedByContactName { get; set; }
+        [JsonPropertyName("_sprk_regardingproject_value" + FormattedValueSuffix)] public string? RegardingProjectName { get; set; }
+        [JsonPropertyName("_sprk_regardingmatter_value" + FormattedValueSuffix)] public string? RegardingMatterName { get; set; }
+        [JsonPropertyName("_sprk_regardingworkassignment_value" + FormattedValueSuffix)] public string? RegardingWorkAssignmentName { get; set; }
+
         // Task 187: every other selected column, among them the row's live-parent lookups (ExternalMultiRootRule.LiveParentSelect),
         // read by name so the select and the rule share ONE list. Never mapped onto the wire DTO.
         [JsonExtensionData] public Dictionary<string, JsonElement>? Extra { get; set; }
+    }
+
+    /// <summary>The OData annotation suffix of a column's display label (Prefer <c>odata.include-annotations</c>).</summary>
+    internal const string FormattedValueSuffix = "@OData.Community.Display.V1.FormattedValue";
+
+    /// <summary><c>sprk_event.sprk_description</c> (2,000 characters; R4 task 014b).</summary>
+    internal const string EventDescriptionColumn = "sprk_description";
+
+    /// <summary><c>sprk_event.sprk_priority</c> (R4 task 014b).</summary>
+    internal const string EventPriorityColumn = "sprk_priority";
+
+    /// <summary>The read form of <c>sprk_event.sprk_assignedto</c> (a contact lookup; R4 task 014b).</summary>
+    internal const string EventAssignedToValueColumn = "_sprk_assignedto_value";
+
+    /// <summary>The create bind of <c>sprk_event.sprk_assignedto</c>: its navigation property, which the Web API matches
+    /// case-sensitively (the bind <c>EventDueAssigneeWrite.BuildPatchJson</c> writes).</summary>
+    internal const string EventAssignedToBindKey = "sprk_AssignedTo@odata.bind";
+
+    /// <summary>The longest <c>sprk_description</c> an event accepts (the column's max length).</summary>
+    internal const int EventDescriptionMaxLength = 2000;
+
+    /// <summary>R4 task 014b review pass 2 (K2): the length of <c>sprk_event.sprk_eventname</c> (Text, max 850;
+    /// docs/data-model/sprk_event-related-tables.md).</summary>
+    internal const int EventNameMaxLength = 850;
+
+    /// <summary>Normal: the priority an event is created with when none is sent (owner Q-4).</summary>
+    internal const int EventPriorityNormal = 100000001;
+
+    /// <summary>The four <c>sprk_event.sprk_priority</c> values (Low, Normal, High, Urgent).</summary>
+    internal static readonly IReadOnlySet<int> EventPriorities = new HashSet<int> { 100000000, 100000001, 100000002, 100000003 };
+
+    // ── R4 task 014b — the event's stable 400 errorCodes (ADR-019) ─────────────────────────────────────────────────────────
+    internal const string EventTypeRequiredErrorCode = "sdap.event.type_required";
+    internal const string EventTypeImmutableErrorCode = "sdap.event.type_immutable";
+    internal const string EventAssigneeNotAllowedErrorCode = "sdap.event.assignee_not_allowed";
+    /// <summary>R4 task 014c: an assignee change on an event that is not open work (<see cref="EventStatusCode.IsOpenWork"/>).</summary>
+    internal const string EventReassignNotOpenErrorCode = "sdap.event.reassign_not_open";
+    internal const string EventDueDateRequiredErrorCode = "sdap.event.due_date_required";
+    internal const string EventPriorityInvalidErrorCode = "sdap.event.priority_invalid";
+    internal const string EventDescriptionTooLongErrorCode = "sdap.event.description_too_long";
+    internal const string EventStatusInvalidErrorCode = "sdap.event.status_invalid";
+    internal const string EventNameRequiredErrorCode = "sdap.event.name_required";
+    internal const string EventNameTooLongErrorCode = "sdap.event.name_too_long";
+
+    /// <summary>
+    /// One <c>sprk_eventtype_ref</c> row (R4 task 014b, FR-35): its id, name, whether an event of it needs a due date
+    /// (<c>sprk_requiredduedate</c>), and whether the row is ACTIVE (only an active row can be picked; an existing event keeps a
+    /// type that was later deactivated, uac-r2 Q3).
+    /// </summary>
+    public sealed record EventTypeOption(Guid Id, string Name, bool RequiresDueDate, bool IsActive);
+
+    private sealed class EventTypeRow
+    {
+        [JsonPropertyName("sprk_eventtype_refid")] public string? Id { get; set; }
+        [JsonPropertyName("sprk_name")] public string? Name { get; set; }
+        [JsonPropertyName("sprk_requiredduedate")] public bool? RequiresDueDate { get; set; }
+        [JsonPropertyName("statecode")] public int? StateCode { get; set; }
     }
 
     private sealed class ContactRow
@@ -2120,15 +2191,47 @@ public class ExternalDataService
     {
         ArgumentNullException.ThrowIfNull(caller);
         var url = $"{GetApiUrl()}/{BuildEventsQuery(rootKind, rootId)}";
+        return await ReadEventRowsAsync(url, caller, $"{rootKind} {rootId}", ct);
+    }
 
+    /// <summary>
+    /// R4 task 014b (FR-36, owner Q-7): ONE event by id, through the SAME read and the SAME withholding as the events lists
+    /// (<see cref="GetEventsAsync"/>: the multi-root rule and THE external visibility predicate). Like the lists it only READS the
+    /// row's invoice links (<see cref="ExternalEventDto.InvoiceLinks"/>): it does NOT hide an invoice-linked event — the route
+    /// applies the caller-aware invoice hiding, the same call the lists make (review pass 2, F1). The value is empty when the event
+    /// does not exist or is withheld; <c>Truncated</c> when a rule could not be decided (the route's 503, never a 200). The route
+    /// has ALREADY checked the caller's Read on every parent (the delete rule's parent check).
+    /// </summary>
+    // `virtual` per ADR-038 section 4 (substitution seam), as GetEventsAsync.
+    public virtual async Task<ExternalCollectionResponse<ExternalEventDto>> GetEventByIdAsync(
+        Guid eventId, CallerPrincipal caller, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(caller);
+        var url = $"{GetApiUrl()}/{BuildEventByIdQuery(eventId)}";
+        return await ReadEventRowsAsync(url, caller, $"event {eventId}", ct);
+    }
+
+    /// <summary>The relative query <see cref="GetEventByIdAsync"/> sends: the list's columns, filtered to one id. Pure.</summary>
+    internal static string BuildEventByIdQuery(Guid eventId)
+    {
+        if (eventId == Guid.Empty)
+            throw new ArgumentException("Event id must be a non-empty GUID.", nameof(eventId));
+        var filter = Uri.EscapeDataString($"sprk_eventid eq {eventId}");
+        return $"sprk_events?$filter={filter}&$select={EventSelect()}";
+    }
+
+    /// <summary>The events read shared by the lists and the single read: page, withhold, hide, follow the invoice chain.</summary>
+    private async Task<ExternalCollectionResponse<ExternalEventDto>> ReadEventRowsAsync(
+        string url, CallerPrincipal caller, string scope, CancellationToken ct)
+    {
         // Task 105: paged to the cap, and a cut-short list says so (see GetDocumentsAsync).
         var read = await GetCollectionAsync<EventRow>(url, ct);
         var (rootReadable, flags, live) = await ReadableEventsAsync(read.Rows, caller, ct);
         if (rootReadable.Count != read.Rows.Count)
         {
             _logger.LogInformation(
-                "[EXT-DATA] events: {Withheld} of {Total} event(s) regarding {RootKind} {RootId} withheld - also filed to a secure record the caller cannot read",
-                read.Rows.Count - rootReadable.Count, read.Rows.Count, rootKind, rootId);
+                "[EXT-DATA] events: {Withheld} of {Total} event(s) regarding {Scope} withheld - also filed to a secure record the caller cannot read",
+                read.Rows.Count - rootReadable.Count, read.Rows.Count, scope);
         }
 
         // uac-r2 task 191h (#2179 design §3.10, #2189): an event regarding an internal-only communication (an event built from an
@@ -3378,22 +3481,96 @@ public class ExternalDataService
                 "Events can only be listed for a project, matter or work assignment. None/Ambiguous are deny states - a "
                 + "caller reaching here with one has skipped its authorization gate.");
 
-        // Task 032 (FR-26): both creator stamps, so the SPA offers Delete only on the caller's own events.
-        // Task 039: all three root lookups, so a row also filed to a root the caller cannot read can be withheld.
-        // R4 task 008 (FR-18; UAC review uac-r2 2026-11-13, condition C): plus the event type lookup, read server-side ONLY to
-        // derive ExternalEventDto.IsTask (compared to EventTypeRef.Task). Neither the id nor the type's name is ever mapped onto
-        // the wire. sprk_event has no external module, so this $select is the column list this read is allowed: nothing in the
-        // module allow-lists (ExternalAccessModule ReadableColumns) changes, and the generic module seam still refuses sprk_event.
+        var filter = Uri.EscapeDataString($"{binding.LookupValueAttribute} eq {rootId}");
+        // Task 105: no $top (it suppresses @odata.nextLink); the primary key breaks due-date ties so pages never overlap.
+        return $"sprk_events?$filter={filter}&$select={EventSelect()}&$orderby=sprk_duedate asc,sprk_eventid asc";
+    }
+
+    /// <summary>
+    /// THE readable columns of the external event read — the lists and <c>GET /events/{id}</c> (R4 task 014b). <c>sprk_event</c>
+    /// has no external module, so this list (not <c>ExternalAccessModule</c>'s <c>ReadableColumns</c>, which would open the
+    /// generic grid and record seam to <c>sprk_event</c>) is the allow-list this plane reads events through, each entry with its
+    /// review. Pinned by <c>ExternalEventFormsContractTests.EventReadColumns_AddTheFormFields_AndNoSecurityOrPersonColumn</c> (the
+    /// allow-list) and <c>ExternalRootEventReadTests.BuildEventsQuery_ForTheProject_IsTheShippedQueryPlusTheTwoOtherLookups</c> (the
+    /// exact select); the single read's withholding runs for real in <c>ExternalRootEventReadTests.GetEventById_*</c>.
+    /// </summary>
+    /// <remarks>
+    /// <list type="bullet">
+    /// <item>id, name, due date, status, created on — the shipped list (tasks 097/098).</item>
+    /// <item>the three regarding lookups — task 039 (multi-root rule); since 014b also their FormattedValue names, for the
+    /// regarding record on <c>GET /events/{id}</c> (the caller holds Read on every one of them by then).</item>
+    /// <item>the two creator stamps — task 032 (delete-own); since 014b also their FormattedValue as <c>createdByName</c>
+    /// (uac-r2 Q5: needs the owner's OK as its own column — owner approved 2026-11-16, "Yes, show it").</item>
+    /// <item><c>sprk_eventtype_ref</c> — task 008 (uac-r2 C: <c>isTask</c>); since 014b the id and its FormattedValue name are on
+    /// the wire as <c>eventTypeId</c>/<c>eventTypeName</c> (uac-r2 approved the column names 2026-11-16, review of task 014 C).</item>
+    /// <item><c>sprk_description</c>, <c>sprk_priority</c> — 014b (uac-r2 review of task 014 C, approved 2026-11-16).</item>
+    /// <item><c>sprk_assignedto</c> — 014b, NAME ONLY (<c>assignedToName</c>, the FormattedValue; uac-r2 review C, approved
+    /// 2026-11-16). The contact id is selected only as the annotation's anchor and never mapped (owner S-2: the assignable-people
+    /// route is the only one that returns contact ids).</item>
+    /// <item>the live-parent lookups (task 187) and the invoice link columns (task 130-0) — read for the withholding rules,
+    /// never mapped.</item>
+    /// </list>
+    /// </remarks>
+    internal static string EventSelect()
+    {
         var select = $"sprk_eventid,{EventNameColumn},sprk_duedate,{EventStatusColumn},createdon,"
                      + "_sprk_regardingproject_value,_sprk_regardingmatter_value,_sprk_regardingworkassignment_value,"
                      + CreatorStampSelect
                      + "," + EventTypeValueColumn
+                     + "," + EventDescriptionColumn + "," + EventPriorityColumn + "," + EventAssignedToValueColumn
                      + LiveParentSelectSuffix(EventTable); // task 187: the parents whose live roots the rule takes in
-        select = WithInvoiceLinkColumns(select, EventTable); // task 130-0 fix round 1: an event follows its invoice
-        var filter = Uri.EscapeDataString($"{binding.LookupValueAttribute} eq {rootId}");
-        // Task 105: no $top (it suppresses @odata.nextLink); the primary key breaks due-date ties so pages never overlap.
-        return $"sprk_events?$filter={filter}&$select={select}&$orderby=sprk_duedate asc,sprk_eventid asc";
+        return WithInvoiceLinkColumns(select, EventTable); // task 130-0 fix round 1: an event follows its invoice
     }
+
+    /// <summary>
+    /// Every <c>sprk_eventtype_ref</c> row, active and inactive (R4 task 014b, FR-35): the creatable set is the active ones
+    /// (<see cref="CreatableEventTypes"/>), and a PATCH that clears a due date asks the event's own type, which may since have
+    /// been deactivated (uac-r2 Q3). One paged app-only read through this service's own client.
+    /// </summary>
+    /// <exception cref="DataverseUnavailableException">The read did not complete (any failed or capped page): the type set is
+    /// never guessed from part of it.</exception>
+    // `virtual` per ADR-038 section 4 (substitution seam).
+    public virtual async Task<IReadOnlyList<EventTypeOption>> GetEventTypesAsync(CancellationToken ct = default)
+    {
+        var url = $"{GetApiUrl()}/{EventTypeRef.EntitySet}?$select=sprk_eventtype_refid,sprk_name,sprk_requiredduedate,statecode"
+                  + "&$orderby=sprk_name asc,sprk_eventtype_refid asc";
+        var read = await GetCollectionAsync<EventTypeRow>(url, ct);
+        if (read.Truncated)
+            throw new DataverseUnavailableException("The event types could not be read completely.");
+
+        return read.Rows
+            .Where(r => Guid.TryParse(r.Id, out _))
+            .Select(r => new EventTypeOption(
+                Guid.Parse(r.Id!), r.Name ?? "", r.RequiresDueDate == true, r.StateCode == 0))
+            .ToList();
+    }
+
+    /// <summary>
+    /// The configured narrowing of the creatable event types (<c>ExternalAccess:EventTypes:Allowed</c>, a GUID list; owner
+    /// Q-1's fallback is Task + Reminder). <see langword="null"/> when nothing is configured (every active type). Fail closed:
+    /// a configured entry that is not a GUID allows nothing in its place, so a list of only bad entries allows nothing. Pure.
+    /// </summary>
+    internal static IReadOnlySet<Guid>? AllowedEventTypeIds(IConfiguration configuration)
+    {
+        var entries = configuration.GetSection("ExternalAccess:EventTypes:Allowed").GetChildren()
+            .Select(c => c.Value).Where(v => !string.IsNullOrWhiteSpace(v)).ToList();
+        if (entries.Count == 0)
+            return null;
+        return entries.Select(v => Guid.TryParse(v, out var id) ? id : Guid.Empty).Where(id => id != Guid.Empty).ToHashSet();
+    }
+
+    /// <summary>
+    /// THE creatable event-type set (R4 task 014b, owner Q-1, uac-r2 Q3): the ACTIVE rows of <paramref name="types"/>, narrowed
+    /// to <paramref name="allowed"/> when one is configured, and — for a caller whose access Dataverse decides — to the rows
+    /// <paramref name="appendTo"/> answers <see langword="true"/> (an unanswered row is left out). A contact passes
+    /// <see langword="null"/>: every active row (an event type confers no access). Ordered as read. Pure.
+    /// </summary>
+    internal static IReadOnlyList<EventTypeOption> CreatableEventTypes(
+        IReadOnlyList<EventTypeOption> types, IReadOnlySet<Guid>? allowed, IReadOnlyDictionary<Guid, bool?>? appendTo) =>
+        types.Where(t => t.IsActive
+                         && (allowed is null || allowed.Contains(t.Id))
+                         && (appendTo is null || (appendTo.TryGetValue(t.Id, out var holds) && holds == true)))
+            .ToList();
 
     /// <summary>The project form of <see cref="BuildEventsQuery(TodoRootKind, Guid)"/> (the shipped query, plus the two extra lookups).</summary>
     internal static string BuildEventsQuery(Guid projectId) => BuildEventsQuery(TodoRootKind.Project, projectId);
@@ -3431,6 +3608,15 @@ public class ExternalDataService
             throw new ArgumentOutOfRangeException(nameof(request), request.EventType,
                 "eventType must be \"task\" or omitted.");
 
+        // R4 task 014b: the route has validated every new field against its rule (the type against the creatable set, the
+        // assignee against the assignable set); the builder refuses what is out of shape, so a skipped gate fails loudly.
+        var priority = request.SprkPriority ?? EventPriorityNormal;
+        if (!EventPriorities.Contains(priority))
+            throw new ArgumentOutOfRangeException(nameof(request), priority, "sprk_priority must be one of the four priorities.");
+        if (request.SprkDescription is { Length: > EventDescriptionMaxLength })
+            throw new ArgumentOutOfRangeException(nameof(request), "sprk_description is longer than 2,000 characters.");
+        var eventTypeId = EventTypeIdOf(request);
+
         var body = new Dictionary<string, object?>();
         if (!string.IsNullOrWhiteSpace(request.SprkName))
             body[EventNameColumn] = request.SprkName;
@@ -3447,10 +3633,155 @@ public class ExternalDataService
         body[binding.BindKey] = $"/{binding.EntitySet}({rootId})";
         body[OwnerBindKey] = $"/teams({owningTeamId})";
 
-        // R4 task 008: "task" binds the Task type row (the ONE shared id, EventTypeRef); omitted binds no type, as before.
-        if (request.EventType is TaskEventType)
-            body[EventTypeBindKey] = $"/{EventTypeRef.EntitySet}({EventTypeRef.TaskId})";
+        // R4 task 008 / 014b: the type the route validated — eventTypeId, or "task" mapped to the Task row (one release).
+        if (eventTypeId is { } typeId)
+            body[EventTypeBindKey] = $"/{EventTypeRef.EntitySet}({typeId})";
+
+        // R4 task 014b (owner Q-4, S-2): priority (Normal when not sent), description, and the first assignee — a plain bind of
+        // the contact the route found in the record's assignable set (setting the first assignee is not a reassign).
+        // LEGACY-EVENT-CREATE-R4 (CreateExternalEventRequest.IsLegacyUntypedCreate): the legacy untyped body writes exactly the
+        // pre-014b payload, so no priority; when the legacy shapes are removed in R5, write the priority unconditionally.
+        if (!request.IsLegacyUntypedCreate)
+            body[EventPriorityColumn] = priority;
+        if (!string.IsNullOrEmpty(request.SprkDescription))
+            body[EventDescriptionColumn] = request.SprkDescription;
+        if (request.AssignedToContactId is { } assignee && assignee != Guid.Empty)
+            body[EventAssignedToBindKey] = $"/contacts({assignee})";
         return body;
+    }
+
+    /// <summary>
+    /// The type an event create names (R4 task 014b): <see cref="CreateExternalEventRequest.EventTypeId"/>, or
+    /// <c>eventType: "task"</c> mapped to <see cref="EventTypeRef.Task"/> (accepted for one release). <see langword="null"/>
+    /// when neither is sent. Both sent and naming different types is a contradiction: thrown (the route answers 400 first).
+    /// </summary>
+    internal static Guid? EventTypeIdOf(CreateExternalEventRequest request)
+    {
+        // LEGACY-EVENT-CREATE-R4 (CreateExternalEventRequest.IsLegacyUntypedCreate): the "task" alias; remove in R5 with the
+        // legacy untyped body.
+        var legacy = request.EventType is TaskEventType ? EventTypeRef.Task : (Guid?)null;
+        if (request.EventTypeId is { } id && id != Guid.Empty)
+        {
+            if (legacy is { } task && task != id)
+                throw new ArgumentOutOfRangeException(nameof(request), "eventType and eventTypeId name different types.");
+            return id;
+        }
+
+        return legacy;
+    }
+
+    /// <summary>
+    /// The COMPLETE PATCH body of an external event edit (R4 task 014b, FR-36): ONLY the agreed columns — <c>sprk_eventname</c>,
+    /// <c>sprk_duedate</c>, <c>sprk_priority</c>, <c>sprk_description</c>, <c>statuscode</c> with its paired <c>statecode</c>
+    /// (owner S-3) — and only those the request SENT. Never ownership, a core-ancestor stamp, <c>sprk_accesspermission</c>,
+    /// <c>sprk_issecure</c> or the event type (S-4) (uac-r2 2026-11-16, condition 3). The assignee is never emitted HERE: the
+    /// route adds the internal reassign's columns (R4 task 014c, <c>ExternalProjectDataEndpoints.BuildEventUpdateWithReassign</c>)
+    /// only after its own checks. Pure; the route has validated each value first, and anything out of shape throws here.
+    /// </summary>
+    internal static Dictionary<string, object?> BuildEventUpdatePayload(UpdateExternalEventRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (request.EventTypeIdSent)
+            throw new ArgumentOutOfRangeException(nameof(request), "The event type is not written by this update.");
+
+        var body = new Dictionary<string, object?>(StringComparer.Ordinal);
+        if (request.NameSent)
+        {
+            if (string.IsNullOrWhiteSpace(request.SprkName))
+                throw new ArgumentOutOfRangeException(nameof(request), "sprk_name cannot be cleared.");
+            body[EventNameColumn] = request.SprkName;
+        }
+
+        if (request.DueDateSent)
+            body["sprk_duedate"] = request.SprkDuedate is null
+                ? null
+                : DataverseDateOnly.Format(DataverseDateOnly.Parse(request.SprkDuedate));
+
+        if (request.PrioritySent)
+        {
+            if (request.SprkPriority is not { } priority || !EventPriorities.Contains(priority))
+                throw new ArgumentOutOfRangeException(nameof(request), request.SprkPriority, "sprk_priority must be one of the four priorities.");
+            body[EventPriorityColumn] = priority;
+        }
+
+        if (request.DescriptionSent)
+        {
+            if (request.SprkDescription is { Length: > EventDescriptionMaxLength })
+                throw new ArgumentOutOfRangeException(nameof(request), "sprk_description is longer than 2,000 characters.");
+            body[EventDescriptionColumn] = string.IsNullOrEmpty(request.SprkDescription) ? null : request.SprkDescription;
+        }
+
+        if (request.StatusSent)
+        {
+            if (request.SprkStatus is not { } status || !EventStatusCode.IsDefined(status))
+                throw new ArgumentOutOfRangeException(nameof(request), request.SprkStatus, "sprk_status must be a sprk_event statuscode.");
+            body[EventStatusColumn] = status;
+            body["statecode"] = EventStatusCode.GetStateCode(status);
+        }
+
+        return body;
+    }
+
+    /// <summary>
+    /// The columns an external event PATCH may ever write (<see cref="UpdateEventAsync"/>'s allow-list; pinned by tests):
+    /// <see cref="BuildEventUpdatePayload"/>'s, plus — R4 task 014c, uac-r2 condition — ONLY the internal reassign's assignee,
+    /// reassigned-date and reassigned-by, named exactly as <c>EventDueAssigneeWrite.AddReassignColumns</c> emits them (the
+    /// lookups' case-sensitive navigation-property binds). Its <c>statuscode</c> is already here.
+    /// </summary>
+    internal static readonly IReadOnlySet<string> EventUpdateColumns = new HashSet<string>(StringComparer.Ordinal)
+    {
+        EventNameColumn, "sprk_duedate", EventPriorityColumn, EventDescriptionColumn, EventStatusColumn, "statecode",
+        "sprk_AssignedTo@odata.bind", "sprk_reassigneddate", "sprk_ReassignedBy@odata.bind",
+    };
+
+    /// <summary>
+    /// The app-only PATCH of an external event edit (R4 task 014b). Call ONLY after the route's edit check passed (uac-r2 Q1, G5:
+    /// checked as the user, written as the app). <see langword="false"/> when the row is gone (404).
+    /// </summary>
+    /// <remarks><c>virtual</c> per ADR-038 section 4 (substitution seam): a deny test must be able to assert no write was sent.</remarks>
+    /// <exception cref="DataverseUnavailableException">Dataverse refused or could not complete the write.</exception>
+    public virtual async Task<bool> UpdateEventAsync(Guid eventId, IReadOnlyDictionary<string, object?> payload, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(payload);
+        if (payload.Keys.Any(k => !EventUpdateColumns.Contains(k)))
+            throw new ArgumentOutOfRangeException(nameof(payload), "The event update names a column outside its allow-list.");
+
+        var url = $"{GetApiUrl()}/sprk_events({eventId})";
+        try
+        {
+            var token = await GetAppOnlyTokenAsync(ct);
+            using var request = new HttpRequestMessage(HttpMethod.Patch, url);
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+            request.Headers.Add("OData-MaxVersion", "4.0");
+            request.Headers.Add("OData-Version", "4.0");
+            request.Headers.Add("If-Match", "*"); // an update, never an upsert that would create a row
+            request.Content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
+
+            using var response = await _httpClient.SendAsync(request, ct);
+            if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
+                return false;
+
+            if (!response.IsSuccessStatusCode)
+            {
+                _logger.LogWarning("[EXT-DATA] Update event {EventId} failed: {Status}", eventId, response.StatusCode);
+                throw new DataverseUnavailableException($"Dataverse answered {(int)response.StatusCode} to the event update.");
+            }
+
+            return true;
+        }
+        catch (DataverseUnavailableException)
+        {
+            throw;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "[EXT-DATA] Update event {EventId} could not be sent", eventId);
+            throw new DataverseUnavailableException("The event update could not be completed.", ex);
+        }
     }
 
     /// <summary>
@@ -4760,9 +5091,34 @@ public class ExternalDataService
         SprkCreatedbycontactValue = r.CreatedByContactValue,
         // R4 task 008 (uac-r2 C): only the comparison leaves; an absent, null or unparsable lookup is not a Task.
         IsTask = Guid.TryParse(r.EventTypeValue, out var eventType) && eventType == EventTypeRef.Task,
+        // R4 task 014b (EventSelect's review notes): the type row's id and name, description, priority; the assignee's and the
+        // creator's NAMES only (FormattedValue), never their ids.
+        EventTypeId = Guid.TryParse(r.EventTypeValue, out var typeId) ? typeId.ToString("D") : null,
+        EventTypeName = Guid.TryParse(r.EventTypeValue, out _) ? r.EventTypeName : null,
+        SprkDescription = r.SprkDescription,
+        SprkPriority = r.SprkPriority,
+        AssignedToName = r.AssignedToName,
+        CreatedByName = !string.IsNullOrWhiteSpace(r.CreatedByPersonName) ? r.CreatedByPersonName : r.CreatedByContactName,
+        Parents = ParentsOf(r),
         // task 130-0 fix round 1; never serialized. F3b fix round 1: plus the invoices of the rows it is filed under.
         InvoiceLinks = InvoiceLinksOf(EventTable, r.Extra).Concat(ancestorLinks ?? Array.Empty<Guid>()).Distinct().ToList(),
     };
+
+    /// <summary>R4 task 014b: the roots an event row is filed under, with their names (server-side only).</summary>
+    private static IReadOnlyList<ExternalEventParent> ParentsOf(EventRow r)
+    {
+        var parents = new List<ExternalEventParent>(3);
+        Add(TodoRootKind.Project, r.SprkRegardingprojectValue, r.RegardingProjectName);
+        Add(TodoRootKind.Matter, r.SprkRegardingmatterValue, r.RegardingMatterName);
+        Add(TodoRootKind.WorkAssignment, r.SprkRegardingworkassignmentValue, r.RegardingWorkAssignmentName);
+        return parents;
+
+        void Add(TodoRootKind kind, string? value, string? name)
+        {
+            if (Guid.TryParse(value, out var id) && id != Guid.Empty)
+                parents.Add(new ExternalEventParent(kind, id, name));
+        }
+    }
 
     private static ExternalContactDto MapContact(ContactRow r) => new()
     {

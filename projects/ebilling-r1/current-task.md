@@ -1,105 +1,90 @@
 # Current Task State
 
-> **Last Updated:** 2026-11-14, about 06:00Z. Session `ebilling-r1`, Claude Desktop, the only writer to this worktree.
-> Older detail is in `notes/handoff-history/current-task-2026-11-13a.md`.
+> **Last Updated:** 2026-11-15. Session `ebilling-r1` (Claude Desktop) is the only writer to this worktree.
+> Older detail: `notes/handoff-history/current-task-2026-11-15a.md` (and `-2026-11-13a.md`).
 
-## Quick recovery
+## Owner mode
 
-- **Branch:** `work/ebilling-r1`.
-- **Local HEAD:** `f6f8a16f3a` plus this notes commit; pushed. **PR #2822** (work → master) is open, not bound; ontology-r1 and uac-r2 were asked to review it (both approvals gate the merge).
-- **Owner mode:** "continue with open work items that are available", plus a testing checklist (`notes/owner-testing-checklist.md`, committed).
+- "Continue with open work items that are available"; keep `notes/owner-testing-checklist.md` current.
+- 2026-11-15, owner: "Proceed with 093; but also other work tasks that can run in parallel".
 
-## Gates
+## NOW — read this first
 
-- Green. The full-suite failures were TaskCanceled timeouts from machine load. Every failing class re-ran green on its own: 8 sequential batches, 872 tests, 0 failures. ArchTests are 2570/0. This meets uac-r2's 084d-5a condition ("full gates green").
+### In flight
+
+- **Dev BFF deployed 2026-11-15 18:32Z: aa7d6345f3** (master c1eb6e4a8e = 095g #2830 + #2839 + R4 021 #2840, plus mcp's spike). uac-r2's 30-min gate passed: 42 requests, 0 5xx, and the external invoice file routes returned 200. word-add-in-r1 was told 095g is live (queued; it is offline). The SPA deploy is spa-r4's, and confirmation is pending. Checklist section E becomes testable once spa-r4 confirms.
+- **#2844 / ISS-022 (found by the gate):** the invoice index job selected the removed `sprk_invoice.sprk_document`, so every invoice re-index has failed since task 094 (2026-10-27).
+  - Fix d7f36ddd6d on work, with regression test `Issue2844_*` and ArchTest `InvoiceIndexColumnsGuardTests`.
+  - Sonnet review: no defects. BFF build has 0 warnings. ArchTests 2633/0. Master merged in.
+  - Next: the PR to master (send uac-r2 the number), then a BFF deploy (owner go in uac-r2's session).
+  - **Then the re-index sweep:** every sprk_invoice with modifiedon ≥ 2026-10-27, through the normal indexing job. It writes to the dev search index, so it needs **the owner's go HERE**. Report the count and the result to uac-r2.
+- **113b ✅ on work (owner go 2026-11-15):** the Invoice Review page now shows 113's Procedure-change banner (`ProcedureChangeNotice.tsx`). One Sonnet adversarial pass found no F-class defects; its unknown-state point is closed. It ships with task 112, the page's first deploy.
+- **Reminder for 084h-2 (ontology-r1):** the writer caps only `reason` at 2000 characters, not `note`. 084h-2 must enforce or trim the note at the service (design §9), so an over-long note never reaches the create and fails as a retryable CreateFailed.
+
+### Done today, on work (pushed)
+
+- **113 Procedure-change banner:** ✅, merged 84e708682c. One adversarial pass plus fix round. ontology-r1 PASSED the judged-dates helper extract (`Services/Signals/Billing/BillingJudgedDates.cs`); keep the Fee/Expense filter at the row→request boundary.
+- **084h-1 writer entry** (`WriteRecordProcedureDecisionAsync`, `RecordProcedureActions`): merged df7dc16ac9. One adversarial pass plus fix round 1 (shared FindKeyedRecordsAsync / AlreadyRecordedOrRefuse helpers, JSON blank note). Billing tests untouched and green (549/549).
+  - Fix round 2 (ontology-r1's F3-1, F3-2 and item 3) merged at e841d90118; ontology-r1 PASSED it. TASK-INDEX row ✅.
+- **093 firm file routes:** ✅, merged a95f7e7297; uac-r2 PASSED it. TASK-INDEX row ✅.
+  - Hand-offs H-1/H-2 to 084h-2/3 are in `notes/084h-1-writer-entry.md`.
+- **084h and 095f part 2 designs:** ontology-r1 PASSED both after round 1 (73ce24172c).
+  - 084h-2 never deploys without 084h-3 (the repair job, ADR-004 IJobHandler).
+  - 084h-2 to 084h-5 are not started; no POMLs yet.
+- **#2830 (095g) merged** to master acc96e1927. It is not on the dev BFF yet; it rides uac-r2's next deploy, which needs the owner's go in uac-r2's session.
+- **#2833 ebilling slice:** `Consistency: Strong` added in scripts/ebilling (b80da28e20). It ships with the next PR.
+
+### Open owner questions (asked 2026-11-15, no answer yet)
+
+The owner was offered "as recommended" for all ten.
+
+**084h:**
+1. Pin-to-Follow → two records.
+2. Accept the §8 classes and tiers.
+3. DELETE note in a JSON body.
+4. No control-character rule on the existing `reason`.
+5. Ship the NotRecorded warning to the UI.
+
+**095f part 2:**
+6. With no note, the column takes the required reason.
+7. A separate internal `sprk_decisionnote` column, not `sprk_correctionnote`.
+8. Adjustments get Decision Records (option A).
+9. Correct/confirm get a note on the correction row (option B).
+10. Create Invoice wizard: server-only for R1 (option C).
+
+**Premise correction to log:** EB-D-237 assumed the Create Invoice wizard has a Correction path. It has none and does not use from-document. The only from-document client is word-add-in-r1's emailInvoiceSubmission.ts (New only).
+
+### Waiting on peers
+
+- **word-add-in-r1** (offline; messages queued):
+  - 096 gate: has the add-in removed the Invoice save target and invoice quick-create, plus one release since?
+  - Will from-document offer Correction?
+  - Slice C (the firm-assign pane) waits until 095g is on the dev BFF.
+- **spa-r4:**
+  - Accepts an optional `correction` prop on InvoiceSubmissionWizard, with conditions (095f design §13).
+  - Builds R4 021 against the 093 contract once its task 013 is done.
 
 ## Next actions (in order)
 
-1. DONE: gates green, notes committed, work pushed.
-2. DONE (cdde3d69b4 + follow-ups merged; 084d ✅; provisioning-r1 Pester 81/81). **Merge origin/master into work.** It brings:
-   - #2798 (ISS-021, `3ae2a63362`);
-   - #2790 (fm 052b and 045d-f, `4f9e77e9c0`);
-   - later #2819 (fm 045g).
-
-   Then:
-   - add the ISS-021 dry-run/write parity case in the 084d rig (asked for by ontology-r1);
-   - swap the planner's literal `"statecode", 0` for StateActive;
-   - add a `ProcedureEntity.StateActive` alias (ontology-r1 comment);
-   - tell provisioning-r1 to re-run the `Set-CustomerOwnerTeams` Pester tests.
-3. **Once 084d's parity case is in**, mark 084d ✅.
-4. **When 045g is on work**:
-   - reword `InvoiceApprovalLineOriginTests.LinesDetachedMovedToANewCoreAndReattached_Approve` to state the rule only. Name NO route; the repo is public.
-   - Add a runbook line: a legacy invoice with no core, or with two, cannot be filed through the BFF (EB-D-231).
-5. **PR #2822 is APPROVED by both reviewers.** ontology-r1 PASSED it at 565f82624b (K1–K4, no F). uac-r2 approved it at 293d87de72, after the F4 fix (Set firm now asks Write|Append), with CI green (47 pass).
-   - The merge waits ONLY on the owner's go. The PR was CLEAN against master bd43110169.
-   - Do NOT push the work branch until #2822 merges: its head must stay 293d87de72. Local commits since then: notes, plus the 095g merge e8dcb1ef80.
-   - After the merge:
-     - tell uac-r2, which folds it into its next dev BFF deploy;
-     - send the master SHA to word-add-in-r1 and spa-r4;
-     - push work and open the next PR (095g plus notes) for ontology-r1 and uac-r2.
-   - The ontology-r1 1/2990 failure was a partial export, not a defect.
-   - K4 goes to the owner: should a per-record Procedure override file a Decision Record?
-6. **095g DONE**, merged into work locally at e8dcb1ef80.
-   - Two Opus adversarial passes; uac-r2 APPROVED at 367e5b2876.
-   - The merge resolved conflicts with the F4 fix; afterwards targeted tests 1569/0 and ArchTests 2612/0.
-   - **Not run:** `scripts/ebilling/Set-EbillingLawFirmTypeCode.ps1`. It needs the owner's go typed in THIS session, with uac-r2 notices before and after. Until it runs, both routes answer 503 on dev.
-   - Two assigned firms on dev have no type; the owner was asked whether to set them.
-   - The pane is word-add-in-r1's; the contract is in the 095g notes, "Contract for word-add-in-r1 (as built)".
-7. **095f part 2.** The owner answered (EB-D-236, 237):
-   - every decision allows an optional short note, line decisions included;
-   - every Correction needs a note, the from-document route and the Create Invoice wizard too.
-   - Split: 2a (lifecycle extension + reject/return), 2b (adjustment), 2c (override + blocked return), 2d (line-decision notes), 2e (from-document Correction note, 094 route + CreateInvoiceWizard). Overwrite with the latest reason; Decision Records keep the history.
-8. DONE 2026-11-14 03:45Z: `sprk_createinvoicewizard` redeployed to dev from master `cfa97d718b`. The owner's go was typed. uac-r2 got notices before and after. Recorded in `notes/053-wp2-deploy.md`.
-9. Then task 112 (deploy). The 095f hold is RELEASED: word-add-in-r1's pane, which sends `correctionNote`, is live on dev at 942b2889bf (#2815 759dc4b1f6, #2820). `Deploy-EbillingInvoiceCorrectionNoteColumn.ps1` must run on every environment beyond dev before 095f goes there.
-
-**Master now:** `cfa97d718b`. It includes 045g (#2819, merged at b76276a314). #2794 (ISS-020) is CLOSED.
-
-**Gates re-run:** Bash `b8vixvoty` re-runs the 177 classes that failed in the full run on `bb28870b76`. The trx is `scratchpad/trx/rerun-bb2887.trx`. The second full run had 438 failures: 435 TaskCanceled (57-475 s), plus 1 TimeoutException, 1 IOException and 1 Compose fidelity failure (`alternate-content-duplicate-paraid.docx`, not ours).
-
-## Decisions this session (all in `notes/decisions-log.md`)
-
-- EB-D-223..232. EB-D-218 is refined for the 084d-5a candidates.
-- Owner, via field-mapping-r1: an approval or correction is never without an invoice (045g round 4, reviewed PASS).
-
-## Peers
-
-- **uac-r2:**
-  - 095g design APPROVED with R1 and R2. The pending-revoke limit is its D-10. The slot 2 Insights label is #2816.
-  - The dev `createinvoicewizard` is stale (confirmed); the redeploy waits on the owner's go.
-- **ontology-r1:** EB-D-232 PASS. Still owed: the DEF-059 role note, the DEF-060 Signals diff and the 176 fixture change.
-- **field-mapping-r1:**
-  - 045g round 4 PASS.
-  - #2790 is merged to master; #2819 (045g) is open.
-- **spa-r4:** task 010 review PASS-with-changes; fix 9b10699efe re-checked PASS. #2818 merged to master as bd43110169 (2026-11-14 06:45Z); its dev SPA deploy follows uac-r2's BFF deploy.
-- **word-add-in-r1:**
-  - It has the 095e and 095f contracts; the pane follows, using a top-level `firmName`.
-  - Owed: the master SHA.
-- **provisioning-r1:** re-run Pester after our master merge.
-
-## Filed this session
-
-- ISS-021 #2797 (fixed by #2798 plus EB-D-232).
-- ISS-020 #2794.
-- ISS-018 #2777.
-- ISS-019 #2782.
-
-## Known limits recorded
-
-- 084d-5a and 084d-5b: in `notes/084-procedure-review-ui.md`.
-- 095e: contract §13.
-- 095f:
-  - The persister's no-note Warning also fires for a from-document Correction (097b), which carries no note, until the owner decides that route.
-  - The column script must run before any deploy beyond dev.
+1. Open the master PR (see In flight), ask ontology-r1 to sign off once CI is green, and get the owner's merge go.
+2. When the owner answers, update decisions-log (EB-D-239+), then:
+   - write POMLs for 095f-2a … 2e and 084h-2/3/4;
+   - build 095f-2a and 084h-2 + 084h-3 in parallel (max 4 agents).
+3. Task 112 (deploy, owner go here plus uac-r2 notices):
+   - the 084f role apply;
+   - first create of `sprk_recordprocedures` plus the SpaarkeMaster AddSolutionComponent;
+   - Billing-tab form placement.
+   - `Deploy-EbillingInvoiceCorrectionNoteColumn.ps1` must run on any environment beyond dev before 095f goes there.
+4. Still owed to ontology-r1: the DEF-059 role note, the DEF-060 Signals diff, the 176 fixture change.
 
 ## Standing gates
 
-- A live Dataverse write or role change needs the owner's OK typed in THIS session, plus uac-r2 notices before and after (also ontology-r1 for `sprk_policyversion`).
-- The access-invariant check lives only in session memory. Run it after every solution import; record pass or fail only.
+- **Live writes:** a live Dataverse write or role change needs the owner's OK typed in THIS session, plus uac-r2 notices before and after (also ontology-r1 for `sprk_policyversion`). Merging a PR needs the owner's go.
 - **Agents:**
-  - At most 4, and name the model for each.
-  - Launch only from the worktree root.
-  - `isolation: worktree` starts on MASTER, so every brief names its base sha.
-  - Remove an agent's worktree with `Remove-WorktreeSafe.ps1` after `git worktree unlock`.
-- Leftover folders that could not be deleted (permission denied; git registration removed): `C:\tmp\wt-iss021`, `C:\tmp\wt-ciw` (partial), `...\.claude\worktrees\agent-a7122a26394c93f4f`. A human can delete them.
-- NEVER run python. Never use `--no-verify` or a bare `git stash`.
-- The repo is public: describe security and timing findings by mechanism only, and only privately to uac-r2.
+  - At most 4; name the model for each.
+  - Launch from the worktree root. `isolation: worktree` starts on MASTER, so each brief names its base sha.
+  - Remove a worktree with `git worktree unlock` then `scripts/worktree/Remove-WorktreeSafe.ps1 -Path` (single-quoted Windows path).
+- **Hard rules:** NEVER run python. Never `--no-verify` or a bare `git stash`.
+- **Public repo:** describe security findings by mechanism only, and only privately to uac-r2. Never put access-gap mechanisms, identity names, role memberships or privilege maps in notes, commits, PRs or issues.
+- **Ebilling Pester:** run on each file's declared version (5.7.1 / 3.4.0). Plain Invoke-Pester loads 6.2 and fails.
+- **Leftover folders a human must delete:** `C:\tmp\wt-iss021`, `C:\tmp\wt-ciw`, `...\.claude\worktrees\agent-a7122a26394c93f4f`.

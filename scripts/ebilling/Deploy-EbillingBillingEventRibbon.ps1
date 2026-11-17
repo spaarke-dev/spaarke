@@ -80,7 +80,9 @@ function Get-RefusalAdvice([string[]]$Ids) {
 $api = "$BaseUrl/api/data/v9.2"
 $token = az account get-access-token --resource $BaseUrl --query accessToken -o tsv 2>$null
 if (-not $token) { throw "No Dataverse token for $BaseUrl. Run 'az login' and retry." }
-$headers = @{ Authorization = "Bearer $token"; Accept = 'application/json'; 'OData-Version' = '4.0' }
+# Strongly consistent reads: attribute metadata (IsSecured) is cached per server, and a plain read soon after a change can
+# come back stale (a secured column reported as unsecured). The header is ignored on data requests.
+$headers = @{ Authorization = "Bearer $token"; Accept = 'application/json'; 'OData-Version' = '4.0'; Consistency = 'Strong' }
 
 function Get-EffectiveRibbon {
     $r = Invoke-RestMethod -Headers $headers -Uri "$api/RetrieveEntityRibbon(EntityName='$Table',RibbonLocationFilter=Microsoft.Dynamics.CRM.RibbonLocationFilters'All')"
