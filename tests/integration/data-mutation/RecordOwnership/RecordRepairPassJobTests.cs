@@ -844,6 +844,9 @@ public sealed partial class RecordRepairPassJobTests
         /// <summary>When set, the scan returns every seeded row of the table (a query that did not hold).</summary>
         public bool ScanIgnoresItsConditions { get; set; }
 
+        /// <summary>Task 052c: the on-demand row budget the job is built with (the production default when unset).</summary>
+        public int? OnDemandRowBudget { get; set; }
+
         /// <summary>Task 052c: the <c>createdon</c> the scan reports for a row, when it differs from what Repair later reads.</summary>
         public Dictionary<Guid, DateTimeOffset> ScanReportsCreatedOn { get; } = [];
 
@@ -948,6 +951,7 @@ public sealed partial class RecordRepairPassJobTests
                 new ConfigurationBuilder().AddInMemoryCollection(Settings).Build(), Log)
             {
                 OntologyWriterIdentity = (_, ct) => OntologyWriter(ct),
+                OnDemandRowBudget = OnDemandRowBudget ?? RecordRepairPassJob.DefaultOnDemandRowBudget,
             };
         }
 

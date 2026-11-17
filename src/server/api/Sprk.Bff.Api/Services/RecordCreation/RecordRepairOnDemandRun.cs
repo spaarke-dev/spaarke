@@ -52,11 +52,12 @@ internal sealed class RecordRepairOnDemandRun
         "yyyy-MM-dd'T'HH:mm:ss.FFFFFFF",
     ];
 
-    private RecordRepairOnDemandRun(string table, DateTimeOffset createdFrom, DateTimeOffset createdTo)
+    private RecordRepairOnDemandRun(string table, DateTimeOffset createdFrom, DateTimeOffset createdTo, Guid? afterId)
     {
         Table = table;
         CreatedFrom = createdFrom;
         CreatedTo = createdTo;
+        AfterId = afterId;
     }
 
     /// <summary>The table, spelled as the pass's table list spells it.</summary>
@@ -69,14 +70,21 @@ internal sealed class RecordRepairOnDemandRun
     internal DateTimeOffset CreatedTo { get; }
 
     /// <summary>
-    /// A run for <paramref name="table"/> over [<paramref name="createdFrom"/>, <paramref name="createdTo"/>), or <c>null</c> and
-    /// the refusal. <paramref name="goLive"/> is the configured go-live instant (the caller refuses an unset one first);
-    /// <paramref name="tables"/> the tables the scheduled pass sweeps.
+    /// Where a run that an earlier run's row budget stopped continues: only rows whose id is after this one are read (the same
+    /// id order the scheduled pass scans in). <c>null</c> = from the start of the window.
+    /// </summary>
+    internal Guid? AfterId { get; }
+
+    /// <summary>
+    /// A run for <paramref name="table"/> over [<paramref name="createdFrom"/>, <paramref name="createdTo"/>) continuing after
+    /// <paramref name="afterId"/> when one is given, or <c>null</c> and the refusal. <paramref name="goLive"/> is the configured
+    /// go-live instant (the caller refuses an unset one first); <paramref name="tables"/> the tables the scheduled pass sweeps.
     /// </summary>
     internal static RecordRepairOnDemandRun? TryCreate(
         string? table,
         string? createdFrom,
         string? createdTo,
+        string? afterId,
         DateTimeOffset goLive,
         DateTimeOffset now,
         IReadOnlyCollection<string> tables,
@@ -106,8 +114,21 @@ internal sealed class RecordRepairOnDemandRun
             return null;
         }
 
+        Guid? after = null;
+        if (!string.IsNullOrWhiteSpace(afterId))
+        {
+            if (!Guid.TryParseExact(afterId.Trim(), "D", out var parsed) || parsed == Guid.Empty)
+            {
+                refusal = new RecordRepairRunRefusal(RecordRepairRunReason.AfterIdInvalid,
+                    "afterId must be the id of a row (a GUID, for example the lastIdCovered of an earlier run).");
+                return null;
+            }
+
+            after = parsed;
+        }
+
         refusal = Check(listed, from, to, goLive, now, tables);
-        return refusal is null ? new RecordRepairOnDemandRun(listed, from, to) : null;
+        return refusal is null ? new RecordRepairOnDemandRun(listed, from, to, after) : null;
     }
 
     /// <summary>
@@ -144,7 +165,8 @@ internal sealed class RecordRepairOnDemandRun
 
     /// <summary>The run's window and table for the heartbeat and the result.</summary>
     public override string ToString() =>
-        $"{Table} [{CreatedFrom.ToString("O", CultureInfo.InvariantCulture)}, {CreatedTo.ToString("O", CultureInfo.InvariantCulture)})";
+        $"{Table} [{CreatedFrom.ToString("O", CultureInfo.InvariantCulture)}, {CreatedTo.ToString("O", CultureInfo.InvariantCulture)})"
+        + (AfterId is { } after ? $" after {after:D}" : string.Empty);
 
     private static RecordRepairRunRefusal? ParseInstant(string? raw, string field, out DateTimeOffset value)
     {
@@ -186,6 +208,9 @@ internal static class RecordRepairRunReason
 
     /// <summary>A bound is an ISO 8601 date and time without its offset.</summary>
     internal const string TimestampOffsetMissing = "record_repair_run.timestamp_offset_missing";
+
+    /// <summary><c>afterId</c> is present but is not a (non-empty) GUID.</summary>
+    internal const string AfterIdInvalid = "record_repair_run.after_id_invalid";
 
     /// <summary><c>createdFrom</c> is not before <c>createdTo</c>.</summary>
     internal const string WindowEmpty = "record_repair_run.window_empty";

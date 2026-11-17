@@ -20,7 +20,8 @@ namespace Sprk.Bff.Api.Tests.Integration.DataMutation.RecordOwnership;
 public sealed partial class RecordRepairPassJobTests
 {
     private static readonly DateTimeOffset WindowFrom = PassWorld.GoLive;
-    private static readonly DateTimeOffset WindowTo = PassWorld.Now.AddMinutes(-1);
+    /// <summary>Ends before the scheduled pass's settle point (now minus two minutes), so the run is not clamped.</summary>
+    private static readonly DateTimeOffset WindowTo = PassWorld.Now.AddMinutes(-10);
 
     // =====================================================================================
     // AC7 (must not fire): a valid run repairs, leaves the product's rows alone, and is idempotent
@@ -35,6 +36,7 @@ public sealed partial class RecordRepairPassJobTests
         var result = await RunOnDemandAsync(OnDemand("sprk_event"));
 
         result.Success.Should().BeTrue(result.ErrorMessage);
+        PassWorld.Count(result, "settleClamped").Should().Be(0, "a window that ends before the settle point is read whole");
         var write = World.Writes.Should().ContainSingle("one conditional write, for the native row only").Subject;
         write.Id.Should().Be(native);
         write.Fields["sprk_clientname"].Should().Be(RepairWorld.MatterClient, "the mapping");
@@ -273,23 +275,131 @@ public sealed partial class RecordRepairPassJobTests
     }
 
     // =====================================================================================
-    // AC8: the row cap
+    // AC8: the row budget, paging, and continuing a truncated window (review F4)
     // =====================================================================================
 
     [Fact]
-    public async Task AWindowWithMoreRowsThanTheCap_ReportsTruncated_AndFails()
+    public async Task AWindowWithMoreRowsThanOnePage_IsPagedInIdOrder_UntilTheWindowIsExhausted()
+    {
+        _pass.Settings[RecordRepairPassJob.MaxRowsPerTableConfigKey] = "2";
+        var ids = Enumerable.Range(2, 5).Select(day => _pass.NativeEvent(createdOn: PassWorld.GoLive.AddDays(day))).Order().ToList();
+
+        var result = await RunOnDemandAsync(OnDemand("sprk_event"));
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        PassWorld.Count(result, "scanned").Should().Be(5, "every row of the window is reached, not just the first page");
+        PassWorld.Count(result, "truncated").Should().Be(0);
+        World.Writes.Select(w => w.Id).Should().BeEquivalentTo(ids);
+        var queries = _pass.ScanQueries.Where(q => q.EntityName == "sprk_event").ToList();
+        queries.Should().HaveCount(3, "pages of two, two and one");
+        AfterIdOf(queries[0]).Should().BeNull();
+        AfterIdOf(queries[1]).Should().Be(ids[1], "the second page continues after the last id of the first");
+        AfterIdOf(queries[2]).Should().Be(ids[3]);
+        _pass.State("sprk_event").Should().BeNull("paging an on-demand window keeps no state");
+    }
+
+    [Fact]
+    public async Task AWindowWithMoreRowsThanTheBudget_StopsAtTheBudget_AndNamesTheLastIdCovered()
+    {
+        _pass.Settings[RecordRepairPassJob.MaxRowsPerTableConfigKey] = "2";
+        _pass.OnDemandRowBudget = 3;
+        var ids = Enumerable.Range(2, 5).Select(day => _pass.NativeEvent(createdOn: PassWorld.GoLive.AddDays(day))).Order().ToList();
+
+        var result = await RunOnDemandAsync(OnDemand("sprk_event"));
+
+        PassWorld.Count(result, "truncated").Should().Be(1);
+        PassWorld.Count(result, "scanned").Should().Be(3, "one run reads at most its budget, across pages");
+        result.Success.Should().BeFalse("the administrator continues the window");
+        World.Writes.Select(w => w.Id).Should().BeEquivalentTo(ids.Take(3));
+        using var json = JsonDocument.Parse(result.ResultJson!);
+        json.RootElement.GetProperty("lastIdCovered").GetString().Should().Be(ids[2].ToString("D"));
+        result.ErrorMessage.Should().Contain("Narrow the window").And.Contain($"afterId {ids[2]:D}");
+        _pass.Log.Entries.Should().ContainSingle(e => e.Message.Contains("heartbeat"))
+            .Which.Message.Should().Contain($"lastIdCovered={ids[2]:D}");
+        _pass.ScanQueries.Count(q => q.EntityName == "sprk_event").Should().Be(2, "a page of two, then the one row the budget leaves");
+    }
+
+    [Fact]
+    public async Task AWindowWithMoreRowsThanTheBudgetOnOnePage_ReportsTruncated_AndFails()
     {
         _pass.Settings[RecordRepairPassJob.MaxRowsPerTableConfigKey] = "1";
+        _pass.OnDemandRowBudget = 1;
         _pass.NativeEvent(createdOn: PassWorld.GoLive.AddDays(2));
         _pass.NativeEvent(createdOn: PassWorld.GoLive.AddDays(3));
 
         var result = await RunOnDemandAsync(OnDemand("sprk_event"));
 
         PassWorld.Count(result, "truncated").Should().Be(1);
-        PassWorld.Count(result, "scanned").Should().Be(1, "one run reads at most the cap");
+        PassWorld.Count(result, "scanned").Should().Be(1, "one run reads at most the budget");
         result.Success.Should().BeFalse("the administrator narrows the window");
         result.ErrorMessage.Should().Contain("Narrow the window");
     }
+
+    [Fact]
+    public async Task ARunContinuedWithTheLastIdCovered_ReadsOnlyTheRowsAfterIt_AndFinishesTheWindow()
+    {
+        _pass.Settings[RecordRepairPassJob.MaxRowsPerTableConfigKey] = "2";
+        var ids = Enumerable.Range(2, 5).Select(day => _pass.NativeEvent(createdOn: PassWorld.GoLive.AddDays(day))).Order().ToList();
+        _pass.OnDemandRowBudget = 3;
+        await RunOnDemandAsync(OnDemand("sprk_event"));
+        World.Writes.Select(w => w.Id).Should().BeEquivalentTo(ids.Take(3));
+        _pass.ScanQueries.Clear();
+        _pass.OnDemandRowBudget = null;
+
+        var second = await RunOnDemandAsync(OnDemand("sprk_event", afterId: ids[2]));
+
+        second.Success.Should().BeTrue(second.ErrorMessage);
+        PassWorld.Count(second, "scanned").Should().Be(2, "only the rows after the id");
+        World.Writes.Select(w => w.Id).Should().BeEquivalentTo(ids, "the whole window is repaired across the two runs, each row once");
+        AfterIdOf(_pass.ScanQueries.First(q => q.EntityName == "sprk_event")).Should().Be(ids[2]);
+        using var json = JsonDocument.Parse(second.ResultJson!);
+        json.RootElement.GetProperty("afterId").GetString().Should().Be(ids[2].ToString("D"));
+    }
+
+    // =====================================================================================
+    // Review F4: the scan stops where the scheduled pass stops (now minus the settle time)
+    // =====================================================================================
+
+    [Fact]
+    public async Task AWindowEndingAtNow_ScansOnlyToTheSettlePoint_AndSaysSo()
+    {
+        var settled = _pass.NativeEvent(createdOn: PassWorld.Now.AddMinutes(-3));
+        var settling = _pass.NativeEvent(createdOn: PassWorld.Now.AddSeconds(-90));
+        var run = OnDemand("sprk_event", from: PassWorld.Now.AddHours(-1), to: PassWorld.Now);
+
+        var result = await RunOnDemandAsync(run);
+
+        World.Writes.Should().ContainSingle().Which.Id.Should().Be(settled);
+        World.Writes.Should().NotContain(w => w.Id == settling, "a row still being written by its creator is left");
+        var scan = _pass.ScanQueries.Should().ContainSingle().Subject;
+        var until = PassWorld.Now - RecordRepairPassJob.SettleTime;
+        scan.Criteria.Conditions.Should().ContainSingle(c => c.AttributeName == "createdon" && c.Operator == Microsoft.Xrm.Sdk.Query.ConditionOperator.LessThan)
+            .Which.Values.Single().Should().Be(until.UtcDateTime);
+        PassWorld.Count(result, "settleClamped").Should().Be(1);
+        result.Success.Should().BeFalse("the window's last minutes were not read; the administrator runs them later");
+        result.ErrorMessage.Should().Contain("run the rest of the window again later");
+        using var json = JsonDocument.Parse(result.ResultJson!);
+        json.RootElement.GetProperty("scanUntil").GetString().Should().Be(until.ToString("O"));
+    }
+
+    [Fact]
+    public async Task AWindowEntirelyInsideTheSettleTime_ReadsNothing_AndFails()
+    {
+        _pass.NativeEvent(createdOn: PassWorld.Now.AddSeconds(-90));
+        var run = OnDemand("sprk_event", from: PassWorld.Now.AddSeconds(-100), to: PassWorld.Now);
+
+        var result = await RunOnDemandAsync(run);
+
+        World.Writes.Should().BeEmpty();
+        _pass.ScanQueries.Should().BeEmpty();
+        PassWorld.Count(result, "settleClamped").Should().Be(1);
+        result.Success.Should().BeFalse();
+    }
+
+    private static Guid? AfterIdOf(Microsoft.Xrm.Sdk.Query.QueryExpression query) =>
+        query.Criteria.Conditions
+            .SingleOrDefault(c => c.AttributeName == "sprk_eventid" && c.Operator == Microsoft.Xrm.Sdk.Query.ConditionOperator.GreaterThan)
+            ?.Values.Single() as Guid?;
 
     // =====================================================================================
     // The contact table waits for the customer team, as in the scheduled pass
@@ -314,10 +424,11 @@ public sealed partial class RecordRepairPassJobTests
     // =====================================================================================
 
     /// <summary>A run built as the admin route builds it (against the pass's go-live unless another is given).</summary>
-    private RecordRepairOnDemandRun OnDemand(string table, DateTimeOffset? from = null, DateTimeOffset? to = null, DateTimeOffset? goLive = null)
+    private RecordRepairOnDemandRun OnDemand(
+        string table, DateTimeOffset? from = null, DateTimeOffset? to = null, DateTimeOffset? goLive = null, Guid? afterId = null)
     {
         var run = RecordRepairOnDemandRun.TryCreate(
-            table, (from ?? WindowFrom).ToString("O"), (to ?? WindowTo).ToString("O"), goLive ?? PassWorld.GoLive, PassWorld.Now,
+            table, (from ?? WindowFrom).ToString("O"), (to ?? WindowTo).ToString("O"), afterId?.ToString("D"), goLive ?? PassWorld.GoLive, PassWorld.Now,
             _pass.Job().Tables, out var refusal);
         run.Should().NotBeNull(refusal?.Detail);
         return run!;
@@ -328,4 +439,122 @@ public sealed partial class RecordRepairPassJobTests
             new JobRunContext(Guid.NewGuid(), PassWorld.CorrelationId, JobRunTrigger.ManualAdmin,
                 new Dictionary<string, object> { [RecordRepairOnDemandRun.ParameterKey] = run }),
             CancellationToken.None);
+}
+
+/// <summary>
+/// Task 052c (review F4): the rules of <see cref="RecordRepairOnDemandRun"/> at their boundaries, asked directly (the route and the
+/// job ask the same ones): the window's end may be now; the window may be exactly 31 days; its start may be exactly go-live; the
+/// table name is matched ignoring case and padding and normalised to the pass's spelling; offsets and fractions of a second parse;
+/// a bound that does not parse, or has no offset, is refused with its own reason.
+/// </summary>
+public sealed class RecordRepairOnDemandRunValidationTests
+{
+    private static readonly DateTimeOffset Now = new(2026, 11, 12, 12, 0, 0, TimeSpan.Zero);
+    private static readonly DateTimeOffset GoLive = new(2026, 9, 1, 0, 0, 0, TimeSpan.Zero);
+    private static readonly string[] Tables = ["sprk_event", "contact"];
+
+    private static RecordRepairOnDemandRun? Create(
+        string? table, string? from, string? to, out RecordRepairRunRefusal? refusal, string? afterId = null) =>
+        RecordRepairOnDemandRun.TryCreate(table, from, to, afterId, GoLive, Now, Tables, out refusal);
+
+    [Theory]
+    // createdTo == now is accepted; a second later is the future.
+    [InlineData("sprk_event", "2026-11-11T12:00:00Z", "2026-11-12T12:00:00Z", "sprk_event", null)]
+    [InlineData("sprk_event", "2026-11-12T11:00:00Z", "2026-11-12T12:00:01Z", null, RecordRepairRunReason.WindowInFuture)]
+    // The window may be exactly 31 days; one second more is too long.
+    [InlineData("sprk_event", "2026-10-12T12:00:00Z", "2026-11-12T12:00:00Z", "sprk_event", null)]
+    [InlineData("sprk_event", "2026-10-12T11:59:59Z", "2026-11-12T12:00:00Z", null, RecordRepairRunReason.WindowTooLong)]
+    // createdFrom == go-live is accepted; one second earlier is refused (never clamped).
+    [InlineData("sprk_event", "2026-09-01T00:00:00Z", "2026-09-02T00:00:00Z", "sprk_event", null)]
+    [InlineData("sprk_event", "2026-08-31T23:59:59Z", "2026-09-02T00:00:00Z", null, RecordRepairRunReason.BeforeGoLive)]
+    // The table: any case, padded; normalised to the pass's own spelling. Unlisted and empty tables are refused.
+    [InlineData("SPRK_EVENT", "2026-11-10T00:00:00Z", "2026-11-11T00:00:00Z", "sprk_event", null)]
+    [InlineData("  Contact  ", "2026-11-10T00:00:00Z", "2026-11-11T00:00:00Z", "contact", null)]
+    [InlineData("task", "2026-11-10T00:00:00Z", "2026-11-11T00:00:00Z", null, RecordRepairRunReason.TableNotRepaired)]
+    [InlineData("", "2026-11-10T00:00:00Z", "2026-11-11T00:00:00Z", null, RecordRepairRunReason.TableNotRepaired)]
+    [InlineData(null, "2026-11-10T00:00:00Z", "2026-11-11T00:00:00Z", null, RecordRepairRunReason.TableNotRepaired)]
+    // An empty window.
+    [InlineData("sprk_event", "2026-11-10T00:00:00Z", "2026-11-10T00:00:00Z", null, RecordRepairRunReason.WindowEmpty)]
+    // A bound that is not an instant, is absent, or has no offset.
+    [InlineData("sprk_event", "last tuesday", "2026-11-11T00:00:00Z", null, RecordRepairRunReason.TimestampInvalid)]
+    [InlineData("sprk_event", "2026-11-10T00:00:00Z", "not a date", null, RecordRepairRunReason.TimestampInvalid)]
+    [InlineData("sprk_event", "2026-11-10", "2026-11-11T00:00:00Z", null, RecordRepairRunReason.TimestampInvalid)]
+    [InlineData("sprk_event", "2026-13-45T00:00:00Z", "2026-11-11T00:00:00Z", null, RecordRepairRunReason.TimestampInvalid)]
+    [InlineData("sprk_event", null, "2026-11-11T00:00:00Z", null, RecordRepairRunReason.TimestampInvalid)]
+    [InlineData("sprk_event", "2026-11-10T00:00:00Z", "", null, RecordRepairRunReason.TimestampInvalid)]
+    [InlineData("sprk_event", "2026-11-10T00:00:00", "2026-11-11T00:00:00Z", null, RecordRepairRunReason.TimestampOffsetMissing)]
+    [InlineData("sprk_event", "2026-11-10T00:00:00Z", "2026-11-11T00:00:00.5", null, RecordRepairRunReason.TimestampOffsetMissing)]
+    public void TheRunRules_AtTheirBoundaries(string? table, string? from, string? to, string? expectedTable, string? expectedReason)
+    {
+        var run = Create(table, from, to, out var refusal);
+
+        if (expectedReason is null)
+        {
+            run.Should().NotBeNull(refusal?.Detail);
+            refusal.Should().BeNull();
+            run!.Table.Should().Be(expectedTable);
+        }
+        else
+        {
+            run.Should().BeNull();
+            refusal!.Code.Should().Be(expectedReason);
+        }
+    }
+
+    [Fact]
+    public void AnOffsetBound_IsNormalisedToUtc()
+    {
+        var run = Create("sprk_event", "2026-11-10T10:30:00+05:30", "2026-11-11T10:30:00+05:30", out var refusal);
+
+        run.Should().NotBeNull(refusal?.Detail);
+        run!.CreatedFrom.Should().Be(new DateTimeOffset(2026, 11, 10, 5, 0, 0, TimeSpan.Zero));
+        run.CreatedFrom.Offset.Should().Be(TimeSpan.Zero);
+        run.CreatedTo.Should().Be(new DateTimeOffset(2026, 11, 11, 5, 0, 0, TimeSpan.Zero));
+    }
+
+    [Fact]
+    public void FractionalSeconds_AreAccepted_AndKept()
+    {
+        var run = Create("sprk_event", "2026-11-10T00:00:00.1234567Z", "2026-11-10T00:00:00.5Z", out var refusal);
+
+        run.Should().NotBeNull(refusal?.Detail);
+        run!.CreatedFrom.Ticks.Should().Be(new DateTimeOffset(2026, 11, 10, 0, 0, 0, TimeSpan.Zero).Ticks + 1234567);
+        run.CreatedTo.Ticks.Should().Be(new DateTimeOffset(2026, 11, 10, 0, 0, 0, TimeSpan.Zero).Ticks + 5000000);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void NoAfterId_MeansTheStartOfTheWindow(string? afterId)
+    {
+        var run = Create("sprk_event", "2026-11-10T00:00:00Z", "2026-11-11T00:00:00Z", out var refusal, afterId);
+
+        run.Should().NotBeNull(refusal?.Detail);
+        run!.AfterId.Should().BeNull();
+    }
+
+    [Fact]
+    public void AWellFormedAfterId_IsKept()
+    {
+        var id = Guid.Parse("a052c000-0000-4000-8000-0000000000aa");
+
+        var run = Create("sprk_event", "2026-11-10T00:00:00Z", "2026-11-11T00:00:00Z", out var refusal, " " + id.ToString("D").ToUpperInvariant() + " ");
+
+        run.Should().NotBeNull(refusal?.Detail);
+        run!.AfterId.Should().Be(id);
+    }
+
+    [Theory]
+    [InlineData("not-a-guid")]
+    [InlineData("a052c000000040008000000000000aa")]
+    [InlineData("{a052c000-0000-4000-8000-0000000000aa}")]
+    [InlineData("00000000-0000-0000-0000-000000000000")]
+    public void AMalformedOrEmptyAfterId_IsRefused(string afterId)
+    {
+        var run = Create("sprk_event", "2026-11-10T00:00:00Z", "2026-11-11T00:00:00Z", out var refusal, afterId);
+
+        run.Should().BeNull();
+        refusal!.Code.Should().Be(RecordRepairRunReason.AfterIdInvalid);
+    }
 }

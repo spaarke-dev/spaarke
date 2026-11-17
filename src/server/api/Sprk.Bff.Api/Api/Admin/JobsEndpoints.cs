@@ -1,8 +1,11 @@
+using System.Globalization;
+using System.Security.Claims;
 using System.Text.Json;
 using Cronos;
 using Microsoft.AspNetCore.Mvc;
 using Spaarke.Scheduling;
 using Sprk.Bff.Api.Api.Admin.Models;
+using Sprk.Bff.Api.Infrastructure.Authentication;
 using Sprk.Bff.Api.Services.RecordCreation;
 
 namespace Sprk.Bff.Api.Api.Admin;
@@ -113,7 +116,7 @@ public static class JobsEndpoints
         group.MapPost("/record-repair-pass/runs", StartRecordRepairRunAsync)
             .WithName("AdminRecordRepairRun")
             .WithSummary("Run the record repair pass for one table over one createdon window")
-            .WithDescription("Starts the record repair pass (Repair mode, fill-only) for ONE table it sweeps, over rows created in [createdFrom, createdTo). Both bounds are ISO 8601 with an offset; createdTo is not after now; the window is at most 31 days; createdFrom is not before the go-live instant (the pass is forward-only). Returns 202 Accepted with the run id; the outcome is on GET /api/admin/jobs/record-repair-pass/status. 400 with a reasonCode when the request is refused; 409 when the pass is not configured or the job is already running; 503 when the scheduler lease store is unavailable.")
+            .WithDescription("Starts the record repair pass (Repair mode, fill-only) for ONE table it sweeps, over rows created in [createdFrom, createdTo). Both bounds are ISO 8601 with an offset; createdTo is not after now; the window is at most 31 days; createdFrom is not before the go-live instant (the pass is forward-only). One run reads at most 500 rows of the window (the last 2 minutes are left, as the scheduled pass leaves them); a larger window reports the last id covered, and an optional afterId (a GUID) in the body continues from there. Returns 202 Accepted with the run id; the outcome is on GET /api/admin/jobs/record-repair-pass/status. 400 with a reasonCode when the request is refused; 409 when the pass is not configured or the job is already running; 503 when the scheduler lease store is unavailable.")
             .Produces<TriggerResponse>(StatusCodes.Status202Accepted)
             .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
@@ -343,12 +346,15 @@ public static class JobsEndpoints
         IDictionary<string, object>? parameters,
         ScheduledJobHost host,
         ILogger logger,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Action<Guid>? onAccepted = null)
     {
         try
         {
             var trigger = await host.TriggerNowAsync(jobId, parameters, cancellationToken)
                 .ConfigureAwait(false);
+
+            onAccepted?.Invoke(trigger.RunId);
 
             var response = new TriggerResponse(
                 RunId: trigger.RunId,
@@ -422,6 +428,7 @@ public static class JobsEndpoints
     /// </remarks>
     private static async Task<IResult> StartRecordRepairRunAsync(
         HttpRequest request,
+        ClaimsPrincipal user,
         ScheduledJobRegistry registry,
         ScheduledJobHost host,
         IConfiguration configuration,
@@ -457,6 +464,12 @@ public static class JobsEndpoints
         {
             body = await request.ReadFromJsonAsync<RecordRepairRunRequest>(cancellationToken).ConfigureAwait(false);
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // The caller went away while the body was being read (e.g., the admin closed the tab): not a server error, no run.
+            logger.LogInformation("Record repair run request cancelled by the caller before its body was read; no run started");
+            return Results.StatusCode(StatusCodes.Status499ClientClosedRequest);
+        }
         catch (Exception ex) when (ex is JsonException or InvalidOperationException)
         {
             body = null;
@@ -465,23 +478,29 @@ public static class JobsEndpoints
         if (body is null)
         {
             return RepairRunRefused(StatusCodes.Status400BadRequest, new RecordRepairRunRefusal(RecordRepairRunReason.BodyInvalid,
-                "The body must be a JSON object with table, createdFrom and createdTo."));
+                "The body must be a JSON object with table, createdFrom and createdTo (and, optionally, afterId)."));
         }
 
         var run = RecordRepairOnDemandRun.TryCreate(
-            body.Table, body.CreatedFrom, body.CreatedTo, goLive, timeProvider.GetUtcNow(), job.Tables, out var refusal);
+            body.Table, body.CreatedFrom, body.CreatedTo, body.AfterId, goLive, timeProvider.GetUtcNow(), job.Tables, out var refusal);
         if (run is null)
         {
             return RepairRunRefused(StatusCodes.Status400BadRequest, refusal!);
         }
 
-        logger.LogInformation("Record repair run requested for {Run}", run);
+        // Who started the run, once it has started: the caller's object id (never a token or a row value), the run id and the
+        // validated request. Structured, so each is a field of the log entry.
+        var startedBy = CallerResolution.ResolveObjectId(user) ?? "(unknown)";
         return await DispatchAsync(
                 jobId,
                 new Dictionary<string, object>(StringComparer.Ordinal) { [RecordRepairOnDemandRun.ParameterKey] = run },
                 host,
                 logger,
-                cancellationToken)
+                cancellationToken,
+                runId => logger.LogInformation(
+                    "Record repair run started: oid={Oid} runId={RunId} table={Table} createdFrom={CreatedFrom} createdTo={CreatedTo} afterId={AfterId}",
+                    startedBy, runId, run.Table, run.CreatedFrom.ToString("O", CultureInfo.InvariantCulture),
+                    run.CreatedTo.ToString("O", CultureInfo.InvariantCulture), run.AfterId?.ToString("D", CultureInfo.InvariantCulture) ?? "-"))
             .ConfigureAwait(false);
     }
 

@@ -53,7 +53,9 @@ namespace Sprk.Bff.Api.Services.RecordCreation;
 /// same per-table claim, the same forward-only and product-principal rules and the same Repair mode; only the selection differs.
 /// It is on demand only for a <see cref="JobRunTrigger.ManualAdmin"/> run carrying the route's typed value
 /// (<see cref="OnDemandRunOf"/>). The job checks the window against go-live itself before reading anything. It never reads or
-/// writes the scheduled pass's state; it reads at most the row cap and reports a larger window as truncated.</para>
+/// writes the scheduled pass's state. It pages the window (id order) up to <see cref="DefaultOnDemandRowBudget"/> rows, then reports it as
+/// truncated with the last id covered, which the next run takes as <c>afterId</c>; it scans no later than the scheduled pass would
+/// (run start minus <see cref="SettleTime"/>) and reports a window that reached past that point as not clean.</para>
 /// <para><b>Placement</b> (ADR-052; CLAUDE.md §10): in the BFF on the in-process <c>Spaarke.Scheduling</c> host, registered with
 /// <c>AddScheduledJob</c> — BFF domain code (Repair mode, the ownership resolver, the field-mapping service) over BFF-owned
 /// tables, BFF identity, low volume (rows created outside the product). No new scheduler, store, package or endpoint.</para>
@@ -100,6 +102,14 @@ public sealed class RecordRepairPassJob : IScheduledJob
     internal const string ContactTable = RecordOwnershipResolver.ContactEntity;
 
     internal const int DefaultMaxRowsPerTable = 200;
+
+    /// <summary>
+    /// Task 052c (review F4): the most rows ONE on-demand run reads, across as many pages of <see cref="MaxRowsPerTableConfigKey"/>
+    /// as it takes. 500 keeps a run inside the table claim (<c>ClaimDuration</c>, 15 minutes) at a pessimistic second per row (each
+    /// row is one Repair: a read and at most one conditional write). A window with more rows stops here and names the last id it
+    /// covered; the administrator continues with <c>afterId</c>, so no row is out of reach however narrow the window.
+    /// </summary>
+    internal const int DefaultOnDemandRowBudget = 500;
 
     /// <summary>How many runs ask a row again before it is logged as abandoned.</summary>
     internal const int MaxAttempts = 12;
@@ -156,6 +166,9 @@ public sealed class RecordRepairPassJob : IScheduledJob
     /// <summary>The tables the pass sweeps, in registry order. Settable only so a test can sweep a subset.</summary>
     internal IReadOnlyList<string> Tables { get; init; } =
         RecordTableRules.All.Select(r => r.Table).Where(t => !ExcludedTables.Contains(t)).ToArray();
+
+    /// <summary>The on-demand row budget (<see cref="DefaultOnDemandRowBudget"/>). Settable only so a test can use a small one.</summary>
+    internal int OnDemandRowBudget { get; init; } = DefaultOnDemandRowBudget;
 
     /// <summary>
     /// The ontology writer's <c>systemuser</c> id, asked only when <see cref="OntologyWriterIdentityConfigKey"/> is set. Settable only
@@ -257,7 +270,7 @@ public sealed class RecordRepairPassJob : IScheduledJob
                 }
                 else
                 {
-                    await RunOnDemandTableAsync(onDemand, entities, idempotency, repair, pass, counts, problems, context, cancellationToken)
+                    await RunOnDemandTableAsync(onDemand, entities, idempotency, repair, pass, until, counts, problems, context, cancellationToken)
                         .ConfigureAwait(false);
                 }
             }
@@ -290,7 +303,7 @@ public sealed class RecordRepairPassJob : IScheduledJob
             status = counts.ScanFailures > 0 || counts.StateFailures > 0
                 ? StatusError
                 : counts.ClaimHeld > 0 || counts.Truncated > 0 || counts.Failed > 0 || counts.PendingRetry > 0 || counts.OutsidePass > 0
-                  || counts.TablesWaiting > 0 || counts.NeedsRetry > 0
+                  || counts.TablesWaiting > 0 || counts.NeedsRetry > 0 || counts.SettleClamped > 0
                     ? StatusPartial
                     : StatusOk;
         }
@@ -612,10 +625,14 @@ public sealed class RecordRepairPassJob : IScheduledJob
     }
 
     /// <summary>
-    /// Task 052c: one on-demand run — the table's claim (the same key as the scheduled pass, owner = this run id), ONE scan of the
-    /// window (at most <see cref="MaxRowsPerTable"/> rows), each row asked through the same rule and Repair as the scheduled pass.
+    /// Task 052c: one on-demand run — the table's claim (the same key as the scheduled pass, owner = this run id), then the window
+    /// scanned page by page (pages of <see cref="MaxRowsPerTable"/>, ordered by id, continuing after the last id read) until it is
+    /// exhausted or <see cref="OnDemandRowBudget"/> rows were read, each row asked through the same rule and Repair as the
+    /// scheduled pass. The scan's upper bound is the window's end or the scheduled pass's own settle point (run start minus
+    /// <see cref="SettleTime"/>), whichever is earlier: a row still being written by its creator is left, and the run says so.
     /// The scheduled pass's state is neither read nor written: its watermark, sweep cursor and retry set stay as they are, and a row
-    /// that needs asking again is reported (<c>needsRetry</c>), not kept. A window with more rows than the cap reports truncated.
+    /// that needs asking again is reported (<c>needsRetry</c>), not kept. A window with more rows than the budget reports truncated
+    /// with the last id covered, and the run's <c>afterId</c> continues from there.
     /// </summary>
     private async Task RunOnDemandTableAsync(
         RecordRepairOnDemandRun run,
@@ -623,12 +640,31 @@ public sealed class RecordRepairPassJob : IScheduledJob
         IIdempotencyService idempotency,
         RecordCreationService repair,
         RecordRepairPassContext pass,
+        DateTimeOffset settledUntil,
         RunCounts counts,
         List<string> problems,
         JobRunContext context,
         CancellationToken ct)
     {
         var table = run.Table;
+        var scanUntil = run.CreatedTo <= settledUntil ? run.CreatedTo : settledUntil;
+        counts.ScanUntil = scanUntil;
+        counts.AfterId = run.AfterId;
+
+        if (scanUntil < run.CreatedTo)
+        {
+            counts.SettleClamped++;
+            problems.Add($"{table}: rows created after {scanUntil.ToString("O", CultureInfo.InvariantCulture)} (the last "
+                         + $"{SettleTime.TotalMinutes.ToString(CultureInfo.InvariantCulture)} minutes) were left, as the scheduled pass leaves them; "
+                         + "run the rest of the window again later.");
+        }
+
+        if (scanUntil <= run.CreatedFrom)
+        {
+            // The whole window lies inside the settle time: nothing is eligible yet, so nothing is read and no claim is taken.
+            return;
+        }
+
         var claimKey = $"{JobIdConstant}:{table}";
         var owner = context.RunId.ToString("N", CultureInfo.InvariantCulture);
 
@@ -643,41 +679,57 @@ public sealed class RecordRepairPassJob : IScheduledJob
 
         try
         {
-            var cap = MaxRowsPerTable;
-            var scan = await ScanAsync(entities, table, run.CreatedFrom, run.CreatedTo, pass.ProductPrincipals, after: null, cap, ct)
-                .ConfigureAwait(false);
-            if (scan is null)
-            {
-                counts.ScanFailures++;
-                problems.Add($"{table}: the scan failed, so no row was read.");
-                return;
-            }
+            var budget = Math.Max(1, OnDemandRowBudget);
+            var pageSize = Math.Min(MaxRowsPerTable, budget);
+            var after = run.AfterId;
 
-            foreach (var row in scan.Rows)
+            while (true)
             {
-                ct.ThrowIfCancellationRequested();
-                counts.Scanned++;
-
-                if (pass.RowOutsideThePass(row) is { } outside)
+                var page = Math.Min(pageSize, budget - counts.Scanned);
+                var scan = await ScanAsync(entities, table, run.CreatedFrom, scanUntil, pass.ProductPrincipals, after, page, ct)
+                    .ConfigureAwait(false);
+                if (scan is null)
                 {
-                    counts.OutsidePass++;
-                    _logger.LogWarning("{Prefix} {Table} {Id}: the scan returned a row outside the pass ({Reason}); not repaired. correlationId={CorrelationId}",
-                        LogPrefix, table, row.Id, outside, context.CorrelationId);
-                    continue;
+                    counts.ScanFailures++;
+                    problems.Add($"{table}: the scan failed, so no further row was read.");
+                    return;
                 }
 
-                var outcome = await repair.RepairAsync(table, row.Id, ct, pass).ConfigureAwait(false);
-                Count(outcome, counts);
-                if (outcome.NeedsRetry)
+                foreach (var row in scan.Rows)
                 {
-                    counts.NeedsRetry++;
-                }
-            }
+                    ct.ThrowIfCancellationRequested();
+                    counts.Scanned++;
 
-            if (scan.Truncated)
-            {
-                counts.Truncated++;
-                problems.Add($"{table}: more than {cap} rows in the window; only the first {cap} were read. Narrow the window and run again.");
+                    if (pass.RowOutsideThePass(row) is { } outside)
+                    {
+                        counts.OutsidePass++;
+                        _logger.LogWarning("{Prefix} {Table} {Id}: the scan returned a row outside the pass ({Reason}); not repaired. correlationId={CorrelationId}",
+                            LogPrefix, table, row.Id, outside, context.CorrelationId);
+                        continue;
+                    }
+
+                    var outcome = await repair.RepairAsync(table, row.Id, ct, pass).ConfigureAwait(false);
+                    Count(outcome, counts);
+                    if (outcome.NeedsRetry)
+                    {
+                        counts.NeedsRetry++;
+                    }
+                }
+
+                if (!scan.Truncated)
+                {
+                    break; // the window is exhausted
+                }
+
+                after = scan.Rows[^1].Id;
+                if (counts.Scanned >= budget)
+                {
+                    counts.Truncated++;
+                    counts.LastIdCovered = after;
+                    problems.Add($"{table}: more than {budget} rows in the window; rows through id {after:D} were covered. "
+                                 + $"Narrow the window, or run it again with afterId {after:D}.");
+                    break;
+                }
             }
 
             if (counts.NeedsRetry > 0)
@@ -849,17 +901,21 @@ public sealed class RecordRepairPassJob : IScheduledJob
         var mode = onDemand is null ? ModeScheduled : ModeOnDemand;
         var createdFrom = onDemand?.CreatedFrom.ToString("O", CultureInfo.InvariantCulture);
         var createdTo = onDemand?.CreatedTo.ToString("O", CultureInfo.InvariantCulture);
+        var scanUntil = counts.ScanUntil?.ToString("O", CultureInfo.InvariantCulture);
+        var afterId = counts.AfterId?.ToString("D", CultureInfo.InvariantCulture);
+        var lastIdCovered = counts.LastIdCovered?.ToString("D", CultureInfo.InvariantCulture);
 
         _logger.Log(
             status == StatusOk ? LogLevel.Information : LogLevel.Warning,
-            "{Prefix} heartbeat status={Status} mode={Mode} table={Table} createdFrom={CreatedFrom} createdTo={CreatedTo} attempt={Attempt} "
+            "{Prefix} heartbeat status={Status} mode={Mode} table={Table} createdFrom={CreatedFrom} createdTo={CreatedTo} scanUntil={ScanUntil} "
+            + "afterId={AfterId} lastIdCovered={LastIdCovered} attempt={Attempt} "
             + "goLive={GoLive} scanned={Scanned} repaired={Repaired} noOp={NoOp} "
             + "skipped={Skipped} failed={Failed} ownerRefused={OwnerRefused} ownerAssignCascades={OwnerAssignCascades} "
             + "tablesWaiting={TablesWaiting} outsidePass={OutsidePass} retried={Retried} "
             + "pendingRetry={PendingRetry} needsRetry={NeedsRetry} abandoned={Abandoned} claimHeld={ClaimHeld} truncated={Truncated} "
             + "scanFailures={ScanFailures} stateFailures={StateFailures} metadataReads={MetadataReads} durationMs={DurationMs} "
             + "trigger={Trigger} runId={RunId} correlationId={CorrelationId}",
-            LogPrefix, status, mode, onDemand?.Table ?? "(all)", createdFrom ?? "-", createdTo ?? "-", context.Attempt,
+            LogPrefix, status, mode, onDemand?.Table ?? "(all)", createdFrom ?? "-", createdTo ?? "-", scanUntil ?? "-", afterId ?? "-", lastIdCovered ?? "-", context.Attempt,
             goLive?.ToString("O", CultureInfo.InvariantCulture) ?? "(unset)", counts.Scanned,
             counts.Repaired, counts.NoOp, counts.Skipped, counts.Failed, counts.OwnerRefused, counts.OwnerAssignCascades,
             counts.TablesWaiting, counts.OutsidePass, counts.Retried,
@@ -880,6 +936,9 @@ public sealed class RecordRepairPassJob : IScheduledJob
                     table = onDemand?.Table,
                     createdFrom,
                     createdTo,
+                    scanUntil,
+                    afterId,
+                    lastIdCovered,
                     attempt = context.Attempt,
                     correlationId = context.CorrelationId,
                     goLive = goLive?.ToString("O", CultureInfo.InvariantCulture),
@@ -898,6 +957,7 @@ public sealed class RecordRepairPassJob : IScheduledJob
                     counts.Abandoned,
                     counts.ClaimHeld,
                     counts.Truncated,
+                    counts.SettleClamped,
                     counts.ScanFailures,
                     counts.StateFailures,
                     counts.MetadataReads,
@@ -944,6 +1004,18 @@ public sealed class RecordRepairPassJob : IScheduledJob
         public int Abandoned;
         public int ClaimHeld;
         public int Truncated;
+
+        /// <summary>Task 052c: 1 when an on-demand run left the window's last settle-time minutes unread (the scheduled pass leaves them too).</summary>
+        public int SettleClamped;
+
+        /// <summary>Task 052c: the upper bound an on-demand run scanned to (the window end, or the settle point when that is earlier).</summary>
+        public DateTimeOffset? ScanUntil;
+
+        /// <summary>Task 052c: the id an on-demand run continued after (its <c>afterId</c>).</summary>
+        public Guid? AfterId;
+
+        /// <summary>Task 052c: when the row budget stopped an on-demand run, the last row id it covered.</summary>
+        public Guid? LastIdCovered;
         public int ScanFailures;
         public int StateFailures;
         public int MetadataReads;
