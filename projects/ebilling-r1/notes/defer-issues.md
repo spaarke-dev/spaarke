@@ -2222,3 +2222,22 @@ In a multi-line call whose earlier lines were recorded, the remaining lines take
 **Estimated effort**: 1 day (server signal + client affordance). **Blockers**: none. **Related**: tasks 095f-2a, 095f-2c, 095f-2ui.
 
 ---
+### ISS-033 — RuleReview `assignmentPanelFirmPicker.test.ts` cannot start without a built shared library
+
+| Field | Value |
+|---|---|
+| **Status** | Open (owner: ontology-r1, ontology 187) |
+| **Urgency** | someday |
+| **Filed** | 2026-11-17 |
+| **Source** | 130e-2 build and review (found in passing; pre-existing since e9208abc5e) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2885 |
+
+**Description**: the test mocks `@spaarke/ui-components` with `jest.mock(...)` but without `{ virtual: true }`. Jest resolves the real module first, so in a fresh worktree, where the shared library has no `dist`, the suite fails to start with "Cannot find module". The other RuleReview suites run. CI or a developer with a fresh checkout sees a red suite that has nothing to do with their change.
+
+**Entry-points**: `src/solutions/RuleReview/src/__tests__/assignmentPanelFirmPicker.test.ts:15`.
+
+**Suggested fix**: pass `{ virtual: true }` to the mock, or map the module in the package's Jest config the way the other suites get their stub. Check that the suite starts in a fresh worktree.
+
+**Estimated effort**: under 1 hour. **Blockers**: none. **Related**: ontology 187 (#2754), task 130e-2.
+
+---
