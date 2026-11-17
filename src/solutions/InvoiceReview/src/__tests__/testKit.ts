@@ -274,6 +274,47 @@ export function strandedSubmission(verb: 'Override' | 'Return' = 'Override', ove
   });
 }
 
+/** ISS-032: the approval verb's status words, as the server reports a decided portion. */
+const DECIDED_STATUS: Readonly<Record<'Approve' | 'Reject' | 'Return', { approval: string; header: string }>> = {
+  Approve: { approval: 'Approved', header: 'Approved' },
+  Reject: { approval: 'Rejected', header: 'Rejected' },
+  Return: { approval: 'Returned', header: 'ReturnedToFirm' },
+};
+
+/**
+ * ISS-032: the approval state of a decision whose status moved but whose Decision Record was not written, as the server reports it to the
+ * caller who finishes it (`incompleteDecision`). The portion's status moved (failedStep `record`) unless overridden.
+ */
+export function strandedApproval(verb: 'Approve' | 'Reject' | 'Return' = 'Reject', overrides: Partial<ApprovalState> = {}): ApprovalState {
+  return approval({
+    status: DECIDED_STATUS[verb].approval,
+    canApprove: false,
+    decidedBy: 'Pat Approver',
+    decidedOn: '2026-11-17T09:00:00Z',
+    incompleteDecision: { verb, failedStep: 'record' },
+    ...overrides,
+  });
+}
+
+/** ISS-032: the same decision, finished: its record is written and the server reports no hint. */
+export function decidedApproval(verb: 'Approve' | 'Reject' | 'Return' = 'Reject', overrides: Partial<ApprovalState> = {}): ApprovalState {
+  return approval({
+    status: DECIDED_STATUS[verb].approval,
+    canApprove: false,
+    decidedBy: 'Pat Approver',
+    decidedOn: '2026-11-17T09:00:00Z',
+    decisionRecordId: 'rec-20',
+    incompleteDecision: null,
+    ...overrides,
+  });
+}
+
+/** ISS-032: a review whose invoice's status shows the decision (the transition happened). */
+export function decidedReview(verb: 'Approve' | 'Reject' | 'Return' = 'Reject', lines: ReviewLine[] = [line(1)]): InvoiceReview {
+  const base = review(lines);
+  return { ...base, header: { ...base.header, status: DECIDED_STATUS[verb].header } };
+}
+
 /** A review whose invoice is held by a blocked submission. */
 export function heldReview(lines: ReviewLine[] = [line(1)]): InvoiceReview {
   const base = review(lines);

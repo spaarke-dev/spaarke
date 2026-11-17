@@ -3,7 +3,7 @@
  *
  *   paneTabs       Context, Related work, History
  *   headerExtras   Awaiting approvers
- *   banners        the blocked-submission view (Override, Return)
+ *   banners        the blocked-submission view (Override, Return); a decision stranded before its record (Finish, ISS-032)
  *   invoiceActions Decide invoice… / View decision
  *
  * One `ApprovalProvider` holds the approval state (task 103) that the header line, the action and the wizard share; the slots are called
@@ -16,7 +16,7 @@ import { InvoiceReviewPage, type InvoiceReviewPageProps, type PaneTabSlot } from
 import { ApprovalProvider, useApproval } from './decision/ApprovalProvider';
 import { AwaitingApprovers } from './decision/AwaitingApprovers';
 import { BlockedBanner } from './decision/BlockedBanner';
-import { DecideInvoiceAction } from './decision/DecideInvoiceAction';
+import { DecideInvoiceAction, IncompleteDecisionBanner } from './decision/DecideInvoiceAction';
 import { SubmitCorrectedInvoiceAction, type OpenCorrectionWizard } from './decision/SubmitCorrectedInvoiceAction';
 import type { NotifyStep } from './decision/InvoiceDecisionWizard';
 import { ContextTab } from './tabs/ContextTab';
@@ -70,6 +70,8 @@ export function InvoiceReviewWithDecisions({ invoiceId, initialLineId, api, deci
         banners={ctx => (
           <>
             <BlockedBanner review={ctx.review} reload={ctx.reload} />
+            {/* ISS-032: a decision stranded before its Decision Record, and its Finish. */}
+            <IncompleteDecisionBanner reload={ctx.reload} />
             {correctionNotice && (
               <MessageBar intent="warning" role="alert" data-testid="correction-notice">
                 <MessageBarBody>{correctionNotice}</MessageBarBody>
