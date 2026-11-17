@@ -4,6 +4,9 @@
  *
  *   Override…        only when the server says `canOverride` (the caller holds the eBilling Override privilege, D-76). A reason is required.
  *   Return to firm…  only when the server says `canReturn` (no privilege needed, D-73). A reason is required.
+ *   Finish as operator…  only when the server says `canFinishAsOperator` and names a `strandedDecision` the caller did not record
+ *                    (ISS-034, EB-D-244): another person's Override or Return that was recorded but did not finish. It is finished exactly as
+ *                    recorded; the reason and note given here are the operator's own. The page never works out who may do this.
  *
  * Each is one reason on `FormModal` (a single-field form, ADR-050). A refusal (403 without the privilege, 409 already decided, 503 partly
  * saved) is shown in the form with its code and nothing changes on the page; a 503 is finished by submitting the same request again. The
@@ -27,7 +30,14 @@ import {
   tokens,
 } from '@fluentui/react-components';
 import { FormModal } from '@spaarke/ui-components';
-import { decisionFailureMessage, isBlockedDefiniteRefusal, isBlockedOutcomeUnknown, type BlockedFinding, type BlockedSubmission } from '../../services/decisionApi';
+import {
+  decisionFailureMessage,
+  isBlockedDefiniteRefusal,
+  isBlockedOutcomeUnknown,
+  isFinishStaleRefusal,
+  type BlockedFinding,
+  type BlockedSubmission,
+} from '../../services/decisionApi';
 import type { ApiFailure, InvoiceReview } from '../../services/invoiceReviewApi';
 import { isNoteRefusal, noteArgs, noteProblem, noteRefusalMessage } from '../../services/noteModel';
 import { NoteField } from '../NoteField';
@@ -57,7 +67,21 @@ export function findingLine(f: BlockedFinding): string {
   return f.detailWithheld ? `${base} (detail withheld for your role)` : base;
 }
 
-type Action = 'override' | 'return';
+type Action = 'override' | 'return' | 'finish';
+
+/** The warning when another request of this submission came back unsure and is not finished: this form must not start a second decision. */
+const LOCK_NOUN: Record<Action, string> = { override: 'An Override', return: 'A Return', finish: 'A finish' };
+const BEFORE_VERB: Record<Action, string> = { override: 'overriding', return: 'returning', finish: 'finishing as operator' };
+
+/** What the finish dialog says: the pending decision (an Override or a Return recorded by another person) and that it finishes exactly as recorded. A generic wording for a verb the page does not know (the dialog opens only from the server's hint, so there is always a verb). */
+export function finishIntro(verb: string | null): string {
+  const tail = 'Your reason is required and is recorded with your name; their reason and note stay as recorded.';
+  if (verb === 'Override')
+    return `Another person recorded an override of this submission, but it did not finish. Finishing it as operator completes it exactly as recorded: the invoice is released into the normal review. ${tail}`;
+  if (verb === 'Return')
+    return `Another person recorded a return of this submission to the firm, but it did not finish. Finishing it as operator completes it exactly as recorded: the invoice goes back to the firm. ${tail}`;
+  return `Another person's decision on this submission was recorded, but it did not finish. Finishing it as operator completes it exactly as recorded. ${tail}`;
+}
 
 export interface BlockedBannerProps {
   review: InvoiceReview;
@@ -68,13 +92,19 @@ export function BlockedBanner({ review, reload }: BlockedBannerProps) {
   const s = useStyles();
   const { api, refresh, locks } = useApproval();
   const held = review.header.held;
-  const submissionId = submissionIdOf(review);
+  // The submission the review names. Once the hold is gone the review may name none; an open form keeps the last one it was opened for, so its
+  // repeat still goes to the same submission.
+  const lastSubmissionId = React.useRef<string | null>(null);
+  const named = submissionIdOf(review);
+  if (named) lastSubmissionId.current = named;
+  const submissionId = named ?? lastSubmissionId.current;
 
   const [blocked, setBlocked] = React.useState<BlockedSubmission | null>(null);
   const [failure, setFailure] = React.useState<ApiFailure | null>(null);
   // The action last shown, kept after the form closes: the FormModal is closed with `open={false}`, never unmounted while
   // open, which would leave the page aria-hidden (#2658). `seq` keys each opening, so every opening starts fresh.
-  const [dialog, setDialog] = React.useState<{ action: Action; open: boolean; seq: number } | null>(null);
+  // `verb` is the stranded decision the finish dialog names, taken when it opens (the offer goes away once the server finishes it).
+  const [dialog, setDialog] = React.useState<{ action: Action; open: boolean; seq: number; verb: string | null } | null>(null);
   const action = dialog?.action ?? null;
   const closeDialog = () => setDialog(prev => (prev ? { ...prev, open: false } : prev));
   const [reason, setReason] = React.useState('');
@@ -110,12 +140,20 @@ export function BlockedBanner({ review, reload }: BlockedBannerProps) {
     if (held) void load();
   }, [held, load]);
 
-  // The hold is gone (the decision is done): nothing is left to repeat, so a lock kept from an unsure send is dropped.
+  // The hold is gone (the decision is done): nothing is left to repeat, so a lock kept from an unsure send is dropped. Not while the form is
+  // still open: an unsure send (a 503 after the decision stood and the invoice was released, with a Signal close failed) re-reads the page, the
+  // hold clears, and the form must stay open with its error and its lock so the same request can be repeated and finish the close.
+  const dialogOpen = dialog?.open === true;
   React.useEffect(() => {
-    if (!held) locks.clear('blocked');
-  }, [held, locks]);
+    if (!held && !dialogOpen) locks.clear('blocked');
+  }, [held, dialogOpen, locks]);
 
-  if (!held || !submissionId) return null;
+  // Only the banner goes with the hold; an open form does not (see above), and no form is ever shown unless one was opened.
+  if (!submissionId) return null;
+
+  // ISS-034: offered only on the server's word (`canFinishAsOperator`) and only for a decision someone else recorded: the decider finishes
+  // their own by repeating it (Override or Return above), never through this action.
+  const stranded = blocked?.canFinishAsOperator === true && blocked.strandedDecision && !blocked.strandedDecision.callerIsDecider ? blocked.strandedDecision : null;
 
   const open = (a: Action) => {
     // An Override or Return that came back unsure is reopened as it was sent, locked, so the repeat is the same request. Review round 2: the
@@ -128,7 +166,8 @@ export function BlockedBanner({ review, reload }: BlockedBannerProps) {
     setNoteError(null);
     setLocked(!!same);
     setError(null);
-    setDialog(prev => (prev?.open ? { ...prev, action: a } : { action: a, open: true, seq: (prev?.seq ?? 0) + 1 }));
+    const verb = a === 'finish' ? stranded?.verb ?? null : null;
+    setDialog(prev => (prev?.open ? { ...prev, action: a, verb } : { action: a, open: true, seq: (prev?.seq ?? 0) + 1, verb }));
   };
 
   // An Override or Return of the OTHER action that came back unsure and is not finished: this form must not start a second decision.
@@ -142,7 +181,11 @@ export function BlockedBanner({ review, reload }: BlockedBannerProps) {
     setNoteError(null);
     const n = noteArgs(note);
     const r =
-      action === 'override' ? await api.overrideBlocked(submissionId, reason.trim(), ...n) : await api.returnBlocked(submissionId, reason.trim(), ...n);
+      action === 'override'
+        ? await api.overrideBlocked(submissionId, reason.trim(), ...n)
+        : action === 'finish'
+          ? await api.finishStranded(submissionId, reason.trim(), ...n)
+          : await api.returnBlocked(submissionId, reason.trim(), ...n);
     if (!alive.current) return;
     if (r.ok) {
       locks.clear('blocked');
@@ -175,9 +218,17 @@ export function BlockedBanner({ review, reload }: BlockedBannerProps) {
     // the server says this request is not going to finish, so the lock is a trap, not a protection. It is cleared (here and at page level), the
     // form is editable again, the refusal is shown, and the page, the approval and the blocked view are re-read to show what the server holds.
     // A transient answer (`in_progress`, `still_processing`) keeps the lock: the same request can still finish.
+    let reread = unknown;
     if (isBlockedDefiniteRefusal(r.failure) && (locked || locks.get('blocked'))) {
       locks.clear('blocked');
       setLocked(false);
+      reread = true;
+      await Promise.all([reload(), refresh(), load()]);
+      if (!alive.current) return;
+    }
+    // ISS-034: a refusal of the operator finish that says the page's picture is out of date (already finished, taken by the caller, not
+    // there, not permitted): re-read so the offer follows the server's state, then show the refusal.
+    if (action === 'finish' && !reread && isFinishStaleRefusal(r.failure)) {
       await Promise.all([reload(), refresh(), load()]);
       if (!alive.current) return;
     }
@@ -188,10 +239,12 @@ export function BlockedBanner({ review, reload }: BlockedBannerProps) {
 
   const blocking = (blocked?.findings ?? []).filter(f => f.blocking && !f.overridden);
   const shown = blocking.slice(0, 5);
-  const title = action === 'override' ? 'Override the block' : 'Return to firm';
+  const title = action === 'override' ? 'Override the block' : action === 'finish' ? 'Finish as operator' : 'Return to firm';
+  const submitLabel = action === 'override' ? 'Override' : action === 'finish' ? 'Finish' : 'Return';
 
   return (
     <>
+      {held && (
       <MessageBar intent="warning" layout="multiline" data-testid="blocked-banner">
         <MessageBarBody>
           <MessageBarTitle>This invoice is on hold</MessageBarTitle>
@@ -220,7 +273,7 @@ export function BlockedBanner({ review, reload }: BlockedBannerProps) {
             </Caption1>
           )}
         </MessageBarBody>
-        {blocked && (blocked.canOverride || blocked.canReturn) && (
+        {blocked && (blocked.canOverride || blocked.canReturn || stranded) && (
           <MessageBarActions>
             {blocked.canOverride && (
               <Button size="small" onClick={() => open('override')} data-testid="override-block">
@@ -232,9 +285,15 @@ export function BlockedBanner({ review, reload }: BlockedBannerProps) {
                 Return to firm…
               </Button>
             )}
+            {stranded && (
+              <Button size="small" onClick={() => open('finish')} data-testid="finish-stranded">
+                Finish as operator…
+              </Button>
+            )}
           </MessageBarActions>
         )}
       </MessageBar>
+      )}
 
       {dialog && (
         <FormModal
@@ -242,7 +301,7 @@ export function BlockedBanner({ review, reload }: BlockedBannerProps) {
           open={dialog.open}
           size="sm"
           title={title}
-          submitLabel={action === 'override' ? 'Override' : 'Return'}
+          submitLabel={submitLabel}
           submitDisabled={otherLock !== null || reason.trim() === '' || noteProblem(note) !== null}
           busy={busy}
           onClose={() => {
@@ -251,17 +310,19 @@ export function BlockedBanner({ review, reload }: BlockedBannerProps) {
           onSubmit={() => void submit()}
         >
           <div className={s.form}>
-            <Text>
-              {action === 'override'
-                ? 'The invoice is released into the normal review. A reason is required and is recorded with your name.'
-                : 'The invoice goes back to the firm, which can correct and resubmit it. A reason is required and the firm sees it.'}
-            </Text>
-            {otherLock && (
+            {action === 'finish' ? (
+              <Text data-testid="finish-stranded-intro">{finishIntro(dialog.verb)}</Text>
+            ) : (
+              <Text>
+                {action === 'override'
+                  ? 'The invoice is released into the normal review. A reason is required and is recorded with your name.'
+                  : 'The invoice goes back to the firm, which can correct and resubmit it. A reason is required and the firm sees it.'}
+              </Text>
+            )}
+            {otherLock && action && (
               <MessageBar intent="warning" layout="multiline" data-testid="blocked-other-lock">
                 <MessageBarBody>
-                  {otherLock.action === 'override'
-                    ? 'An Override may have been saved in part. Submit it again to finish it before returning.'
-                    : 'A Return may have been saved in part. Submit it again to finish it before overriding.'}
+                  {LOCK_NOUN[otherLock.action]} may have been saved in part. Submit it again to finish it before {BEFORE_VERB[action]}.
                 </MessageBarBody>
               </MessageBar>
             )}
