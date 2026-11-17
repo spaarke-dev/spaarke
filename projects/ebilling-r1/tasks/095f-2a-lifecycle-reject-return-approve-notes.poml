@@ -4,7 +4,7 @@
     <title>Decision notes, part 2a: the lifecycle overload writing sprk_decisionnote, plus the reject, return and approve notes and the decision-note writers guard</title>
     <phase>5 Partner surfaces — 095f part 2 (EB-D-236, EB-D-240)</phase>
     <gate>095f-2s merged into work (the column on the pending list). Branch from work/ebilling-r1 at the sha named in the agent brief.</gate>
-    <status>open</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>BFF C#: a new member on IInvoiceLifecycleService (the single owner of invoice transitions), three decision routes, and a writers guard.</rigor-reason>
     <model-tier>opus</model-tier>

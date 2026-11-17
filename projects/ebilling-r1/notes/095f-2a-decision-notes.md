@@ -284,3 +284,13 @@ Round 2 changes one source file (`InvoiceApprovalService.cs`) and adds no packag
 (f) **Writers guard attribution.** A custom attribute on a parameter or return value is attributed to its method's name. So such an attribute naming a note column on a method whose name is allowed (for example `TransitionAsync`) passes the writers guard. The guard documents this attribution rule.
 
 (g) **The stored decider when the stored set cannot be found.** As in reject and return, the closes fall back to the caller's user only when the stored-set lookup returns no record while the writer-created record read found one. Both reads look for the writer-created record under the same key, so this is not expected on a real path; it was not made to fail closed, to keep parity with reject and return.
+
+## Round 2 re-check and merge (2026-11-17)
+
+- **Scoped Sonnet re-check of 55efd48441..a561ac98bd:** both round-2 claims hold (stored decider on every Signal close; stored approved amount compared before anything is written, closed or linked); no F-class finding. Mutation runs: removing the amount compare fails both F2 tests; using the caller as decider fails both F1 tests.
+- **K3 closed after merge (main session):** the fail-closed branch for an unreadable stored amount had no test (treating it as a match left every test green). Added `StoredApprovedAmount_Unreadable_IsRefused` (signals/link × key missing/not a number): Incomplete at "record", no second record, nothing written, closed or linked. With the branch mutated to `(stored ?? amount) != amount`, all 4 cases fail; restored.
+- **Known limits from the re-check:**
+  - K2: an approve record written before `approvedAmount` entered `Values` (a 9-hour window on 2026-10-29 between 10f640f530 and 6a2e657876, both merged together) would stay Incomplete at "record" on a repeat. Not a regression: the pre-round-1 repeat refused it the same way. Practically unreachable; if ever seen, compare against `sprk_factsnapshot` `facts.approvedAmount` when the key is absent.
+  - K2: known limit (g) is reachable only as a read race (the stored-set read uses NoLock); the closes would then name the repeater, who is the portion's claimant.
+  - K1: the portion's `sprk_decidedby` is not reconciled with the record's decider (same as reject and return); the record stays the authority.
+- **Merged into work/ebilling-r1 as 7849bd05a0** (plus the K3 test commit). Merged tip: BFF build `--warnaserror` 0 warnings; Finance/Signals/Invoice/Ebilling/Procedure suites 16,942/0; ArchTests 2,661/0.

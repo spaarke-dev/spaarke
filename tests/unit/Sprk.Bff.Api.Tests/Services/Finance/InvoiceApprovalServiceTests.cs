@@ -685,6 +685,46 @@ public sealed class InvoiceApprovalServiceTests
             "one Warning with ids only, never the amounts");
     }
 
+    [Theory(DisplayName = "095f-2a review round 2 re-check K3: a stranded approve whose stored record holds no readable approved amount is refused on the repeat (fail closed) - Incomplete at 'record', nothing written, closed or linked")]
+    [InlineData("signals", "missing")]
+    [InlineData("link", "missing")]
+    [InlineData("signals", "not-a-number")]
+    [InlineData("link", "not-a-number")]
+    public async Task StoredApprovedAmount_Unreadable_IsRefused(string failingStep, string shape)
+    {
+        var w = new ApprovalWorld();
+        w.AddLine(InvoiceLineStatus.Accepted, approved: 100m);
+        var signal = w.AddInvoiceSignal("EB-TOTAL");
+        StrandAt(w, failingStep, signal);
+        (await w.ApproveAs(AliceUser)).FailedStep.Should().Be(failingStep);
+        var record = w.ApproveRecords.Should().ContainSingle().Subject;
+        var frozen = RecordedAmount(record);
+
+        // The portion still holds the frozen amount (untampered); only the stored record's amount cannot be read. Treating an
+        // unreadable amount as a match would let any portion amount complete against it, so it must refuse like a mismatch.
+        w.Portion["sprk_approvedamount"] = new Money(decimal.Round(frozen, 2) + 0.00m);
+        var steps = System.Text.Json.Nodes.JsonNode.Parse(record.GetAttributeValue<string>("sprk_steps"))!;
+        var values = steps["steps"]![0]!["values"]!.AsObject();
+        values.Remove("approvedAmount");
+        if (shape == "not-a-number")
+        {
+            values["approvedAmount"] = "one hundred";
+        }
+
+        record["sprk_steps"] = steps.ToJsonString();
+        var (created, writes, closes, closed) = (w.H.Created.Count, w.Writes, w.Closes.Count, w.ClosedBy.Count);
+
+        var retried = await w.ApproveAs(AliceUser);
+
+        retried.Outcome.Should().Be(ApprovalOutcome.Incomplete, retried.Detail);
+        retried.FailedStep.Should().Be("record");
+        w.H.Created.Count.Should().Be(created, "no second record");
+        w.Writes.Should().Be(writes, "nothing written");
+        w.Closes.Count.Should().Be(closes, "no Signal close asked");
+        w.ClosedBy.Count.Should().Be(closed);
+        w.Portion.GetAttributeValue<EntityReference>("sprk_decisionrecord").Should().BeNull("nothing linked");
+    }
+
     [Theory(DisplayName = "095f-2a review round 2 F2 (must-not-fire): a stranded approve whose portion amount is unchanged completes on the repeat")]
     [InlineData("signals")]
     [InlineData("link")]
