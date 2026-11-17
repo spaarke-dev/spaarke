@@ -4,7 +4,7 @@
  * `toFailure` / `ApiResult` / `ApiFailure` it reuses.
  *
  *   Task 103  GET  /api/finance/invoices/{id}/approval                     eligible approvers, canApprove, open-line counts, who decided
- *             POST /api/finance/invoices/{id}/approve                      approve (no body: the decider is the caller, the decision id the portion's)
+ *             POST /api/finance/invoices/{id}/approve                      approve (no body but an optional note: the decider is the caller, the decision id the portion's)
  *   Task 102  GET  /api/finance/invoices/{id}/adjustment-rules             rules a reviewer may cite on an invoice adjustment
  *             POST /api/finance/invoices/{id}/adjustments                  add an adjustment (method, value, reason, rule; the server computes the amount)
  *             DELETE /api/finance/invoices/{id}/adjustments/{lineId}       remove one
@@ -14,6 +14,10 @@
  *   Task 106  GET  /api/finance/invoices/{id}/context                      five independent sections, each available / unavailable / notTracked
  *   Task 107  GET  /api/finance/invoices/{id}/lines/{lineId}/related-work  documents behind one fee line, or the empty reason
  *
+ * Task 095f-2ui: every decision here takes an optional `note` (approve, reject, return, add and remove adjustment, override, blocked return).
+ * A blank or whitespace-only note is left out of the request, never sent as null or "" (design 095f-part2 1.2); a note that is sent is the
+ * text as typed.
+ *
  * The page decides nothing the server owns (ADR-002, I-1): it never computes a total, an amount or who may decide. Wire types follow
  * InvoiceApprovalService.cs, InvoiceAdjustmentService.cs, InvoiceRejectReturnEndpoints.cs, SubmissionOverrideService.cs,
  * InvoiceContextService.cs and InvoiceRelatedWorkService.cs (camelCase; DateOnly as yyyy-MM-dd).
@@ -21,6 +25,7 @@
 
 import type { AuthenticatedFetchFn } from '@spaarke/auth';
 import { toFailure, type ApiFailure, type ApiResult } from './invoiceReviewApi';
+import { noteMember } from './noteModel';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Wire types
@@ -115,6 +120,8 @@ export interface AddAdjustmentRequest {
   value: number;
   reason: string;
   ruleId: string | null;
+  /** Task 095f-2ui: the optional note on the adjustment's Decision Record. Blank is left out of the request. */
+  note?: string;
 }
 
 export interface AdjustmentDto {
@@ -336,6 +343,13 @@ export const INCOMPLETE_CODES: ReadonlySet<string> = new Set([
 ]);
 
 /**
+ * 409 `InvoiceAdjustmentService.AdjustmentCodes.IdReused`: the adjustment id (an add's, or a removal's, which is derived from the line) was
+ * already used for other content or by another reviewer. On a removal this is the stale-page answer (another reviewer removed it, or a
+ * repeat carried another note): the page re-reads the list. Pinned to the server's source by `__tests__/serverWordsPin.test.ts`.
+ */
+export const CODE_ADJUSTMENT_ID_REUSED = 'ebilling.adjustment.id_reused';
+
+/**
  * A 503 that saved part of the change: one of the documented codes, or any 503 that names the step it stopped at or the lines it committed
  * (the approve route answers those with the line service's own code, so the list alone would miss a code it does not know yet).
  */
@@ -367,15 +381,15 @@ export function decisionFailureMessage(f: ApiFailure): string {
 
 export interface InvoiceDecisionApi {
   getApproval(invoiceId: string): Promise<ApiResult<ApprovalState>>;
-  approve(invoiceId: string): Promise<ApiResult<ApproveResponse>>;
-  reject(invoiceId: string, reason: string): Promise<ApiResult<DecisionResponse>>;
-  returnToFirm(invoiceId: string, reason: string): Promise<ApiResult<DecisionResponse>>;
+  approve(invoiceId: string, note?: string): Promise<ApiResult<ApproveResponse>>;
+  reject(invoiceId: string, reason: string, note?: string): Promise<ApiResult<DecisionResponse>>;
+  returnToFirm(invoiceId: string, reason: string, note?: string): Promise<ApiResult<DecisionResponse>>;
   listAdjustmentRules(invoiceId: string): Promise<ApiResult<AdjustmentRulesResponse>>;
   addAdjustment(invoiceId: string, request: AddAdjustmentRequest): Promise<ApiResult<AdjustmentResponse>>;
-  removeAdjustment(invoiceId: string, lineId: string): Promise<ApiResult<AdjustmentResponse>>;
+  removeAdjustment(invoiceId: string, lineId: string, note?: string): Promise<ApiResult<AdjustmentResponse>>;
   getBlocked(submissionId: string): Promise<ApiResult<BlockedSubmission>>;
-  overrideBlocked(submissionId: string, reason: string): Promise<ApiResult<BlockedDecisionResponse>>;
-  returnBlocked(submissionId: string, reason: string): Promise<ApiResult<BlockedDecisionResponse>>;
+  overrideBlocked(submissionId: string, reason: string, note?: string): Promise<ApiResult<BlockedDecisionResponse>>;
+  returnBlocked(submissionId: string, reason: string, note?: string): Promise<ApiResult<BlockedDecisionResponse>>;
   getContext(invoiceId: string): Promise<ApiResult<InvoiceContext>>;
   getRelatedWork(invoiceId: string, lineId: string): Promise<ApiResult<RelatedWork>>;
 }
@@ -421,10 +435,9 @@ export function createInvoiceDecisionApi(fetchFn: AuthenticatedFetchFn, bffBaseU
   /** One call; a body that does not pass `valid` is a failure, never an empty answer. */
   async function call<T>(url: string, method: 'GET' | 'POST' | 'DELETE', body: unknown, valid: (b: unknown) => boolean, what: string): Promise<ApiResult<T>> {
     try {
-      const res = await fetchFn(
-        url,
-        method === 'POST' ? { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body ?? {}) } : { method }
-      );
+      // A POST always carries a JSON body (`{}` for none); a DELETE carries one only when it has something to say (the removal's note).
+      const json = { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body ?? {}) };
+      const res = await fetchFn(url, method === 'POST' || (method === 'DELETE' && body !== null) ? { method, ...json } : { method });
       const parsed = (await res.json()) as unknown;
       return valid(parsed) ? { ok: true, value: parsed as T } : { ok: false, failure: unexpected(what) };
     } catch (err) {
@@ -435,28 +448,32 @@ export function createInvoiceDecisionApi(fetchFn: AuthenticatedFetchFn, bffBaseU
   return {
     getApproval: invoiceId =>
       call(decisionRoutes.approval(bffBaseUrl, invoiceId), 'GET', null, b => isObject(b) && typeof b.status === 'string' && Array.isArray(b.eligibleApprovers), 'approval body'),
-    approve: invoiceId => call(decisionRoutes.approve(bffBaseUrl, invoiceId), 'POST', {}, b => isObject(b) && typeof b.outcome === 'string', 'approve body'),
-    reject: (invoiceId, reason) =>
-      call(decisionRoutes.reject(bffBaseUrl, invoiceId), 'POST', { reason }, b => isObject(b) && typeof b.outcome === 'string', 'decision body'),
-    returnToFirm: (invoiceId, reason) =>
-      call(decisionRoutes.returnToFirm(bffBaseUrl, invoiceId), 'POST', { reason }, b => isObject(b) && typeof b.outcome === 'string', 'decision body'),
+    approve: (invoiceId, note) => call(decisionRoutes.approve(bffBaseUrl, invoiceId), 'POST', { ...noteMember(note) }, b => isObject(b) && typeof b.outcome === 'string', 'approve body'),
+    reject: (invoiceId, reason, note) =>
+      call(decisionRoutes.reject(bffBaseUrl, invoiceId), 'POST', { reason, ...noteMember(note) },b => isObject(b) && typeof b.outcome === 'string', 'decision body'),
+    returnToFirm: (invoiceId, reason, note) =>
+      call(decisionRoutes.returnToFirm(bffBaseUrl, invoiceId), 'POST', { reason, ...noteMember(note) },b => isObject(b) && typeof b.outcome === 'string', 'decision body'),
     listAdjustmentRules: invoiceId =>
       call(decisionRoutes.adjustmentRules(bffBaseUrl, invoiceId), 'GET', null, b => isObject(b) && Array.isArray(b.rules), 'adjustment rules body'),
     addAdjustment: (invoiceId, r) =>
       call(
         decisionRoutes.adjustments(bffBaseUrl, invoiceId),
         'POST',
-        { adjustmentId: r.adjustmentId, method: r.method, value: r.value, reason: r.reason, ruleId: r.ruleId },
+        { adjustmentId: r.adjustmentId, method: r.method, value: r.value, reason: r.reason, ruleId: r.ruleId, ...noteMember(r.note) },
         isObject,
         'adjustment body'
       ),
-    removeAdjustment: (invoiceId, lineId) => call(decisionRoutes.adjustment(bffBaseUrl, invoiceId, lineId), 'DELETE', null, isObject, 'adjustment body'),
+    // The removal's note rides in an optional JSON body `{ note }` (RemoveAdjustmentRequest); with no note there is no body at all.
+    removeAdjustment: (invoiceId, lineId, note) => {
+      const body = noteMember(note);
+      return call(decisionRoutes.adjustment(bffBaseUrl, invoiceId, lineId), 'DELETE', 'note' in body ? body : null, isObject, 'adjustment body');
+    },
     getBlocked: submissionId =>
       call(decisionRoutes.blocked(bffBaseUrl, submissionId), 'GET', null, b => isObject(b) && typeof b.state === 'string' && Array.isArray(b.findings), 'blocked body'),
-    overrideBlocked: (submissionId, reason) =>
-      call(decisionRoutes.override(bffBaseUrl, submissionId), 'POST', { reason }, b => isObject(b) && typeof b.outcome === 'string', 'override body'),
-    returnBlocked: (submissionId, reason) =>
-      call(decisionRoutes.returnBlocked(bffBaseUrl, submissionId), 'POST', { reason }, b => isObject(b) && typeof b.outcome === 'string', 'return body'),
+    overrideBlocked: (submissionId, reason, note) =>
+      call(decisionRoutes.override(bffBaseUrl, submissionId), 'POST', { reason, ...noteMember(note) },b => isObject(b) && typeof b.outcome === 'string', 'override body'),
+    returnBlocked: (submissionId, reason, note) =>
+      call(decisionRoutes.returnBlocked(bffBaseUrl, submissionId), 'POST', { reason, ...noteMember(note) },b => isObject(b) && typeof b.outcome === 'string', 'return body'),
     getContext: invoiceId =>
       call(decisionRoutes.context(bffBaseUrl, invoiceId), 'GET', null, b => isObject(b) && isObject(b.coreRecord) && isObject(b.budget), 'context body'),
     getRelatedWork: (invoiceId, lineId) =>

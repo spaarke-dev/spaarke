@@ -12,6 +12,9 @@
  *   Task 102  adjustment lines and the stored totals arrive in the read model; adding one is 111's approve wizard.
  *   Task 164  POST /api/finance/invoices/{invoiceId}/lines                                  Add line: a reviewer adds a Fee or Expense line the firm did not bill
  *
+ * Task 095f-2ui: `decideLine`, `decideLines`, `correctLine` and `correctHeader` (a correct and a confirm) take an optional `note`; a blank or
+ * whitespace-only note is left out of the request, never sent as null or "". `acceptClean` never takes one.
+ *
  * The page decides nothing the server owns (ADR-002, I-1): it never computes a total, a status or who may decide. Every outcome is the
  * server's answer. `authenticatedFetch` THROWS on any non-2xx (`ApiError` with the parsed ProblemDetails) and on an exhausted 401
  * (`AuthError`); every outcome is decided in the `catch` through the `@spaarke/auth` guards. Mirrors
@@ -19,6 +22,7 @@
  */
 
 import { isApiError, isAuthFailure, problemOf, type AuthenticatedFetchFn } from '@spaarke/auth';
+import { noteMember } from './noteModel';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Wire types (the BFF's JSON, camelCase): InvoiceReviewReadService.cs, InvoiceLineDecisionService.cs, InvoiceCorrectionService.cs
@@ -271,6 +275,8 @@ export interface SingleDecision {
   reason: string | null;
   /** Reduce only: the approved amount (between 0 and the billed amount; the server checks). */
   approvedAmount: number | null;
+  /** Task 095f-2ui: the optional note on the line's Decision Record. Blank or whitespace-only is left out of the request, never sent as null or "". */
+  note?: string;
 }
 
 export interface MultiDecision {
@@ -278,12 +284,16 @@ export interface MultiDecision {
   action: DecisionAction;
   reason: string | null;
   lines: Array<{ lineId: string; approvedAmount: number | null }>;
+  /** Task 095f-2ui: one note, saved on every selected line's own record. Blank is left out of the request. */
+  note?: string;
 }
 
 export interface CorrectionRequest {
   field: string;
   value: string | null;
   confirm: boolean;
+  /** Task 095f-2ui: the optional note on the correction row (a correct and a confirm both take one). Blank is left out of the request. */
+  note?: string;
 }
 
 /** Body of Add line (task 164, AddLineRequest). No total, status, owner or person: the server takes the decider from the caller's token. */
@@ -625,6 +635,7 @@ export function createInvoiceReviewApi(fetchFn: AuthenticatedFetchFn, bffBaseUrl
         action: d.action,
         reason: d.reason,
         approvedAmount: d.approvedAmount,
+        ...noteMember(d.note),
       });
     },
 
@@ -634,19 +645,21 @@ export function createInvoiceReviewApi(fetchFn: AuthenticatedFetchFn, bffBaseUrl
         action: d.action,
         reason: d.reason,
         lines: d.lines,
+        ...noteMember(d.note),
       });
     },
 
+    // Accept all Clean carries no note, ever (095f-2d1: the lines it accepts are accepted in bulk and each record is written without one).
     acceptClean(invoiceId, decisionId) {
       return post(routes.acceptClean(bffBaseUrl, invoiceId), { decisionId });
     },
 
     correctLine(invoiceId, lineId, r) {
-      return post(routes.correctLine(bffBaseUrl, invoiceId, lineId), { field: r.field, value: r.value, confirm: r.confirm });
+      return post(routes.correctLine(bffBaseUrl, invoiceId, lineId), { field: r.field, value: r.value, confirm: r.confirm, ...noteMember(r.note) });
     },
 
     correctHeader(invoiceId, r) {
-      return post(routes.correctHeader(bffBaseUrl, invoiceId), { field: r.field, value: r.value, confirm: r.confirm });
+      return post(routes.correctHeader(bffBaseUrl, invoiceId), { field: r.field, value: r.value, confirm: r.confirm, ...noteMember(r.note) });
     },
 
     addLine(invoiceId, r) {
