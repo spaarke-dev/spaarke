@@ -31,3 +31,4 @@ Use a Collaborate user and a View Only user on a matter, a project and a work as
 - Fix: PR #2894 (uac-r2 gate review PASS, checked against live metadata), squash-merged to master as `08161cfb0e` after Router and Client lint passed.
 - Same key in Signals (D-22 #2893) closed as not a defect: that path goes through `DataverseWriteItemMapper`, which corrects the case.
 - Waiting on: the dev BFF redeploy by uac-r2 from merged master (the owner names the SHA there), then retest items 1–6.
+- Dev BFF `326781c50f` live 2026-11-17T22:03Z (uac-r2; read-back, healthz and 401 checks OK; rollback `e46b6b453b`). Retest can resume.
