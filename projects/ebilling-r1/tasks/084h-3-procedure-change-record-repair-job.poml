@@ -4,7 +4,7 @@
     <title>Server-side retry: the ADR-004 repair job for a per-record Procedure Decision Record that failed after the change landed (RecordProcedureDecisionJob)</title>
     <phase>3 Rules (WP3) — Procedures on the record (EB-D-238, EB-D-239 Q10)</phase>
     <gate>084h-2 merged into work. Branch from work/ebilling-r1 at the sha named in the agent brief. Ships in the same deploy as 084h-2.</gate>
-    <status>open</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>New background work in the BFF (ADR-004 IJobHandler, ADR-052 placement); writes Decision Records.</rigor-reason>
     <model-tier>opus</model-tier>

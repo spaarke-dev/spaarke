@@ -135,7 +135,7 @@ Every constant of `DecisionRecordRefusalReason` is in `RecordProcedureDecisionJo
   - `tests/integration/seam/Signals/RecordProcedureRepairSeamTests.cs`: the slice from the Procedure service's enqueue through the Service Bus wire and the processor's routing rule to the record, plus the real host composition.
 - **Review round 1 changes two POML outcomes.** The POML's J4 completes a permanent refusal and its K1 constraint makes `OwnerRefused` permanent. Both are superseded by the round-1 findings (ontology-r1 F1, F2): a permanent refusal is now `Poisoned`, and `OwnerRefused` is permanent only for `ParentUnresolved`.
 
-## Tests
+## Tests (first build, before review round 1: counts and outcomes superseded where round 1 changed them; see "Review round 1")
 
 | Criterion | Proven by |
 |---|---|
@@ -147,7 +147,7 @@ Every constant of `DecisionRecordRefusalReason` is in `RecordProcedureDecisionJo
 | K1 | `K1_EveryWriterRefusalReason_IsClassifiedRetryableOrPermanent_AndTheTableNamesNoOtherReason` (reflection over the enum's constants), `K1_Control_AReasonAddedToTheWriter_WouldBeReportedUnclassified_AndIsRetriedAtRunTime`, `K1_TheNamedRefusals_HaveTheirAgreedClass` |
 | Enqueue reaches the handler; registration | `AFailedInlineRecord_IsQueuedToTheRepairJob_...` (the service's real enqueue, through the wire, routed by the processor's rule to exactly this handler); `TheRealContainer_WiresTheEnqueuerIntoTheProcedureService_AndRoutesItsJobTypeToTheRepairHandler` (real host composition, scope validation on) |
 
-## Verification
+## Verification (first build; round 1 and the merged tip are in "Review round 1" and "Merge")
 
 | Run | Result |
 |---|---|
@@ -178,3 +178,12 @@ Every constant of `DecisionRecordRefusalReason` is in `RecordProcedureDecisionJo
 Well under the +5 MB justification trigger and the 55 MB review / 60 MB stop thresholds. The base is the work-branch tip named in the brief, not a fresh `origin/master` build: the change is one new source file and a registration, and the work branch carries other unmerged code, so a master comparison would measure the branch, not this task.
 
 BFF Hygiene §10 + NFR-01 verified: compressed publish size 52.72 MB (50.28 MiB) incl. PDBs, delta +9 KB, no new HIGH CVEs.
+
+## Re-check and merge (2026-11-17)
+
+- **ontology-r1 re-check of F1/F2 at 36b3f9004f: PASS** (ontology sign-off; RecordMissing retryable agreed).
+- **Scoped Sonnet re-check of the fix diff b1d31707d5..36b3f9004f:** all six fixes verified; no F-class finding. Two known limits:
+  - K4 (doc): the first-build "Tests" and "Verification" figures predate round 1 (labelled above).
+  - K1: a permanent owner refusal is dead-lettered with the description `decision_owner_refused` only. The owner refusal code is in the Error log, not on the message, so a dead-letter triage joins to logs.
+- **Merged into work/ebilling-r1 as bb4ad3f578.** On the merged tip: BFF build `--warnaserror` 0 warnings; the 084h-3, Procedure assignment, billing recorder and gate job suites 661/0.
+- **ADR-004 tension above: pending owner confirmation** (§6.5 path A, the same exception as ontology task 149 K2 and 084h-1 K-b; ontology-r1 has no objection).
