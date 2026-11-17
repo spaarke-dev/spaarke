@@ -29,14 +29,14 @@
 - **mcp-r1:** dev spike = spike-v2 `973776a5a6` (branch spike/spaarkeai-mcp-phase0, confirmed current). Never deploy `work/spaarkeai-mcp-bff-api-r1`. Ping before every swap; live notice after (sent for be0420d763).
 - **spa-r4:** not mid-E2E (next E2E = task 016 after 014b + 015 deploy); ask before a restart. 015 opens event rows from list data, GET for deep links only (K5).
 - **ontology-r1:** 195 live on dev; owner composer template recheck can go. **#2884 (`0de88473b1`, task 196) asked into the next dev BFF build** (no rush; any master-based candidate carries it). After deploy, a gate/assign-task job refused its lock dead-letters as MaxRetriesExceeded "ProcessingLockRefused" — intended, not a regression; tell ontology-r1 when it's live.
-- **word-add-in-r1:** #2829 merge needs the owner's go.
+- **word-add-in-r1:** #2829 (095g firm-assign pane) MERGED `a68b6e5e6f` on the owner's go and live on the dev add-in site (2026-11-17); no add-in file changed after my pass at `bebc8e047c` (verified). Owner's dev check is next.
 
 ## Filed this session
 - #2851 (memo race, fixed in round 2) · #2853 (evaluator Max dedupe; latent) · #2860 (systemic QueryAsync; mine) · #2863 (dev drift `sprk_sourceemaildocument` unsecured; ebilling's) · #2864 (SpaarkeAi bundle bakes dev BFF fallback + dev ids) · **#2870** (AI membership treats child-record assignee columns as access-conferring; A-21/D-4 follow-up) · #2848 / #2850 open, unowned.
 
 ## Waiting on the owner
 - Dev checks: To Do create (Office); Send budget inquiry text; **AI drafting retry in the email composer**; **composer template recheck** (195 live).
-- SpaarkeMaster 1.3.2.0 publish/import; D-2 step 3; word-add-in #2829; provisioning #2871; ebilling task 112; #2764; 191i live steps; 193 PCF import; D-10 after U-3; #2786 part 2 scope; follow-ups #2826, #2549. Checklist: `notes/owner-test-checklist-2026-11-13.md`.
+- SpaarkeMaster 1.3.2.0 publish/import; D-2 step 3; word-add-in #2829 dev check (firm-assign pane); provisioning #2871; ebilling task 112; #2764; 191i live steps; 193 PCF import; D-10 after U-3; #2786 part 2 scope; follow-ups #2826, #2549. Checklist: `notes/owner-test-checklist-2026-11-13.md`.
 
 ## Scratch
 - Worktrees: `C:\wtcew` (#2875 wizard build; can go after fm's live check), `C:\wtdep13` (live BFF merge; keep), `C:\wtdep12` (BFF rollback; keep), `C:\wtdep11`, `C:\wt2845b` (round 2, merged), `C:\wtm16` (master 16771d1051 publish baseline; can go), `C:\wt2859`, `C:\wt2869`, `C:\wt2852`, `C:\wt130e`, `C:\wtdep10`, `C:\wtdep9`, `C:\wtdep8`, `C:\wt2845`, `C:\wt2833` (can go). Remove only with `scripts/worktree/Remove-WorktreeSafe.ps1`.
