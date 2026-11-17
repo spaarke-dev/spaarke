@@ -9,13 +9,14 @@
 
 ## NOW — read this first
 
-### Active (2026-11-16 ~20:30): wave 1 of 084h / 095f part 2
+### Active (2026-11-17): wave 2 of 084h / 095f part 2
 
-- **084h-2 BUILT** on `origin/task/ebilling-084h-2` (base 69745e926d; commits 209297ba75, 0202d84472, e3127757fa). Targeted suites pass 2420/0, ArchTests 2650/0, publish delta +42 KB, no CVE. **In progress:** an Opus adversarial review (background), plus ontology-r1's H-3 glance (asked). Next: triage findings → fix rounds if F → merge into work → remove agent worktree `C:\code_files\spaarke\.claude\worktrees\agent-a5e4401af0960ba9b` (unlock + Remove-WorktreeSafe) → delete remote branch.
+- **Wave 2 building (two Opus implementer agents, base 5508b576fe):** 084h-3 repair job → `task/ebilling-084h-3`; 095f-2a lifecycle/reject/return/approve notes → `task/ebilling-095f-2a`. Next per agent: one adversarial review, fix F, merge into work, remove the agent worktree (unlock + Remove-WorktreeSafe), delete the branch. 084h-3 goes to ontology-r1 for the K1 classification check; 095f-2a to ontology-r1 light (catalog `note` parameter).
+- **084h-2 ✅ merged into work 606812068a** (Opus review: F4 test gap fixed 93ead0d4b2; K-a..K-f in its notes; ontology H-3 PASS). Worktree and branch removed.
 - **095f-2e1 ✅ merged into work 7d5a3a369a** (one adversarial pass, no F; K1-K3 in its notes). **095f-2s ✅ merged d6dafe032c** (pushed).
 - **Fixed a 130e-1 regression:** `FirmOutcomeScopeTests` "130c happy path" seeded no `billing.reason` evidence (efef15f29f, fixture only).
-- **UNPUSHED on work (≈7 commits, through caf4f1ce7e):** held until the full `Sprk.Bff.Api.Tests` run is clean. The first full run hung (a testhost at 16 GB / 1,759 threads after 2 h; killed). Re-running with `--blame-hang --blame-hang-timeout 10m` (background; trx under the session scratchpad `fulltest\`). If a hang is named: decide whether it is ours (130e-1 / 2e1) or pre-existing (file an ISS).
-- **Next waves:** 084h-3 (after 084h-2 merges; K1 retry classification from ontology-r1) + 095f-2a; then 084h-4, 095f-2c, 2d1, 2d2; then 095f-2b (ontology full review), 2ui; 095f-2e2 after the owner's pick. 130e-2 is still open (Rule Review editor field; no POML yet).
+- **work pushed 2026-11-17 at 5508b576fe.** The single-process full BFF run times out under load on this machine (474/478 TaskCanceled; never run it that way). Gate = CI's five shards (scratchpad `run-shards.ps1`): 4 clean, `rest` 1 failure = known flaky #2543 (uac-r2), passes 3/3 alone. ArchTests 2656/0.
+- **Next waves:** 084h-4, 095f-2c, 2d1, 2d2 (after 2a / 084h-3 merge); then 095f-2b (ontology full review), 2ui; 095f-2e2 after the owner's pick. 130e-2 is still open (Rule Review editor field; no POML yet).
 - **Deploy order elsewhere:** columns first (079 syncs `sprk_firmdescription`, `sprk_rejectionreason`, and now `sprk_decisionnote` + `sprk_invoicecorrection.sprk_note`, and empties both pending lists), then a BFF carrying 130e-1. 079 takes the SpaarkeMaster version after uac-r2's 1.3.2.0 (merged 57431c8e6a) and keeps InvoiceFamilyFieldLockSourceGuardTests green.
 ### Done 2026-11-16 (pushed)
 
