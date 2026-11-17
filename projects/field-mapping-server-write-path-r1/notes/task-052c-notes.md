@@ -149,6 +149,14 @@ Gates (on 39d8474f62, after the mutations were restored):
 - **K5 — A window that ends at or after "now minus two minutes" is reported as not clean.** The scan stops at the scheduled
   pass's settle point; the run says which rows were left (`settleClamped`, `scanUntil`) and Success=false, and the administrator
   runs the tail later. A window ending at "now" therefore never reports success.
+- **K6 — A run both clamped and truncated is continued in two parts (fix re-check).** Continuing such a run with `afterId` covers
+  only `[createdFrom, scanUntil)`; rows in the clamped tail `[scanUntil, createdTo)` whose id is below `afterId` are not reached
+  that way. Run the tail as its own window. Arises only when `createdTo` is within the settle time of the run's start.
+- **K7 — Rows not finished on an earlier page are not covered by `afterId` (fix re-check).** A row that ended `needsRetry` or
+  failed on an earlier page lies below `lastIdCovered`; a page scan failure after page 1 reports no `lastIdCovered`. In both
+  cases run the window again from its start: Repair is fill-only and conditional, so a re-run writes only what is still missing.
+- **K8 — Later pages share page 1's query.** No test asserts that page 2 onward carries the product-principal condition; every
+  page is built by the same `BuildScanQuery`, so the condition cannot differ between pages.
 
 ## Review and fix round 1
 
@@ -196,3 +204,11 @@ without a constant condition (J1, J2, R1).
 
 Gates after the round: solution build 0 warnings; ArchTests 2639/2639; `dotnet format whitespace --verify-no-changes` clean on
 every touched .cs; the filtered Sprk.Bff.Api.Tests run (Repair, RecordOwnership, Scheduled, Job, Admin, RecordCreation, Contact, AssignCascade, Census, Issue975; `!~Api.Office.`) 9105 passed, 5 skipped (pre-existing), 0 failed.
+
+## Reviews (2026-11-17, main session)
+
+- Two independent adversarial passes on 39d8474f62..7285c88b4e (auth-tagged task): Opus and Sonnet. Neither found an F1 or F2.
+  Their F3/F4 findings are round 1 above; their K items are K1-K5 (the settle-time finding was raised as F4 by one and K by the
+  other, and was fixed).
+- Scoped re-check of the fix diff 7285c88b4e..3f4ad4b8be (Sonnet; the fix changed the approach, adding paging): no F1/F2; K6-K8.
+- Merged into the work branch at cb86030700 (`task/fm-052c` c569dd8a6a).

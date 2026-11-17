@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="052d" project="field-mapping-server-write-path-r1">
+  <metadata>
+    <title>Repair pass report: core-pair findings on Signal and Decision Record, and rows the pass cannot finish (FR-25, FR-41; task 044(d))</title>
+    <phase>5 W5 Records created outside the product</phase>
+    <gate>052b and 052c on the work branch (merges b18d4fc394, cb86030700). Nothing here enables the pass on any environment.</gate>
+    <status>in-progress</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .cs in Sprk.Bff.Api (the repair job, run as the system principal); report-only on two append-only tables where a write would break D-204; new tests at KEEP paths.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>The audit-history read is new to the BFF (shape, paging, cost) and the report must never become a write.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>W5-B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>No other code task is open; 023's live check touches no code.</parallel-reason>
+    <deps>052b, 052c, 044</deps>
+    <tags>bff-api, jobs, security, testing</tags>
+    <estimated-effort>1 session</estimated-effort>
+  </metadata>
+
+  <prompt>Slice d of task 052. Make the repair pass report two things, writing nothing for either. (1) Task 044(d) (owner 2026-11-06, ontology D-204, D-210): for `sprk_signal` and `sprk_decisionrecord` rows created after go-live, report each row that holds one half of the core pair only (`sprk_corerecordtype` xor `sprk_corerecordid`), and each row whose pair changed after create, read from the Dataverse column audit history of those two columns (auditing is on for both tables and all four columns on dev, task 044 notes §5). (2) Rows the pass cannot finish (052b K6, K8): per table, the size of the retry set and the rows abandoned in this run, so an operator sees them without reading every log line.</prompt>
+  <role>SPAARKE platform developer, .NET 10 BFF, ADR-036 scheduled jobs, Dataverse Web API and auditing. Report-only; security fails closed.</role>
+  <goal>An operator reading a run's result (the existing run record via `/api/admin/jobs/record-repair-pass/status` and `/history`) and its log sees every post-go-live Signal and Decision Record row with a half pair or a pair changed after create (table, id, finding, and for a change the audit time and the changing user's id), and each table's retry-set size and abandoned rows; the pass never writes either of the two tables and never writes because of a finding.</goal>
+
+  <context>
+    <background>
+- Parents: `tasks/052-repair-pass-scheduled-job.poml` (AC "Task 044(d)"), `tasks/044-core-pair-server-only-field-security.poml` (AC8, background), `notes/task-044-notes.md` §5-§6, `notes/decisions.md` (2026-11-04 D-204 entries; the 044 ruling "no field security on the core pair": an edit outside the server is detected and traced, not blocked).
+- Both tables stay OUT of repair (2026-11-02; Decision Record is append-only; D-204: only their writers create them). The pass already excludes them from writing; the report adds a read-only scan of them.
+- 052b (`notes/task-052b-notes.md`): per-table state (watermark, sweep cursor, retry ids) in IDistributedCache, RunCounts, heartbeat, Finish/result JSON. K6: abandoned rows after 12 faulted attempts are logged and dropped. K8: the retry set is uncapped. 052c (`notes/task-052c-notes.md`): on-demand mode (one table, one window).
+- Audit read: no BFF code reads Dataverse audit history today. Decide the read and record it: e.g. the `audits` entity set filtered by `objecttypecode`, `operation` = Update and the audit row's `createdon` in the window, then decide whether the two pair columns changed (from `attributemask` via the columns' `ColumnNumber` metadata, or `RetrieveAuditDetails` / `RetrieveRecordChangeHistory` for the candidates). A "pair changed after create" is an update audit of either column on a row created after go-live, whenever the update happened, so this scan is windowed on the AUDIT row's time with its own watermark, not the row's `createdon`. Read app-only (the BFF identity needs audit-read privilege: confirm what it has from the code and the role definitions in the repo; if it would need a role change, STOP and escalate, do not change a role).
+- Report channel: no new route, store or table. The findings go to the run's result JSON (bounded: counts plus the first N findings, a named constant) and one structured log line per finding (table, id, finding code, audit time, changing user id). No field values, no core-record ids, no row content in either.
+    </background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/RecordCreation/RecordRepairPassJob.cs (report scan, retry-set and abandoned counts in result and heartbeat)</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/RecordCreation/RecordRepairCorePairReport.cs (or a name you choose; the read-only scan and audit read)</file>
+      <file role="read">src/server/shared/Spaarke.Dataverse/ (the client the job uses; extend only with a read method if one is needed, and say why)</file>
+      <file role="read">tests/Spaarke.ArchTests (writer-only guards for sprk_signal / sprk_decisionrecord, D-204: the report must not trip them and must not need an exemption)</file>
+      <file role="new">tests/integration/data-mutation/RecordOwnership/RecordRepairPassReportTests.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="D-204 / D-210">No create, update, delete, associate or assign request ever reaches `sprk_signal` or `sprk_decisionrecord` from the pass, in any mode, whatever the report finds. Completing or clearing a pair is out of scope. No ArchTest exemption is added for the job on these tables.</constraint>
+    <constraint source="forward-only">Only rows created after go-live are reported. Go-live unset: the report reads nothing (as the pass).</constraint>
+    <constraint source="ADR-036 / ADR-052 / §11">Inside the existing job and its tick; no new job, route, store, package or role. Bounded reads per run (named page and row caps); a cap reached is reported (truncated) and the run is partial. The report's own watermark(s) live in the job's existing state store and never move the repair watermark.</constraint>
+    <constraint source="privacy / public repo">Reports and logs carry table, row id, finding code, audit time and the changing user's id only. Commits, comments, test names and notes state rules only.</constraint>
+    <constraint source="scope">Do not edit SecureRootInheritance.cs, UAC-r2's files (DirectThreadAccessService.cs, DirectMessageParticipantShares.cs, SecureChildShareReconciliationJob.cs, SecureChildReconciler.cs), RecordTableRules.cs, OwnedChildWrite.cs, RecordCreationService.cs, ScheduledJobHost.cs, or anything under `.claude/`. The cascade design is 052e.</constraint>
+    <constraint source="ADR-038 / §10">Tests at KEEP paths; each must-fire shown to fail with its rule switched off. Never run Sprk.Bff.Api.Tests unfiltered (`&amp;FullyQualifiedName!~Api.Office.`). Placement Justification and §11 answers in the notes; publish delta and CVE check are the main session's.</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step order="0">Branch `task/fm-052d` from the work branch tip; FULL rigor; read this POML and the parents listed; confirm the audit read shape and privilege from code (record it).</step>
+    <step order="1">Half-pair scan of both tables (created after go-live, windowed like the pass, its own state).</step>
+    <step order="2">Changed-after-create scan from audit history (windowed on the audit row's time, its own watermark, bounded).</step>
+    <step order="3">Retry-set size and abandoned rows per table in the result JSON and heartbeat.</step>
+    <step order="4">Tests (ACs), build 0 warnings, ArchTests, filtered suites, `dotnet format whitespace --verify-no-changes`; `notes/task-052d-notes.md`. Commit on `task/fm-052d`; do not push.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">AC1 (044(d)): a post-go-live row holding only `sprk_corerecordtype` and one holding only `sprk_corerecordid` are each reported (`core_pair_half`); a whole pair and a row with neither half are not.</criterion>
+    <criterion testable="true">AC2 (044(d)): a post-go-live row with an update audit of either pair column is reported (`core_pair_changed_after_create`, with audit time and changing user id); a row whose updates touched other columns only, and a row created before go-live, are not.</criterion>
+    <criterion testable="true">AC3 (must fire, no write): across every AC1/AC2 case and in both scheduled and on-demand runs, no write request reaches `sprk_signal` or `sprk_decisionrecord`; the writer-only ArchTests pass without an exemption.</criterion>
+    <criterion testable="true">AC4 (state): the report's watermarks never move the repair watermark, sweep cursor or retry set; a second run over the same window reports nothing new (each finding is reported once per window it falls in, not every tick — record how).</criterion>
+    <criterion testable="true">AC5 (bounded): more findings or audit rows than the caps report truncated, the run is partial, and the next run continues.</criterion>
+    <criterion testable="true">AC6 (fails closed): an audit read that faults is a fault (logged, run partial, report watermark not moved), never "no changes".</criterion>
+    <criterion testable="true">AC7 (K6/K8): the result JSON and heartbeat carry each table's retry-set size and the ids abandoned in this run.</criterion>
+    <criterion testable="true">AC8 (privacy): no report entry or log line carries field values, core-record ids or row content.</criterion>
+    <criterion testable="true">AC9: build 0 warnings; ArchTests and affected suites green; owner-write census unchanged.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>If reading audit history needs a privilege or role change for the BFF identity, STOP and escalate (security-sensitive; UAC-r2 owns roles).</trigger>
+    <trigger>If any finding would require writing either table, STOP: report only (D-204).</trigger>
+  </escalation>
+
+  <justification>
+    <existing>The repair job (052b/052c) repairs and counts rows; nothing reports core-pair integrity; column auditing records changes but nothing reads it.</existing>
+    <extension>The report runs inside the existing job and its state store and returns through the existing run record and logs; no new route, job or store.</extension>
+    <cost-of-doing-nothing>Task 044 removed field security from the pair on the condition that edits outside the server are detected (owner 2026-11-06, D-210); without this report a half or altered pair on append-only evidence goes unseen, and abandoned repair rows are visible only in individual log lines.</cost-of-doing-nothing>
+  </justification>
+
+  <notes>Split from task 052 (052a-e). Written 2026-11-17 in the main session (owner "yes proceed" to 052d next).</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>
