@@ -191,6 +191,32 @@ public class FirmDescriptionRulesTests
         FirmDescriptionRules.Validate(text, RuleSetName, PolicyName).IsValid.Should().BeTrue();
     }
 
+    // 130e-2 fix round 1 (F1): the Turkish dotless i (U+0131) and dotted I (U+0130) are not case pairs of i and I under OrdinalIgnoreCase, so a
+    // name like "YILLIK SINIR" was not found in "y\u0131ll\u0131k s\u0131n\u0131r". Both sides now read them as "i". The characters are written as escapes.
+    [Theory(DisplayName = "130e-2 fix round 1 F1 (C4): a Turkish dotless or dotted form of the name, or a plain text against a Turkish name, is refused (names_rule)")]
+    [InlineData("Billed under the y\u0131ll\u0131k s\u0131n\u0131r.", "YILLIK SINIR")]                // dotless text, plain upper name
+    [InlineData("Billed under the YILLIK SINIR.", "Y\u0131ll\u0131k S\u0131n\u0131r")]                 // plain text, dotless name
+    [InlineData("Billed under the Y\u0130LL\u0130K S\u0130N\u0130R.", "yillik sinir")]                // dotted capitals text, plain lower name
+    [InlineData("Billed under the yillik sinir.", "Y\u0130LL\u0130K S\u0130N\u0130R")]                // plain text, dotted capitals name
+    [InlineData("Billed under the y\u0131ll\u0131k s\u0131n\u0131r.", "Y\u0130LL\u0130K S\u0130N\u0130R")] // dotless text, dotted name
+    [InlineData("Billed under the Y\u0130LL\u0130K S\u0130N\u0130R.", "y\u0131ll\u0131k s\u0131n\u0131r")] // dotted text, dotless name
+    public void ATurkishCaseFormOfTheName_IsRefused(string text, string name)
+    {
+        FirmDescriptionRules.Validate(text, name, null).RefusalCode.Should().Be(FirmDescriptionRules.NamesTheRule, "the name is in the set slot");
+        FirmDescriptionRules.Validate(text, null, name).RefusalCode.Should().Be(FirmDescriptionRules.NamesTheRule, "and in the rule slot");
+        FirmDescriptionRules.Validate(text).IsValid.Should().BeTrue("the setup: the text alone is an allowed text");
+    }
+
+    [Theory(DisplayName = "130e-2 fix round 1 F1 must-not-fire: unrelated text holding a dotless or dotted i is accepted")]
+    [InlineData("Ak\u0131ll\u0131 hizmet bedeli uygulanm\u0131şt\u0131r.")]
+    [InlineData("\u0130stanbul office, hourly rates apply.")]
+    [InlineData("Billed under the y\u0131ll\u0131k tarife.")] // shares one word with the name only
+    public void UnrelatedTurkishText_IsAccepted(string text)
+    {
+        FirmDescriptionRules.Validate(text, "YILLIK SINIR", PolicyName).IsValid.Should().BeTrue();
+        FirmDescriptionRules.Validate(text, RuleSetName, "Y\u0131ll\u0131k S\u0131n\u0131r").IsValid.Should().BeTrue();
+    }
+
     /// <summary>Printable ASCII mapped to its fullwidth form (U+FF01 to U+FF5E); the space is kept.</summary>
     private static string Fullwidth(string ascii) =>
         string.Concat(ascii.Select(c => c is >= '!' and <= '~' ? (char)(c + 0xFEE0) : c));

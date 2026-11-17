@@ -63,9 +63,17 @@ const UNPAIRED_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBF
 // Unicode categories Control, Format, LineSeparator, ParagraphSeparator (`FirmDescriptionRules.IsInvisibleControl`).
 const INVISIBLE = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u;
 
-/** NFKC, then every run of white space as one space, trimmed, simple-upper-cased per character (the server's `Comparable` + OrdinalIgnoreCase). */
+/**
+ * NFKC, then every run of white space as one space, trimmed, the Turkish dotless i (U+0131) and dotted I (U+0130) as "i", then
+ * simple-upper-cased per character (the server's `Comparable` + OrdinalIgnoreCase). The "i" fold comes first so `toUpperCase` never
+ * decides those two (it would give "I" for U+0131 and keep U+0130, which the server's ordinal comparison does not).
+ */
 export function comparable(value: string): string {
-  const folded = value.normalize('NFKC').replace(WS_RUN, ' ').replace(/^ | $/g, '');
+  const folded = value
+    .normalize('NFKC')
+    .replace(WS_RUN, ' ')
+    .replace(/^ | $/g, '')
+    .replace(/[\u0131\u0130]/g, 'i');
   return [...folded]
     .map(ch => {
       const upper = ch.toUpperCase();
@@ -122,11 +130,12 @@ export function checkFirmDescription(raw: string, ctx: FirmDescriptionContext = 
 /**
  * The `firmDescription` member of the PATCH body, or `undefined` for "leave the key out". Only a change is sent (130e-1 contract):
  * a changed text as typed (the server trims it), a cleared field as `""`, an untouched field not at all, so the member is never null by
- * accident. A blank field over a rule with no text is not a change. A Duplicate rule never sends one.
+ * accident. A blank field over a rule with no text is not a change. A Duplicate rule sends only a removal: `""`, when it holds a stored
+ * text and the admin used Remove (the server accepts a blank on a Duplicate, and refuses any other text); never a text.
  */
 export function firmDescriptionToSend(stored: string | null | undefined, current: string, isDuplicate = false): string | undefined {
-  if (isDuplicate) return undefined;
   const now = trimLikeServer(current);
+  if (isDuplicate) return now === '' && trimLikeServer(stored ?? '') !== '' ? '' : undefined;
   if (now === trimLikeServer(stored ?? '')) return undefined;
   return now === '' ? '' : current; // a blank field is a clear: say it as "", whatever white space was left in it
 }
@@ -158,3 +167,22 @@ export function firmDescriptionRefusals(failure: ApiFailure, fallbackPolicyId?: 
   }
   return out;
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Which refusals the page keeps (fix round 1 F4)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * The firm description refusals the rule set page holds, by rule, and which call they came from. A refusal of a SAVE is about the text the
+ * admin typed into one rule's form: it goes when another rule is selected. A refusal of an Accept or a Publish is about the STORED text, which
+ * does not change by looking at another rule, so it stays.
+ */
+export interface RefusalState {
+  from: 'edit' | 'other';
+  byRule: Record<string, FirmRefusal[]>;
+}
+
+export const NO_REFUSALS: RefusalState = { from: 'other', byRule: {} };
+
+/** The refusals after the selected rule changes: a save's go, the others stay. */
+export const refusalsAfterSelect = (state: RefusalState): RefusalState => (state.from === 'edit' ? NO_REFUSALS : state);

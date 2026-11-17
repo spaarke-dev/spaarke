@@ -191,7 +191,8 @@ public static class FirmDescriptionRules
 
     /// <summary>
     /// The form both sides of the name check are compared in: NFKC (compatibility forms such as fullwidth letters and the typographic spaces
-    /// become their plain forms), then every run of white space (<see cref="char.IsWhiteSpace(char)"/>) becomes one U+0020, trimmed. A value that
+    /// become their plain forms), then every run of white space (<see cref="char.IsWhiteSpace(char)"/>) becomes one U+0020, trimmed, and the
+    /// Turkish dotless i (U+0131) and dotted I (U+0130) become "i" (130e-2 fix round 1 F1). A value that
     /// cannot be normalised (an unpaired surrogate; a text holding one is refused before this check) is compared as it is. Look-alike letters
     /// from other scripts (homoglyphs) are not mapped: a known limit.
     /// </summary>
@@ -222,7 +223,9 @@ public static class FirmDescriptionRules
             }
             else
             {
-                builder.Append(c);
+                // 130e-2 fix round 1 (F1): the Turkish dotless i (U+0131) and dotted I (U+0130) are not case pairs of i and I under
+                // OrdinalIgnoreCase, so "y\u0131ll\u0131k s\u0131n\u0131r" would not be found in "YILLIK SINIR": both read as "i" on both sides.
+                builder.Append(c is '\u0131' or '\u0130' ? 'i' : c);
                 inWhiteSpace = false;
             }
         }

@@ -13,13 +13,14 @@ import {
   REASON_NAMES_RULE,
   REASON_TOO_LONG,
   checkFirmDescription,
+  comparable,
   type FirmDescriptionContext,
   firmDescriptionRefusals,
   firmDescriptionToSend,
 } from '../services/firmDescription';
 import { diffProposals, saveEdit } from '../services/reviewActions';
 import { createRuleSetApi, toFailure } from '../services/ruleSetApi';
-import { POLICY_ID, SET_ID, detail, mockApi, ok, problem, proposal } from './testKit';
+import { POLICY_ID, SET_ID, mockApi, problem, proposal } from './testKit';
 
 const SET_NAME = 'Acme guidelines';
 const RULE_NAME = 'Daily hours cap';
@@ -45,9 +46,16 @@ describe('firmDescriptionToSend: only a change is sent', () => {
     expect(firmDescriptionToSend(null, '   ')).toBeUndefined();
   });
 
-  it('must-not-fire: a Duplicate rule never sends one', () => {
+  it('must-not-fire: a Duplicate rule never sends a text', () => {
     expect(firmDescriptionToSend(null, 'anything', true)).toBeUndefined();
-    expect(firmDescriptionToSend('stored', '', true)).toBeUndefined();
+    expect(firmDescriptionToSend('stored', 'anything', true)).toBeUndefined();
+    expect(firmDescriptionToSend('stored', 'stored', true)).toBeUndefined();
+    expect(firmDescriptionToSend(null, '', true)).toBeUndefined();
+  });
+
+  it('a Duplicate rule that holds a text sends "" only when it has been removed (F3)', () => {
+    expect(firmDescriptionToSend('stored', '', true)).toBe('');
+    expect(firmDescriptionToSend('stored', '   ', true)).toBe('');
   });
 
   it('the member is on the PATCH body only when set (JSON has no undefined, never a null)', async () => {
@@ -165,6 +173,52 @@ describe('checkFirmDescription: the server checks, early', () => {
       expect(reasonOf('Any text at all', {})).toBeNull();
     });
 
+    describe('the Turkish dotless i and dotted I read as "i" on both sides (fix round 1 F1, as the server does)', () => {
+      const dotless = 'y\u0131ll\u0131k s\u0131n\u0131r';
+      const dotted = 'Y\u0130LL\u0130K S\u0130N\u0130R';
+
+      it.each([
+        ['a dotless text against a plain upper-case name', `Billed under the ${dotless}.`, 'YILLIK SINIR'],
+        ['a plain upper-case text against a dotless name', 'Billed under the YILLIK SINIR.', dotless],
+        ['a dotted text against a plain lower-case name', `Billed under the ${dotted}.`, 'yillik sinir'],
+        ['a plain lower-case text against a dotted name', 'Billed under the yillik sinir.', dotted],
+        ['a dotless text against a dotted name', `Billed under the ${dotless}.`, dotted],
+        ['a dotted text against a dotless name', `Billed under the ${dotted}.`, dotless],
+      ])('must-fire: %s', (_n, text, name) => {
+        expect(reasonOf(text, { ruleName: name })).toBe(REASON_NAMES_RULE);
+        expect(reasonOf(text, { ruleSetName: name })).toBe(REASON_NAMES_RULE);
+      });
+
+      it('"Y\u0131ll\u0131k s\u0131n\u0131r" against "yillik sinir" is a match, on both sides', () => {
+        expect(comparable('Y\u0131ll\u0131k s\u0131n\u0131r')).toBe(comparable('yillik sinir'));
+        expect(reasonOf('Y\u0131ll\u0131k s\u0131n\u0131r', { ruleName: 'yillik sinir' })).toBe(REASON_NAMES_RULE);
+      });
+
+      it('must-not-fire: unrelated text holding a dotless or dotted i', () => {
+        expect(reasonOf('Ak\u0131ll\u0131 hizmet bedeli', { ruleName: 'YILLIK SINIR', ruleSetName: 'Acme guidelines' })).toBeNull();
+        expect(reasonOf('\u0130stanbul office rates apply', { ruleName: 'YILLIK SINIR' })).toBeNull();
+        expect(reasonOf('Billed under the y\u0131ll\u0131k tarife', { ruleName: 'YILLIK SINIR' })).toBeNull();
+      });
+    });
+
+    describe('JavaScript upper-casing against .NET OrdinalIgnoreCase on common scripts (fix round 1 F2 re-check)', () => {
+      // Pairs the two engines agree on: a name and the same name in the other case must match, and a different letter must not.
+      it.each([
+        ['Latin with accents', 'Café Rules', 'CAFÉ RULES'],
+        ['Greek', 'αβγ κανόνας', 'ΑΒΓ ΚΑΝΌΝΑΣ'],
+        ['Cyrillic', 'правило', 'ПРАВИЛО'],
+        ['German sharp s', 'Große Regel', 'Große Regel'],
+      ])('%s matches in either case', (_n, name, text) => {
+        expect(reasonOf(`Per ${text}.`, { ruleName: name })).toBe(REASON_NAMES_RULE);
+        expect(reasonOf(`Per ${name}.`, { ruleName: text })).toBe(REASON_NAMES_RULE);
+      });
+
+      it('the sharp s does not match "SS" (.NET keeps it too), and a final sigma matches a plain sigma (both engines upper-case both to the same letter)', () => {
+        expect(reasonOf('Per GROSSE REGEL.', { ruleName: 'Große Regel' })).toBeNull();
+        expect(reasonOf('Per κανόνας', { ruleName: 'κανόνασ' })).toBe(REASON_NAMES_RULE);
+      });
+    });
+
     it('a look-alike letter from another alphabet is NOT caught (known limit, said in the notice)', () => {
       expect(reasonOf('Daily hours cаp')).toBeNull(); // Cyrillic a
     });
@@ -240,26 +294,9 @@ describe('a 422 firm description refusal', () => {
   });
 });
 
-describe('after a save on a published rule', () => {
-  it('the edit carries the member and the reload shows the new draft with the new text', async () => {
-    const api = mockApi();
-    const published = proposal({ inForce: true, state: 'Accepted', versionId: 'v-1', versionNumber: 1, firmDescription: 'Old wording' });
-    const draft = proposal({ inForce: false, hasPublishedVersion: true, state: 'Proposed', versionId: 'v-2', versionNumber: 2, firmDescription: 'New wording' });
-    api.edit.mockResolvedValue(ok({ proposal: { ...draft, rowVersion: null }, createdNewVersion: true }));
-    api.get.mockResolvedValue(ok(detail([draft])));
-
-    const outcome = await saveEdit(api, SET_ID, POLICY_ID, { firmDescription: 'New wording' });
-
-    expect(api.edit).toHaveBeenCalledWith(SET_ID, POLICY_ID, { firmDescription: 'New wording' });
-    expect(outcome.kind).toBe('saved');
-    if (outcome.kind === 'saved') {
-      expect(outcome.createdNewVersion).toBe(true);
-      expect(outcome.detail?.proposals[0]).toMatchObject({ versionId: 'v-2', firmDescription: 'New wording' });
-      expect(diffProposals(published, outcome.detail!.proposals[0]).map(l => l.field)).toContain('Firm description');
-    }
-  });
-
-  it('a stale reload reports a changed firm description', () => {
+// The save path itself (the form's edit, the PATCH, the reload that shows the new draft) is tested in `ruleForm.test.ts`.
+describe('the reload after a 409', () => {
+  it('reports a changed firm description', () => {
     const lines = diffProposals(proposal({ firmDescription: 'a' }), proposal({ firmDescription: 'b' }));
     expect(lines).toEqual([{ field: 'Firm description', before: 'a', after: 'b' }]);
     expect(diffProposals(proposal({ firmDescription: null }), proposal({ firmDescription: null }))).toEqual([]);

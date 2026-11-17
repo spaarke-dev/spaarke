@@ -136,6 +136,39 @@ describe('a Duplicate rule', () => {
     expect(field(html)).toContain('Leftover');
     expect(html).not.toContain('firm-description-error');
   });
+
+  it('with a stored text: shows it read-only with a Remove action and says it is not used (fix round 1 F3)', () => {
+    const html = render({ ...duplicate(), firmDescription: 'Leftover' });
+
+    expect(field(html)).toContain('Leftover');
+    expect(field(html)).toContain('readOnly');
+    expect(html).toContain('data-testid="firm-description-remove"');
+    expect(textOf(html, 'firm-description-duplicate')).toContain('The text stored on this rule is not used');
+    expect(html).not.toContain('firm-description-removing');
+  });
+
+  it('must-not-fire: no Remove with no stored text, or for a reader who cannot write', () => {
+    expect(render(duplicate())).not.toContain('firm-description-remove');
+    expect(render({ ...duplicate(), firmDescription: '   ' })).not.toContain('firm-description-remove');
+    expect(render({ ...duplicate(), firmDescription: 'Leftover' }, { canWrite: false })).not.toContain('firm-description-remove');
+  });
+});
+
+describe('the warning for a stored text a save would leave off (fix round 1 F6)', () => {
+  const inForce = (text: string | null) => proposal({ inForce: true, state: 'Accepted', firmDescription: text });
+
+  it('shows by the field when the rule is in force and its stored text fails the checks', () => {
+    const html = render(inForce('Per the Acme guidelines, no.'));
+
+    expect(textOf(html, 'firm-description-carry-warning')).toContain('This text no longer passes the checks');
+    expect(textOf(html, 'firm-description-carry-warning')).toContain('Saving creates a new draft without it');
+  });
+
+  it('must-not-fire: a clean text, or a draft with a failing text, shows no warning', () => {
+    expect(render(inForce('Clean wording.'))).not.toContain('firm-description-carry-warning');
+    expect(render(inForce(null))).not.toContain('firm-description-carry-warning');
+    expect(render(proposal({ inForce: false, firmDescription: 'Per the Acme guidelines, no.' }))).not.toContain('firm-description-carry-warning');
+  });
 });
 
 describe('a server refusal (422) under the field', () => {
