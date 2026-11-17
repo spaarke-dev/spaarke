@@ -73,8 +73,9 @@ public sealed class SubmissionOverrideOtherDecisionTests
         refused.StatusCode.Should().Be(409);
         refused.ErrorCode.Should().Be(BlockedSubmissionErrors.OtherDecisionPending);
         refused.ErrorCode.Should().Be("ebilling.blocked.other_decision_pending", "the wire code is a contract");
-        refused.Detail.Should().Be(BlockedSubmissionErrors.OtherDecisionPendingDetail(pendingIsOverride: pending == "override"));
-        refused.Detail.Should().Contain(pending == "override" ? "Repeat the override" : "Repeat the return", "the detail names the decision to repeat");
+        refused.Detail.Should().Be(BlockedSubmissionErrors.OtherDecisionPendingDetail(pendingIsOverride: pending == "override", callerIsDecider: true));
+        refused.Detail.Should().Contain(pending == "override" ? "Repeat the override" : "Repeat the return",
+            "the caller is the pending decision's own decider, so the detail tells them to repeat it");
         refused.InvoiceId.Should().Be(World.InvoiceId);
         Snapshot.Of(w).Should().Be(before, "no record, no store, no close, no release, no transition, no submission write, no notice");
 
@@ -88,6 +89,50 @@ public sealed class SubmissionOverrideOtherDecisionTests
         after.StatusCode.Should().Be(409);
         after.ErrorCode.Should().Be(pending == "override" ? BlockedSubmissionErrors.AlreadyOverridden : BlockedSubmissionErrors.AlreadyReturned);
         w.RecordCreates.Should().Be(1, "one decision, one record");
+    }
+
+    [Theory(DisplayName = "ISS-031 review round 1 F1: another person (not the pending decision's decider) is refused 409 other_decision_pending with a detail that says the person who recorded it completes it, never \"repeat it\"; nothing is written")]
+    [InlineData("override-release")]
+    [InlineData("return-transition")]
+    public async Task StrandedDecision_AnotherPerson_IsToldItIsTheirsToComplete(string strand)
+    {
+        var w = await World.CreateAsync();
+        var pending = VerbOf(strand);
+        await SubmissionOverrideDecisionNoteTests.StrandAsync(w, strand, "First note");
+        var before = Snapshot.Of(w);
+        w.Probe.CallerSystemUserId = Guid.Parse("10500000-0000-4000-8000-0000000000c9");
+
+        var refused = await Decide(w, OtherOf(pending), "Another reviewer's reason.");
+
+        refused.StatusCode.Should().Be(409);
+        refused.ErrorCode.Should().Be(BlockedSubmissionErrors.OtherDecisionPending, "the same code for every caller");
+        refused.Detail.Should().Be(BlockedSubmissionErrors.OtherDecisionPendingDetail(pendingIsOverride: pending == "override", callerIsDecider: false));
+        refused.Detail.Should().StartWith("Another person's " + (pending == "override" ? "override" : "return"));
+        refused.Detail.Should().Contain("They complete it by repeating it.");
+        refused.Detail.Should().NotContain("Repeat the", "this caller cannot finish another person's decision (095f-2c decider rule)");
+        Snapshot.Of(w).Should().Be(before);
+    }
+
+    [Fact(DisplayName = "ISS-031 review round 1: with BOTH records stored (only reachable before ISS-031), an Override and a Return each answer 409 other_decision_pending and write nothing")]
+    public async Task BothRecordsStored_BothVerbsAreRefused_AndWriteNothing()
+    {
+        var w = await World.CreateAsync();
+        await SubmissionOverrideDecisionNoteTests.StrandAsync(w, "override-release", null);
+        var stored = InvoiceSubmissionAfterSteps.StoredFindings.Parse(w.FindingsJson)!;
+        var returnDecision = SubmissionOverrideService.BuildDecision(
+            SubmissionOverrideService.Verb.Return, stored, World.SubmissionId, World.InvoiceId, World.Caller, Reason,
+            new InvoiceSubmissionAfterSteps.ResolvedSignalSet(w.Clock.GetUtcNow().UtcDateTime, []));
+        (await w.Recorder.RecordAsync(returnDecision, CancellationToken.None)).AlreadyRecorded.Should().BeFalse("the Return record is seeded");
+        w.RecordCreates.Should().Be(2, "an Override record and a Return record");
+        var before = Snapshot.Of(w);
+
+        foreach (var verb in new[] { "override", "return", "override" })
+        {
+            var refused = await Decide(w, verb);
+            refused.StatusCode.Should().Be(409, verb);
+            refused.ErrorCode.Should().Be(BlockedSubmissionErrors.OtherDecisionPending, verb);
+            Snapshot.Of(w).Should().Be(before, "{0} wrote nothing", verb);
+        }
     }
 
     [Fact(DisplayName = "ISS-031: a Return stranded after its transition (the invoice already Returned to Firm) refuses an Override by the invoice's state, already_returned, before the other-verb lookup; nothing is written")]

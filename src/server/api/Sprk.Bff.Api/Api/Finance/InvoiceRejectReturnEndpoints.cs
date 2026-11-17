@@ -20,7 +20,8 @@ namespace Sprk.Bff.Api.Api.Finance;
 /// <para><b>Status codes.</b> 200 decided or already decided (a repeat is a no-op, <c>alreadyDecided</c>); 400 <c>ebilling.reason_required</c> /
 /// <c>ebilling.reason_too_long</c> / <c>ebilling.note_too_long</c> / <c>ebilling.note_invalid_characters</c> (task 095f-2a); 401; 403 (route, not eligible, identity unproven, or no rights to close the invoice's Signals); 404
 /// uniform; 409 (not In Review, held, no or ambiguous approval portion, unknown or already-decided approval, approval changed or claimed by
-/// another approver, another decision in progress, transition refused); 500 (no single core record, a decision the writer refuses); 503
+/// another approver, another decision in progress, transition refused, or <c>ebilling.blocked.other_decision_pending</c> while an Override of the
+/// invoice's own submission is recorded but not released, ISS-031); 500 (no single core record, a decision the writer refuses); 503
 /// <c>ebilling.disabled</c>, <c>ebilling.invoice.decision_unavailable</c> (nothing changed) or <c>ebilling.invoice.decision_incomplete</c>
 /// (repeat the call to finish).</para>
 /// </remarks>
