@@ -27,3 +27,17 @@ Branch `task/ontology-196-gate-lock` (worktree `C:\wt196`, from origin/master `3
 - Guard idea (not built): an ArchTest/source-scan that flags a handler returning `JobOutcome.Success` inside an `if (!await ...TryAcquireProcessingLockAsync(` block.
 
 rework: none task 196
+
+## Fix round 1 (PR #2884; three scoped changes, D-106)
+1. `AssignTaskEmailJob.cs` (`AssignTaskEmailJobHandler.ProcessAsync`): a refused `TryAcquireProcessingLockAsync` now returns `JobOutcome.Failure(..., LockRefusedError = "ProcessingLockRefused", ...)` (was Success). Warning on a non-final delivery (job id, task id, attempt, delivery count), Error ("will be dead-lettered") on `job.IsFinalDelivery`; no lock release, no notifier call, no new telemetry instrument. The `IsEventProcessedAsync` short-circuit before the lock stays Success. Class remarks (Once per task, Outcomes) rewritten to the new rule.
+2. K1: `GateDecisionRecordJob.cs` remarks now say the processor abandons with no delay, so all deliveries of a refused job fall inside the one-minute takeover age and it is dead-lettered; a replay after a minute takes a stale lock over or finds the record.
+3. K4: gate refused branch logs the Warning only when not final (else-branch), the Error (and the one metered failure) only when final. Gate theory assertions adjusted: final = no Warning, one Error; non-final = one Warning, no Error.
+
+Tests: new `tests/unit/Sprk.Bff.Api.Tests/Services/Signals/AssignTaskEmailJobHandlerTests.cs` (real handler, real notifier via Mock CallBase, real IdempotencyService; doubled: `SendAsSystemAsync`, `AssignTaskRecipientGate.DecideAsync`, Dataverse): (a) own-leftover-lock redelivery < OwnerTakeoverAge: Failed, no send, gate not re-asked, lock left, one Warning; (b) concurrent second job Failed with no send, then its redelivery after the first sent completes via the idempotency short-circuit with no second send; (c) final/non-final theory (4 rows, same as the gate). `ReleaseFaultingCache` moved from a nested class in `GateDecisionRecordJobTests` to `tests/unit/Sprk.Bff.Api.Tests/TestInfrastructure/ReleaseFaultingCache.cs` so both files share it (no behaviour change).
+Results: filtered run (GateDecisionRecordJobTests + AssignTaskEmailJobHandlerTests + AssignTaskNotifier*) 115 passed / 0 failed. Seeding proof: old `AssignTaskEmailJob.cs` (plus the one const so the file compiles) fails all 3 test methods (6 cases incl. theory rows); (a) fails with "found JobStatus.Completed" (the silent drop). Old gate job fails the adjusted final-delivery assertion. Restored; all pass.
+Outstanding from before, still not fixed: `Services/Ai/Jobs/AppOnlyDocumentAnalysisJobHandler.cs` ~110-117 and the other `TryAcquireProcessingLockAsync` callers listed above.
+
+## Reviews (main session)
+- Independent adversarial review (Opus) at `31c6bc1656`: PASS, no F. K1 (remarks: in practice a refused job is dead-lettered, not taken over) and K4 (Warning beside Error on final delivery) fixed in fix round 1. K2 (a concurrent duplicate is dead-lettered and counted while its sibling writes; no data loss) accepted.
+- Scope addition, fix round 1: the reviewer and implementer found the same defect in our `AssignTaskEmailJob` (task 168); fixed in the same PR (`d9784b2953`), re-checked by the main session.
+- Not ours: `AppOnlyDocumentAnalysisJobHandler` has the same shape; added to issue #1089 (comment 6950194589).
