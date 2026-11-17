@@ -122,20 +122,105 @@ public sealed class InvoiceDecisionIncompleteHintTests
         (await Decide(w, verb, AliceUser)).Should().BeTrue("the repeat the hint offers finishes it");
     }
 
+    public static TheoryData<Verb, string> AfterTheRecord => new()
+    {
+        { Verb.Reject, "signals" },
+        { Verb.Reject, "link" },
+        { Verb.Return, "signals" },
+        { Verb.Return, "link" },
+        { Verb.Approve, "signals" },
+        { Verb.Approve, "link" },
+    };
+
+    /// <summary>Alice's decision, stranded after its record: one of its Signals not closed (<c>signals</c>), or the portion's link (<c>link</c>).</summary>
+    private static async Task<Guid> StrandAfterTheRecord(ApprovalWorld w, Verb verb, string step)
+    {
+        var signal = w.AddInvoiceSignal();
+        if (step == "signals")
+        {
+            w.CloseFailsOnce[signal] = SignalAutomatedCloseOutcome.ChangedSinceRead;
+        }
+        else
+        {
+            w.FaultsOnce[step] = new InvalidOperationException("dataverse down");
+        }
+
+        (await Decide(w, verb, AliceUser)).Should().BeFalse("the call stopped after its record");
+        w.RecordsOf(ActionOf(verb)).Should().ContainSingle("the record was written before the step that failed");
+        w.Portion.GetAttributeValue<EntityReference>(InvoiceApprovalService.PortionRecord).Should().BeNull("the portion was never linked");
+        return signal;
+    }
+
+    [Theory(DisplayName = "ISS-032 review F4: a decision stranded after its record (a Signal not closed, or the link) reports 'link' to the claimant; their repeat closes the rest and links, from the stored record, and the hint goes")]
+    [MemberData(nameof(AfterTheRecord))]
+    public async Task StrandedAfterTheRecord_IsReported_AndTheRepeatClearsIt(Verb verb, string step)
+    {
+        var w = World(verb);
+        var signal = await StrandAfterTheRecord(w, verb, step);
+        var record = w.RecordsOf(ActionOf(verb)).Single();
+
+        (await w.GetAs(AliceUser))!.IncompleteDecision.Should().Be(new InvoiceIncompleteDecisionDto(verb.ToString(), "link"));
+
+        (await Decide(w, verb, AliceUser)).Should().BeTrue("the repeat finishes from the stored record");
+        w.RecordsOf(ActionOf(verb)).Should().ContainSingle().Which.Id.Should().Be(record.Id, "no second record");
+        w.Portion.GetAttributeValue<EntityReference>(InvoiceApprovalService.PortionRecord)!.Id.Should().Be(record.Id);
+        w.SignalStatus(signal).Should().Be(SignalWriter.SignalStatusResolved);
+        (await w.GetAs(AliceUser))!.IncompleteDecision.Should().BeNull("the decision is complete: recorded and linked");
+    }
+
+    [Theory(DisplayName = "ISS-032 review F4: a recorded decision whose portion status is not the decision's (Pending) reports 'link'; the repeat moves it and the hint goes")]
+    [MemberData(nameof(Verbs))]
+    public async Task RecordedWithPortionNotMoved_IsReportedLink(Verb verb)
+    {
+        var w = World(verb);
+        await StrandAfterTheRecord(w, verb, "link");
+        w.Portion[EligibleApproverResolver.ApprovalStatus] = new OptionSetValue(InvoiceApprovalService.PortionPending);
+
+        (await w.GetAs(AliceUser))!.IncompleteDecision.Should().Be(new InvoiceIncompleteDecisionDto(verb.ToString(), "link"));
+
+        (await Decide(w, verb, AliceUser)).Should().BeTrue();
+        w.RecordsOf(ActionOf(verb)).Should().ContainSingle();
+        (await w.GetAs(AliceUser))!.IncompleteDecision.Should().BeNull();
+    }
+
+    [Fact(DisplayName = "ISS-032 review F4: an approve stranded after its record is hinted to its claimant even when no longer eligible (the repeat of a recorded approve does not re-check eligibility), and that repeat finishes it")]
+    public async Task Approve_RecordedClaimantNoLongerEligible_IsStillHinted()
+    {
+        var w = World(Verb.Approve);
+        await StrandAfterTheRecord(w, Verb.Approve, "link");
+        w.Core["sprk_assignedattorney1"] = new EntityReference("contact", Carol);
+
+        var state = (await w.GetAs(AliceUser))!;
+
+        state.CallerEligible.Should().BeFalse();
+        state.IncompleteDecision.Should().Be(new InvoiceIncompleteDecisionDto("Approve", "link"));
+        (await Decide(w, Verb.Approve, AliceUser)).Should().BeTrue("the repeat the hint offers finishes it");
+        (await w.GetAs(AliceUser))!.IncompleteDecision.Should().BeNull();
+    }
+
     // ── Must not fire ──
 
-    [Theory(DisplayName = "ISS-032 (must-not-fire): a decision with its record reports no incompleteDecision - complete, and stranded after the record ('link')")]
+    [Theory(DisplayName = "ISS-032 (must-not-fire): a complete decision - its record written AND linked - reports no incompleteDecision")]
     [MemberData(nameof(Verbs))]
-    public async Task DecisionWithItsRecord_ReportsNone(Verb verb)
+    public async Task CompleteDecision_ReportsNone(Verb verb)
     {
-        var complete = World(verb);
-        (await Decide(complete, verb, AliceUser)).Should().BeTrue();
-        (await complete.GetAs(AliceUser))!.IncompleteDecision.Should().BeNull();
+        var w = World(verb);
+        (await Decide(w, verb, AliceUser)).Should().BeTrue();
+        w.Portion.GetAttributeValue<EntityReference>(InvoiceApprovalService.PortionRecord).Should().NotBeNull("(control) linked");
 
-        var afterRecord = World(verb);
-        await Strand(afterRecord, verb, "link");
-        afterRecord.RecordsOf(ActionOf(verb)).Should().ContainSingle("the record was written before the link failed");
-        (await afterRecord.GetAs(AliceUser))!.IncompleteDecision.Should().BeNull("the Decision Record exists");
+        (await w.GetAs(AliceUser))!.IncompleteDecision.Should().BeNull();
+    }
+
+    [Fact(DisplayName = "ISS-032 review K1 (must-not-fire): an Approved invoice whose portion records another decision (Rejected) reports no approve hint")]
+    public async Task Approve_PortionRecordsAnotherDecision_ReportsNone()
+    {
+        var w = World(Verb.Approve);
+        await Strand(w, Verb.Approve, "identity");
+        (await w.GetAs(AliceUser))!.IncompleteDecision.Should().NotBeNull("(control) stranded before its record");
+
+        w.Portion[EligibleApproverResolver.ApprovalStatus] = new OptionSetValue(InvoiceApprovalService.PortionRejected);
+
+        (await w.GetAs(AliceUser))!.IncompleteDecision.Should().BeNull("the portion is not this approve's to finish");
     }
 
     [Fact(DisplayName = "ISS-032 (must-not-fire): an invoice In Review, and one that is not decided, report no incompleteDecision")]
