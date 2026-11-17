@@ -220,6 +220,10 @@ describe('Finish as operator (ISS-034, EB-D-244): the route, the hints and the r
     expect(isBlockedOutcomeUnknown(conflict(c.RecordUnavailable, 503))).toBe(false);
     expect(isBlockedDefiniteRefusal(conflict(c.RecordUnavailable, 503))).toBe(false);
     expect(isFinishStaleRefusal(conflict(c.RecordUnavailable, 503))).toBe(false);
+    // The finish route returns invoice_not_held (a stale-state refusal); a finished decision is a 200 there, not AlreadyOverridden / AlreadyReturned.
+    expect(isFinishStaleRefusal(conflict(c.InvoiceNotHeld))).toBe(true);
+    expect(isFinishStaleRefusal(conflict(c.AlreadyOverridden))).toBe(false);
+    expect(isFinishStaleRefusal(conflict(c.AlreadyReturned))).toBe(false);
   });
 });
 

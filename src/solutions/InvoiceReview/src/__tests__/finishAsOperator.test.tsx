@@ -7,7 +7,7 @@
  */
 
 import '@testing-library/jest-dom';
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { configure, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { FluentProvider, webDarkTheme, webLightTheme } from '@fluentui/react-components';
 import { InvoiceReviewWithDecisions } from '../components/InvoiceReviewWithDecisions';
 import { finishIntro } from '../components/decision/BlockedBanner';
@@ -64,6 +64,9 @@ async function openFinish(decision: MockDecisionApi, reviews: InvoiceReview | In
   const dialog = await dialogOf();
   return { dialog, api };
 }
+
+// The flows here chain several sends and re-reads; the full suite runs files in parallel, so allow for a slow machine.
+configure({ asyncUtilTimeout: 5000 });
 
 beforeEach(() => {
   jest.spyOn(console, 'warn').mockImplementation(() => undefined);
@@ -247,6 +250,7 @@ describe('Finish as operator: each refusal shows its message', () => {
     ['403 not_authorized (FR-51)', () => failed(forbidden('ebilling.blocked.not_authorized')), 'rights to close the signals', 'ebilling.blocked.not_authorized'],
     ['409 decision_conflict', () => failed(problem(409, 'ebilling.blocked.decision_conflict')), 'different decision is already recorded', 'ebilling.blocked.decision_conflict'],
     ['409 other_decision_pending', () => failed(problem(409, 'ebilling.blocked.other_decision_pending')), 'recorded but has not finished', 'ebilling.blocked.other_decision_pending'],
+    ['409 invoice_not_held', () => failed(problem(409, 'ebilling.blocked.invoice_not_held')), 'no longer held', 'ebilling.blocked.invoice_not_held'],
   ];
 
   it.each(refusals)('%s: the dialog stays open with the sentence and the code, the reason is kept, and nothing is locked', async (_, refusal, sentence, code) => {
@@ -277,13 +281,31 @@ describe('Finish as operator: each refusal shows its message', () => {
     expect(error).not.toHaveTextContent('No recorded override or return');
   });
 
+  // The server always sends a detail with a refusal (the fixed sentences are only a fallback): each code shows the server's own words and code.
+  it.each([
+    ['403 operator_not_permitted', () => failed(forbidden('ebilling.blocked.operator_not_permitted', { detail: 'Server words: not permitted.' })), 'Server words: not permitted.', 'ebilling.blocked.operator_not_permitted'],
+    ['409 nothing_stranded', () => failed(problem(409, 'ebilling.blocked.nothing_stranded', { detail: 'Server words: nothing waits.' })), 'Server words: nothing waits.', 'ebilling.blocked.nothing_stranded'],
+    ['409 own_decision_pending', () => failed(problem(409, 'ebilling.blocked.own_decision_pending', { detail: 'Server words: it is yours.' })), 'Server words: it is yours.', 'ebilling.blocked.own_decision_pending'],
+    ['409 both_decisions_recorded', () => failed(problem(409, 'ebilling.blocked.both_decisions_recorded', { detail: 'Server words: both recorded.' })), 'Server words: both recorded.', 'ebilling.blocked.both_decisions_recorded'],
+    ['409 invoice_not_held', () => failed(problem(409, 'ebilling.blocked.invoice_not_held', { detail: 'Server words: not held.' })), 'Server words: not held.', 'ebilling.blocked.invoice_not_held'],
+    ['503 record_unavailable', () => failed(problem(503, 'ebilling.blocked.record_unavailable', { detail: 'Server words: try again.' })), 'Server words: try again.', 'ebilling.blocked.record_unavailable'],
+  ])('%s with the server\'s detail shows that detail and the code, not the fixed sentence', async (_, refusal, detail, code) => {
+    const decision = strandedApi();
+    decision.finishStranded.mockResolvedValueOnce(refusal());
+    const { dialog } = await openFinish(decision);
+    fireEvent.change(reasonOf(dialog), { target: { value: 'The decider has left the firm' } });
+    fireEvent.click(submitBtn(dialog));
+    const error = await within(dialog).findByTestId('blocked-error');
+    expect(error).toHaveTextContent(`${detail} (${code})`);
+    expect(error.textContent).not.toBe(`${BLOCKED_REFUSAL_SENTENCES[code]} (${code})`);
+  });
+
   it.each([
     ['403 operator_not_permitted', () => failed(forbidden('ebilling.blocked.operator_not_permitted'))],
     ['409 nothing_stranded', () => failed(problem(409, 'ebilling.blocked.nothing_stranded'))],
     ['409 own_decision_pending', () => failed(problem(409, 'ebilling.blocked.own_decision_pending'))],
     ['409 both_decisions_recorded', () => failed(problem(409, 'ebilling.blocked.both_decisions_recorded'))],
-    ['409 already_overridden', () => failed(problem(409, 'ebilling.blocked.already_overridden'))],
-    ['409 already_returned', () => failed(problem(409, 'ebilling.blocked.already_returned'))],
+    ['409 invoice_not_held', () => failed(problem(409, 'ebilling.blocked.invoice_not_held'))],
   ])('%s says the page is out of date: the review, the approval and the blocked view are re-read', async (_, refusal) => {
     const decision = strandedApi();
     decision.finishStranded.mockResolvedValueOnce(refusal());
@@ -303,6 +325,9 @@ describe('Finish as operator: each refusal shows its message', () => {
     ['503 record_unavailable', () => failed(problem(503, 'ebilling.blocked.record_unavailable'))],
     ['403 not_authorized (FR-51)', () => failed(forbidden('ebilling.blocked.not_authorized'))],
     ['409 decision_conflict', () => failed(problem(409, 'ebilling.blocked.decision_conflict'))],
+    // The finish route answers a finished decision 200 alreadyDecided; these two belong to the Override and Return routes.
+    ['409 already_overridden', () => failed(problem(409, 'ebilling.blocked.already_overridden'))],
+    ['409 already_returned', () => failed(problem(409, 'ebilling.blocked.already_returned'))],
   ])('(must-not-fire) %s is just an error: no extra re-read', async (_, refusal) => {
     const decision = strandedApi();
     decision.finishStranded.mockResolvedValueOnce(refusal());
@@ -325,6 +350,10 @@ describe('Finish as operator: each refusal shows its message', () => {
     expect(decisionFailureMessage(f(409, 'constructor'))).toBe('The invoice changed or cannot be changed now. Close this and reload the page. (constructor)');
     expect(isFinishStaleRefusal(f(409, 'ebilling.blocked.nothing_stranded'))).toBe(true);
     expect(isFinishStaleRefusal(f(403, 'ebilling.blocked.operator_not_permitted'))).toBe(true);
+    expect(isFinishStaleRefusal(f(409, 'ebilling.blocked.invoice_not_held'))).toBe(true);
+    // The finish route answers a finished decision 200, so the other verb's repeat answers are not its stale-state refusals.
+    expect(isFinishStaleRefusal(f(409, 'ebilling.blocked.already_overridden'))).toBe(false);
+    expect(isFinishStaleRefusal(f(409, 'ebilling.blocked.already_returned'))).toBe(false);
     // The same code on another status is not it, nor is an ordinary refusal.
     expect(isFinishStaleRefusal(f(500, 'ebilling.blocked.nothing_stranded'))).toBe(false);
     expect(isFinishStaleRefusal(f(409, 'ebilling.blocked.decision_conflict'))).toBe(false);
@@ -484,6 +513,99 @@ describe('Finish as operator: an unsure send locks the dialog, and the repeat is
 // ─────────────────────────────────────────────────────────────────────────────
 // The client
 // ─────────────────────────────────────────────────────────────────────────────
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Review round 1, F1: an unsure outcome whose re-read clears the hold keeps the form open
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('an unsure send whose re-read shows the hold gone (the decision stood, a Signal close did not)', () => {
+  const anyDialog = () => screen.queryByRole('dialog', { hidden: true });
+  const unsure = () => failed(problem(503, 'ebilling.blocked.unavailable', { detail: 'The decision stood but not every Signal closed.' }));
+
+  const verbs: Array<[string, string, string, string, 'overrideBlocked' | 'returnBlocked' | 'finishStranded', () => MockDecisionApi]> = [
+    ['Override', 'override-block', 'Override the block', 'Override', 'overrideBlocked', () => mockDecisionApi(held())],
+    ['blocked Return', 'return-blocked', 'Return to firm', 'Return', 'returnBlocked', () => mockDecisionApi(held())],
+    ['Finish as operator', 'finish-stranded', 'Finish as operator', 'Finish', 'finishStranded', () => strandedApi()],
+  ];
+
+  it.each(verbs)('%s: the form stays open with the error and the lock, the banner goes, and the repeat posts the identical body', async (_, testId, title, submitName, method, make) => {
+    const decision = make();
+    decision[method].mockResolvedValueOnce(unsure());
+    // The first read holds the invoice; every read after the send says the hold is gone.
+    renderDecisions([heldReview(), review([line(1)])], decision);
+    fireEvent.click(await screen.findByTestId(testId));
+    const dialog = await dialogOf(title);
+    fireEvent.change(reasonOf(dialog), { target: { value: 'Known reason' } });
+    fireEvent.change(noteOf(dialog), { target: { value: 'The first note' } });
+    fireEvent.click(submitBtn(dialog, submitName));
+
+    const error = await within(dialog).findByTestId('blocked-error');
+    expect(error).toHaveTextContent('(ebilling.blocked.unavailable)');
+    expect(error).toHaveTextContent('It was saved in part: repeat it to finish.');
+    await waitFor(() => expect(screen.queryByTestId('blocked-banner')).not.toBeInTheDocument());
+    // The form is still there, locked as sent.
+    expect(screen.getByRole('dialog', { name: title, hidden: true })).toBeInTheDocument();
+    expect(reasonOf(dialog)).toHaveAttribute('readonly');
+    expect(noteOf(dialog)).toHaveAttribute('readonly');
+    expect(within(dialog).getByTestId('blocked-note-locked')).toBeInTheDocument();
+
+    fireEvent.click(submitBtn(dialog, submitName));
+    await waitFor(() => expect(decision[method]).toHaveBeenCalledTimes(2));
+    expect(decision[method].mock.calls[1]).toEqual(decision[method].mock.calls[0]);
+    expect(decision[method].mock.calls[1]).toEqual([SUBMISSION_ID, 'Known reason', 'The first note']);
+    // The repeat finished it (the mock's default answer): the form closes and nothing is left on the page.
+    await waitFor(() => expect(anyDialog()).not.toBeInTheDocument());
+    expect(screen.queryByTestId('blocked-banner')).not.toBeInTheDocument();
+  });
+
+  it.each(verbs)('(must-not-fire) %s: a definite success closes the form normally, and no form is on the page once the hold is gone', async (_, testId, title, submitName, method, make) => {
+    const decision = make();
+    renderDecisions([heldReview(), review([line(1)])], decision);
+    expect(anyDialog()).not.toBeInTheDocument();
+    fireEvent.click(await screen.findByTestId(testId));
+    const dialog = await dialogOf(title);
+    fireEvent.change(reasonOf(dialog), { target: { value: 'Known reason' } });
+    fireEvent.click(submitBtn(dialog, submitName));
+    await waitFor(() => expect(decision[method]).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(anyDialog()).not.toBeInTheDocument());
+    expect(screen.queryByTestId('blocked-banner')).not.toBeInTheDocument();
+    expect(decision[method]).toHaveBeenCalledTimes(1);
+  });
+
+  it('the same when the re-read still names the submission (the form is not tied to what the review names)', async () => {
+    const decision = mockDecisionApi(held());
+    decision.overrideBlocked.mockResolvedValueOnce(unsure());
+    const stillNamed = { ...review([line(1)]), submission: heldReview().submission };
+    renderDecisions([heldReview(), stillNamed], decision);
+    fireEvent.click(await screen.findByTestId('override-block'));
+    const dialog = await dialogOf('Override the block');
+    fireEvent.change(reasonOf(dialog), { target: { value: 'Known reason' } });
+    fireEvent.click(submitBtn(dialog, 'Override'));
+    await within(dialog).findByTestId('blocked-error');
+    await waitFor(() => expect(screen.queryByTestId('blocked-banner')).not.toBeInTheDocument());
+    expect(reasonOf(dialog)).toHaveAttribute('readonly');
+    fireEvent.click(submitBtn(dialog, 'Override'));
+    await waitFor(() => expect(decision.overrideBlocked).toHaveBeenCalledTimes(2));
+    expect(decision.overrideBlocked.mock.calls[1]).toEqual(decision.overrideBlocked.mock.calls[0]);
+    await waitFor(() => expect(anyDialog()).not.toBeInTheDocument());
+  });
+
+  it('(must-not-fire) closing the form once the hold is gone drops the lock: nothing is left to repeat, and no form comes back', async () => {
+    const decision = strandedApi();
+    decision.finishStranded.mockResolvedValueOnce(unsure());
+    renderDecisions([heldReview(), review([line(1)])], decision);
+    fireEvent.click(await screen.findByTestId('finish-stranded'));
+    const dialog = await dialogOf();
+    fireEvent.change(reasonOf(dialog), { target: { value: 'Known reason' } });
+    fireEvent.click(submitBtn(dialog));
+    await within(dialog).findByTestId('blocked-error');
+    await waitFor(() => expect(screen.queryByTestId('blocked-banner')).not.toBeInTheDocument());
+    cancel(dialog);
+    await waitFor(() => expect(anyDialog()).not.toBeInTheDocument());
+    expect(screen.queryByTestId('finish-stranded')).not.toBeInTheDocument();
+    expect(decision.finishStranded).toHaveBeenCalledTimes(1);
+  });
+});
 
 describe('the finish-stranded client call', () => {
   const BASE = 'https://bff.example.test';

@@ -430,14 +430,16 @@ export const BLOCKED_REFUSAL_SENTENCES: Readonly<Record<string, string>> = {
   [CODE_BLOCKED_RECORD_UNAVAILABLE]: 'The record could not be saved right now. Nothing was changed. Try again.',
   'ebilling.blocked.already_overridden': 'This submission was already overridden.',
   'ebilling.blocked.already_returned': 'This submission was already returned to the firm.',
+  'ebilling.blocked.invoice_not_held': 'This invoice is no longer held by this submission.',
   'ebilling.blocked.not_authorized': 'You do not have the rights to close the signals this decision resolves.',
   'ebilling.blocked.decision_conflict': 'A different decision is already recorded for this submission.',
   'ebilling.blocked.other_decision_pending': 'The other decision on this submission is recorded but has not finished, so this one cannot be made.',
 };
 
 /**
- * ISS-034: the refusals of the operator finish that say the page's picture of the submission is out of date (the decision is finished, was
- * taken by the caller, was never there, or the caller may not finish it). The page re-reads after them so the offer follows the server's state.
+ * ISS-034: the refusals of the operator finish that say the page's picture of the submission is out of date (the decision was taken by the
+ * caller, was never there, the invoice is no longer held, or the caller may not finish it). The page re-reads after them so the offer follows
+ * the server's state. A decision that is already finished is not here: the finish route answers it 200 `alreadyDecided`, not a refusal.
  */
 export const isFinishStaleRefusal = (f: ApiFailure): boolean =>
   (f.status === 403 && f.errorCode === CODE_BLOCKED_OPERATOR_NOT_PERMITTED) ||
@@ -447,8 +449,7 @@ export const isFinishStaleRefusal = (f: ApiFailure): boolean =>
       CODE_BLOCKED_NOTHING_STRANDED,
       CODE_BLOCKED_OWN_DECISION_PENDING,
       CODE_BLOCKED_BOTH_DECISIONS_RECORDED,
-      'ebilling.blocked.already_overridden',
-      'ebilling.blocked.already_returned',
+      'ebilling.blocked.invoice_not_held',
       'ebilling.blocked.not_blocked',
       'ebilling.blocked.other_decision_pending',
     ].includes(f.errorCode));

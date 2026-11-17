@@ -73,7 +73,7 @@ type Action = 'override' | 'return' | 'finish';
 const LOCK_NOUN: Record<Action, string> = { override: 'An Override', return: 'A Return', finish: 'A finish' };
 const BEFORE_VERB: Record<Action, string> = { override: 'overriding', return: 'returning', finish: 'finishing as operator' };
 
-/** What the finish dialog says: the pending decision (an Override or a Return recorded by another person) and that it finishes exactly as recorded. A generic wording when the server's hint is no longer there (a locked reopening). */
+/** What the finish dialog says: the pending decision (an Override or a Return recorded by another person) and that it finishes exactly as recorded. A generic wording for a verb the page does not know (the dialog opens only from the server's hint, so there is always a verb). */
 export function finishIntro(verb: string | null): string {
   const tail = 'Your reason is required and is recorded with your name; their reason and note stay as recorded.';
   if (verb === 'Override')
@@ -92,7 +92,12 @@ export function BlockedBanner({ review, reload }: BlockedBannerProps) {
   const s = useStyles();
   const { api, refresh, locks } = useApproval();
   const held = review.header.held;
-  const submissionId = submissionIdOf(review);
+  // The submission the review names. Once the hold is gone the review may name none; an open form keeps the last one it was opened for, so its
+  // repeat still goes to the same submission.
+  const lastSubmissionId = React.useRef<string | null>(null);
+  const named = submissionIdOf(review);
+  if (named) lastSubmissionId.current = named;
+  const submissionId = named ?? lastSubmissionId.current;
 
   const [blocked, setBlocked] = React.useState<BlockedSubmission | null>(null);
   const [failure, setFailure] = React.useState<ApiFailure | null>(null);
@@ -135,12 +140,16 @@ export function BlockedBanner({ review, reload }: BlockedBannerProps) {
     if (held) void load();
   }, [held, load]);
 
-  // The hold is gone (the decision is done): nothing is left to repeat, so a lock kept from an unsure send is dropped.
+  // The hold is gone (the decision is done): nothing is left to repeat, so a lock kept from an unsure send is dropped. Not while the form is
+  // still open: an unsure send (a 503 after the decision stood and the invoice was released, with a Signal close failed) re-reads the page, the
+  // hold clears, and the form must stay open with its error and its lock so the same request can be repeated and finish the close.
+  const dialogOpen = dialog?.open === true;
   React.useEffect(() => {
-    if (!held) locks.clear('blocked');
-  }, [held, locks]);
+    if (!held && !dialogOpen) locks.clear('blocked');
+  }, [held, dialogOpen, locks]);
 
-  if (!held || !submissionId) return null;
+  // Only the banner goes with the hold; an open form does not (see above), and no form is ever shown unless one was opened.
+  if (!submissionId) return null;
 
   // ISS-034: offered only on the server's word (`canFinishAsOperator`) and only for a decision someone else recorded: the decider finishes
   // their own by repeating it (Override or Return above), never through this action.
@@ -235,6 +244,7 @@ export function BlockedBanner({ review, reload }: BlockedBannerProps) {
 
   return (
     <>
+      {held && (
       <MessageBar intent="warning" layout="multiline" data-testid="blocked-banner">
         <MessageBarBody>
           <MessageBarTitle>This invoice is on hold</MessageBarTitle>
@@ -283,6 +293,7 @@ export function BlockedBanner({ review, reload }: BlockedBannerProps) {
           </MessageBarActions>
         )}
       </MessageBar>
+      )}
 
       {dialog && (
         <FormModal
