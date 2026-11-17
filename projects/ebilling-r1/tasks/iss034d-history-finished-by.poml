@@ -4,7 +4,7 @@
     <title>Invoice Review History tab shows "Finished by {name}" for a blocked Override or Return completed by someone other than its decider (EB-D-257; iss034c AC5)</title>
     <phase>Defect fix follow-up (ISS-034 #2888; owner EB-D-257)</phase>
     <gate>iss034c merged into work. Branch from work/ebilling-r1 at the sha named in the agent brief.</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>BFF review read plus the Invoice Review code page; tests modified.</rigor-reason>
     <model-tier>sonnet</model-tier>
