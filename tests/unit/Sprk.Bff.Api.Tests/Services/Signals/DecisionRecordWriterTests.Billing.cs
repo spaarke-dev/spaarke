@@ -60,6 +60,28 @@ public sealed partial class DecisionRecordWriterTests
         }
     }
 
+    /// <summary>
+    /// ISS-034 review round 1 (F2): the shared harness answers EVERY create with the one <see cref="Harness.NewId"/>, so two records written in
+    /// one test cannot be told apart by id. This re-answers the create the way Dataverse does: the FIRST create still gets
+    /// <see cref="Harness.NewId"/> (so a test that reads it for a single record is unchanged), every later create its own new id, and each
+    /// created row carries its id (the lookups above find it by that id). Opt-in, so the shared harness (ontology-owned) stays byte-identical.
+    /// </summary>
+    internal static Harness WithDistinctCreateIds(Harness h)
+    {
+        h.Org.Setup(o => o.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
+            .Returns((Entity e, CancellationToken _) =>
+            {
+                if (e.Id == Guid.Empty)
+                {
+                    e.Id = h.Created.Count == 0 ? h.NewId : Guid.NewGuid();
+                }
+
+                h.Created.Add(e);
+                return Task.FromResult(e.Id);
+            });
+        return h;
+    }
+
     private static bool BillingSatisfies(ConditionExpression condition, Entity row)
     {
         object? actual = condition.AttributeName == row.LogicalName + "id"

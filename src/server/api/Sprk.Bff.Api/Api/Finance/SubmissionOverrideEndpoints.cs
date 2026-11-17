@@ -33,12 +33,15 @@ namespace Sprk.Bff.Api.Api.Finance;
 /// <para><b>Finish a stranded decision (ISS-034, EB-D-244).</b> <c>POST .../finish-stranded</c> lets a billing admin finish ANOTHER person's
 /// Override or Return that was recorded but did not finish, exactly as recorded (the stored reason, note, Signal set and decider). The route's
 /// filter is the decide routes' (Read and Write on the submission). Inside the service, as the caller and failing closed: the billing-admin
-/// marker (<see cref="BillingAdminAuthorization.Admin"/>'s check) before anything about the submission is read, then the stranded verb, derived
-/// server-side; for an Override the eBilling Override privilege (both refusals 403 <c>ebilling.blocked.operator_not_permitted</c>); then, under
-/// the invoice lock, the FR-51 close rights (403 <c>ebilling.blocked.not_authorized</c>). 409 <c>ebilling.blocked.nothing_stranded</c> when no
-/// decision is recorded, <c>other_decision_pending</c> when both are, <c>decision_conflict</c> when the caller is the stored decider (they repeat
-/// their own decision). The operator's reason (required) and note (optional) go on the operator's own <c>finish-stranded-decision</c> Decision
-/// Record; a finished decision answers 200 <c>alreadyDecided</c> with no operator record.</para>
+/// marker (every check of <see cref="BillingAdminAuthorization.Admin"/>) before anything about the submission is read, then the stranded verb,
+/// derived server-side; for an Override the eBilling Override privilege (both refusals 403 <c>ebilling.blocked.operator_not_permitted</c>); then,
+/// under the invoice lock, the FR-51 close rights (403 <c>ebilling.blocked.not_authorized</c>). Codes of this route only (review round 1; the
+/// override and return routes keep theirs): 409 <c>ebilling.blocked.nothing_stranded</c> when no decision is recorded;
+/// 409 <c>ebilling.blocked.both_decisions_recorded</c> when both are (neither can be finished: it needs support);
+/// 409 <c>ebilling.blocked.own_decision_pending</c> when the caller is the stored decider (they repeat their own decision on its own route).
+/// The operator's reason (required) and note (optional) go on the operator's own <c>finish-stranded-decision</c> Decision Record (one per
+/// submission, verb and operator, outcome <c>FinishRequested</c>); the response's <c>recordId</c> is the finished decision's record; a finished
+/// decision answers 200 <c>alreadyDecided</c> with no operator record.</para>
 /// </remarks>
 public static class SubmissionOverrideEndpoints
 {

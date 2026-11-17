@@ -520,7 +520,7 @@ public sealed class SubmissionOverrideEndpointsAuthorizationContractTests
         var json = JsonNode.Parse(await response.Content.ReadAsStringAsync())!.AsObject();
         json["errorCode"]!.GetValue<string>().Should().Be("ebilling.blocked.operator_not_permitted");
         json["reasonCode"]!.GetValue<string>().Should().Be("ebilling.blocked.operator_not_permitted");
-        host.World.Probe.Calls.Select(c => c.Privilege).Should().Equal(SubmissionOverrideService.AdminMarkerPrivilege);
+        host.World.Probe.Calls.Select(c => c.Privilege).Should().Equal(SubmissionOverrideService.AdminMarkerChecks()[0].Operation);
         host.World.Entities.Invocations.Should().BeEmpty("nothing about the submission is read before the marker");
         host.World.AssertNothingChanged();
     }
@@ -530,13 +530,39 @@ public sealed class SubmissionOverrideEndpointsAuthorizationContractTests
     {
         await using var host = await Host.StartAsync();
         host.GrantRights();
-        host.World.Probe.Hold(SubmissionOverrideService.AdminMarkerPrivilege);
+        host.HoldAdminMarker();
 
         var response = await host.SendAsync(Request("POST", Url("finish-stranded"), ReasonBody()));
 
         response.StatusCode.Should().Be(HttpStatusCode.Conflict);
         (await ErrorCodeAsync(response)).Should().Be("ebilling.blocked.nothing_stranded");
         host.World.AssertNothingWritten();
+    }
+
+    [Fact(DisplayName = "iss034a review round 1: finish-stranded by a billing admin finishes another person's stranded override: 200 with the finished decision's outcome and A's record id, the submission released, one operator record")]
+    public async Task FinishStranded_ByABillingAdmin_Is200_AndFinishesTheStrandedDecision()
+    {
+        await using var host = await Host.StartAsync();
+        host.GrantRights();
+        // Decider A (the World's caller) records an override whose release then fails: the decision is stranded.
+        (await DataMutation.Ebilling.SubmissionOverrideDecisionNoteTests.StrandAsync(host.World, "override-release", null)).StatusCode.Should().Be(503);
+        var decidedId = host.World.Records.Created.Single(e => e.LogicalName == "sprk_decisionrecord").Id;
+        host.World.Probe.CallerSystemUserId = SubmissionOverrideServiceTests.World.Operator;
+        host.HoldAdminMarker();
+
+        var response = await host.SendAsync(Request("POST", Url("finish-stranded"),
+            Json("""{"reason":"The decider has left; finishing their recorded decision.","note":"Operator note"}""")));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var json = JsonNode.Parse(await response.Content.ReadAsStringAsync())!.AsObject();
+        json["outcome"]!.GetValue<string>().Should().Be("Overridden");
+        json["alreadyDecided"]!.GetValue<bool>().Should().BeFalse();
+        json["submissionId"]!.GetValue<Guid>().Should().Be(SubmissionId);
+        json["recordId"]!.GetValue<Guid>().Should().Be(decidedId, "the response names the finished decision's record, A's");
+        host.World.Status.Should().Be(InvoiceSubmissionStatus.Accepted);
+        var op = host.World.Records.Created.Should().ContainSingle(e => e.GetAttributeValue<string>("sprk_actioncode") == "finish-stranded-decision").Subject;
+        op.Id.Should().NotBe(decidedId);
+        op.GetAttributeValue<Microsoft.Xrm.Sdk.EntityReference>("sprk_confirmedby")!.Id.Should().Be(SubmissionOverrideServiceTests.World.Operator);
     }
 
     // ── Helpers ──
@@ -613,6 +639,15 @@ public sealed class SubmissionOverrideEndpointsAuthorizationContractTests
         }
 
         public void GrantRights() => Access.Grant(Set, SubmissionId, AccessRights.Read | AccessRights.Write);
+
+        /// <summary>ISS-034: the caller holds the billing-admin marker (every check of <see cref="BillingAdminAuthorization.Admin"/>).</summary>
+        public void HoldAdminMarker()
+        {
+            foreach (var check in SubmissionOverrideService.AdminMarkerChecks())
+            {
+                World.Probe.Hold(check.Operation);
+            }
+        }
 
         public Task<HttpResponseMessage> SendAsync(HttpRequestMessage request) => _client.SendAsync(request);
 

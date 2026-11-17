@@ -391,6 +391,16 @@ public class DecisionActionCatalogTests
         DecisionGateTier.Resolve(action.Gate!).Should().Be(tier);
     }
 
+    [Fact(DisplayName = "iss034a review round 1 (ontology-r1): finish-stranded-decision gates with return-to-firm's factors: not reversible, externally visible (a finished return reaches the firm), a record-of-truth change, Tier4")]
+    public void FinishStrandedDecision_GatesAsReturnToFirm_ExternallyVisible()
+    {
+        DecisionActionCatalog.TryGetBilling("finish-stranded-decision", out var finish).Should().BeTrue();
+        DecisionActionCatalog.TryGetBilling("return-to-firm", out var returned).Should().BeTrue();
+
+        finish.Gate.Should().Be(new DecisionGateFactors(GateRiskTier.Tier4, Reversible: false, ExternallyVisible: true, RecordOfTruthImpact: true));
+        finish.Gate.Should().Be(returned.Gate, "a finished return reaches the firm, so the finish gates as return-to-firm does");
+    }
+
     [Theory]
     [InlineData("reduce-line", "approvedAmount", "reason")]
     [InlineData("disallow-line", "reason")]

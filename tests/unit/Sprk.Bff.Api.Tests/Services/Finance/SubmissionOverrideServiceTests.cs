@@ -54,6 +54,10 @@ public partial class SubmissionOverrideServiceTests
         /// <summary>ISS-034 (iss034a): a billing admin who is NOT the stranded decision's decider (its decider is <see cref="Caller"/>).</summary>
         public static readonly Guid Operator = Guid.Parse("10500000-0000-4000-8000-0000000000c3");
         public static readonly Guid OperatorContact = Guid.Parse("10500000-0000-4000-8000-0000000000c4");
+
+        /// <summary>ISS-034 review round 1 (F1): a second billing admin, who completes a finish the first operator left interrupted.</summary>
+        public static readonly Guid SecondOperator = Guid.Parse("10500000-0000-4000-8000-0000000000c5");
+        public static readonly Guid SecondOperatorContact = Guid.Parse("10500000-0000-4000-8000-0000000000c6");
         public static readonly Guid InvoiceId = InvoiceSubmissionPersister.InvoiceIdFor(SubmissionId);
         public const string Token = "caller-token";
         public static readonly DateTime CreatedOn = new(2026, 10, 20, 8, 0, 0, DateTimeKind.Utc);
@@ -110,6 +114,10 @@ public partial class SubmissionOverrideServiceTests
 
         /// <summary>ISS-031: thrown by the lookup of ONE decision id only (the other verb's record, say), as the writer throws it; null = no fault.</summary>
         public Func<Guid, Exception?> FindFaultFor { get; set; } = _ => null;
+
+        /// <summary>ISS-034 review round 1: awaited at the start of each lookup of a decision id (null = none), so a test can see whether two
+        /// lookups run together.</summary>
+        public Func<Guid, Task>? FindGate { get; set; }
         public List<string> SignalQueries { get; } = [];
         public int FindCalls { get; set; }
 
@@ -379,7 +387,8 @@ public partial class SubmissionOverrideServiceTests
                     return Task.CompletedTask;
                 });
 
-            Records = DecisionRecordWriterTests.WithBillingLookups(new DecisionRecordWriterTests.Harness());
+            // ISS-034 review round 1 (F2): every create gets its own id, as in Dataverse, so a decision's record and an operator's are told apart.
+            Records = DecisionRecordWriterTests.WithDistinctCreateIds(DecisionRecordWriterTests.WithBillingLookups(new DecisionRecordWriterTests.Harness()));
             Records.Rows[("sprk_invoice", InvoiceId)] = new Entity("sprk_invoice", InvoiceId) { ["sprk_matter"] = new EntityReference("sprk_matter", Matter) };
             foreach (var version in (outcome.Evaluation?.Findings ?? []).Select(f => f.PolicyVersionId).Distinct())
             {
@@ -392,6 +401,8 @@ public partial class SubmissionOverrideServiceTests
             // ISS-034 (iss034a): the operator who finishes another person's stranded decision has a linked contact too.
             identity.Setup(i => i.ResolveAsync(Operator, It.IsAny<CancellationToken>()))
                 .ReturnsAsync(new PersonIdentity(Operator, ContactId: OperatorContact));
+            identity.Setup(i => i.ResolveAsync(SecondOperator, It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new PersonIdentity(SecondOperator, ContactId: SecondOperatorContact));
             Recorder = new BillingDecisionRecorder(Records.Writer, identity.Object, NullLogger<BillingDecisionRecorder>.Instance);
 
             Probe.CallerSystemUserId = Caller;
@@ -411,12 +422,20 @@ public partial class SubmissionOverrideServiceTests
                 },
                 Recorder.Preflight,
                 CloseAsync,
-                (code, invoice, decisionId, ct) =>
+                async (code, invoice, decisionId, ct) =>
                 {
                     FindCalls++;
-                    return (FindFault ?? FindFaultFor(decisionId)) is { } fault
-                        ? Task.FromException<DecisionRecordWriter.BillingStoredResolvedSet?>(fault)
-                        : Recorder.FindStoredResolvedSetAsync(code, invoice, decisionId, ct);
+                    if (FindGate is { } gate)
+                    {
+                        await gate(decisionId);
+                    }
+
+                    if ((FindFault ?? FindFaultFor(decisionId)) is { } fault)
+                    {
+                        throw fault;
+                    }
+
+                    return await Recorder.FindStoredResolvedSetAsync(code, invoice, decisionId, ct);
                 },
                 Clock,
                 Queue.Submitter)
@@ -715,6 +734,10 @@ public partial class SubmissionOverrideServiceTests
 
         public List<FinanceEndpointsAuthorizationContractTests.PrivilegeCall> Calls { get; } = [];
         public Exception? PrivilegeFault { get; set; }
+
+        /// <summary>ISS-034 review round 1: a fault for ONE privilege question only (null = none), so a probe of one privilege can fault while
+        /// another is answered.</summary>
+        public Func<string, Exception?> PrivilegeFaultFor { get; set; } = _ => null;
         public Exception? IdentityFault { get; set; }
         public Guid? CallerSystemUserId { get; set; }
 
@@ -740,7 +763,7 @@ public partial class SubmissionOverrideServiceTests
         public override Task<bool> CallerHoldsPrivilegeAsync(string? callerBearerToken, string privilegeName, CancellationToken ct = default)
         {
             Calls.Add(new FinanceEndpointsAuthorizationContractTests.PrivilegeCall(privilegeName, !string.IsNullOrEmpty(callerBearerToken)));
-            return PrivilegeFault is { } fault
+            return (PrivilegeFault ?? PrivilegeFaultFor(privilegeName)) is { } fault
                 ? Task.FromException<bool>(fault)
                 : Task.FromResult(!string.IsNullOrEmpty(callerBearerToken) && _held.Contains(privilegeName));
         }

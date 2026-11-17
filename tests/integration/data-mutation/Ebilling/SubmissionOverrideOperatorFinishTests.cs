@@ -1,6 +1,7 @@
 using System.Text.Json.Nodes;
 using FluentAssertions;
 using Microsoft.Xrm.Sdk;
+using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Api.Finance;
 using Sprk.Bff.Api.Services.Finance;
 using Sprk.Bff.Api.Services.Finance.Submission;
@@ -17,6 +18,8 @@ namespace Sprk.Bff.Api.Tests.DataMutation.Ebilling;
 /// Over the real <see cref="SubmissionOverrideService"/> and the real Decision Record writer harness of <see cref="World"/>, each test proves the
 /// stored state: the records, the release transaction, the transition, the submission, the Signals and their closes.
 /// </summary>
+/// <remarks>Review round 1: the writer harness gives every create its own id (<c>WithDistinctCreateIds</c>), so A's record and the operator's
+/// are told apart by id; the operator's record is one per submission, verb and operator (F1).</remarks>
 public sealed class SubmissionOverrideOperatorFinishTests
 {
     private const string Reason = "Negotiated rate is not yet in the rate card.";
@@ -24,9 +27,14 @@ public sealed class SubmissionOverrideOperatorFinishTests
     private const string OperatorReason = "The decider has left; finishing their recorded decision.";
     private const string OperatorNote = "Operator note";
     private const string FinishCode = "finish-stranded-decision";
-    private static readonly Guid SecondOperator = Guid.Parse("10500000-0000-4000-8000-0000000000c5");
+
+    /// <summary>The characters a <c>"padding"</c> member adds to a JSON object beside its value: <c>,"padding":""</c>.</summary>
+    private const int PaddingOverhead = 13;
 
     private static string VerbOf(string strand) => strand.StartsWith("return", StringComparison.Ordinal) ? "return" : "override";
+
+    private static SubmissionOverrideService.Verb ServiceVerb(string verb) =>
+        verb == "override" ? SubmissionOverrideService.Verb.Override : SubmissionOverrideService.Verb.Return;
 
     private static Task<BlockedDecisionResult> Finish(World w, string? reason = OperatorReason, string? note = OperatorNote) =>
         w.Service.FinishStrandedAsync(World.SubmissionId, reason, note, World.Token, CancellationToken.None);
@@ -36,18 +44,36 @@ public sealed class SubmissionOverrideOperatorFinishTests
             ? w.Service.OverrideAsync(World.SubmissionId, reason, null, World.Token, CancellationToken.None)
             : w.Service.ReturnAsync(World.SubmissionId, reason, null, World.Token, CancellationToken.None);
 
-    /// <summary>The caller becomes <paramref name="who"/>, a billing admin (the marker; the World already holds the Override privilege).</summary>
+    private static IEnumerable<string> AdminMarker() => SubmissionOverrideService.AdminMarkerChecks().Select(c => c.Operation);
+
+    /// <summary>The caller becomes <paramref name="who"/>, a billing admin (every check of the marker; the World already holds the Override privilege).</summary>
     private static void ActAsAdmin(World w, Guid who)
     {
         w.Probe.CallerSystemUserId = who;
-        w.Probe.Hold(SubmissionOverrideService.AdminMarkerPrivilege);
+        foreach (var privilege in AdminMarker())
+        {
+            w.Probe.Hold(privilege);
+        }
+    }
+
+    private static void ReleaseAdmin(World w)
+    {
+        foreach (var privilege in AdminMarker())
+        {
+            w.Probe.Release(privilege);
+        }
     }
 
     private static List<Entity> Records(World w, string? code = null) =>
         w.Records.Created.Where(e => e.LogicalName == "sprk_decisionrecord" && (code is null || e.GetAttributeValue<string>("sprk_actioncode") == code)).ToList();
 
-    private static JsonObject ValuesOf(Entity record) =>
-        JsonNode.Parse(record.GetAttributeValue<string>("sprk_steps"))!["steps"]!.AsArray().Single()!["values"]!.AsObject();
+    private static Entity OperatorRecordOf(World w, Guid operatorId) =>
+        Records(w, FinishCode).Should().ContainSingle(r => r.GetAttributeValue<EntityReference>("sprk_confirmedby")!.Id == operatorId).Subject;
+
+    private static JsonObject StepOf(Entity record) =>
+        JsonNode.Parse(record.GetAttributeValue<string>("sprk_steps"))!["steps"]!.AsArray().Single()!.AsObject();
+
+    private static JsonObject ValuesOf(Entity record) => StepOf(record)["values"]!.AsObject();
 
     private static string Fingerprint(Entity record) => string.Join(";", record.Attributes.OrderBy(a => a.Key, StringComparer.Ordinal)
         .Select(a => a.Key + "=" + (a.Value switch { EntityReference r => r.LogicalName + ":" + r.Id, OptionSetValue o => o.Value.ToString(), var v => v?.ToString() })));
@@ -56,6 +82,9 @@ public sealed class SubmissionOverrideOperatorFinishTests
 
     private static string? DecisionNoteOf(World w) =>
         w.Invoice!.Contains(InvoiceCorrectionNote.DecisionColumn) ? w.Invoice[InvoiceCorrectionNote.DecisionColumn] as string : null;
+
+    private static DecisionRecordRefusedException LookupFailed() =>
+        new(DecisionRecordRefusalReason.BillingRecordLookupFailed, "the lookup faulted", innerException: new TimeoutException("dataverse"));
 
     /// <summary>Everything a finish can write, as it stands now: compared before and after a refused call.</summary>
     private sealed record Snapshot(
@@ -94,6 +123,27 @@ public sealed class SubmissionOverrideOperatorFinishTests
         return await SubmissionOverrideDecisionNoteTests.StrandAsync(w, strand, FirstNote);
     }
 
+    /// <summary>Operator B (<see cref="World.Operator"/>) starts the finish of A's stranded decision; it writes B's record and then faults (the
+    /// release, or the transition), so B's record exists and the decision is still held.</summary>
+    private static async Task InterruptedOperatorFinishAsync(World w, string verb)
+    {
+        ActAsAdmin(w, World.Operator);
+        if (verb == "override")
+        {
+            w.UpdateFault = new TimeoutException("dataverse");
+        }
+        else
+        {
+            w.TransitionFault = new TimeoutException("dataverse");
+        }
+
+        (await Finish(w)).StatusCode.Should().Be(503, "B's finish was interrupted after B's record");
+        w.UpdateFault = null;
+        w.TransitionFault = null;
+        OperatorRecordOf(w, World.Operator);
+        w.Code.Should().Be(SubmissionReasonCodes.Blocked, "still held");
+    }
+
     // ── The finish: as recorded, crediting the decider, plus one operator record ──
 
     [Theory(DisplayName = "iss034a AC1: a decision stranded by decider A is finished by operator B exactly as recorded: released or returned, A's record unchanged, Signals closed crediting A under A's record, the stamp and column hold A's text, and ONE finish-stranded-decision record by B names A's record")]
@@ -111,16 +161,14 @@ public sealed class SubmissionOverrideOperatorFinishTests
         w.Code.Should().Be(SubmissionReasonCodes.Blocked, "the submission is still held");
         var decided = Records(w).Should().ContainSingle("A's record was written before the strand").Subject;
         var decidedBefore = Fingerprint(decided);
-        // The writer harness answers every create with the same id (NewId), so A's record id is NewId; the operator record is told apart by its
-        // code and its key (the harness's lookups match on the key in sprk_steps, as the writer's do).
-        var decidedId = w.Records.NewId;
+        var decidedId = decided.Id; // review round 1 (F2): every record has its own id, so A's is told apart from the operator's by id
+        decidedId.Should().NotBeEmpty();
         ActAsAdmin(w, World.Operator);
 
         var finished = await Finish(w);
 
         finished.Kind.Should().Be(BlockedDecisionKind.Decided);
         finished.Outcome.Should().Be(verb == "override" ? "Overridden" : "Returned");
-        finished.RecordId.Should().Be(decidedId, "the finished decision is A's; its record is the one the state names");
         w.Code.Should().Be(verb == "override" ? SubmissionReasonCodes.Overridden : SubmissionReasonCodes.Returned);
         if (verb == "override")
         {
@@ -134,29 +182,32 @@ public sealed class SubmissionOverrideOperatorFinishTests
             w.TransitionNotes.Where(n => n is not null).Should().OnlyContain(n => n == FirstNote, "the transition carries A's stored note");
         }
 
-        // A's record is untouched (append-only), and the decision stays A's.
-        Fingerprint(Records(w)[0]).Should().Be(decidedBefore);
+        // One operator record: B confirmed, B's reason and note, naming A's decision and record; it resolves no Signal; its id is its own.
+        Records(w).Should().HaveCount(2);
+        var op = Records(w, FinishCode).Should().ContainSingle().Subject;
+        op.Id.Should().NotBe(decidedId, "the operator's record is a record of its own");
+        op.GetAttributeValue<EntityReference>("sprk_confirmedby")!.Id.Should().Be(World.Operator);
+        op.GetAttributeValue<string>("sprk_reason").Should().Be(OperatorReason);
+        StepOf(op)["outcome"]!.GetValue<string>().Should().Be("FinishRequested", "review round 1: the record says the finish was asked for, never that it finished");
+        var values = ValuesOf(op);
+        values["finishedDecision"]!.GetValue<string>().Should().Be(verb == "override" ? "override-submission" : "return-to-firm");
+        values["finishedRecord"]!.GetValue<string>().Should().Be(decidedId.ToString("D"), "the operator record names A's record");
+        values["note"]!.GetValue<string>().Should().Be(OperatorNote);
+        w.Recorded.Last().DecisionId.Should().Be(SubmissionOverrideService.OperatorFinishDecisionIdFor(World.SubmissionId, ServiceVerb(verb), World.Operator));
+        w.Recorded.Last().ResolvedSignalIds.Should().BeNull("the finished decision's own record resolves the Signals");
+        w.Order.IndexOf("record").Should().BeLessThan(w.Order.LastIndexOf("update"), "the operator record comes before the finish's state write");
+
+        // The response, the stamp and the closes name A's record, never the operator's (F2).
+        finished.RecordId.Should().Be(decidedId, "the finished decision is A's; its record is the one the state names").And.NotBe(op.Id);
+        Fingerprint(Records(w)[0]).Should().Be(decidedBefore, "A's record is untouched (append-only)");
         var stamp = StampOf(w, verb);
         stamp["reason"]!.GetValue<string>().Should().Be(Reason, "the stamp holds A's stored reason");
         Guid.Parse(stamp["bySystemUserId"]!.GetValue<string>()).Should().Be(World.Caller, "the stamp names A");
-        Guid.Parse(stamp["recordId"]!.GetValue<string>()).Should().Be(decidedId);
+        Guid.Parse(stamp["recordId"]!.GetValue<string>()).Should().Be(decidedId, "the stamp names A's record, not the operator's");
         w.Signals.Should().OnlyContain(s => s.GetAttributeValue<OptionSetValue>("sprk_signalstatus").Value == SignalWriter.SignalStatusResolved, "every Signal is closed");
         w.Closes.Should().NotBeEmpty().And.OnlyContain(c => c.DecidedBy == World.Caller && c.RecordId == decidedId, "closed under A's record, crediting A");
+        w.ClosedBy.Values.Should().OnlyContain(id => id == decidedId, "every Signal stands closed by A's record");
         w.Notified.Should().ContainSingle();
-
-        // One operator record: B confirmed, B's reason and note, naming A's decision and record; it resolves no Signal.
-        Records(w).Should().HaveCount(2);
-        var op = Records(w, FinishCode).Should().ContainSingle().Subject;
-        op.GetAttributeValue<EntityReference>("sprk_confirmedby")!.Id.Should().Be(World.Operator);
-        op.GetAttributeValue<string>("sprk_reason").Should().Be(OperatorReason);
-        var values = ValuesOf(op);
-        values["finishedDecision"]!.GetValue<string>().Should().Be(verb == "override" ? "override-submission" : "return-to-firm");
-        values["finishedRecord"]!.GetValue<string>().Should().Be(decidedId.ToString("D"));
-        values["note"]!.GetValue<string>().Should().Be(OperatorNote);
-        w.Recorded.Last().DecisionId.Should().Be(SubmissionOverrideService.OperatorFinishDecisionIdFor(
-            World.SubmissionId, verb == "override" ? SubmissionOverrideService.Verb.Override : SubmissionOverrideService.Verb.Return));
-        w.Recorded.Last().ResolvedSignalIds.Should().BeNull("the finished decision's own record resolves the Signals");
-        w.Order.IndexOf("record").Should().BeLessThan(w.Order.LastIndexOf("update"), "the operator record comes before the finish's state write");
     }
 
     [Fact(DisplayName = "iss034a: the operator record is written before the finish's first write (the Signal close), after the lock")]
@@ -182,14 +233,20 @@ public sealed class SubmissionOverrideOperatorFinishTests
         { "override-release", "no-override-privilege", 403, BlockedSubmissionErrors.OperatorNotPermitted },
         { "override-release", "privilege-probe-fault", 403, BlockedSubmissionErrors.OperatorNotPermitted },
         { "return-transition", "privilege-probe-fault", 403, BlockedSubmissionErrors.OperatorNotPermitted },
+        { "override-release", "override-probe-fault-only", 403, BlockedSubmissionErrors.OperatorNotPermitted },
         { "override-release", "unidentified-caller", 403, BlockedSubmissionErrors.OperatorNotPermitted },
         { "override-closes-and-release", "no-fr51-rights", 403, BlockedSubmissionErrors.NotAuthorized },
         { "return-closes-and-transition", "no-fr51-rights", 403, BlockedSubmissionErrors.NotAuthorized },
-        { "override-release", "caller-is-the-decider", 409, BlockedSubmissionErrors.DecisionConflict },
-        { "return-transition", "caller-is-the-decider", 409, BlockedSubmissionErrors.DecisionConflict },
-        { "override-release", "lookup-fault", 503, BlockedSubmissionErrors.Unavailable },
-        { "return-transition", "lookup-fault", 503, BlockedSubmissionErrors.Unavailable },
+        { "override-release", "caller-is-the-decider", 409, BlockedSubmissionErrors.OwnDecisionPending },
+        { "return-transition", "caller-is-the-decider", 409, BlockedSubmissionErrors.OwnDecisionPending },
+        { "override-release", "lookup-fault", 503, BlockedSubmissionErrors.RecordUnavailable },
+        { "return-transition", "lookup-fault", 503, BlockedSubmissionErrors.RecordUnavailable },
         { "override-release", "operator-record-lookup-fault", 503, BlockedSubmissionErrors.RecordUnavailable },
+        { "override-release", "operator-record-write-fault", 503, BlockedSubmissionErrors.RecordUnavailable },
+        { "return-transition", "operator-record-write-fault", 503, BlockedSubmissionErrors.RecordUnavailable },
+        { "override-release", "operator-record-writer-refusal", 503, BlockedSubmissionErrors.RecordUnavailable },
+        { "override-release", "stored-record-names-no-decider", 503, BlockedSubmissionErrors.Unavailable },
+        { "return-transition", "stored-record-names-no-decider", 503, BlockedSubmissionErrors.Unavailable },
         { "override-release", "firm-gate", 409, BlockedSubmissionErrors.FirmMissing },
     };
 
@@ -205,13 +262,17 @@ public sealed class SubmissionOverrideOperatorFinishTests
         switch (refusal)
         {
             case "no-admin-marker":
-                w.Probe.Release(SubmissionOverrideService.AdminMarkerPrivilege);
+                ReleaseAdmin(w);
                 break;
             case "no-override-privilege":
                 w.Probe.Release(EbillingOverridePrivilege.PrivilegeName);
                 break;
             case "privilege-probe-fault":
                 w.Probe.PrivilegeFault = new TimeoutException("dataverse");
+                break;
+            case "override-probe-fault-only":
+                // Review round 1: the marker is held and answered; only the Override privilege's probe faults (fail closed).
+                w.Probe.PrivilegeFaultFor = p => p == EbillingOverridePrivilege.PrivilegeName ? new TimeoutException("dataverse") : null;
                 break;
             case "unidentified-caller":
                 w.Probe.CallerSystemUserId = null;
@@ -220,11 +281,21 @@ public sealed class SubmissionOverrideOperatorFinishTests
                 w.Probe.Rights = (set, id) => Spaarke.Dataverse.AccessRights.Read;
                 break;
             case "lookup-fault":
-                w.FindFaultFor = id => id == SubmissionOverrideService.OverrideDecisionIdFor(World.SubmissionId) ? new TimeoutException("dataverse") : null;
+                // Review round 1: as the real lookup faults (FindBillingDecisionResolvedSetAsync wraps every fault as a refusal).
+                w.FindFaultFor = id => id == SubmissionOverrideService.OverrideDecisionIdFor(World.SubmissionId) ? LookupFailed() : null;
                 break;
             case "operator-record-lookup-fault":
-                w.FindFaultFor = id => id == SubmissionOverrideService.OperatorFinishDecisionIdFor(World.SubmissionId, SubmissionOverrideService.Verb.Override)
-                    ? new TimeoutException("dataverse") : null;
+                w.FindFaultFor = id => id == SubmissionOverrideService.OperatorFinishDecisionIdFor(World.SubmissionId, SubmissionOverrideService.Verb.Override, World.Operator)
+                    ? LookupFailed() : null;
+                break;
+            case "operator-record-write-fault":
+                w.RecordFault = new TimeoutException("dataverse"); // only the operator's record is written by a finish
+                break;
+            case "operator-record-writer-refusal":
+                w.RecordFault = LookupFailed();
+                break;
+            case "stored-record-names-no-decider":
+                Records(w).Single().Attributes.Remove("sprk_confirmedby"); // a corrupted record (K4): no decider to credit
                 break;
             case "firm-gate":
                 w.InvoiceOwnHold = SubmissionReasonCodes.FirmMissing; // the invoice is held for its firm
@@ -238,9 +309,19 @@ public sealed class SubmissionOverrideOperatorFinishTests
         refused.Kind.Should().Be(BlockedDecisionKind.Refused);
         refused.StatusCode.Should().Be(status);
         refused.ErrorCode.Should().Be(code);
-        Snapshot.Of(w).Should().Be(before, "nothing is written");
+        if (refusal.StartsWith("operator-record-write", StringComparison.Ordinal))
+        {
+            // The write was attempted (the recorder was asked) and failed: no record was created, and nothing after it ran.
+            w.Recorded.Should().HaveCount(before.Recorded + 1);
+            (Snapshot.Of(w) with { Recorded = before.Recorded }).Should().Be(before, "nothing is written");
+        }
+        else
+        {
+            Snapshot.Of(w).Should().Be(before, "nothing is written");
+        }
+
         Records(w, FinishCode).Should().BeEmpty("no operator record");
-        if (refusal is "no-admin-marker" or "unidentified-caller" || (refusal == "privilege-probe-fault"))
+        if (refusal is "no-admin-marker" or "unidentified-caller" or "privilege-probe-fault")
         {
             w.Entities.Invocations.Count.Should().Be(reads, "the admin marker is asked before anything about the submission is read");
             w.FindCalls.Should().Be(finds, "and before any record lookup");
@@ -268,7 +349,7 @@ public sealed class SubmissionOverrideOperatorFinishTests
         w.LockKeys.Should().BeEmpty("refused before the lock");
     }
 
-    [Fact(DisplayName = "iss034a AC2: both records stored is 409 other_decision_pending (no finish either way), nothing written")]
+    [Fact(DisplayName = "iss034a AC2 (review round 1): both records stored is 409 both_decisions_recorded (its own code: needs support), nothing written")]
     public async Task BothRecordsStored_Is409_AndWritesNothing()
     {
         var w = await World.CreateAsync();
@@ -284,9 +365,16 @@ public sealed class SubmissionOverrideOperatorFinishTests
         var refused = await Finish(w);
 
         refused.StatusCode.Should().Be(409);
-        refused.ErrorCode.Should().Be(BlockedSubmissionErrors.OtherDecisionPending);
+        refused.ErrorCode.Should().Be(BlockedSubmissionErrors.BothDecisionsRecorded).And.Be("ebilling.blocked.both_decisions_recorded", "the wire code is a contract");
         refused.Detail.Should().Be(BlockedSubmissionErrors.BothDecisionsRecordedDetail);
         Snapshot.Of(w).Should().Be(before);
+    }
+
+    [Fact(DisplayName = "iss034a (review round 1): the caller-is-the-decider code is its own stable wire code")]
+    public void TheOperatorRouteCodes_AreStable()
+    {
+        BlockedSubmissionErrors.OwnDecisionPending.Should().Be("ebilling.blocked.own_decision_pending");
+        BlockedSubmissionErrors.BothDecisionsRecorded.Should().Be("ebilling.blocked.both_decisions_recorded");
     }
 
     [Fact(DisplayName = "iss034a: the operator's reason is checked by the decisions' rules before anything is read (400 reason_required)")]
@@ -304,6 +392,61 @@ public sealed class SubmissionOverrideOperatorFinishTests
         refused.ErrorCode.Should().Be(BlockedSubmissionErrors.ReasonRequired);
         w.Entities.Invocations.Count.Should().Be(reads);
         Snapshot.Of(w).Should().Be(before);
+    }
+
+    // ── Review round 1 (F4): the stamp's size is checked before any write ──
+
+    [Fact(DisplayName = "iss034a review round 1 (F4): an operator finish whose stamp does not fit the findings column is 409 findings_too_large BEFORE the operator record and the Signal closes; nothing written")]
+    public async Task AStampThatDoesNotFit_IsRefusedBeforeTheOperatorRecord()
+    {
+        var w = await World.CreateAsync();
+        await StrandAsync(w, "override-release");
+        var decidedId = Records(w).Single().Id;
+        // Pad the stored findings so that they fit, but not with the finish's stamp (the margin is half the stamp, either way).
+        var stampLength = SubmissionOverrideService.WithStamp(w.FindingsJson, SubmissionOverrideService.OverrideMember,
+            new BlockedDecisionStamp(decidedId, World.Caller, w.Clock.GetUtcNow(), Reason)).Length - w.FindingsJson.Length;
+        var root = JsonNode.Parse(w.FindingsJson)!.AsObject();
+        root["padding"] = new string('p', InvoiceSubmissionPersister.FindingsJsonMaxLength - (stampLength / 2) - w.FindingsJson.Length - PaddingOverhead);
+        w.Submission[InvoiceSubmissionPersister.SubmissionFindingsJson] = root.ToJsonString();
+        w.FindingsJson.Length.Should().BeLessThanOrEqualTo(InvoiceSubmissionPersister.FindingsJsonMaxLength, "the findings fit");
+        (w.FindingsJson.Length + stampLength).Should().BeGreaterThan(InvoiceSubmissionPersister.FindingsJsonMaxLength, "the stamp does not");
+        ActAsAdmin(w, World.Operator);
+        var before = Snapshot.Of(w);
+
+        var refused = await Finish(w);
+
+        refused.StatusCode.Should().Be(409);
+        refused.ErrorCode.Should().Be(BlockedSubmissionErrors.FindingsTooLarge);
+        Snapshot.Of(w).Should().Be(before, "nothing is written: no operator record, no Signal close");
+        Records(w, FinishCode).Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "iss034a review round 1 (F4, found in passing): a first decision whose Signal set fits the findings but whose stamp does not is 409 findings_too_large BEFORE the set's store and the Decision Record; nothing written")]
+    public async Task ADecisionWhoseStampDoesNotFit_IsRefusedBeforeAnyWrite()
+    {
+        // The lengths, measured on an unpadded world: the set the decision stores (no Signal is open) and the stamp it writes.
+        var probe = await World.CreateAsync();
+        var plain = probe.FindingsJson;
+        var withSet = SubmissionOverrideService.WithHumanDecisionSet(plain, SubmissionOverrideService.OverrideDecisionIdFor(World.SubmissionId),
+            new InvoiceSubmissionAfterSteps.ResolvedSignalSet(probe.Clock.GetUtcNow().UtcDateTime, []), []);
+        var setLength = withSet.Length - plain.Length;
+        var stampLength = SubmissionOverrideService.WithStamp(withSet, SubmissionOverrideService.OverrideMember,
+            new BlockedDecisionStamp(Guid.NewGuid(), World.Caller, probe.Clock.GetUtcNow(), Reason)).Length - withSet.Length;
+        var padding = InvoiceSubmissionPersister.FindingsJsonMaxLength - setLength - (stampLength / 2) - plain.Length - PaddingOverhead;
+        var w = await World.CreateAsync(json =>
+        {
+            json["padding"] = new string('p', padding);
+            return json;
+        });
+        (w.FindingsJson.Length + setLength).Should().BeLessThanOrEqualTo(InvoiceSubmissionPersister.FindingsJsonMaxLength, "the set fits");
+        (w.FindingsJson.Length + setLength + stampLength).Should().BeGreaterThan(InvoiceSubmissionPersister.FindingsJsonMaxLength, "the stamp does not");
+
+        var refused = await w.OverrideAsync();
+
+        refused.StatusCode.Should().Be(409);
+        refused.ErrorCode.Should().Be(BlockedSubmissionErrors.FindingsTooLarge);
+        w.AssertNothingWritten();
+        w.Records.Created.Should().BeEmpty("no Decision Record");
     }
 
     // ── Repeats ──
@@ -327,7 +470,7 @@ public sealed class SubmissionOverrideOperatorFinishTests
         (Snapshot.Of(w) with { Closes = before.Closes }).Should().Be(before, "a repeat writes nothing (its re-close of the stored set finds every Signal already closed by the record)");
     }
 
-    [Theory(DisplayName = "iss034a AC3: a finish interrupted after the operator record completes on the next call (even with another text) with still exactly ONE operator record")]
+    [Theory(DisplayName = "iss034a AC3: a finish interrupted after the operator record completes on the same operator's next call (even with another text) with still exactly ONE operator record")]
     [InlineData("override-release")]
     [InlineData("return-transition")]
     public async Task AFinishInterruptedAfterTheOperatorRecord_CompletesOnTheNextCall_WithOneOperatorRecord(string strand)
@@ -335,22 +478,7 @@ public sealed class SubmissionOverrideOperatorFinishTests
         var w = await World.CreateAsync();
         var verb = VerbOf(strand);
         await StrandAsync(w, strand);
-        ActAsAdmin(w, World.Operator);
-        if (verb == "override")
-        {
-            w.UpdateFault = new TimeoutException("dataverse");
-        }
-        else
-        {
-            w.TransitionFault = new TimeoutException("dataverse");
-        }
-
-        var interrupted = await Finish(w);
-        interrupted.StatusCode.Should().Be(503);
-        Records(w, FinishCode).Should().ContainSingle("the operator record was written before the failed write");
-        w.Code.Should().Be(SubmissionReasonCodes.Blocked, "still held");
-        w.UpdateFault = null;
-        w.TransitionFault = null;
+        await InterruptedOperatorFinishAsync(w, verb);
 
         var completed = await Finish(w, reason: "Another reason entirely.", note: null);
 
@@ -361,24 +489,58 @@ public sealed class SubmissionOverrideOperatorFinishTests
         Records(w).Should().HaveCount(2);
     }
 
-    [Fact(DisplayName = "iss034a (known limit): an operator finish interrupted after its record is another operator's to complete: a second operator is refused 409 decision_conflict, nothing written")]
-    public async Task AnInterruptedFinish_IsRefusedToASecondOperator()
+    [Theory(DisplayName = "iss034a review round 1 (F1): a finish operator B left interrupted after B's record is completed by operator C, who writes C's own record; each operator has exactly one record and the decision is finished once")]
+    [InlineData("override-release")]
+    [InlineData("return-transition")]
+    public async Task AnInterruptedFinish_IsCompletedByASecondOperator_WithTheirOwnRecord(string strand)
     {
         var w = await World.CreateAsync();
-        await StrandAsync(w, "override-release");
-        ActAsAdmin(w, World.Operator);
-        w.UpdateFault = new TimeoutException("dataverse");
-        (await Finish(w)).StatusCode.Should().Be(503);
-        w.UpdateFault = null;
-        w.Probe.CallerSystemUserId = SecondOperator;
-        var before = Snapshot.Of(w);
+        var verb = VerbOf(strand);
+        await StrandAsync(w, strand);
+        var decidedId = Records(w).Single().Id;
+        await InterruptedOperatorFinishAsync(w, verb);
+        var decidedCode = verb == "override" ? SubmissionReasonCodes.Overridden : SubmissionReasonCodes.Returned;
+        ActAsAdmin(w, World.SecondOperator);
 
-        var refused = await Finish(w);
+        var completed = await Finish(w, reason: "B is away; completing the finish.", note: null);
 
-        refused.StatusCode.Should().Be(409);
-        refused.ErrorCode.Should().Be(BlockedSubmissionErrors.DecisionConflict);
-        refused.Detail.Should().Be(BlockedSubmissionErrors.AnotherOperatorDetail);
-        Snapshot.Of(w).Should().Be(before);
+        completed.Kind.Should().Be(BlockedDecisionKind.Decided);
+        completed.RecordId.Should().Be(decidedId, "the finished decision is still A's");
+        w.Code.Should().Be(verb == "override" ? SubmissionReasonCodes.Overridden : SubmissionReasonCodes.Returned);
+        var b = OperatorRecordOf(w, World.Operator);
+        var c = OperatorRecordOf(w, World.SecondOperator);
+        Records(w, FinishCode).Should().HaveCount(2, "exactly one record for each operator");
+        c.Id.Should().NotBe(b.Id);
+        c.GetAttributeValue<string>("sprk_reason").Should().Be("B is away; completing the finish.");
+        ValuesOf(b)["finishedRecord"]!.GetValue<string>().Should().Be(decidedId.ToString("D"));
+        ValuesOf(c)["finishedRecord"]!.GetValue<string>().Should().Be(decidedId.ToString("D"));
+        Records(w, verb == "override" ? "override-submission" : "return-to-firm").Should().ContainSingle("A's decision is recorded once");
+        w.Notified.Should().ContainSingle("the decision is announced once");
+        w.Updates.Count(u => u.TryGetValue(InvoiceSubmissionPersister.SubmissionReasonCode, out var written) && Equals(written, decidedCode)).Should().Be(1, "the decided state is written once");
+        Guid.Parse(StampOf(w, verb)["recordId"]!.GetValue<string>()).Should().Be(decidedId);
+    }
+
+    [Theory(DisplayName = "iss034a review round 1: after operator B's interrupted finish, decider A's own repeat finishes the decision with no operator record of its own, and B's record stays")]
+    [InlineData("override-release")]
+    [InlineData("return-transition")]
+    public async Task AfterAnInterruptedOperatorFinish_TheDecidersOwnRepeatFinishes_AndTheOperatorRecordStays(string strand)
+    {
+        var w = await World.CreateAsync();
+        var verb = VerbOf(strand);
+        await StrandAsync(w, strand);
+        var decidedId = Records(w).Single().Id;
+        await InterruptedOperatorFinishAsync(w, verb);
+        var b = Fingerprint(OperatorRecordOf(w, World.Operator));
+        w.Probe.CallerSystemUserId = World.Caller;
+
+        var repeated = await Decide(w, verb);
+
+        repeated.Kind.Should().Be(BlockedDecisionKind.Decided);
+        repeated.RecordId.Should().Be(decidedId);
+        w.Code.Should().Be(verb == "override" ? SubmissionReasonCodes.Overridden : SubmissionReasonCodes.Returned);
+        Fingerprint(OperatorRecordOf(w, World.Operator)).Should().Be(b, "B's record stays as written (append-only)");
+        Records(w).Should().HaveCount(2, "A's record and B's; the decider's repeat writes none");
+        w.Notified.Should().ContainSingle();
     }
 
     // ── Must not fire: the existing routes are unchanged ──
@@ -409,6 +571,34 @@ public sealed class SubmissionOverrideOperatorFinishTests
         Records(w, FinishCode).Should().BeEmpty();
     }
 
+    // ── Disabled decider (question from uac-r2) ──
+
+    [Theory(DisplayName = "iss034a review round 1: a finish credits the stored decider only as lookup values and stamp text (the Signal closes' resolved-by, the stamp); no write assigns, owns or notifies the decider, so a disabled decider does not stop it")]
+    [InlineData("override-closes-and-release")]
+    [InlineData("return-closes-and-transition")]
+    public async Task AFinish_NamesTheDeciderOnlyAsALookupAndInTheStamp(string strand)
+    {
+        var w = await World.CreateAsync();
+        await StrandAsync(w, strand);
+        ActAsAdmin(w, World.Operator);
+        var stateWritesBefore = w.Updates.Count;
+
+        (await Finish(w)).Kind.Should().Be(BlockedDecisionKind.Decided);
+
+        // The closes credit A (sprk_resolvedby, a systemuser lookup: Dataverse accepts one to a disabled user).
+        w.Closes.Should().OnlyContain(c => c.DecidedBy == World.Caller);
+        // No state write (submission, release transaction, invoice) carries A as a lookup, an owner or anything else.
+        var written = w.Updates.Skip(stateWritesBefore).SelectMany(u => u.Values)
+            .Concat(w.Transactions.SelectMany(t => t.OfType<Microsoft.Xrm.Sdk.Messages.UpdateRequest>()).SelectMany(u => u.Target.Attributes.Values));
+        written.OfType<EntityReference>().Should().NotContain(r => r.Id == World.Caller, "nothing is assigned to or owned by the decider");
+        // The operator record is the operator's, and the notification names no person.
+        var op = Records(w, FinishCode).Single();
+        op.Attributes.Values.OfType<EntityReference>().Should().NotContain(r => r.Id == World.Caller, "the operator record links no lookup to the decider");
+        typeof(SubmissionDecidedNotification).GetProperties().Select(p => p.Name).Should().NotContain(n => n.Contains("User", StringComparison.OrdinalIgnoreCase)
+            || n.Contains("Recipient", StringComparison.OrdinalIgnoreCase) || n.Contains("Decider", StringComparison.OrdinalIgnoreCase), "the notice carries no person");
+        w.Notified.Single().Should().NotBeNull();
+    }
+
     // ── GET: the read-only hints ──
 
     [Fact(DisplayName = "iss034a AC5: GET shows the stranded Override to the operator, who may finish it")]
@@ -416,13 +606,45 @@ public sealed class SubmissionOverrideOperatorFinishTests
     {
         var w = await World.CreateAsync();
         await StrandAsync(w, "override-release");
-        var recordId = w.Records.NewId;
+        var recordId = Records(w).Single().Id;
         ActAsAdmin(w, World.Operator);
 
         var view = (await w.Service.GetAsync(World.SubmissionId, World.Token, CancellationToken.None))!;
 
         view.StrandedDecision.Should().Be(new BlockedStrandedDecision("Override", recordId, CallerIsDecider: false));
         view.CanFinishAsOperator.Should().BeTrue();
+    }
+
+    [Fact(DisplayName = "iss034a review round 1: GET runs the two record lookups together, and asks the Override privilege once (the hint reuses canOverride's answer)")]
+    public async Task Get_RunsTheLookupsTogether_AndAsksTheOverridePrivilegeOnce()
+    {
+        var w = await World.CreateAsync();
+        await StrandAsync(w, "override-release");
+        var recordId = Records(w).Single().Id;
+        ActAsAdmin(w, World.Operator);
+        // The Override record's lookup completes only once the Return record's lookup has started: run one after the other, it times out
+        // (a fault, so no hint); run together, both complete.
+        var returnStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        w.FindGate = id =>
+        {
+            if (id == SubmissionOverrideService.ReturnDecisionIdFor(World.SubmissionId))
+            {
+                returnStarted.TrySetResult();
+                return Task.CompletedTask;
+            }
+
+            return id == SubmissionOverrideService.OverrideDecisionIdFor(World.SubmissionId)
+                ? returnStarted.Task.WaitAsync(TimeSpan.FromSeconds(5))
+                : Task.CompletedTask;
+        };
+        w.Probe.Calls.Clear();
+
+        var view = (await w.Service.GetAsync(World.SubmissionId, World.Token, CancellationToken.None))!;
+
+        view.StrandedDecision.Should().Be(new BlockedStrandedDecision("Override", recordId, CallerIsDecider: false), "both lookups completed");
+        view.CanFinishAsOperator.Should().BeTrue();
+        view.CanOverride.Should().BeTrue();
+        w.Probe.Calls.Count(c => c.Privilege == EbillingOverridePrivilege.PrivilegeName).Should().Be(1, "the hint reuses canOverride's privilege answer");
     }
 
     [Fact(DisplayName = "iss034a AC5: GET shows a stranded Return to an operator WITHOUT the Override privilege, who may finish it (a Return needs none)")]
@@ -448,12 +670,12 @@ public sealed class SubmissionOverrideOperatorFinishTests
     {
         var w = await World.CreateAsync();
         await StrandAsync(w, "override-release");
-        var recordId = w.Records.NewId;
+        var recordId = Records(w).Single().Id;
         ActAsAdmin(w, who == "decider" ? World.Caller : World.Operator);
         switch (who)
         {
             case "non-admin":
-                w.Probe.Release(SubmissionOverrideService.AdminMarkerPrivilege);
+                ReleaseAdmin(w);
                 break;
             case "no-override-privilege":
                 w.Probe.Release(EbillingOverridePrivilege.PrivilegeName);
@@ -469,7 +691,7 @@ public sealed class SubmissionOverrideOperatorFinishTests
         view.StrandedDecision.Should().Be(new BlockedStrandedDecision("Override", recordId, CallerIsDecider: who == "decider"));
     }
 
-    [Fact(DisplayName = "iss034a AC5: GET gives no stranded hint when nothing is stranded, or when the lookup faults (the view still loads)")]
+    [Fact(DisplayName = "iss034a AC5: GET gives no stranded hint when nothing is stranded, or when a lookup faults (the view still loads)")]
     public async Task Get_NoHint_WhenNothingIsStranded_OrTheLookupFaults()
     {
         var w = await World.CreateAsync();
@@ -480,17 +702,42 @@ public sealed class SubmissionOverrideOperatorFinishTests
         clean.CanOverride.Should().BeTrue("the ordinary hints are unchanged");
 
         await StrandAsync(w, "override-release");
-        w.FindFault = new TimeoutException("dataverse");
+        w.FindFault = LookupFailed();
         var faulted = (await w.Service.GetAsync(World.SubmissionId, World.Token, CancellationToken.None))!;
         faulted.StrandedDecision.Should().BeNull();
         faulted.CanFinishAsOperator.Should().BeFalse();
         faulted.State.Should().Be(BlockedSubmissionStates.Blocked);
+
+        w.FindFault = null;
+        w.FindFaultFor = id => id == SubmissionOverrideService.ReturnDecisionIdFor(World.SubmissionId) ? LookupFailed() : null;
+        var oneFaulted = (await w.Service.GetAsync(World.SubmissionId, World.Token, CancellationToken.None))!;
+        oneFaulted.StrandedDecision.Should().BeNull("a fault in either lookup gives no hint");
+        oneFaulted.CanFinishAsOperator.Should().BeFalse();
     }
 
-    [Fact(DisplayName = "iss034a: the admin marker is BillingAdminAuthorization.Admin()'s one check (no new privilege)")]
+    // ── The admin marker ──
+
+    [Fact(DisplayName = "iss034a: the admin marker is BillingAdminAuthorization.Admin()'s checks (no new privilege)")]
     public void TheAdminMarker_IsTheBillingAdminCheck()
     {
-        SubmissionOverrideService.AdminMarkerPrivilege.Should().Be(BillingAdminAuthorization.WriteRuleSetPrivilege);
+        SubmissionOverrideService.AdminMarkerChecks().Should().BeEquivalentTo(BillingAdminAuthorization.Admin().Checks, o => o.WithStrictOrdering());
+        SubmissionOverrideService.AdminMarkerChecks().Should().OnlyContain(c => c.Path == FinanceCheckPath.Privilege);
+        AdminMarker().Should().Contain(BillingAdminAuthorization.WriteRuleSetPrivilege);
         BlockedSubmissionErrors.OperatorNotPermitted.Should().Be("ebilling.blocked.operator_not_permitted", "the wire code is a contract");
+    }
+
+    [Fact(DisplayName = "iss034a review round 1: the operator gate asks exactly every check of Admin(), as the caller, before anything else")]
+    public async Task TheOperatorGate_AsksExactlyTheAdminChecks()
+    {
+        var w = await World.CreateAsync();
+        await StrandAsync(w, "override-release");
+        ActAsAdmin(w, World.Operator);
+        w.Probe.Calls.Clear();
+
+        // A missing reason is refused right after the gate, before the Override privilege is asked: the calls are the gate's alone.
+        (await Finish(w, reason: " ")).StatusCode.Should().Be(400);
+
+        w.Probe.Calls.Select(c => c.Privilege).Should().Equal(BillingAdminAuthorization.Admin().Checks.Select(c => c.Operation));
+        w.Probe.Calls.Should().OnlyContain(c => c.HasToken, "asked as the caller");
     }
 }
