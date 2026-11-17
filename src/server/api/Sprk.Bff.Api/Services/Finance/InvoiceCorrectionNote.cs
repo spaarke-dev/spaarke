@@ -22,7 +22,7 @@ namespace Sprk.Bff.Api.Services.Finance;
 /// (1) Existing: the reasons of the line decision, adjustment, add-line and assign-firm services share <see cref="InvoiceLineDecisionService.ReasonMaxLength"/>
 /// but each validates its own text. The only writer of <c>sprk_correctionnote</c> is the submission persister (guarded by
 /// <c>InvoiceDecisionNoteWritersGuardTests</c>); the decision note's writers are the lifecycle transition (095f-2a), the override release
-/// transaction (095f-2c), and later the totals path (095f-2b), listed in that same guard.
+/// transaction (095f-2c), and the totals path of an adjustment (095f-2b, <c>InvoiceTotalsService.RecalculateAsync</c>), listed in that same guard.
 /// (2) Extension: the decision routes and the submission route check notes by one rule, and EB-D-240 adds a second column with the same text
 /// rule, so the column names, the rule and the decision routes' shared 400 codes are extended here rather than copied into each service.
 /// (3) Cost of doing nothing: each writer would carry its own length and control-character rule and drift, so the same note would be accepted
