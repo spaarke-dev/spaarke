@@ -363,9 +363,15 @@ internal static class AssignedAccessTestDoubles
             return row;
         }
 
+        /// <summary>ebilling-r1 task 095g: how many access passes began (each reads its root first); a refused request ran none.</summary>
+        public int RootReads => Volatile.Read(ref _rootReads);
+
+        private int _rootReads;
+
         internal override Task<AssignedRootSnapshot?> ReadRootAsync(
             ExternalGrantRootType rootType, Guid rootId, IReadOnlyCollection<string> fields, CancellationToken ct)
         {
+            Interlocked.Increment(ref _rootReads);
             if (FailRootRead)
                 throw new HttpRequestException("Simulated root read failure.");
             if (!Roots.TryGetValue((rootType, rootId), out var values))
@@ -774,6 +780,11 @@ internal static class AssignedAccessTestDoubles
                 _rows.Single(r => r.Id == id).StateCode = 1;
         }
 
+        /// <summary>The grant core's strict root-row read (#2852) answers from the same data as every other read.</summary>
+        public override Task<List<T>> QueryStrictAsync<T>(string entitySetName, string? filter = null, string? select = null,
+            int? top = null, int? skip = null, CancellationToken cancellationToken = default)
+            => QueryAsync<T>(entitySetName, filter, select, top, skip, cancellationToken);
+
         public override Task<List<T>> QueryAsync<T>(string entitySetName, string? filter = null, string? select = null,
             int? top = null, int? skip = null, CancellationToken cancellationToken = default)
         {
@@ -1124,6 +1135,11 @@ internal static class AssignedAccessTestDoubles
                 NullLogger<DataverseWebApiClient>.Instance,
                 NoCredential.Instance)
             => _target = target;
+
+        /// <summary>The grant core's strict root-row read (#2852) answers from the same data as every other read.</summary>
+        public override Task<List<T>> QueryStrictAsync<T>(string entitySetName, string? filter = null, string? select = null,
+            int? top = null, int? skip = null, CancellationToken cancellationToken = default)
+            => _target().QueryStrictAsync<T>(entitySetName, filter, select, top, skip, cancellationToken);
 
         public override Task<List<T>> QueryAsync<T>(string entitySetName, string? filter = null, string? select = null,
             int? top = null, int? skip = null, CancellationToken cancellationToken = default)

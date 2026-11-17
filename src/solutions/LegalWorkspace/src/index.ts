@@ -1,5 +1,5 @@
 /**
- * @spaarke/legal-workspace — barrel export
+ * legal-workspace — barrel export (the `exports` entry of this solution's package.json)
  *
  * Public surface for consumers that need to embed the LegalWorkspace
  * experience inside another shell (e.g. SpaarkeAi's `WorkspaceLayoutWidget`
@@ -7,7 +7,7 @@
  *
  * Round 4 Fix 4 (2026-05-21):
  *   This barrel was added so SpaarkeAi can `import { LegalWorkspaceApp } from
- *   "@spaarke/legal-workspace"` instead of copying 30+ files / ~10K LOC of
+ *   "legal-workspace"` instead of copying 30+ files / ~10K LOC of
  *   section factories + DataverseService + FeedTodoSync context. The operator's
  *   reuse principle taken to its logical conclusion: don't copy factories —
  *   reuse the whole working app as a single widget.
@@ -15,6 +15,10 @@
  * Standalone LegalWorkspace's runtime entry is `main.tsx` → `App.tsx`
  * (NOT this barrel), so adding these exports does NOT change the standalone
  * bundle's behaviour or size (FR-25 / NFR-10).
+ *
+ * SpaarkeAi consumes it as a declared file: dependency ("legal-workspace": "file:../LegalWorkspace").
+ * A shared "legal-workspace" facade package re-exported this file from 2026-07-02 until it was retired on
+ * 2026-11-13 (reuse-governance-tightening-r1 task 032).
  */
 
 export { LegalWorkspaceApp } from "./LegalWorkspaceApp";
@@ -49,7 +53,7 @@ export type { ILegalWorkspaceAppProps } from "./LegalWorkspaceApp";
  *   initialized SpaarkeAi's own singleton.
  *
  *   Option A from the fix plan: SpaarkeAi's bootstrap also calls
- *   `setRuntimeConfig(...)` from `@spaarke/legal-workspace` with the SAME
+ *   `setRuntimeConfig(...)` from `legal-workspace` with the SAME
  *   resolved config so both singletons agree on `bffBaseUrl` / `scope` /
  *   `clientId` / `tenantId`. The two singletons remain distinct in-process
  *   instances — they just hold equivalent values.

@@ -4,7 +4,7 @@
     <title>Superseded invoice's submission view: Accepted with a replaced-by-correction note</title>
     <phase>3 Rules — corrected invoices (split from 097, EB-D-180)</phase>
     <gate>startable after 097d</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Changes the answer of the submission status reads (internal and external) in the BFF, and decides what a caller may be told about another submission; tags include bff-api and auth.</rigor-reason>
     <model-tier>sonnet</model-tier>

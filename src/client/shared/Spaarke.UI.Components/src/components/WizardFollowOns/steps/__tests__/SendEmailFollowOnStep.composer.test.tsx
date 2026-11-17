@@ -381,6 +381,71 @@ describe('sendComposedEmail: the Finish send through the composer request path (
     );
   });
 
+  describe('the next step a failure names follows where the user is (task 183, fix round 1)', () => {
+    const expired = () =>
+      jest.fn().mockResolvedValue({
+        ok: false,
+        status: 401,
+        headers: { get: () => 'application/json' },
+        json: async () => ({ title: 'Unauthorized', status: 401 }),
+      });
+    const unconfirmed = () => jest.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({}) });
+
+    it('an expired sign-in with the composer still open says to select the button that sends again', async () => {
+      const result = await sendComposedEmail(COMPOSED, {
+        associations: association,
+        authenticatedFetch: expired() as unknown as AuthenticatedFetchFn,
+        retryLabel: 'Finish',
+      });
+      expect(result.warning).toBe(
+        'The email was not sent. Your sign-in had expired. Sign in again, then select Finish to send it.'
+      );
+      expect(result.warning).not.toMatch(/from the record/);
+    });
+
+    it('an expired sign-in after the wizard closed, with no record, does not point at a record', async () => {
+      const result = await sendComposedEmail(COMPOSED, {
+        associations: [],
+        authenticatedFetch: expired() as unknown as AuthenticatedFetchFn,
+      });
+      expect(result.warning).toBe(
+        'The email was not sent. Your sign-in had expired. Sign in again, then send the email again.'
+      );
+      expect(result.warning).not.toMatch(/record/);
+    });
+
+    it('an unconfirmed send with no record says to check Sent Items only', async () => {
+      const result = await sendComposedEmail(COMPOSED, {
+        associations: [],
+        authenticatedFetch: unconfirmed() as unknown as AuthenticatedFetchFn,
+      });
+      expect(result.warning).toBe(
+        'The email may have been sent: Spaarke accepted it but did not confirm it. Check your Sent Items before sending it again.'
+      );
+    });
+
+    it('a send that got no response with no record says to check Sent Items only', async () => {
+      const noResponse = jest.fn().mockRejectedValue(new TypeError('Failed to fetch'));
+      const result = await sendComposedEmail(COMPOSED, {
+        associations: [],
+        authenticatedFetch: noResponse as unknown as AuthenticatedFetchFn,
+      });
+      expect(result.warning).toMatch(/^The email may not have been sent/);
+      expect(result.warning).toMatch(/Check your Sent Items before sending it again\./);
+      expect(result.warning).not.toMatch(/record/);
+    });
+
+    it("with a record the unconfirmed warning still names the record's Messages", async () => {
+      const result = await sendComposedEmail(COMPOSED, {
+        associations: association,
+        authenticatedFetch: unconfirmed() as unknown as AuthenticatedFetchFn,
+        retryLabel: 'Send',
+      });
+      expect(result.warning).toMatch(/so it may not appear on the record/);
+      expect(result.warning).toMatch(/Sent Items or the record's Messages/);
+    });
+  });
+
   it('refuses, with a warning, an attachment that never uploaded (never sent without it)', async () => {
     const fetch = okFetch();
     const result = await sendComposedEmail(

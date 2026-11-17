@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="013" project="spaarke-SPA-external-access-platform-r4">
+  <metadata>
+    <title>Record template: collapsible sections remembered per user; invoice and document rows open their record in a child modal over the record (owner retest 2026-11-14)</title>
+    <phase>1 Record template and actions (post-E2E rework, round 2)</phase>
+    <gate>none (SPA only)</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>.tsx in the SPA; nested modal focus</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Reuses the existing child-SprkModal pattern (SubmitInvoiceAction) and RecordTemplateModal; a small storage helper</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches recordTemplates.ts / RecordSectionCard after 012</parallel-reason>
+    <deps>012</deps>
+    <tags>frontend, react, fluent-ui</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Owner, 2026-11-14 retest: (a) "for Invoices I don't see how to open the invoice record (should open on top of this modal with invoice modal)"; (b) documents have no open action from the record; (c) "these forms the sections should expand/collapse; and save settings after close for the user".</prompt>
+  <goal>Every record-template section header can collapse and expand; the state is remembered per signed-in user, record type and section, and restored the next time any record of that type opens. In the Invoices section and the Documents section, activating a row opens that invoice / document in a RecordTemplateModal hosted in a child SprkModal over the current record; closing it returns to the record unchanged.</goal>
+
+  <context>
+    <background>Code map 2026-11-14: `RecordSectionCard.tsx:54-67` is a static section with `HeaderToolbar` (no collapse anywhere in the shared HeaderToolbar). `InvoicesSection.tsx:99-102` rows are plain `&lt;li&gt;` with no handler. Document names are plain Text (`DocumentLibrary.tsx:967-977`). Child modal pattern: `SubmitInvoiceAction.tsx:141-229` (`useChildDialog`, SprkModal `size="lg" dismiss="explicit"`, rendered as a React descendant of the record modal). `useOpenRecord()` (`RecordOpener.tsx:39-83`) REPLACES the open record — not what the owner wants here. Templates exist for `sprk_invoice` (`recordTemplates.ts:86`) and `sprk_document` (`:117`). Storage today: theme in localStorage (`App.tsx:196`); no preferences service. FR-19 (task 032) persists grid settings per browser, so per-browser localStorage keyed by user is consistent.</background>
+  </context>
+
+  <constraints>
+    <constraint source="FR-03 / ADR-050 / MODAL-DECISION-CRITERIA">The child record is a SprkModal child of the record modal (same chrome family); focus moves into it, Escape/Close returns focus to the activating row; test it. One child level only: inside a child record, rows do not open a further modal (they follow today's behaviour).</constraint>
+    <constraint source="FR-06/07">The child record uses its own record's access and actions exactly as when opened from a grid; nothing is inherited from the parent.</constraint>
+    <constraint source="FR-15 / task 023">A document row with `hasFile === false` still opens its record (Information only); no Download is offered there.</constraint>
+    <constraint source="storage rule">localStorage wrapped in try/catch; the page renders with all sections expanded when storage throws or is empty. Key = a stable per-user value from /me (never the email/UPN in clear text; hash it) + record entity + section id. No PII in the stored value.</constraint>
+    <constraint source="a11y / ADR-021">The collapse control is a button with `aria-expanded` and `aria-controls`; keyboard operable; header section actions stay usable when collapsed (or hide with the body — pick one, test it, note it).</constraint>
+    <constraint source="ADR-012">RecordSectionCard is SPA-local; do not add collapse to the shared HeaderToolbar in this task.</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step order="1">Storage helper (`recordSectionState.ts`): read/write collapsed ids per user+entity, try/catch, tests.</step>
+    <step order="2">RecordSectionCard: chevron toggle, `aria-expanded`, body hidden when collapsed; RecordTemplateModal passes entity + section id + user key.</step>
+    <step order="3">Child record host (`ChildRecordModal` using the SubmitInvoiceAction pattern); InvoicesSection rows and DocumentLibrary names (record-template use only) become buttons that open it; refresh the parent section on close.</step>
+    <step order="4">Tests: collapse persists across remount; storage throwing → all expanded; per-user isolation; invoice row opens the invoice record over the matter and Close returns focus; document row likewise; no third level.</step>
+    <step order="5">typecheck, lint, vitest; TASK-INDEX, POML status, drift check, notes.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">Collapsing "Documents" on one matter, closing, and opening another matter shows Documents collapsed; another signed-in user on the same browser sees it expanded.</criterion>
+    <criterion testable="true">With localStorage throwing, every section renders expanded and no error surfaces.</criterion>
+    <criterion testable="true">Clicking an invoice row in a matter's Invoices section opens the invoice record over the matter (the matter modal stays mounted); Close returns to the matter with focus on that row.</criterion>
+    <criterion testable="true">Clicking a document name in the record's Documents section opens that document's record the same way.</criterion>
+  </acceptance-criteria>
+
+  <notes>Collapsible record sections with per-user localStorage state (hashed contact/systemuser id, try/catch, no PII); invoice rows and record-template document names open the record in a nested child RecordTemplateModal over the record (one level, focus returns to the row; invoices refresh on close, documents do not). Adversarial review: two F1 (low) fixed (document refresh lost the sort; invoice aria-label hid the meta) plus nav and Esc test. Detail: notes/task-013-notes.md.
+rework: fix-round-1 task 013</notes>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

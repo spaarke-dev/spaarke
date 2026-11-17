@@ -1,20 +1,23 @@
 /**
- * Tasks & events — the record's tasks and events (R3 task 057 `EventsAndTasksSection`, moved from R3's record-detail modal; task 005).
+ * Events — the record's events (R3 task 057 `EventsAndTasksSection`, moved from R3's record-detail modal; task 005). The
+ * section id stays `tasksEvents`; its title is "Events" since task 012.
  *
  * The existing `EventsCalendar` on the record's own route (GET /api/v1/external/{projects|matters|workassignments}/{id}/
  * events; the server applies the record's rights and the every-root rule, the client filters nothing). An event the caller
  * created shows Delete (task 054). A 403 shows the shared denied state and a failed read a retryable error, inside the
  * section only. Refresh (or Try again) remounts the list, which re-reads.
  *
- * Owner 2026-11-12 (task 009): external users work only with `sprk_event`; a Task is an event of type Task (task 011). The
- * list shows one read in two groups: Tasks (the events the BFF flags `isTask`) and Events (the rest).
+ * Owner 2026-11-14 (task 012): "we only want Events (which allow for an event type of 'Task')". External users work only
+ * with `sprk_event`; the list is ONE date-ordered list, and every event shows the name of its type (task 015).
  *
- * ADD TASK / ADD EVENT (task 004, FR-03; tasks 009, 011). The list offers its actions through `offerAction('addTask')` and
- * `offerAction('addEvent')`, the template hands them back as `headerActions` (the buttons in this card's header), and the
- * list renders both create dialogs (a `FormModal` each) inside this section, so a dialog is a descendant of the record
- * modal. A create in flight holds the modal: the list reports busy while EITHER dialog is posting, so one going idle never
- * releases the other's hold. Add task is shown only when the list's `canCreateTask` is true; Add event follows
- * `canCreate`. Add task sends `eventType: "task"`; Add event sends no type.
+ * ADD EVENT (task 004, FR-03; tasks 009, 012, 015). The list offers its one action through `offerAction('addEvent')`, the
+ * template hands it back as `headerActions` (the button in this card's header), and the list renders the one create dialog
+ * (a `FormModal`) inside this section, so the dialog is a descendant of the record modal. The dialog's Event Type choice is
+ * exactly the list's `creatableEventTypes`; Add event is offered only when the list's `canCreate` is true and at least one
+ * type is creatable. A create in flight holds the modal: the list reports busy while it posts.
+ *
+ * OPENING A ROW (task 015). The list gets this record's title (`recordTitle`), which names the Regarding value of an event
+ * opened from a row; the title of an event is a button that opens it as a child record.
  *
  * WHO MAY ADD (task 006, FR-06 / FR-07). No level is assumed: the list follows `createRightOf` (recordAccess.ts) - its
  * `canCreate` (task 002: every caller, every root), and for a project caller without `writeAccessPerRecord` the `/me`
@@ -38,6 +41,7 @@ const EVENTS_ROOTS: Readonly<Record<string, EventsRoot>> = {
 export const TasksEventsSection: React.FC<RecordSectionContext> = ({
   detail,
   recordId,
+  title,
   callerContext,
   caller,
   refreshSignal,
@@ -61,11 +65,11 @@ export const TasksEventsSection: React.FC<RecordSectionContext> = ({
         <EventsCalendar
           projectId={recordId}
           root={root}
+          recordTitle={title}
           accessLevel={level}
           writeAccessPerRecord={writeAccessPerRecord}
           caller={caller}
           onCreateActionChange={offerAction('addEvent')}
-          onCreateTaskActionChange={offerAction('addTask')}
           onBusyChange={onBusyChange}
         />
       </div>

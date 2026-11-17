@@ -4,7 +4,7 @@
     <title>Procedures and rules in force on the record (Part A): the two caller-read routes of model 6.6</title>
     <phase>3 Rules (WP3) — Procedure model (EB-D-148), wave W3-E</phase>
     <gate>startable: 081, 089 and 082 are merged (on master since #2689). The UI is now 084a–084d (EB-D-217).</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>New BFF routes exposing internal-only Procedure and override content (step 0, caller reads).</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -29,7 +29,7 @@
       <file role="new">src/server/api/Sprk.Bff.Api/Services/Finance/Procedures/RecordProcedureReadService.cs</file>
       <file role="new">src/server/api/Sprk.Bff.Api/Api/Finance/RecordProcedureEndpoints.cs</file>
       <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/DI/FinanceModule.cs, EndpointMappingExtensions.cs (shared append points); tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.Ledger.cs</file>
-      <file role="new">tests/unit/Sprk.Bff.Api.Tests/Services/Finance/Procedures/RecordProcedureReadServiceTests.cs; tests/unit/Sprk.Bff.Api.Tests/Api/Finance/RecordProcedureEndpointsTests.cs</file>
+      <file role="new">tests/integration/contract/Api/Finance/RecordProcedureEndpointsContractTests.cs, RecordProcedureReadModelContractTests.cs, RecordProcedureRig.cs (contract tests, KEEP per ADR-038; compiled into the Sprk.Bff.Api.Tests project)</file>
       <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Api/Finance/ProcedureAssignmentEndpoints.cs (per-core-record routes, step-0 flag, Record path, uniform 404)</file>
       <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Signals/Billing/ProcedureResolver.cs (ReadAsync, line ~885)</file>
     </relevant-files>
@@ -37,9 +37,9 @@
 
   <constraints>
     <constraint source="model 6.6, 5.3 (uac-r2 C5)">Both routes carry 099's step-0 flag. The core record type is fixed per route from the core-record list (matter, project, work assignment), the id comes from the route, and the caller's Read on it is checked through the Record path with FinanceDenial.UniformNotFound (unknown and unreadable answer the same 404).</constraint>
-    <constraint source="model 6.6 (read as the caller)">The resolver's row reads run with the caller's identity, not app-only. If any row the lists need is refused to the caller or the read faults, the route answers 503 ProblemDetails procedures.unavailable and shows no partial list; it never fills the gap app-only.</constraint>
+    <constraint source="model 6.6 (read as the caller), EB-D-218 (owner 2026-11-12, option A; uac-r2 conditions)">The resolver reads its rows ONCE, app-only (the existing IGenericEntityService; no new caller-identity entity service, no SDK impersonation). Then ONE batched caller-rights check (CallerRecordAccessProbe, gate variant) covers EVERY row the answer exposes: the chain records, Procedures, Procedure Versions, rule sets, policies and override rows. If any of them is not readable by the caller, or the check faults or cannot establish the caller, the route answers 503 ProblemDetails procedures.unavailable and shows no partial list. Step 0 uses the stored external flag (never the #EXT# domain, never the business unit). Known limit, written in the notes: these routes are internal-only; opening them to external callers requires the 191 external-visibility predicate first.</constraint>
     <constraint source="model 6.6, 3.2">Procedures list: firm = the query's firmId, else the record's sprk_billingfirm, else none (then only Procedures with no Firm). Per Procedure: name, type, every matching source with the winning one marked (All records, Firm, Manual d0, Manual d1 with the parent), the version in force on the date (number and dates) or "no version in force" / "not yet in force", the overrides on the chain (mode, pinned version and the newer version it skips, reason, who, when, distance), excluded rows included with their mode, and blocking gaps as a separate gaps array (questions a–d).</constraint>
-    <constraint source="model 6.6, 6.3">Rules in force: for the query's date (default today) and firm, every rule with its source Procedure Version, level and distance, firm scope, and one marks array (displaced with the displacing rule, excluded with reason and optional firm, changed with the record rule id and based-on version, stale, base retired). Marks are computed at read time; nothing is written (question f).</constraint>
+    <constraint source="model 6.6, 6.3">Rules in force: for the query's date (default today) and firm, every rule with its source Procedure Version, level and distance, firm scope, and one marks array (excluded with reason and optional firm, changed with the record rule id and based-on version, stale, base retired). Marks are computed at read time; nothing is written (question f). The "displaced/outranked" mark is NOT in 084 (EB-D-219): it is task 084e; keep the marks array open to a fifth kind.</constraint>
     <constraint source="ADR-001, ADR-008, ADR-019, .claude/constraints/bff-extensions.md">Own endpoints file; ProblemDetails with stable codes; ledger GovernedFile entry with each route's basis; no new package; publish-size delta recorded.</constraint>
     <constraint source="project">No change to ProcedureResolver.cs in this task. If the lists need one, STOP (escalation below): it is ontology-r1-reviewed code.</constraint>
   </constraints>
@@ -64,7 +64,7 @@
   </knowledge>
 
   <steps mode="directional">
-    <step order="1">RecordProcedureReadService over ProcedureResolver with a caller-identity row source; the two routes per core record; ledger entry.</step>
+    <step order="1">RecordProcedureReadService over ProcedureResolver: one app-only read, then one batched caller-rights check over every exposed row (EB-D-218); the two routes per core record; ledger entry.</step>
     <step order="2">Tests (criteria); dotnet build and test; publish-size delta.</step>
     <step order="3">Answer questions a–g in notes/084-procedure-review-ui.md (DTO notes) and correct spaarke-prototype's types.ts assumptions there, for 084a.</step>
     <step order="4">Update TASK-INDEX.md: this task's status cell to "✅ [done]".</step>
@@ -77,8 +77,8 @@
   </escalation>
 
   <justification>
-    <existing>No route lists a record's Procedures or rules in force; RuleSetEndpoints lists rule sets for billing admins without a record; ProcedureResolver (082) computes the same sources for evaluation.</existing>
-    <extension>The read service is a thin caller-identity wrapper over 082's resolver (no second selection); a new endpoints file because the routes are reads keyed by core record, while 089's file holds the override writes.</extension>
+    <existing>No route lists a record's Procedures or rules in force (git grep -nE '/procedures"|rules-in-force' afe78f9d01 -- src/server/api/Sprk.Bff.Api/Api: no matches); RuleSetEndpoints.cs lists rule sets for billing admins without a record; ProcedureResolver.ReadAsync (Services/Signals/Billing/ProcedureResolver.cs, 082) computes the same sources for evaluation; CallerRecordAccessProbe.GetCallerRightsForRecordsOrUnknownAsync (Infrastructure/ExternalAccess/CallerRecordAccessProbe.cs:431) is the existing batched caller-rights check.</existing>
+    <extension>The read service is a thin wrapper over 082's resolver (no second selection) that reads app-only and then gates the whole answer on one caller-rights check (EB-D-218); a new endpoints file because the routes are reads keyed by core record, while 089's ProcedureAssignmentEndpoints.cs holds the override writes.</extension>
     <cost-of-doing-nothing>O-3 and O-9 fail: the rules that apply to a record are not visible or reviewable, so an override cannot be checked before an invoice is judged, and 084a–084d have nothing to render.</cost-of-doing-nothing>
   </justification>
 
@@ -95,8 +95,8 @@
   <acceptance-criteria>
     <criterion testable="true">Both routes refuse a flagged-external caller, no systemuser row and a flag-read fault (negative); a caller without Read on the record gets a 404 byte-identical to a non-existent record.</criterion>
     <criterion testable="true">Procedures list: with sprk_billingfirm = F it lists F's Procedures, all-records Procedures and manual ones on the chain, each with its sources and the date's version; with firmId = G it lists G's instead of F's; a Procedure naming firm F assigned manually is absent for firm G (firm condition); an Exclude on the record returns the row with mode Excluded; two d1 parents with different pins appear in the gaps array.</criterion>
-    <criterion testable="true">Rules in force: the list equals 082's resolver output for the same record, date and firm (one shared resolution, asserted by a test), with displaced, excluded, changed, stale and base-retired marks each covered by one test.</criterion>
-    <criterion testable="true">A row read refused to the caller, or a faulted read, returns 503 procedures.unavailable with no list (negative: never a partial list, never an app-only read).</criterion>
+    <criterion testable="true">Rules in force: the list equals 082's resolver output for the same record, date and firm (one shared resolution, asserted by a test), with excluded, changed, stale and base-retired marks each covered by one test.</criterion>
+    <criterion testable="true">An exposed row the caller cannot Read (a chain parent, a Procedure, a rule, an override row), a faulted rights check, or a faulted row read returns 503 procedures.unavailable with no list (negative: never a partial list); a flagged-external system user is refused by step 0 (must-fire).</criterion>
     <criterion testable="true">Nothing is written by either route (no Dataverse create or update in the tests).</criterion>
     <criterion testable="true">Ledger entry added; publish-size delta recorded; no package; no new HIGH CVE.</criterion>
     <criterion testable="true">Cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>

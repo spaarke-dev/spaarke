@@ -223,6 +223,8 @@ function Invoke-Dv {
         "OData-Version"    = "4.0"
         "Accept"           = "application/json"
         "Content-Type"     = "application/json; charset=utf-8"
+        # #2833: strongly consistent reads - attribute metadata (IsSecured) is cached per server; a plain read can be stale.
+        "Consistency"     = "Strong"
     }
     foreach ($k in $ExtraHeaders.Keys) { $headers[$k] = $ExtraHeaders[$k] }
     $params = @{ Uri = "$BaseUrl/api/data/v9.2/$Endpoint"; Method = $Method; Headers = $headers }
@@ -293,7 +295,7 @@ function Read-State {
     $recordHow = $null
     $choiceIn = $null
     if ($found) {
-        $dvHeaders = @{ Authorization = "Bearer $Token"; Accept = 'application/json'; 'OData-MaxVersion' = '4.0'; 'OData-Version' = '4.0' }
+        $dvHeaders = @{ Authorization = "Bearer $Token"; Accept = 'application/json'; 'OData-MaxVersion' = '4.0'; 'OData-Version' = '4.0'; Consistency = 'Strong' }
         $membership = Get-DvSolutionMembership -Api "$BaseUrl/api/data/v9.2" -Headers $dvHeaders -SolutionId $sol.value[0].solutionid
         $componentId = if ($null -ne $col -and $col.MetadataId) { $col.MetadataId } else { [guid]::Empty }
         $how = Test-DvInSolution -Membership $membership -ComponentId $componentId -TableMetadataId $entity.MetadataId

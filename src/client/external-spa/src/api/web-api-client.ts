@@ -13,8 +13,12 @@
  *   GET   /api/v1/external/projects/{id}/contacts             → project contacts
  *   GET   /api/v1/external/projects/{id}/organizations        → project organizations
  *   POST  /api/v1/external/projects/{id}/events               → create event
+ *   GET   /api/v1/external/events/{id}                        → one event (R4 task 015; the `?record=event:{id}` deep link)
+ *   PATCH /api/v1/external/events/{id}                        → edit / change status / reassign (R4 task 015; 204)
+ *   GET   /api/v1/external/{projects|matters|workassignments}/{id}/assignable-people → who an event may be assigned to
  *   GET   /api/v1/external/{projects|matters|workassignments|servicerequests}/{id}/documents
  *                                                              → a record's documents (task 031; service requests ONLY here)
+ *   GET   /api/v1/external/invoices/{id}/files[/{fileId}/content] → an invoice's files, list and download only (R4 task 021)
  *   DELETE /api/v1/external/documents/{id}                    → delete own document (task 032 / 054)
  *   DELETE /api/v1/external/events/{id}                       → delete own event (task 032 / 054)
  *   POST  /api/v1/external/{matters|projects|workassignments}/{id}/invoice-submissions → submit an invoice PDF (ebilling-r1 051)
@@ -25,7 +29,7 @@
  * See: docs/architecture/external-access-architecture.md
  */
 
-import { bffApiCall, getExternalUserContext } from '../auth/bff-client';
+import { bffApiBlob, bffApiCall, getExternalUserContext } from '../auth/bff-client';
 import { ApiError } from '../types';
 import { gridDataverseClient } from '../services/gridDataverseClient';
 import { InvoiceSubmissionError, isEbillingDisabledError } from '@spaarke/ui-components/components/InvoiceSubmission';
@@ -133,9 +137,58 @@ export interface ODataEvent extends CreatorStamps {
   _sprk_regardingproject_value?: string | null;
   /**
    * `true` when the event is of the Task type (R4 task 008): the BFF reads the type server-side and sends only this
-   * boolean. The record's Tasks list shows these; every other event is an Event. Absent (an older BFF) is "not a task".
+   * boolean. The Events list marks these with a Task badge; every other event is a plain event. Absent (an older BFF) is "not a task".
    */
   isTask?: boolean;
+  // R4 task 014b/c, 015 (FR-35 / FR-36): the event's own fields and the rights the BFF decided for THIS caller. Names are the
+  // Dataverse FormattedValues of the lookups; the SPA never receives a contact id except from `assignable-people`.
+  /** The event type's row id (a type row, never a person); null when the event has no type. */
+  eventTypeId?: string | null;
+  /** The event type's name; null when the event has no type (shown as "—"). */
+  eventTypeName?: string | null;
+  /** Plain text, up to 2,000 characters. */
+  sprk_description?: string | null;
+  /** Low 100000000, Normal 100000001, High 100000002, Urgent 100000003 (`events/eventFields.ts`). */
+  sprk_priority?: number | null;
+  /** The assignee's name; never the assignee's id or email. */
+  assignedToName?: string | null;
+  /** The creator's name. */
+  createdByName?: string | null;
+  /** `PATCH /events/{id}` would admit an edit by this caller (the same check). Absent = not said = hidden. */
+  canEdit?: boolean;
+  /** `PATCH /events/{id}` would admit a status change by this caller. Absent = not said = hidden. */
+  canChangeStatus?: boolean;
+  /** The statuscodes a status change may set (every status but the current one), when `canChangeStatus`. */
+  allowedStatuses?: number[];
+  /** The PATCH would admit a reassign (`assignedToContactId`): `canEdit`, open work, and a role that reads contacts. */
+  canReassign?: boolean;
+}
+
+/** The record an event is regarding, as `GET /events/{id}` names it. */
+export interface ODataEventRegarding {
+  kind: 'project' | 'matter' | 'workassignment';
+  id: string;
+  name?: string | null;
+}
+
+/** `GET /events/{id}`: the list row's fields plus the regarding record. */
+export interface ODataEventDetail extends ODataEvent {
+  regarding?: ODataEventRegarding | null;
+}
+
+/** One event type the caller may pick on create (`creatableEventTypes` of the events list). */
+export interface CreatableEventType {
+  id: string;
+  name: string;
+  /** An event of this type needs a due date. */
+  requiresDueDate: boolean;
+}
+
+/** One person an event may be assigned to (`GET …/assignable-people`). The only place a contact id reaches the SPA. */
+export interface AssignablePerson {
+  contactId: string;
+  name: string;
+  isMe: boolean;
 }
 
 /**
@@ -207,10 +260,10 @@ interface ODataCollectionResponse<T> {
    */
   canCreate?: boolean;
   /**
-   * The event lists only (R4 task 008): whether the caller may create a Task-typed event here (`canCreate` and the Task
-   * type's own right). Omitted on every other list, and by a BFF that predates it: absent is "not said", never "can".
+   * The event lists only (R4 task 014b): every event type the caller may pick on create. An empty array means "none": the
+   * SPA offers no Add event (014 K3). Omitted by a BFF that predates it: absent is "not said", never "any".
    */
-  canCreateTask?: boolean;
+  creatableEventTypes?: unknown;
 }
 
 /**
@@ -224,8 +277,23 @@ export interface ListResult<T> {
   truncated: boolean;
   /** The BFF's `canCreate` for the record the list is scoped to, when it wrote one (task 036 fix round 1); else absent. */
   canCreate?: boolean | null;
-  /** The event lists' `canCreateTask` (task 008), when the BFF wrote one; else absent (hide "Add task"). */
-  canCreateTask?: boolean | null;
+  /**
+   * The event lists' `creatableEventTypes` (task 014b), only when the BFF sent an array (an empty one included: "no type may
+   * be picked"); else absent.
+   */
+  creatableEventTypes?: CreatableEventType[];
+}
+
+/** The well-formed entries of a `creatableEventTypes` array (an entry with no id or name is dropped, never guessed). */
+function creatableEventTypesOf(raw: unknown[]): CreatableEventType[] {
+  const types: CreatableEventType[] = [];
+  for (const entry of raw) {
+    if (!entry || typeof entry !== 'object') continue;
+    const { id, name, requiresDueDate } = entry as Record<string, unknown>;
+    if (typeof id !== 'string' || !id || typeof name !== 'string' || !name.trim()) continue;
+    types.push({ id, name, requiresDueDate: requiresDueDate === true });
+  }
+  return types;
 }
 
 // ---------------------------------------------------------------------------
@@ -310,7 +378,9 @@ async function getCollection<T>(bffPath: string, _options: ODataQueryOptions = {
     truncated: response.truncated === true,
     // Only when the BFF said (task 036 fix round 1): a missing member stays absent, never read as "cannot".
     ...(typeof response.canCreate === 'boolean' ? { canCreate: response.canCreate } : {}),
-    ...(typeof response.canCreateTask === 'boolean' ? { canCreateTask: response.canCreateTask } : {}),
+    ...(Array.isArray(response.creatableEventTypes)
+      ? { creatableEventTypes: creatableEventTypesOf(response.creatableEventTypes) }
+      : {}),
   };
 }
 
@@ -414,11 +484,10 @@ export async function getDocuments(
 /**
  * The record types whose documents the external plane serves (task 031): the `{root}` segment of
  * `/api/v1/external/{root}/{id}/documents`. A service request's documents are reachable ONLY through the
- * `servicerequests` route (the documents module's scope dimensions lack its lookup), never the module fetch. An invoice's
- * documents use the `invoices` route (owner decision 2026-10-11, option A: rights inherited from the invoice's matter and
- * project, the union of both; task 031 notes).
+ * `servicerequests` route (the documents module's scope dimensions lack its lookup), never the module fetch. An invoice has
+ * NO document root: its files are ebilling's read-only `/invoices/{id}/files` routes (`getInvoiceFiles` below; R4 task 021).
  */
-export type DocumentRoot = 'projects' | 'matters' | 'workassignments' | 'servicerequests' | 'invoices';
+export type DocumentRoot = 'projects' | 'matters' | 'workassignments' | 'servicerequests';
 
 /** `/api/v1/external/{root}/{id}/documents`: list (GET) and upload (POST). */
 export function documentsPath(root: DocumentRoot, recordId: string): string {
@@ -441,7 +510,7 @@ export interface DocumentListResult extends ListResult<ODataDocument> {
 }
 
 /**
- * The documents of a project, matter, work assignment, service request or invoice (task 031 routes), and the BFF's `canCreate`:
+ * The documents of a project, matter, work assignment or service request (task 031 routes), and the BFF's `canCreate`:
  * whether the caller holds Create on the record (so a ViewOnly reader is not offered an upload that can only fail).
  */
 export async function getRecordDocuments(root: DocumentRoot, recordId: string): Promise<DocumentListResult> {
@@ -451,6 +520,99 @@ export async function getRecordDocuments(root: DocumentRoot, recordId: string): 
     truncated: response.truncated === true,
     canCreate: typeof response.canCreate === 'boolean' ? response.canCreate : null,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Invoice files (R4 task 021, FR-13): ebilling-r1 task 093's read-only firm routes
+// ---------------------------------------------------------------------------
+//
+// Contract read at the ebilling PR #2839 head (ref pr/2839):
+//   ExternalInvoiceSubmissionEndpoints.cs:106 GET /api/v1/external/invoices/{id}/files          -> 200 { value: ExternalInvoiceFileItem[] }
+//   ExternalInvoiceSubmissionEndpoints.cs:122 GET /api/v1/external/invoices/{id}/files/{fileId}/content -> the bytes (no Content-Disposition name)
+//   StoredFileContracts.cs:628 `ExternalInvoiceFileItem` (Id, FileName, ContentType?, SizeBytes?, CreatedOn?, ScanStatus)
+// Content for a Checking file answers 409 `errorCode: file_scan_pending` (StoredFileEndpoints.cs:479). A file the caller may not
+// see (an invisible invoice, an unknown or out-of-set file, a Malicious one) is one uniform 404; a fault or the eBilling kill
+// switch is 503 (`file_store_unavailable`, `ebilling.disabled`); the workforce role ceiling is 403. There is no upload route
+// and no versions route: the SPA offers list and download only.
+
+/** `scanStatus`: Clean and NotScanned are served; Checking has no malware verdict yet (its content answers 409). */
+export type InvoiceFileScanStatus = 'Clean' | 'Checking' | 'NotScanned';
+
+/** One row of `GET /api/v1/external/invoices/{id}/files`. `contentType`, `sizeBytes` and `createdOn` (UTC ISO) may be null. */
+export interface InvoiceFileItem {
+  id: string;
+  fileName: string;
+  contentType: string | null;
+  sizeBytes: number | null;
+  createdOn: string | null;
+  /** Typed as the contract's values; the reader treats any other string as not served (never offers Download for it). */
+  scanStatus: InvoiceFileScanStatus;
+}
+
+/** The `errorCode` of the content route's 409 while a file's malware scan has no verdict. */
+export const FILE_SCAN_PENDING_ERROR_CODE = 'file_scan_pending';
+
+/** `/api/v1/external/invoices/{id}/files`: the invoice's firm-visible files (list). */
+export function invoiceFilesPath(invoiceId: string): string {
+  return `/api/v1/external/invoices/${encodeURIComponent(invoiceId)}/files`;
+}
+
+/** The content (download) route of one invoice file. */
+export function invoiceFileContentPath(invoiceId: string, fileId: string): string {
+  return `${invoiceFilesPath(invoiceId)}/${encodeURIComponent(fileId)}/content`;
+}
+
+/** The invoice's files, as the BFF lists them (a Malicious file is omitted by the server). */
+export async function getInvoiceFiles(invoiceId: string): Promise<InvoiceFileItem[]> {
+  const response = await bffApiCall<{ value?: InvoiceFileItem[] }>(invoiceFilesPath(invoiceId));
+  return response.value ?? [];
+}
+
+/** The bytes of one invoice file, through the authenticated blob read (no signed URL, no Graph, no SPE pointer). */
+export async function getInvoiceFileContent(invoiceId: string, fileId: string): Promise<Blob> {
+  return bffApiBlob(invoiceFileContentPath(invoiceId, fileId));
+}
+
+/** Whether a failed content read is the 409 `file_scan_pending` (the file is still being checked). */
+export function isFileScanPendingError(err: unknown): boolean {
+  if (!(err instanceof ApiError) || err.statusCode !== 409) return false;
+  try {
+    return (JSON.parse(err.message) as { errorCode?: unknown }).errorCode === FILE_SCAN_PENDING_ERROR_CODE;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Whether a failed files read is the eBilling kill switch (503 `ebilling.disabled`; both files routes sit behind it). It
+ * reuses the shared detector, which answers true for that code only: an outage 503 (`file_store_unavailable`) is not it.
+ */
+export function isInvoiceFilesDisabledError(err: unknown): boolean {
+  return isEbillingDisabledError(toInvoiceSubmissionError(err));
+}
+
+/** The name an invoice file is shown under when the BFF sends none (it sends `Name ?? ""`). */
+export const INVOICE_FILE_FALLBACK_NAME = 'Invoice file';
+
+/** The name shown for a file: its `fileName`, else {@link INVOICE_FILE_FALLBACK_NAME}. */
+export function invoiceFileDisplayName(file: Pick<InvoiceFileItem, 'fileName'>): string {
+  return file.fileName.trim() ? file.fileName : INVOICE_FILE_FALLBACK_NAME;
+}
+
+const FILE_EXTENSIONS: Readonly<Record<string, string>> = {
+  'application/pdf': 'pdf',
+  'image/png': 'png',
+  'image/jpeg': 'jpg',
+  'image/gif': 'gif',
+  'image/webp': 'webp',
+};
+
+/** The name a file is saved under: its `fileName`, else "invoice-file" plus an extension from its `contentType` (pdf for application/pdf). */
+export function invoiceFileSaveName(file: Pick<InvoiceFileItem, 'fileName' | 'contentType'>): string {
+  if (file.fileName.trim()) return file.fileName;
+  const type = (file.contentType ?? '').split(';')[0].trim().toLowerCase();
+  const extension = FILE_EXTENSIONS[type];
+  return extension ? `invoice-file.${extension}` : 'invoice-file';
 }
 
 // ---------------------------------------------------------------------------
@@ -505,6 +667,26 @@ export async function getRootEvents(
  */
 export async function getEvents(projectId: string, options: ODataQueryOptions = {}): Promise<ListResult<ODataEvent>> {
   return getRootEvents('projects', projectId, options);
+}
+
+/**
+ * `GET /api/v1/external/events/{id}` (R4 task 014b, owner Q-7): one event with the rights the BFF decided for this caller and
+ * the record it is regarding. Not readable and not found answer the same 404 (`ApiError`). The deep link `?record=event:{id}`
+ * reads through this; a row opened from a list does NOT (a multi-parent event can be in a readable list and 404 here).
+ */
+export async function getEvent(eventId: string): Promise<ODataEventDetail> {
+  return bffApiCall<ODataEventDetail>(`/api/v1/external/events/${encodeURIComponent(eventId)}`);
+}
+
+/**
+ * `GET /api/v1/external/{root}/{id}/assignable-people` (R4 task 014b): the people an event on this record may be assigned to,
+ * "Me" flagged. 403 when the caller may neither create nor edit an event there; 503 when unknown (`ApiError`).
+ */
+export async function getAssignablePeople(root: EventsRoot, recordId: string): Promise<AssignablePerson[]> {
+  const response = await bffApiCall<{ value?: AssignablePerson[] }>(
+    `/api/v1/external/${root}/${encodeURIComponent(recordId)}/assignable-people`
+  );
+  return (response.value ?? []).filter(p => typeof p.contactId === 'string' && p.contactId && !!p.name);
 }
 
 // ---------------------------------------------------------------------------
@@ -595,10 +777,16 @@ export interface CreateEventPayload {
   /** Optional status — Draft (1) or Open (659490001) only, written to `statuscode`; omit it to create the event Open (task 097 review F9). */
   sprk_status?: number;
   /**
-   * The event's type, from the BFF's closed set: only `"task"` (R4 task 008). Omit it for an untyped event (Add event); any
-   * other value is refused with 400. Sent by "Add task" only.
+   * The event's type: REQUIRED, one of the list's `creatableEventTypes` ids (R4 task 014b / 015, owner Q-2). The legacy
+   * `eventType: "task"` is no longer sent.
    */
-  eventType?: 'task';
+  eventTypeId: string;
+  /** Low 100000000, Normal 100000001, High 100000002, Urgent 100000003 (`events/eventFields.ts`). */
+  sprk_priority?: number;
+  /** Plain text, up to 2,000 characters. */
+  sprk_description?: string;
+  /** A contact id from `getAssignablePeople` for this record; anyone else is refused (400). */
+  assignedToContactId?: string;
   /**
    * OData binding to associate the event with a project. The navigation property is the
    * PascalCase SchemaName sprk_RegardingProject (metadata-verified, R5 task 002 — sprk_event
@@ -612,15 +800,17 @@ export interface CreateEventPayload {
  * Create an Event regarding a project, matter or work assignment: `POST /api/v1/external/{root}/{id}/events`
  * (spaarke-SPA-external-access-platform-r4 task 006, FR-06; the matter and work-assignment routes are task 002's).
  *
- * The server takes the parent from the ROUTE only (`CreateExternalEventRequest` has `sprk_name`, `sprk_duedate`,
- * `sprk_status` and, since task 008, the optional `eventType` ("task" only), and no regarding member), so a matter or
- * work-assignment event sends the payload as given. "Add task" sends `eventType: "task"`; "Add event" sends none. The project
- * route keeps the body it has always been sent, the project bind included (the server skips that member), byte for byte.
+ * The server takes the parent from the ROUTE only (`CreateExternalEventRequest` has no regarding member), so a matter or
+ * work-assignment event sends the payload as given. The project route keeps the body it has always been sent, the project
+ * bind included (the server skips that member), byte for byte.
+ *
+ * The returned row has NO formatted names (type, assignee, creator) and no rights, so a list must re-read after a create
+ * rather than insert it.
  *
  * @param root      Which kind of record `recordId` is
  * @param recordId  Dataverse GUID of the record
  * @param payload   Event fields to set on creation
- * @returns         The created ODataEvent record (with system fields populated)
+ * @returns         The created ODataEvent record (system fields only)
  */
 export async function createRootEvent(
   root: EventsRoot,
@@ -647,6 +837,34 @@ export async function createRootEvent(
  */
 export async function createEvent(projectId: string, payload: CreateEventPayload): Promise<ODataEvent> {
   return createRootEvent('projects', projectId, payload);
+}
+
+/**
+ * The partial body of `PATCH /api/v1/external/events/{id}` (R4 task 014b / 014c): a member that is not sent is not changed.
+ * `eventTypeId` is never sent (the type is immutable: 400 `type_immutable`).
+ */
+export interface UpdateEventPatch {
+  sprk_name?: string;
+  /** "yyyy-MM-dd", or `null` to clear it (400 when the event's type requires one). */
+  sprk_duedate?: string | null;
+  sprk_priority?: number;
+  /** `null` or "" clears it. */
+  sprk_description?: string | null;
+  /** Any event statuscode (`EVENT_STATUS_LABELS`). */
+  sprk_status?: number;
+  /** A reassign to this contact (from `getAssignablePeople`): sets status Reassigned unless `sprk_status` is also sent. */
+  assignedToContactId?: string;
+}
+
+/**
+ * Edits an event / changes its status: `PATCH /api/v1/external/events/{id}`, 204 with no body. A refusal is an `ApiError`
+ * whose message is the ProblemDetails body (`problemMessage`): 400 with a stable `errorCode` per field, 403, 404, 503.
+ */
+export async function updateEvent(eventId: string, patch: UpdateEventPatch): Promise<void> {
+  await bffApiCall<void>(`/api/v1/external/events/${encodeURIComponent(eventId)}`, {
+    method: 'PATCH',
+    body: JSON.stringify(patch),
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -948,6 +1166,9 @@ export const webApiClient = {
   getEvents,
   getRootEvents,
   createEvent,
+  getEvent,
+  updateEvent,
+  getAssignablePeople,
   deleteOwnEvent,
   deleteOwnServiceRequest,
   // Contacts

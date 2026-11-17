@@ -261,3 +261,55 @@ answered AND `canCreate` is not false. The status toggle is excluded (no server 
 **Why deferred.** It needs a new user-visible error surface in the shared grid. That is outside R4 scope.
 
 **Fix shape.** Add an error surface to the grid (an inline MessageBar or an `onCommandError` prop) and route both catches to it. Add tests, then prune the suppressions.
+
+## D-17 — External API: every request repeats access resolution (#2845)
+
+**Status.** Handed off → `unified-access-control-r2`, on the owner's direction, 2026-11-15. Accepted by uac-r2 the same day; it will run FULL rigor on Opus with two adversarial passes, once its owner gives the go. Filed as an issue (found outside R4), not as deferred R4 scope.
+
+**Where.** The shared external access layer in the BFF:
+- `Infrastructure/ExternalAccess/NoAccessListReader.cs:182` (deny list, deliberately uncached across requests);
+- `ExternalParticipationService.cs`, `AccessibleRecordSetService.cs`, `CallerPrincipalResolver.cs`, `Services/Dataverse/ParentLineage.cs`.
+
+**Effect.** Every external request takes 3–4 s on the server: 50–60 Dataverse calls one after another at about 85 ms each. Within one request, `sprk_noaccessentries` is read 8 times, Organization.svc is called 6.7 times, `sprk_matters` is read 6.5 times, and `sprk_contactorganizations` and `contacts({id})` 4 times each. The route's own data is 1–2 calls. The owner reported the SPA as very slow. It isn't capacity: P1v3, 1 worker, `/ping` about 0.1 s.
+
+**Source.** App Insights `spe-insights-dev-67e2xz`, read-only queries shown to the owner first, 2026-11-15. The KQL is in #2845.
+
+**Fix shape.** Keep "live per request" (no cross-request TTL), but memoize the caller, grant set, deny list and lineage once per request, run the independent reads in parallel, and batch the per-candidate lookups. Add a test that counts Dataverse calls per request. Target: under 1 s.
+
+## D-18 — RequestAccessMemo.For races on a fresh HttpContext.Items (#2851)
+
+**Status.** Handed off → `unified-access-control-r2` (accepted 2026-11-16; fixed in #2845 round 2, branch `perf/2845-round2`). 014a keeps its local pre-create.
+
+**Where.** `Infrastructure/ExternalAccess/RequestAccessMemo.cs:38`. The lock on `context.Items` doesn't cover the lazy creation of `Items` itself.
+
+**Effect.** When concurrent compositions are the first to touch `Items` in a request, the dictionary can be corrupted (the read is treated as unknown, giving a 503) or the memo can be lost (the #2845 saving silently disappears). Task 014a's memo test reproduced it in 3 of 4 runs.
+
+**Fix shape.** Create the memo once, single-threaded, before any fan-out (in a filter or middleware, or at the evaluator's entry). Add a concurrency test on a fresh `DefaultHttpContext`. 014a works around it locally.
+
+## D-19 — Assignee picker omits workforce contacts with standing access (#2854)
+
+**Status.** Open, next round. Agreed with uac-r2 in its gate review of #2852 (K1, confirmed 2026-11-16).
+
+**Where.** `Infrastructure/ExternalAccess/RecordContactAccessService.cs` (the class remarks document the exclusion). The terms it leaves out are at `AccessibleRecordSetService.cs` ~2888-3017 (standing-grant / derived-member, ContactOnly plane only).
+
+**Effect.** A workforce contact-only user with standing access can see the record, but:
+- is not offered as an assignee;
+- gets `isMe` = false.
+
+This under-lists, which fails closed.
+
+**Why deferred.** The service can't tell which plane a contact signs in on. Including the terms for every contact would over-list CIAM sign-ins.
+
+**Fix shape (D-19).** A way to know a contact's sign-in plane (for example a workforce-bound marker). Then add the standing-grant / derived-member terms for those contacts only. Needs uac-r2's review.
+
+## D-20 — QueryAsync turns a malformed 2xx into an empty list (#2860)
+
+**Status.** Handed off → `unified-access-control-r2`, which proposed it and owns the follow-up (2026-11-16). Filed as an issue, not deferred R4 scope.
+
+**Where.** `Spaarke.Dataverse/DataverseWebApiClient.cs`, `QueryAsync<T>` (`result?.Value ?? new`). It has 87 callers.
+
+**Effect.** A 2xx response whose `value` is missing or null reads as "no rows". An access-relevant read can then give a believable wrong answer instead of an error.
+
+**R4 part.** 014a adds `QueryStrictAsync<T>` and moves only `ExternalGrantLifecycle.QueryActiveRowsForRootAsync` to it. The owner chose this option (A) on 2026-11-16.
+
+**Fix shape.** Audit the remaining callers. Move the access-relevant ones to the strict method, checking that each fails closed on a throw.

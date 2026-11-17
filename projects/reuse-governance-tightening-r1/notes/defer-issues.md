@@ -115,7 +115,7 @@ On the Linux CI runner the check reports **13** new missing paths, not 2 (Tier 2
 
 | Field | Value |
 |---|---|
-| **Status** | Fixed on the project branch 2026-11-12 (`65224ce73f`); #2713 closes when that reaches master. Owner confirmed Power Pages deploys are retired. Skill archived to `.claude/archive/2026-11-12/skills/power-page-deploy/` (repo archive convention, not `_archived/`); INDEX row removed; `azure-deploy`, `deploy-new-release`, `office-addins-deploy`, two docs and `knowledge/sharepoint-embedded/NOTES.md` repointed at the Static Web Apps workflow; 2 baseline lines removed. |
+| **Status** | Done 2026-11-12 — merged to master in PR #2751 (`8c05f5b70f`); #2713 closed. Owner confirmed Power Pages deploys are retired. Skill archived to `.claude/archive/2026-11-12/skills/power-page-deploy/` (repo archive convention, not `_archived/`); INDEX row removed; `azure-deploy`, `deploy-new-release`, `office-addins-deploy`, two docs and `knowledge/sharepoint-embedded/NOTES.md` repointed at the Static Web Apps workflow; 2 baseline lines removed. |
 | **Urgency** | next-round |
 | **Filed** | 2026-11-11 |
 | **Source** | Found in passing while fixing ISS-002 (its `.site-download` path has never been in the repo) |
@@ -143,4 +143,296 @@ The owner confirms that Power Pages is retired for the external SPA. Then archiv
 
 ---
 
+### DEF-001 — Consolidate `@spaarke/sdap-client` into `@spaarke/ui-components`
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | next-round |
+| **Filed** | 2026-11-13 |
+| **Source** | Task 030 package review §1 (owner-approved "Approve all"); filed by task 034 |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2801 |
+
+**Description**
+
+The owner approved consolidating the package into ui-components (`src/services/sdap/`, not `pcf-safe`). It fails T1 (the abstracted-I/O service tier ui-components already sanctions) and T2 (no dependencies), and T3 is weak (2 real importers: ui-components and DocumentUploadWizard; 16 of 17 solution listings unused). Out of r1 execution scope (FR-09). Findings: P-2 Medium (delete/download through two BFF route families), P-9 Low, P-10 Low. Failure without it: new BFF-client code can land in either package, and the two route families keep diverging with no single owner.
+
+**Entry-points**
+
+- `src/client/shared/Spaarke.SdapClient/src/operations/DeleteOperation.ts:22`, `DownloadOperation.ts:22`
+- `src/client/shared/Spaarke.UI.Components/src/services/EntityCreationService.ts:40`; `src/solutions/DocumentUploadWizard/src/services/uploadOrchestrator.ts:46`
+
+**Suggested fix**: migration outline in the issue and `notes/package-reviews.md` §1; tasks 031–033 are the reference implementation.
+
+**Estimated effort**: 1–2 days
+**Blockers**: none
+**Related**: ADR-012; DEF-006; ISS-004
+
+---
+
+### DEF-002 — Sanction `@spaarke/smart-todo-components` (ADR-012 Pattern D amendment)
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | next-round |
+| **Filed** | 2026-11-13 |
+| **Source** | Task 030 package review §2 (owner-approved); filed by task 034 |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2802 |
+
+**Description**
+
+The owner approved sanctioning this package through one ADR-012 amendment (Path B) for Pattern D feature packages, shared with DEF-003 and DEF-004. A package qualifies when it is consumed by 2+ surfaces, is domain-bound in a way ui-components may not be, and is reached by PCFs only through deep imports. This overturns design §6.2's consolidate hypothesis. The amendment is a follow-up PR, not task 080 (080 is review and PRs only; FR-09 limited r1 execution to three packages). Findings: P-8 Medium (~72 `sprk_*` literals vs ADR-012 MUST NOT), a likely duplicate `SmartToDo.tsx` (Medium, not diffed), P-10 Low. Failure without it: the census row stays "under review", so the package has no ADR basis and its entity literals breach ADR-012 with no recorded exception.
+
+**Entry-points**
+
+- `.claude/adr/ADR-012-shared-components.md` (census markers), `docs/adr/ADR-012-shared-component-library.md`, `tests/Spaarke.ArchTests/SharedPackageCensusTests.cs`
+- `src/solutions/SmartTodo/src/` (`SmartToDo.tsx`) vs `src/client/shared/Spaarke.SmartTodo.Components/src/`
+
+**Suggested fix**: one amendment PR for DEF-002–004 (DEF-005 can ride along): flip the census rows to Sanctioned with the citation and update the census test in the same PR.
+
+**Estimated effort**: half a day for the amendment (shared); 2–4 hours for the findings
+**Blockers**: none
+**Related**: DEF-003, DEF-004, DEF-005
+
+---
+
+### DEF-003 — Sanction `@spaarke/communication-components` (Pattern D amendment); de-duplicate regarding-write logic
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | next-round |
+| **Filed** | 2026-11-13 |
+| **Source** | Task 030 package review §3 (owner-approved); filed by task 034 |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2803 |
+
+**Description**
+
+Sanction under the DEF-002 amendment; this is the strongest case (9 surfaces, including 3 PCFs through deep imports). Findings:
+- P-3 Medium: the regarding-write helpers are duplicated between `ConnectionsWriteHandler` and the RegardingResolver PCF's `ResolverWriteHandler`.
+- P-8 Medium: ~317 `sprk_*` literals.
+- P-11 Low: an ai-widgets `dist/` path.
+- P-12 Low: dead prototype code page `CommunicationPage`.
+- P-13 Low: unused `@microsoft/signalr` peer.
+
+Failure without it: the most widely shared feature package has no ADR basis, and P-3's parallel copies drift silently.
+
+**Entry-points**
+
+- `src/client/shared/Spaarke.Communication.Components/src/logic/connections/ConnectionsWriteHandler.ts:141,219,268`; `src/client/pcf/RegardingResolver/RegardingResolver/handlers/ResolverWriteHandler.ts`
+- `src/client/code-pages/CommunicationPage/`; `src/client/shared/Spaarke.AI.Widgets/tsconfig.json:35-36`
+
+**Suggested fix**: amendment PR (see DEF-002); extract the shared nav-prop / catalog / selection parts into one module; delete the prototype page; drop the peer.
+
+**Estimated effort**: amendment shared; P-3 about 1 day; the rest 1–2 hours
+**Blockers**: none
+**Related**: DEF-002, DEF-004
+
+---
+
+### DEF-004 — Sanction `@spaarke/daily-briefing-components` (Pattern D amendment); use the shared nav-prop resolver
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | next-round |
+| **Filed** | 2026-11-13 |
+| **Source** | Task 030 package review §4 (owner-approved); filed by task 034 |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2804 |
+
+**Description**
+
+Sanction under the DEF-002 amendment (Pattern D: the DailyBriefing code page and the LegalWorkspace section). Findings: P-4 Medium (`useInlineTodoCreate` keeps a private nav-prop discovery, one of seven copies in `notes/reuse-scan-dry-run.md`), P-8 Medium (~48 `sprk_*` literals), P-10 Low (unused SpaarkeAi listing). Failure without it: a nav-prop fix made in the shared resolver never reaches this copy, so inline to-do creation can bind the wrong navigation property after a schema change.
+
+**Entry-points**
+
+- `src/client/shared/Spaarke.DailyBriefing.Components/src/hooks/useInlineTodoCreate.ts:151-165`
+
+**Suggested fix**: amendment PR (see DEF-002); replace the private discovery with the shared resolver; remove the unused listing.
+
+**Estimated effort**: amendment shared; P-4 2–4 hours
+**Blockers**: none
+**Related**: DEF-002, DEF-003
+
+---
+
+### DEF-005 — Sanction `@spaarke/compose-components` (ADR-012 amendment: editing model + TipTap quarantine)
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | next-round |
+| **Filed** | 2026-11-13 |
+| **Source** | Task 030 package review §5 (owner-approved); filed by task 034 |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2805 |
+
+**Description**
+
+The package passes all three tests: a distinct editing-model contract (`docxBridge.ts` exists only here), a TipTap/ProseMirror quarantine of 15 `@tiptap/*` packages, and 2 code-page surfaces. Sanctioning it settles capability-index row 30, which has "two answers" today. Findings: P-8 Medium (a few `sprk_*` literals in `ComposeWorkspace.tsx`), P-11 Low (`dist/` tsconfig paths for `@spaarke/auth` and `@spaarke/ai-widgets`), P-14 Low (`mammoth` pin may be unused; one hard-coded colour). Failure without it: the package that quarantines a heavy dependency has no ADR basis, and capability-index row 30 stays ambiguous.
+
+**Entry-points**
+
+- `src/client/shared/Spaarke.Compose.Components/tsconfig.json`, `package.json` (`mammoth`), `src/widgets/ComposeWorkspace.tsx`
+- `.claude/patterns/CAPABILITY-INDEX.md` row 30
+
+**Suggested fix**: amendment naming the contract and the quarantine (it can ride with DEF-002–004); census row → Sanctioned; census test updated in the same PR.
+
+**Estimated effort**: 1–2 hours amendment; 2–3 hours findings
+**Blockers**: none
+**Related**: DEF-002
+
+---
+
+### DEF-006 — Consolidate `@spaarke/ai-outputs` into `@spaarke/ai-widgets`
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | next-round |
+| **Filed** | 2026-11-13 |
+| **Source** | Task 030 package review §7 (owner-approved); filed by task 034 |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2806 |
+
+**Description**
+
+Move the package into ai-widgets (`src/outputs/`). Its only real importer is ai-widgets, and it fails T2 and T3. Findings:
+- P-6 Medium: pane-event shapes are defined three times and `IChatSession` twice; the ai-context half was fixed by task 031.
+- P-7 Medium: the registry metadata matches `OutputWidgetType` by string, not by import.
+- Low: P-10, P-11, and no `exports` map.
+
+Failure without it: renaming an `OutputWidgetType` value compiles and silently breaks the widget lookup, so that output widget stops rendering.
+
+**Entry-points**
+
+- `src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/register-workspace-widgets.ts:67`
+- `src/client/shared/Spaarke.AI.Widgets/src/types/aiContext.ts:82,129`; `src/client/shared/Spaarke.AI.Outputs/src/types/index.ts:166-193`; `src/client/shared/Spaarke.UI.Components/src/components/SprkChat/types.ts:178,203`
+
+**Suggested fix**: migration outline in the issue; task 031 is the reference implementation.
+
+**Estimated effort**: 1 day
+**Blockers**: none
+**Related**: DEF-001
+
+---
+
+### ISS-004 — Open-in-desktop is implemented on nine surfaces with different behaviour (P-1)
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | next-round |
+| **Filed** | 2026-11-13 |
+| **Source** | Task 030 finding P-1; re-verified by grep in task 034 (three more call sites than the review listed) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2807 |
+
+**Description**
+
+Every surface calls `GET /api/documents/{id}/open-links`, but each handles the response differently:
+- the shared hook falls back to `webUrl` in a new tab;
+- LegalWorkspace and SpeDocumentViewer set `location.href`;
+- the SemanticSearchControl PCF and DocumentRelationshipViewer use `window.open(…, '_self')`, and DocumentRelationshipViewer downloads through `/content` when there is no `desktopUrl`;
+- the CommunicationAttachments PCF uses `desktopUrl || webUrl`;
+- the legacy web resource `sprk_DocumentOperations.js` keeps its own copy.
+
+The Office add-ins differ on purpose and are out of scope. Failure: the same click behaves differently by surface, and error-handling fixes in the shared hook do not reach the others. Moving document-operations into ui-components (task 033) did not fix this; each surface needs migrating and checking by hand.
+
+**Entry-points**
+
+- `git grep -n "open-links" -- src ':!**/bundle.js' ':!**/*.test.*'`
+- `src/client/shared/Spaarke.UI.Components/src/hooks/useDocumentActions.ts:116,161-165`
+
+**Suggested fix**: decide one behaviour, then migrate surface by surface. PCFs need a `pcf-safe`, React-free helper.
+
+**Estimated effort**: 2–3 days
+**Blockers**: none
+**Related**: DEF-001 (P-2)
+
+---
+
+### ISS-005 — LegalWorkspace and SemanticSearch fail their own standalone tsc, and no gate runs it
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | next-round |
+| **Filed** | 2026-11-13 |
+| **Source** | Found in passing, tasks 032 and 033 (`notes/032-legal-workspace.md`, `notes/033-document-operations.md`) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2808 |
+
+**Description**
+
+LegalWorkspace's `tsc --noEmit` reports 234 errors (174 its own). Three matter:
+- a re-export of the removed `ComposeWorkspacePlaceholder` in `sections/index.ts:23`, which fails the bundle for its first importer;
+- a type import of the missing `NarrateRequest` in `sectionRegistry.ts:34`;
+- deep `@spaarke/ai-widgets/...` imports its tsconfig cannot resolve.
+
+SemanticSearch reports 23 × TS6059 (`@spaarke/auth` source outside `rootDir`) and 2 × TS2352 in `src/index.tsx:60,109`. Both builds are bundler-only, so a type error reaches review only if it also breaks bundling.
+
+**Entry-points**
+
+- `cd src/solutions/LegalWorkspace && npx tsc --noEmit -p .`
+- `cd src/client/code-pages/SemanticSearch && npx tsc --noEmit -p .`
+
+**Suggested fix**: fix the listed items, add the missing types, then decide on a typecheck step for each project.
+
+**Estimated effort**: 2–4 hours plus the gate decision
+**Blockers**: none
+**Related**: —
+
+---
+
+### ISS-006 — `deploy-spaarke-ai.yml` misses six source trees SpaarkeAi bundles
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | next-round |
+| **Filed** | 2026-11-15 |
+| **Source** | Task 080 adversarial review, finding 5 (`notes/080-review.md`); pre-existing, not caused by this project |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2841 |
+
+**Description**
+
+`src/solutions/SpaarkeAi/vite.config.ts` bundles source from `Spaarke.Compose.Components`, `Spaarke.Communication.Components`, `Spaarke.Notifications`, `DocumentUploadWizard`, `FindSimilarCodePage` and `WorkspaceLayoutWizard`, but none is in the workflow's `paths` trigger. A fix merged to master that touches only one of them does not redeploy the Console to DEV.
+
+**Entry-points**
+
+- `.github/workflows/deploy-spaarke-ai.yml` (`on.push.paths`)
+- `src/solutions/SpaarkeAi/vite.config.ts` (`path.resolve(__dirname, ...)` roots)
+
+**Suggested fix**: add the six `paths` lines; verify with one dispatch run.
+
+**Estimated effort**: 15 minutes
+**Blockers**: none
+**Related**: `.claude/skills/code-page-deploy/SKILL.md` now states the gap (task 080).
+
+---
+
+### ISS-007 — Docs and comments name a `normalizeUrl()` that does not exist
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | someday |
+| **Filed** | 2026-11-15 |
+| **Source** | Task 080 adversarial review, found in passing (same root cause as finding 4) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2842 |
+
+**Description**
+
+The BFF URL normalizer is `normalizeBffBaseUrl()` in `src/client/shared/Spaarke.Auth/src/bffClientConfig.ts:89`. Six places still name `normalizeUrl()` in `resolveRuntimeConfig.ts`, and `docs/architecture/AUTH-AND-BFF-URL-PATTERN.md` shows a code body for it. A reader searches for a function that is not there.
+
+**Entry-points**
+
+- `git grep -n normalizeUrl -- docs src/client`
+- `docs/architecture/AUTH-AND-BFF-URL-PATTERN.md:72,75,77,251,309`; `docs/guides/PCF-DEPLOYMENT-GUIDE.md:100,108`; comments in `src/client/shared/Spaarke.Auth/src/createRuntimeConfigStore.ts:127`, `src/client/pcf/shared/utils/environmentVariables.ts:66`
+
+**Suggested fix**: rename and repoint; replace the doc's code block with the current body or a link. The capability index row 3 and `.claude/patterns/auth/bff-url-normalization.md` were corrected in task 080.
+
+**Estimated effort**: 30 minutes
+**Blockers**: none
+**Related**: ISS-006 (same review)
+
+---
 ## Closed

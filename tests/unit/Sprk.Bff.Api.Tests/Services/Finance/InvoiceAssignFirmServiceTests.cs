@@ -55,6 +55,8 @@ public sealed partial class InvoiceAssignFirmServiceTests
             ["statuscode"] = new OptionSetValue(InvoiceStatusCodes.InReview),
             ["versionnumber"] = 5L,
             [InvoiceReviewService.InvTrackingNumber] = "INV-7.3",
+            // EB-D-226 (task 095e): a held invoice carries the name the AI read off the PDF (the issuer), which Set firm replaces.
+            [InvoiceReviewService.InvName] = "Issuer On The PDF Ltd - INV-7",
             ["sprk_matter"] = new EntityReference("sprk_matter", Matter),
             [InvoiceFirmHold.InvoiceHoldColumn] = InvoiceFirmHold.InvoiceHoldValue,
         };
@@ -105,6 +107,12 @@ public sealed partial class InvoiceAssignFirmServiceTests
         /// Dataverse does (the test double models it in <see cref="Route"/>).</summary>
         public bool ScopeColumnExists = true;
         public bool? ActiveFirm = true;
+
+        /// <summary>EB-D-226 (task 095e): the firm record's name (<c>sprk_organizationname</c>) the service reads before it writes; null is a row with no name.</summary>
+        public string? FirmName = "Hartwell and Co LLP";
+
+        /// <summary>EB-D-226 (task 095e): a fault the firm-name read throws (null: it answers).</summary>
+        public Exception? FirmNameReadFault;
         public InvoiceFirmLink Link = InvoiceFirmLink.Linked;
         public DecisionCallerRefusal CloseRights = DecisionCallerRefusal.None;
         public CoreAncestorResult Filing = new(CoreAncestorStatus.Derived, [new CoreAncestorStamp("sprk_matter", "sprk_matter", Matter)], null);
@@ -137,6 +145,10 @@ public sealed partial class InvoiceAssignFirmServiceTests
         {
             Entities.Setup(e => e.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync((QueryExpression q, CancellationToken _) => Route(q));
+            Entities.Setup(e => e.RetrieveAsync("sprk_organization", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+                .Returns((string _, Guid id, string[] _, CancellationToken _) => FirmNameReadFault is { } fault
+                    ? Task.FromException<Entity>(fault)
+                    : Task.FromResult(new Entity("sprk_organization", id) { ["sprk_organizationname"] = FirmName }));
             Entities.Setup(e => e.ExecuteTransactionAsync(It.IsAny<IReadOnlyList<OrganizationRequest>>(), It.IsAny<CancellationToken>()))
                 .Callback((IReadOnlyList<OrganizationRequest> r, CancellationToken _) => Transactions.Add(r))
                 .Returns(Task.CompletedTask);
@@ -242,7 +254,9 @@ public sealed partial class InvoiceAssignFirmServiceTests
             Allocator.Verify(a => a.RenumberSubmissionAsync(
                 It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<string>(),
                 It.IsAny<Func<RenumberCandidate, RenumberApply>>(), It.IsAny<CancellationToken>()), Times.Never);
-            Entities.Invocations.Where(i => i.Method.Name != nameof(IGenericEntityService.RetrieveMultipleAsync)).Should().BeEmpty("a refusal writes nothing");
+            // EB-D-226 (task 095e): the firm's name is read (RetrieveAsync) before the apply is built; reads are not writes.
+            Entities.Invocations.Where(i => i.Method.Name is not (nameof(IGenericEntityService.RetrieveMultipleAsync) or nameof(IGenericEntityService.RetrieveAsync)))
+                .Should().BeEmpty("a refusal writes nothing");
             Transactions.Should().BeEmpty();
         }
 
@@ -530,7 +544,9 @@ public sealed partial class InvoiceAssignFirmServiceTests
         result.DecisionId.Should().Be(InvoiceAssignFirmService.DecisionIdFor(SubmissionId));
         w.RenumberArgs.Should().Be(("11", Firm, "INV-7"), "conditioned on the submission version read, for the firm, with the row's own firm invoice number");
         w.Transactions.Should().BeEmpty("the allocator sends the one transaction; the service writes nothing of its own");
-        w.Entities.Invocations.Where(i => i.Method.Name != nameof(IGenericEntityService.RetrieveMultipleAsync)).Should().BeEmpty();
+        // EB-D-226 (task 095e): the firm's name is read (RetrieveAsync) before the apply is built; reads are not writes.
+        w.Entities.Invocations.Where(i => i.Method.Name is not (nameof(IGenericEntityService.RetrieveMultipleAsync) or nameof(IGenericEntityService.RetrieveAsync)))
+            .Should().BeEmpty();
 
         var apply = w.Applied!;
         var invoice = Update(apply, "sprk_invoice", InvoiceId);
@@ -578,6 +594,8 @@ public sealed partial class InvoiceAssignFirmServiceTests
         stored.FirmMissingSignals.SetReadAtUtc.Should().Be(Now.UtcDateTime);
         stored.Renamed.Select(r => (r.Entity, r.From, r.To)).Should().BeEquivalentTo(new[]
         {
+            // EB-D-226 (task 095e): the invoice's own name is in the mapping, from the issuer to the firm record's name.
+            (InvoiceReviewReadService.InvoiceEntity, "Issuer On The PDF Ltd - INV-7", "Hartwell and Co LLP - INV-7"),
             (InvoiceSubmissionPersister.LineEntity, "INV-7.3 #1", "INV-7.1 #1"),
             (InvoiceSubmissionPersister.LineEntity, "INV-7.3 #2", "INV-7.1 #2"),
             (InvoiceSubmissionPersister.ApprovalEntity, "Approval INV-7.3", "Approval INV-7.1"),
@@ -601,6 +619,88 @@ public sealed partial class InvoiceAssignFirmServiceTests
         Update(second, InvoiceSubmissionPersister.LineEntity, w.Lines[0].Id).Target.GetAttributeValue<string>("sprk_name").Should().Be("INV-7.4 #1");
         AssignFirmStoredDecision.Read(FindingsOf(second))!.TrackingNumber.Should().Be("INV-7.4");
         FindingsOf(first).ToJsonString().Should().Be(FindingsOf(w.Applied!).ToJsonString(), "the same candidate builds the same apply");
+    }
+
+    [Fact(DisplayName = "095e (EB-D-226, seed-proof): Set firm re-names the invoice from the firm record's name and its firm invoice number, in the SAME apply update as its firm and number")]
+    public async Task SetFirm_RenamesTheInvoice_FromTheFirmRecord_InTheSameApply()
+    {
+        var w = new World();
+
+        var result = await w.Assign();
+
+        result.Outcome.Should().Be(AssignFirmOutcome.Assigned);
+        var invoice = Update(w.Applied!, "sprk_invoice", InvoiceId).Target;
+        invoice.GetAttributeValue<string>("sprk_name").Should().Be("Hartwell and Co LLP - INV-7", "the firm record's name, not the issuer the PDF named");
+        invoice.GetAttributeValue<EntityReference>(InvoiceSubmissionPersister.InvoiceVendorOrg)!.Id.Should().Be(Firm, "the same update writes the firm");
+        invoice.GetAttributeValue<string>("sprk_trackingnumber").Should().Be("INV-7.1");
+        w.Applied!.Requests.Count(r => r is UpdateRequest { Target.LogicalName: "sprk_invoice" }).Should().Be(1, "one invoice update: name, firm and number together");
+    }
+
+    [Fact(DisplayName = "095e review F1 (EB-D-226, seed-proof): Set firm also stores the new invoice name in the findings (invoiceName), so a re-run, a correction and the after-steps read the firm's name, not the issuer's")]
+    public async Task SetFirm_StoresTheNewInvoiceName_InTheFindings()
+    {
+        var w = new World();
+        w.Submission[InvoiceSubmissionPersister.SubmissionFindingsJson] =
+            """{"trackingNumber":"INV-7.3","invoiceName":"Issuer On The PDF Ltd - INV-7","pipelineFindings":[{"code":"firm_missing"}],"keep":1}""";
+
+        await w.Assign();
+
+        FindingsOf(w.Applied!)["invoiceName"]!.GetValue<string>().Should().Be("Hartwell and Co LLP - INV-7");
+        Update(w.Applied!, "sprk_invoice", InvoiceId).Target.GetAttributeValue<string>("sprk_name").Should().Be("Hartwell and Co LLP - INV-7", "the row and the stored name agree");
+    }
+
+    [Fact(DisplayName = "095e review F1 (EB-D-226, seed-proof): the invoice-level Signal plan entries take the new name as their subject; a line's entry keeps its own; the stored decision's hashed rename counts are unchanged")]
+    public async Task SetFirm_InvoiceLevelPlanEntries_TakeTheNewName_LineEntriesDoNot()
+    {
+        var w = new World();
+        w.Submission[InvoiceSubmissionPersister.SubmissionFindingsJson] =
+            """{"trackingNumber":"INV-7.3","invoiceName":"Issuer On The PDF Ltd - INV-7","pipelineFindings":[{"code":"firm_missing"}],"signalPlan":[{"policyCode":"P","subjectEntity":"sprk_invoice","subjectName":"Issuer On The PDF Ltd - INV-7"},{"policyCode":"P","subjectEntity":"sprk_billingevent","subjectName":"INV-7.3 #1"}]}""";
+
+        await w.Assign();
+
+        var plan = FindingsOf(w.Applied!)["signalPlan"]!.AsArray().OfType<JsonObject>().ToList();
+        plan[0]["subjectName"]!.GetValue<string>().Should().Be("Hartwell and Co LLP - INV-7");
+        plan[1]["subjectName"]!.GetValue<string>().Should().Be("INV-7.3 #1", "a line's entry is not the invoice's");
+        var stored = AssignFirmStoredDecision.Read(FindingsOf(w.Applied!))!;
+        InvoiceAssignFirmService.RenamedCounts(stored.Renamed, stored.FirmSetLines).Keys.Should()
+            .BeEquivalentTo(["firmSetLines", "lines", "approval", "storedFiles", "findings"], "the invoice is not a count: the counts are hashed (K2)");
+    }
+
+    [Fact(DisplayName = "095e (EB-D-226): the invoice name does not depend on the allocator's attempt number (every retry of the apply builds the same name)")]
+    public async Task SetFirm_TheInvoiceName_IsTheSameForEveryAttempt()
+    {
+        var w = new World();
+        await w.Assign();
+
+        var second = w.Builder!(new RenumberCandidate("INV-7.4", 4));
+
+        Update(second, "sprk_invoice", InvoiceId).Target.GetAttributeValue<string>("sprk_name").Should().Be("Hartwell and Co LLP - INV-7");
+    }
+
+    [Theory(DisplayName = "095e (EB-D-226, seed-proof, fail closed): a firm-name read fault or a firm with no name is 503 unavailable; nothing is renumbered, written or recorded, and the issuer name is never used")]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task SetFirm_TheFirmNameCannotBeRead_Is503_AndNothingIsWritten(bool fault)
+    {
+        var w = new World();
+        if (fault)
+        {
+            w.FirmNameReadFault = new TimeoutException();
+        }
+        else
+        {
+            w.FirmName = null;
+        }
+
+        var result = await w.Assign();
+
+        (result.Outcome, result.Status, result.Code).Should().Be((AssignFirmOutcome.Refused, 503, AssignFirmCodes.Unavailable));
+        w.Applied.Should().BeNull("the apply was never built");
+        w.Transactions.Should().BeEmpty();
+        w.Recorded.Should().BeEmpty();
+        w.Allocator.Verify(a => a.RenumberSubmissionAsync(
+            It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<string>(),
+            It.IsAny<Func<RenumberCandidate, RenumberApply>>(), It.IsAny<CancellationToken>()), Times.Never());
     }
 
     [Fact(DisplayName = "095d-1b: the decision the stored one rebuilds passes the REAL Decision Record writer's preflight (assign-firm, the invoice, the firm value, no Signal resolved)")]
@@ -1105,7 +1205,7 @@ public sealed partial class InvoiceAssignFirmServiceTests
         counts["approval"].Should().Be(1);
         counts["storedFiles"].Should().Be(2, "INV-7.3.pdf and INV-7.3-2.docx; INV-7.30.pdf is not the old number's");
         counts["findings"].Should().Be(1);
-        stored.Renamed.Should().HaveCount(5, "the stored member keeps every old-to-new name");
+        stored.Renamed.Should().HaveCount(6, "the stored member keeps every old-to-new name (EB-D-226: the invoice's own name is the sixth)");
     }
 
     [Fact(DisplayName = "095d-1b refusal: a findings member that would pass 1,048,576 characters with the new number is 409 too_large and nothing is written (must fire)")]

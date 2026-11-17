@@ -744,7 +744,9 @@ function Test-ProfilePreconditions {
     $problems = [System.Collections.Generic.List[string]]::new()
     $allDefaultTeams = @((Invoke-Dv "teams?`$select=teamid,name,_businessunitid_value&`$filter=isdefault eq true&`$expand=businessunitid(`$select=name,isdisabled)").value)
     # The ontology writer's business unit's default team (scripts/common/OntologyWriterUnit.ps1) is never added to or expected on the reader profile.
-    $dvHeaders = @{ Authorization = "Bearer $(Get-DataverseToken)"; Accept = 'application/json'; 'OData-MaxVersion' = '4.0'; 'OData-Version' = '4.0' }
+    # Strongly consistent reads: attribute metadata (IsSecured) is cached per server, and a plain read soon after a change can
+    # come back stale (a secured column reported as unsecured). The header is ignored on data requests.
+    $dvHeaders = @{ Authorization = "Bearer $(Get-DataverseToken)"; Accept = 'application/json'; 'OData-MaxVersion' = '4.0'; 'OData-Version' = '4.0'; Consistency = 'Strong' }
     $split = Split-DvDefaultTeamsByOntologyWriterUnit -Api $State.ApiBase -Headers $dvHeaders -DefaultTeams $allDefaultTeams
     $writerUnitTeams = @($split.WriterUnitTeams)
     $defaultTeams = @($split.ReaderTeams | Where-Object { -not $_.businessunitid.isdisabled })

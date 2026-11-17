@@ -20,6 +20,13 @@ const byId = (id: string) => screen.getByTestId(id);
 const change = (id: string, value: string) => fireEvent.change(byId(id), { target: { value } });
 const click = (id: string) => fireEvent.click(byId(id));
 
+/** Task 193: an Existence rule needs one test before the Condition step can be left. */
+const addRecordTest = () => {
+  click('rule-wizard-when-row-add');
+  change('rule-wizard-when-row-0-field', 'zz_state');
+  change('rule-wizard-when-row-0-value', 'open');
+};
+
 const metrics = (over: Partial<NonNullable<RuleSummary['metrics']>> = {}): NonNullable<RuleSummary['metrics']> => ({
   openItems: 2,
   lastFiredOn: '2026-10-15T09:30:00Z',
@@ -213,6 +220,7 @@ describe('RulesArea - the rule wizard', () => {
       await find(arrives);
     }
     change('rule-wizard-subject', 'zz_widget');
+    addRecordTest();
     click('rule-wizard-next');
     await find('rule-wizard-wording');
     change('rule-wizard-headline', 'A headline');
@@ -257,6 +265,7 @@ describe('RulesArea - the rule wizard', () => {
     click('rule-wizard-next');
     await find('rule-wizard-condition');
     change('rule-wizard-subject', 'zz_widget');
+    addRecordTest();
     click('rule-wizard-next');
     await find('rule-wizard-wording');
     change('rule-wizard-headline', 'A headline');

@@ -3,11 +3,12 @@
  * (spaarke-SPA-external-access-platform-r4 task 006, FR-06 / FR-07 / NFR-04).
  *
  * ONE PLACE FOR:
- *   (a) the right behind each of the record's create actions (Upload, New message, Add task, Add event; each in its own
+ *   (a) the right behind each of the record's create actions (Upload, New message, Add event; each in its own
  *       section's header since task 009): `createRightOf`, used by every list inside the record template, so they follow
  *       one rule; and the list-host rule of EventsCalendar and a project's DocumentLibrary, the same in and out of the
- *       template (`levelVerdictOf`, `listCreateRightOf`; D-9: the project page follows it too). Add task adds the list's
- *       `canCreateTask` (`createTaskRightOf`, task 011);
+ *       template (`levelVerdictOf`, `listCreateRightOf`; D-9: the project page follows it too). Add event is also shown
+ *       only when the list names at least one event type the caller may pick (`addEventRightOf`, `creatableEventTypes`,
+ *       task 015);
  *   (a2) whether "Submit invoice" is offered (task 007, FR-10): `submitInvoiceRightOf`, from `/me` `firms` and the
  *       firm-records answers (read by `actions/SubmitInvoiceAction.tsx`);
  *   (b) the header's "Your access" value: `yourAccessOf`, from `recordAccessFactsOf` (the caller's `/me` level for the
@@ -17,7 +18,7 @@
  *   SPA since task 011 / D-11).
  *
  * WHERE THE ANSWERS COME FROM (never a guess, ADR-003 fail closed):
- *   - each list's `canCreate` (and, for Add task, `canCreateTask`): the BFF's answer of the matching POST for this caller on
+ *   - each list's `canCreate` (and, for an event, its `creatableEventTypes`): the BFF's answer of the matching POST for this caller on
  *     this record (task 002 / 008: the documents, event and message lists of projects, matters and work assignments; the
  *     message thread of every record). It is the ONLY source for a matter, a work assignment, an invoice and a service
  *     request.
@@ -27,7 +28,7 @@
  *   - the LABEL ("Your access", task 011): `/me` `projects` for a project, `/me` `records` for a matter or work assignment
  *     (task 008). Display only. A `writeAccessPerRecord` caller is the composed READ view (uac-r2 A2), which would
  *     contradict their working create actions, so the line is not shown for them at all and their actions keep following
- *     the lists' `canCreate` / `canCreateTask`. A record `/me` has no entry for (an invoice, a service request, a
+ *     the lists' `canCreate` / `creatableEventTypes`. A record `/me` has no entry for (an invoice, a service request, a
  *     document, or a matter the BFF did not list) shows no level.
  * Unknown (the list still loading, failed, or silent; `/me` not read) is `null`: the action is hidden and nothing is said.
  *
@@ -42,16 +43,9 @@ import { AccessLevel } from '../../types';
 import type { RecordHostAction, RecordSectionId, RecordToolbarActionId } from './recordTemplate.types';
 
 /** The create actions a record's lists offer to the template (task 004; in their sections' headers since task 009). */
-export type RecordCreateActionId = Extract<RecordToolbarActionId, 'upload' | 'newMessage' | 'addTask' | 'addEvent'>;
+export type RecordCreateActionId = Extract<RecordToolbarActionId, 'upload' | 'newMessage' | 'addEvent'>;
 
-export const RECORD_CREATE_ACTIONS: readonly RecordCreateActionId[] = ['upload', 'newMessage', 'addTask', 'addEvent'];
-
-/**
- * A right a section reports WITHOUT a toolbar action (task 006 fix round 1): the invoice Files list's own Upload, which
- * stays the list's button (no toolbar Upload on an invoice) but is still part of what the caller may do on the record,
- * so "Your access" and the Files card's read-only line follow it.
- */
-export type RecordSectionRightId = 'filesUpload';
+export const RECORD_CREATE_ACTIONS: readonly RecordCreateActionId[] = ['upload', 'newMessage', 'addEvent'];
 
 /** May the caller create: `true`, `false`, or `null` = not known (yet). Only `true` offers the action. */
 export type CreateRight = boolean | null;
@@ -63,10 +57,8 @@ export type CreateRight = boolean | null;
 /** The read-only line of a section, per what is read-only in it. */
 interface ReadOnlyLines {
   documents: string;
-  /** The invoice's Files card. */
-  files: string;
   messages: string;
-  /** Tasks & events: its event list is read-only. */
+  /** Events: its event list is read-only. */
   events: string;
 }
 
@@ -99,13 +91,11 @@ export const RECORD_ACCESS_TEXT: {
   level: ACCESS_LEVEL_LABELS,
   grantLines: {
     documents: 'You can view these documents. Uploading needs Collaborate access.',
-    files: 'You can view these files. Uploading needs Collaborate access.',
     messages: 'You can read this thread. Posting needs Collaborate access.',
     events: 'You can view these events. Adding one needs Collaborate access.',
   },
   neutralLines: {
     documents: 'You can view these documents, but not upload to this record.',
-    files: 'You can view these files, but not upload to this record.',
     messages: 'You can read this thread, but not post to it.',
     events: 'You can view these events, but not add one.',
   },
@@ -165,15 +155,20 @@ export function listCreateRightOf(input: CreateRightInput): { right: CreateRight
 }
 
 /**
- * The right behind "Add task" (task 011): the event right (`createRightOf`: the list's `canCreate`, and the `/me` level
- * where it decides) AND the list's own `canCreateTask` (the BFF's answer for the Task type, task 008). Only an explicit
- * `true` from both is a yes: a list that says nothing about tasks (an older BFF, a failed read) is unknown, never "can",
- * so the action stays hidden (hide, don't guess). `false` from either is a no; an unknown event right is unknown.
+ * The right behind "Add event" (tasks 012 / 015, FR-35): the caller's create right on the record (`eventRight`, the shared
+ * `listCreateRightOf` rule) AND at least one event type they may pick. Every event is typed (owner Q-2) and the type options
+ * are exactly the list's `creatableEventTypes`, so a caller with the create right but no creatable type could not complete the
+ * form: that is a "no" (014 K3), and the section's read-only line says so. A list that sent no `creatableEventTypes` at all
+ * (an older BFF) says nothing about types: unknown, never "any", so Add event stays hidden (hide, don't guess). This replaced
+ * the Task choice's own right (`canCreateTask`), which is no longer read.
  */
-export function createTaskRightOf(eventRight: CreateRight, listCanCreateTask: boolean | null | undefined): CreateRight {
-  if (eventRight === false) return false;
-  if (eventRight === null) return null;
-  return typeof listCanCreateTask === 'boolean' ? listCanCreateTask : null;
+export function addEventRightOf(
+  eventRight: CreateRight,
+  creatableEventTypes: readonly unknown[] | null | undefined
+): CreateRight {
+  if (eventRight !== true) return eventRight;
+  if (!Array.isArray(creatableEventTypes)) return null;
+  return creatableEventTypes.length > 0;
 }
 
 /** Strict `/me` label → level: anything else is not an answer (unlike `mapAccessLevelString`, which defaults to ViewOnly). */
@@ -221,7 +216,7 @@ const RECORD_TYPE_OF_ROOT: Readonly<Record<string, string>> = {
  * DISPLAY ONLY (uac-r2 A2). A level decides a write only for a project caller without `writeAccessPerRecord`
  * (`decidingLevelOf`); a matter's or work assignment's `records` level never does. For a `writeAccessPerRecord` caller
  * the level is the composed READ view: `yourAccessOf` does not show it, `decidingLevelOf` answers `undefined`, and their
- * create actions keep following the lists' `canCreate` / `canCreateTask`.
+ * create actions keep following the lists' `canCreate` / `creatableEventTypes`.
  */
 export function recordLevelOf(
   root: string | undefined,
@@ -248,7 +243,7 @@ export interface RecordAccessFacts {
   /** The caller's `/me` level for this record as an answer (`recordLevelOf`), to display; undefined when there is none. */
   level: AccessLevel | undefined;
   /**
-   * The level that gates Upload, Add task and Add event is a fail-safe GUESS, not an answer: a level-decided project
+   * The level that gates Upload and Add event is a fail-safe GUESS, not an answer: a level-decided project
    * caller whose `/me` has no (recognisable) entry for the project. `decidingLevelOf` then hides those actions as View
    * Only, but what the caller may do there is unknown, so nothing is said about it (FR-07: unknown shows nothing).
    */
@@ -267,25 +262,23 @@ export function recordAccessFactsOf(
 }
 
 /** The rights a project caller's `/me` level gates (the message thread is not one: it follows the thread alone). */
-const LEVEL_GATED_RIGHTS: readonly (RecordCreateActionId | RecordSectionRightId)[] = ['upload', 'addTask', 'addEvent'];
+const LEVEL_GATED_RIGHTS: readonly RecordCreateActionId[] = ['upload', 'addEvent'];
 
 // ---------------------------------------------------------------------------
 // What the template knows: the rights the record's lists reported
 // ---------------------------------------------------------------------------
 
-export type RecordCreateRights = Readonly<Partial<Record<RecordCreateActionId | RecordSectionRightId, CreateRight>>>;
+export type RecordCreateRights = Readonly<Partial<Record<RecordCreateActionId, CreateRight>>>;
 
 /**
- * The rights the record's lists reported: with their action offers (only the create actions this record's config lists,
- * in its toolbar or a section's header; a list that has not reported yet is unknown), plus the rights sections reported
- * without an action of the template's (`sectionRights`, e.g. the invoice Files list's Upload).
+ * The rights the record's lists reported with their action offers (only the create actions this record's config lists,
+ * in its toolbar or a section's header; a list that has not reported yet is unknown).
  */
 export function createRightsOf(
   actionIds: readonly RecordToolbarActionId[],
-  offers: Partial<Record<RecordToolbarActionId, RecordHostAction>>,
-  sectionRights: Partial<Record<RecordSectionRightId, CreateRight>> = {}
+  offers: Partial<Record<RecordToolbarActionId, RecordHostAction>>
 ): RecordCreateRights {
-  const rights: Partial<Record<RecordCreateActionId | RecordSectionRightId, CreateRight>> = { ...sectionRights };
+  const rights: Partial<Record<RecordCreateActionId, CreateRight>> = {};
   for (const id of RECORD_CREATE_ACTIONS) {
     if (actionIds.includes(id)) rights[id] = offers[id]?.right ?? null;
   }
@@ -361,6 +354,37 @@ export function submitInvoiceRightOf(input: {
 }
 
 // ---------------------------------------------------------------------------
+// (a3) What the caller may do with ONE event (R4 task 015, FR-36 / S-1, S-3)
+// ---------------------------------------------------------------------------
+
+/** What an event row says about the caller's rights on it: the BFF's own answers (`PATCH /events/{id}` would admit it). */
+export interface EventRightsFacts {
+  canEdit?: boolean | null;
+  canChangeStatus?: boolean | null;
+  allowedStatuses?: readonly number[] | null;
+  canReassign?: boolean | null;
+}
+
+/** Edit is offered only on an explicit `canEdit: true`; absent (an older BFF) is "not said", never "can". */
+export function eventEditRightOf(event: EventRightsFacts | null | undefined): boolean {
+  return event?.canEdit === true;
+}
+
+/**
+ * The statuses a Change status dialog offers: exactly the BFF's `allowedStatuses`, and only when `canChangeStatus` is an
+ * explicit `true`. Empty = the action is not offered at all.
+ */
+export function eventStatusChoicesOf(event: EventRightsFacts | null | undefined): readonly number[] {
+  if (event?.canChangeStatus !== true || !Array.isArray(event.allowedStatuses)) return [];
+  return event.allowedStatuses.filter((s): s is number => typeof s === 'number');
+}
+
+/** Reassign (the Edit dialog's Assigned To) needs `canEdit` and an explicit `canReassign: true` (open work only). */
+export function eventReassignRightOf(event: EventRightsFacts | null | undefined): boolean {
+  return event?.canEdit === true && event.canReassign === true;
+}
+
+// ---------------------------------------------------------------------------
 // (b) "Your access"
 // ---------------------------------------------------------------------------
 
@@ -384,7 +408,7 @@ export function yourAccessOf({ callerContext, level, levelGuessed }: RecordAcces
 
 /**
  * The one line saying why a section is read-only (FR-07), or `null` when it is not, or not known to be. Only a section
- * that owns a create right has one (Documents, Files, Messages, Tasks & events). The line names a grant level only when
+ * that owns a create right has one (Documents, Messages, Events). The line names a grant level only when
  * the deciding `/me` level is KNOWN to be View Only; every other "no" (a ceiling, a per-record caller, a record `/me`
  * has no level for) gets the neutral wording. (Task 011: a level decides only for a project caller without
  * `writeAccessPerRecord`; a per-record caller's level is the read view, so it never triggers the grant wording.) A right decided by a guessed level (`levelGuessed`) is not known, so it
@@ -411,8 +435,6 @@ export function readOnlyNoteOf(
   switch (section) {
     case 'documents':
       return known.upload === false ? lines.documents : null;
-    case 'files':
-      return known.filesUpload === false ? lines.files : null;
     case 'messages':
       return known.newMessage === false ? lines.messages : null;
     case 'tasksEvents':

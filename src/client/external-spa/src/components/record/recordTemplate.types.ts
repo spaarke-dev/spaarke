@@ -36,7 +36,7 @@ export const RECORD_SECTION_LABELS: Readonly<Record<RecordSectionId, string>> = 
   files: 'Files',
   preview: 'Preview',
   messages: 'Messages',
-  tasksEvents: 'Tasks & events',
+  tasksEvents: 'Events',
 };
 
 /**
@@ -49,7 +49,6 @@ export type RecordToolbarActionId = Extract<
   | 'refresh'
   | 'upload'
   | 'newMessage'
-  | 'addTask'
   | 'addEvent'
   | 'submitInvoice'
   | 'copyLink'
@@ -58,6 +57,8 @@ export type RecordToolbarActionId = Extract<
   | 'delete'
   | 'history'
   | 'send'
+  | 'edit'
+  | 'changeStatus'
 >;
 
 /**
@@ -99,7 +100,7 @@ export interface RecordTemplateConfig {
   toolbar: readonly RecordToolbarActionId[];
   /**
    * Task 009 (owner 2026-11-12): actions that live in a section's header instead of the toolbar, per section, in order
-   * (Upload in Documents, New message in Messages, Add task and Add event in Tasks & events). They are offered exactly as toolbar
+   * (Upload in Documents, New message in Messages, Add event in Events). They are offered exactly as toolbar
    * actions are (by the section's list, or by an action host in `actions/`) and follow the same hide-don't-disable rules;
    * the template renders them as the section card's `HeaderToolbar` icon slots. An action id appears in `toolbar` or in
    * one section here, never both. Absent = no section actions.
@@ -133,6 +134,11 @@ export interface RecordViewContext {
   onRecordDeleted: () => void;
   /** Ask one section of this record to re-read (the service request recall re-reads the Messages thread). */
   refreshSection: (section: RecordSectionId) => void;
+  /**
+   * Re-read THIS record (what the modal's Refresh does: the shown record stays on screen until the answer arrives, and every
+   * section re-reads). An action host calls it after a save (Edit, Change status: task 015) so the record shows the new values.
+   */
+  refreshRecord: () => void;
 }
 
 /** What a section renderer gets. */
@@ -146,7 +152,7 @@ export interface RecordSectionContext extends RecordViewContext {
   refreshSignal: number;
   /**
    * Task 004 (FR-03), task 009, task 011. For a section that owns a create dialog (Documents: `upload`; Messages:
-   * `newMessage`; Tasks & events: `addTask` and `addEvent`): the reporter through which it offers that action, or `undefined` when this record's config lists
+   * `newMessage`; Events: `addEvent`): the reporter through which it offers that action, or `undefined` when this record's config lists
    * the action nowhere (neither `toolbar` nor `sectionActions`). A section that receives a reporter shows no create button
    * of its own and renders its dialog itself (so the dialog is a React descendant of the record modal); one that receives
    * `undefined` keeps its own button. The stable reporter per action id is the action hosts' one (`onActionChange`).
@@ -163,13 +169,6 @@ export interface RecordSectionContext extends RecordViewContext {
    * `recordAccess.ts`), or null/absent when it is not read-only or that is not known yet.
    */
   readOnlyNote?: string | null;
-  /**
-   * Task 006 fix round 1 (FR-07). For a section whose list has a create right WITHOUT a toolbar action (the invoice Files
-   * list's own Upload, `'filesUpload'`): the stable reporter through which it tells the template that right (`true` /
-   * `false`, or `null` while unknown and on unmount), so "Your access" and its read-only line follow it. It adds nothing
-   * to the toolbar.
-   */
-  reportRight?: (id: 'filesUpload') => (right: boolean | null) => void;
 }
 
 /** A toolbar action an action host offers: hidden unless `visible` (hide, don't disable). */
@@ -179,7 +178,7 @@ export interface RecordHostAction {
   /** Overrides the action's default tooltip (= accessible name); must contain the action's label (WCAG 2.5.3). */
   tooltip?: string;
   /**
-   * Task 006 (FR-06). A create action (Upload, New message, Add task, Add event) reports the right behind it from the BFF's
+   * Task 006 (FR-06). A create action (Upload, New message, Add event) reports the right behind it from the BFF's
    * answers: `true` / `false`, or `null` while unknown. A create action is shown only when it is `true`.
    */
   right?: boolean | null;

@@ -11,8 +11,11 @@ import path from 'path';
 import { describe, expect, it } from 'vitest';
 import {
   ACCESS_LEVEL_LABELS,
-  createTaskRightOf,
+  addEventRightOf,
   decidingLevelOf,
+  eventEditRightOf,
+  eventReassignRightOf,
+  eventStatusChoicesOf,
   readOnlyNoteOf,
   recordAccessFactsOf,
   recordLevelOf,
@@ -166,20 +169,60 @@ describe('yourAccessOf: nothing is inferred', () => {
   });
 });
 
-describe('createTaskRightOf: Add task needs the event right AND an explicit canCreateTask', () => {
+describe('addEventRightOf: Add event needs the create right AND at least one creatable type (task 015)', () => {
+  const ONE = [{ id: 't-1', name: 'Task', requiresDueDate: true }];
   it.each([
-    // [event right, list canCreateTask, expected]
-    [true, true, true],
-    [true, false, false],
-    [true, null, null],
+    // [create right, creatableEventTypes, expected]
+    [true, ONE, true], // must fire
+    [true, [], false], // the right without a type to pick: "no" (014 K3)
+    [true, null, null], // an older BFF sent no creatableEventTypes: unknown, never "any"
     [true, undefined, null],
-    [false, true, false],
-    [false, false, false],
-    [false, undefined, false],
-    [null, true, null],
-    [null, false, null],
-  ] as const)('event right %s and canCreateTask %s -> %s', (eventRight, canCreateTask, expected) => {
-    expect(createTaskRightOf(eventRight, canCreateTask)).toBe(expected);
+    [false, ONE, false], // types never turn a "no" into a yes
+    [false, [], false],
+    [null, ONE, null], // the right is not known yet: still not known
+    [null, null, null],
+  ] as const)('create right %s and types %j -> %s', (eventRight, types, expected) => {
+    expect(addEventRightOf(eventRight, types)).toBe(expected);
+  });
+
+  it('a creatableEventTypes that is not a list is not an answer', () => {
+    expect(addEventRightOf(true, 'task' as unknown as null)).toBeNull();
+    expect(addEventRightOf(true, { length: 1 } as unknown as null)).toBeNull();
+  });
+});
+
+describe('the per-event rights are the BFF answers, read strictly (task 015)', () => {
+  it.each([
+    [true, true],
+    [false, false],
+    [undefined, false],
+    [null, false],
+  ] as const)('canEdit %s -> Edit offered %s', (canEdit, expected) => {
+    expect(eventEditRightOf({ canEdit })).toBe(expected);
+  });
+  it('no event, no Edit', () => {
+    expect(eventEditRightOf(null)).toBe(false);
+    expect(eventEditRightOf(undefined)).toBe(false);
+  });
+
+  it('Change status offers exactly allowedStatuses, and only on an explicit canChangeStatus: true', () => {
+    expect(eventStatusChoicesOf({ canChangeStatus: true, allowedStatuses: [659490002, 659490004] })).toEqual([
+      659490002, 659490004,
+    ]);
+    // must-not-fire: not said, false, or no list of statuses
+    expect(eventStatusChoicesOf({ allowedStatuses: [659490002] })).toEqual([]);
+    expect(eventStatusChoicesOf({ canChangeStatus: false, allowedStatuses: [659490002] })).toEqual([]);
+    expect(eventStatusChoicesOf({ canChangeStatus: true })).toEqual([]);
+    expect(eventStatusChoicesOf({ canChangeStatus: true, allowedStatuses: [] })).toEqual([]);
+    expect(eventStatusChoicesOf(null)).toEqual([]);
+  });
+
+  it('Reassign needs canEdit AND canReassign, both explicit', () => {
+    expect(eventReassignRightOf({ canEdit: true, canReassign: true })).toBe(true);
+    expect(eventReassignRightOf({ canEdit: true, canReassign: false })).toBe(false);
+    expect(eventReassignRightOf({ canEdit: true })).toBe(false);
+    expect(eventReassignRightOf({ canEdit: false, canReassign: true })).toBe(false);
+    expect(eventReassignRightOf(undefined)).toBe(false);
   });
 });
 

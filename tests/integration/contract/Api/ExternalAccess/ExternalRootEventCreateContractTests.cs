@@ -62,7 +62,7 @@ public sealed class ExternalRootEventCreateContractTests : IClassFixture<Externa
         { "workassignments", ExternalDataService.TodoRootKind.WorkAssignment, WorkAssignment },
     };
 
-    private static object ValidEvent() => new { sprk_name = "Hearing", sprk_duedate = "2026-12-01" };
+    private static object ValidEvent() => new { sprk_name = "Hearing", sprk_duedate = "2026-12-01", eventType = "task" };
 
     /// <summary>A CIAM partner holding <paramref name="level"/> on <paramref name="rootId"/> of <paramref name="kind"/>.</summary>
     private static CallerPrincipal Partner(ExternalDataService.TodoRootKind kind, Guid rootId, ExternalAccessLevel level) =>
@@ -127,8 +127,8 @@ public sealed class ExternalRootEventCreateContractTests : IClassFixture<Externa
         var payload = ExternalDataService.BuildEventCreatePayload(args.Kind, args.RootId, args.Request, args.OwningTeamId);
         payload.Should().ContainKey(bindKey).WhoseValue.Should().Be($"/{entitySet}({rootId})");
         payload.Should().ContainKey(ExternalDataService.OwnerBindKey).WhoseValue.Should().Be($"/teams({args.OwningTeamId})");
-        payload.Keys.Count(k => k.EndsWith("@odata.bind", StringComparison.Ordinal)).Should().Be(2,
-            "one root bind and the owner — never a second root");
+        payload.Keys.Count(k => k.EndsWith("@odata.bind", StringComparison.Ordinal)).Should().Be(3,
+            "one root bind, the owner and the type (required since task 014b) — never a second root");
         payload["sprk_duedate"].Should().Be("2026-12-01");
     }
 
@@ -239,14 +239,16 @@ public sealed class ExternalRootEventCreateContractTests : IClassFixture<Externa
         _fixture.Principal = Holding(CallerPrincipalPlane.Workforce, kind, rootId, AccessRights.Read, SystemUserId, dataverseDecides: true);
         _fixture.Probe.AnswerAppOnly(SystemUserId, EntitySetOf(kind), rootId, AccessRights.Read | AccessRights.AppendTo)
             .HoldsAppOnly(SystemUserId, EventCreatePrivilege);
+        _fixture.Probe.AnswerAppOnly(SystemUserId, EventTypeRef.EntitySet, EventTypeRef.Task, AccessRights.Read | AccessRights.AppendTo);
 
         using var client = _fixture.CreateAuthenticatedClient();
         using var response = await client.PostAsJsonAsync($"/api/v1/external/{segment}/{rootId}/events", ValidEvent());
 
         response.StatusCode.Should().Be(HttpStatusCode.Created, await response.Content.ReadAsStringAsync());
         _fixture.Data.CreateEventCallCount.Should().Be(1);
-        _fixture.Probe.AppOnlyCalls.Should().ContainSingle().Which.Should().Match<(Guid, string EntitySet, Guid RecordId)>(
-            c => c.EntitySet == EntitySetOf(kind) && c.RecordId == rootId, "the TARGET root is asked about");
+        // The TARGET root, then (task 008 B1 / 014b) the type row the event binds — nothing else.
+        _fixture.Probe.AppOnlyCalls.Select(c => (c.EntitySet, c.RecordId)).Should().Equal(
+            (EntitySetOf(kind), rootId), (EventTypeRef.EntitySet, EventTypeRef.Task));
         _fixture.Probe.AppOnlyPrivilegeCalls.Should().Equal(new[] { (SystemUserId, EventCreatePrivilege) });
     }
 

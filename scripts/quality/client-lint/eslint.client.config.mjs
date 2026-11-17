@@ -32,7 +32,6 @@ export const PACKAGES = [
   { id: "ai-widgets", dir: "src/client/shared/Spaarke.AI.Widgets" },
   { id: "compose-components", dir: "src/client/shared/Spaarke.Compose.Components" },
   { id: "communication-components", dir: "src/client/shared/Spaarke.Communication.Components" },
-  { id: "document-operations", dir: "src/client/shared/Spaarke.DocumentOperations" },
   { id: "daily-briefing-components", dir: "src/client/shared/Spaarke.DailyBriefing.Components" },
   { id: "spaarkeai", dir: "src/solutions/SpaarkeAi" },
   { id: "legal-workspace-app", dir: "src/solutions/LegalWorkspace" },

@@ -62,6 +62,9 @@ $headers = @{
     Authorization      = "Bearer $token"
     'OData-MaxVersion' = '4.0'
     'OData-Version'    = '4.0'
+    # Strongly consistent reads: attribute metadata (IsSecured) is cached per server, and a plain read soon after a change can
+    # come back stale (a secured column reported as unsecured). The header is ignored on data requests.
+    Consistency        = 'Strong'
     Prefer             = 'odata.maxpagesize=5000'
 }
 

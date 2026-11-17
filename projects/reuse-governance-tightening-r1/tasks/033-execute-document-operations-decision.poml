@@ -4,7 +4,7 @@
     <title>Execute the owner-approved decision for @spaarke/document-operations</title>
     <phase>4 Package reviews</phase>
     <gate>blocked until 032</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .ts/.tsx code across three consumers and tests; high-risk item in the plan's risk register</rigor-reason>
     <model-tier>opus</model-tier>
@@ -101,7 +101,7 @@
     <criterion testable="true">Cover the existing contract only; extras justified in one line in notes.</criterion>
   </acceptance-criteria>
 
-  <notes>Item 4 PR(s) are separate from the items 1-3 PR (NFR-05).</notes>
+  <notes>Item 4 PR(s) are separate from the items 1-3 PR (NFR-05). Completed 2026-11-13: useDocumentActions + its test moved to ui-components src/hooks (main barrel, not pcf-safe); SemanticSearch, Compose, SpaarkeAi and LegalWorkspace re-pointed; package deleted; ADR-012 census + SharedPackageCensusTests updated; CI compose gate, Build-AllClientComponents, client-lint list and CAPABILITY-INDEX fixed. PCF bundle (ScopeConfigEditor) unchanged at 338,693 bytes. ui-components 6371, Compose 1455, SemanticSearch 531, SpaarkeAi 1226 tests pass; LegalWorkspace builds; census 8/8. Details: notes/033-document-operations.md.</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

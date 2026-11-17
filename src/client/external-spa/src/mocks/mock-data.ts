@@ -3,7 +3,14 @@
  * Provides realistic sample data so UI can be developed without a live BFF or auth.
  */
 
-import type { ODataProject, ODataDocument, ODataEvent, ODataContact, ODataOrganization } from '../api/web-api-client';
+import type {
+  ODataProject,
+  ODataDocument,
+  ODataEvent,
+  ODataContact,
+  ODataOrganization,
+  CreatableEventType,
+} from '../api/web-api-client';
 import type { ExternalUserContextResponse } from '../auth/bff-client';
 
 export const MOCK_USER: ExternalUserContextResponse = {
@@ -85,6 +92,12 @@ export const MOCK_DOCUMENTS: Record<string, ODataDocument[]> = {
   ],
 };
 
+/** The event types the mock BFF lists as creatable on every record (`creatableEventTypes`, R4 task 014). */
+export const MOCK_CREATABLE_EVENT_TYPES: CreatableEventType[] = [
+  { id: 'mock-type-task', name: 'Task', requiresDueDate: true },
+  { id: 'mock-type-meeting', name: 'Meeting', requiresDueDate: false },
+];
+
 export const MOCK_EVENTS: Record<string, ODataEvent[]> = {
   'mock-project-001': [
     {
@@ -102,7 +115,11 @@ export const MOCK_EVENTS: Record<string, ODataEvent[]> = {
       sprk_status: 659490001, // Open (statuscode)
       _sprk_regardingproject_value: 'mock-project-001',
       createdon: '2026-01-12T09:00:00Z',
-      isTask: true, // an event of type Task (R4 task 008)
+      eventTypeId: 'mock-type-task',
+      eventTypeName: 'Task', // an event of type Task (R4 tasks 008 / 015)
+      sprk_priority: 100000002, // High
+      assignedToName: 'Jane Smith',
+      sprk_description: 'Mark up the indemnity and escrow clauses and return to counsel.',
     },
     {
       sprk_eventid: 'evt-004',

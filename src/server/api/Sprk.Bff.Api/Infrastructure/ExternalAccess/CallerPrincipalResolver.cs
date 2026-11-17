@@ -564,6 +564,10 @@ public sealed class CiamContactPrincipalStrategy : ICallerPrincipalStrategy
         // plane composition the workforce contact also uses. Nothing here reads a grant's level: the
         // evaluator decides which level counts (DirectAccessLevel on a Secure root) and which records
         // survive (deny list, then Restricted).
+        //
+        // #2851: the request's access memo is created HERE, single-threaded, before the three concurrent compositions
+        // start, so none of them is the first to touch HttpContext.Items (RequestAccessMemo.For).
+        RequestAccessMemo.For(httpContext);
         var principal = (await ComposeAsync(_accessibleSet, contactId, email, oid, httpContext.RequestAborted)
             .ConfigureAwait(false)).Principal;
 
@@ -588,14 +592,13 @@ public sealed class CiamContactPrincipalStrategy : ICallerPrincipalStrategy
     {
         ArgumentNullException.ThrowIfNull(accessibleSet);
 
-        var accessibleProjects = await accessibleSet
-            .ComposeForCiamContactAsync(contactId, AccessibleRecordSetService.ProjectEntity, ct)
-            .ConfigureAwait(false);
-        var accessibleMatters = await accessibleSet
-            .ComposeForCiamContactAsync(contactId, AccessibleRecordSetService.MatterEntity, ct)
-            .ConfigureAwait(false);
-        var accessibleWorkAssignments = await accessibleSet
-            .ComposeForCiamContactAsync(contactId, AccessibleRecordSetService.WorkAssignmentEntity, ct)
+        // #2845: the three compositions run CONCURRENTLY (started in this order), sharing the request's memo of the
+        // subject-level reads. Their results, and the first fault in project → matter → work-assignment order, are exactly
+        // what the sequential awaits gave (AwaitInOrderAsync).
+        var (accessibleProjects, accessibleMatters, accessibleWorkAssignments) = await AwaitInOrderAsync(
+                accessibleSet.ComposeForCiamContactAsync(contactId, AccessibleRecordSetService.ProjectEntity, ct),
+                accessibleSet.ComposeForCiamContactAsync(contactId, AccessibleRecordSetService.MatterEntity, ct),
+                accessibleSet.ComposeForCiamContactAsync(contactId, AccessibleRecordSetService.WorkAssignmentEntity, ct))
             .ConfigureAwait(false);
 
         // Per-record rights, straight from the evaluator — as WorkforcePrincipalStrategy does. Only entries
@@ -620,6 +623,30 @@ public sealed class CiamContactPrincipalStrategy : ICallerPrincipalStrategy
                 WorkAssignmentAccess = workAssignmentAccess,
             },
             accessibleProjects, accessibleMatters, accessibleWorkAssignments);
+    }
+
+    /// <summary>
+    /// #2845: the three per-type compositions, awaited as if one after another. All three are already running; this waits for
+    /// every one to finish (so none is left running past the request's authorization), then takes the results in
+    /// project → matter → work-assignment order — and so rethrows the FIRST of them to fault or be cancelled, in that order,
+    /// exactly as the sequential awaits did. A later composition's fault is observed (never an unobserved task exception).
+    /// </summary>
+    internal static async Task<(AccessibleRecordSet Projects, AccessibleRecordSet Matters, AccessibleRecordSet WorkAssignments)>
+        AwaitInOrderAsync(Task<AccessibleRecordSet> projects, Task<AccessibleRecordSet> matters, Task<AccessibleRecordSet> workAssignments)
+    {
+        try
+        {
+            await Task.WhenAll(projects, matters, workAssignments).ConfigureAwait(false);
+        }
+        catch
+        {
+            // Rethrown below, in order: the first faulted or cancelled task of project → matter → work assignment.
+        }
+
+        return (
+            await projects.ConfigureAwait(false),
+            await matters.ConfigureAwait(false),
+            await workAssignments.ConfigureAwait(false));
     }
 
     /// <summary>
@@ -826,6 +853,10 @@ public sealed class WorkforcePrincipalStrategy : ICallerPrincipalStrategy
         }
 
         var principal = resolution.Principal!;
+
+        // #2851: the request's access memo is created HERE, single-threaded, before the three concurrent compositions
+        // start, so none of them is the first to touch HttpContext.Items (RequestAccessMemo.For).
+        RequestAccessMemo.For(httpContext);
         var composed = await ComposeAsync(
                 _accessibleSet, principal, WorkforcePrincipalResolver.ExtractTokenEmail(httpContext.User), httpContext.RequestAborted)
             .ConfigureAwait(false);
@@ -857,12 +888,14 @@ public sealed class WorkforcePrincipalStrategy : ICallerPrincipalStrategy
         // type (project / matter / work assignment). This is what prevents a workforce caller from seeing
         // all records merely by authenticating (R2 NFR-08). Each set = membership/assignment ∪ own-contact
         // grants for that type.
-        var accessibleProjects = await accessibleSet
-            .ComposeAsync(principal, ProjectEntity, ct).ConfigureAwait(false);
-        var accessibleMatters = await accessibleSet
-            .ComposeAsync(principal, MatterEntity, ct).ConfigureAwait(false);
-        var accessibleWorkAssignments = await accessibleSet
-            .ComposeAsync(principal, WorkAssignmentEntity, ct).ConfigureAwait(false);
+        //
+        // #2845: concurrently, as the CIAM strategy does (CiamContactPrincipalStrategy.AwaitInOrderAsync): started in this
+        // order, results and the first fault taken in this order.
+        var (accessibleProjects, accessibleMatters, accessibleWorkAssignments) = await CiamContactPrincipalStrategy.AwaitInOrderAsync(
+                accessibleSet.ComposeAsync(principal, ProjectEntity, ct),
+                accessibleSet.ComposeAsync(principal, MatterEntity, ct),
+                accessibleSet.ComposeAsync(principal, WorkAssignmentEntity, ct))
+            .ConfigureAwait(false);
 
         // Per-record rights, straight from the evaluator — no stamp, no per-plane default. Only entries
         // carrying Read reach the principal (task 136 · C2); until then this copied every key, a None-rights

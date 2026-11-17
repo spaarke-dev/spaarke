@@ -187,6 +187,14 @@ public sealed class FakeSecureRecordSetupDataverse : ISecureRecordSetupDataverse
             dv.SecuredColumns[ColumnKey(SecureRecordSetupProcedure.InvoiceMoneyTable, column)] = true;
         }
 
+        // Task 270: the invoice-family links (#2799) and the four packaged message-access columns (field-mapping 054b) as a
+        // release carrying both locks ships them. The direct recipient is absent (provisioning never creates it):
+        // AddDirectRecipient adds it.
+        foreach (var (table, column) in SecureRecordSetupProcedure.InvoiceFamilyLinkColumns.Concat(SecureRecordSetupProcedure.MessageAccessColumns))
+        {
+            dv.SeedBffManagedLock(table, column);
+        }
+
         // ISS-020: the standing-grant profile as SpaarkeMaster ships it (Read/Create/Update on contact.sprk_standinggrant,
         // the column secured, no members) ...
         dv.StandingGrantProfileId = dv.AddProfile(SecureRecordSetupProcedure.StandingGrantProfileName);
@@ -305,6 +313,34 @@ public sealed class FakeSecureRecordSetupDataverse : ISecureRecordSetupDataverse
     }
 
     internal static string ColumnKey(string table, string column) => $"{table}.{column}";
+
+    /// <summary>
+    /// Task 270: a BFF-managed column lock as SpaarkeMaster ships it on <paramref name="table"/>.<paramref name="column"/> —
+    /// secured; Readers 4/0/0, Writers 4/4/4, plus the platform's System Administrator profile.
+    /// </summary>
+    internal void SeedBffManagedLock(string table, string column)
+    {
+        var permissions = ColumnPermissions(column);
+        permissions.Add(new SecureSetupFieldPermission(ReaderProfileId, table, 4, 0, 0));
+        permissions.Add(new SecureSetupFieldPermission(WriterProfileId, table, 4, 4, 4));
+        permissions.Add(new SecureSetupFieldPermission(SystemAdministratorProfileId, table, 4, 4, 4));
+        SecuredColumns[ColumnKey(table, column)] = true;
+    }
+
+    /// <summary>Task 270: the environment ran scripts/Set-DirectRecipientSchema.ps1 and Set-ThreadFlagFieldSecurity.ps1.</summary>
+    internal void AddDirectRecipient()
+        => SeedBffManagedLock(SecureRecordSetupProcedure.DirectRecipientColumn.Table, SecureRecordSetupProcedure.DirectRecipientColumn.Column);
+
+    /// <summary>Every permission row on <paramref name="table"/>.<paramref name="column"/> for <paramref name="profileId"/> removed.</summary>
+    internal void RemoveGrant(string table, string column, Guid profileId)
+        => ColumnPermissions(column).RemoveAll(p => p.ProfileId == profileId && string.Equals(p.EntityName, table, StringComparison.OrdinalIgnoreCase));
+
+    /// <summary><paramref name="profileId"/>'s grant on <paramref name="table"/>.<paramref name="column"/> replaced by read/create/update.</summary>
+    internal void SetGrant(string table, string column, Guid profileId, int read, int create, int update)
+    {
+        RemoveGrant(table, column, profileId);
+        ColumnPermissions(column).Add(new SecureSetupFieldPermission(profileId, table, read, create, update));
+    }
 
     internal List<SecureSetupFieldPermission> ColumnPermissions(string column)
     {

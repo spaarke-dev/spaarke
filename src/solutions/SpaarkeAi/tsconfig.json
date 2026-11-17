@@ -5,8 +5,6 @@
     "baseUrl": ".",
     "paths": {
       "@/*": ["src/*"],
-      "@spaarke/ai-context": ["../../client/shared/Spaarke.AI.Context/src/index.ts"],
-      "@spaarke/ai-context/*": ["../../client/shared/Spaarke.AI.Context/src/*"],
       "@spaarke/ai-outputs": ["../../client/shared/Spaarke.AI.Outputs/src/index.ts"],
       "@spaarke/ai-outputs/*": ["../../client/shared/Spaarke.AI.Outputs/src/*"],
       "@spaarke/auth": ["../../client/shared/Spaarke.Auth/src/index.ts"],
@@ -21,12 +19,9 @@
       "@spaarke/notifications/*": ["../../client/shared/Spaarke.Notifications/src/*"],
       "@spaarke/communication-components": ["../../client/shared/Spaarke.Communication.Components/src/index.ts"],
       "@spaarke/communication-components/*": ["../../client/shared/Spaarke.Communication.Components/src/*"],
-      "@spaarke/document-operations": ["../../client/shared/Spaarke.DocumentOperations/src/index.ts"],
-      "@spaarke/document-operations/*": ["../../client/shared/Spaarke.DocumentOperations/src/*"],
       "@spaarke/compose-components": ["../../client/shared/Spaarke.Compose.Components/src/index.ts"],
       "@spaarke/compose-components/*": ["../../client/shared/Spaarke.Compose.Components/src/*"],
-      "@spaarke/legal-workspace": ["../../client/shared/Spaarke.LegalWorkspace/src/index.ts"],
-      "@spaarke/legal-workspace/*": ["../../client/shared/Spaarke.LegalWorkspace/src/*"],
+      "legal-workspace": ["../LegalWorkspace/src/index.ts"],
       "@azure/msal-browser": ["./node_modules/@azure/msal-browser"],
       "@fluentui/react-components": ["./node_modules/@fluentui/react-components"],
       "@fluentui/react-icons": ["./node_modules/@fluentui/react-icons"]

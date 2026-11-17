@@ -29,7 +29,8 @@ export function fakeResponse(status: number, body?: unknown): Response {
 
 type Fetch = (url: string, init?: RequestInit) => Promise<Response>;
 
-const CREATE = /\/api\/v1\/child-records\/([a-z_]+)$/i;
+// An optional query string follows the table (`?mappingSourceEntity=&mappingSourceId=`, task 023): the body is what is asserted.
+const CREATE = /\/api\/v1\/child-records\/([a-z_]+)(?:\?[^#]*)?$/i;
 const REFILE = /\/api\/v1\/child-records\/([a-z_]+)\/([^/?]+)$/i;
 const EVENT_FILING = /\/api\/v1\/events\/([^/?]+)\/filing$/i;
 const COMMUNICATION_FILING = /\/api\/communications\/([^/?]+)\/filing$/i;
@@ -53,7 +54,9 @@ export function bffChildWriteFetch(
     // Only the child-record routes carry JSON; any other request (an SPE upload's file body, …) goes to `inner` as is.
     const isChildRoute = [CREATE, REFILE, EVENT_FILING, COMMUNICATION_FILING].some(r => r.test(url));
     if (!isChildRoute) {
-      return inner ? inner(url, init) : fakeResponse(404, { title: 'Not Found', status: 404, detail: `No fake route for ${method} ${url}` });
+      return inner
+        ? inner(url, init)
+        : fakeResponse(404, { title: 'Not Found', status: 404, detail: `No fake route for ${method} ${url}` });
     }
     const body = typeof init?.body === 'string' ? (JSON.parse(init.body) as Record<string, unknown>) : {};
     try {
@@ -87,7 +90,9 @@ export function bffChildWriteFetch(
         detail: err instanceof Error ? err.message : String(err),
       });
     }
-    return inner ? inner(url, init) : fakeResponse(404, { title: 'Not Found', status: 404, detail: `No fake route for ${method} ${url}` });
+    return inner
+      ? inner(url, init)
+      : fakeResponse(404, { title: 'Not Found', status: 404, detail: `No fake route for ${method} ${url}` });
   }) as unknown as jest.Mock<Promise<Response>, [string, RequestInit?]>;
 }
 

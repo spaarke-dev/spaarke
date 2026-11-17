@@ -8,7 +8,7 @@ Maintainer notes (stripped before Claude reads this file):
 -->
 # src/client/shared — shared TypeScript packages
 
-Shared React/TypeScript libraries consumed by PCF controls, Code Pages (`src/solutions/*`), the external SPA and the Office add-ins (the add-ins use only `@spaarke/auth`). One folder per package; several have their own `README.md` (Compose, DocumentOperations, Events, Notifications, SdapClient, SmartTodo, Visuals) — read it before changing that package.
+Shared React/TypeScript libraries consumed by PCF controls, Code Pages (`src/solutions/*`), the external SPA and the Office add-ins (the add-ins use only `@spaarke/auth`). One folder per package; several have their own `README.md` (Compose, Events, Notifications, SdapClient, SmartTodo, Visuals) — read it before changing that package.
 
 **`@spaarke/ui-components`** (`Spaarke.UI.Components/`) has two entry points:
 - `src/index.ts` — the main barrel, for Code Pages (React 19);
