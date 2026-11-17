@@ -25,3 +25,9 @@ Use a Collaborate user and a View Only user on a matter, a project and a work as
 | 6 | Collaborate: Edit (type read-only) and Change status (any status) work and the list shows the new values | |
 | 7 | View Only: no Add event, Edit, Change status or Delete | |
 | 8 | uac-r2's post-deploy gate shows no new 5xx | |
+
+## Step 3 finding — typed event create answered 500 (D-21 #2892)
+- Owner E2E 2026-11-17, matter root, type Task: POST /matters/{id}/events → 500 InvalidOperationException. Cause: the external create bound the event type as `sprk_eventtype_ref@odata.bind`; the case-sensitive navigation property is `sprk_EventType_Ref` (task 008 regression). Every typed create failed.
+- Fix: PR #2894 (uac-r2 gate review PASS, checked against live metadata), squash-merged to master as `08161cfb0e` after Router and Client lint passed.
+- Same key in Signals (D-22 #2893) closed as not a defect: that path goes through `DataverseWriteItemMapper`, which corrects the case.
+- Waiting on: the dev BFF redeploy by uac-r2 from merged master (the owner names the SHA there), then retest items 1–6.
