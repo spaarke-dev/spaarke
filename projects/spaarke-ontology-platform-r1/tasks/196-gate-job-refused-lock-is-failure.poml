@@ -4,7 +4,7 @@
     <title>Gate Decision Record job: a refused processing lock is a Failure (redelivered, then dead-lettered), never a silent Success</title>
     <phase>12 Create-wizard lookups and composer (185 dev check fixes)</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Tags include bff-api; modifies .cs code and tests.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -82,7 +82,7 @@
   <tools>
     <tool name="dotnet">Build the BFF; filtered dotnet test on GateDecisionRecordJobTests; ArchTests</tool>
   </tools>
-  <completion></completion>
+  <completion>Done 2026-11-17: PR #2884 merged to master (0de88473b1). Refused processing lock returns Failure (Warning per non-final delivery; Error + one GateRecordFailed on the final, then dead-lettered). Fix round 1 added the same fix to our AssignTaskEmailJob (task 168), plus K1 remarks and K4 log wording. Independent Opus review PASS (no F), fix diff re-checked by the main session. Publish delta +153 bytes. Not deployed: dev via uac-r2 next BFF build. Notes: notes/task-196-notes.md. rework: fix-round-1 task 196</completion>
   <execution>
     <protocol>Run through task-execute. Fresh worktree from origin/master; PR to master.</protocol>
   </execution>
