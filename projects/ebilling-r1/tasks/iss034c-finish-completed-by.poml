@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="iss034c" project="ebilling-r1">
+  <metadata>
+    <title>Blocked decision stamp records who completed the decision (iss034a K5, EB-D-253)</title>
+    <phase>Defect fix (ISS-034 #2888 follow-up; owner EB-D-253)</phase>
+    <gate>iss034a and iss034b merged into work. Branch from work/ebilling-r1 at the sha named in the agent brief.</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>BFF decision path (SubmissionOverrideService) plus the Invoice Review code page; tests modified.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+    <parallel-safe>true</parallel-safe>
+    <deps>iss034a, iss034b</deps>
+    <tags>bff-api, react, testing</tags>
+    <estimated-effort>0.5 day</estimated-effort>
+  </metadata>
+
+  <prompt>Since iss034a, an operator can finish a blocked Override or Return that another person recorded but did not finish. Each operator who tries leaves one `FinishRequested` operator record, but nothing names who COMPLETED the decision: the decider, the decider's own repeat, or one of the operators (notes/iss034a-operator-finish-stranded-decision.md K5). The owner wants the completer recorded (EB-D-253).
+
+Fix: the blocked-decision stamp (`BlockedDecisionStamp`, written into `sprk_findingsjson` by `WithStamp` in src/server/api/Sprk.Bff.Api/Services/Finance/SubmissionOverrideService.cs) gains the completing caller, `completedBySystemUserId`, written in the SAME write that already writes the stamp (the release transaction or the Return path's stamp write), so it can never name someone whose call did not complete the decision. The completing caller is the user whose request made that write: the decider on a first-time decision or its repeat, the operator on an operator finish. `bySystemUserId` stays the stored decider, unchanged. `ReadStamp` reads stamps without the new member (every stamp written before this change) as "not recorded", never as a fault. The GET view that already carries the stamps (`BlockedSubmissionView.Override` / `.Return`) exposes it. Invoice Review's History tab (src/solutions/InvoiceReview/src/components/tabs/HistoryTab.tsx, which already reads decision data) shows "Finished by {name}" for a blocked decision when the completer differs from the decider, using the same name resolution the tab already uses for people; when the stamp has no completer, it shows nothing extra.</prompt>
+
+  <goal>For every blocked Override or Return finished from now on, the stored data names exactly the user whose call completed it, and the page shows it when that user is not the decider.</goal>
+
+  <constraints>
+    <constraint source="EB-D-253">The completer is written only in the write that completes the decision (atomic with it). No new Decision Record, no new Dataverse column, no schema or package change.</constraint>
+    <constraint source="iss034a">Everything iss034a keeps from the stored decision stays: bySystemUserId, the reason, the note, the Signal closes and the Decision Record credit the stored decider. The operator record (FinishRequested) is unchanged.</constraint>
+    <constraint source="F4 / iss034a review round 1">The pre-write stamp-size check (findings_too_large) measures the stamp as it will be written, including the new member; the check after the closes stays as the backstop.</constraint>
+    <constraint source="compatibility">A stamp without the member reads as before (no fault, no 503); a decision repeated after this change on a submission whose stamp was written before it does not rewrite history beyond what the repeat already writes today.</constraint>
+    <constraint source="ADR-021">Fluent v9 tokens only; no new surface: the History tab line only.</constraint>
+    <constraint source="project">Only SubmissionOverrideService.cs (and its view types), the Invoice Review page files that read the stamp (decisionModel.ts / invoiceReviewApi.ts / HistoryTab.tsx as needed), their tests, and notes/iss034a-operator-finish-stranded-decision.md (K5 marked fixed by iss034c). No deploy.</constraint>
+  </constraints>
+
+  <acceptance-criteria>
+    <criterion testable="true">xUnit: a first-time Override and a first-time Return write completedBySystemUserId = the decider; the decider's repeat after a stranded write writes the decider; an operator finish writes the operator, while bySystemUserId stays the decider.</criterion>
+    <criterion testable="true">xUnit: a failed finish (any refusal or fault before the completing write) writes no completer; a later completion by someone else writes that person.</criterion>
+    <criterion testable="true">xUnit: ReadStamp of a stamp without the member gives a null completer and no fault (must-not-fire); the GET view carries the completer.</criterion>
+    <criterion testable="true">xUnit: the findings_too_large pre-check counts the new member (a stamp that fits only without it is refused before any write).</criterion>
+    <criterion testable="true">Jest: the History tab shows "Finished by {name}" when the completer differs from the decider, and nothing extra when it matches or is absent.</criterion>
+    <criterion testable="true">Filtered SubmissionOverride|BlockedSubmission tests, the InvoiceReview Jest suite, typecheck and build, and the --warnaserror BFF build pass.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>
