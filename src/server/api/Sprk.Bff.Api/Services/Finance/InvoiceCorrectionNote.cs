@@ -40,6 +40,13 @@ public static class InvoiceCorrectionNote
     /// </summary>
     public const string DecisionColumn = "sprk_decisionnote";
 
+    /// <summary>
+    /// Task 095f-2d2 (EB-D-242): the <c>sprk_invoicecorrection</c> column holding the note a reviewer's correct or confirm carries. Written only in the
+    /// same create as the correction row (<c>InvoiceCorrectionService</c>), never part of the row's derived id, never on an "Accepted in bulk" or
+    /// "Unreviewed" row, and never added to a firm-facing reader or allow-list. Added by <c>scripts/ebilling/Deploy-EbillingDecisionNoteColumns.ps1</c> (Memo 2000).
+    /// </summary>
+    public const string CorrectionRowColumn = "sprk_note";
+
     /// <summary>Task 095f-2a (design 1.1): the decision routes' 400 for a note over <see cref="MaxLength"/>.</summary>
     public const string NoteTooLongCode = "ebilling.note_too_long";
 

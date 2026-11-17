@@ -92,6 +92,10 @@ public class InvoiceNoteColumnsGuardTests
     internal static IReadOnlyList<string> NamesDecisionNote(IEnumerable<(string File, string Code)> sources) =>
         sources.Where(s => ColumnPatterns[0].IsMatch(s.Code)).Select(s => s.File).OrderBy(f => f, StringComparer.Ordinal).ToList();
 
+    /// <summary>The files that name the correction row's note, <c>sprk_note</c> (pure): the firm-facing planes must have none (095f-2d2, EB-D-242).</summary>
+    internal static IReadOnlyList<string> NamesCorrectionRowNote(IEnumerable<(string File, string Code)> sources) =>
+        sources.Where(s => ColumnPatterns[1].IsMatch(s.Code)).Select(s => s.File).OrderBy(f => f, StringComparer.Ordinal).ToList();
+
     private static IEnumerable<(string File, string Code)> BffSources() =>
         SourceScan.ServerSourceFiles().Select(f => (SourceScan.Relative(f), SourceScan.CodeText(File.ReadLines(f))));
 
@@ -165,6 +169,34 @@ public class InvoiceNoteColumnsGuardTests
             "sprk_decisionnote is the INTERNAL decision note (EB-D-240); no firm-facing reader, allow-list or SPA type may name it:\n" + string.Join("\n", hits));
     }
 
+    [Fact(DisplayName = "095f-2d2 EB-D-242: no firm-facing file (external server code, external DI module, external SPA) names sprk_note, the correction row's internal note")]
+    public void ExternalPlane_NeverNamesTheCorrectionRowNote()
+    {
+        var files = ExternalPlaneFiles().ToList();
+        Assert.NotEmpty(files);
+        var hits = NamesCorrectionRowNote(files.Select(f => (SourceScan.Relative(f), SourceScan.CodeText(File.ReadLines(f)))));
+        Assert.True(hits.Count == 0,
+            "sprk_invoicecorrection.sprk_note is the INTERNAL note a reviewer's correct or confirm carries (EB-D-242); no firm-facing reader, allow-list or SPA type may name it:\n"
+            + string.Join("\n", hits));
+    }
+
+    [Fact(DisplayName = "095f-2d2 controls: sprk_note planted in a firm-facing file is reported (must fire, synthetic and the real external DI module); lookalikes and comments are not (must not fire)")]
+    public void CorrectionRowNoteControls()
+    {
+        // Must fire, synthetic: a projection, a type and a constant that name the column.
+        Assert.Equal(["a.cs"], NamesCorrectionRowNote([("a.cs", "ReadableColumns: new[] { \"sprk_invoicenumber\", \"sprk_Note\" }"), ("b.cs", "no note here")]));
+        Assert.Equal(["t.ts"], NamesCorrectionRowNote([("t.ts", "interface Correction { sprk_note?: string }")]));
+
+        // Must fire, real file: the external DI module, which holds the module allow-lists, with the column planted in it.
+        var module = SourceScan.CodeText(File.ReadLines(ExternalAccessDiModule()));
+        Assert.Equal(["ExternalAccessModule.cs"], NamesCorrectionRowNote([("ExternalAccessModule.cs", module + "\nvar ReadableColumns = new[] { \"sprk_note\" };")]));
+
+        // Must not fire: the real module as it is, lookalike names, the other note columns, and a comment.
+        Assert.Empty(NamesCorrectionRowNote([("ExternalAccessModule.cs", module)]));
+        Assert.Empty(NamesCorrectionRowNote([("c.cs", "\"sprk_notes\", \"sprk_notebook\", \"sprk_correctionnote\", \"sprk_decisionnote\", \"new_sprk_note\"")]));
+        Assert.Empty(NamesCorrectionRowNote([("d.cs", SourceScan.CodeText(["var x = 1; // never sprk_note"]))]));
+    }
+
     [Fact(DisplayName = "095f-2s controls: a planted BFF select is reported (must fire); pending or carried columns and lookalike names are not (must not fire)")]
     public void Controls()
     {
@@ -194,8 +226,8 @@ public class InvoiceNoteColumnsGuardTests
         // Must not fire: lookalike names and unrelated columns.
         Assert.Empty(NamedColumns("sprk_notes, sprk_notebook, new_sprk_note, sprk_correctionnote, sprk_decisionnotes, sprk_reason"));
 
-        // The real tree: the BFF names sprk_invoice.sprk_decisionnote (095f-2a's lifecycle write) but not yet sprk_invoicecorrection.sprk_note;
-        // the real pending list covers both, so neither is a violation.
+        // The real tree: the BFF names sprk_invoice.sprk_decisionnote (095f-2a's lifecycle write) and sprk_invoicecorrection.sprk_note (095f-2d2's
+        // correction row write); the real pending list covers both, so neither is a violation.
         Assert.Empty(Violations(BffSources(), SourceAttributesByColumn(), PendingSchema));
 
         // The ratchet: an entry the source carries is stale.
