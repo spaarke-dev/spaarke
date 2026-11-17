@@ -946,7 +946,16 @@ public sealed class ProcedureAssignmentEndpointsTests
 
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         seenDecider.Should().Be(Decider);
-        seen?.Note.Should().Be(withBody ? "no longer needed" : null);
+        if (withBody)
+        {
+            // Review F4: the body must bind; a null request would silently drop the note on every unpin and remove.
+            seen.Should().NotBeNull();
+            seen!.Note.Should().Be("no longer needed");
+        }
+        else
+        {
+            seen?.Note.Should().BeNull();
+        }
         if (!withBody)
         {
             seen.Should().BeNull();

@@ -83,3 +83,17 @@ For change-rule, the preflight runs after stages 1 and 2 and before stage 3.
 ## Rework
 
 None after the build; fixes during the build were test-only (see the commit).
+
+## Review (2026-11-16): one Opus adversarial pass
+
+Hunt items (a), (b), (d), (e), (f) and (i) are clean. ontology-r1's H-3 glance passed at e3127757fa.
+
+**Fixed (F4):** `ProcedureAssignmentEndpointsTests` DELETE note-body test used `seen?.Note`, which skipped the assertion when the body failed to bind. It now asserts that the request is non-null and that the note equals the sent text when a body is sent. Fixed on work after the merge.
+
+**Known limits:**
+- **K-a, change-rule preflight after stages 1-2.** If the preflight refuses (only a service bug can cause that), the record-scoped rule set and an Off policy row already exist, and the answer says nothing was changed. The leftover rows have no effect, and a retry reuses them.
+- **K-b, same-caller double submit.** Two identical requests: A commits and records; B's transaction gives no answer, and B's read-back finds A's row (same creator, same reason), so B files a second record. Nothing on the row tells the attempts apart. Earlier-episode rows cannot match, because the duplicate check refuses before the send.
+- **K-c, a create that commits after its read-back.** A timed-out transaction that commits later leaves the change with no record and no repair (the answer was 500 "may or may not"). This extends design K-1 from DELETE to creates.
+- **K-d, an unproven change-rule.** The commit is proven, but the Exclude-row read-back faults: the answer is NotRecorded with nothing enqueued, logged once as `RecordUnproven`.
+- **K-e, 403 shape.** The decider 403 puts its code under `reasonCode` (as the reject and return routes do). RecordProcedures reads `errorCode`, so it shows the title and detail. A transient WhoAmI or OBO fault answers 403, not a retryable 503 (same idiom as reject and return, design §6.1).
+- **K-f, coverage.** S10 (`decisionRecord` in the answer) is proven at the endpoint level with a mocked service result; the contract rig captures records but no contract test asserts the member.
