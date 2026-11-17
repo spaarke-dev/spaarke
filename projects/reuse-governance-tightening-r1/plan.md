@@ -1,7 +1,7 @@
 # Project Plan: Reuse Governance Tightening R1
 
-> **Last Updated**: 2026-11-11
-> **Status**: Ready for Tasks
+> **Last Updated**: 2026-11-17
+> **Status**: Complete
 > **Spec**: [spec.md](spec.md) · **Design**: [design.md](design.md)
 
 ---
@@ -227,7 +227,7 @@ See spec.md "Success Criteria" 1–10; each phase's deliverables above map to th
 
 ---
 
-**Status**: Ready for Tasks
+**Status**: Complete (2026-11-17)
 **Next Action**: task-create
 
 ---

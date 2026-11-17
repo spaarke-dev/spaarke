@@ -22,7 +22,7 @@
 | 042 | 5(e) Re-arm the CS0618 obsolete-API check | 5 | ✅ [done] | none | Group A | FULL | opus / high |
 | 043 | 5(f) Per-session C# language-server A/B trial | 5 | ✅ [done] | none | — (operator, machine load) | STANDARD | sonnet / high |
 | 080 | Adversarial review of items 1-4 and their PRs | 6 | ✅ [done] | 002, 012, 020, 021, 033, 034, 035 | — (.claude, main) | FULL | opus / high |
-| 090 | Project wrap-up | 6 | 🔲 [open] | 080, 040, 041, 042, 043 | — (final) | STANDARD | sonnet / high |
+| 090 | Project wrap-up | 6 | ✅ [done] | 080, 040, 041, 042, 043 | — (final) | STANDARD | sonnet / high |
 
 **Total**: 19 tasks (FULL 5 · STANDARD 13 · MINIMAL 1). Tasks 011 and 012 are cancelled if task 010 records no-go.
 
