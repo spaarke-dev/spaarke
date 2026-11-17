@@ -95,11 +95,11 @@ public static class SubmissionOverrideEndpoints
 
     private static async Task<IResult> OverrideAsync(
         Guid submissionId, BlockedDecisionRequest? body, HttpContext http, SubmissionOverrideService service, CancellationToken ct) =>
-        ToResult(await service.OverrideAsync(submissionId, body?.Reason, TokenHelper.ExtractBearerTokenOrNull(http), ct), http);
+        ToResult(await service.OverrideAsync(submissionId, body?.Reason, body?.Note, TokenHelper.ExtractBearerTokenOrNull(http), ct), http);
 
     private static async Task<IResult> ReturnAsync(
         Guid submissionId, BlockedDecisionRequest? body, HttpContext http, SubmissionOverrideService service, CancellationToken ct) =>
-        ToResult(await service.ReturnAsync(submissionId, body?.Reason, TokenHelper.ExtractBearerTokenOrNull(http), ct), http);
+        ToResult(await service.ReturnAsync(submissionId, body?.Reason, body?.Note, TokenHelper.ExtractBearerTokenOrNull(http), ct), http);
 
     /// <summary>200 with the outcome (a repeat is 200 with <c>alreadyDecided</c>), or the refusal as ProblemDetails (ADR-019).</summary>
     internal static IResult ToResult(BlockedDecisionResult result, HttpContext http) => result.Kind switch

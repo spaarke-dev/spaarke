@@ -291,6 +291,49 @@ public sealed class SubmissionOverrideEndpointsAuthorizationContractTests
         host.World.RecordCreates.Should().Be(1);
     }
 
+    // ── The decision note (ebilling-r1 task 095f-2c; EB-D-236, EB-D-240) ──
+
+    private static StringContent NoteBody(string note) =>
+        Json(new JsonObject { ["reason"] = "Negotiated rate is not yet in the rate card.", ["note"] = note }.ToJsonString());
+
+    [Theory(DisplayName = "095f-2c: the override and return routes take an optional note: 200, the note is in the Decision Record's Values and the invoice's internal decision note column")]
+    [InlineData("override")]
+    [InlineData("return")]
+    public async Task Post_WithANote_Is200_AndRecordsIt(string verb)
+    {
+        await using var host = await Host.StartAsync();
+        host.GrantRights();
+
+        var response = await host.SendAsync(Request("POST", Url(verb), NoteBody("  Agreed with the partner.  ")));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        host.World.Recorded.Single().Values!["note"].Should().Be("Agreed with the partner.");
+        var column = verb == "override"
+            ? host.World.Invoice!.GetAttributeValue<string>(InvoiceCorrectionNote.DecisionColumn)
+            : host.World.TransitionNotes.Single();
+        column.Should().Be("Agreed with the partner.");
+        host.World.Invoice!.Contains(InvoiceCorrectionNote.Column).Should().BeFalse("a decision never writes the firm's correction note");
+    }
+
+    [Theory(DisplayName = "095f-2c: a refused note (over 2000 characters, or a control character) is a 400 with the shared code, before any rights read beyond the route's, and nothing is recorded or written")]
+    [InlineData("override", 2001, "ebilling.note_too_long")]
+    [InlineData("return", 2001, "ebilling.note_too_long")]
+    [InlineData("override", 0, "ebilling.note_invalid_characters")]
+    [InlineData("return", 0, "ebilling.note_invalid_characters")]
+    public async Task Post_WithARefusedNote_Is400_AndNothingChanges(string verb, int length, string code)
+    {
+        await using var host = await Host.StartAsync();
+        host.GrantRights();
+        var note = length > 0 ? new string('n', length) : "bad\u0007note";
+
+        var response = await host.SendAsync(Request("POST", Url(verb), NoteBody(note)));
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        (await ErrorCodeAsync(response)).Should().Be(code);
+        (await response.Content.ReadAsStringAsync()).Should().NotContain("nnnn").And.NotContain("bad", "the refusal never echoes the note");
+        host.World.AssertNothingChanged();
+    }
+
     // ── Reason and body ──
 
     [Theory]

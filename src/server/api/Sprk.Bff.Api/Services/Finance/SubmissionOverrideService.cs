@@ -130,8 +130,9 @@ public static class BlockedSubmissionErrors
     };
 }
 
-/// <summary>The body of the override and return routes. The reason is required and is the only input: the decider is the authenticated caller.</summary>
-public sealed record BlockedDecisionRequest(string? Reason);
+/// <summary>The body of the override and return routes. The reason is required; the note (task 095f-2c, EB-D-236, EB-D-240) is optional.
+/// The decider is the authenticated caller.</summary>
+public sealed record BlockedDecisionRequest(string? Reason, string? Note = null);
 
 /// <summary>Who decided a blocked submission, when, why, and the Decision Record that holds it. Internal reviewers only.</summary>
 public sealed record BlockedDecisionStamp(Guid RecordId, Guid BySystemUserId, DateTimeOffset On, string Reason);
@@ -246,7 +247,17 @@ public sealed record BlockedDecisionResult
 /// is re-derived from the holds that REMAIN after it, through the one derivation (<see cref="InvoiceOpenHolds.ReasonsAfterAsync"/>), and written in
 /// the SAME transaction as the submission's state, each row conditioned on the version this call read. The invoice is In Review (checked under
 /// the lock, and its version is the condition). The detail is blank only when nothing else holds the invoice: a firm hold still open keeps it
-/// "Waiting for the firm". An Override that lifts no Procedure hold writes only the submission, as before.</para>
+/// "Waiting for the firm". An Override that lifts no Procedure hold writes no review detail.</para>
+/// <para><b>The decision note (task 095f-2c; EB-D-236, EB-D-240).</b> The request may carry an optional note, checked by
+/// <see cref="InvoiceCorrectionNote.Check"/> after the reason and before any read, lock or write (400 <c>ebilling.note_too_long</c> /
+/// <c>ebilling.note_invalid_characters</c>; never truncated or stripped). Given, it is the Decision Record's <c>Values["note"]</c> (a key only
+/// when a note is given, so a decision with no note hashes as before). Every Override writes the invoice in the release transaction: the update
+/// carries <c>sprk_invoice.sprk_decisionnote</c> (the note, or with no note the required reason; the internal column, never shown to a firm),
+/// beside the review detail when a hold is lifted, and still no status. A version fault applies neither update. A Return passes the note (or the
+/// reason) to the lifecycle's <c>TransitionAsync</c> overload, so the column lands in the same conditional update as the status. The firm's own
+/// <c>sprk_correctionnote</c> is never written here. A repeat that arrives after the record was written but before the state change must carry
+/// the first reason and note: the writer refuses another with 409 <see cref="BlockedSubmissionErrors.DecisionConflict"/>, as it does for another
+/// reason.</para>
 /// <para><b>Signals (D-122, the human-decision close agreed with ontology-r1).</b> An override and a return each resolve every Open or
 /// Acknowledged Signal on the invoice and on its lines, of every policy: the set is read once and stored in <c>sprk_findingsjson</c> under
 /// <see cref="HumanDecisionSetMember"/> BEFORE the record (049's way, with this decision's id), the record lists it
@@ -670,18 +681,28 @@ public sealed class SubmissionOverrideService
     /// on every call, as the caller); the reason is required. A repeat is a no-op with no new Decision Record.
     /// </summary>
     public Task<BlockedDecisionResult> OverrideAsync(Guid submissionId, string? reason, string? callerBearerToken, CancellationToken ct) =>
-        DecideAsync(Verb.Override, submissionId, reason, callerBearerToken, ct);
+        OverrideAsync(submissionId, reason, note: null, callerBearerToken, ct);
+
+    /// <summary>Task 095f-2c (EB-D-236, EB-D-240): <see cref="OverrideAsync(Guid, string?, string?, CancellationToken)"/> with the optional decision
+    /// <paramref name="note"/> (null, empty or whitespace-only means none).</summary>
+    public Task<BlockedDecisionResult> OverrideAsync(Guid submissionId, string? reason, string? note, string? callerBearerToken, CancellationToken ct) =>
+        DecideAsync(Verb.Override, submissionId, reason, note, callerBearerToken, ct);
 
     /// <summary>
     /// Returns a blocked submission to the firm (D-73: no privilege; EB-D-203: a Blocked SPA submission too, also with no privilege, while the
     /// reviewer still needs Write on the invoice). The reason is required. A repeat is a no-op with no new Decision Record.
     /// </summary>
     public Task<BlockedDecisionResult> ReturnAsync(Guid submissionId, string? reason, string? callerBearerToken, CancellationToken ct) =>
-        DecideAsync(Verb.Return, submissionId, reason, callerBearerToken, ct);
+        ReturnAsync(submissionId, reason, note: null, callerBearerToken, ct);
+
+    /// <summary>Task 095f-2c (EB-D-236, EB-D-240): <see cref="ReturnAsync(Guid, string?, string?, CancellationToken)"/> with the optional decision
+    /// <paramref name="note"/> (null, empty or whitespace-only means none).</summary>
+    public Task<BlockedDecisionResult> ReturnAsync(Guid submissionId, string? reason, string? note, string? callerBearerToken, CancellationToken ct) =>
+        DecideAsync(Verb.Return, submissionId, reason, note, callerBearerToken, ct);
 
     internal enum Verb { Override, Return }
 
-    private async Task<BlockedDecisionResult> DecideAsync(Verb verb, Guid submissionId, string? reason, string? token, CancellationToken ct)
+    private async Task<BlockedDecisionResult> DecideAsync(Verb verb, Guid submissionId, string? reason, string? rawNote, string? token, CancellationToken ct)
     {
         // ── 1. Who is asking, and may they. Before anything is read, so a refusal says nothing about the submission. ──
         var decider = await ResolveCallerAsync(token, ct).ConfigureAwait(false);
@@ -713,6 +734,16 @@ public sealed class SubmissionOverrideService
             return BlockedDecisionResult.Refuse(submissionId, StatusCodes.Status400BadRequest, BlockedSubmissionErrors.ReasonTooLong,
                 $"The reason may be at most {ReasonMaxLength} characters.");
         }
+
+        // ── 2b. Task 095f-2c (design 1.1): the note by the one shared rule, after the reason and before any read, lock or write; never truncated
+        //    or stripped. ──
+        var checkedNote = InvoiceCorrectionNote.Check(rawNote);
+        if (InvoiceCorrectionNote.DecisionRefusalOf(checkedNote.Refusal) is { } noteRefusal)
+        {
+            return BlockedDecisionResult.Refuse(submissionId, StatusCodes.Status400BadRequest, noteRefusal.Code, noteRefusal.Detail);
+        }
+
+        var note = checkedNote.Value;
 
         // ── 3. Read, and every refusal that needs no write or lock. ──
         Entity? row;
@@ -788,7 +819,7 @@ public sealed class SubmissionOverrideService
 
         try
         {
-            return await DecideLockedAsync(verb, submissionId, invoiceId, trimmed, decider!.Value, token, ct).ConfigureAwait(false);
+            return await DecideLockedAsync(verb, submissionId, invoiceId, trimmed, note, decider!.Value, token, ct).ConfigureAwait(false);
         }
         finally
         {
@@ -805,7 +836,7 @@ public sealed class SubmissionOverrideService
     }
 
     private async Task<BlockedDecisionResult> DecideLockedAsync(
-        Verb verb, Guid submissionId, Guid invoiceId, string reason, Guid decider, string? token, CancellationToken ct)
+        Verb verb, Guid submissionId, Guid invoiceId, string reason, string? note, Guid decider, string? token, CancellationToken ct)
     {
         // Re-read under the lock: what was read before it may have been decided by the call that held it.
         Entity? row;
@@ -955,6 +986,7 @@ public sealed class SubmissionOverrideService
         // ── Task 095d-0 (EB-D-185, ontology-r1 2026-11-05): a firm comes first. Override only (Return stays open). After the rights (403 first), and BEFORE
         //    the holds derivation, the set's store, the Decision Record and the Signal closes, so a refused request leaves nothing for a retry to
         //    trip over. A read fault answers 503 with nothing written. ──
+        long overrideInvoiceVersion = 0;
         if (verb == Verb.Override)
         {
             InvoiceFirmGateResult gate;
@@ -975,6 +1007,16 @@ public sealed class SubmissionOverrideService
                 return BlockedDecisionResult.Refuse(submissionId, StatusCodes.Status409Conflict, BlockedSubmissionErrors.FirmMissing,
                     BlockedSubmissionErrors.FirmDetailFor(gate), invoiceId);
             }
+
+            // Task 095f-2c: the release always writes the invoice (its internal decision note), so its version is the condition of the release
+            // transaction for every override, not only one that lifts a Procedure hold. Checked here, before any write.
+            if (RowVersionOf(invoice!) is not { } readInvoiceVersion)
+            {
+                _logger.LogWarning("Invoice {InvoiceId} was read without a row version; the release of submission {SubmissionId} is not written", invoiceId, submissionId);
+                return Unavailable(submissionId, invoiceId);
+            }
+
+            overrideInvoiceVersion = readInvoiceVersion;
         }
 
         // ── Task 114 (F4 review round; 114b order change): the holds that REMAIN are derived BEFORE any write (the set store, the Decision Record,
@@ -999,13 +1041,7 @@ public sealed class SubmissionOverrideService
                         _entities, invoice!, submissionId, new InvoiceOpenHolds.StoredSubmission(SubmissionReasonCodes.Overridden, provisional), ct).ConfigureAwait(false);
                     if (writesDetail)
                     {
-                        if (RowVersionOf(invoice!) is not { } invoiceVersion)
-                        {
-                            _logger.LogWarning("Invoice {InvoiceId} was read without a row version; the release of submission {SubmissionId} is not written", invoiceId, submissionId);
-                            return Unavailable(submissionId, invoiceId);
-                        }
-
-                        releaseDetail = (invoiceVersion, InvoiceReviewDetail.ReviewDetailOf(remaining));
+                        releaseDetail = (overrideInvoiceVersion, InvoiceReviewDetail.ReviewDetailOf(remaining));
                     }
                 }
             }
@@ -1035,7 +1071,7 @@ public sealed class SubmissionOverrideService
             subjects = kept.Select(s => (s.SubjectEntity, s.SubjectId)).Distinct().ToList();
         }
 
-        var decision = BuildDecision(verb, stored, submissionId, invoiceId, decider, reason, signalSet, ChannelNameOf(row));
+        var decision = BuildDecision(verb, stored, submissionId, invoiceId, decider, reason, signalSet, ChannelNameOf(row), note);
         try
         {
             _preflight(decision);
@@ -1120,7 +1156,10 @@ public sealed class SubmissionOverrideService
             InvoiceTransitionResult moved;
             try
             {
-                moved = await _lifecycle.TransitionAsync(invoiceId, InvoiceLifecycleStatus.ReturnedToFirm, ct).ConfigureAwait(false);
+                // 095f-2c (EB-D-240): the invoice's internal decision note lands in the same conditional update as the status, holding the
+                // note, or with no note the required reason. A repeat that finds the invoice already Returned to Firm moves nothing and so
+                // writes no note (the column keeps the first one).
+                moved = await _lifecycle.TransitionAsync(invoiceId, InvoiceLifecycleStatus.ReturnedToFirm, note ?? reason, ct).ConfigureAwait(false);
             }
             catch (Exception ex) when (!IsCallerCancellation(ex, ct))
             {
@@ -1163,9 +1202,12 @@ public sealed class SubmissionOverrideService
         }
 
         // ── Task 114 (ontology D-205 writer 5): an Override that lifts a Procedure hold writes the invoice's review detail, derived BEFORE the
-        //    record (above) from the holds that REMAIN, in the SAME transaction as the submission's state, each row conditioned on the version read. ──
-        IReadOnlyList<OrganizationRequest>? releaseTransaction = releaseDetail is { } release
-            ? BuildReleaseTransaction(submissionId, fields, version, invoiceId, release.InvoiceVersion, release.ReviewDetail)
+        //    record (above) from the holds that REMAIN, in the SAME transaction as the submission's state, each row conditioned on the version read.
+        //    Task 095f-2c (EB-D-240): every Override writes that transaction, because the invoice's internal decision note (the note, or with no
+        //    note the required reason) lands with the release; the review detail is in it only when a Procedure hold is lifted. ──
+        IReadOnlyList<OrganizationRequest>? releaseTransaction = verb == Verb.Override
+            ? BuildReleaseTransaction(submissionId, fields, version, invoiceId, overrideInvoiceVersion,
+                writesReviewDetail: releaseDetail is not null, releaseDetail?.ReviewDetail, note ?? reason)
             : null;
 
         try
@@ -1231,15 +1273,19 @@ public sealed class SubmissionOverrideService
     }
 
     /// <summary>
-    /// Task 114 (ontology D-205 writer 5): the release as ONE transaction, in this order: the submission's state (<paramref name="submissionFields"/>),
-    /// then the invoice's review detail (<paramref name="reviewDetail"/>, null = blank). Each row is conditioned on the version this call read
+    /// Task 114 (ontology D-205 writer 5) and task 095f-2c (EB-D-236, EB-D-240): the release as ONE transaction, in this order: the submission's
+    /// state (<paramref name="submissionFields"/>), then the invoice's columns. The invoice update always carries the internal decision note
+    /// (<see cref="InvoiceCorrectionNote.DecisionColumn"/>: <paramref name="decisionNote"/>, which the caller sets to the note, or with no note
+    /// the required reason), and the review detail (<paramref name="reviewDetail"/>, null = blank) only when <paramref name="writesReviewDetail"/>
+    /// (an Override that lifts a Procedure hold). Each row is conditioned on the version this call read
     /// (<see cref="ConcurrencyBehavior.IfRowVersionMatches"/>), so a submission or an invoice that changed since (the invoice no longer In
-    /// Review, its firm set, a status move) faults the transaction and nothing is applied. It writes no other invoice column and no status: the
-    /// invoice stays In Review (the caller checked that under the lock and the invoice's version is the condition that it still is).
+    /// Review, its firm set, a status move) faults the transaction and neither update is applied. It writes no status and no other invoice
+    /// column: the invoice stays In Review (the caller checked that under the lock and the invoice's version is the condition that it still is).
+    /// It never writes <c>sprk_correctionnote</c>, the firm's own text (EB-D-240).
     /// </summary>
     internal static IReadOnlyList<OrganizationRequest> BuildReleaseTransaction(
         Guid submissionId, IReadOnlyDictionary<string, object> submissionFields, long submissionVersion,
-        Guid invoiceId, long invoiceVersion, int? reviewDetail)
+        Guid invoiceId, long invoiceVersion, bool writesReviewDetail, int? reviewDetail, string decisionNote)
     {
         var submission = new Microsoft.Xrm.Sdk.Entity(Entity, submissionId) { RowVersion = submissionVersion.ToString(CultureInfo.InvariantCulture) };
         foreach (var (column, value) in submissionFields)
@@ -1250,8 +1296,12 @@ public sealed class SubmissionOverrideService
         var invoice = new Microsoft.Xrm.Sdk.Entity(InvoiceReviewService.InvoiceEntity, invoiceId)
         {
             RowVersion = invoiceVersion.ToString(CultureInfo.InvariantCulture),
-            [InvoiceReviewDetail.Column] = InvoiceReviewDetail.ValueOf(reviewDetail),
+            [InvoiceCorrectionNote.DecisionColumn] = decisionNote,
         };
+        if (writesReviewDetail)
+        {
+            invoice[InvoiceReviewDetail.Column] = InvoiceReviewDetail.ValueOf(reviewDetail);
+        }
 
         return
         [
@@ -1440,7 +1490,7 @@ public sealed class SubmissionOverrideService
         {
             DecisionRecordRefusalReason.ReviewInvalid => BlockedDecisionResult.Refuse(submissionId, StatusCodes.Status409Conflict,
                 BlockedSubmissionErrors.DecisionConflict,
-                "This decision is already recorded with another reason or decider. Repeat it as it was first made.", invoiceId),
+                "This decision is already recorded with another reason, note or decider. Repeat it as it was first made.", invoiceId),
             DecisionRecordRefusalReason.FactSnapshotMissing or DecisionRecordRefusalReason.SubjectUnsupported
                 or DecisionRecordRefusalReason.SubjectUnfileable or DecisionRecordRefusalReason.RecordClassUnderivable
                 or DecisionRecordRefusalReason.CoreUnsupported or DecisionRecordRefusalReason.OwnerRefused
@@ -1483,7 +1533,7 @@ public sealed class SubmissionOverrideService
     /// </summary>
     internal static BillingDecision BuildDecision(
         Verb verb, InvoiceSubmissionAfterSteps.StoredFindings stored, Guid submissionId, Guid invoiceId, Guid decider, string reason,
-        InvoiceSubmissionAfterSteps.ResolvedSignalSet signals, string channel = "Internal")
+        InvoiceSubmissionAfterSteps.ResolvedSignalSet signals, string channel = "Internal", string? note = null)
     {
         var deciding = stored.DecidingIndexes
             .Select(i => stored.Findings.TryGetValue(i, out var f) ? f : null)
@@ -1527,6 +1577,14 @@ public sealed class SubmissionOverrideService
             ["submissionId"] = submissionId.ToString("D"),
             ["trackingNumber"] = stored.TrackingNumber,
         };
+
+        // Task 095f-2c (design 1.2): the note is a value only when one is given, never a null-valued key (the hash covers every key, so
+        // "note": null would hash differently from no key); a decision without a note hashes exactly as before. The caller passes the checked,
+        // trimmed note (null for none).
+        if (!string.IsNullOrWhiteSpace(note))
+        {
+            values["note"] = note;
+        }
 
         // Task 114: an override that releases a Procedure hold names what it released, from the stored hold (reader members: the Procedure's
         // name and the first gapped work date, or the cause; never an id). The action's own parameter dictionary, so the record's shape is the

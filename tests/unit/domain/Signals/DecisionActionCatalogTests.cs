@@ -405,11 +405,13 @@ public class DecisionActionCatalogTests
     }
 
     /// <summary>ebilling-r1 095f-2a (EB-D-236; design 8, Q6): every invoice-level decision declares the optional "note" its service writes to
-    /// <c>Values["note"]</c> when a note is given. Must fire: reject-invoice and return-to-firm declared no note before 095f-2a.</summary>
+    /// <c>Values["note"]</c> when a note is given. Must fire: reject-invoice and return-to-firm declared no note before 095f-2a, and
+    /// override-submission (the Override's code) none before 095f-2c.</summary>
     [Theory]
     [InlineData("approve-invoice")]
     [InlineData("reject-invoice")]
     [InlineData("return-to-firm")]
+    [InlineData("override-submission")]
     public void InvoiceDecisions_DeclareNoteAsAnOptionalTextAreaParameter(string code)
     {
         DecisionActionCatalog.TryGetBilling(code, out var action).Should().BeTrue();
