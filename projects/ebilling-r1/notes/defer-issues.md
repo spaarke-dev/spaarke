@@ -2077,3 +2077,43 @@ A BFF deploy can ship code that writes index fields the live index doesn't have.
 **Estimated effort**: 1-2 days. **Blockers**: none. **Related**: #2848, ADR-004, task 084h-3.
 
 ---
+
+### ISS-026 — RecordProcedures page has a `lint` script but no ESLint config, and is outside client-lint
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | next-round |
+| **Filed** | 2026-11-17 |
+| **Source** | Sonnet review of task 084h-4 (found in passing; pre-existing) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2877 |
+
+**Description**: `src/solutions/RecordProcedures/package.json` declares `"lint": "eslint src --ext .ts,.tsx"`, but the folder has no ESLint config, so `npm run lint` cannot run, and `.github/workflows/client-lint.yml` does not list the page. Hooks-rule and unused-code mistakes in this page (seven wizards, the Procedures grid) reach master unchecked; 084h-4's review could not run lint at all.
+
+**Entry-points**: `src/solutions/RecordProcedures/package.json:14`; `.github/workflows/client-lint.yml:30-34,64-68` (path lists); compare a listed page such as `src/solutions/Reporting/`.
+
+**Suggested fix**: add the page to client-lint's shared config (the way Reporting and LegalWorkspace are covered), fix what it reports, and drop or repoint the local `lint` script. CI workflow edits are a hot path: coordinate with the CI owner.
+
+**Estimated effort**: half a day (unknown finding count). **Blockers**: none. **Related**: task 084h-4.
+
+---
+
+### ISS-027 — RecordProcedures Reason boxes silently cut pasted text at 2,000 characters
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | next-round |
+| **Filed** | 2026-11-17 |
+| **Source** | Sonnet review of task 084h-4 (the Note box had the same flaw and was fixed in 084h-4's fix round; the Reason boxes are pre-existing) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2878 |
+
+**Description**: the Reason textareas set `maxLength={MAX_REASON_CHARS}`. A paste longer than 2,000 characters is truncated by the browser with no message, and the cut reason is saved as the Procedure change's reason; the user never learns part of it was lost.
+
+**Entry-points**: `src/solutions/RecordProcedures/src/components/wizards/AssignProcedureWizard.tsx:417`, `ProcedureWizard.tsx:213`, `RuleWizard.tsx:300`.
+
+**Suggested fix**: do what 084h-4 did for the Note box: remove `maxLength`, show a character counter, and let the existing validation hold Finish over the limit; test that a 2,600-character paste keeps all 2,600 characters and sends nothing.
+
+**Estimated effort**: 1-2 hours. **Blockers**: merge 084h-4 first (same files). **Related**: task 084h-4.
+
+---
