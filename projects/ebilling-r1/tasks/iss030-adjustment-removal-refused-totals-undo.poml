@@ -4,7 +4,7 @@
     <title>ISS-030 (#2881): a refused totals recalculation after an adjustment removal reactivates the row, as the add path undoes its row</title>
     <phase>Defect fix (found in 095f-2b review)</phase>
     <gate>Branch from work/ebilling-r1 at the sha named in the agent brief.</gate>
-    <status>open</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>BFF write path (.cs); invariant: no half-applied removal.</rigor-reason>
     <model-tier>sonnet</model-tier>
