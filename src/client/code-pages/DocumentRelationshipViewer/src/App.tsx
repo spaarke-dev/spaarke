@@ -72,7 +72,7 @@ import { createXrmEmailComposeHandlers } from '@spaarke/ui-components/components
 import { postSidePaneLookupToParent } from '@spaarke/ui-components/components/SprkModal/sidePaneFrameSignal';
 import type { IDataService } from '@spaarke/ui-components/types/serviceInterfaces';
 import { getXrm } from '@spaarke/ui-components/utils/xrmContext';
-import { openInDesktopApp } from '@spaarke/ui-components/utils/openInDesktopApp';
+import { openInDesktopApp, OPEN_IN_DESKTOP_FAILED_MESSAGE } from '@spaarke/ui-components/utils/openInDesktopApp';
 
 /** Inline SVG icon: table/grid view (matches Fluent 20px icon style) */
 const TableViewIcon: React.FC = () => (
@@ -374,7 +374,6 @@ export const App: React.FC<AppProps> = ({ params, isDark = false, apiBaseUrl }) 
           const res = await authenticatedFetch(
             `${apiBaseUrl}/api/documents/${encodeURIComponent(previewDocumentId)}/open-links`
           );
-          if (!res.ok) return;
           const links = await res.json();
           // Office files open in the Office app; anything else downloads through the BFF (shared
           // behaviour, ISS-004). No SharePoint webUrl fallback: a read-only user on a secure record
@@ -388,6 +387,8 @@ export const App: React.FC<AppProps> = ({ params, isDark = false, apiBaseUrl }) 
           });
         } catch (err) {
           console.error('[FilePreview] Open file failed:', previewDocumentId, err);
+          // The preview dialog is modal, so an inline bar would be hidden behind it: use the platform dialog.
+          void getXrm('openErrorDialog')?.Navigation?.openErrorDialog?.({ message: OPEN_IN_DESKTOP_FAILED_MESSAGE });
         }
       })();
     },

@@ -28,7 +28,7 @@ import { getEffectiveDarkMode } from "../../providers/ThemeProvider";
 import { authenticatedFetch } from "../../services/authInit";
 import { getDocumentOpenLinks } from "../../services/DocumentApiService";
 import { getBffBaseUrl, getTenantId } from "../../config/runtimeConfig";
-import { RecordCardShell, CardIcon, AiSummaryPopover, FindSimilarViewerDialog, createXrmNavigationService, getXrm, openInDesktopApp } from "@spaarke/ui-components";
+import { RecordCardShell, CardIcon, AiSummaryPopover, FindSimilarViewerDialog, createXrmNavigationService, getXrm, openInDesktopApp, OPEN_IN_DESKTOP_FAILED_MESSAGE } from "@spaarke/ui-components";
 import type { ISummaryData } from "@spaarke/ui-components";
 import { FilePreviewDialog } from "../FilePreview/FilePreviewDialog";
 
@@ -174,6 +174,7 @@ export const DocumentCard: React.FC<IDocumentCardProps> = React.memo(
         });
       } catch (err) {
         console.error("[DocumentCard] Open file error:", err);
+        void getXrm("openErrorDialog")?.Navigation?.openErrorDialog?.({ message: OPEN_IN_DESKTOP_FAILED_MESSAGE });
       }
     }, [doc.sprk_documentid]);
 

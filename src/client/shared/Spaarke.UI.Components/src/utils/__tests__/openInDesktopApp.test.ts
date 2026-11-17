@@ -42,8 +42,6 @@ describe('openInDesktopApp', () => {
   test('Office file: hands the desktop link to the Office app and does not download', async () => {
     const fetch = jest.fn();
     const open = jest.spyOn(window, 'open').mockImplementation(() => null);
-    // jsdom logs "navigation not implemented" when location.href is assigned.
-    jest.spyOn(console, 'error').mockImplementation(() => {});
 
     const result = await openInDesktopApp({
       bffBaseUrl: BFF,
@@ -54,7 +52,14 @@ describe('openInDesktopApp', () => {
 
     expect(result).toBe('office-app');
     expect(fetch).not.toHaveBeenCalled();
-    expect(open).not.toHaveBeenCalled(); // same tab, no empty window left behind
+    expect(open).not.toHaveBeenCalled(); // no empty window left behind
+    // The launch: a hidden iframe whose src is the protocol URL (no unload event on the page).
+    const frame = document.querySelector('iframe');
+    expect(frame).not.toBeNull();
+    expect(frame!.getAttribute('src')).toBe('ms-word:https://contoso/doc.docx');
+    expect(frame!.style.display).toBe('none');
+    jest.runAllTimers();
+    expect(document.querySelector('iframe')).toBeNull();
   });
 
   test('non-Office file: downloads through /content with the file name from open-links', async () => {
@@ -108,9 +113,9 @@ describe('openInDesktopApp', () => {
 });
 
 describe('documentContentUrl', () => {
-  test('a trailing slash or /api on the BFF host never produces /api/api', () => {
+  test('appends the content route to a host-only base; trailing slashes are trimmed', () => {
+    expect(documentContentUrl(BFF, 'abc')).toBe(`${BFF}/api/documents/abc/content`);
     expect(documentContentUrl(`${BFF}/`, 'abc')).toBe(`${BFF}/api/documents/abc/content`);
-    expect(documentContentUrl(`${BFF}/api`, 'abc')).toBe(`${BFF}/api/documents/abc/content`);
-    expect(documentContentUrl(`${BFF}/api/`, 'abc')).toBe(`${BFF}/api/documents/abc/content`);
+    expect(documentContentUrl(BFF, 'a b')).toBe(`${BFF}/api/documents/a%20b/content`);
   });
 });

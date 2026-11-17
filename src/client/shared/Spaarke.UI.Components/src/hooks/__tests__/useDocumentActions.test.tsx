@@ -113,9 +113,9 @@ describe('useDocumentActions — openInWeb', () => {
 });
 
 describe('useDocumentActions — openInDesktop', () => {
-  // ISS-004: Office files open in the Office app in the same tab; anything else downloads through
+  // ISS-004: Office files open in the Office app without leaving the page; anything else downloads through
   // /content — never the SharePoint webUrl (a read-only user on a secure record cannot open it).
-  test('Office file: opens in the Office app, in the same tab, without a download', async () => {
+  test('Office file: launches the Office app through a hidden iframe, without a download', async () => {
     mockedFetch.mockResolvedValueOnce(
       jsonResponse({
         webUrl: 'https://web/doc',
@@ -124,18 +124,28 @@ describe('useDocumentActions — openInDesktop', () => {
         fileName: 'a.docx',
       })
     );
-    // jsdom logs "navigation not implemented" when location.href is assigned.
-    jest.spyOn(console, 'error').mockImplementation(() => {});
+    jest.useFakeTimers();
+    try {
+      const { result } = renderHook(() => useDocumentActions({ bffBaseUrl: BFF }));
 
-    const { result } = renderHook(() => useDocumentActions({ bffBaseUrl: BFF }));
+      await act(async () => {
+        await result.current.openInDesktop('doc-1');
+      });
 
-    await act(async () => {
-      await result.current.openInDesktop('doc-1');
-    });
-
-    expect(mockedFetch).toHaveBeenCalledTimes(1); // open-links only
-    expect(window.open).not.toHaveBeenCalled();
-    expect(result.current.actionError).toBeNull();
+      expect(mockedFetch).toHaveBeenCalledTimes(1); // open-links only
+      expect(window.open).not.toHaveBeenCalled();
+      expect(result.current.actionError).toBeNull();
+      // The launch: a hidden iframe whose src is the desktop URL.
+      const frame = document.querySelector('iframe');
+      expect(frame).not.toBeNull();
+      expect(frame!.getAttribute('src')).toBe('ms-word:ofe%7Cu%7Chttps://web/doc');
+      act(() => {
+        jest.runAllTimers();
+      });
+      expect(document.querySelector('iframe')).toBeNull();
+    } finally {
+      jest.useRealTimers();
+    }
   });
 
   test('non-Office file: downloads through /content instead of opening the web view', async () => {

@@ -13,7 +13,7 @@ import * as React from 'react';
 import { SendEmailDialog, createXrmEmailComposeHandlers } from '@spaarke/ui-components';
 import { RichFilePreviewDialog } from '@spaarke/ui-components/components/FilePreview/RichFilePreviewDialog';
 import { getDocumentPreviewUrl, getDocumentOpenLinks } from '../../services/DocumentApiService';
-import { createXrmNavigationService, getXrm, openInDesktopApp } from '@spaarke/ui-components';
+import { createXrmNavigationService, getXrm, openInDesktopApp, OPEN_IN_DESKTOP_FAILED_MESSAGE } from '@spaarke/ui-components';
 import { copyDocumentLink, setWorkspaceFlag } from './filePreviewService';
 import { searchUsersAsLookup } from '../CreateMatter/matterService';
 import { authenticatedFetch } from '../../services/authInit';
@@ -94,7 +94,9 @@ export const FilePreviewDialog: React.FC<IFilePreviewDialogProps> = ({
         fallbackFileName: documentName,
       });
     } catch (err) {
-      console.error('[FilePreviewDialog] Download failed:', err);
+      console.error('[FilePreviewDialog] Open file failed:', err);
+      // The preview dialog is modal, so use the platform dialog (an inline bar would sit behind it).
+      void getXrm('openErrorDialog')?.Navigation?.openErrorDialog?.({ message: OPEN_IN_DESKTOP_FAILED_MESSAGE });
     }
   }, [documentId, documentName]);
 

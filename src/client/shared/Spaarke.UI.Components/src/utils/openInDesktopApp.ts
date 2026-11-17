@@ -2,9 +2,11 @@
  * "Open in desktop" — one behaviour for every surface (ISS-004, #2807).
  *
  * - **Office files.** `GET /api/documents/{id}/open-links` returns a `desktopUrl` (`ms-word:`, `ms-excel:`,
- *   `ms-powerpoint:`) only for Word, Excel and PowerPoint. It is launched in the SAME tab
- *   (`window.location.href`): the browser hands the link to the Office app and the page stays where it is.
- *   A new window would leave an empty tab behind.
+ *   `ms-powerpoint:`) only for Word, Excel and PowerPoint. It is launched through a hidden iframe whose `src` is
+ *   the protocol link: the browser hands the link to the Office app, the page stays where it is, and no unload
+ *   event fires. (Assigning `location.href`, or clicking an anchor, to a protocol URL fires `beforeunload` in
+ *   Chromium: that raises an unsaved-changes prompt in Compose and closes side panes. A new window would leave
+ *   an empty tab behind.)
  * - **Every other file** (PDF, image, saved email…) is downloaded through the BFF `/content` route, and the
  *   browser hands it to the user's default app. It is NOT sent to the SharePoint `webUrl`: a user who may read a
  *   secure record but not edit it has no SharePoint access and would get an access-denied page
@@ -24,6 +26,9 @@ export interface IDesktopOpenLinks {
   fileName?: string | null;
 }
 
+/** The sentence every surface shows when `openInDesktopApp` (or the open-links request before it) fails. */
+export const OPEN_IN_DESKTOP_FAILED_MESSAGE = "Couldn't open the file. Try again, or download it from the record.";
+
 /** What happened: the Office app was asked to open the file, or the file was downloaded. */
 export type DesktopOpenResult = 'office-app' | 'downloaded';
 
@@ -41,16 +46,28 @@ export interface IOpenInDesktopAppOptions {
 }
 
 /**
- * The BFF route that streams a document's bytes after authorizing the caller on the record. A trailing `/` or
- * `/api` on the host is removed first (the same rule as `normalizeBffBaseUrl` in `@spaarke/auth`), so a caller
- * holding an `.../api` URL cannot produce `/api/api`.
+ * The BFF route that streams a document's bytes after authorizing the caller on the record. `bffBaseUrl` must be
+ * host-only (callers get it from `normalizeBffBaseUrl` in `@spaarke/auth`); a trailing `/` is tolerated.
  */
 export function documentContentUrl(bffBaseUrl: string, documentId: string): string {
-  const host = bffBaseUrl
-    .trim()
-    .replace(/\/+$/, '')
-    .replace(/\/api$/i, '');
+  const host = bffBaseUrl.trim().replace(/\/+$/, '');
   return `${host}/api/documents/${encodeURIComponent(documentId)}/content`;
+}
+
+/** How long the hidden launch iframe stays in the DOM, so the browser can hand the protocol link to the app. */
+const LAUNCH_FRAME_LIFETIME_MS = 5000;
+
+/**
+ * Launch a protocol URL (`ms-word:` ...) without leaving the page. A hidden iframe does not fire `beforeunload`
+ * on the host page, unlike `location.href` or an anchor click.
+ */
+function launchProtocolUrl(url: string): void {
+  const frame = document.createElement('iframe');
+  frame.style.display = 'none';
+  frame.setAttribute('aria-hidden', 'true');
+  frame.src = url;
+  document.body.appendChild(frame);
+  setTimeout(() => frame.remove(), LAUNCH_FRAME_LIFETIME_MS);
 }
 
 /** Save a blob as a file through a temporary link. */
@@ -80,7 +97,7 @@ export async function openInDesktopApp(options: IOpenInDesktopAppOptions): Promi
   const { bffBaseUrl, documentId, links, fetch, fallbackFileName } = options;
 
   if (links.desktopUrl) {
-    window.location.href = links.desktopUrl;
+    launchProtocolUrl(links.desktopUrl);
     return 'office-app';
   }
 

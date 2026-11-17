@@ -26,6 +26,7 @@ import {
 } from "@fluentui/react-components";
 import { ChatRegular, ChatAddRegular, DismissRegular, ArrowClockwiseRegular } from "@fluentui/react-icons";
 import { PaneHeader, SprkChat, createConsumerDispatcher, RichFilePreviewDialog, createXrmNavigationService, createXrmDataService, searchUsersAndContacts, launchSurface, resolveSurfaceLaunch, launchSummarizeFilesWizard, SendEmailDialog, createXrmEmailComposeHandlers } from "@spaarke/ui-components";
+import { getXrm, openInDesktopApp, OPEN_IN_DESKTOP_FAILED_MESSAGE } from "@spaarke/ui-components";
 import { WelcomeStartCards } from "./WelcomeStartCards";
 import { QuickStartModal } from "./QuickStartModal";
 import { MemoryDialog } from "./MemoryDialog";
@@ -1956,6 +1957,32 @@ export function ConversationPane(): React.JSX.Element {
     }
   }, [savedPreview?.documentId, bffBaseUrl, authenticatedFetch]);
 
+  // "Open file" / "Download" in that preview (ISS-004): the Office app for Word / Excel / PowerPoint, otherwise a
+  // download through the BFF — the same behaviour as every other surface. The dialog is modal, so a failure is
+  // shown with the platform error dialog (an inline bar would sit behind it).
+  const openSavedFileInDesktop = React.useCallback((): void => {
+    const docId = savedPreview?.documentId;
+    if (!docId || !bffBaseUrl) return;
+    void (async () => {
+      try {
+        const response = await authenticatedFetch(`${bffBaseUrl}/api/documents/${encodeURIComponent(docId)}/open-links`, {
+          method: "GET",
+        });
+        const links = (await response.json()) as { desktopUrl?: string | null; fileName?: string | null };
+        await openInDesktopApp({
+          bffBaseUrl,
+          documentId: docId,
+          links,
+          fetch: authenticatedFetch,
+          fallbackFileName: savedPreview?.fileName ?? undefined,
+        });
+      } catch (err) {
+        console.error("[ConversationPane] Open in desktop failed:", err);
+        void getXrm("openErrorDialog")?.Navigation?.openErrorDialog?.({ message: OPEN_IN_DESKTOP_FAILED_MESSAGE });
+      }
+    })();
+  }, [savedPreview?.documentId, savedPreview?.fileName, bffBaseUrl, authenticatedFetch]);
+
   // FR-13 Step 1: publish `dispatchComposeAction` into the cross-pane Compose
   // action bridge so the inline AI toolbar (workspace pane, ComposeAiToolbar's
   // `enqueueComposeAction`) routes THROUGH this Assistant-pane serial queue
@@ -3633,7 +3660,7 @@ export function ConversationPane(): React.JSX.Element {
           documentName={savedPreview.fileName ?? "Document"}
           onClose={() => setPreviewOpen(false)}
           fetchPreviewUrl={fetchSavedPreviewUrl}
-          onOpenFile={() => undefined}
+          onOpenFile={openSavedFileInDesktop}
           onEmailDocument={() => undefined}
           onCopyLink={() => undefined}
           onOpenRecord={() => {

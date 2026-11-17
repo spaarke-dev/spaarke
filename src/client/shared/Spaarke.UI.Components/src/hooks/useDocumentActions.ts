@@ -30,7 +30,7 @@
 
 import { useState, useCallback } from 'react';
 import { authenticatedFetch, isApiError, isAuthFailure, problemOf } from '@spaarke/auth';
-import { openInDesktopApp } from '../utils/openInDesktopApp';
+import { openInDesktopApp, saveBlobAsFile } from '../utils/openInDesktopApp';
 
 // =============================================
 // Types
@@ -177,20 +177,12 @@ export function useDocumentActions(options: UseDocumentActionsOptions): UseDocum
       setActionError(null);
       try {
         const url = `${bffBaseUrl}/api/documents/${documentId}/download`;
-        // Use a hidden link to trigger browser download
         const response = await authenticatedFetch(url);
         const blob = await response.blob();
-        const blobUrl = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = blobUrl;
         // Extract filename from Content-Disposition or use fallback
         const disposition = response.headers.get('Content-Disposition');
         const match = disposition?.match(/filename\*?=(?:UTF-8'')?["']?([^"';\n]+)/i);
-        a.download = match?.[1] ?? `document-${documentId}`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(blobUrl);
+        saveBlobAsFile(blob, match?.[1] ?? `document-${documentId}`);
       } catch (err) {
         setActionError(failureMessage("Couldn't download the document", err));
       } finally {

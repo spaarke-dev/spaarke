@@ -72,7 +72,8 @@ import {
 } from '@spaarke/ui-components/dist/components/DocumentEmailWizard';
 import { createXrmEmailComposeHandlers } from '@spaarke/ui-components/dist/components/EmailComposer';
 import { AppInsightsService } from '@spaarke/ui-components/dist/services/AppInsightsService';
-import { openInDesktopApp } from '@spaarke/ui-components/dist/utils/openInDesktopApp';
+import { openInDesktopApp, OPEN_IN_DESKTOP_FAILED_MESSAGE } from '@spaarke/ui-components/dist/utils/openInDesktopApp';
+import { getXrm } from '@spaarke/ui-components/dist/utils/xrmContext';
 import type { IDataService } from '@spaarke/ui-components/dist/types/serviceInterfaces';
 
 /**
@@ -688,6 +689,7 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
         )
         .catch(err => {
           console.error('[SemanticSearchControl] Failed to open file:', err);
+          void getXrm('openErrorDialog')?.Navigation?.openErrorDialog?.({ message: OPEN_IN_DESKTOP_FAILED_MESSAGE });
         });
     },
     [apiService, apiBaseUrl]

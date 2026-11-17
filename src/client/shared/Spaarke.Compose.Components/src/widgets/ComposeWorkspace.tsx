@@ -5427,7 +5427,9 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
           documentName={state.documentRef?.fileName ?? 'Document'}
           onClose={() => setDocumentPreviewOpen(false)}
           fetchPreviewUrl={fetchDocumentPreviewUrl}
-          onOpenFile={() => undefined}
+          // Same behaviour as the toolbar's "Word > Desktop" (ISS-004): the Office app, else a download
+          // through the BFF. Failures reach the banner stack via `wordActionError`.
+          onOpenFile={() => void openInDesktop(previewDocumentId)}
           onEmailDocument={() => undefined}
           onCopyLink={() => undefined}
           onOpenRecord={() => {

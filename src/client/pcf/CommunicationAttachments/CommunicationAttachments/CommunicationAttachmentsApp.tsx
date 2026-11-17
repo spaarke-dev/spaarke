@@ -38,7 +38,7 @@ import {
 import { RichFilePreviewDialog } from '@spaarke/ui-components/dist/components/FilePreview/RichFilePreviewDialog';
 import { cleanGuid } from '@spaarke/ui-components/dist/services/PolymorphicResolverService';
 import { getXrm } from '@spaarke/ui-components/dist/utils/xrmContext';
-import { openInDesktopApp } from '@spaarke/ui-components/dist/utils/openInDesktopApp';
+import { openInDesktopApp, OPEN_IN_DESKTOP_FAILED_MESSAGE } from '@spaarke/ui-components/dist/utils/openInDesktopApp';
 import { authenticatedFetch } from '@spaarke/auth';
 import { IInputs } from './generated/ManifestTypes';
 // Task 021: the Layer-1 attachments logic + the promoted AttachmentList
@@ -407,14 +407,14 @@ export const CommunicationAttachmentsApp: React.FC<ICommunicationAttachmentsAppP
             void (async () => {
               const documentId = previewItem.documentId as string;
               const links = await apiService.getOpenLinks(documentId);
-              if (!links) return;
               if (mode !== 'desktop') {
-                openExternal(links.webUrl);
+                openExternal(links?.webUrl ?? null);
                 return;
               }
               // Office files open in the Office app; anything else downloads through the BFF (shared
               // behaviour, ISS-004) — not the SharePoint webUrl, which a read-only user cannot open.
               try {
+                if (!links) throw new Error('The open-links request returned nothing.');
                 await openInDesktopApp({
                   bffBaseUrl: resolvedApiBaseUrl,
                   documentId,
@@ -424,6 +424,9 @@ export const CommunicationAttachmentsApp: React.FC<ICommunicationAttachmentsAppP
                 });
               } catch (err) {
                 console.error('[CommunicationAttachments] Open in desktop failed:', err);
+                void getXrm('openErrorDialog')?.Navigation?.openErrorDialog?.({
+                  message: OPEN_IN_DESKTOP_FAILED_MESSAGE,
+                });
               }
             })();
           }}
