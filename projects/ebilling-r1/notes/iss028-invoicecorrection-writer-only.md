@@ -90,7 +90,8 @@ Correction rows: native write hardening. The role source now agrees with part 1:
 
 - One role file under `src/dataverse/solutions/SpaarkeMaster/Roles/` (entries for `sprk_invoicecorrection` only; no other table touched).
 - `tests/Spaarke.ArchTests/FeatureRolePrivilegeGuardTests.cs`: the new guard section (from line 1508).
-- `config/feature-role-privileges.json`, `config/secure-record-owner-role.json` and `config/external-collaborator-role.json`: checked, unchanged.
+- `config/feature-role-privileges.json`: carries the change as `removals` entries under gap `ISS028` (see "Follow-up" below).
+- `config/secure-record-owner-role.json` and `config/external-collaborator-role.json`: checked, unchanged.
 
 ### Identity of the writers (verified before the edit)
 
@@ -108,8 +109,9 @@ as the calling user; the generic create, update and delete paths refuse the tabl
 registry is covered without editing the test. The guard checks every person role file in every `Roles` folder under
 `src/dataverse/solutions` (`PersonRoles`, the same set the existing must-not-hold rules read; the repo has no packed or bundled copy of
 the roles) and every ruled change in `config/feature-role-privileges.json`. The writer's own role (`ExpectedAppUsersRoles`) is exempt.
-Findings outside a ratchet baseline fail; a baseline entry no longer found fails as stale. The baseline holds entries for other
-writer-only tables that predate this rule (known, tracked).
+Findings outside a ratchet baseline fail; a baseline entry no longer found, or found at another depth, fails (the ratchet matches
+role, privilege and depth). The baseline holds four entries for other writer-only tables that predate this rule, all
+owner-ruled, ontology D-160/D-162, reaffirmed 2026-11-05 (designated cleanup role); the Budget Revision entries also cite D-204.
 
 Controls:
 - `WriterOnlyNativeWriteControls`: must-fire for each forbidden verb in any casing on a synthetic role and for a synthetic ruled change;
@@ -140,3 +142,8 @@ Dev gets the change by a direct scoped edit after merge (EB-D-250). Other enviro
 - `NewestExpectationsFileCarriesTheRuledSet` leaves gap `ISS028` out (`PendingNextReleaseRemovalGaps`); `PendingRemovalGapsAreARatchet`
   fails once the newest expectations file carries an entry of a pending gap, so the gap then leaves the list.
 - Next release's role-privilege expectations must list the five removed entries (managed stage-and-upgrade): the correction-row write entries.
+  `PendingNextReleaseRemovalGaps` records the expectations version gap `ISS028` was raised against (1.3.1.0); any newer expectations
+  file that does not carry the gap's entries fails the guard.
+- Intended, owner confirmation pending: after this change an ordinary user's native delete of an invoice that has correction rows (and
+  of a core record or invoice line that correction rows reference) is refused; invoices end by status, not by delete. To be tried
+  during the dev apply.
