@@ -39,6 +39,8 @@ export const RECORD_LINK_TOKENS: Readonly<Record<string, string>> = {
   document: 'sprk_document',
   invoice: 'sprk_invoice',
   servicerequest: 'sprk_servicerequest',
+  // R4 task 015 (owner Q-7): `?record=event:{id}` opens an event top-level (its entity's `read` is GET /events/{id}).
+  event: 'sprk_event',
 };
 
 /**
