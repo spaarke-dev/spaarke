@@ -53,9 +53,10 @@ Same job, same host lease, same per-table claim key (`record-repair-pass:{table}
 set (asked first; undecidable → nothing read), same row rule (`RecordRepairPassContext.RowOutsideThePass` in the job, then again
 in Repair over the row it read), same Repair mode, same contact-table gate (the customer team must resolve). Differences:
 
-- Selection: ONE scan of `[createdFrom, createdTo)` for the one table, ordered by id, at most `MaxRowsPerTable` rows. More rows →
-  `truncated`, Success=false, "narrow the window"; the first page is still repaired (fill-only, so a narrowed re-run writes
-  nothing twice).
+- Selection (revised in review round 1): the table's `[createdFrom, min(createdTo, run start - settle time))`, paged in id order
+  (pages of `MaxRowsPerTable`, continuing after the last id read, starting after `afterId` when given) until exhausted or
+  `DefaultOnDemandRowBudget` rows were read. More rows than the budget → `truncated`, Success=false, `lastIdCovered`; everything
+  read was repaired (fill-only, so a continued or repeated run writes nothing twice).
 - State: the scheduled pass's `record-repair-pass:{table}:state` (watermark, sweep window and cursor, retry set) is neither read
   nor written. A row that needs asking again is counted `needsRetry` (Success=false; run the window again), not kept. A row in
   the scheduled retry set stays there: if the on-demand run repaired it, the scheduled pass's next ask is a no-op and drops it.
@@ -132,11 +133,66 @@ Gates (on 39d8474f62, after the mutations were restored):
 
 ## Known limits
 
-- **K1 — Truncated windows are not continued.** An on-demand run keeps no cursor (it must not touch the scheduled state); a
-  truncated window repairs its first page and the administrator narrows the window. Rows are ordered by id, so the repaired
-  page is not the earliest by `createdon`.
+- **K1 — A truncated window is continued by the administrator, not by the job (superseded in review round 1).** An on-demand run
+  keeps no cursor of its own (it must not touch the scheduled state). It pages the window in id order up to the row budget
+  (`DefaultOnDemandRowBudget` = 500), then reports `truncated`, Success=false and `lastIdCovered`; the administrator runs the
+  window again with `afterId` = that id. Rows are ordered by id, so a run's rows are not the earliest by `createdon`.
 - **K2 — No retry set.** A row an on-demand run cannot finish is counted (`needsRetry`) and not kept; running the window again is
   the retry. Rows the scheduled pass is retrying stay in its set either way.
 - **K3 — The admin 202 test's run reads nothing** (that host's WhoAmI names no user): what a started run does is pinned in
   `RecordRepairPassJobTests` over the real job; the 202 test proves the route hands the job the typed run (`mode: on_demand`,
   table) through the real host.
+- **K4 — The job's disable switch and `RunScheduledJobs=false` do not stop the route.** The route starts a manual run through
+  the host's `TriggerNowAsync`, which does not consult either. The off switch for on-demand runs is unsetting
+  `RecordRepair:Pass:GoLive`: the route answers 409 `record_repair_run.not_configured` and the job refuses an on-demand run with
+  go-live unset.
+- **K5 — A window that ends at or after "now minus two minutes" is reported as not clean.** The scan stops at the scheduled
+  pass's settle point; the run says which rows were left (`settleClamped`, `scanUntil`) and Success=false, and the administrator
+  runs the tail later. A window ending at "now" therefore never reports success.
+
+## Review and fix round 1
+
+| # | Finding | Class | Outcome |
+|---|---|---|---|
+| 1 | An on-demand run read one page and had no cursor, so rows past the cap inside a one-second window were unreachable | F4 | Fixed. The run pages (id order, `after` = last id read, the scheduled pass's order) until the window is exhausted or `DefaultOnDemandRowBudget` rows were read; on the budget it names `lastIdCovered` in the result JSON, the heartbeat and the message; an optional body field `afterId` (GUID) continues a run, validated before the lease (`record_repair_run.after_id_invalid`, 400; the empty GUID is refused). The scheduled pass's state is untouched. |
+| 2 | A started run left no record of who started it | F3 | Fixed. After the host accepts the run the route logs once, structured: `oid` (via `CallerResolution.ResolveObjectId`), run id, table, window, `afterId`. No token or row data; a refused or lease-held request logs no started line. |
+| 3 | No test of the route's `go_live_invalid` 409 | F4 | Fixed. A host with an unparseable go-live answers 409 `record_repair_run.go_live_invalid`, starts no run and does not echo the setting. |
+| 4 | A client abort while the body is read was an unhandled `OperationCanceledException` | F3 | Fixed. `catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)` returns 499 (as the generic trigger does) and logs the cancel at information level; tested with a body that stalls and a client that leaves. |
+| 5 | The on-demand window could end at now while the scheduled pass stops at now minus the settle time | F4 | Fixed. The job clamps the scan's upper bound to min(`createdTo`, run start minus `SettleTime`); a clamped run is reported not clean (K5); a window wholly inside the settle time reads nothing and takes no claim. The route still accepts `createdTo` up to now. |
+| 6 | Boundary and path test gaps in the request rules | F4 | Fixed. `RecordRepairOnDemandRunValidationTests`: `createdTo` = now accepted (+1 s refused); a window of exactly 31 days accepted (+1 s refused); `createdFrom` = go-live accepted (-1 s refused); upper-case and padded table names accepted and normalised to the pass's spelling; `+05:30` offset normalised to UTC; fractional seconds kept; `timestamp_invalid` (6 shapes) and `timestamp_offset_missing`; `afterId` absent / well formed / malformed / empty. Route: `body_invalid` for `null`, `[]` and a bare string as well as text that is not JSON. |
+| 7 | Notes | F4 | This section, K1 revised, K4 and K5. |
+
+Not done: the optional assertion of the core-ancestor stamp in the on-demand repair test. The pass harness
+(`RepairWorld`) records the conditional write's mapping and owner fields but not the stamp, so the stamp stays pinned where it is
+today (`RecordRepairModeTests`); exposing it would change the harness for one assertion.
+
+**Row budget value: 500.** One Repair per row is a read and at most one conditional write; at a pessimistic second per row 500
+rows stay inside the table claim (`ClaimDuration`, 15 minutes). It is a named constant (`DefaultOnDemandRowBudget`) with an
+`init` property on the job for tests.
+
+**Must-fire evidence (production rule switched off, test project rebuilt, `RecordRepairPassJob*` + `RecordRepairPassTrigger*` +
+`RecordRepairOnDemandRun*`, 132 tests; each file restored with `git checkout`).** Mutations that would not compile were redone
+without a constant condition (J1, J2, R1).
+
+| Rule switched off | Tests that failed (all expected) |
+|---|---|
+| Paging stops after the first page | `AWindowWithMoreRowsThanOnePage_*`, `AWindowWithMoreRowsThanTheBudget_*`, `AWindowWithMoreRowsThanTheBudgetOnOnePage_*`, `ARunContinuedWithTheLastIdCovered_*` (4) |
+| Budget never stops the run | the two budget tests (2) |
+| `afterId` ignored by the job | `ARunContinuedWithTheLastIdCovered_*` (1) |
+| `afterId` dropped when the run is built | `AWellFormedAfterId_IsKept`, `ARunContinuedWithTheLastIdCovered_*`, the started-run log test (3) |
+| Empty GUID accepted as `afterId` | `AMalformedOrEmptyAfterId_IsRefused(empty)`, the route's `after_id_invalid` case (2) |
+| Scan not clamped to the settle point | `AWindowEndingAtNow_*`, `AWindowEntirelyInsideTheSettleTime_*` (2) |
+| `lastIdCovered` not set | `AWindowWithMoreRowsThanTheBudget_StopsAtTheBudget_*` (1) |
+| 499 catch not matching | `AClientThatAbortsWhileItsBodyIsRead_*` (1) |
+| Started-run log not written | `AStartedRun_IsLoggedOnce_*` (1) |
+| Caller `oid` not logged | `AStartedRun_IsLoggedOnce_*` (1) |
+| Unparseable go-live ignored by the route | `WithAnUnparseableGoLive_*` plus the route's other cases (23) |
+| Window bound `>=` instead of `>` | the exactly-31-days case (1) |
+| `createdTo` = now refused | the `createdTo == now` cases and both settle tests (4) |
+| `createdFrom` = go-live refused | the `createdFrom == go-live` case and every on-demand job test (16) |
+| Table matched case-sensitively | upper-case and padded cases (2) |
+| Table name not trimmed | the padded case (1) |
+| Offset bound not normalised to UTC | `AnOffsetBound_IsNormalisedToUtc` (1) |
+
+Gates after the round: solution build 0 warnings; ArchTests 2639/2639; `dotnet format whitespace --verify-no-changes` clean on
+every touched .cs; the filtered Sprk.Bff.Api.Tests run (Repair, RecordOwnership, Scheduled, Job, Admin, RecordCreation, Contact, AssignCascade, Census, Issue975; `!~Api.Office.`) 9105 passed, 5 skipped (pre-existing), 0 failed.
