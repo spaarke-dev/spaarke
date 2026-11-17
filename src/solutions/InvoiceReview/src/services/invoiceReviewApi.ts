@@ -201,6 +201,8 @@ export interface ReviewDecisionRecord {
   decidedOn: string | null;
   decidedBy: ReviewRef | null;
   reason: string | null;
+  /** ISS-034 iss034d (EB-D-257): who completed a blocked Override or Return that someone else recorded. Absent otherwise. */
+  completedBy?: { name: string } | null;
 }
 
 /** ebilling-r1 task 113: the server's states for the read-time Procedure-change banner (`ProcedureChangeBanner`). */

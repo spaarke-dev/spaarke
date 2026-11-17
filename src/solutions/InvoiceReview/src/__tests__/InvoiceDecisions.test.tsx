@@ -1166,6 +1166,24 @@ describe('History pane', () => {
     expect(within(tab).queryByRole('button', { name: /edit|delete|remove/i, hidden: true })).not.toBeInTheDocument();
   });
 
+  it('shows "Finished by {name}" under an entry the server says someone else completed, and nothing extra otherwise (iss034d)', async () => {
+    const records = [
+      decisionRecord({ recordId: 'r1', number: 'DR-0001', actionCode: 'override-submission', subject: 'invoice', lineId: null, completedBy: { name: 'O. Operator' } }),
+      decisionRecord({ recordId: 'r2', number: 'DR-0002', actionCode: 'accept-line', lineId: lineId(1) }),
+      decisionRecord({ recordId: 'r3', number: 'DR-0003', actionCode: 'reduce-line', lineId: lineId(1), completedBy: null }),
+      decisionRecord({ recordId: 'r4', number: 'DR-0004', actionCode: 'return-to-firm', subject: 'invoice', lineId: null, completedBy: { name: '' } }),
+    ];
+    renderDecisions(review([line(1)], { decisionHistory: records }), mockDecisionApi());
+    await screen.findByTestId('review-title');
+    fireEvent.click(screen.getByRole('tab', { name: 'History', hidden: true }));
+    const tab = await screen.findByTestId('history-tab');
+    const finished = within(tab).getAllByTestId('history-finished-by');
+    expect(finished).toHaveLength(1);
+    expect(finished[0]).toHaveTextContent('Finished by O. Operator');
+    expect(finished[0].closest('[data-kind="decision"]')).toHaveTextContent('DR-0001');
+    expect(within(tab).getAllByTestId('record-row')).toHaveLength(4);
+  });
+
   it('says so when nothing is recorded', async () => {
     renderDecisions(clean(), mockDecisionApi());
     await screen.findByTestId('review-title');
