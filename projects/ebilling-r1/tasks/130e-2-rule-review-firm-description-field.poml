@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="130e-2" project="ebilling-r1">
+  <metadata>
+    <title>Rule Review editor: a "Firm description" field on each rule, with the "firms see this" notice</title>
+    <phase>5 Firm feedback — 130e (DEF-060, EB-D-212, EB-D-213)</phase>
+    <gate>130e-1 merged into work. Branch from work/ebilling-r1 at the sha named in the agent brief.</gate>
+    <status>open</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Client-only change to the Rule Review code page. Tests are modified, so Step 9.5 review runs.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+    <parallel-safe>true</parallel-safe>
+    <deps>130e-1</deps>
+    <tags>react, fluent-ui, frontend, testing</tags>
+    <estimated-effort>1 day</estimated-effort>
+  </metadata>
+
+  <prompt>Build the editor side of the 130e-2 contract in projects/ebilling-r1/notes/130e-firm-description-writer.md ("The 130e-2 contract (editor)"). Each rule's detail in Rule Review (ProposalDetailPane) shows and edits firmDescription, read from GET /api/finance/rulesets/{id} proposals[].firmDescription and saved through PATCH .../proposals/{policyId} with body member firmDescription. The server is authoritative; the client mirrors its checks to give early field errors.</prompt>
+
+  <goal>A billing admin can write, change or clear the short text a firm sees when a rule rejects its invoice, and is told plainly that firms see it.</goal>
+
+  <constraints>
+    <constraint source="130e-1 contract">Send firmDescription only when the admin changed it. Blank clears it (send ""), and an untouched field leaves the key out, so it is never null by accident.</constraint>
+    <constraint source="130e-1 contract">The client checks mirror the server: at most 200 Unicode scalars (count code points, not UTF-16 units); no { } &lt; &gt;; no control, format or separator characters and no unpaired surrogate; must not contain the rule set's or the rule's name after NFKC and white-space folding, case-insensitively; not on a Duplicate rule (field read-only, with a reason).</constraint>
+    <constraint source="130e-1 contract">A 422 ruleset.invalid or ruleset.publish_invalid with errors[].field "firmDescription" shows the reason's message under the field (one message per reason code). The text is never echoed by the server, so the client never needs it.</constraint>
+    <constraint source="130e-1 contract">On a published working version the edit creates a new draft (no 409); the page reflects the new draft after save, as it does for other proposal edits.</constraint>
+    <constraint source="EB-D-212 / D-66">The field carries a visible notice: firms see this text when this rule rejects their invoice; it must not name the rule set or the rule, and must not hold internal notes. Look-alike letters are not caught; the notice says so in plain words.</constraint>
+    <constraint source="ISS-027">No maxLength truncation: a counter (n / 200) and a field error over the limit.</constraint>
+    <constraint source="ADR-021">Fluent v9 tokens only; dark mode.</constraint>
+    <constraint source="project">Only src/solutions/RuleReview/** and a new notes file. No shared-library change, no server change, no deploy.</constraint>
+  </constraints>
+
+  <acceptance-criteria>
+    <criterion testable="true">Jest: the field shows the stored text; an edit sends firmDescription; a clear sends ""; an untouched save leaves the key out (must-not-fire).</criterion>
+    <criterion testable="true">Jest: each client check fires on its case and not on a clean text (NFKC and white-space folding cases included; a 200-scalar text with astral characters is accepted, 201 is refused).</criterion>
+    <criterion testable="true">Jest: a 422 with each firm_description_* reason shows its field message; a Duplicate rule shows the field read-only.</criterion>
+    <criterion testable="true">A source-scan test pins the six reason codes, the 200 limit and the request member name against the C# source.</criterion>
+    <criterion testable="true">The full RuleReview Jest suite is green; npm run typecheck (surface-owned errors 0) and npm run build succeed.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load the knowledge files first. Follow task-execute for rigor, checkpoints and quality gates.</protocol>
+  </execution>
+</task>
