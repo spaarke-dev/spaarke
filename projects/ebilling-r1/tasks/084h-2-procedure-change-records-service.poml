@@ -4,7 +4,7 @@
     <title>Per-record Procedure changes file their Decision Record: recorder, ProcedureAssignmentService and endpoints (note, decision id, Unknown read-back, decisionRecord member, enqueue on failure)</title>
     <phase>3 Rules (WP3) — Procedures on the record (EB-D-238, EB-D-239)</phase>
     <gate>084h-1 merged into work (done). Branch from work/ebilling-r1 at the sha named in the agent brief. Never deployed without 084h-3.</gate>
-    <status>open</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>BFF C# on 089's write path: commit ordering, idempotency and a response contract change on seven acts.</rigor-reason>
     <model-tier>opus</model-tier>
