@@ -43,7 +43,10 @@ function renderDecisions(reviews: InvoiceReview | InvoiceReview[], decision: Moc
 }
 
 const held = () => approval({ held: true, canApprove: false });
-const FINISH = { name: 'Finish as operator', hidden: true } as const;
+// The open form, by role alone. Fluent's focus handling can mark an open surface aria-hidden once the page moves under it (the banner that
+// held its trigger goes), which makes the surface's accessible NAME empty: a query by name then misses a form that is still open, and a
+// negative "is gone" check by name passes too early. Which form is meant is checked on the element found (its title text), not by name.
+const anyDialog = () => screen.queryByRole('dialog', { hidden: true });
 const dialogOf = (name = 'Finish as operator') => screen.findByRole('dialog', { name, hidden: true });
 const reasonOf = (d: HTMLElement) => within(d).getByLabelText('Reason') as HTMLTextAreaElement;
 const noteOf = (d: HTMLElement) => within(d).getByLabelText('Note') as HTMLTextAreaElement;
@@ -387,7 +390,7 @@ describe('Finish as operator: an unsure send locks the dialog, and the repeat is
     expect(reasonOf(dialog)).toHaveAttribute('readonly');
     expect(noteOf(dialog)).toHaveAttribute('readonly');
     cancel(dialog);
-    await waitFor(() => expect(screen.queryByRole('dialog', FINISH)).not.toBeInTheDocument());
+    await waitFor(() => expect(anyDialog()).not.toBeInTheDocument());
 
     fireEvent.click(await screen.findByTestId('finish-stranded'));
     const again = await dialogOf();
@@ -399,7 +402,7 @@ describe('Finish as operator: an unsure send locks the dialog, and the repeat is
     await waitFor(() => expect(decision.finishStranded).toHaveBeenCalledTimes(2));
     expect(decision.finishStranded.mock.calls[1]).toEqual(decision.finishStranded.mock.calls[0]);
     // The repeat finished it (the mock's default answer): the lock goes with it.
-    await waitFor(() => expect(screen.queryByRole('dialog', FINISH)).not.toBeInTheDocument());
+    await waitFor(() => expect(anyDialog()).not.toBeInTheDocument());
     fireEvent.click(await screen.findByTestId('finish-stranded'));
     const fresh = await dialogOf();
     expect(reasonOf(fresh).value).toBe('');
@@ -425,7 +428,7 @@ describe('Finish as operator: an unsure send locks the dialog, and the repeat is
     const dialog = await sendFinish(decision);
     await within(dialog).findByTestId('blocked-error');
     cancel(dialog);
-    await waitFor(() => expect(screen.queryByRole('dialog', FINISH)).not.toBeInTheDocument());
+    await waitFor(() => expect(anyDialog()).not.toBeInTheDocument());
 
     fireEvent.click(await screen.findByTestId('override-block'));
     const other = await dialogOf('Override the block');
@@ -433,7 +436,7 @@ describe('Finish as operator: an unsure send locks the dialog, and the repeat is
     fireEvent.change(reasonOf(other), { target: { value: 'Known resubmission' } });
     expect(within(other).getByRole('button', { name: 'Override', hidden: true })).toBeDisabled();
     cancel(other);
-    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Override the block', hidden: true })).not.toBeInTheDocument());
+    await waitFor(() => expect(anyDialog()).not.toBeInTheDocument());
 
     fireEvent.click(await screen.findByTestId('return-blocked'));
     const ret = await dialogOf('Return to firm');
@@ -453,7 +456,7 @@ describe('Finish as operator: an unsure send locks the dialog, and the repeat is
     fireEvent.click(within(first).getByRole('button', { name: 'Override', hidden: true }));
     await within(first).findByTestId('blocked-error');
     cancel(first);
-    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Override the block', hidden: true })).not.toBeInTheDocument());
+    await waitFor(() => expect(anyDialog()).not.toBeInTheDocument());
 
     fireEvent.click(await screen.findByTestId('finish-stranded'));
     const other = await dialogOf();
@@ -477,7 +480,7 @@ describe('Finish as operator: an unsure send locks the dialog, and the repeat is
     await waitFor(() => expect(reasonOf(dialog)).not.toHaveAttribute('readonly'));
     expect(within(dialog).getByTestId('blocked-error')).toHaveTextContent('(ebilling.blocked.nothing_stranded)');
     cancel(dialog);
-    await waitFor(() => expect(screen.queryByRole('dialog', FINISH)).not.toBeInTheDocument());
+    await waitFor(() => expect(anyDialog()).not.toBeInTheDocument());
     fireEvent.click(await screen.findByTestId('override-block'));
     const other = await dialogOf('Override the block');
     expect(within(other).queryByTestId('blocked-other-lock')).not.toBeInTheDocument();
@@ -519,7 +522,6 @@ describe('Finish as operator: an unsure send locks the dialog, and the repeat is
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe('an unsure send whose re-read shows the hold gone (the decision stood, a Signal close did not)', () => {
-  const anyDialog = () => screen.queryByRole('dialog', { hidden: true });
   const unsure = () => failed(problem(503, 'ebilling.blocked.unavailable', { detail: 'The decision stood but not every Signal closed.' }));
 
   const verbs: Array<[string, string, string, string, 'overrideBlocked' | 'returnBlocked' | 'finishStranded', () => MockDecisionApi]> = [
@@ -544,7 +546,8 @@ describe('an unsure send whose re-read shows the hold gone (the decision stood, 
     expect(error).toHaveTextContent('It was saved in part: repeat it to finish.');
     await waitFor(() => expect(screen.queryByTestId('blocked-banner')).not.toBeInTheDocument());
     // The form is still there, locked as sent.
-    expect(screen.getByRole('dialog', { name: title, hidden: true })).toBeInTheDocument();
+    expect(anyDialog()).toBe(dialog);
+    expect(within(dialog).getByText(title)).toBeInTheDocument();
     expect(reasonOf(dialog)).toHaveAttribute('readonly');
     expect(noteOf(dialog)).toHaveAttribute('readonly');
     expect(within(dialog).getByTestId('blocked-note-locked')).toBeInTheDocument();

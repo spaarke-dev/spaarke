@@ -78,6 +78,19 @@ function openRecord(entityName: string, id: string): void {
     .catch(err => console.warn('[InvoiceReview] The record could not be opened:', err));
 }
 
+/**
+ * "Submit corrected invoice" (task 095f-2e2b): opens the Create Invoice wizard code page in Correction mode for this invoice, as a
+ * dialog (the same `navigateTo` launch every other wizard uses), and resolves when the dialog closes. The wizard reads the invoice's
+ * correction prefill itself; the launch carries only the invoice id.
+ */
+function openCorrectionWizard(invoiceId: string): Promise<{ confirmed?: boolean }> {
+  return createXrmNavigationService().openDialog('sprk_createinvoicewizard', `correctionInvoiceId=${encodeURIComponent(invoiceId)}`, {
+    width: { value: 60, unit: '%' },
+    height: { value: 70, unit: '%' },
+    title: 'Submit corrected invoice',
+  });
+}
+
 const Message: React.FC<{ testId: string; title: string; body: string; onRetry?: () => void }> = ({ testId, title, body, onRetry }) => {
   const s = useStyles();
   return (
@@ -151,7 +164,7 @@ function Root() {
       </div>
     );
   } else {
-    body = <InvoiceReviewWithDecisions invoiceId={launch.invoiceId} initialLineId={launch.lineId} api={api} decisionApi={decisionApi} openRecord={openRecord} />;
+    body = <InvoiceReviewWithDecisions invoiceId={launch.invoiceId} initialLineId={launch.lineId} api={api} decisionApi={decisionApi} openRecord={openRecord} openCorrectionWizard={openCorrectionWizard} />;
   }
 
   // The FluentProvider carries only the theme; the surface colours sit on a wrapper div (project gotcha F-10).
