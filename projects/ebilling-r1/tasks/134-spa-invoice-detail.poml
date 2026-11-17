@@ -1,5 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <task id="134" project="ebilling-r1">
+  <amendment source="EB-D-254, owner 2026-11-17 (option b)">No PDF report file in R1; task 133 is withdrawn. The firm report is the on-screen report (130's projection) in the SPA, plus the findings table in the 131 notice email body. FR-40 and D-36 are amended. This amendment overrides every PDF, report-download and 133 reference below.</amendment>
+  <amendment-detail>134: no Download PDF button and no report route call. Instead the Outcome report prints cleanly: a print stylesheet (hides navigation and chrome, a page break between the summary and the findings, light colours when printing in dark mode) and a "Print or save as PDF" button that calls window.print(). Vitest: the button calls window.print; the print class hides the chrome. The UI test step "Download PDF" becomes "Print preview shows the same items".</amendment-detail>
   <metadata>
     <title>SPA invoice detail and on-screen report</title>
     <phase>5 Firm feedback (WP5) — wave W5-2</phase>
