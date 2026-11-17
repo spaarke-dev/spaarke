@@ -2207,7 +2207,7 @@ In a multi-line call whose earlier lines were recorded, the remaining lines take
 
 | Field | Value |
 |---|---|
-| **Status** | Open |
+| **Status** | In Progress (task iss032 merged into work 0ec908c554; closes when on master) |
 | **Urgency** | next-round |
 | **Filed** | 2026-11-17 |
 | **Source** | 095f-2ui round-1 re-check (Opus; found in passing; pre-existing) |

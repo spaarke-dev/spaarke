@@ -103,3 +103,9 @@ Not yet built end to end (2e2b in progress).
 - [ ] As an ordinary user (Spaarke Core User), open an invoice that has a correction. Try to delete it from the model-driven app. **Expect** a refusal (no privilege on the correction rows). End invoices by status instead.
 - [ ] As the same user, open an invoice-correction row directly (Advanced Find or the table view). **Expect** read-only: no Save, Delete, Assign or Share.
 - [ ] In Invoice Review, correct a line value and confirm a line. **Expect** both to save, with the correction rows written as usual (the app writes them, not the user).
+
+## J. Finish a decision that did not finish (iss032): after a BFF and an Invoice Review page that carry it
+
+These states are hard to cause by hand; they need a fault during a decision. If you see one in normal use, test it then:
+- [ ] An invoice showing Rejected, Returned or Approved with the "This decision did not finish" banner: **Finish decision…** opens a form. Before the decision was recorded, it asks for the reason again and says why. After it was recorded, the reason is shown locked. Submitting finishes the decision, and the page then shows "View decision".
+- [ ] A decided invoice with no banner shows only "View decision" (nothing changed for complete decisions).

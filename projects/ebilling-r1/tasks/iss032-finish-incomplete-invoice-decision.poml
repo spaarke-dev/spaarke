@@ -4,7 +4,7 @@
     <title>Invoice Review: finish an invoice decision (reject, return, approve) stranded after its transition, once the wizard is closed (ISS-032 #2883)</title>
     <phase>Defect fix (ISS-032, next-round)</phase>
     <gate>Branch from work/ebilling-r1 at the sha named in the agent brief.</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>BFF decision services and the approval-state read, plus the Invoice Review code page; tests modified.</rigor-reason>
     <model-tier>opus</model-tier>

@@ -98,7 +98,8 @@ The coordinator amended the must-not-fire. It was "a decision whose record exist
 **Known limits**
 - **K2: the 105-return false positive is unreachable.** The hint needs the caller's own claim on the portion (`sprk_decidedby`), and a 105 return writes none.
 - **K3:** see Fixed.
-- **K4:** listed by the review as a known limit. Its text was not in the fix brief, so it is not restated here.
+- **K4 (carried limits, confirmed by the review):** only the claimant sees the hint, so if they have left nobody can finish it from the page; the Signal close rights are not pre-checked, so a caller without them gets a 403 in the form; a re-asked reason (before the record) can differ from the first text (095f-2a K-1).
+- **Scoped re-check (Sonnet, after round 1):** no F-class finding. K: a non-empty link counts as complete without checking that it names the writer's record, for reject and return as well as approve (a hand-edited link shows "View decision" while the repeat would still repair it). K: `recordedReason` has no test with two records of different verbs; the server ignores the reason at the link stage, so a wrong choice is harmless.
 
 **Fail-before**
 - Server: the round-0 services from 0a11e3f357 against the new suite gave **11 failed, 23 passed** of 34. The 11 are the new tests.
