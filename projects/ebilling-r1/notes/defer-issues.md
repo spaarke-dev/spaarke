@@ -2207,7 +2207,7 @@ In a multi-line call whose earlier lines were recorded, the remaining lines take
 
 | Field | Value |
 |---|---|
-| **Status** | In Progress (task iss032 merged into work 0ec908c554; closes when on master) |
+| **Status** | Done (task iss032; on master in #2904, merge commit fe51619cfc, 2026-11-18) |
 | **Urgency** | next-round |
 | **Filed** | 2026-11-17 |
 | **Source** | 095f-2ui round-1 re-check (Opus; found in passing; pre-existing) |
@@ -2245,7 +2245,7 @@ In a multi-line call whose earlier lines were recorded, the remaining lines take
 
 | Field | Value |
 |---|---|
-| **Status** | In Progress (EB-D-244; iss034a and iss034b merged into work, d5934d6d51; closes when on master) |
+| **Status** | Done (EB-D-244; iss034a–d; on master in #2904, merge commit fe51619cfc, 2026-11-18) |
 | **Urgency** | next-round |
 | **Filed** | 2026-11-17 |
 | **Source** | iss031 review (Opus): made reachable by the ISS-031 guard |
@@ -2356,7 +2356,7 @@ Write side of ISS-038 (see uac-r2 thread). Record sets should be keyed (record, 
 
 | Field | Value |
 |---|---|
-| **Status** | In Progress (merged into work; applied to dev 2026-11-17, Verify PASS; release pending) |
+| **Status** | In Progress (on master in #2904, fe51619cfc; applied to dev 2026-11-17, Verify PASS; closes when SpaarkeMaster 1.3.2.0 is released and imported) |
 | **Urgency** | now |
 | **Filed** | 2026-11-17 |
 | **Source** | ISS-038 review; uac-r2 thread |
