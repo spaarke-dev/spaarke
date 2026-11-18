@@ -325,7 +325,7 @@ The Office add-ins differ on purpose and are out of scope. Failure: the same cli
 
 | Field | Value |
 |---|---|
-| **Status** | Open |
+| **Status** | Fixed by #2905 (open 2026-11-18). Both projects type-check clean; LegalWorkspace pins 44 shared-lib `noUnusedLocals` findings in `tsc-baseline.json` (ratchet). Gated in each `build` script and in `ci-standalone-checks.yml` `client-typecheck`. |
 | **Urgency** | next-round |
 | **Filed** | 2026-11-13 |
 | **Source** | Found in passing, tasks 032 and 033 (`notes/032-legal-workspace.md`, `notes/033-document-operations.md`) |
