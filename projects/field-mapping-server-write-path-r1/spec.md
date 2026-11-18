@@ -404,9 +404,10 @@ contract), `tests/Spaarke.ArchTests/` (`RecordOwnerAssignmentCensusTests`, `Refi
     family walk, and it does not use the W7 record family service, which reads as the caller. Repair re-owns one
     row at a time through the create owner decision, including across business units. A repaired row's family then
     follows it through the existing unified-access-control-r2 jobs (the ordinary-moves, secure-family and re-file
-    passes), which walk families as the application. Repair leaves isolated rows to the secure pass. Out-of-the-box
-    notes and activities never move with a row: a row that has such children keeps its owner and is counted and
-    reported. Children created before go-live follow only when their owner is a default team (no backfill). Every
+    passes), which walk families as the application. Repair leaves isolated rows to the secure pass. An event's or
+    an analysis's out-of-the-box notes move with it (Q2); a note never moves to an isolated owner, because an
+    isolated parent is skipped whole. Activities, child contacts and contact notes never move with a row: a row that
+    has such children keeps its owner and is counted and reported. Children created before go-live follow only when their owner is a default team (no backfill). Every
     family member that does not reach the family's owner is named in design §3.6 and counted or reported there.
 
 **W6 — Standard, guards, docs, retirement**

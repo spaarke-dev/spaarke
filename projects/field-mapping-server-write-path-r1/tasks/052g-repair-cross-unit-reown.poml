@@ -61,6 +61,7 @@
     <criterion testable="true">AC4 (negative, must fire): Repair never writes when the current owner is in the Secure Record unit or is a restricted-content owner team.</criterion>
     <criterion testable="true">AC4a (negative, must fire): a faulted isolation read, or an unreadable owning unit, counts as isolated: skipped and counted, never written.</criterion>
     <criterion testable="true">AC4b: the guard uses `RefileIsolationRead.BeforeWriteAsync` / `SecureChildReconciler.IsSecureTeamOwnedAsync` and the configured `SecureRecord:BusinessUnitName`, with no hard-coded team id, and keeps the row's F1-b mapping block. Must-not-fire twin: an ordinary cross-unit move is written.</criterion>
+    <criterion testable="true">AC4d (negative, owner Q2 2026-11-18): an event with a note whose answer is isolated (Secure team or a restricted-content owner team), or whose isolation read faults, is skipped whole: the event and its note are untouched (`owner_left_to_secure_pass`, counted). A note never moves to an isolated owner. Must-fire twin: 052f AC3 (an ordinary event's note moves with it). UAC-r2 reviews the note-move path with the guard diff.</criterion>
     <criterion testable="true">AC4c: a 412 on the owner write leads to one re-read, with no retry loop.</criterion>
     <criterion testable="true">AC5 (negative): a secure root is never re-owned.</criterion>
     <criterion testable="true">AC6 (negative): a pre-go-live row is never written.</criterion>

@@ -75,7 +75,7 @@
     <cost-of-doing-nothing>The owner's binding outcome (2026-11-02) is unmet: a repaired root's children keep other owners, and with the cross-BU skip and the empty allow-list most roots are never re-owned at all, so the pass cannot be enabled to do what FR-25 requires.</cost-of-doing-nothing>
   </justification>
 
-  <notes>Written 2026-11-18 in the main session (owner "Yes, start 052e"). Design only; implementation follows owner approval. Completed 2026-11-18: owner approved Q1 and Q3–Q8 (yes) and Q2 (no; Spaarke does not use out-of-the-box Notes or activities). FR-25 amended in spec.md. Follow-on tasks 052f and 052g created. AC1–AC6 met.</notes>
+  <notes>Written 2026-11-18 in the main session (owner "Yes, start 052e"). Design only; implementation follows owner approval. Completed 2026-11-18: owner approved Q1–Q8 (yes). Q2 was first recorded as no, then the owner answered yes (event and analysis notes move; contact notes stay out per UAC-r2 U4; Spaarke does not use out-of-the-box Notes or activities). FR-25 amended in spec.md. Follow-on tasks 052f and 052g created. AC1–AC6 met.</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

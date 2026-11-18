@@ -106,7 +106,7 @@ The rows created outside the product are exactly those user-owned rows. **Repair
 | Moves nothing | `->team` from matter, project, event, document, invoice and contact; `contact->adx_externalidentity`; `->sharepointdocument` from matter, project, event and contact | No owner columns, or not stored in Dataverse. These relationships are **never read per row** (§3.2). |
 | Follows the record (intended) | `->sharepointdocumentlocation` from matter, project, event and contact | The record's own document location. The 194 pass leaves it to the root's own Assign, and the owner accepted the same cascade for the forward move into the secure team (UAC-r2 round 4 item 3). |
 | Follows the record (intended) | `sprk_analysis->sprk_analysischatmessage`, `->sprk_analysisemailmetadata`, `->sprk_analysisworkingversion` | The analysis's own content, parental by design |
-| Owner question **Q2** | `sprk_event->annotation`, `sprk_analysis->annotation` | **Recommended: not accepted** (UAC-r2 agrees). The Assign would carry the record's notes to the new owner team. A note that was readable only at user depth, by its author, would become readable across the new unit, which widens who can read it. A row with a note keeps its owner and is counted. |
+| Follows the record (owner Q2, 2026-11-18) | `sprk_event->annotation`, `sprk_analysis->annotation` | **Accepted** (owner decision, confirmed in this session; UAC-r2 agrees). The Assign carries the notes owned by the record's owner (UserOwned cascade) to the new owner team, which can then read them. Notes owned by other people stay with them. Spaarke does not use the out-of-the-box Notes, so this is expected to be rare. The §3.3.1 guard sits on the parent: a parent whose answer or current owner is isolated, or whose isolation read faults, is skipped whole, and its notes never move. |
 | Not accepted (UAC-r2, U4) | `contact->annotation` | The same widening, into the customer unit. A contact with a note keeps its owner and is counted. |
 
 **Never accepted.** Listed explicitly so that a later reader cannot add them by habit:
@@ -194,7 +194,8 @@ Repair and the root-owner step both re-own a person-owned ordinary work assignme
 | `sprk_signal`, `sprk_decisionrecord`, `sprk_budgetrevision` | Never written (D-204) | — |
 | A pre-go-live user-owned child | Forward-only, no backfill (Q4) | Nowhere (K3) |
 | A row owned by a non-default team | Repair keeps team-owned rows | 194 report, when in another unit |
-| A row with an activity, child-contact or note child | Never cascaded (Q2, Q5) | `owner_assign_cascades` |
+| A row with an activity or child-contact child, or a contact with a note child | Never cascaded (Q5, U4) | `owner_assign_cascades` |
+| A note owned by someone other than its event's or analysis's owner | The UserOwned cascade moves only the owner's notes (Q2) | Nowhere (the note keeps its author) |
 | A root whose `sprk_issecure` is empty | Repair keeps it (`OwnerRootSecure`); the 194 job lists only `false` | Repair report |
 | A communication that keeps its creator (E1), and its content rows | E1 rule (`RecordOwnershipResolver.cs:941-946`) | Repair report (kept) |
 | Files of documents filed directly under a non-root row moved across units | UAC-r2 issue 2903 (U1) | `ownerMovedBusinessUnit` log line |
@@ -215,7 +216,7 @@ FULL rigor, Opus. Files:
 ACs:
 1. The §3.1 entries (plus Q2's answer), each with its reason in code. Moves-nothing entries are never read per row.
 2. Re-owned: a matter, project, document, invoice or contact row with no unaccepted child.
-3. Negative: an event, analysis or contact row with a note child is not re-owned (`owner_assign_cascades`, counted). Owner Q2 (2026-11-18): no note relationship is accepted.
+3. Owner Q2 (2026-11-18): an event or analysis row with a note child is re-owned and its owner's note moves with it (must fire). Negative: an event or analysis whose answer is isolated is skipped whole and its note is untouched (must not fire; with 052g's guard). Negative: a contact row with a note child is not re-owned (`owner_assign_cascades`, counted; U4).
 4. Negative: an analysis row with an email activity is not re-owned (`owner_assign_cascades`, with the relationship named).
 5. Negative: a contact with a child contact is not re-owned.
 6. Negative: a failed, refused or depth-limited child read gives `owner_assign_cascade_unknown`, never "no children".
@@ -259,7 +260,7 @@ The live check on dev gains these cases:
 
 **Owner, to decide in this session:**
 - **Q1.** Option B: Repair per row, plus the 194, secure and re-file passes, rather than a new family walk. *Recommended: yes.*
-- **Q2.** Should notes (`annotation`) cascade with an event and an analysis? *Recommended: no* (UAC-r2 agrees). The cascade would widen who can read a note. A row with notes keeps its owner and is counted. Contact notes are not accepted (UAC-r2, U4).
+- **Q2.** Should notes (`annotation`) cascade with an event and an analysis? *Recommended: no* (UAC-r2 agrees). The cascade would widen who can read a note. A row with notes keeps its owner and is counted. Contact notes are not accepted (UAC-r2, U4). **Decided: yes** (owner, 2026-11-18; see below).
 - **Q3.** Pre-go-live default-team children of a repaired root follow it through the 194 pass, as after any MDA Assign. *Recommended: yes.*
 - **Q4.** Pre-go-live user-owned children of a repaired root stay where they are, and no report lists them (K3). *Recommended: yes; this is "no backfill".*
 - **Q5.** Activities and child contacts never move through an Assign. A row that has them keeps its owner and is reported. *Recommended: yes.*
@@ -267,7 +268,7 @@ The live check on dev gains these cases:
 - **Q7.** The system path uses the reconciler's app-only walk, not the W7 reader, which reads as the caller. This is a deviation from FR-25's wording. *Recommended: accept, and amend FR-25's sentence.*
 - **Q8.** The cross-unit move of a non-root row hands nothing to the 194 engine (§3.3 step 4). The one residual, files of documents filed directly under that row, is UAC-r2's issue 2903 (U1). *Recommended: yes.*
 
-**Owner, decided 2026-11-18 in this session.** Q2: no (event and analysis notes are not accepted). Q1 and Q3–Q8: yes, as recommended. The owner states that Spaarke does not use the out-of-the-box Notes (`annotation`) or activities, so a row skipped under Q2 or Q5 is expected to be rare; it is still counted and reported. Dev held one note in total on 2026-11-18 (read-only count).
+**Owner, decided 2026-11-18 in this session.** Q1 and Q3–Q8: yes, as recommended. **Q2: yes** — event and analysis notes move with the re-owned record. The owner first left Q2 to the recommendation (recorded as no), then answered yes in UAC-r2's session and confirmed yes here. The owner states that Spaarke does not use the out-of-the-box Notes (`annotation`) or activities, so both cases are expected to be rare; a row skipped under Q5 or U4 is still counted and reported. Contact notes stay out (U4, unchanged). The isolation guard stays on the parent (§3.3.1), so a note never moves to an isolated owner. Dev held one note in total on 2026-11-18 (read-only count).
 
 **UAC-r2, answered 2026-11-18.** Option B is fine: no new family walk, no in-process call.
 
@@ -276,7 +277,7 @@ The live check on dev gains these cases:
 | U1. Files of documents under a moved non-root parent | Theirs, issue 2903. Not ours, and it does not block |
 | U2. The race in §3.2 | The post-write re-read with a count is enough; the snapshot is not extended |
 | U3. Two writers of a work assignment's or project's owner | Keep both; a 412 means re-read, with no retry loop |
-| U4. The §3.1 entries | Accepted as listed, except `contact->annotation`: not accepted. Event and analysis notes: not accepted until the owner decides (Q2) |
+| U4. The §3.1 entries | Accepted as listed, except `contact->annotation`: not accepted (reconfirmed 2026-11-18). Event and analysis notes: accepted after the owner's Q2 yes, with the guard on the parent and the must-fire / must-not-fire pair; UAC-r2 reviews the note-move path with 052g's guard diff |
 | The §3.3.1 guard | Required, in their shape; they review 052g's diff of it |
 
 ## 6. Before the pass is enabled on any environment (consolidated)
