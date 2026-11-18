@@ -360,6 +360,28 @@ public sealed class InvoiceRejectReturnEndpointsAuthorizationContractTests
     // Task 132: the notification job (FR-39, EB-D-258)
     // =========================================================================================
 
+    [Theory(DisplayName = "132 review F1: an Incomplete decision enqueues nothing; the claimant's repeat that completes it (answered Decided, the record is the last step) enqueues exactly ONE job over the two calls, and a further repeat none")]
+    [InlineData("reject", EbillingNotificationEvent.InvoiceRejected)]
+    [InlineData("return", EbillingNotificationEvent.ReturnedToFirm)]
+    public async Task Incomplete_ThenTheClaimantsRepeat_EnqueuesExactlyOneJobInTotal(string route, EbillingNotificationEvent expected)
+    {
+        await using var host = await Host.StartAsync();
+        host.GrantAll();
+        host.World.FaultsOnce["link"] = new InvalidOperationException("dataverse down");
+        const string body = "{\"reason\":\"Because\",\"noticeSubject\":\"Please correct\",\"noticeProse\":\"Please correct the hours.\"}";
+
+        var failed = await host.SendAsync(route, body: body);
+        host.Queued.Should().BeEmpty("an Incomplete decision is not yet a decision the firm is told about");
+        var repeat = await host.SendAsync(route, body: body);
+        var again = await host.SendAsync(route, body: body);
+
+        failed.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable);
+        repeat.StatusCode.Should().Be(HttpStatusCode.OK);
+        again.StatusCode.Should().Be(HttpStatusCode.OK);
+        var job = host.Queued.Should().ContainSingle("one job over the three calls: the completing repeat enqueues, the already-decided one does not").Subject;
+        job.IdempotencyKey.Should().Be(EbillingNotificationEnqueuer.IdempotencyKeyFor(expected, host.World.InvoiceId));
+    }
+
     [Theory(DisplayName = "132 EB-D-258: a decision enqueues ONE notification job; it carries the reviewer-confirmed notice when the request had both parts, and none otherwise")]
     [InlineData("reject", EbillingNotificationEvent.InvoiceRejected)]
     [InlineData("return", EbillingNotificationEvent.ReturnedToFirm)]
