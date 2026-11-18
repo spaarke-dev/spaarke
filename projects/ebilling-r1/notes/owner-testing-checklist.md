@@ -114,3 +114,10 @@ These states are hard to cause by hand; they need a fault during a decision. If 
 
 - [ ] A blocked Override or Return that one person recorded and an operator finished (section G): its History entry shows **Finished by {operator}** under the decision.
 - [ ] A blocked decision its own decider finished, and any decision made before iss034c, shows no "Finished by" line.
+
+## L. Rule set "Visible to Firms" is set only by Spaarke (ISS-040): after the dev apply (needs your typed OK)
+
+- [ ] As an internal user, open a rule set in the model-driven app. The "Visible to Firms" value still shows on the form and in the view.
+- [ ] Try to change "Visible to Firms" directly on the form. **Expect** it to be read-only (only Spaarke changes it).
+- [ ] Create a rule set in the model-driven app. **Expect** the save to succeed with "Visible to Firms" = No.
+- [ ] In Rule Review, switch a rule set's visibility on and off. **Expect** it to work as before.

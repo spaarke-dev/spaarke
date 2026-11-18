@@ -72,7 +72,7 @@ public enum FirmOutcomeDecision
 }
 
 /// <summary>
-/// The firm-visible outcome of one invoice or submission. <see cref="ApprovedTotal"/> is null for a state that has not been decided.
+/// The firm-visible outcome of one invoice or submission. <see cref="ApprovedTotal"/> is null for every state that has no approval: a submission, an invoice In Review, Rejected or Returned to firm.
 /// <see cref="Degraded"/> is true when a read did not complete: the outcome then carries the status only (fail closed).
 /// </summary>
 /// <param name="TrackingNumber">The tracking number the firm was given on submission.</param>
@@ -170,7 +170,9 @@ public delegate Task<FirmClauseText> FirmClauseReader(Guid policyVersionId, Guid
 /// <para><b>What is shown.</b> A submission Received or Processing: status and billed total only. An invoice In Review: status, billed total,
 /// its reviewer-added lines and its decided lines (Reduced, Disallowed) with the reviewer's reason; no approved total and no invoice-level
 /// adjustment (EB-D-202). Approved, Sent to AP and Paid: the same items plus the invoice-level adjustments, and the approved total. Rejected
-/// and Returned to Firm: status and billed total. Pending, Flagged, Clean, Accepted, overridden and AI-observation findings never appear: an
+/// and Returned to Firm (EB-D-259, task 130f): the SAME items as In Review, built by the same code, with the decided kind and label and the billed
+/// total; no approved total and no invoice-level adjustment. The reviewer's reject or return reason and note are never read (that Decision Record
+/// has its own action code, which no item reads). Pending, Flagged, Clean, Accepted, overridden and AI-observation findings never appear: an
 /// item exists only because a line was decided, added or adjusted by a reviewer.</para>
 /// <para><b>Where each part comes from (all read app-only).</b> The line and its status: the invoice's lines
 /// (<see cref="InvoiceReviewReadService.LineQuery"/>). The reason: the <c>reduce-line</c>, <c>disallow-line</c> or <c>add-line</c> Decision Record
@@ -299,9 +301,7 @@ public sealed class FirmFindingsProjection
         switch (lifecycle)
         {
             case InvoiceLifecycleStatus.Rejected:
-                return new FirmOutcome(FirmOutcomeKind.Rejected, tracking, "Rejected", billed, null, [], false);
             case InvoiceLifecycleStatus.ReturnedToFirm:
-                return new FirmOutcome(FirmOutcomeKind.ReturnedToFirm, tracking, "Returned to firm", billed, null, [], false);
             case InvoiceLifecycleStatus.InReview:
             case InvoiceLifecycleStatus.Approved:
             case InvoiceLifecycleStatus.SentToAp:
@@ -318,10 +318,14 @@ public sealed class FirmFindingsProjection
                 return Closed(tracking, ClosedLabel);
         }
 
-        var decided = lifecycle != InvoiceLifecycleStatus.InReview;
+        // Rejected and Returned to Firm (EB-D-259, task 130f) show the In Review items by the same code below, with the decided kind and label and
+        // the billed total. They carry no approved total and no invoice-level adjustment: those belong to Approved and later.
+        var approvedOrLater = lifecycle is InvoiceLifecycleStatus.Approved or InvoiceLifecycleStatus.SentToAp or InvoiceLifecycleStatus.Paid;
         var statusOnly = lifecycle switch
         {
             InvoiceLifecycleStatus.InReview => new FirmOutcome(FirmOutcomeKind.InvoiceInReview, null, "In review", null, null, [], true),
+            InvoiceLifecycleStatus.Rejected => new FirmOutcome(FirmOutcomeKind.Rejected, null, "Rejected", null, null, [], true),
+            InvoiceLifecycleStatus.ReturnedToFirm => new FirmOutcome(FirmOutcomeKind.ReturnedToFirm, null, "Returned to firm", null, null, [], true),
             InvoiceLifecycleStatus.Approved => new FirmOutcome(FirmOutcomeKind.Approved, null, "Approved", null, null, [], true),
             InvoiceLifecycleStatus.SentToAp => new FirmOutcome(FirmOutcomeKind.SentToAp, null, "Sent to accounts payable", null, null, [], true),
             _ => new FirmOutcome(FirmOutcomeKind.Paid, null, "Paid", null, null, [], true),
@@ -330,7 +334,7 @@ public sealed class FirmFindingsProjection
         IReadOnlyList<FirmOutcomeItem> items;
         try
         {
-            items = await BuildItemsAsync(invoiceId, includeAdjustments: decided, ct).ConfigureAwait(false);
+            items = await BuildItemsAsync(invoiceId, includeAdjustments: approvedOrLater, ct).ConfigureAwait(false);
         }
         catch (Exception ex) when (IsFault(ex, ct))
         {
@@ -338,10 +342,12 @@ public sealed class FirmFindingsProjection
             return statusOnly;
         }
 
-        var approved = decided ? invoice.Approved : null;
+        var approved = approvedOrLater ? invoice.Approved : null;
         return lifecycle switch
         {
             InvoiceLifecycleStatus.InReview => new FirmOutcome(FirmOutcomeKind.InvoiceInReview, tracking, "In review", billed, null, items, false),
+            InvoiceLifecycleStatus.Rejected => new FirmOutcome(FirmOutcomeKind.Rejected, tracking, "Rejected", billed, null, items, false),
+            InvoiceLifecycleStatus.ReturnedToFirm => new FirmOutcome(FirmOutcomeKind.ReturnedToFirm, tracking, "Returned to firm", billed, null, items, false),
             InvoiceLifecycleStatus.SentToAp => new FirmOutcome(FirmOutcomeKind.SentToAp, tracking, "Sent to accounts payable", billed, approved, items, false),
             InvoiceLifecycleStatus.Paid => new FirmOutcome(FirmOutcomeKind.Paid, tracking, "Paid", billed, approved, items, false),
             _ => new FirmOutcome(

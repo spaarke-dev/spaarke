@@ -1,6 +1,6 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
 <FieldSecurityProfiles xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
-  <FieldSecurityProfile name="Spaarke BFF-Managed Field Readers" description="Read on columns ONLY the BFF writes (sprk_createdbyperson on sprk_project / sprk_matter / sprk_workassignment; task 150 adds sprk_issecure). Associated with EVERY business unit default team, so every user keeps reading them — a secured column is HIDDEN from anyone without Read. unified-access-control-r2 task 133." fieldsecurityprofileid="{42e542c8-47bf-f111-aaaf-0022482913fc}">
+  <FieldSecurityProfile name="Spaarke BFF-Managed Field Readers" description="Read on columns ONLY the BFF writes (sprk_createdbyperson on sprk_project / sprk_matter / sprk_workassignment; task 150 adds sprk_issecure). Associated with EVERY business unit default team, so every user keeps reading them — a secured column is HIDDEN from anyone without Read. unified-access-control-r2 task 133. Also reads sprk_ruleset.sprk_visibletofirms (ebilling-r1 ISS-040)." fieldsecurityprofileid="{42e542c8-47bf-f111-aaaf-0022482913fc}">
     <FieldPermissions>
       <FieldPermission>
         <EntityName>sprk_communication</EntityName>
@@ -893,6 +893,14 @@
       <FieldPermission>
         <EntityName>sprk_communicationthread</EntityName>
         <AttributeName>sprk_isdefaultthread</AttributeName>
+        <CanRead>4</CanRead>
+        <CanUpdate>0</CanUpdate>
+        <CanCreate>0</CanCreate>
+        <CanReadUnmasked>0</CanReadUnmasked>
+      </FieldPermission>
+      <FieldPermission>
+        <EntityName>sprk_ruleset</EntityName>
+        <AttributeName>sprk_visibletofirms</AttributeName>
         <CanRead>4</CanRead>
         <CanUpdate>0</CanUpdate>
         <CanCreate>0</CanCreate>
@@ -1857,6 +1865,14 @@
       <FieldPermission>
         <EntityName>sprk_communicationthread</EntityName>
         <AttributeName>sprk_isdefaultthread</AttributeName>
+        <CanRead>4</CanRead>
+        <CanUpdate>4</CanUpdate>
+        <CanCreate>4</CanCreate>
+        <CanReadUnmasked>0</CanReadUnmasked>
+      </FieldPermission>
+      <FieldPermission>
+        <EntityName>sprk_ruleset</EntityName>
+        <AttributeName>sprk_visibletofirms</AttributeName>
         <CanRead>4</CanRead>
         <CanUpdate>4</CanUpdate>
         <CanCreate>4</CanCreate>

@@ -153,7 +153,8 @@ public sealed class FirmNoticeActionSeamTests
 
         var draft = await rig.ComposeAsync();
 
-        draft.Html.Should().Contain("600.00").And.Contain("450.00").And.Contain("Billed total: 4,200.00").And.Contain("Tracking number: TRK-5.1");
+        // 130f (K4): a Return notice has no Approved column, so the approved line amount (450.00) is not shown; the billed amount and the billed total are.
+        draft.Html.Should().Contain("600.00").And.NotContain("450.00").And.Contain("Billed total: 4,200.00").And.Contain("Tracking number: TRK-5.1");
         draft.Html.Should().Contain("Acme Billing Guidelines, version 2, Section 7.3").And.Contain("Each task is entered separately.");
     }
 
