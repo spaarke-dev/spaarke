@@ -131,7 +131,7 @@ Firm emails come from the shared mailbox; the Invoice Review "notify" step (132u
 - [ ] In the external portal, the bell shows an item (with the invoice name) for your own Rejected / Returned / adjusted invoices only; another firm member who neither submitted nor is the billing contact sees none.
 - [ ] Approvers get one in-app notification "Invoice ready for your review" per invoice; non-approvers get none.
 - [ ] With eBilling switched off, the portal bell shows no billing items.
-- [ ] The submission form no longer shows the "notice text" field (after the field-security apply, which needs your OK).
+- [ ] The "notice text" field is locked (applied to dev 2026-11-17, ready to test now). As a non-admin user, the submission form shows the field masked (\*\*\*\*\*) and you can't edit it. It disappears from the form once the SpaarkeMaster release with task 132's form change is imported.
 
 ## N. Billing Guidelines in the external portal (task 135): after a dev BFF and external SPA that carry it (work → master merge, your go)
 
