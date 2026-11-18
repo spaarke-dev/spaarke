@@ -177,7 +177,7 @@ public static class RuleSetClauseVisibility
     /// </summary>
     public static FirmClauseText ForFirm(bool? ruleSetVisibleToFirms, string? clauseQuote, string? clauseLocation, string? firmFacingName = null)
     {
-        if (ruleSetVisibleToFirms != true)
+        if (!IsVisibleToFirms(ruleSetVisibleToFirms))
         {
             return FirmClauseText.None;
         }
@@ -186,6 +186,12 @@ public static class RuleSetClauseVisibility
         var location = NullIfBlank(clauseLocation);
         return quote is null && location is null ? FirmClauseText.None : new FirmClauseText(quote, location, NullIfBlank(firmFacingName));
     }
+
+    /// <summary>
+    /// The ONE decision whether a rule set is shown to firms at all (ebilling-r1 task 135): its flag is on. A missing flag is off. <see cref="ForFirm"/>
+    /// asks it, and the Billing Guidelines view asks it to decide whether a set is listed, so the two cannot disagree.
+    /// </summary>
+    public static bool IsVisibleToFirms(bool? ruleSetVisibleToFirms) => ruleSetVisibleToFirms == true;
 
     private static string? NullIfBlank(string? text) => string.IsNullOrWhiteSpace(text) ? null : text;
 }
@@ -224,7 +230,9 @@ public sealed class RuleSetOutcome<T> where T : class
     internal static RuleSetOutcome<T> Invalid(string errorCode, IReadOnlyList<RuleSetError> errors) =>
         new()
         {
-            Kind = RuleSetOutcomeKind.Invalid, ErrorCode = errorCode, Errors = errors,
+            Kind = RuleSetOutcomeKind.Invalid,
+            ErrorCode = errorCode,
+            Errors = errors,
             StatusCode = errors.Any(e => e.Field == RuleSetService.FirmDescriptionField)
                 ? StatusCodes.Status422UnprocessableEntity
                 : StatusCodes.Status400BadRequest,
@@ -3226,14 +3234,7 @@ public class RuleSetService
             TopCount = 1,
         };
         var procedure = (await _entities.RetrieveMultipleAsync(query, ct)).Entities.FirstOrDefault(r => r.Id == procedureId);
-        if (procedure is null)
-        {
-            return null;
-        }
-
-        var firmFacing = procedure.GetAttributeValue<string>(ProcedureEntity.FirmFacingNameColumn);
-        var name = string.IsNullOrWhiteSpace(firmFacing) ? procedure.GetAttributeValue<string>(ProcedureEntity.NameColumn) : firmFacing;
-        return string.IsNullOrWhiteSpace(name) ? null : name.Trim();
+        return ProcedureEntity.FirmFacingLabelOf(procedure);
     }
 
     // ───────────────────────────────────────────────────────────────────────────────────────────────

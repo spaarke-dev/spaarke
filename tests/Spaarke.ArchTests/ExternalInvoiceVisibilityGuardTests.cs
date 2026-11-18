@@ -118,6 +118,9 @@ public class ExternalInvoiceVisibilityGuardTests
             "Creates the caller's own submission and returns its receipt (tracking number); a new submission has no invoice yet.",
         [$"{typeof(ExternalUserContextEndpoint).FullName}::HandleAsync"] =
             "Reads the caller's active firm NAMES for the SPA header; no family row.",
+        ["Sprk.Bff.Api.Api.ExternalAccess.BillingGuidelinesEndpoints::GetAsync"] =
+            "Reviewed ebilling-r1 task 135. Reads the caller's active firm NAMES (the same one-query read the SPA header uses) and the billing "
+            + "rules in force for those firms (Procedures, rule sets, rules); no invoice, line, submission or other family row is read or returned.",
         // ── the firm outcome (ebilling-r1 task 130b, FR-38): the predicate is applied by the route's filter, once, before the handler ──
         ["Sprk.Bff.Api.Api.ExternalAccess.FirmOutcomeEndpoints::GetInvoiceOutcomeAsync"] =
             "Reviewed 130b. Reads the projection only for the invoice id FirmOutcomeAuthorizationFilter admitted (stored in the request's items; "
