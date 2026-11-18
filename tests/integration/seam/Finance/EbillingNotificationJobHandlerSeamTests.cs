@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Azure.Core;
 using FluentAssertions;
 using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.Logging;
@@ -8,6 +9,8 @@ using Microsoft.Xrm.Sdk;
 using Moq;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Configuration;
+using Sprk.Bff.Api.Infrastructure.Exceptions;
+using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Services.Ai.PublicContracts;
 using Sprk.Bff.Api.Services.Communication;
 using Sprk.Bff.Api.Services.Communication.Channels;
@@ -51,6 +54,7 @@ public sealed class EbillingNotificationJobHandlerSeamTests
         public readonly Guid SubmitterId = Guid.NewGuid();
         public readonly Guid BillingId = Guid.NewGuid();
         public readonly FakeIdempotency Cache = new();
+        public readonly Memberships Members = new();
         public readonly RecordingChannel Channel = new();
         public readonly Mock<IActionSeam> Actions = new();
         public readonly List<CreateNotificationRequest> Notified = [];
@@ -70,6 +74,9 @@ public sealed class EbillingNotificationJobHandlerSeamTests
             World.Put(new Entity("sprk_organization", FirmId) { ["sprk_organizationname"] = "Acme Law", ["sprk_billingcontact"] = new EntityReference("contact", BillingId) });
             World.Put(Mailable(SubmitterId, "Sam Submitter", SubmitterEmail));
             World.Put(Mailable(BillingId, "Bea Billing", BillingEmail));
+            // Both contacts are active members of the firm; a test takes a membership away to prove who is NOT told (ebilling-r1 132 review F1).
+            Members.Firms[SubmitterId] = [FirmId];
+            Members.Firms[BillingId] = [FirmId];
             World.Invoice["sprk_submittedby"] = new EntityReference("contact", SubmitterId);
             World.Invoice["sprk_trackingnumber"] = "TRK-1.2";
             var submission = World.Row("sprk_invoicesubmission", World.OwnSubmissionId);
@@ -115,7 +122,7 @@ public sealed class EbillingNotificationJobHandlerSeamTests
                 settings.Object, Mock.Of<IInvoiceAi>(MockBehavior.Strict), Log.For<FirmNoticeComposer>());
 
             var entities = World.Entities.Object;
-            var recipients = new EbillingNotificationRecipients(entities, Log.For<EbillingNotificationRecipients>());
+            var recipients = new EbillingNotificationRecipients(entities, Members, Log.For<EbillingNotificationRecipients>());
             return new EbillingNotificationJobHandler(
                 composer, recipients, Communication(), World.Resolver(), Actions.Object, Cache, entities,
                 Mock.Of<IOptionsMonitor<EbillingOptions>>(m => m.CurrentValue == Options), Log.For<EbillingNotificationJobHandler>())
@@ -311,6 +318,78 @@ public sealed class EbillingNotificationJobHandlerSeamTests
         await rig.Handler().ProcessAsync(rig.RejectedSubmissionJob(), CancellationToken.None);
 
         Recipients(rig.Channel.Sent.Should().ContainSingle().Subject).Should().Equal(SubmitterEmail);
+    }
+
+    // ── Review F1: only ACTIVE members of the notice's own firm are told ──
+
+    [Fact(DisplayName = "132 review F1 (must-fire): a submitter whose membership in the firm is no longer active is NOT emailed; the billing contact still is")]
+    public async Task ASubmitterWithoutAnActiveMembership_IsNotTold()
+    {
+        var rig = new Rig();
+        rig.Members.Firms.Remove(rig.SubmitterId);
+        rig.SubmissionIs(InvoiceSubmissionStatus.Rejected);
+        rig.SubmissionOutcome = rig.Outcome(FirmOutcomeKind.SubmissionRejected);
+
+        await rig.Handler().ProcessAsync(rig.RejectedSubmissionJob(), CancellationToken.None);
+
+        Recipients(rig.Channel.Sent.Should().ContainSingle().Subject).Should().Equal(BillingEmail);
+        rig.Log.Lines.Should().NotContain(l => l.Contains(SubmitterEmail) || l.Contains(BillingEmail), "ADR-015: ids only");
+    }
+
+    [Fact(DisplayName = "132 review F1 (must-fire): a billing contact who belongs to ANOTHER firm is NOT emailed")]
+    public async Task ABillingContactFromAnotherFirm_IsNotTold()
+    {
+        var rig = new Rig();
+        rig.Members.Firms[rig.BillingId] = [Guid.NewGuid()];
+        rig.SubmissionIs(InvoiceSubmissionStatus.Rejected);
+        rig.SubmissionOutcome = rig.Outcome(FirmOutcomeKind.SubmissionRejected);
+
+        await rig.Handler().ProcessAsync(rig.RejectedSubmissionJob(), CancellationToken.None);
+
+        Recipients(rig.Channel.Sent.Should().ContainSingle().Subject).Should().Equal(SubmitterEmail);
+    }
+
+    [Fact(DisplayName = "132 review F1 (must-fire): a deactivated contact record confers no membership, so it is not emailed even with a membership row")]
+    public async Task ADeactivatedContact_IsNotTold()
+    {
+        var rig = new Rig();
+        rig.Members.InactiveContacts.Add(rig.BillingId);
+        rig.SubmissionIs(InvoiceSubmissionStatus.Rejected);
+        rig.SubmissionOutcome = rig.Outcome(FirmOutcomeKind.SubmissionRejected);
+
+        await rig.Handler().ProcessAsync(rig.RejectedSubmissionJob(), CancellationToken.None);
+
+        Recipients(rig.Channel.Sent.Should().ContainSingle().Subject).Should().Equal(SubmitterEmail);
+    }
+
+    [Fact(DisplayName = "132 review F1 (must-fire): a contact whose statecode was not read is NOT active and is not emailed")]
+    public async Task AContactWithNoStatecode_IsNotActive_AndIsNotTold()
+    {
+        var rig = new Rig();
+        rig.World.Row("contact", rig.BillingId).Attributes.Remove("statecode");
+        rig.SubmissionIs(InvoiceSubmissionStatus.Rejected);
+        rig.SubmissionOutcome = rig.Outcome(FirmOutcomeKind.SubmissionRejected);
+
+        await rig.Handler().ProcessAsync(rig.RejectedSubmissionJob(), CancellationToken.None);
+
+        Recipients(rig.Channel.Sent.Should().ContainSingle().Subject).Should().Equal(SubmitterEmail);
+    }
+
+    [Fact(DisplayName = "132 review F1: when nobody holds an active membership nothing is sent, nothing is marked, and the job completes with an ids-only warning")]
+    public async Task NobodyWithAMembership_SendsNothing_AndWritesNoMarker()
+    {
+        var rig = new Rig();
+        rig.Members.Firms.Clear();
+        rig.SubmissionIs(InvoiceSubmissionStatus.Rejected);
+        rig.SubmissionOutcome = rig.Outcome(FirmOutcomeKind.SubmissionRejected);
+
+        var outcome = await rig.Handler().ProcessAsync(rig.RejectedSubmissionJob(), CancellationToken.None);
+
+        outcome.Status.Should().Be(JobStatus.Completed);
+        rig.Channel.Sent.Should().BeEmpty();
+        rig.Cache.Marked.Should().BeEmpty();
+        rig.Log.Lines.Should().Contain(l => l.Contains(rig.World.OwnSubmissionId.ToString()) && l.Contains(FirmId.ToString()) && l.Contains("no "));
+        rig.Log.Lines.Should().NotContain(l => l.Contains(SubmitterEmail) || l.Contains(BillingEmail), "ADR-015: ids only");
     }
 
     [Fact(DisplayName = "132: the pipeline reports a rejection just BEFORE it writes the final status; a submission still Processing is waited for, then the notice goes")]
@@ -546,6 +625,77 @@ public sealed class EbillingNotificationJobHandlerSeamTests
         rig.Log.Lines.Where(l => l.Contains("eBilling notification")).Should().NotContain(l => l.Contains("submitter@firm.test"), "ADR-015: the job's own lines carry no address");
     }
 
+    private static SdapProblemException GraphSendFailed(string outcome) => new(
+        "GRAPH_SEND_FAILED", "Failed to send email", "graph", 502, new Dictionary<string, object> { [EmailChannelSender.SendOutcomeExtension] = outcome });
+
+    [Fact(DisplayName = "132 review F1 (must-fire): a send Graph PROVABLY refused (NotSent) forgets the marker and is retried; the later delivery sends exactly once")]
+    public async Task SendThatProvablyDidNotGoOut_ClearsTheMarker_AndIsRetried()
+    {
+        var rig = new Rig();
+        rig.SubmissionIs(InvoiceSubmissionStatus.Rejected);
+        rig.SubmissionOutcome = rig.Outcome(FirmOutcomeKind.SubmissionRejected);
+        rig.SendFault = GraphSendFailed(EmailChannelSender.SendOutcomeNotSent);
+        var job = rig.RejectedSubmissionJob();
+
+        var first = await rig.Handler().ProcessAsync(job, CancellationToken.None);
+        rig.Cache.Marked.Should().BeEmpty("the marker is forgotten, or the retry would drop the notice");
+        rig.SendFault = null;
+        var second = await rig.Handler().ProcessAsync(job, CancellationToken.None);
+        var third = await rig.Handler().ProcessAsync(job, CancellationToken.None);
+
+        first.Status.Should().Be(JobStatus.Failed, "retryable, not Poisoned");
+        second.Status.Should().Be(JobStatus.Completed);
+        third.Status.Should().Be(JobStatus.Completed);
+        rig.Channel.Sent.Should().ContainSingle("sent once on the retry, not again after it");
+    }
+
+    [Fact(DisplayName = "132 review F1 (must-fire): a send refusal that comes BEFORE the channel (sender, validation, daily limit) is also retried with the marker forgotten")]
+    public async Task APreSendRefusal_ClearsTheMarker_AndIsRetried()
+    {
+        var rig = new Rig();
+        rig.SubmissionIs(InvoiceSubmissionStatus.Rejected);
+        rig.SubmissionOutcome = rig.Outcome(FirmOutcomeKind.SubmissionRejected);
+        rig.SendFault = new SdapProblemException("DAILY_SEND_LIMIT", "Daily send limit reached", null, 429);
+
+        var first = await rig.Handler().ProcessAsync(rig.RejectedSubmissionJob(), CancellationToken.None);
+
+        first.Status.Should().Be(JobStatus.Failed);
+        rig.Cache.Marked.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "132 review F1 (must-fire): an AMBIGUOUS send outcome (Graph 'Unknown') stays Poisoned with the marker kept, and is not sent again")]
+    public async Task AnAmbiguousSend_StaysPoisoned_AndKeepsTheMarker()
+    {
+        var rig = new Rig();
+        rig.SubmissionIs(InvoiceSubmissionStatus.Rejected);
+        rig.SubmissionOutcome = rig.Outcome(FirmOutcomeKind.SubmissionRejected);
+        rig.SendFault = GraphSendFailed(EmailChannelSender.SendOutcomeUnknown);
+        var job = rig.RejectedSubmissionJob();
+
+        var first = await rig.Handler().ProcessAsync(job, CancellationToken.None);
+        rig.SendFault = null;
+        var second = await rig.Handler().ProcessAsync(job, CancellationToken.None);
+
+        first.Status.Should().Be(JobStatus.Poisoned);
+        rig.Cache.Marked.Should().ContainSingle("the message may have been accepted: the marker stays");
+        second.Status.Should().Be(JobStatus.Completed);
+        rig.Channel.Sent.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "132 review F1 (must-fire): a NotSent send whose marker cannot be shown gone is Poisoned (a silent drop is worse than an alert)")]
+    public async Task ANotSentSend_WhoseMarkerCannotBeCleared_IsPoisoned()
+    {
+        var rig = new Rig();
+        rig.SubmissionIs(InvoiceSubmissionStatus.Rejected);
+        rig.SubmissionOutcome = rig.Outcome(FirmOutcomeKind.SubmissionRejected);
+        rig.SendFault = GraphSendFailed(EmailChannelSender.SendOutcomeNotSent);
+        rig.Cache.CannotClear = true;
+
+        var outcome = await rig.Handler().ProcessAsync(rig.RejectedSubmissionJob(), CancellationToken.None);
+
+        outcome.Status.Should().Be(JobStatus.Poisoned);
+    }
+
     [Fact(DisplayName = "132 ADR-018: with the eBilling kill switch off the job sends and notifies nothing")]
     public async Task KillSwitchOff_SendsNothing()
     {
@@ -680,9 +830,48 @@ public sealed class EbillingNotificationJobHandlerSeamTests
             return Task.CompletedTask;
         }
 
+        /// <summary>When true the marker cannot be removed (the cache refuses), so the job cannot show it gone.</summary>
+        public bool CannotClear { get; set; }
+
+        public Task<bool> ClearEventProcessedAsync(string eventId, CancellationToken cancellationToken = default)
+        {
+            if (CannotClear)
+            {
+                return Task.FromResult(false);
+            }
+
+            _marked.Remove(eventId);
+            return Task.FromResult(true);
+        }
+
         public Task<bool> TryAcquireProcessingLockAsync(string eventId, TimeSpan? lockDuration = null, CancellationToken cancellationToken = default) => Task.FromResult(true);
 
         public Task ReleaseProcessingLockAsync(string eventId, CancellationToken cancellationToken = default) => Task.CompletedTask;
+    }
+
+    /// <summary>The firm memberships of the contacts (the real <c>ReadContactFirmsAsync</c> rule runs over this double of the two Dataverse reads).</summary>
+    private sealed class Memberships : ExternalParticipationService
+    {
+        public Memberships()
+            : base(new HttpClient(), cache: null!, configuration: null!, credential: Mock.Of<TokenCredential>(),
+                httpContextAccessor: null!, logger: NullLogger<ExternalParticipationService>.Instance, filing: null)
+        {
+        }
+
+        /// <summary>The firms each contact actively belongs to; a contact not listed belongs to none.</summary>
+        public Dictionary<Guid, Guid[]> Firms { get; } = [];
+
+        /// <summary>Contacts whose own record is not Active (a deactivated contact confers no firm).</summary>
+        public HashSet<Guid> InactiveContacts { get; } = [];
+
+        internal override Task<ContactRecordState> QueryContactStateAsync(Guid contactId, CancellationToken ct) =>
+            Task.FromResult(InactiveContacts.Contains(contactId) ? ContactRecordState.Inactive : ContactRecordState.Active);
+
+        internal override Task<ActiveOrgMemberships> ReadOrganizationMembershipsAsync(Guid contactId, CancellationToken ct = default)
+        {
+            var firms = Firms.TryGetValue(contactId, out var list) ? list : [];
+            return Task.FromResult(new ActiveOrgMemberships(firms, firms, false));
+        }
     }
 
     private sealed class RecordingChannel : ICommunicationChannelSender

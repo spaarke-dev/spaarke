@@ -2,6 +2,8 @@ using System.Net.Mail;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Api.ExternalAccess;
+using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Services.Finance.Submission;
 
 namespace Sprk.Bff.Api.Services.Finance;
@@ -39,9 +41,11 @@ public sealed record FirmRecipients(IReadOnlyList<string> Addresses, bool Billin
 /// never an address the request carried.
 /// </summary>
 /// <remarks>
-/// Only ACTIVE contacts with a well-formed single address count; the list is de-duplicated by address (case-insensitive), so a submitter who is
-/// also the billing contact is written to once. A missing billing contact is not an error: the submitter alone is told, and the caller logs the
-/// ids. Logs carry ids and codes only (ADR-015): never an address.
+/// Only ACTIVE contacts with a well-formed single address count, and only those who hold an ACTIVE membership in the notice's own firm RIGHT NOW
+/// (<see cref="ExternalInvoiceSubmissionAuthorizationFilter.ReadContactFirmsAsync"/>, the one definition of "a contact's firms" the SPA and the routes use): a
+/// submitter who has since left the firm, and a billing contact who belongs to another firm, are not told. A contact whose <c>statecode</c> was not read is
+/// not active. The list is de-duplicated by address (case-insensitive), so a submitter who is also the billing contact is written to once. A missing
+/// billing contact is not an error: the submitter alone is told, and the caller logs the ids. Logs carry ids and codes only (ADR-015): never an address.
 /// </remarks>
 public sealed class EbillingNotificationRecipients
 {
@@ -53,11 +57,14 @@ public sealed class EbillingNotificationRecipients
     private const int ContactStateActive = 0;
 
     private readonly IGenericEntityService _entities;
+    private readonly ExternalParticipationService _participations;
     private readonly ILogger<EbillingNotificationRecipients> _logger;
 
-    public EbillingNotificationRecipients(IGenericEntityService entities, ILogger<EbillingNotificationRecipients> logger)
+    public EbillingNotificationRecipients(
+        IGenericEntityService entities, ExternalParticipationService participations, ILogger<EbillingNotificationRecipients> logger)
     {
         _entities = entities ?? throw new ArgumentNullException(nameof(entities));
+        _participations = participations ?? throw new ArgumentNullException(nameof(participations));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -147,9 +154,26 @@ public sealed class EbillingNotificationRecipients
             contactIds.Add(billingId);
         }
 
+        // The firm is the notice's own: a contact who is not an ACTIVE member of it now (left the firm, belongs to another firm, or whose membership
+        // is unreadable: the job retries) is not told. No firm on the record means nobody can be shown to belong to it.
+        var members = new List<Guid>();
+        foreach (var id in contactIds)
+        {
+            if (await IsActiveMemberAsync(id, facts.FirmId, ct).ConfigureAwait(false))
+            {
+                members.Add(id);
+            }
+            else
+            {
+                _logger.LogInformation(
+                    "eBilling notification recipient is not an active member of the firm and is not told | Contact {ContactId}, Firm {FirmId}", id, facts.FirmId);
+            }
+        }
+
+        contactIds = members;
         if (contactIds.Count == 0)
         {
-            return new FirmRecipients([], BillingContactMissing: billing is null);
+            return new FirmRecipients([], BillingContactMissing: true);
         }
 
         var query = new QueryExpression(ContactEntity)
@@ -163,7 +187,8 @@ public sealed class EbillingNotificationRecipients
         var usable = new Dictionary<Guid, string>();
         foreach (var contact in contacts)
         {
-            var state = contact.GetAttributeValue<OptionSetValue>("statecode")?.Value ?? ContactStateActive;
+            // A statecode that was not read is NOT active (fail closed).
+            var state = contact.GetAttributeValue<OptionSetValue>("statecode")?.Value;
             if (state == ContactStateActive && WellFormed(contact.GetAttributeValue<string>(ContactEmail)) is { } address)
             {
                 usable[contact.Id] = address;
@@ -184,6 +209,27 @@ public sealed class EbillingNotificationRecipients
             "eBilling notification recipients resolved | Invoice {InvoiceId}, Submission {SubmissionId}, Count {Count}, BillingContactMissing {BillingContactMissing}",
             facts.InvoiceId, facts.SubmissionId, addresses.Count, billingMissing);
         return new FirmRecipients(addresses, billingMissing);
+    }
+
+    /// <summary>
+    /// True when <paramref name="contactId"/> is an Active contact holding an active (conferring) membership in <paramref name="firmId"/> now. A read that could
+    /// not be made throws (the job retries); it is never "not a member" and never a pass.
+    /// </summary>
+    private async Task<bool> IsActiveMemberAsync(Guid contactId, Guid? firmId, CancellationToken ct)
+    {
+        if (firmId is not { } firm || firm == Guid.Empty)
+        {
+            return false;
+        }
+
+        var (firms, unreadable) = await ExternalInvoiceSubmissionAuthorizationFilter
+            .ReadContactFirmsAsync(contactId, contactUnreadable: false, _participations, _logger, ct).ConfigureAwait(false);
+        if (unreadable)
+        {
+            throw new InvalidOperationException("The firm membership of a recipient could not be read.");
+        }
+
+        return firms.Contains(firm);
     }
 
     /// <summary>One plain address with no whitespace, comma, semicolon or control character (a header-injection or a list is refused); null otherwise.</summary>

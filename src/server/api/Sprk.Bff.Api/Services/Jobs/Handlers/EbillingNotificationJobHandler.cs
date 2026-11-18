@@ -3,8 +3,10 @@ using System.Text.Json;
 using Microsoft.Extensions.Options;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Configuration;
+using Sprk.Bff.Api.Infrastructure.Exceptions;
 using Sprk.Bff.Api.Services.Ai.PublicContracts;
 using Sprk.Bff.Api.Services.Communication;
+using Sprk.Bff.Api.Services.Communication.Channels;
 using Sprk.Bff.Api.Services.Communication.Models;
 using Sprk.Bff.Api.Services.Finance;
 using Sprk.Bff.Api.Services.Finance.Submission;
@@ -248,9 +250,22 @@ public class EbillingNotificationJobHandler : IJobHandler
         {
             throw;
         }
+        catch (SdapProblemException ex) when (SendProvablyDidNotGoOut(ex))
+        {
+            // The email did not go out (a refusal before the send, or Graph's settled refusal): the marker would make the retry drop it, so it is
+            // forgotten and the job is retried. If the marker cannot be shown gone, a retry would silently drop the notice: poison it instead.
+            var forgotten = await ForgetMarkerAsync(marker, ct).ConfigureAwait(false);
+            _logger.LogWarning(
+                "eBilling notification job {JobId}: the firm email was not sent and is {Next} | Event {Event}, Subject {SubjectId}, Code {Code}, Status {Status}",
+                job.JobId, forgotten ? "retried" : "NOT retried (the marker could not be cleared)", evt, subjectId, ex.Code, ex.StatusCode);
+            return forgotten
+                ? Transient(job, "the firm email was not sent", stopwatch)
+                : JobOutcome.Poisoned(job.JobId, JobType, "The firm email was not sent and its marker could not be cleared", job.Attempt, stopwatch.Elapsed);
+        }
         catch (Exception ex)
         {
-            // The marker is written, so this notice is NOT retried (at-most-once): the operator reads the dead-letter queue.
+            // The marker is written and the outcome is AMBIGUOUS (the message may have been accepted), so this notice is NOT retried (at-most-once): the
+            // operator reads the dead-letter queue.
             _logger.LogError(
                 "eBilling notification job {JobId}: the firm email was not sent after the marker was written | Event {Event}, Subject {SubjectId}, ExceptionType {ExceptionType}",
                 job.JobId, evt, subjectId, ex.GetType().Name);
@@ -515,6 +530,44 @@ public class EbillingNotificationJobHandler : IJobHandler
     }
 
     // ── Shared ──────────────────────────────────────────────────────────────────────────────────────
+
+    private const string GraphSendFailedCode = "GRAPH_SEND_FAILED";
+
+    /// <summary>
+    /// True when a typed send failure is KNOWN to have happened before Graph accepted the message. The email channel marks its own failures
+    /// (<see cref="EmailChannelSender.SendOutcomeExtension"/>): <c>NotSent</c> is a settled refusal or a failure before the request left; <c>Unknown</c>
+    /// (a timeout, a transport fault, a 5xx, a 408) and a failure that carries no outcome are ambiguous, because the message may have been delivered.
+    /// Any other typed problem is one of the send path's own refusals (validation, sender, daily limit, record preparation), all before the channel send.
+    /// </summary>
+    internal static bool SendProvablyDidNotGoOut(SdapProblemException ex)
+    {
+        if (!string.Equals(ex.Code, GraphSendFailedCode, StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        return ex.Extensions is not null
+            && ex.Extensions.TryGetValue(EmailChannelSender.SendOutcomeExtension, out var outcome)
+            && string.Equals(outcome as string, EmailChannelSender.SendOutcomeNotSent, StringComparison.Ordinal);
+    }
+
+    /// <summary>Removes the marker and reads it back as gone; false when that could not be shown.</summary>
+    private async Task<bool> ForgetMarkerAsync(string marker, CancellationToken ct)
+    {
+        try
+        {
+            return await _idempotency.ClearEventProcessedAsync(marker, ct).ConfigureAwait(false)
+                && !await _idempotency.IsEventProcessedAsync(marker, ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception)
+        {
+            return false;
+        }
+    }
 
     /// <summary>Writes the marker and reads it back; false when it is not visible afterwards (a cache that fails open).</summary>
     private async Task<bool> WriteMarkerAsync(string marker, CancellationToken ct)

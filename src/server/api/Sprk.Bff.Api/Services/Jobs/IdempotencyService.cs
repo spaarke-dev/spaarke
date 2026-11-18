@@ -80,6 +80,21 @@ public class IdempotencyService : IIdempotencyService
         }
     }
 
+    public async Task<bool> ClearEventProcessedAsync(string eventId, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var key = GetProcessedKey(eventId);
+            await _cache.RemoveAsync(key, cancellationToken);
+            return await _cache.GetAsync(key, cancellationToken) is null;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to clear the processed marker of event {EventId}", eventId);
+            return false;
+        }
+    }
+
     public Task<bool> TryAcquireProcessingLockAsync(string eventId, TimeSpan? lockDuration = null, CancellationToken cancellationToken = default) =>
         TryAcquireAsync(eventId, ownerId: null, lockDuration, cancellationToken);
 
