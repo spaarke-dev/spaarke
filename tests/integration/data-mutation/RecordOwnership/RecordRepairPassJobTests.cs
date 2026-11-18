@@ -548,7 +548,8 @@ public sealed partial class RecordRepairPassJobTests
         World.Writes.Should().HaveCount(3);
         World.ColumnMetadataReads.Count(t => t == "sprk_event").Should().Be(1);
         World.ColumnMetadataReads.Count(t => t == "sprk_matter").Should().Be(1);
-        PassWorld.Count(result, "metadataReads").Should().Be(2);
+        PassWorld.Count(result, "metadataReads").Should().Be(2 + RecordRepairCorePairReport.Tables.Count,
+            "the repair tables' two, and the report's pair-column read of each core-pair table (audit settings are checked every run)");
     }
 
     [Fact]
@@ -801,7 +802,7 @@ public sealed partial class RecordRepairPassJobTests
     // =====================================================================================
 
     /// <summary>The job over a <see cref="RepairWorld"/>: its scope, its scan, its claim store, its clock and its settings.</summary>
-    private sealed class PassWorld
+    private sealed partial class PassWorld
     {
         public static readonly DateTimeOffset Now = new(2026, 11, 12, 12, 0, 0, TimeSpan.Zero);
         public static readonly DateTimeOffset GoLive = new(2026, 11, 1, 0, 0, 0, TimeSpan.Zero);
@@ -936,6 +937,11 @@ public sealed partial class RecordRepairPassJobTests
                 });
             entities.Setup(e => e.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
                 .Returns((QueryExpression query, CancellationToken _) => Task.FromResult(Scan(query)));
+            entities.Setup(e => e.GetColumnMetadataAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                .Returns((string table, CancellationToken _) => Task.FromResult(ReportColumns(table)));
+            entities.Setup(e => e.GetTableAuditMetadataAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                .Returns((string table, CancellationToken _) => Task.FromResult(ReportTable(table)));
+            EntityMocks.Add(entities);
 
             var collection = new ServiceCollection()
                 .AddSingleton(entities.Object)
@@ -963,6 +969,11 @@ public sealed partial class RecordRepairPassJobTests
         /// <summary>The job's window scan over the seeded rows: each condition of the query applied, ordered by id, capped.</summary>
         private EntityCollection Scan(QueryExpression query)
         {
+            if (query.EntityName == RecordRepairCorePairReport.AuditTable
+                || query.EntityName == RecordRepairCorePairReport.OrganizationTable
+                || RecordRepairCorePairReport.Tables.Contains(query.EntityName))
+                return ReportScan(query);
+
             if (query.EntityName == "systemuser")
             {
                 var applicationId = (Guid)query.Criteria.Conditions.Single(c => c.AttributeName == "applicationid").Values[0];

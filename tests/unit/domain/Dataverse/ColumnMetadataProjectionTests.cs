@@ -100,6 +100,45 @@ public sealed class ColumnMetadataProjectionTests
         DataverseServiceClientImpl.ColumnMetadataOf(Entity(new StringAttributeMetadata())).Should().BeEmpty();
     }
 
+    [Fact]
+    public void AColumnsNumber_IsCarried_AndAbsentWhenNotStated()
+    {
+        // Task 052d: an update audit's attributemask lists changed columns by this number.
+        var numbered = new LookupAttributeMetadata { LogicalName = "sprk_corerecordtype" };
+        typeof(AttributeMetadata).GetProperty(nameof(AttributeMetadata.ColumnNumber))!.SetValue(numbered, 31);
+
+        var columns = DataverseServiceClientImpl.ColumnMetadataOf(Entity(numbered, new StringAttributeMetadata { LogicalName = "sprk_corerecordid" }));
+
+        columns["sprk_corerecordtype"].ColumnNumber.Should().Be(31);
+        columns["sprk_corerecordid"].ColumnNumber.Should().BeNull();
+    }
+
+    [Fact]
+    public void AColumnsAuditSetting_IsCarried_AndUnknownWhenNotStated()
+    {
+        // Task 052d review fix: the core-pair report reads no history of a column whose auditing is not on.
+        var on = new LookupAttributeMetadata { LogicalName = "sprk_corerecordtype", IsAuditEnabled = new Microsoft.Xrm.Sdk.BooleanManagedProperty(true) };
+        var off = new StringAttributeMetadata { LogicalName = "sprk_corerecordid", IsAuditEnabled = new Microsoft.Xrm.Sdk.BooleanManagedProperty(false) };
+
+        var columns = DataverseServiceClientImpl.ColumnMetadataOf(Entity(on, off, new StringAttributeMetadata { LogicalName = "sprk_name" }));
+
+        columns["sprk_corerecordtype"].IsAuditEnabled.Should().BeTrue();
+        columns["sprk_corerecordid"].IsAuditEnabled.Should().BeFalse();
+        columns["sprk_name"].IsAuditEnabled.Should().NotBe(true, "an unstated flag is not read as on");
+    }
+
+    [Fact]
+    public void ATablesObjectTypeCode_AndAuditSetting_AreCarried_AndUnknownWhenNotStated()
+    {
+        var stated = new EntityMetadata { LogicalName = "sprk_signal", IsAuditEnabled = new Microsoft.Xrm.Sdk.BooleanManagedProperty(true) };
+        typeof(EntityMetadata).GetProperty(nameof(EntityMetadata.ObjectTypeCode))!.SetValue(stated, 11003);
+
+        DataverseServiceClientImpl.TableAuditMetadataOf(stated).Should().Be(new TableAuditMetadata(11003, true));
+        DataverseServiceClientImpl.TableAuditMetadataOf(new EntityMetadata { LogicalName = "sprk_signal" })
+            .Should().Be(new TableAuditMetadata(null, null), "a fact the metadata does not state is unknown, and the report fails closed on it");
+        DataverseServiceClientImpl.TableAuditMetadataOf(null).Should().Be(new TableAuditMetadata(null, null));
+    }
+
     private static EntityMetadata Entity(params AttributeMetadata[] attributes)
     {
         var entity = new EntityMetadata { LogicalName = "sprk_matter" };
