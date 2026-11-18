@@ -159,6 +159,12 @@ public sealed class BillingGuidelinesService
             IReadOnlyCollection<Entity?> baseSets = [];
             if (rule.RecordRule is { } recordSlot)
             {
+                // A record rule whose set row does not read as record-scoped would be decided by its own flag alone: fail closed.
+                if (!RecordRuleSet.IsRecordScoped(set))
+                {
+                    continue;
+                }
+
                 if (!baseSetOf.TryGetValue(recordSlot.BasePolicyVersionId, out var baseSet))
                 {
                     baseSetOf[recordSlot.BasePolicyVersionId] = baseSet = await _ruleSets.RuleSetOfVersionAsync(recordSlot.BasePolicyVersionId, ct).ConfigureAwait(false);
