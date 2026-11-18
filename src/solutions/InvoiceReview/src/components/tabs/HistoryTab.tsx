@@ -17,6 +17,7 @@ import { HEADER_FIELDS } from '../Dialogs';
 const useStyles = makeStyles({
   root: { display: 'flex', flexDirection: 'column', rowGap: tokens.spacingVerticalS, padding: tokens.spacingHorizontalL },
   muted: { color: tokens.colorNeutralForeground3 },
+  finishedBy: { display: 'block', color: tokens.colorNeutralForeground3, paddingInlineStart: tokens.spacingHorizontalM },
 });
 
 const CLASSES: ReadonlySet<string> = new Set(['Judgement', 'Routine', 'Dismissal']);
@@ -88,6 +89,12 @@ export function HistoryTab({ review, api, invoiceId }: HistoryTabProps) {
               >
                 {r.reason ? <Caption1>{r.reason}</Caption1> : undefined}
               </RecordRow>
+              {/* ISS-034 iss034d (EB-D-257): the server names who completed a blocked Override or Return that someone else recorded. */}
+              {r.completedBy?.name ? (
+                <Caption1 className={s.finishedBy} data-testid="history-finished-by">
+                  Finished by {r.completedBy.name}
+                </Caption1>
+              ) : null}
             </div>
           );
         }

@@ -766,6 +766,46 @@
       "privilege": "prvAppendTosprk_WorkAssignment",
       "expectedDepth": "Deep",
       "feature": "Basic User is read-only on Spaarke tables (owner 2026-11-06)"
+    },
+    {
+      "gap": "ISS028",
+      "role": "Spaarke Core User",
+      "table": "sprk_invoicecorrection",
+      "privilege": "prvAssignsprk_invoicecorrection",
+      "expectedDepth": "Deep",
+      "feature": "Correction rows: native write hardening (ebilling-r1 iss028, EB-D-249)"
+    },
+    {
+      "gap": "ISS028",
+      "role": "Spaarke Core User",
+      "table": "sprk_invoicecorrection",
+      "privilege": "prvCreatesprk_invoicecorrection",
+      "expectedDepth": "Deep",
+      "feature": "Correction rows: native write hardening (ebilling-r1 iss028, EB-D-249)"
+    },
+    {
+      "gap": "ISS028",
+      "role": "Spaarke Core User",
+      "table": "sprk_invoicecorrection",
+      "privilege": "prvDeletesprk_invoicecorrection",
+      "expectedDepth": "Deep",
+      "feature": "Correction rows: native write hardening (ebilling-r1 iss028, EB-D-249)"
+    },
+    {
+      "gap": "ISS028",
+      "role": "Spaarke Core User",
+      "table": "sprk_invoicecorrection",
+      "privilege": "prvSharesprk_invoicecorrection",
+      "expectedDepth": "Deep",
+      "feature": "Correction rows: native write hardening (ebilling-r1 iss028, EB-D-249)"
+    },
+    {
+      "gap": "ISS028",
+      "role": "Spaarke Core User",
+      "table": "sprk_invoicecorrection",
+      "privilege": "prvWritesprk_invoicecorrection",
+      "expectedDepth": "Deep",
+      "feature": "Correction rows: native write hardening (ebilling-r1 iss028, EB-D-249)"
     }
   ]
 }

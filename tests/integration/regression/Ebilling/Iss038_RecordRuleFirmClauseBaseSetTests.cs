@@ -62,9 +62,9 @@ public sealed class Iss038_RecordRuleFirmClauseBaseSetTests
         w.H.Row("sprk_ruleset", SetOf(w.H, internalBase))["sprk_visibletofirms"] = false;
 
         var service = w.Service();
-        var first = await service.ChangeRuleAsync(Matter, matter, Change(visibleBase, firm), Guid.NewGuid(), CallerToken, default);
+        var first = await service.ChangeRuleAsync(Matter, matter, Change(visibleBase, firm), Guid.NewGuid(), Guid.NewGuid(), CallerToken, default);
         first.Kind.Should().Be(RuleSetOutcomeKind.Done, first.Detail);
-        var second = await service.ChangeRuleAsync(Matter, matter, Change(internalBase, firm), Guid.NewGuid(), CallerToken, default);
+        var second = await service.ChangeRuleAsync(Matter, matter, Change(internalBase, firm), Guid.NewGuid(), Guid.NewGuid(), CallerToken, default);
         second.Kind.Should().Be(RuleSetOutcomeKind.Done, second.Detail);
 
         // The state this regression is about: one record set, created visible by the first rule, now holding both record rules.

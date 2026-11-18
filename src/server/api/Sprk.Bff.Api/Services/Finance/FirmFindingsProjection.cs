@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
@@ -6,6 +7,7 @@ using Spaarke.Dataverse;
 using Sprk.Bff.Api.Services.Finance.Procedures;
 using Sprk.Bff.Api.Services.Finance.Submission;
 using Sprk.Bff.Api.Services.Signals;
+using Sprk.Bff.Api.Services.Signals.Billing;
 
 namespace Sprk.Bff.Api.Services.Finance;
 
@@ -70,7 +72,7 @@ public enum FirmOutcomeDecision
 }
 
 /// <summary>
-/// The firm-visible outcome of one invoice or submission. <see cref="ApprovedTotal"/> is null for a state that has not been decided.
+/// The firm-visible outcome of one invoice or submission. <see cref="ApprovedTotal"/> is null for every state that has no approval: a submission, an invoice In Review, Rejected or Returned to firm.
 /// <see cref="Degraded"/> is true when a read did not complete: the outcome then carries the status only (fail closed).
 /// </summary>
 /// <param name="TrackingNumber">The tracking number the firm was given on submission.</param>
@@ -169,7 +171,9 @@ public delegate Task<FirmClauseText> FirmClauseReader(Guid policyVersionId, Guid
 /// <para><b>What is shown.</b> A submission Received or Processing: status and billed total only. An invoice In Review: status, billed total,
 /// its reviewer-added lines and its decided lines (Reduced, Disallowed) with the reviewer's reason; no approved total and no invoice-level
 /// adjustment (EB-D-202). Approved, Sent to AP and Paid: the same items plus the invoice-level adjustments, and the approved total. Rejected
-/// and Returned to Firm: status and billed total. Pending, Flagged, Clean, Accepted, overridden and AI-observation findings never appear: an
+/// and Returned to Firm (EB-D-259, task 130f): the SAME items as In Review, built by the same code, with the decided kind and label and the billed
+/// total; no approved total and no invoice-level adjustment. The reviewer's reject or return reason and note are never read (that Decision Record
+/// has its own action code, which no item reads). Pending, Flagged, Clean, Accepted, overridden and AI-observation findings never appear: an
 /// item exists only because a line was decided, added or adjusted by a reviewer.</para>
 /// <para><b>Where each part comes from (all read app-only).</b> The line and its status: the invoice's lines
 /// (<see cref="InvoiceReviewReadService.LineQuery"/>). The reason: the <c>reduce-line</c>, <c>disallow-line</c> or <c>add-line</c> Decision Record
@@ -300,9 +304,7 @@ public sealed class FirmFindingsProjection
         switch (lifecycle)
         {
             case InvoiceLifecycleStatus.Rejected:
-                return new FirmOutcome(FirmOutcomeKind.Rejected, tracking, "Rejected", billed, null, [], false);
             case InvoiceLifecycleStatus.ReturnedToFirm:
-                return new FirmOutcome(FirmOutcomeKind.ReturnedToFirm, tracking, "Returned to firm", billed, null, [], false);
             case InvoiceLifecycleStatus.InReview:
             case InvoiceLifecycleStatus.Approved:
             case InvoiceLifecycleStatus.SentToAp:
@@ -319,10 +321,14 @@ public sealed class FirmFindingsProjection
                 return Closed(tracking, ClosedLabel);
         }
 
-        var decided = lifecycle != InvoiceLifecycleStatus.InReview;
+        // Rejected and Returned to Firm (EB-D-259, task 130f) show the In Review items by the same code below, with the decided kind and label and
+        // the billed total. They carry no approved total and no invoice-level adjustment: those belong to Approved and later.
+        var approvedOrLater = lifecycle is InvoiceLifecycleStatus.Approved or InvoiceLifecycleStatus.SentToAp or InvoiceLifecycleStatus.Paid;
         var statusOnly = lifecycle switch
         {
             InvoiceLifecycleStatus.InReview => new FirmOutcome(FirmOutcomeKind.InvoiceInReview, null, "In review", null, null, [], true),
+            InvoiceLifecycleStatus.Rejected => new FirmOutcome(FirmOutcomeKind.Rejected, null, "Rejected", null, null, [], true),
+            InvoiceLifecycleStatus.ReturnedToFirm => new FirmOutcome(FirmOutcomeKind.ReturnedToFirm, null, "Returned to firm", null, null, [], true),
             InvoiceLifecycleStatus.Approved => new FirmOutcome(FirmOutcomeKind.Approved, null, "Approved", null, null, [], true),
             InvoiceLifecycleStatus.SentToAp => new FirmOutcome(FirmOutcomeKind.SentToAp, null, "Sent to accounts payable", null, null, [], true),
             _ => new FirmOutcome(FirmOutcomeKind.Paid, null, "Paid", null, null, [], true),
@@ -331,7 +337,7 @@ public sealed class FirmFindingsProjection
         IReadOnlyList<FirmOutcomeItem> items;
         try
         {
-            items = await BuildItemsAsync(invoiceId, includeAdjustments: decided, ct).ConfigureAwait(false);
+            items = await BuildItemsAsync(invoiceId, includeAdjustments: approvedOrLater, ct).ConfigureAwait(false);
         }
         catch (Exception ex) when (IsFault(ex, ct))
         {
@@ -339,10 +345,12 @@ public sealed class FirmFindingsProjection
             return statusOnly;
         }
 
-        var approved = decided ? invoice.Approved : null;
+        var approved = approvedOrLater ? invoice.Approved : null;
         return lifecycle switch
         {
             InvoiceLifecycleStatus.InReview => new FirmOutcome(FirmOutcomeKind.InvoiceInReview, tracking, "In review", billed, null, items, false),
+            InvoiceLifecycleStatus.Rejected => new FirmOutcome(FirmOutcomeKind.Rejected, tracking, "Rejected", billed, null, items, false),
+            InvoiceLifecycleStatus.ReturnedToFirm => new FirmOutcome(FirmOutcomeKind.ReturnedToFirm, tracking, "Returned to firm", billed, null, items, false),
             InvoiceLifecycleStatus.SentToAp => new FirmOutcome(FirmOutcomeKind.SentToAp, tracking, "Sent to accounts payable", billed, approved, items, false),
             InvoiceLifecycleStatus.Paid => new FirmOutcome(FirmOutcomeKind.Paid, tracking, "Paid", billed, approved, items, false),
             _ => new FirmOutcome(
@@ -870,8 +878,59 @@ public sealed class FirmFindingsProjection
 
     private static readonly string[] RejectionSignalColumns =
     [
-        "sprk_policyversion", "sprk_firmreason", "sprk_regardinginvoice", "sprk_regardinginvoiceline", "createdon",
+        "sprk_policyversion", "sprk_firmreason", "sprk_regardinginvoice", "sprk_regardinginvoiceline", "createdon", "sprk_evidencerefs",
     ];
+
+    /// <summary>
+    /// The reason codes a Signal's own <c>billing.reason</c> evidence lists (task 130e-1, uac-r2 K1/Q2): an allow-list parse of
+    /// <c>sprk_evidencerefs</c> that reads ONLY the <c>ref</c> of entries whose <c>kind</c> is exactly <see cref="BillingFindingSignalMapper.ReasonEvidenceKind"/>
+    /// (any other kind can carry values and is never read here). Empty for a missing, malformed or non-array value. The caller keeps a code only
+    /// when the closed catalogue (<see cref="BillingRuleCatalogue.IsRejectCapableReason"/>) knows it for the finding's type.
+    /// </summary>
+    internal static IReadOnlySet<string> ReasonCodesOf(string? evidenceJson)
+    {
+        var codes = new HashSet<string>(StringComparer.Ordinal);
+        if (string.IsNullOrWhiteSpace(evidenceJson))
+        {
+            return codes;
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(evidenceJson);
+            if (document.RootElement.ValueKind != JsonValueKind.Array)
+            {
+                return codes;
+            }
+
+            foreach (var entry in document.RootElement.EnumerateArray())
+            {
+                if (entry.ValueKind == JsonValueKind.Object
+                    && entry.TryGetProperty("kind", out var kind) && kind.ValueKind == JsonValueKind.String
+                    && string.Equals(kind.GetString(), BillingFindingSignalMapper.ReasonEvidenceKind, StringComparison.Ordinal)
+                    && entry.TryGetProperty("ref", out var code) && code.ValueKind == JsonValueKind.String
+                    && code.GetString() is { Length: > 0 } value)
+                {
+                    codes.Add(value);
+                }
+            }
+        }
+        catch (JsonException)
+        {
+            codes.Clear();
+        }
+
+        return codes;
+    }
+
+    /// <summary>
+    /// Task 130e-1 (uac-r2 K1): the override is taken only from a Signal whose own reason evidence names THIS finding's reason code, and only
+    /// when the closed catalogue knows that code for the finding's rule type. Any other Signal of the same version and line (another reason of a
+    /// merged rule) never gives this finding its text.
+    /// </summary>
+    private static bool NamesTheFindingsReason(Entity signal, FirmRejectionFindings.Finding finding) =>
+        BillingRuleCatalogue.IsRejectCapableReason(finding.RuleType, finding.ReasonCode)
+        && ReasonCodesOf(signal.GetAttributeValue<string>("sprk_evidencerefs")).Contains(finding.ReasonCode);
 
     /// <summary>
     /// A Rejected submission's outcome: the findings that rejected it, from the submission's OWN stored findings. A fault reading them, or
@@ -970,7 +1029,8 @@ public sealed class FirmFindingsProjection
                 ? null
                 : signals
                     .Where(s => s.GetAttributeValue<EntityReference>("sprk_policyversion")?.Id == version
-                        && s.GetAttributeValue<EntityReference>("sprk_regardinginvoiceline")?.Id == lineId)
+                        && s.GetAttributeValue<EntityReference>("sprk_regardinginvoiceline")?.Id == lineId
+                        && NamesTheFindingsReason(s, finding))
                     .OrderBy(s => s.GetAttributeValue<DateTime?>("createdon")).ThenBy(s => s.Id)
                     .Select(s => FirmRejectionFindings.ShownFirmReason(s.GetAttributeValue<string>("sprk_firmreason")))
                     .FirstOrDefault(r => r is not null);

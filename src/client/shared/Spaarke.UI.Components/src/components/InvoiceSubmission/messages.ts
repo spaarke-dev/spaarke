@@ -5,7 +5,12 @@
  * when it wrote one (it can name the configured size limit, for example). The tables below are the fallback for a
  * refusal that carried no detail, keyed by the stable `errorCode` and then by HTTP status.
  */
-import { InvoiceSubmissionError } from './types';
+import {
+  CORRECTION_NOT_ALLOWED_ERROR_CODE,
+  CORRECTION_NOTE_REQUIRED_ERROR_CODE,
+  CORRECTION_UNAVAILABLE_ERROR_CODE,
+  InvoiceSubmissionError,
+} from './types';
 
 const BY_CODE: Readonly<Record<string, string>> = {
   'ebilling.submission.file_required': 'Choose a PDF file to submit.',
@@ -29,7 +34,28 @@ const BY_CODE: Readonly<Record<string, string>> = {
   'ebilling.submission.failed': 'Nothing was saved. Try again.',
   'ebilling.tracking.unavailable': 'A tracking number could not be issued right now. Try again shortly.',
   'ebilling.disabled': 'Invoice submission is not available.',
+  // A corrected invoice (095f-2e2b). The server's own detail wins; these words are for an answer that carried none.
+  [CORRECTION_NOTE_REQUIRED_ERROR_CODE]:
+    'Say why this invoice is corrected. A correction needs a note. Nothing was saved.',
+  [CORRECTION_UNAVAILABLE_ERROR_CODE]:
+    'This invoice is not available to you, or no longer exists, so it cannot be corrected. Nothing was saved.',
 };
+
+/**
+ * Why a Correction was refused (409 `correction_not_allowed`), by the server's `reason`. The server writes a sentence for each of
+ * these and it wins; the words here are for an answer that carried none, and for a reason a newer server adds (the last sentence).
+ */
+const BY_CORRECTION_REASON: Readonly<Record<string, string>> = {
+  invoice_status: 'Only an invoice in review can be corrected; this one has moved on, so nothing was saved.',
+  different_firm: 'This invoice belongs to another firm, so this submission cannot replace it. Nothing was saved.',
+  different_core_record:
+    'The invoice to correct is filed under another record, so this submission cannot replace it. Nothing was saved.',
+  different_invoice_number:
+    'A corrected invoice keeps the firm invoice number of the invoice it replaces. Nothing was saved.',
+  no_submission: 'This invoice has no finished submission to correct, so nothing was saved.',
+  submission_in_progress: 'This invoice is still being processed. Try again when it has finished. Nothing was saved.',
+};
+const CORRECTION_NOT_ALLOWED_FALLBACK = 'This invoice cannot be corrected right now. Nothing was saved.';
 
 const BY_STATUS: Readonly<Record<number, string>> = {
   400: 'The submission was not accepted. Check the file and the details and try again.',
@@ -50,6 +76,9 @@ export function invoiceSubmissionErrorMessage(err: unknown): string {
   if (err instanceof InvoiceSubmissionError) {
     const detail = err.detail?.trim();
     if (detail) return detail;
+    if (err.errorCode === CORRECTION_NOT_ALLOWED_ERROR_CODE) {
+      return (err.reason && BY_CORRECTION_REASON[err.reason]) || CORRECTION_NOT_ALLOWED_FALLBACK;
+    }
     if (err.errorCode && BY_CODE[err.errorCode]) return BY_CODE[err.errorCode];
     if (err.statusCode !== undefined) {
       if (BY_STATUS[err.statusCode]) return BY_STATUS[err.statusCode];

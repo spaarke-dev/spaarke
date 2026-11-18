@@ -99,7 +99,7 @@ public sealed class DataverseDeleteRecordHandlerTests : TypedToolHandlerTestFixt
     public static TheoryData<string, bool> WriterOnlyTablesAndApproval()
     {
         var data = new TheoryData<string, bool>();
-        foreach (var table in new[] { "sprk_signal", "sprk_decisionrecord", "sprk_budgetrevision" })
+        foreach (var table in new[] { "sprk_signal", "sprk_decisionrecord", "sprk_budgetrevision", "sprk_invoicecorrection" })
         {
             data.Add(table, true);
             data.Add(table, false);
@@ -144,6 +144,7 @@ public sealed class DataverseDeleteRecordHandlerTests : TypedToolHandlerTestFixt
     [InlineData("sprk_signal")]
     [InlineData("sprk_decisionrecord")]
     [InlineData("sprk_budgetrevision")]
+    [InlineData("sprk_invoicecorrection")]
     public void TheMessage_IsPlainOffChat_AndTheModelsOnChat(string table)
     {
         var plain = RecordTableRules.RefuseWriterOnlyTableDelete(table)!;

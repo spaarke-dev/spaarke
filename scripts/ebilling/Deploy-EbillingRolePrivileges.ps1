@@ -11,9 +11,12 @@
     0x80040220 (no prvRead) on sprk_invoiceapproval and the "Invoices to review" view failed.
 
     Rule (per role, read live from the role in the root business unit):
-      WORKING tables  sprk_invoiceapproval, sprk_invoicesubmission, sprk_invoicecorrection, sprk_externalidentifier,
-                      sprk_billingexport: for every privilege the role holds on sprk_invoice (Create, Read, Write, Delete,
-                      Append, AppendTo, Assign, Share) the same privilege on the working table at the same depth.
+      WORKING tables  sprk_invoiceapproval, sprk_invoicesubmission, sprk_externalidentifier, sprk_billingexport: for every
+                      privilege the role holds on sprk_invoice (Create, Read, Write, Delete, Append, AppendTo, Assign, Share)
+                      the same privilege on the working table at the same depth.
+                      NOT sprk_invoicecorrection (correction rows: native write hardening, EB-D-249): the role files are its
+                      source (src/dataverse/solutions/SpaarkeMaster/Roles, FeatureRolePrivilegeGuardTests) and
+                      scripts/Set-FeatureRolePrivileges.ps1 applies them. This script must never add it back.
       CONFIG tables   sprk_ebillingsetting, sprk_ratecard, sprk_ratecardrate, sprk_billingcodeset, sprk_billingcode,
                       sprk_timekeeper: Read at the depth the role holds for Read on sprk_invoice. An
                       organization-owned table only offers Global depth (the platform refuses Deep), so Read is then added at
@@ -68,7 +71,7 @@ $EnvironmentUrl = $EnvironmentUrl.TrimEnd('/')
 $DryRun = [bool]$WhatIfPreference
 
 $Reference = 'sprk_invoice'
-$WorkingTables = 'sprk_invoiceapproval', 'sprk_invoicesubmission', 'sprk_invoicecorrection', 'sprk_externalidentifier', 'sprk_billingexport'
+$WorkingTables = 'sprk_invoiceapproval', 'sprk_invoicesubmission', 'sprk_externalidentifier', 'sprk_billingexport'   # not sprk_invoicecorrection (EB-D-249)
 $ConfigTables = 'sprk_ebillingsetting', 'sprk_ratecard', 'sprk_ratecardrate', 'sprk_billingcodeset', 'sprk_billingcode', 'sprk_timekeeper'   # not sprk_ruleset (D-185)
 $Verbs = 'Create', 'Read', 'Write', 'Delete', 'Append', 'AppendTo', 'Assign', 'Share'
 $Rank = @{ Basic = 0; Local = 1; Deep = 2; Global = 3 }
@@ -249,7 +252,7 @@ try {
             Write-Host "  nothing to add for $roleName" -ForegroundColor Yellow
         }
 
-        # --- Evidence: the role's privileges on the 13 tables (settled read) -------------------------------------
+        # --- Evidence: the role's privileges on the tables (settled read) -----------------------------------------
         $final = if ($DryRun) { $have } else { Get-RoleDepths $role.Id }
         Write-Host "  privileges of '$roleName' on the tables ($(if ($DryRun) { 'current' } else { 'after the run' })):"
         foreach ($t in @($Reference) + $WorkingTables + $ConfigTables) {

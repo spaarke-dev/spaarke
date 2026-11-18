@@ -388,8 +388,11 @@ public static class DecisionActionCatalog
     private static readonly DecisionActionDefinition[] DeclaredBilling =
     [
         // ---- Line decisions (subject: the invoice line) ------------------------------------------------------
+        // ebilling-r1 095f-2d1 (EB-D-236; design 8, Q6): "note" declared optional on the three line decisions, the Values key the line decision
+        // service writes on each line's own record when a note is given. The writer reads only required parameters, so declaring it changes no
+        // behaviour. (Accepted in bulk writes accept-line records with no note.)
         new("accept-line", "Accept line", DecisionLane.Decide, IsNextStep: false, WorkType: null,
-            [],
+            [NoteParameter()],
             ["Accepts the line at its billed amount"],
             Excludes: ["reduce-line", "disallow-line"],
             DecisionRecordClass.Routine)
@@ -399,6 +402,7 @@ public static class DecisionActionCatalog
             [
                 new("approvedAmount", "Approved amount", DecisionParameterKind.Money, Required: true),
                 new("reason", "Reason for reduction", DecisionParameterKind.TextArea, Required: true, Hint: ReasonHint),
+                NoteParameter(),
             ],
             ["Sets the line's approved amount below its billed amount", "Recomputes the invoice totals"],
             Excludes: ["disallow-line"],
@@ -406,7 +410,7 @@ public static class DecisionActionCatalog
         { Gate = new DecisionGateFactors(GateRiskTier.Tier2b, Reversible: true, RecordOfTruthImpact: true) },
 
         new("disallow-line", "Disallow line", DecisionLane.Decide, IsNextStep: false, WorkType: null,
-            [new("reason", "Reason for disallowing", DecisionParameterKind.TextArea, Required: true, Hint: ReasonHint)],
+            [new("reason", "Reason for disallowing", DecisionParameterKind.TextArea, Required: true, Hint: ReasonHint), NoteParameter()],
             ["Sets the line's approved amount to zero", "Recomputes the invoice totals"],
             Excludes: [],
             DecisionRecordClass.Judgement)
@@ -420,23 +424,27 @@ public static class DecisionActionCatalog
             DecisionRecordClass.Judgement)
         { Gate = new DecisionGateFactors(GateRiskTier.Tier4, Reversible: false, RecordOfTruthImpact: true) },
 
+        // ebilling-r1 095f-2a (EB-D-236; design 8, Q6 answered by ontology-r1): "note" declared optional, the Values key the service writes when
+        // a note is given. The writer reads only required parameters, so declaring it changes no behaviour.
         new("reject-invoice", "Reject invoice", DecisionLane.Decide, IsNextStep: false, WorkType: null,
-            [new("reason", "Reason for rejection", DecisionParameterKind.TextArea, Required: true, Hint: ReasonHint)],
+            [new("reason", "Reason for rejection", DecisionParameterKind.TextArea, Required: true, Hint: ReasonHint), NoteParameter()],
             ["Rejects the whole invoice; the rejection is final", "The firm sees the reason"],
             Excludes: ["return-to-firm"],
             DecisionRecordClass.Judgement)
         { Gate = new DecisionGateFactors(GateRiskTier.Tier4, Reversible: false, ExternallyVisible: true, RecordOfTruthImpact: true) },
 
         new("return-to-firm", "Return to firm", DecisionLane.Decide, IsNextStep: false, WorkType: null,
-            [new("reason", "Reason for returning", DecisionParameterKind.TextArea, Required: true, Hint: ReasonHint)],
+            [new("reason", "Reason for returning", DecisionParameterKind.TextArea, Required: true, Hint: ReasonHint), NoteParameter()],
             ["Returns the invoice to the firm to correct and resubmit", "The firm sees the reason"],
             Excludes: [],
             DecisionRecordClass.Judgement)
         { Gate = new DecisionGateFactors(GateRiskTier.Tier4, Reversible: false, ExternallyVisible: true, RecordOfTruthImpact: true) },
 
         // ---- Override (D-24; subject: the invoice the accepted submission created) ----------------------------
+        // ebilling-r1 095f-2c (EB-D-236; design 8, Q6): "note" declared optional, the Values key the Override service writes when a note is given.
+        // The writer reads only required parameters, so declaring it changes no behaviour. (return-to-firm, the blocked return's code too, has it from 095f-2a.)
         new("override-submission", "Override blocking failure", DecisionLane.Decide, IsNextStep: false, WorkType: null,
-            [new("reason", "Reason for overriding", DecisionParameterKind.TextArea, Required: true, Hint: ReasonHint)],
+            [new("reason", "Reason for overriding", DecisionParameterKind.TextArea, Required: true, Hint: ReasonHint), NoteParameter()],
             ["Accepts the submission despite its blocking failure", "The overridden finding stays visible to the reviewer"],
             Excludes: [],
             DecisionRecordClass.Judgement)
@@ -466,6 +474,55 @@ public static class DecisionActionCatalog
             Excludes: [],
             DecisionRecordClass.Judgement)
         { Gate = new DecisionGateFactors(GateRiskTier.Tier2b, Reversible: true, RecordOfTruthImpact: true) },
+
+        // ---- Invoice-level adjustments (ebilling-r1 095f-2b, EB-D-241; design 3 option A; subject: the invoice) --------------------------
+        // Recorded only by the adjustment service, after the adjustment line and the totals land, never through the Signals commit route
+        // (BillingActions only). The gates follow add-line: a reviewer-made change to the invoice's totals that a later decision can undo; the
+        // firm sees the resulting totals, not the record. Each parameter code is its Values key. remove-adjustment declares no reason: the
+        // remove route takes none.
+        new("add-adjustment", "Add adjustment", DecisionLane.Decide, IsNextStep: false, WorkType: null,
+            [
+                new("method", "Method", DecisionParameterKind.Choice, Required: true,
+                    Options: [new("percent", "Percent of fees after line adjustments"), new("fixed", "Fixed amount")]),
+                new("value", "Value", DecisionParameterKind.Money, Required: true),
+                new("rule", "Billing rule", DecisionParameterKind.Lookup, Required: false, LookupEntity: "sprk_policyversion"),
+                new("reason", "Reason for the adjustment", DecisionParameterKind.TextArea, Required: true, Hint: ReasonHint),
+                NoteParameter(),
+            ],
+            ["Adds an invoice-level adjustment (a percent of fees or a fixed amount)", "Recomputes the invoice totals"],
+            Excludes: [],
+            DecisionRecordClass.Judgement)
+        { Gate = new DecisionGateFactors(GateRiskTier.Tier2b, Reversible: true, RecordOfTruthImpact: true) },
+
+        new("remove-adjustment", "Remove adjustment", DecisionLane.Decide, IsNextStep: false, WorkType: null,
+            [
+                new("adjustment", "Adjustment", DecisionParameterKind.Lookup, Required: true, LookupEntity: "sprk_billingevent"),
+                NoteParameter(),
+            ],
+            ["Removes an invoice-level adjustment (the line is kept, inactive)", "Recomputes the invoice totals"],
+            Excludes: [],
+            DecisionRecordClass.Judgement)
+        { Gate = new DecisionGateFactors(GateRiskTier.Tier2b, Reversible: true, RecordOfTruthImpact: true) },
+
+        // ---- Operator finish of a stranded decision (ebilling-r1 ISS-034 / iss034a, EB-D-244; subject: the invoice) ----------------------
+        // Recorded only by SubmissionOverrideService's operator finish, never through the Signals commit route (BillingActions only). The
+        // operator's own step when finishing ANOTHER person's recorded-but-unfinished override-submission or blocked return-to-firm exactly as
+        // it was recorded: the finished record keeps its decider, reason, note and resolved Signals; this record names it ("finishedDecision",
+        // the finished code; "finishedRecord", its Decision Record) with the operator's required reason and optional note. Not reversible (the
+        // finish releases or returns the invoice), a record-of-truth change, and externally visible (a finished return reaches the firm, as
+        // return-to-firm's does), so it gates Tier4 as the most serious decision it can finish (ontology-r1 review: Tier4 and Judgement confirmed).
+        new("finish-stranded-decision", "Finish stranded decision", DecisionLane.Decide, IsNextStep: false, WorkType: null,
+            [
+                new("finishedDecision", "Finished decision", DecisionParameterKind.Choice, Required: true,
+                    Options: [new("override-submission", "Override blocking failure"), new("return-to-firm", "Return to firm")]),
+                new("finishedRecord", "Finished Decision Record", DecisionParameterKind.Lookup, Required: true, LookupEntity: "sprk_decisionrecord"),
+                new("reason", "Reason for finishing it", DecisionParameterKind.TextArea, Required: true, Hint: ReasonHint),
+                NoteParameter(),
+            ],
+            ["Finishes another person's recorded override or return exactly as it was recorded", "Records who finished it; the original decision and its decider are unchanged"],
+            Excludes: [],
+            DecisionRecordClass.Judgement)
+        { Gate = new DecisionGateFactors(GateRiskTier.Tier4, Reversible: false, ExternallyVisible: true, RecordOfTruthImpact: true) },
     ];
 
     /// <summary>The billing set with every exclusion made mutual. Its codes never overlap <see cref="Definitions"/> (checked at static

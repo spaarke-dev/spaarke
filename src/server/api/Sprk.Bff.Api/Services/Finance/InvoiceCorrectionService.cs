@@ -164,7 +164,9 @@ public static class CorrectionCodes
 /// </summary>
 /// <param name="Value">The final value as text (an invariant number, a <c>yyyy-MM-dd</c> date, a code or free text). Absent when <paramref name="Confirm"/>.</param>
 /// <param name="Confirm">Keep the value as read: one Confirmed individually row (D-64) when it still equals what the AI read.</param>
-public sealed record CorrectionCommand(Guid InvoiceId, Guid? LineId, string? Field, string? Value, bool Confirm, Guid ReviewerSystemUserId);
+/// <param name="Note">Task 095f-2d2 (EB-D-242): an optional reviewer note, checked by <see cref="InvoiceCorrectionNote.Check"/> before any read and written on the
+/// correction row in the same create. Blank means no note. Never part of the row's id, never logged.</param>
+public sealed record CorrectionCommand(Guid InvoiceId, Guid? LineId, string? Field, string? Value, bool Confirm, Guid ReviewerSystemUserId, string? Note = null);
 
 /// <summary>One correction row as the History pane and the calibration report read it. Values are the caller's to see (ADR-015: never logged).</summary>
 public sealed record CorrectionDto(
@@ -368,6 +370,9 @@ public sealed class InvoiceCorrectionService
             return refused;
         }
 
+        // 095f-2d2 (design 1.1): Validate has accepted the note, so this is the trimmed text (null when blank); from here on it is the one value the row takes.
+        command = command with { Note = InvoiceCorrectionNote.Check(command.Note).Value };
+
         return spec!.Header
             ? await CorrectHeaderAsync(command, spec, ct).ConfigureAwait(false)
             : await CorrectLineAsync(command, spec, ct).ConfigureAwait(false);
@@ -409,6 +414,13 @@ public sealed class InvoiceCorrectionService
         if (!command.Confirm && spec.Kind != Kind.Code && !TryNormalize(spec, command.Value!, out _, out var detail))
         {
             return Bad(CorrectionCodes.ValueInvalid, detail);
+        }
+
+        // 095f-2d2 (design 1.1, EB-D-242): the note by the one shared rule, after the request's own rules and before any read; never truncated or stripped.
+        // The detail never echoes the note.
+        if (InvoiceCorrectionNote.DecisionRefusalOf(InvoiceCorrectionNote.Check(command.Note).Refusal) is { } noteRefusal)
+        {
+            return Bad(noteRefusal.Code, noteRefusal.Detail);
         }
 
         return null;
@@ -1436,6 +1448,13 @@ public sealed class InvoiceCorrectionService
         if (aiText is not null)
         {
             row["sprk_aivalue"] = Capped(aiText);
+        }
+
+        // 095f-2d2 (EB-D-242): the reviewer's note, in the same create as the row. Added only for a non-blank note (never an empty or null column), and
+        // never part of the id above, so a repeat with an edited note finds this row and leaves its note as first written. CorrectAsync has already checked it.
+        if (command.Note is { } note)
+        {
+            row[InvoiceCorrectionNote.CorrectionRowColumn] = note;
         }
 
         if (lineId is { } line)

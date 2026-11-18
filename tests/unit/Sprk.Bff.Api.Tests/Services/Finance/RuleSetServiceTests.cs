@@ -33,7 +33,7 @@ namespace Sprk.Bff.Api.Tests.Services.Finance;
 /// flag-off rule set never yields clause text. Dataverse and SPE are substituted at their narrow seams; validation, the describer and the
 /// orchestration are real. The fake store evaluates the real query (nested filters, In, Null), so a lost domain filter is observable.
 /// </remarks>
-public sealed class RuleSetServiceTests
+public sealed partial class RuleSetServiceTests
 {
     private static readonly Guid TeamId = Guid.NewGuid();
     private static readonly Guid DocumentId = Guid.NewGuid();

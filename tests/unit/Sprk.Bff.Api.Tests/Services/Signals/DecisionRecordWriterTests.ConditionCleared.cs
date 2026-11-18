@@ -25,9 +25,10 @@ public sealed partial class DecisionRecordWriterTests
 
     /// <summary>A no-core To Do last changed by <paramref name="by"/> at <paramref name="on"/>; the user's eligibility columns come back
     /// through the "changedby" link as aliased values (absent: the link found no user).</summary>
-    private static Harness ChangedToDo(Guid by, DateTime on, Entity? user = null, IRecordOwnershipResolver? realResolver = null)
+    private static Harness ChangedToDo(
+        Guid by, DateTime on, Entity? user = null, IRecordOwnershipResolver? realResolver = null, IReadOnlySet<DecisionRecordWriter.KeyedEntry>? derivedRecordIds = null)
     {
-        var h = new Harness(realResolver: realResolver);
+        var h = new Harness(realResolver: realResolver, derivedRecordIds: derivedRecordIds);
         var todo = new Entity("sprk_todo", TodoId)
         {
             ["modifiedby"] = new EntityReference("systemuser", by),

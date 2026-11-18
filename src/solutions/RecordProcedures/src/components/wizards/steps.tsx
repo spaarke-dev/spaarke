@@ -12,9 +12,10 @@
  */
 
 import * as React from 'react';
-import { Button, Caption1, MessageBar, MessageBarBody, MessageBarTitle, Radio, RadioGroup, Spinner, Text, makeStyles, tokens } from '@fluentui/react-components';
+import { Button, Caption1, Field, MessageBar, MessageBarBody, MessageBarTitle, Radio, RadioGroup, Spinner, Text, Textarea, makeStyles, tokens } from '@fluentui/react-components';
 import type { RemovalPreview, WriteFailure } from '../../services/overridesApi';
 import type { DryRunView } from '../../services/dryRunApi';
+import { MAX_NOTE_CHARS, noteToSend } from '../../services/overridesApi';
 import { NOT_ALLOWED_BOTH } from './plan';
 import { ADVISORY_LINE, NOT_LISTED, UNCHECKED_CLOSE_LINE, affectedLine, dryRunFailureText, impactChanges, previewFailureText, type ImpactChange } from './impact';
 
@@ -323,11 +324,19 @@ export const ImpactStep: React.FC<{
 // Confirm
 // ─────────────────────────────────────────────────────────────────────────────
 
+/** Task 084h-4 (EB-D-239 Q10): said when a change saved but its Decision Record was neither written nor queued. */
+export const NOT_RECORDED_LINE = 'The change was saved, but its decision record could not be written. Tell your administrator.';
+
+/** The characters a note counts, after trimming (what the server counts), with a thousands separator: "2,145". */
+const noteCount = (value: string): string => (noteToSend(value)?.length ?? 0).toLocaleString('en-US');
+
 export const ConfirmStep: React.FC<{
   rows: ReadonlyArray<readonly [string, React.ReactNode]>;
   /** A removal that neither the dry run nor the removal preview could check: say so (it does not block). */
   uncheckedClose?: boolean;
-}> = ({ rows, uncheckedClose }) => {
+  /** Task 084h-4: the optional note for the change's Decision Record, and its edit. Absent: no Note box. */
+  note?: { value: string; onChange: (value: string) => void; problem: string | null };
+}> = ({ rows, uncheckedClose, note }) => {
   const s = useWizardStyles();
   return (
     <div className={s.step} data-testid="confirm-step">
@@ -337,6 +346,16 @@ export const ConfirmStep: React.FC<{
         </MessageBar>
       )}
       <KeyValues rows={rows} />
+      {note && (
+        <Field
+          label="Note"
+          hint={`Optional. Kept in the decision record of this change. ${noteCount(note.value)} / ${MAX_NOTE_CHARS.toLocaleString('en-US')} characters.`}
+          validationState={note.problem ? 'error' : 'none'}
+          validationMessage={note.problem ?? undefined}
+        >
+          <Textarea value={note.value} onChange={(_, d) => note.onChange(d.value)} resize="vertical" data-testid="confirm-note" />
+        </Field>
+      )}
       <Caption1 className={s.muted}>{O21_LINE}</Caption1>
     </div>
   );

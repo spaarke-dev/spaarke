@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="084h-2" project="ebilling-r1">
+  <metadata>
+    <title>Per-record Procedure changes file their Decision Record: recorder, ProcedureAssignmentService and endpoints (note, decision id, Unknown read-back, decisionRecord member, enqueue on failure)</title>
+    <phase>3 Rules (WP3) — Procedures on the record (EB-D-238, EB-D-239)</phase>
+    <gate>084h-1 merged into work (done). Branch from work/ebilling-r1 at the sha named in the agent brief. Never deployed without 084h-3.</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>BFF C# on 089's write path: commit ordering, idempotency and a response contract change on seven acts.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Post-commit write ordering, the Unknown read-back and the repair payload must hash exactly as the inline write; a mistake files duplicates or loses records silently.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits ProcedureAssignmentService.cs and ProcedureAssignmentEndpoints.cs, which 084h-3 builds on.</parallel-reason>
+    <deps>084h-1</deps>
+    <tags>bff-api, signals, decision-record, testing</tags>
+    <estimated-effort>1-1.5 days</estimated-effort>
+  </metadata>
+
+  <prompt>Build design notes/084h-procedure-change-decision-records-design.md sections 2, 4, 6, 7.1, 7.2 and 9 on the service side, as settled by §16 (review round 1) and §17 (owner answers, EB-D-239): BillingDecisionRecorder.RecordProcedureAsync and PreflightProcedure; in ProcedureAssignmentService the decider parameter, the decision id minted before the preflight, the preflight before SendAsync, the record after Done, the create read-back on Unknown (matching creator person and reason), sprk_pinnedversion on LoadOverrideAsync, the decisionRecord member on OverrideView and OverrideRemoved, the note, the enqueue on failure (through 084h-3's enqueuer interface, which this task declares and 084h-3 implements) and the log; in ProcedureAssignmentEndpoints the decider resolution (403), the optional note on the three POST bodies and a JSON body { "note" } on the DELETE. Tests S1-S10 and S6-S8 of design §11.</prompt>
+
+  <goal>Each of the seven per-record acts that commits files exactly one Decision Record on the core record, after the commit; a refused, failed, duplicate or dry-run act files none; a record that fails after the change landed keeps the 2xx answer with decisionRecord.status Queued (or NotRecorded when the enqueue also fails), and the queued payload equals the inline request's content.</goal>
+
+  <context>
+    <background>Read the whole design; §16 and §17 override earlier sections. Owner answers (EB-D-239): two records for a Pin-to-Follow plan; the §8 classes and tiers; the DELETE note in a JSON body; reason keeps its existing check (only the note refuses control characters); the NotRecorded warning ships and server-side retry is required (084h-3). The writer entry and catalog set are in work from 084h-1 (notes/084h-1-writer-entry.md).</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Finance/BillingDecisionRecorder.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Finance/Procedures/ProcedureAssignmentService.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/Finance/ProcedureAssignmentEndpoints.cs</file>
+      <file role="modify">tests/unit/Sprk.Bff.Api.Tests/Services/Finance/Procedures/ProcedureAssignmentServiceTests.cs, .../Api/Finance/ProcedureAssignmentEndpointsTests.cs, .../Services/Finance/BillingDecisionRecorderTests.cs</file>
+      <file role="modify">tests/integration/contract/Api/Finance/RecordProcedureWriteRig.cs, RecordWritePermissionsContractTests.cs (the decisionRecord member; existing assertions unchanged)</file>
+      <file role="create">projects/ebilling-r1/notes/084h-2-procedure-change-records-service.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="design 6.1">Order: validate (note via InvoiceCorrectionNote.Check, before any read) → mint decision id → preflight → SendAsync → on Done, record. Never record before the commit.</constraint>
+    <constraint source="design 6.2, J1">The decision id is the same in the preflight, the record and any queued payload; Values keys are the declared parameter codes (procedure, version, rule, firm, note); a null or whitespace-only note adds no key.</constraint>
+    <constraint source="design 6.1, review item 5">On Unknown, record only when a read-back finds the row matching mode, procedure, version, firm, sprk_createdbyperson = caller and sprk_reason; otherwise record none and keep the existing 500 "may or may not".</constraint>
+    <constraint source="design 9, EB-D-239 Q9">The note is stored only in the record's Values["note"], never on the override row; reason keeps CheckReason (trim, length) unchanged. Unpin and remove records carry a null sprk_reason.</constraint>
+    <constraint source="design 7, EB-D-239 Q10">A recorder refusal or exception after Done: 2xx answer, decisionRecord.status Queued, one enqueue; a failed enqueue gives NotRecorded; one Error log with ids only; no rethrow. 089's house rule that a landed change keeps its 2xx is unchanged.</constraint>
+    <constraint source="design 10">decisionRecord appears once per answer (OverrideView, OverrideRemoved; not RuleChangedView). The record stays internal: no firm-facing reader changes.</constraint>
+    <constraint source="ontology-r1 H-3">The service (not only the endpoint) enforces the 2000-character note cap and the control-character check on every act, the DELETE JSON body included; a direct service call with a 2001-character note is refused before any read.</constraint>
+    <constraint source="logging">No log line contains note or reason text.</constraint>
+    <constraint source="project">No edit to DecisionRecordWriter.cs or DecisionActionCatalog.cs (084h-1 owns them). No live call to any environment. Never run python. Never --no-verify. No bare git stash.</constraint>
+    <constraint source="root 10">Publish-size delta against a fresh master build and the CVE check recorded in the notes.</constraint>
+  </constraints>
+
+  <acceptance-criteria>
+    <criterion testable="true">S1: each of the seven acts on Done calls the recorder once with the section 2 code, subject, Values and confirmer, and each built request passes the real PreflightRecordProcedureDecision; the decision id is identical in preflight, record and payload.</criterion>
+    <criterion testable="true">S2 (must-not-fire): Duplicate, Conflict, Gone, Failed, owner-refused, validation-refused, reason-missing and dry-run make zero recorder calls.</criterion>
+    <criterion testable="true">S3: Unknown plus a matching read-back records once; a mismatch (including another creator person or another reason) or a fault records none and keeps 500.</criterion>
+    <criterion testable="true">S4: a recorder refusal or exception after Done gives 201/200 with decisionRecord.status Queued and one enqueue whose payload equals the inline content; a failed enqueue gives NotRecorded; no note or reason text in logs.</criterion>
+    <criterion testable="true">S5, S8, S9, S10 as in design §11; S6: 2000 characters accepted, 2001 and \u0007 give 400 assignment.note_too_long / assignment.note_invalid_characters before any read, \n accepted, whitespace-only means none; S7: an unresolved decider gives 403 before the service.</criterion>
+    <criterion testable="true">The DELETE accepts a JSON body { "note" } and an empty body; a Pin-to-Follow plan (unpin then assign) files two records.</criterion>
+    <criterion testable="true">dotnet build of the BFF with --warnaserror: 0 warnings; Procedure, recorder and contract suites green; ArchTests green (DecisionRecordContextImmutability, RecordOwnerAssignmentCensus, DryRunNoWriteGuard).</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>If a record cannot be written after the commit without changing the writer, or the Unknown read-back cannot prove the caller's row: STOP and report.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>BillingDecisionRecorder (billing records), the 084h-1 writer entry.</existing>
+    <extension>The recorder is extended with one method reusing DeciderContactAsync; no new service.</extension>
+    <cost-of-doing-nothing>EB-D-238/239 unmet: the seven per-record acts leave no Decision Record.</cost-of-doing-nothing>
+  </justification>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load the knowledge files first. Follow task-execute for rigor, checkpoints and quality gates.</protocol>
+  </execution>
+</task>

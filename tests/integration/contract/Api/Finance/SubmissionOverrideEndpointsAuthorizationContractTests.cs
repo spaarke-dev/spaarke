@@ -291,6 +291,49 @@ public sealed class SubmissionOverrideEndpointsAuthorizationContractTests
         host.World.RecordCreates.Should().Be(1);
     }
 
+    // ── The decision note (ebilling-r1 task 095f-2c; EB-D-236, EB-D-240) ──
+
+    private static StringContent NoteBody(string note) =>
+        Json(new JsonObject { ["reason"] = "Negotiated rate is not yet in the rate card.", ["note"] = note }.ToJsonString());
+
+    [Theory(DisplayName = "095f-2c: the override and return routes take an optional note: 200, the note is in the Decision Record's Values and the invoice's internal decision note column")]
+    [InlineData("override")]
+    [InlineData("return")]
+    public async Task Post_WithANote_Is200_AndRecordsIt(string verb)
+    {
+        await using var host = await Host.StartAsync();
+        host.GrantRights();
+
+        var response = await host.SendAsync(Request("POST", Url(verb), NoteBody("  Agreed with the partner.  ")));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        host.World.Recorded.Single().Values!["note"].Should().Be("Agreed with the partner.");
+        var column = verb == "override"
+            ? host.World.Invoice!.GetAttributeValue<string>(InvoiceCorrectionNote.DecisionColumn)
+            : host.World.TransitionNotes.Single();
+        column.Should().Be("Agreed with the partner.");
+        host.World.Invoice!.Contains(InvoiceCorrectionNote.Column).Should().BeFalse("a decision never writes the firm's correction note");
+    }
+
+    [Theory(DisplayName = "095f-2c: a refused note (over 2000 characters, or a control character) is a 400 with the shared code, before any rights read beyond the route's, and nothing is recorded or written")]
+    [InlineData("override", 2001, "ebilling.note_too_long")]
+    [InlineData("return", 2001, "ebilling.note_too_long")]
+    [InlineData("override", 0, "ebilling.note_invalid_characters")]
+    [InlineData("return", 0, "ebilling.note_invalid_characters")]
+    public async Task Post_WithARefusedNote_Is400_AndNothingChanges(string verb, int length, string code)
+    {
+        await using var host = await Host.StartAsync();
+        host.GrantRights();
+        var note = length > 0 ? new string('n', length) : "bad\u0007note";
+
+        var response = await host.SendAsync(Request("POST", Url(verb), NoteBody(note)));
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        (await ErrorCodeAsync(response)).Should().Be(code);
+        (await response.Content.ReadAsStringAsync()).Should().NotContain("nnnn").And.NotContain("bad", "the refusal never echoes the note");
+        host.World.AssertNothingChanged();
+    }
+
     // ── Reason and body ──
 
     [Theory]
@@ -432,6 +475,96 @@ public sealed class SubmissionOverrideEndpointsAuthorizationContractTests
         response.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable);
     }
 
+    // ── The operator finish of a stranded decision (ISS-034, iss034a, EB-D-244) ──
+
+    [Fact(DisplayName = "iss034a: finish-stranded without a bearer is 401 and touches nothing")]
+    public async Task FinishStranded_Unauthenticated_Is401()
+    {
+        await using var host = await Host.StartAsync();
+
+        var response = await host.SendAsync(Request("POST", Url("finish-stranded"), ReasonBody(), authenticated: false));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+        host.World.Entities.Invocations.Should().BeEmpty();
+        host.World.AssertNothingChanged();
+    }
+
+    [Theory(DisplayName = "iss034a: finish-stranded carries the decide routes' filter: no rights, or Read without Write, on the submission is 403 before any privilege question or read")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task FinishStranded_WithoutWriteOnTheSubmission_Is403_BeforeAnyPrivilegeOrRead(bool readOnly)
+    {
+        await using var host = await Host.StartAsync();
+        if (readOnly)
+        {
+            host.Access.Grant(Set, SubmissionId, AccessRights.Read);
+        }
+
+        var response = await host.SendAsync(Request("POST", Url("finish-stranded"), ReasonBody()));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        host.World.Probe.Calls.Should().BeEmpty("the billing-admin marker is asked only after the route's rights pass");
+        host.World.Entities.Invocations.Should().BeEmpty();
+        host.World.AssertNothingChanged();
+    }
+
+    [Fact(DisplayName = "iss034a: finish-stranded with the route's rights but without the billing-admin marker is 403 operator_not_permitted (errorCode and reasonCode), before the submission is read")]
+    public async Task FinishStranded_WithoutTheAdminMarker_Is403OperatorNotPermitted_BeforeAnyRead()
+    {
+        await using var host = await Host.StartAsync();
+        host.GrantRights();
+
+        var response = await host.SendAsync(Request("POST", Url("finish-stranded"), ReasonBody()));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        var json = JsonNode.Parse(await response.Content.ReadAsStringAsync())!.AsObject();
+        json["errorCode"]!.GetValue<string>().Should().Be("ebilling.blocked.operator_not_permitted");
+        json["reasonCode"]!.GetValue<string>().Should().Be("ebilling.blocked.operator_not_permitted");
+        host.World.Probe.Calls.Select(c => c.Privilege).Should().Equal(SubmissionOverrideService.AdminMarkerChecks()[0].Operation);
+        host.World.Entities.Invocations.Should().BeEmpty("nothing about the submission is read before the marker");
+        host.World.AssertNothingChanged();
+    }
+
+    [Fact(DisplayName = "iss034a: finish-stranded by a billing admin with nothing stranded is 409 nothing_stranded, nothing written")]
+    public async Task FinishStranded_NothingStranded_Is409()
+    {
+        await using var host = await Host.StartAsync();
+        host.GrantRights();
+        host.HoldAdminMarker();
+
+        var response = await host.SendAsync(Request("POST", Url("finish-stranded"), ReasonBody()));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Conflict);
+        (await ErrorCodeAsync(response)).Should().Be("ebilling.blocked.nothing_stranded");
+        host.World.AssertNothingWritten();
+    }
+
+    [Fact(DisplayName = "iss034a review round 1: finish-stranded by a billing admin finishes another person's stranded override: 200 with the finished decision's outcome and A's record id, the submission released, one operator record")]
+    public async Task FinishStranded_ByABillingAdmin_Is200_AndFinishesTheStrandedDecision()
+    {
+        await using var host = await Host.StartAsync();
+        host.GrantRights();
+        // Decider A (the World's caller) records an override whose release then fails: the decision is stranded.
+        (await DataMutation.Ebilling.SubmissionOverrideDecisionNoteTests.StrandAsync(host.World, "override-release", null)).StatusCode.Should().Be(503);
+        var decidedId = host.World.Records.Created.Single(e => e.LogicalName == "sprk_decisionrecord").Id;
+        host.World.Probe.CallerSystemUserId = SubmissionOverrideServiceTests.World.Operator;
+        host.HoldAdminMarker();
+
+        var response = await host.SendAsync(Request("POST", Url("finish-stranded"),
+            Json("""{"reason":"The decider has left; finishing their recorded decision.","note":"Operator note"}""")));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var json = JsonNode.Parse(await response.Content.ReadAsStringAsync())!.AsObject();
+        json["outcome"]!.GetValue<string>().Should().Be("Overridden");
+        json["alreadyDecided"]!.GetValue<bool>().Should().BeFalse();
+        json["submissionId"]!.GetValue<Guid>().Should().Be(SubmissionId);
+        json["recordId"]!.GetValue<Guid>().Should().Be(decidedId, "the response names the finished decision's record, A's");
+        host.World.Status.Should().Be(InvoiceSubmissionStatus.Accepted);
+        var op = host.World.Records.Created.Should().ContainSingle(e => e.GetAttributeValue<string>("sprk_actioncode") == "finish-stranded-decision").Subject;
+        op.Id.Should().NotBe(decidedId);
+        op.GetAttributeValue<Microsoft.Xrm.Sdk.EntityReference>("sprk_confirmedby")!.Id.Should().Be(SubmissionOverrideServiceTests.World.Operator);
+    }
+
     // ── Helpers ──
 
     private static StringContent ReasonBody() => Json("""{"reason":"Negotiated rate is not yet in the rate card."}""");
@@ -506,6 +639,15 @@ public sealed class SubmissionOverrideEndpointsAuthorizationContractTests
         }
 
         public void GrantRights() => Access.Grant(Set, SubmissionId, AccessRights.Read | AccessRights.Write);
+
+        /// <summary>ISS-034: the caller holds the billing-admin marker (every check of <see cref="BillingAdminAuthorization.Admin"/>).</summary>
+        public void HoldAdminMarker()
+        {
+            foreach (var check in SubmissionOverrideService.AdminMarkerChecks())
+            {
+                World.Probe.Hold(check.Operation);
+            }
+        }
 
         public Task<HttpResponseMessage> SendAsync(HttpRequestMessage request) => _client.SendAsync(request);
 

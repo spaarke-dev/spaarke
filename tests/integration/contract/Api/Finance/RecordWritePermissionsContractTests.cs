@@ -132,7 +132,9 @@ public sealed class RecordWritePermissionsContractTests
             (RuleSetService)RuntimeHelpers.GetUninitializedObject(typeof(RuleSetService)),
             (Sprk.Bff.Api.Services.Signals.SignalClosureService)RuntimeHelpers.GetUninitializedObject(typeof(Sprk.Bff.Api.Services.Signals.SignalClosureService)),
             (AffectedInvoiceCounter)RuntimeHelpers.GetUninitializedObject(typeof(AffectedInvoiceCounter)),
-            NullLogger<ProcedureAssignmentService>.Instance);
+            NullLogger<ProcedureAssignmentService>.Instance,
+            // Task 084h-2: the recorder (never reached: the service is substituted) and no repair queue.
+            (BillingDecisionRecorder)RuntimeHelpers.GetUninitializedObject(typeof(BillingDecisionRecorder)), null!);
 
         public StatedCaller StepZero { get; private set; } = null!;
         public HttpClient Client = null!;

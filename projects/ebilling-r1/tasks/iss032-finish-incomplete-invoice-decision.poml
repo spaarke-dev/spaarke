@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="iss032" project="ebilling-r1">
+  <metadata>
+    <title>Invoice Review: finish an invoice decision (reject, return, approve) stranded after its transition, once the wizard is closed (ISS-032 #2883)</title>
+    <phase>Defect fix (ISS-032, next-round)</phase>
+    <gate>Branch from work/ebilling-r1 at the sha named in the agent brief.</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>BFF decision services and the approval-state read, plus the Invoice Review code page; tests modified.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <effort>high</effort>
+    <parallel-safe>true</parallel-safe>
+    <deps>095f-2a, 095f-2c, 095f-2ui</deps>
+    <tags>bff-api, react, testing</tags>
+    <estimated-effort>1 day</estimated-effort>
+  </metadata>
+
+  <prompt>Reject, Return and Approve make the invoice's status transition BEFORE they write the Decision Record and the after-steps (src/server/api/Sprk.Bff.Api/Services/Finance/InvoiceRejectReturnService.cs, around the "transition" / "record" / "signals" / "link" Incomplete steps; InvoiceApprovalService.cs likewise). When a later step fails, the call answers 503 incomplete with a failedStep, and a repeat of the same decision finishes it on the server. The open wizard can send that repeat. But once the wizard is closed or the page reloads, Invoice Review sees the invoice as decided and opens the wizard read-only ("View decision"), so nothing sends the repeat: the Decision Record, the note and the after-steps are never written, and the reviewer cannot see that (notes/defer-issues.md ISS-032).
+
+Approach (coordinator's choice, directional): (1) the approval-state read the page already uses (InvoiceApprovalEndpoints' InvoiceApprovalStateDto) reports a stranded decision: the invoice's status shows a decision of this kind, but the Decision Record for the decision id the server derives for it is missing (the same lookup the repeat uses), as `incompleteDecision` { verb, failedStep if known }. Only a caller who may make that decision sees it. A lookup fault gives no hint (never a guess) and is logged. (2) Invoice Review shows the stranded state plainly and offers "Finish decision", which sends the same repeat the open wizard would send, under the server's existing rules for who may repeat it. If the repeat needs the reviewer's original reason or note and the server did not store it before the failure, the page asks for it again, saying why; if what the server stored disagrees with what a repeat would send, the server's stored values win, as 095f-2c's stored-decision rule does for Override.</prompt>
+
+  <goal>A reject, return or approve that stopped after its transition can always be finished from Invoice Review, including after a reload, and the reviewer can see that it needs finishing.</goal>
+
+  <constraints>
+    <constraint source="ADR-002">The server decides: the hint is read-only and computed server-side; the finish is the existing repeat path, with no new write path and no second decision.</constraint>
+    <constraint source="095f-2c, iss034a">Who may repeat a decision is decided by the existing services (eligible approver, Write on the invoice, the stored-decider rules where they apply). The hint never widens that; a caller who may not repeat sees no Finish affordance.</constraint>
+    <constraint source="ISS-032; amended review round 1 (coordinator)">A complete decision, meaning its Decision Record is written AND the approval portion is linked to it (the server's own CompleteOrNoOpAsync definition), is unchanged: still read-only "View decision" (must-not-fire). A decision whose record exists but whose follow-up steps (Signals, link) did not finish is stranded too, and is hinted with failedStep "link".</constraint>
+    <constraint source="escalation">If the repeat cannot be rebuilt (a required value is neither stored nor safely re-askable) or the approach contradicts a stored-decision rule, STOP and report; do not invent a new path.</constraint>
+    <constraint source="ADR-021">Fluent v9 tokens only; reuse the page's existing banner or message pattern (as iss034b's Finish-as-operator did).</constraint>
+    <constraint source="project">Only InvoiceRejectReturnService.cs, InvoiceApprovalService.cs, InvoiceApprovalEndpoints.cs (the state DTO), the Invoice Review decision files (DecideInvoiceAction.tsx, decisionModel.ts, decisionApi.ts as needed), their tests, and notes/iss032-finish-incomplete-invoice-decision.md. No schema or package change, no deploy.</constraint>
+  </constraints>
+
+  <acceptance-criteria>
+    <criterion testable="true">xUnit: for each of reject, return and approve, a transition with no Decision Record reports incompleteDecision with the verb, and one stranded after its record (at "signals" or "link") reports it with failedStep "link", each with a repeat that clears it; a complete decision (record written AND linked) reports none; a lookup fault reports none and logs. (Amended review round 1.)</criterion>
+    <criterion testable="true">xUnit: a caller who may not make the decision gets no hint.</criterion>
+    <criterion testable="true">Jest: after a reload, a stranded decision shows the stranded message and "Finish decision"; Finish sends exactly one repeat (the button is disabled while it is in flight), then refreshes and shows the decision read-only; a complete decision shows only "View decision".</criterion>
+    <criterion testable="true">Jest: a refusal or 503 from the repeat shows its message and keeps the Finish affordance.</criterion>
+    <criterion testable="true">Filtered InvoiceRejectReturn|InvoiceApproval|InvoiceDecision tests, the InvoiceReview Jest suite, typecheck and build, and the --warnaserror BFF build pass.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

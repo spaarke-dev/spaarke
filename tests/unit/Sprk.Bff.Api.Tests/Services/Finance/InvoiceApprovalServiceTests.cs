@@ -231,7 +231,7 @@ public sealed class InvoiceApprovalServiceTests
     {
         var w = new ApprovalWorld();
         w.AddLine(InvoiceLineStatus.Accepted, approved: 100m);
-        w.Lifecycle.Setup(l => l.TransitionAsync(w.InvoiceId, InvoiceLifecycleStatus.Approved, It.IsAny<CancellationToken>()))
+        w.Lifecycle.Setup(l => l.TransitionAsync(w.InvoiceId, InvoiceLifecycleStatus.Approved, It.IsAny<string?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new InvoiceTransitionResult(InvoiceTransitionOutcome.Refused, InvoiceLifecycleStatus.Approved, InvoiceLifecycleStatus.InReview, "invoice-lifecycle.transition-not-allowed"));
 
         var result = await w.ApproveAs(AliceUser);
@@ -246,7 +246,7 @@ public sealed class InvoiceApprovalServiceTests
         w.WriteLog.Count(e => e == "claim:sprk_invoiceapproval").Should().Be(2, "the claim, then its conditional clear");
 
         // Another approver is not blocked by the refused attempt (K1 would refuse a live claim).
-        w.Lifecycle.Setup(l => l.TransitionAsync(w.InvoiceId, InvoiceLifecycleStatus.Approved, It.IsAny<CancellationToken>()))
+        w.Lifecycle.Setup(l => l.TransitionAsync(w.InvoiceId, InvoiceLifecycleStatus.Approved, It.IsAny<string?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new InvoiceTransitionResult(InvoiceTransitionOutcome.Transitioned, InvoiceLifecycleStatus.Approved, InvoiceLifecycleStatus.InReview, null));
         (await w.ApproveAs(BobUser)).Outcome.Should().Be(ApprovalOutcome.Approved);
     }
@@ -257,7 +257,7 @@ public sealed class InvoiceApprovalServiceTests
         var w = new ApprovalWorld();
         w.AddLine(InvoiceLineStatus.Accepted, approved: 100m);
         var clearAttempted = false;
-        w.Lifecycle.Setup(l => l.TransitionAsync(w.InvoiceId, InvoiceLifecycleStatus.Approved, It.IsAny<CancellationToken>()))
+        w.Lifecycle.Setup(l => l.TransitionAsync(w.InvoiceId, InvoiceLifecycleStatus.Approved, It.IsAny<string?>(), It.IsAny<CancellationToken>()))
             .Returns(() =>
             {
                 // Armed after the claim: the next conditional portion write is the clear. Between its re-read and its update another
@@ -287,7 +287,7 @@ public sealed class InvoiceApprovalServiceTests
     {
         var w = new ApprovalWorld();
         w.AddLine(InvoiceLineStatus.Accepted, approved: 100m);
-        w.Lifecycle.Setup(l => l.TransitionAsync(w.InvoiceId, InvoiceLifecycleStatus.Approved, It.IsAny<CancellationToken>()))
+        w.Lifecycle.Setup(l => l.TransitionAsync(w.InvoiceId, InvoiceLifecycleStatus.Approved, It.IsAny<string?>(), It.IsAny<CancellationToken>()))
             .Returns(() =>
             {
                 // Someone else's write lands on the portion between the claim and the refusal: it is no longer our claim.
@@ -653,22 +653,144 @@ public sealed class InvoiceApprovalServiceTests
         (await w.ApproveAs(BobUser)).Outcome.Should().Be(ApprovalOutcome.Approved, "the claimant completes it");
     }
 
-    [Fact(DisplayName = "103 K3 SEEDED: the approved amount is in the record's Values, so a repeat with a different frozen amount is refused, never answered as recorded")]
-    public async Task ApprovedAmount_IsCoveredByTheHash()
+    [Theory(DisplayName = "103 K3 SEEDED (095f-2a review round 2 F2): an approve stranded after its record ('signals' or 'link') whose portion approved amount was changed is refused on the repeat - Incomplete at 'record', nothing written, closed or linked")]
+    [InlineData("signals")]
+    [InlineData("link")]
+    public async Task ApprovedAmount_IsCoveredByTheHash(string failingStep)
     {
         var w = new ApprovalWorld();
         w.AddLine(InvoiceLineStatus.Accepted, approved: 100m);
-        w.FaultsOnce["link"] = new InvalidOperationException("dataverse down");
-        (await w.ApproveAs(AliceUser)).Outcome.Should().Be(ApprovalOutcome.Incomplete);
-        w.ApproveRecords.Should().ContainSingle();
+        var signal = w.AddInvoiceSignal("EB-TOTAL");
+        StrandAt(w, failingStep, signal);
+        (await w.ApproveAs(AliceUser)).FailedStep.Should().Be(failingStep);
+        var record = w.ApproveRecords.Should().ContainSingle().Subject;
+        var frozen = RecordedAmount(record);
+        var (created, writes, closes, closed) = (w.H.Created.Count, w.Writes, w.Closes.Count, w.ClosedBy.Count);
 
         w.Portion["sprk_approvedamount"] = new Money(999m);
         var retried = await w.ApproveAs(AliceUser);
 
-        retried.Outcome.Should().Be(ApprovalOutcome.Incomplete);
+        // Before round 1 the repeat asked RecordAsync again and the hash (which covers approvedAmount) refused it; round 1 finished the
+        // stored record instead and answered Approved with the tampered amount on the portion. The stored amount is compared now.
+        retried.Outcome.Should().Be(ApprovalOutcome.Incomplete, retried.Detail);
         retried.FailedStep.Should().Be("record");
-        w.ApproveRecords.Should().ContainSingle("the writer refuses other content under the same id");
+        w.H.Created.Count.Should().Be(created, "no second record");
+        w.Writes.Should().Be(writes, "nothing written");
+        w.Closes.Count.Should().Be(closes, "no Signal close asked");
+        w.ClosedBy.Count.Should().Be(closed);
+        w.Portion.GetAttributeValue<EntityReference>("sprk_decisionrecord").Should().BeNull("nothing linked");
+        RecordedAmount(record).Should().Be(frozen).And.NotBe(999m);
+        w.Log.Entries.Should().Contain((Microsoft.Extensions.Logging.LogLevel.Warning,
+            $"Approve of invoice {w.InvoiceId}: the portion's approved amount is not the one Decision Record {record.Id} holds; nothing was changed."),
+            "one Warning with ids only, never the amounts");
     }
+
+    [Theory(DisplayName = "095f-2a review round 2 re-check K3: a stranded approve whose stored record holds no readable approved amount is refused on the repeat (fail closed) - Incomplete at 'record', nothing written, closed or linked")]
+    [InlineData("signals", "missing")]
+    [InlineData("link", "missing")]
+    [InlineData("signals", "not-a-number")]
+    [InlineData("link", "not-a-number")]
+    public async Task StoredApprovedAmount_Unreadable_IsRefused(string failingStep, string shape)
+    {
+        var w = new ApprovalWorld();
+        w.AddLine(InvoiceLineStatus.Accepted, approved: 100m);
+        var signal = w.AddInvoiceSignal("EB-TOTAL");
+        StrandAt(w, failingStep, signal);
+        (await w.ApproveAs(AliceUser)).FailedStep.Should().Be(failingStep);
+        var record = w.ApproveRecords.Should().ContainSingle().Subject;
+        var frozen = RecordedAmount(record);
+
+        // The portion still holds the frozen amount (untampered); only the stored record's amount cannot be read. Treating an
+        // unreadable amount as a match would let any portion amount complete against it, so it must refuse like a mismatch.
+        w.Portion["sprk_approvedamount"] = new Money(decimal.Round(frozen, 2) + 0.00m);
+        var steps = System.Text.Json.Nodes.JsonNode.Parse(record.GetAttributeValue<string>("sprk_steps"))!;
+        var values = steps["steps"]![0]!["values"]!.AsObject();
+        values.Remove("approvedAmount");
+        if (shape == "not-a-number")
+        {
+            values["approvedAmount"] = "one hundred";
+        }
+
+        record["sprk_steps"] = steps.ToJsonString();
+        var (created, writes, closes, closed) = (w.H.Created.Count, w.Writes, w.Closes.Count, w.ClosedBy.Count);
+
+        var retried = await w.ApproveAs(AliceUser);
+
+        retried.Outcome.Should().Be(ApprovalOutcome.Incomplete, retried.Detail);
+        retried.FailedStep.Should().Be("record");
+        w.H.Created.Count.Should().Be(created, "no second record");
+        w.Writes.Should().Be(writes, "nothing written");
+        w.Closes.Count.Should().Be(closes, "no Signal close asked");
+        w.ClosedBy.Count.Should().Be(closed);
+        w.Portion.GetAttributeValue<EntityReference>("sprk_decisionrecord").Should().BeNull("nothing linked");
+    }
+
+    [Theory(DisplayName = "095f-2a review round 2 F2 (must-not-fire): a stranded approve whose portion amount is unchanged completes on the repeat")]
+    [InlineData("signals")]
+    [InlineData("link")]
+    public async Task ApprovedAmount_Unchanged_StrandedApproveCompletes(string failingStep)
+    {
+        var w = new ApprovalWorld();
+        w.AddLine(InvoiceLineStatus.Accepted, approved: 100m);
+        var signal = w.AddInvoiceSignal("EB-TOTAL");
+        StrandAt(w, failingStep, signal);
+        (await w.ApproveAs(AliceUser)).FailedStep.Should().Be(failingStep);
+        var record = w.ApproveRecords.Should().ContainSingle().Subject;
+
+        // Untampered: the same amount the record froze, written back with two decimal places as Dataverse returns a Money.
+        w.Portion["sprk_approvedamount"] = new Money(decimal.Round(RecordedAmount(record), 2) + 0.00m);
+        var retried = await w.ApproveAs(AliceUser);
+
+        retried.Outcome.Should().Be(ApprovalOutcome.Approved, retried.Detail);
+        retried.DecisionRecordId.Should().Be(record.Id);
+        w.ApproveRecords.Should().ContainSingle();
+        w.Portion.GetAttributeValue<EntityReference>("sprk_decisionrecord").Id.Should().Be(record.Id);
+        w.SignalStatus(signal).Should().Be(SignalWriter.SignalStatusResolved);
+    }
+
+    [Theory(DisplayName = "095f-2a review round 2 F1: a stranded approve repeated by someone the (tampered) portion names completes with the STORED decider on every Signal close, never the repeater")]
+    [InlineData("signals")]
+    [InlineData("link")]
+    public async Task StrandedApprove_RepeatedByAnother_ClosesForTheStoredDecider(string failingStep)
+    {
+        var w = new ApprovalWorld();
+        w.AddLine(InvoiceLineStatus.Accepted, approved: 100m);
+        var signal = w.AddInvoiceSignal("EB-TOTAL");
+        var other = w.AddInvoiceSignal("EB-DUP");
+        StrandAt(w, failingStep, signal);
+        (await w.ApproveAs(AliceUser)).FailedStep.Should().Be(failingStep);
+        var record = w.ApproveRecords.Should().ContainSingle().Subject;
+        var created = w.H.Created.Count;
+
+        // The portion's decided-by is a column a person can edit: Bob names himself and repeats.
+        w.Portion["sprk_decidedby"] = new EntityReference("contact", Bob);
+        w.CloseDeciders.Clear();
+        var repeat = await w.ApproveAs(BobUser);
+
+        repeat.Outcome.Should().Be(ApprovalOutcome.Approved, repeat.Detail);
+        repeat.DecisionRecordId.Should().Be(record.Id);
+        w.CloseDeciders.Should().NotBeEmpty().And.OnlyContain(d => d == AliceUser, "named for the stored record's decider, never for whoever repeats");
+        w.H.Created.Count.Should().Be(created, "one record");
+        w.ApproveRecords.Should().ContainSingle();
+        w.Portion.GetAttributeValue<EntityReference>("sprk_decisionrecord").Id.Should().Be(record.Id, "the link is written");
+        w.SignalStatus(signal).Should().Be(SignalWriter.SignalStatusResolved);
+        w.SignalStatus(other).Should().Be(SignalWriter.SignalStatusResolved);
+    }
+
+    private static void StrandAt(ApprovalWorld w, string failingStep, Guid signal)
+    {
+        if (failingStep == "signals")
+        {
+            w.CloseFailsOnce[signal] = SignalAutomatedCloseOutcome.ChangedSinceRead;
+        }
+        else
+        {
+            w.FaultsOnce["link"] = new InvalidOperationException("dataverse down");
+        }
+    }
+
+    private static decimal RecordedAmount(Entity r) =>
+        System.Text.Json.Nodes.JsonNode.Parse(r.GetAttributeValue<string>("sprk_steps"))!["steps"]![0]!["values"]!["approvedAmount"]!.GetValue<decimal>();
 
     [Theory(DisplayName = "103 K4: a portion with no or an unknown status is refused (409 status_unknown), never treated as Pending; GET shows Unknown")]
     [InlineData(null)]
