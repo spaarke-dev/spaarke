@@ -2125,9 +2125,9 @@ public class FeatureRolePrivilegeGuardTests
 
     /// <summary>Removal gaps that no expectations file carries yet, each with the newest expectations version it was raised against. The
     /// next release's role-privilege expectations file must carry their entries (managed stage-and-upgrade); then the gap leaves this list.
-    /// ISS028 only (correction rows: native write hardening).</summary>
+    /// None now: ISS028 (correction rows: native write hardening, raised against 1.3.1.0) is carried by 1.3.2.0 and left the list.</summary>
     internal static readonly IReadOnlyDictionary<string, Version> PendingNextReleaseRemovalGaps =
-        new Dictionary<string, Version>(StringComparer.Ordinal) { [WriterOnlyRemovalGap] = new Version(1, 3, 1, 0) };
+        new Dictionary<string, Version>(StringComparer.Ordinal);
 
     /// <summary>One expectations file: its version and its roles.</summary>
     internal sealed record ExpectationsRelease(Version Version, IReadOnlyDictionary<string, RoleExpectation> Roles);
@@ -2180,7 +2180,7 @@ public class FeatureRolePrivilegeGuardTests
 
         // The pending gaps (the next release's expectations file takes them) are left out here, and held by their own ratchet, which
         // fails once a newer expectations file than the one a gap was raised against leaves the gap's entries out.
-        Assert.Equal(new[] { ("ISS028", new Version(1, 3, 1, 0)) }, PendingNextReleaseRemovalGaps.Select(p => (p.Key, p.Value)));
+        Assert.Empty(PendingNextReleaseRemovalGaps); // ISS028 left the list when 1.3.2.0 carried it
         var pendingProblems = PendingRemovalProblems(allRemovals, PendingNextReleaseRemovalGaps, LoadAllExpectations(ExpectationsDirectory));
         Assert.True(pendingProblems.Count == 0, "Pending removal gaps:\n  " + string.Join("\n  ", pendingProblems));
         var removals = allRemovals.Where(r => !PendingNextReleaseRemovalGaps.ContainsKey(r.Gap)).ToList();
@@ -2229,13 +2229,30 @@ public class FeatureRolePrivilegeGuardTests
     {
         var allRemovals = LoadRemovals(RuledChangesPath);
         var changes = LoadRuledChanges(RuledChangesPath);
-        var releases = LoadAllExpectations(ExpectationsDirectory);
-        var newest = releases[^1];
-        var pending = allRemovals.Where(r => PendingNextReleaseRemovalGaps.ContainsKey(r.Gap)).ToList();
-        Assert.NotEmpty(pending);
+        var allReleases = LoadAllExpectations(ExpectationsDirectory);
 
-        // must-not-fire: the real files and list
-        Assert.Empty(PendingRemovalProblems(allRemovals, PendingNextReleaseRemovalGaps, releases));
+        // must-not-fire: the real files and list (no gap is pending now)
+        Assert.Empty(PendingRemovalProblems(allRemovals, PendingNextReleaseRemovalGaps, allReleases));
+
+        // The controls below replay ISS028's history, so they keep firing while no gap is pending: raised against 1.3.1.0, before
+        // 1.3.2.0 carried it. Only the files up to the raised-against version count as the releases of that moment.
+        var raised = new Version(1, 3, 1, 0);
+        var pendingGaps = new Dictionary<string, Version>(StringComparer.Ordinal) { [WriterOnlyRemovalGap] = raised };
+        var releases = allReleases.Where(r => r.Version <= raised).ToList();
+        var newest = releases[^1];
+        var pending = allRemovals.Where(r => r.Gap == WriterOnlyRemovalGap).ToList();
+        Assert.NotEmpty(pending);
+        Assert.Equal(raised, newest.Version);
+
+        // must-not-fire: that moment's files with the gap pending
+        Assert.Empty(PendingRemovalProblems(allRemovals, pendingGaps, releases));
+
+        // must-fire stale, on the real files: had ISS028 stayed pending, 1.3.2.0 (which carries it) flags each entry
+        var newestReal = allReleases[^1];
+        Assert.True(newestReal.Version > raised, "the real files have no release after the one ISS028 was raised against");
+        Assert.Equal(
+            pending.Select(r => $"{r.Role}: {r.Privilege} — removal {r.Gap} is pending but the newest expectations file ({newestReal.Version}) carries it; take {r.Gap} off the pending list"),
+            PendingRemovalProblems(allRemovals, pendingGaps, allReleases));
 
         // must-fire: without the pending list, each pending removal fails the carry check
         foreach (var r in pending)
@@ -2252,20 +2269,20 @@ public class FeatureRolePrivilegeGuardTests
 
         // must-fire (F4): a newer expectations file (seeded in memory) that does not carry the gap's entries
         var withoutThem = releases.Append(new ExpectationsRelease(next, newest.Roles)).ToList();
-        var missing = PendingRemovalProblems(allRemovals, PendingNextReleaseRemovalGaps, withoutThem);
+        var missing = PendingRemovalProblems(allRemovals, pendingGaps, withoutThem);
         Assert.Equal(pending.Count, missing.Count);
         Assert.All(pending, r => Assert.Contains(missing, p => p.StartsWith($"{next}: {r.Role}: {r.Privilege} — the next release's expectations must carry gap {r.Gap}", StringComparison.Ordinal)
             && p.Contains("managed stage-and-upgrade", StringComparison.Ordinal)));
 
         // must-fire (F4): a newer file that carries only some of them still fails for the rest
         var partial = releases.Append(new ExpectationsRelease(next, WithPending(newest.Roles, pending.Take(1)))).ToList();
-        Assert.Equal(pending.Count - 1, PendingRemovalProblems(allRemovals, PendingNextReleaseRemovalGaps, partial).Count(p => p.StartsWith($"{next}: ", StringComparison.Ordinal)));
+        Assert.Equal(pending.Count - 1, PendingRemovalProblems(allRemovals, pendingGaps, partial).Count(p => p.StartsWith($"{next}: ", StringComparison.Ordinal)));
 
         // must-not-fire for the carry, must-fire stale: a newer file that carries all of them passes and flags each pending entry stale
         var withThem = releases.Append(new ExpectationsRelease(next, WithPending(newest.Roles, pending))).ToList();
         Assert.Equal(
             pending.Select(r => $"{r.Role}: {r.Privilege} — removal {r.Gap} is pending but the newest expectations file ({next}) carries it; take {r.Gap} off the pending list"),
-            PendingRemovalProblems(allRemovals, PendingNextReleaseRemovalGaps, withThem));
+            PendingRemovalProblems(allRemovals, pendingGaps, withThem));
 
         // must-fire stale: the raised-against file itself (the newest) carries an entry
         foreach (var r in pending)
@@ -2273,7 +2290,7 @@ public class FeatureRolePrivilegeGuardTests
             var seeded = releases.Take(releases.Count - 1).Append(new ExpectationsRelease(newest.Version, WithPending(newest.Roles, [r]))).ToList();
             Assert.Equal(
                 new[] { $"{r.Role}: {r.Privilege} — removal {r.Gap} is pending but the newest expectations file ({newest.Version}) carries it; take {r.Gap} off the pending list" },
-                PendingRemovalProblems(allRemovals, PendingNextReleaseRemovalGaps, seeded));
+                PendingRemovalProblems(allRemovals, pendingGaps, seeded));
         }
 
         // must-fire: a pending gap with no removal, and a raised-against version with no file
