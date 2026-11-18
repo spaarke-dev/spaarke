@@ -42,7 +42,7 @@ public sealed class FirmFindingsProjectionTests
 
     private static Guid LineId(int sequence) => InvoiceSubmissionPersister.LineIdFor(SubmissionId, sequence - 1);
 
-    private sealed class World
+    internal sealed class World
     {
         public readonly List<Entity> Invoices = [];
         public readonly List<Entity> Lines = [];
@@ -423,7 +423,7 @@ public sealed class FirmFindingsProjectionTests
     }
 
     /// <summary>Records every log line (level and rendered message) the projection writes.</summary>
-    private sealed class ListLogger : ILogger<FirmFindingsProjection>
+    internal sealed class ListLogger : ILogger<FirmFindingsProjection>
     {
         public readonly List<(LogLevel Level, string Message)> Lines = [];
 

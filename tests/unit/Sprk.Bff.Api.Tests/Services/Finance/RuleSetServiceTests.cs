@@ -732,6 +732,24 @@ public sealed class RuleSetServiceTests
     private static Guid JudgedInvoice(Harness h, params Guid[] versions) =>
         h.Invoice(FindingsWith(SnapshotOf(versions.Select(AppliedOn).ToArray())));
 
+    /// <summary>
+    /// ISS-038: the findings JSON of an invoice judged on each record rule version in <paramref name="recordRules"/>, applied on the invoice, its
+    /// slot naming the base rule version (as the resolver writes a record rule's slot), plus the plain versions <paramref name="plain"/>. Built by
+    /// the real snapshot builder (082d).
+    /// </summary>
+    internal static string FindingsWithRecordRules(IReadOnlyList<(Guid RecordVersion, Guid BaseVersion)> recordRules, params Guid[] plain)
+    {
+        var procedure = new AppliedProcedure(
+            Guid.NewGuid(), "Base Procedure", Guid.NewGuid(), 1, new ProcedureRank(ProcedureLevel.AllRecords, 0, false), ProcedureSources.AllRecords, false, []);
+        var rules = recordRules.Select(r => new ResolvedRule(
+            new ResolvedPolicyVersion { PolicyId = Guid.NewGuid(), PolicyCode = "BRR-RECORD", PolicyVersionId = r.RecordVersion, RuleSetId = Guid.NewGuid() },
+            procedure,
+            new RecordRuleSlot(Guid.NewGuid(), "BASE", r.BaseVersion, new CoreRecordLink("sprk_matter", Guid.NewGuid(), 0), null))).ToList();
+        var onDate = new ProcedureRulesOnDate(new DateOnly(2026, 11, 5), [procedure], rules, [], [], []);
+        var applications = recordRules.Select(r => r.RecordVersion).Concat(plain).Select(AppliedOn).ToList();
+        return FindingsWith(ProcedureSnapshot.Build(new BillingProcedureBasis([], [onDate], applications)));
+    }
+
     // ═══════════════════════════════════════════════════════════════════════════
     // Reads and domain isolation
     // ═══════════════════════════════════════════════════════════════════════════
@@ -2960,7 +2978,7 @@ public sealed class RuleSetServiceTests
             "no Procedure assignment, override or Procedure Version is read: the snapshot is not re-resolved");
     }
 
-    [Fact(DisplayName = "083: a record rule's clause carries the neutral label, never the Procedure's names, and reads no Procedure")]
+    [Fact(DisplayName = "083: a record rule's clause carries the neutral label, never the Procedure's names, and reads no Procedure name")]
     public async Task GetFirmClause_ForARecordRule_CarriesTheNeutralLabel()
     {
         var h = new Harness();
@@ -2969,7 +2987,11 @@ public sealed class RuleSetServiceTests
         var firmRecordSet = h.RuleSet(RuleSetService.RuleSetPublished, visible: true, scope: RecordRuleSet.ScopeFirmRecord, firm: FirmId, procedure: procedure);
         var (_, record) = h.Rule(recordSet, "BRR-1", ProposalState.Accepted, current: true);
         var (_, firmRecord) = h.Rule(firmRecordSet, "BRR-2", ProposalState.Accepted, current: true);
-        var invoice = JudgedInvoice(h, record, firmRecord);
+        // ISS-038: a record rule shows only when its base rule's own rule set is visible too (and its Procedure is readable and not Internal Standard), so each slot names such a base.
+        h.Row("sprk_procedure", procedure)["sprk_proceduretype"] = new OptionSetValue((int)ProcedureType.Guideline);
+        var baseSet = h.RuleSet(RuleSetService.RuleSetPublished, visible: true, procedure: procedure);
+        var (_, baseVersion) = h.Rule(baseSet, "BASE-1", ProposalState.Accepted, current: true);
+        var invoice = h.Invoice(FindingsWithRecordRules([(record, baseVersion), (firmRecord, baseVersion)]));
 
         var shown = await h.Service().GetFirmClauseAsync(record, invoice, default);
         var shownForFirm = await h.Service().GetFirmClauseAsync(firmRecord, invoice, default);
@@ -2977,7 +2999,8 @@ public sealed class RuleSetServiceTests
         shown.Should().Be(new FirmClauseText(Quote, Section, "Billing instructions for this record"));
         shownForFirm.FirmFacingName.Should().Be("Billing instructions for this record");
         System.Text.Json.JsonSerializer.Serialize(shown).Should().NotContain("BASE-");
-        h.Queries.Should().NotContain(q => q.EntityName == "sprk_procedure", "the neutral label needs no Procedure");
+        h.Queries.Where(q => q.EntityName == "sprk_procedure").Should().OnlyContain(
+            q => q.ColumnSet.Columns.SequenceEqual(new[] { ProcedureEntity.TypeColumn }), "the neutral label needs no Procedure name; the base set's Procedure is read for its type only");
     }
 
     [Fact(DisplayName = "083: a legacy rule set (no Procedure) shows its clause with no label")]

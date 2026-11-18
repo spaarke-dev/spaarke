@@ -63,7 +63,7 @@ public sealed class ProcedureAssignmentServiceTests
     }
 
     /// <summary>Keeps what the service logged: level, the formatted line, and whether an exception object was passed.</summary>
-    private sealed class CapturingLogger : ILogger<ProcedureAssignmentService>
+    internal sealed class CapturingLogger : ILogger<ProcedureAssignmentService>
     {
         public List<(LogLevel Level, string Message, bool HasException)> Entries { get; } = new();
 
@@ -75,7 +75,7 @@ public sealed class ProcedureAssignmentServiceTests
             Entries.Add((logLevel, formatter(state, exception), exception is not null));
     }
 
-    private sealed class World
+    internal sealed class World
     {
         public readonly RuleSetServiceTests.Harness H = new();
 
