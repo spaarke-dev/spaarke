@@ -72,6 +72,8 @@ import {
 } from '@spaarke/ui-components/dist/components/DocumentEmailWizard';
 import { createXrmEmailComposeHandlers } from '@spaarke/ui-components/dist/components/EmailComposer';
 import { AppInsightsService } from '@spaarke/ui-components/dist/services/AppInsightsService';
+import { openInDesktopApp, OPEN_IN_DESKTOP_FAILED_MESSAGE } from '@spaarke/ui-components/dist/utils/openInDesktopApp';
+import { getXrm } from '@spaarke/ui-components/dist/utils/xrmContext';
 import type { IDataService } from '@spaarke/ui-components/dist/types/serviceInterfaces';
 
 /**
@@ -673,37 +675,21 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
     (result: SearchResult, mode: 'web' | 'desktop') => {
       apiService
         .getOpenLinks(result.documentId)
-        .then(async openLinks => {
-          // Desktop protocol available (Word, Excel, PowerPoint) — open in native app
-          if (openLinks.desktopUrl) {
-            return window.open(openLinks.desktopUrl, '_self');
-          }
-          // No desktop protocol — download via BFF and let OS open with default app
-          // (e.g. Adobe Acrobat for PDFs). SPE webUrl requires SharePoint permissions
-          // users may not have, so we stream through the BFF's /content endpoint.
-          try {
-            const contentUrl = `${apiBaseUrl}/api/documents/${encodeURIComponent(result.documentId)}/content`;
-            const response = await authenticatedFetch(contentUrl);
-            if (response.ok) {
-              const blob = await response.blob();
-              const objectUrl = URL.createObjectURL(blob);
-              const a = document.createElement('a');
-              a.href = objectUrl;
-              a.download = openLinks.fileName ?? result.name ?? 'document';
-              document.body.appendChild(a);
-              a.click();
-              document.body.removeChild(a);
-              URL.revokeObjectURL(objectUrl);
-              return;
-            }
-          } catch (err) {
-            console.error('[SemanticSearchControl] Download failed, falling back:', err);
-          }
-          // Final fallback to webUrl
-          return window.open(openLinks.webUrl, '_blank', 'noopener,noreferrer');
-        })
+        .then(openLinks =>
+          // Office files open in the Office app; anything else downloads through the BFF (shared
+          // behaviour, ISS-004). No SharePoint webUrl fallback: a read-only user on a secure record
+          // cannot open it.
+          openInDesktopApp({
+            bffBaseUrl: apiBaseUrl,
+            documentId: result.documentId,
+            links: openLinks,
+            fetch: authenticatedFetch,
+            fallbackFileName: result.name ?? undefined,
+          })
+        )
         .catch(err => {
           console.error('[SemanticSearchControl] Failed to open file:', err);
+          void getXrm('openErrorDialog')?.Navigation?.openErrorDialog?.({ message: OPEN_IN_DESKTOP_FAILED_MESSAGE });
         });
     },
     [apiService, apiBaseUrl]
@@ -1864,7 +1850,7 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
 
       {/* Version Footer (always visible) */}
       <div className={styles.versionFooter}>
-        <Text size={100}>v1.1.87 • Built 2026-11-15</Text>
+        <Text size={100}>v1.1.88 • Built 2026-11-17</Text>
       </div>
 
       {/* Host-mounted preview dialog. Single instance per PCF surface so

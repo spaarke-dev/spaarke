@@ -28,7 +28,7 @@ import { getEffectiveDarkMode } from "../../providers/ThemeProvider";
 import { authenticatedFetch } from "../../services/authInit";
 import { getDocumentOpenLinks } from "../../services/DocumentApiService";
 import { getBffBaseUrl, getTenantId } from "../../config/runtimeConfig";
-import { RecordCardShell, CardIcon, AiSummaryPopover, FindSimilarViewerDialog, createXrmNavigationService, getXrm } from "@spaarke/ui-components";
+import { RecordCardShell, CardIcon, AiSummaryPopover, FindSimilarViewerDialog, createXrmNavigationService, getXrm, openInDesktopApp, OPEN_IN_DESKTOP_FAILED_MESSAGE } from "@spaarke/ui-components";
 import type { ISummaryData } from "@spaarke/ui-components";
 import { FilePreviewDialog } from "../FilePreview/FilePreviewDialog";
 
@@ -164,25 +164,17 @@ export const DocumentCard: React.FC<IDocumentCardProps> = React.memo(
     const handleOpenFile = React.useCallback(async () => {
       try {
         const links = await getDocumentOpenLinks(doc.sprk_documentid);
-        if (links?.desktopUrl) {
-          window.location.href = links.desktopUrl;
-          return;
-        }
-        const contentUrl = `${getBffBaseUrl()}/api/documents/${encodeURIComponent(doc.sprk_documentid)}/content`;
-        const response = await authenticatedFetch(contentUrl);
-        if (response.ok) {
-          const blob = await response.blob();
-          const objectUrl = URL.createObjectURL(blob);
-          const a = document.createElement("a");
-          a.href = objectUrl;
-          a.download = links?.fileName ?? doc.sprk_name ?? "document";
-          document.body.appendChild(a);
-          a.click();
-          document.body.removeChild(a);
-          URL.revokeObjectURL(objectUrl);
-        }
+        // Office files open in the Office app; anything else downloads (shared behaviour, ISS-004).
+        await openInDesktopApp({
+          bffBaseUrl: getBffBaseUrl(),
+          documentId: doc.sprk_documentid,
+          links: links ?? {},
+          fetch: authenticatedFetch,
+          fallbackFileName: doc.sprk_documentname || undefined,
+        });
       } catch (err) {
         console.error("[DocumentCard] Open file error:", err);
+        void getXrm("openErrorDialog")?.Navigation?.openErrorDialog?.({ message: OPEN_IN_DESKTOP_FAILED_MESSAGE });
       }
     }, [doc.sprk_documentid]);
 

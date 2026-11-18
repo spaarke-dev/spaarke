@@ -64,6 +64,8 @@ import {
   cleanGuid,
   EmptyState,
   getXrm,
+  openInDesktopApp,
+  OPEN_IN_DESKTOP_FAILED_MESSAGE,
 } from '@spaarke/ui-components';
 import { describeFailedSections } from './failedSections';
 import type { ILookupItem } from '@spaarke/ui-components/types/LookupTypes';
@@ -918,8 +920,35 @@ export const DailyBriefingApp: React.FC<DailyBriefingAppProps> = ({ params: _par
           onClose={closePreview}
           // Same BFF endpoint the Semantic Search PCF uses — SPE preview embed URL.
           fetchPreviewUrl={() => getDocumentPreviewUrl(previewDoc.documentId)}
-          // "Open file": open the SPE preview URL in a new tab (both modes).
-          onOpenFile={async () => {
+          // "Open file" / "Download": desktop mode goes through the shared open-in-desktop behaviour (ISS-004):
+          // the Office app for Word / Excel / PowerPoint, otherwise a download through the BFF. Web mode keeps
+          // opening the SPE preview URL in a new tab.
+          onOpenFile={async mode => {
+            if (mode === 'desktop') {
+              try {
+                const response = await authenticatedFetch(
+                  `/api/documents/${encodeURIComponent(previewDoc.documentId)}/open-links`
+                );
+                const links = await response.json();
+                // Relative base: `authenticatedFetch` resolves `/api/...` against the BFF host set in `initAuth`.
+                await openInDesktopApp({
+                  bffBaseUrl: '',
+                  documentId: previewDoc.documentId,
+                  links,
+                  fetch: authenticatedFetch,
+                  fallbackFileName: previewDoc.documentName,
+                });
+              } catch (err) {
+                console.error('[DailyBriefing] Open in desktop failed:', err);
+                dispatchToast(
+                  <Toast>
+                    <ToastTitle>{OPEN_IN_DESKTOP_FAILED_MESSAGE}</ToastTitle>
+                  </Toast>,
+                  { intent: 'error', timeout: 8000 }
+                );
+              }
+              return;
+            }
             const url = await getDocumentPreviewUrl(previewDoc.documentId);
             if (url && typeof window !== 'undefined') window.open(url, '_blank', 'noopener');
           }}
