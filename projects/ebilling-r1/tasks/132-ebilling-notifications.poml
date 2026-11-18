@@ -8,7 +8,7 @@
     <title>Notifications: email, SPA feed, approver in-app</title>
     <phase>5 Firm feedback (WP5) — wave W5-3</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Wires existing delivery components (CommunicationService, the external notification feed, IActionSeam) to eBilling events; recipient targeting is security-relevant and gets negative tests, but no new auth model.</rigor-reason>
     <model-tier>sonnet</model-tier>

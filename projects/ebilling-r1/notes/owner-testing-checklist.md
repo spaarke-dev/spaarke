@@ -121,3 +121,14 @@ These states are hard to cause by hand; they need a fault during a decision. If 
 - [ ] Try to change "Visible to Firms" directly on the form. **Expect** it to be read-only (only Spaarke changes it).
 - [ ] Create a rule set in the model-driven app. **Expect** the save to succeed with "Visible to Firms" = No.
 - [ ] In Rule Review, switch a rule set's visibility on and off. **Expect** it to work as before.
+
+## M. Notifications (task 132): after a dev BFF that carries it (work → master merge, your go)
+
+Firm emails come from the shared mailbox; the Invoice Review "notify" step (132ui) is not built yet, so Reject / Return emails only go when a reviewer-confirmed notice exists.
+- [ ] Submit an invoice that the checks reject. The submitter (and the firm's billing contact, if they can open that matter) gets one email with the findings table in the body.
+- [ ] Approve an invoice with an adjustment. The same two people get one email; approving with no adjustment sends none.
+- [ ] A billing contact who has no access to a secure matter gets no email for that matter's invoice.
+- [ ] In the external portal, the bell shows an item (with the invoice name) for your own Rejected / Returned / adjusted invoices only; another firm member who neither submitted nor is the billing contact sees none.
+- [ ] Approvers get one in-app notification "Invoice ready for your review" per invoice; non-approvers get none.
+- [ ] With eBilling switched off, the portal bell shows no billing items.
+- [ ] The submission form no longer shows the "notice text" field (after the field-security apply, which needs your OK).
