@@ -146,7 +146,7 @@ public sealed class BillingGuidelinesScopeTests : IAsyncLifetime
         var schema = new RuleBodySchemaValidator();
         var validator = new PolicyVersionValidator(schema, new PredicateCompiler(schema, TimeProvider.System), NullLogger<PolicyVersionValidator>.Instance);
         return new BillingGuidelinesService(
-            _rig.Entities.Object, new RuleBodyDescriber(validator, _rig.Entities.Object, NullLogger<RuleBodyDescriber>.Instance),
+            _rig.Entities.Object, new RuleBodyDescriber(validator, _rig.Entities.Object, NullLogger<RuleBodyDescriber>.Instance), _rig.RuleSets,
             NullLogger<BillingGuidelinesService>.Instance);
     }
 
@@ -170,15 +170,20 @@ public sealed class BillingGuidelinesScopeTests : IAsyncLifetime
     };
 
     /// <summary>A published rule set shown to firms (or not), as the rig's rule set row plus the flag and status.</summary>
-    private Guid SeedProcedure(string code, Guid? firm, bool visible, ProcedureAppliesTo appliesTo = ProcedureAppliesTo.AllRecords)
+    private Guid SeedProcedure(string code, Guid? firm, bool visible, ProcedureAppliesTo appliesTo = ProcedureAppliesTo.AllRecords) =>
+        SeedRule(code, firm, visible, appliesTo).Procedure;
+
+    /// <summary>As <see cref="SeedProcedure"/>, naming every row; <paramref name="type"/> is the Procedure type (a Guideline unless a test says otherwise).</summary>
+    private (Guid Procedure, Guid Version, Guid Rule, Guid RuleVersion) SeedRule(
+        string code, Guid? firm, bool visible, ProcedureAppliesTo appliesTo = ProcedureAppliesTo.AllRecords, ProcedureType? type = ProcedureType.Guideline)
     {
-        var simple = _rig.Simple(code, appliesTo, firm);
+        var simple = _rig.Simple(code, appliesTo, firm, procedureType: type);
         _rig.World.Add("sprk_ruleset", _rig.RuleSetOf(simple.Procedure),
             ("sprk_procedure", RecordProcedureRig.Ref(ProcedureEntity.Entity, simple.Procedure)),
             (RuleDomains.PolicyDomainColumn, RecordProcedureRig.Option(RuleDomains.PolicyDomainBilling)),
             ("statecode", RecordProcedureRig.Option(0)), ("sprk_visibletofirms", visible),
             ("statuscode", RecordProcedureRig.Option(RuleSetService.RuleSetPublished)));
-        return simple.Procedure;
+        return simple;
     }
 
     // ── Requests ──
@@ -366,6 +371,52 @@ public sealed class BillingGuidelinesScopeTests : IAsyncLifetime
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         (await response.Content.ReadAsStringAsync()).Should().Contain("RATE-ALL");
         _composed.Should().Contain(RecordProcedureRig.Matter);
+    }
+
+    /// <summary>A rule of the record M changed on it: the record rule set (shown to firms or not) over <paramref name="baseRule"/>.</summary>
+    private void ChangeOnMatter((Guid Procedure, Guid Version, Guid Rule, Guid RuleVersion) baseRule, bool recordSetVisible)
+    {
+        var rows = _rig.ChangeRuleRows(RecordProcedureRig.Matter, RecordProcedureRig.M, baseRule.Rule, baseRule.RuleVersion, new DateOnly(2026, 1, 15));
+        _rig.World.Add("sprk_ruleset", rows.RuleSet,
+            ("sprk_scope", RecordProcedureRig.Option(RecordRuleSet.ScopeRecord)),
+            (RuleDomains.PolicyDomainColumn, RecordProcedureRig.Option(RuleDomains.PolicyDomainBilling)), ("statecode", RecordProcedureRig.Option(0)),
+            (RecordProcedureRig.Matter, RecordProcedureRig.Ref(RecordProcedureRig.Matter, RecordProcedureRig.M)),
+            ("sprk_visibletofirms", recordSetVisible), ("statuscode", RecordProcedureRig.Option(RuleSetService.RuleSetPublished)));
+    }
+
+    [Theory(DisplayName = "135 per record (ISS-038): a changed rule is served only when its record set AND its base rule's set are shown to firms, and its base is not an Internal Standard one")]
+    [InlineData(true, true, ProcedureType.Guideline, true)]
+    [InlineData(true, false, ProcedureType.Guideline, false)]
+    [InlineData(false, true, ProcedureType.Guideline, false)]
+    [InlineData(true, true, ProcedureType.InternalStandard, false)]
+    public async Task AChangedRule_IsServedOnlyWhenBothSetsAreShown(bool recordSetVisible, bool baseSetVisible, ProcedureType baseType, bool served)
+    {
+        var baseRule = SeedRule("RATE-BASE", null, baseSetVisible, type: baseType);
+        ChangeOnMatter(baseRule, recordSetVisible);
+
+        var response = await GetAsync($"{Route}?coreRecordId={RecordProcedureRig.M}");
+        var body = await response.Content.ReadAsStringAsync();
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        if (served)
+        {
+            body.Should().Contain(BillingGuidelinesService.RecordLabel);
+        }
+        else
+        {
+            body.Should().NotContain(BillingGuidelinesService.RecordLabel);
+        }
+    }
+
+    [Fact(DisplayName = "135 negative: a rule set of an Internal Standard Procedure with the flag on is not in the 200 body (a Guideline beside it is)")]
+    public async Task AnInternalStandardSet_IsNotServed()
+    {
+        SeedRule("RATE-GUIDE", null, visible: true);
+        SeedRule("RATE-INTERNAL", null, visible: true, type: ProcedureType.InternalStandard);
+
+        var body = await (await GetAsync()).Content.ReadAsStringAsync();
+
+        body.Should().Contain("RATE-GUIDE").And.NotContain("RATE-INTERNAL");
     }
 
     [Theory(DisplayName = "135 per record negative: a record the contact cannot read, a missing one and a malformed id are the same 404 and read no rule")]

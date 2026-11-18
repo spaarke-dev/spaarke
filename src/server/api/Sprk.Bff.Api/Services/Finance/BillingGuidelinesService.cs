@@ -4,7 +4,8 @@
 //   (1) Existing: ProcedureResolver (082) says which Published rules are in force for a firm (and, per record, a record); RuleBodyDescriber
 //       says what a body means; RuleSetClauseVisibility (076) decides what clause text a firm may see; no route exposes policy content to a
 //       CIAM caller (grep "BillingGuidelines" in src found none before this task).
-//   (2) Extension: all four are reused unchanged in behaviour. This class only joins them: it adds the rule set's flag and the Procedure's
+//   (2) Extension: all four are reused unchanged in behaviour (plus RuleSetService.RuleSetOfVersionAsync, the live read of a record rule's base
+//       rule set, and RuleSetClauseVisibility.VisibleToFirms, the one visibility decision). This class only joins them: it adds the rule set's flag and the Procedure's
 //       firm-facing label (two batched reads of ids the resolver already returned) and builds an explicit allow-list DTO.
 //   (3) Cost of doing nothing: a firm cannot see the rules it is measured against (D-66); FR-49 fails.
 //
@@ -21,6 +22,7 @@ using System.Text.Json;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Finance.Procedures;
 using Sprk.Bff.Api.Services.Finance.Resolution;
 using Sprk.Bff.Api.Services.Signals;
@@ -75,12 +77,14 @@ public sealed class BillingGuidelinesService
 
     private readonly IGenericEntityService _entities;
     private readonly RuleBodyDescriber _describer;
+    private readonly RuleSetService _ruleSets;
     private readonly ILogger<BillingGuidelinesService> _logger;
 
-    public BillingGuidelinesService(IGenericEntityService entities, RuleBodyDescriber describer, ILogger<BillingGuidelinesService> logger)
+    public BillingGuidelinesService(IGenericEntityService entities, RuleBodyDescriber describer, RuleSetService ruleSets, ILogger<BillingGuidelinesService> logger)
     {
         _entities = entities ?? throw new ArgumentNullException(nameof(entities));
         _describer = describer ?? throw new ArgumentNullException(nameof(describer));
+        _ruleSets = ruleSets ?? throw new ArgumentNullException(nameof(ruleSets));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -129,19 +133,41 @@ public sealed class BillingGuidelinesService
             return [];
         }
 
+        // The scope and core-record columns come with the flag: the helper below tells a record-scoped set (whose flag alone says nothing)
+        // from any other by them, and a row read without them would read as a plain set.
         var setRows = await ReadByIdsAsync("sprk_ruleset", "sprk_rulesetid", rules.Select(r => r.Version.RuleSetId),
-            [VisibleColumn, "statuscode"], ct).ConfigureAwait(false);
+            [VisibleColumn, "statuscode", RecordRuleSet.ScopeColumn, .. InvoiceFamilyCoreRecordGuard.FilingCoreTables], ct).ConfigureAwait(false);
         var procedureRows = await ReadByIdsAsync(ProcedureEntity.Entity, "sprk_procedureid",
             rules.Where(r => r.RecordRule is null).Select(r => r.Procedure.ProcedureId),
-            [ProcedureEntity.FirmFacingNameColumn, ProcedureEntity.NameColumn], ct).ConfigureAwait(false);
+            [ProcedureEntity.FirmFacingNameColumn, ProcedureEntity.NameColumn, ProcedureEntity.TypeColumn], ct).ConfigureAwait(false);
 
+        // A record rule's base rule sets, read live (a Billing Guidelines view has no invoice snapshot), once per base version.
+        var baseSetOf = new Dictionary<Guid, Entity?>();
         var groups = new Dictionary<string, (string Name, string Scope, int? Version, DateOnly? From, DateOnly? To, List<BillingGuidelineRule> Rules)>(StringComparer.Ordinal);
         foreach (var rule in rules.OrderBy(r => r.Version.PolicyName, StringComparer.Ordinal).ThenBy(r => r.Version.PolicyId))
         {
             // Only a Published set is shown (the view lists what is in force today: a Retired or Draft set is not).
             if (!setRows.TryGetValue(rule.Version.RuleSetId, out var set)
-                || set.GetAttributeValue<OptionSetValue>("statuscode")?.Value != RuleSetService.RuleSetPublished
-                || !RuleSetClauseVisibility.IsVisibleToFirms(set.GetAttributeValue<bool?>(VisibleColumn)))
+                || set.GetAttributeValue<OptionSetValue>("statuscode")?.Value != RuleSetService.RuleSetPublished)
+            {
+                continue;
+            }
+
+            // The ONE firm-visibility decision (ISS-038): a plain set by its own flag; a record rule's set (shared by every changed rule of its
+            // record, its flag taken from the first) by its own flag AND the flag of the base rule's set, read now. A base that cannot be
+            // read, is record-scoped, or is an Internal Standard Procedure's is no base: the rule is not shown. A read fault propagates (503).
+            IReadOnlyCollection<Entity?> baseSets = [];
+            if (rule.RecordRule is { } recordSlot)
+            {
+                if (!baseSetOf.TryGetValue(recordSlot.BasePolicyVersionId, out var baseSet))
+                {
+                    baseSetOf[recordSlot.BasePolicyVersionId] = baseSet = await _ruleSets.RuleSetOfVersionAsync(recordSlot.BasePolicyVersionId, ct).ConfigureAwait(false);
+                }
+
+                baseSets = [baseSet];
+            }
+
+            if (!RuleSetClauseVisibility.VisibleToFirms(set, baseSets))
             {
                 continue;
             }
@@ -157,6 +183,14 @@ public sealed class BillingGuidelinesService
             }
             else
             {
+                // An Internal Standard Procedure is never shown to a firm, whatever its set's flag says (the rule FirmFindingsProjection applies to
+                // a cited rule). A Procedure that cannot be read, or has no type, is not shown either (fail closed).
+                if (procedureRows.GetValueOrDefault(rule.Procedure.ProcedureId)?.GetAttributeValue<OptionSetValue>(ProcedureEntity.TypeColumn)?.Value is not { } type
+                    || type == (int)ProcedureType.InternalStandard)
+                {
+                    continue;
+                }
+
                 var named = ProcedureEntity.FirmFacingLabelOf(procedureRows.GetValueOrDefault(rule.Procedure.ProcedureId));
                 if (named is null)
                 {
@@ -186,7 +220,7 @@ public sealed class BillingGuidelinesService
                 groups[key] = group;
             }
 
-            group.Rules.Add(await ProjectRuleAsync(rule.Version, label, set, ct).ConfigureAwait(false));
+            group.Rules.Add(await ProjectRuleAsync(rule.Version, label, ct).ConfigureAwait(false));
         }
 
         return groups.Values
@@ -195,13 +229,14 @@ public sealed class BillingGuidelinesService
             .ToList();
     }
 
-    private async Task<BillingGuidelineRule> ProjectRuleAsync(ResolvedPolicyVersion version, string label, Entity set, CancellationToken ct)
+    private async Task<BillingGuidelineRule> ProjectRuleAsync(ResolvedPolicyVersion version, string label, CancellationToken ct)
     {
         var name = string.IsNullOrWhiteSpace(version.PolicyName) ? UnnamedRule : version.PolicyName.Trim();
 
-        // The one clause decision (076): the flag, then blank text as null, then no text when there is neither a quote nor a section. The
-        // flag was decided above for the whole set (the same helper), so it is passed as read.
-        var clause = RuleSetClauseVisibility.ForFirm(set.GetAttributeValue<bool?>(VisibleColumn), version.ClauseReference, version.ClauseLocation, label);
+        // The one clause decision (076): the flag, then blank text as null, then no text when there is neither a quote nor a section. Visibility
+        // was decided above for this rule (RuleSetClauseVisibility.VisibleToFirms, with a record rule's base set); the rule is only here when it
+        // is shown, so the decision passed on is "visible", never the record set's own flag read alone.
+        var clause = RuleSetClauseVisibility.ForFirm(true, version.ClauseReference, version.ClauseLocation, label);
 
         RuleDescriptionResult? described = null;
         try

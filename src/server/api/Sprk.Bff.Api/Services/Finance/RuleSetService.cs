@@ -189,7 +189,7 @@ public static class RuleSetClauseVisibility
 
     /// <summary>
     /// The ONE decision whether a rule set is shown to firms at all (ebilling-r1 task 135): its flag is on. A missing flag is off. <see cref="ForFirm"/>
-    /// asks it, and the Billing Guidelines view asks it to decide whether a set is listed, so the two cannot disagree.
+    /// asks it, and so does <see cref="VisibleToFirms"/>, which the Billing Guidelines view asks to decide whether a rule is listed, so the two cannot disagree.
     /// </summary>
     public static bool IsVisibleToFirms(bool? ruleSetVisibleToFirms) => ruleSetVisibleToFirms == true;
 
@@ -3295,9 +3295,10 @@ public class RuleSetService
     /// The Billing rule set (record-scoped or not) of the policy of <paramref name="policyVersionId"/>, or null when any step cannot be read, or
     /// when the set's Procedure is an Internal Standard one or its type cannot be read: the same Internal Standard rule
     /// <c>FirmFindingsProjection.CitableVersionsAsync</c> applies to a Procedure's rule set, applied to the base here because a record set has no
-    /// Procedure link of its own (see uac-r2 thread). A base set with no Procedure link (a legacy set) is returned as read.
+    /// Procedure link of its own (see uac-r2 thread). A base set with no Procedure link (a legacy set) is returned as read. Internal: the Billing
+    /// Guidelines view (task 135) reads a record rule's base set live through it, so the Internal Standard check has one home.
     /// </summary>
-    private async Task<Entity?> RuleSetOfVersionAsync(Guid policyVersionId, CancellationToken ct)
+    internal async Task<Entity?> RuleSetOfVersionAsync(Guid policyVersionId, CancellationToken ct)
     {
         if (policyVersionId == Guid.Empty)
         {

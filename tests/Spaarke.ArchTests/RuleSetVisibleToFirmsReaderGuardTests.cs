@@ -46,6 +46,7 @@ public sealed class RuleSetVisibleToFirmsReaderGuardTests
     private const string RuleSetServiceFile = "src/server/api/Sprk.Bff.Api/Services/Finance/RuleSetService.cs";
     private const string AssignmentFile = "src/server/api/Sprk.Bff.Api/Services/Finance/Procedures/ProcedureAssignmentService.cs";
     private const string ProcedureFile = "src/server/api/Sprk.Bff.Api/Services/Finance/Procedures/ProcedureService.cs";
+    private const string BillingGuidelinesFile = "src/server/api/Sprk.Bff.Api/Services/Finance/BillingGuidelinesService.cs";
 
     internal sealed record Entry(int Count, string Kind, string Reason);
 
@@ -87,6 +88,11 @@ public sealed class RuleSetVisibleToFirmsReaderGuardTests
         // Reason: writer. A record-scoped set is created with the flag of the rule it first takes; the helper never trusts it alone.
         // Citation: ADR-038 A1; ISS-038.
         [(AssignmentFile, "RecordRuleSetCreateAsync")] = new(1, "Write", "sets the record set's initial flag"),
+
+        // Reason: the Billing Guidelines view (ebilling-r1 task 135) names the column once, as its constant, to SELECT it with the rule set row. The
+        // decision is not made here: every rule goes through RuleSetClauseVisibility.VisibleToFirms (the record set AND, for a record rule, its
+        // base rule set read live), and the flag is never read from the row by this class. Citation: ADR-038 A1; ISS-038; D-66.
+        [(BillingGuidelinesFile, "VisibleColumn")] = new(1, "Select", "column name only; the decision is the helper"),
 
         // Reason: writer. A Procedure's type change resets its rule set's flag to the type's initial value. Citation: ADR-038 A1; D-66.
         [(ProcedureFile, "UpdateAsync")] = new(1, "Write", "resets the flag on a type change"),

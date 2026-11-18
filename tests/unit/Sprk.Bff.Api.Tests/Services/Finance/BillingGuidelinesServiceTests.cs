@@ -3,8 +3,12 @@ using FluentAssertions;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Xrm.Sdk;
+using Microsoft.Xrm.Sdk.Query;
+using Moq;
 using Spaarke.Dataverse;
+using Spaarke.Scheduling;
 using Sprk.Bff.Api.Services.Access;
+using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Finance;
 using Sprk.Bff.Api.Services.Finance.Procedures;
 using Sprk.Bff.Api.Services.Finance.Resolution;
@@ -47,9 +51,25 @@ public sealed class BillingGuidelinesServiceTests
     private readonly BillingGuidelinesService _service;
     private readonly Dictionary<Guid, Guid> _setOf = new();
 
+    /// <summary>How the BASE rule set read of a record rule (a rule set read by its id, one row) answers: the world's rows, no row, or a fault.</summary>
+    private enum BaseSetRead { World, Missing, Faults }
+
+    private BaseSetRead _baseSetRead = BaseSetRead.World;
+
+    private static bool IsBaseSetRead(QueryExpression query) =>
+        query.EntityName == RuleSet && query.TopCount == 1
+        && query.Criteria.Conditions.Any(c => c.AttributeName == "sprk_rulesetid" && c.Operator == ConditionOperator.Equal);
+
     public BillingGuidelinesServiceTests()
     {
-        var entities = SecureChildShareWorld.EntitiesOver(() => _world).Object;
+        var entitiesMock = SecureChildShareWorld.EntitiesOver(() => _world);
+        // Added after the world's catch-all, so it wins only while a test switches the base set read; otherwise the world answers.
+        entitiesMock
+            .Setup(e => e.RetrieveMultipleAsync(It.Is<QueryExpression>(q => _baseSetRead != BaseSetRead.World && IsBaseSetRead(q)), It.IsAny<CancellationToken>()))
+            .Returns(() => _baseSetRead == BaseSetRead.Faults
+                ? Task.FromException<EntityCollection>(new TimeoutException("the base rule set read is down"))
+                : Task.FromResult(new EntityCollection()));
+        var entities = entitiesMock.Object;
         _world.Add(SecureRootInheritance.RecordTypeRefEntity, MatterType, ("sprk_recordlogicalname", "sprk_matter"));
         _world.Add(Matter, M, ("sprk_name", MatterName));
         // P is filed under M (its pair): M is P's direct parent.
@@ -57,7 +77,12 @@ public sealed class BillingGuidelinesServiceTests
             (SecureRootInheritance.PairTypeColumn, new EntityReference(SecureRootInheritance.RecordTypeRefEntity, MatterType)));
         var schema = new RuleBodySchemaValidator();
         var validator = new PolicyVersionValidator(schema, new PredicateCompiler(schema, TimeProvider.System), NullLogger<PolicyVersionValidator>.Instance);
-        _service = new BillingGuidelinesService(entities, new RuleBodyDescriber(validator, entities, NullLogger<RuleBodyDescriber>.Instance), _log)
+        var describer = new RuleBodyDescriber(validator, entities, NullLogger<RuleBodyDescriber>.Instance);
+        // The REAL rule-set service: the base rule set of a record rule is read through it (planning asks no owner).
+        var ruleSets = new RuleSetService(
+            entities, new Mock<IRecordOwnershipResolver>(MockBehavior.Strict).Object, validator, describer,
+            new ProcessLocalScheduledJobLease(), NullLogger<RuleSetService>.Instance);
+        _service = new BillingGuidelinesService(entities, describer, ruleSets, _log)
         {
             Clock = new FixedClock(Today),
         };
@@ -70,7 +95,7 @@ public sealed class BillingGuidelinesServiceTests
     private static EntityReference Ref(string table, Guid id) => new(table, id);
 
     private Guid AddProcedure(string name, string? firmFacing, ProcedureAppliesTo appliesTo, Guid? firm = null, int status = ProcedureEntity.StatusActive,
-        bool? visible = true, int ruleSetStatus = RuleSetService.RuleSetPublished)
+        bool? visible = true, int ruleSetStatus = RuleSetService.RuleSetPublished, ProcedureType? type = ProcedureType.Guideline)
     {
         var id = Guid.NewGuid();
         var columns = new List<(string, object)>
@@ -82,6 +107,7 @@ public sealed class BillingGuidelinesServiceTests
             (ProcedureEntity.AppliesToColumn, Option((int)appliesTo)),
         };
         if (firmFacing is not null) columns.Add((ProcedureEntity.FirmFacingNameColumn, firmFacing));
+        if (type is { } t) columns.Add((ProcedureEntity.TypeColumn, Option((int)t)));
         if (firm is { } f) columns.Add((ProcedureEntity.FirmColumn, Ref("sprk_organization", f)));
         _world.Add(ProcedureEntity.Entity, id, columns.ToArray());
 
@@ -149,9 +175,10 @@ public sealed class BillingGuidelinesServiceTests
     /// <summary>A Procedure with one version [Jan 1, open), one rule and its published version.</summary>
     private (Guid Procedure, Guid Version, Guid Rule, Guid RuleVersion) Simple(
         string name, string? firmFacing, ProcedureAppliesTo appliesTo = ProcedureAppliesTo.AllRecords, Guid? firm = null, bool? visible = true,
-        string? body = ApprovedRateBody, string ruleName = "Approved rates", string code = "BILL-RATE", string? quote = "The billed rate may exceed the approved rate by 5 percent.")
+        string? body = ApprovedRateBody, string ruleName = "Approved rates", string code = "BILL-RATE", string? quote = "The billed rate may exceed the approved rate by 5 percent.",
+        ProcedureType? type = ProcedureType.Guideline)
     {
-        var procedure = AddProcedure(name, firmFacing, appliesTo, firm, visible: visible);
+        var procedure = AddProcedure(name, firmFacing, appliesTo, firm, visible: visible, type: type);
         var version = AddVersion(procedure, 3, Jan1, null);
         var rule = AddRule(_setOf[procedure], code, ruleName);
         var ruleVersion = AddRuleVersion(rule, version, body, quote);
@@ -202,7 +229,8 @@ public sealed class BillingGuidelinesServiceTests
     }
 
     /// <summary>A record rule changing <paramref name="baseRule"/> on a record, for every firm or for <paramref name="firm"/> only (its own rule set, shown to firms).</summary>
-    private void ChangeRuleOnRecord(string table, Guid record, (Guid Procedure, Guid Version, Guid Rule, Guid RuleVersion) baseRule, string quote, Guid? firm = null)
+    private void ChangeRuleOnRecord(string table, Guid record, (Guid Procedure, Guid Version, Guid Rule, Guid RuleVersion) baseRule, string quote, Guid? firm = null,
+        bool recordSetVisible = true)
     {
         var at = new DateTime(2026, 2, 1, 8, 0, 0, DateTimeKind.Utc);
         ExcludeRule(table, record, baseRule.Rule, firm, at);
@@ -211,7 +239,7 @@ public sealed class BillingGuidelinesServiceTests
         {
             ("sprk_scope", Option(firm is null ? RecordRuleSet.ScopeRecord : RecordRuleSet.ScopeFirmRecord)),
             (RuleDomains.PolicyDomainColumn, Option(RuleDomains.PolicyDomainBilling)), ("statecode", Option(0)), (table, Ref(table, record)),
-            ("sprk_visibletofirms", true), ("statuscode", Option(RuleSetService.RuleSetPublished)),
+            ("sprk_visibletofirms", recordSetVisible), ("statuscode", Option(RuleSetService.RuleSetPublished)),
         };
         if (firm is { } f) setColumns.Add(("sprk_firm", Ref("sprk_organization", f)));
         _world.Add(RuleSet, set, setColumns.ToArray());
@@ -438,6 +466,113 @@ public sealed class BillingGuidelinesServiceTests
 
         asF.Should().Contain("Base rule").And.NotContain("G-ONLY-CLAUSE").And.NotContain(ReasonSecret, "firm G's Exclude does not remove the rule for firm F");
         asG.Should().Contain("G-ONLY-CLAUSE", "the control: the record rule shows for its own firm");
+    }
+
+    // ── A record rule is shown only when its record set AND its base rule's set are shown to firms (ISS-038, decided live) ──
+
+    private const string RecordClause = "RECORD-CLAUSE-TEXT";
+
+    [Fact(DisplayName = "135 per record (ISS-038): record set flag on and base set flag on shows the changed rule; the base rule it replaces is not listed")]
+    public async Task ARecordRule_WithBothFlagsOn_IsShown()
+    {
+        var baseRule = Simple("Guidelines", "Base set", ruleName: "Base rule", code: "BILL-BASE", visible: true);
+        ChangeRuleOnRecord(Matter, M, baseRule, RecordClause);
+
+        var json = JsonSerializer.Serialize(await OnMatter(Firm(F)));
+
+        json.Should().Contain(RecordClause).And.NotContain("Base rule");
+    }
+
+    [Fact(DisplayName = "135 per record negative (ISS-038): record set flag on but the BASE rule's set flag off -> the changed rule is not shown, nor its clause")]
+    public async Task ARecordRule_WhoseBaseSetIsNotShownToFirms_IsNotShown()
+    {
+        var baseRule = Simple("Guidelines", "Base set BASE-OFF", ruleName: "Base rule", code: "BILL-BASE", visible: false);
+        ChangeRuleOnRecord(Matter, M, baseRule, RecordClause, recordSetVisible: true);
+
+        var response = await OnMatter(Firm(F));
+
+        response.Sets.Should().BeEmpty();
+        JsonSerializer.Serialize(response).Should().NotContain(RecordClause).And.NotContain("BASE-OFF");
+    }
+
+    [Fact(DisplayName = "135 per record negative (ISS-038): a base set with no flag at all hides the changed rule too (a missing flag is off)")]
+    public async Task ARecordRule_WhoseBaseSetFlagIsUnset_IsNotShown()
+    {
+        var baseRule = Simple("Guidelines", "Base set", ruleName: "Base rule", code: "BILL-BASE", visible: null);
+        ChangeRuleOnRecord(Matter, M, baseRule, RecordClause);
+
+        (await OnMatter(Firm(F))).Sets.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "135 per record negative: the record set's own flag off hides the changed rule whatever the base says")]
+    public async Task ARecordRule_WhoseRecordSetIsNotShown_IsNotShown()
+    {
+        var baseRule = Simple("Guidelines", "Base set", ruleName: "Base rule", code: "BILL-BASE", visible: true);
+        ChangeRuleOnRecord(Matter, M, baseRule, RecordClause, recordSetVisible: false);
+
+        (await OnMatter(Firm(F))).Sets.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "135 per record negative (ISS-038): a base rule of an Internal Standard Procedure hides the changed rule, whatever the flags say")]
+    public async Task ARecordRule_WhoseBaseIsAnInternalStandard_IsNotShown()
+    {
+        var baseRule = Simple("Internal", "Internal set", ruleName: "Internal rule", code: "BILL-INT", visible: true, type: ProcedureType.InternalStandard);
+        ChangeRuleOnRecord(Matter, M, baseRule, RecordClause, recordSetVisible: true);
+
+        var response = await OnMatter(Firm(F));
+
+        response.Sets.Should().BeEmpty();
+        JsonSerializer.Serialize(response).Should().NotContain(RecordClause);
+    }
+
+    [Fact(DisplayName = "135 per record negative (ISS-038): a base rule set that cannot be read (no row) hides the changed rule")]
+    public async Task ARecordRule_WhoseBaseSetCannotBeRead_IsNotShown()
+    {
+        var baseRule = Simple("Guidelines", "Base set", ruleName: "Base rule", code: "BILL-BASE", visible: true);
+        ChangeRuleOnRecord(Matter, M, baseRule, RecordClause);
+        (await OnMatter(Firm(F))).Sets.Should().ContainSingle("the control: with the base readable the rule shows");
+
+        _baseSetRead = BaseSetRead.Missing;
+        var response = await OnMatter(Firm(F));
+
+        response.Sets.Should().BeEmpty();
+        JsonSerializer.Serialize(response).Should().NotContain(RecordClause);
+    }
+
+    [Fact(DisplayName = "135 per record negative (ISS-038): a fault reading the base rule set fails the whole read (the route answers 503), never a list that includes the rule")]
+    public async Task AFaultReadingTheBaseSet_FailsTheRead()
+    {
+        var baseRule = Simple("Guidelines", "Base set", ruleName: "Base rule", code: "BILL-BASE", visible: true);
+        ChangeRuleOnRecord(Matter, M, baseRule, RecordClause);
+        _baseSetRead = BaseSetRead.Faults;
+
+        var read = () => OnMatter(Firm(F));
+
+        await read.Should().ThrowAsync<TimeoutException>();
+    }
+
+    [Fact(DisplayName = "135 negative: a Procedure that is an Internal Standard one is never listed, whatever its set's flag (and a Guideline beside it is)")]
+    public async Task AnInternalStandardProcedure_IsNeverListed()
+    {
+        Simple("Guideline", "Guideline set", code: "BILL-G", type: ProcedureType.Guideline);
+        Simple("Internal", "Internal set INTERNAL-STANDARD", visible: true, code: "BILL-I", type: ProcedureType.InternalStandard);
+
+        var (response, json) = await General(Firm(F));
+
+        response.Sets.Select(s => s.Name).Should().Equal("Guideline set");
+        json.Should().NotContain("INTERNAL-STANDARD");
+    }
+
+    [Fact(DisplayName = "135 negative: a Procedure with no readable type is not listed (fail closed)")]
+    public async Task AProcedureWithNoType_IsNotListed()
+    {
+        Simple("Typed", "Typed set", code: "BILL-T");
+        Simple("Untyped", "Untyped set UNTYPED", code: "BILL-U", type: null);
+
+        var (response, json) = await General(Firm(F));
+
+        response.Sets.Select(s => s.Name).Should().Equal("Typed set");
+        json.Should().NotContain("UNTYPED");
     }
 
     // ── The describer's refusal ──
