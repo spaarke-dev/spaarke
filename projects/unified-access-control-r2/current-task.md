@@ -38,6 +38,7 @@
 ## Waiting on the owner
 - Dev checks: To Do create (Office); Send budget inquiry text; **AI drafting retry in the email composer**; **composer template recheck** (195 live).
 - **EB-D-247 (derivable record id, see the uac-r2 thread): owner chose "Option 2 narrowed" in this session (2026-11-17).** Relayed to ebilling-r1 and ontology-r1. Squash-merged and pushed as `e3eae27ef6` on work/ebilling-r1; I verified it holds no private detail and that no pre-squash commit is reachable from origin. CLOSED for uac-r2.
+- **Rule set visibility: native write hardening (private file `private-record-ruleset-firm-visibility.md`):** ebilling builds field security + guard; dev apply needs the owner's typed OK in ebilling's session; one role-privilege question for the owner (private file). ISS-038 Opus F1 fix in progress; I re-check its range before the PR.
 - **Correction rows: native write hardening: DONE on dev (2026-11-17, ebilling, owner go in its session; private file `private-correction-rows-*`).** I re-probed: all 6 Core User roles and testuser1's effective privileges (3 reads) hold only Read/Append/AppendTo. Rollback: `Set-FeatureRolePrivileges.ps1 -Restore -Gap ISS028 -Apply`. Still open: ebilling's master PR adds the 5 removals to 1.3.2.0, and I review it.
 - SpaarkeMaster 1.3.2.0 publish/import; D-2 step 3; word-add-in #2829 dev check (firm-assign pane); provisioning #2871; ebilling task 112; #2764; 191i live steps; 193 PCF import; D-10 after U-3; #2786 part 2 scope; follow-ups #2826, #2549. Checklist: `notes/owner-test-checklist-2026-11-13.md`.
 
