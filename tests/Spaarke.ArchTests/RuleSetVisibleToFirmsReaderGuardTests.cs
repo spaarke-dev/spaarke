@@ -1,3 +1,4 @@
+using System.Text;
 using System.Text.RegularExpressions;
 using Xunit;
 
@@ -14,7 +15,7 @@ namespace Spaarke.ArchTests;
 /// a firm-visibility decision, and its answer feeds <c>RuleSetClauseVisibility.ForFirm</c>, the single place that shows or hides clause text. A
 /// new reader that took a record set's flag alone would bring the defect back.</para>
 /// <para><b>Enforced by:</b> this source scan (CI tier 1 runs the whole ArchTests suite, and the Stop hook). An occurrence is a match of the
-/// column name (any casing; also the Web API <c>_..._value</c> form) in a <c>.cs</c> file under <c>src/server</c>, with line comments removed.
+/// column name (any casing; also the Web API <c>_..._value</c> form) in a <c>.cs</c> file under <c>src/server</c>, with line comments removed (a <c>//</c> inside a string literal is not a comment: <see cref="StripComments"/>).
 /// Each occurrence is attributed to its enclosing member: the nearest line above it that starts with an access modifier and declares a method,
 /// constructor, record, field or property. The guard fails when a (file, member) pair names the column and is not listed, when a listed pair names
 /// it a different number of times than listed (an added read inside a reviewed member is a new read), and when a listed pair no longer names it
@@ -94,7 +95,7 @@ public sealed class RuleSetVisibleToFirmsReaderGuardTests
     /// <summary>Each occurrence of the column in <paramref name="lines"/> (line comments removed), with its enclosing member and 1-based line.</summary>
     internal static List<(string Member, int Line)> Occurrences(IReadOnlyList<string> lines)
     {
-        var code = lines.Select(SourceScan.StripLineComment).ToList();
+        var code = StripComments(lines);
         var found = new List<(string, int)>();
         for (var i = 0; i < code.Count; i++)
         {
@@ -105,6 +106,130 @@ public sealed class RuleSetVisibleToFirmsReaderGuardTests
         }
 
         return found;
+    }
+
+    /// <summary>
+    /// The lines with <c>//</c> line comments (and so <c>///</c>) removed, ignoring a <c>//</c> inside a string literal: regular, verbatim
+    /// (<c>@"..."</c>), interpolated (<c>$"..."</c>, <c>$@"..."</c>) and raw (<c>"""..."""</c>) strings, and char literals. A verbatim or raw string
+    /// that spans lines keeps its state across them. String text is kept, so a column named inside a string (a URL, an OData <c>$select</c>) is
+    /// still seen. Local to this guard: <see cref="SourceScan.StripLineComment"/> cuts at the first <c>//</c> wherever it is, and other guards
+    /// rely on that. Block comments are not handled (see the Known limits).
+    /// </summary>
+    internal static List<string> StripComments(IReadOnlyList<string> lines)
+    {
+        var result = new List<string>(lines.Count);
+        var inVerbatim = false;
+        var rawQuotes = 0;
+        foreach (var line in lines)
+        {
+            var sb = new StringBuilder();
+            var inRegular = false;
+            var i = 0;
+            while (i < line.Length)
+            {
+                var c = line[i];
+                if (rawQuotes > 0)
+                {
+                    var run = QuoteRun(line, i);
+                    if (c == '"' && run >= rawQuotes)
+                    {
+                        rawQuotes = 0;
+                        sb.Append(line, i, run);
+                        i += run;
+                    }
+                    else
+                    {
+                        sb.Append(c);
+                        i++;
+                    }
+                }
+                else if (inVerbatim)
+                {
+                    if (c == '"' && i + 1 < line.Length && line[i + 1] == '"')
+                    {
+                        sb.Append("\"\"");
+                        i += 2;
+                        continue;
+                    }
+
+                    inVerbatim = c != '"';
+                    sb.Append(c);
+                    i++;
+                }
+                else if (inRegular)
+                {
+                    if (c == '\\' && i + 1 < line.Length)
+                    {
+                        sb.Append(c).Append(line[i + 1]);
+                        i += 2;
+                        continue;
+                    }
+
+                    inRegular = c != '"';
+                    sb.Append(c);
+                    i++;
+                }
+                else if (c == '/' && i + 1 < line.Length && line[i + 1] == '/')
+                {
+                    break; // the rest of the line is a comment
+                }
+                else if (c == '"')
+                {
+                    var run = QuoteRun(line, i);
+                    if (run >= 3)
+                    {
+                        rawQuotes = run;
+                    }
+                    else if (run == 2)
+                    {
+                        sb.Append("\"\"");
+                        i += 2;
+                        continue; // an empty string
+                    }
+                    else if (sb.Length > 0 && (sb[^1] == '@' || (sb[^1] == '$' && sb.Length > 1 && sb[^2] == '@')))
+                    {
+                        inVerbatim = true;
+                    }
+                    else
+                    {
+                        inRegular = true;
+                    }
+
+                    sb.Append(line, i, run);
+                    i += run;
+                }
+                else if (c == '\'')
+                {
+                    // A char literal ('"' and '\'' must not open or close a string).
+                    var length = i + 1 < line.Length && line[i + 1] == '\\'
+                        ? line.IndexOf('\'', Math.Min(i + 3, line.Length)) - i + 1
+                        : i + 2 < line.Length && line[i + 2] == '\'' ? 3 : 1;
+                    length = length < 1 ? 1 : length;
+                    sb.Append(line, i, length);
+                    i += length;
+                }
+                else
+                {
+                    sb.Append(c);
+                    i++;
+                }
+            }
+
+            result.Add(sb.ToString());
+        }
+
+        return result;
+    }
+
+    private static int QuoteRun(string line, int start)
+    {
+        var end = start;
+        while (end < line.Length && line[end] == '"')
+        {
+            end++;
+        }
+
+        return end - start;
     }
 
     /// <summary>The name declared by the nearest line at or above <paramref name="index"/> that starts with an access modifier.</summary>
@@ -245,6 +370,36 @@ public sealed class RuleSetVisibleToFirmsReaderGuardTests
         var lines = Fixture("    internal static void Read()", "    {", "        " + line, "    }");
 
         Assert.Empty(Occurrences(lines));
+    }
+
+    [Theory(DisplayName = "ISS-038: a column named inside a string that holds // (a URL) is still reported (must-fire control)")]
+    [InlineData("var url = $\"https://{org}/api/data/v9.2/sprk_rulesets?$select=sprk_visibletofirms\";")]
+    [InlineData("var url = \"https://example.org/api/data/v9.2/sprk_rulesets?$select=sprk_visibletofirms\";")]
+    [InlineData("var url = @\"https://example.org/sprk_rulesets?$select=sprk_visibletofirms\";")]
+    [InlineData("var url = $@\"https://{org}/sprk_rulesets?$select=sprk_visibletofirms\";")]
+    [InlineData("var url = \"\"\"https://example.org/sprk_rulesets?$select=sprk_visibletofirms\"\"\";")]
+    [InlineData("var quote = '\"'; var url = \"https://x/sprk_visibletofirms\";")]
+    [InlineData("var url = \"a \\\" b https://x/sprk_visibletofirms\";")]
+    public void TheGuard_FiresOnTheColumnInsideAStringThatHoldsSlashes(string planted)
+    {
+        var lines = Fixture("    internal static void Read()", "    {", "        " + planted, "    }");
+
+        Assert.Equal(new[] { "Read" }, Occurrences(lines).Select(o => o.Member));
+    }
+
+    [Fact(DisplayName = "ISS-038: a // inside a multi-line verbatim string does not hide the column; a real comment after a string does (control)")]
+    public void TheGuard_KeepsStringStateAcrossLines_AndStillStripsRealComments()
+    {
+        var lines = Fixture(
+            "    internal static void Read()",
+            "    {",
+            "        var query = @\"GET https://example.org/api",
+            "            ?$select=sprk_visibletofirms\";",
+            "        var other = \"https://example.org\"; // sprk_visibletofirms is named in this comment only",
+            "        var third = \"https://example.org\"; /// sprk_visibletofirms",
+            "    }");
+
+        Assert.Equal(new[] { "Read" }, Occurrences(lines).Select(o => o.Member));
     }
 
     [Fact(DisplayName = "ISS-038: a reviewed shape (a listed member with its count) stays quiet (must-not-fire control); members are attributed by declaration")]
