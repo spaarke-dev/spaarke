@@ -22,26 +22,14 @@
 - **iss028 dev apply ✅** (EB-D-250/252). Verify passed; uac-r2's re-probe passed. Checklist section I.
 - Index hygiene: 095f, 165, 116 (on master via #2724) and 130 (delivered by 130-0..130e-2) are marked ✅.
 
-**Running / in flight (2026-11-17 late night; work tip 9fc96c8bc6):**
-- **ISS-038 (#2896), LIVE on master + dev:** an Opus implementer on `fix/iss-038-firm-clause-base-set`, cut from origin/master 08161cfb0e (agent worktree agent-a6e1ebaaca792514a).
-  - Scope: one shared both-flags helper, a source-scan guard on `sprk_visibletofirms` readers, and must-fire tests through GetFirmClauseAsync and FirmFindingsProjection.
-  - The agent also writes, but does not run, the dev count query.
-  - Next: Opus review, then uac-r2 review (send the range). Then **open a PR to master and merge it (owner go EB-D-261)**.
-  - After that: run the count query read-only on dev and send the COUNT ONLY to uac-r2 privately. The owner tells uac-r2 when to deploy.
-  - Public wording only: "per-record visibility uses both rule sets' flags (see uac-r2 thread)". ISS-039 #2897 is the write side, next round.
-- **130f** (EB-D-259; Rejected/Returned show line items): `task/ebilling-130f`, 40b33ae74b → 98e709662f, with one more small commit pending.
-  - The pending commit drops the Approved column also when the notice kind is Reject/Return.
-  - Opus review done: no leak; F2 test seeding fixed.
-  - Next: a quick self re-check, uac-r2 review, then merge into work. No SPA change, so spa-r4 has nothing to review.
-- **132** (server half; EB-D-258): `task/ebilling-132` at 8e5ed0b963 (agent worktree agent-ab36d191b98d84154). **Opus review running.** Key check: the feed's K4 "firm-wide" scope against the POML's "submitter or billing contact only".
-  - Agent's owner questions, answered by me as coordinator:
-    - (1) keep the `message` kind;
-    - (2) 132ui covers both Return and Reject;
-    - (3) the feed follows the POML (submitter + billing contact). Fix it if the review confirms it is firm-wide.
-  - `sprk_firmnoticetext` is now JSON {v, source, kind, subject, prose, html, htmlOmitted}; 130g reads `prose`.
-- **135** (Billing Guidelines): fix round 1 done (9f54b8a705, 0f3988c106), including the EB-D-260 firm filter. **Held for ISS-038's helper:** after ISS-038 merges to master, merge master into work, then wire the per-record view to the helper (F1). Then a scoped re-check, uac-r2 + spa-r4 reviews, and merge.
-- Then: 132ui (Invoice Review notify step) and 130g (show confirmed prose), after 132.
-- Leftover scratch folders for a human to delete: `C:\wt131a`, `C:\wt131b`.
+**Running / in flight (2026-11-18 early; work tip a02126462e):**
+- **ISS-038 ✅ ON MASTER** (PR 2902 merged e5da41db7a; #2896 closed; SHA sent to uac-r2). Master merged into work 3c86e6e2a4 (FieldSecurityProfiles.xml conflict: master rows + ISS-040 rows re-added) + a02126462e (regression test on the work ChangeRuleAsync signature). ISS-039 #2897 is the write side, next round. Still to do: the dev count query (read-only) → COUNT ONLY to uac-r2 privately.
+- **130f ✅** merged into work f0ab99a83b (uac-r2 PASS). K6 (ApprovedAmount still in the API for Rejected/Returned) carried to the 134 POML.
+- **ISS-040 (#2901) ✅ merged into work** b17e3da316 (Opus review + round 1, uac-r2 PASS): field-secures `sprk_ruleset.sprk_visibletofirms` (Readers 4/0/0, Writers 4/4/4). **Dev apply WAITS for the owner's typed OK** (asked several times; no answer yet): run `scripts/ebilling/Set-EbillingRuleSetVisibilityFieldSecurity.ps1 -BffApplicationIds 5967251e-171c-46fe-a6c2-ef843c90309d,1e40baad-e065-4aea-a8d4-4b7ab273458c` (dry run, then apply, then -Verify); a failed membership check STOPS (never add members); uac-r2 notices before and after with the -Verify output. Checklist section L. Private (uac-r2 only): Service Writer holds Global Write on sprk_ruleset (owner question for the owner summary).
+- **132** (`task/ebilling-132`, agent worktree agent-ab36d191b98d84154): rounds 1-3 done (tip b5c7d0223f; work merged in at 19fb32e29d + index fix 5f29918b6e). **uac-r2 PASS on logic, one F2 test-only** (drive the feed's production row conversion: SDK Entity candidate with a live-parent secure root → Denied, twin Visible, CandidateColumns ⊇ InvoiceScopeColumnNames). An implementer is adding it; send uac-r2 the test diff, then merge 132 into work. sprk_firmnoticetext field-security dev apply also needs the owner's typed OK + uac-r2 notices (script Set-EbillingFirmNoticeTextFieldSecurity.ps1). K16 (no enqueue on AlreadyDecided) accepted.
+- **135** (`task/ebilling-135`, agent worktree agent-a1b19c8fa25a869b7): work merged in (87651c946c), VisibleToFirms wired + Internal Standard sets excluded (4e2b3e85b4, 772ec5fa90), my K1 fail-closed f054d8a00e. Scoped re-check: no F. **Next: send to uac-r2 (firm-visible output) and spa-r4 (widget), then merge into work.**
+- Then: 132ui, 130g, 134. Agent slips this session: bare python run 3 times by agents (no effect); keep the no-python line in every brief.
+- Leftover scratch folders for a human to delete: `C:wt131a`, `C:wt131b`.
 
 **Decided today:**
 - **EB-D-254 (owner, option b): no PDF report in R1.** 133 is withdrawn. 132 sends the findings table in the 131 notice body. 134 prints cleanly; spa-r4's guidance is in the 134 POML: use record sections or action hosts, and scope the print stylesheet to the report. FR-40 is amended.
