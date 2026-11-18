@@ -12,7 +12,7 @@
 
 import '@testing-library/jest-dom';
 import * as React from 'react';
-import { fireEvent, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import type {
   DecisionAction,
   DecisionOpenLookup,
@@ -26,6 +26,8 @@ import { makeLoader, makeService, renderWizard } from './decisionTestKit';
 
 /** Task 192 (D-224): the props every EmailComposer mount received, so a test can pin what the step does NOT pass it. */
 const mockComposerProps: Array<Record<string, unknown>> = [];
+/** Task 197: the last composer state each mount reported, so a test can report an edited rich-text body the way the editor does. */
+const mockComposerStates: Array<Record<string, unknown>> = [];
 jest.mock('../../EmailComposer/EmailComposer', () => {
   // jest.mock factories cannot reference imports, so react is required here
   const react = require('react') as typeof import('react');
@@ -34,7 +36,15 @@ jest.mock('../../EmailComposer/EmailComposer', () => {
   ) as typeof import('../../EmailComposer/EmailComposer');
   const Spy = react.forwardRef<unknown, Record<string, unknown>>((props, ref) => {
     mockComposerProps.push(props);
-    return react.createElement(actual.EmailComposer, { ...props, ref } as never);
+    const onStateChange = props.onStateChange as ((s: Record<string, unknown>) => void) | undefined;
+    const spied = {
+      ...props,
+      onStateChange: (s: Record<string, unknown>) => {
+        mockComposerStates.push(s);
+        onStateChange?.(s);
+      },
+    };
+    return react.createElement(actual.EmailComposer, { ...spied, ref } as never);
   });
   Spy.displayName = 'SpyEmailComposer';
   return { ...actual, EmailComposer: Spy };
@@ -42,6 +52,20 @@ jest.mock('../../EmailComposer/EmailComposer', () => {
 
 const click = (element: Element) => fireEvent.click(element);
 const button = (name: RegExp) => screen.getByRole('button', { name });
+
+/** Task 197: the message opens in rich text, so its text is the editor's, not a textarea's. */
+const richBody = (step: HTMLElement): HTMLElement => {
+  const editor = step.querySelector('[contenteditable="true"]');
+  if (!editor) throw new Error('the rich-text editor is not shown');
+  return editor as HTMLElement;
+};
+
+/** Task 197: edits go through the plain-text box (the editor's own typing is not simulated in jsdom). */
+const plainBody = (step: HTMLElement): HTMLTextAreaElement => {
+  const existing = within(step).queryByRole('textbox', { name: 'Message body' });
+  if (!existing) click(within(step).getByRole('button', { name: 'Switch to plain text' }));
+  return within(step).getByRole('textbox', { name: 'Message body' }) as HTMLTextAreaElement;
+};
 
 const LEAD = { contactId: 'cccccccc-0000-0000-0000-0000000000aa', name: 'Lead Counsel', email: 'lead@firm.example' };
 
@@ -132,7 +156,7 @@ describe('message step in the EmailComposer (task 160)', () => {
 
     expect(within(step).getByText(LEAD.email)).toBeInTheDocument();
     expect(within(step).getByRole('textbox', { name: 'Subject' })).not.toHaveValue('');
-    expect(within(step).getByRole('textbox', { name: 'Message body' })).not.toHaveValue('');
+    await waitFor(() => expect(richBody(step).textContent).not.toBe(''));
     expect(button(/^next$/i)).toBeEnabled();
   });
 
@@ -156,7 +180,7 @@ describe('message step in the EmailComposer (task 160)', () => {
     await waitFor(() => expect(button(/^next$/i)).toBeDisabled());
     fireEvent.change(within(step).getByRole('textbox', { name: 'Subject' }), { target: { value: 'Budget question' } });
     await waitFor(() => expect(button(/^next$/i)).toBeEnabled());
-    fireEvent.change(within(step).getByRole('textbox', { name: 'Message body' }), { target: { value: '  ' } });
+    fireEvent.change(plainBody(step), { target: { value: '  ' } });
     await waitFor(() => expect(button(/^next$/i)).toBeDisabled());
   });
 
@@ -168,9 +192,7 @@ describe('message step in the EmailComposer (task 160)', () => {
     fireEvent.change(to, { target: { value: 'second@firm.example' } });
     fireEvent.keyDown(to, { key: 'Enter' });
     fireEvent.change(within(step).getByRole('textbox', { name: 'Subject' }), { target: { value: 'Budget question' } });
-    fireEvent.change(within(step).getByRole('textbox', { name: 'Message body' }), {
-      target: { value: 'Why the overage?' },
-    });
+    fireEvent.change(plainBody(step), { target: { value: 'Why the overage?' } });
 
     const review = await recordAfterInquiry(service);
     expect(review.actions.find(a => a.code === 'send-budget-inquiry')).toEqual({
@@ -489,7 +511,7 @@ describe('message step in the EmailComposer (task 160)', () => {
     expect(button(/^next$/i)).toBeDisabled();
   });
 
-  it('a matter name that is markup never runs when the body is switched to rich text (F1, stored XSS)', async () => {
+  it('a matter name that is markup never runs, and shows literally, in the rich-text body it opens in (F1, stored XSS)', async () => {
     const payload = 'Acme <img src=x onerror="window.__xss=1">';
     const writes: string[] = [];
     const descriptor = Object.getOwnPropertyDescriptor(Element.prototype, 'innerHTML')!;
@@ -503,12 +525,10 @@ describe('message step in the EmailComposer (task 160)', () => {
     try {
       setup(planWith(composerInquiry([LEAD])), {}, { ...pathBItem, core: { ...matterCore, name: payload } });
       const step = await toInquiry();
-      expect((within(step).getByRole('textbox', { name: 'Message body' }) as HTMLTextAreaElement).value).toContain(
-        'onerror'
-      );
-
-      click(within(step).getByRole('button', { name: 'Switch to rich text' }));
-      await waitFor(() => expect(within(step).queryByRole('textbox', { name: 'Message body' })).toBeNull());
+      // Task 197: the message opens in rich text; the markup in the name is escaped by the plain-text conversion, so it is
+      // shown as the characters it is, never parsed.
+      await waitFor(() => expect(richBody(step).textContent).toContain('onerror'));
+      expect(richBody(step).querySelector('img')).toBeNull();
       await new Promise(resolve => setTimeout(resolve, 50));
 
       expect((window as unknown as { __xss?: number }).__xss).toBeUndefined();
@@ -561,16 +581,24 @@ const inquiryWithDefaults = (): DecisionAction => {
 
 describe('message step starts from the server default text (task 192, D-224)', () => {
   const subjectBox = (step: HTMLElement) => within(step).getByRole('textbox', { name: 'Subject' }) as HTMLInputElement;
-  const bodyBox = (step: HTMLElement) =>
-    within(step).getByRole('textbox', { name: 'Message body' }) as HTMLTextAreaElement;
+  // Task 197: the message opens in rich text. `bodyBox` is the plain-text box (reached through the format toggle) for edits.
+  const bodyBox = plainBody;
 
   it('opens with the default Subject and Message, line breaks kept, instead of the generic template', async () => {
     setup(planWith(inquiryWithDefaults()));
     const step = await toInquiry();
 
     expect(subjectBox(step).value).toBe(DEFAULT_SUBJECT);
-    expect(bodyBox(step).value).toBe(DEFAULT_BODY);
-    expect(bodyBox(step).value.split('\n')).toHaveLength(8);
+    // Task 197: opens in rich text, one paragraph per blank-line-separated block, the single line break kept inside a block.
+    await waitFor(() => expect(richBody(step).textContent).toContain('Hello,'));
+    const paragraphs = Array.from(richBody(step).querySelectorAll('p'));
+    expect(paragraphs.map(p => p.textContent)).toEqual([
+      'Hello,',
+      "We received notice of a fee or scope change on Acme v. Beta (MTR-00042). The matter's budget has not been revised to reflect it.",
+      'Please send us a revised budget estimate, or confirm that the change does not affect the current budget.',
+      'Thank you,Dana Whitfield',
+    ]);
+    expect(richBody(step).querySelectorAll('br').length).toBeGreaterThanOrEqual(1);
     expect(button(/^next$/i)).toBeEnabled();
   });
 
@@ -618,7 +646,8 @@ describe('message step starts from the server default text (task 192, D-224)', (
 
     expect(subjectBox(step).value).not.toBe(DEFAULT_SUBJECT);
     expect(subjectBox(step).value).not.toBe('');
-    expect(bodyBox(step).value).not.toBe(DEFAULT_BODY);
+    await waitFor(() => expect(richBody(step).textContent).not.toBe(''));
+    expect(richBody(step).textContent).not.toContain('Dana Whitfield');
   });
 
   it('stays compose-only: the composer gets no template picker, no AI draft and a fetch that refuses (D-224)', async () => {
@@ -639,4 +668,88 @@ describe('message step starts from the server default text (task 192, D-224)', (
       'never sends from the composer'
     );
   });
+});
+
+/**
+ * Task 197 (owner 2026-11-18): the message opens in rich text, in this step too. The commit route sends the body as plain text
+ * (`BodyFormat.PlainText` in the inquiry and reminder executors), so what is committed is always plain text: never HTML.
+ */
+describe('message step opens in rich text and commits plain text (task 197)', () => {
+  /** Report an edited rich-text body the way the editor does (its typing is not simulated in jsdom). */
+  const editRichBody = (html: string) => {
+    const props = mockComposerProps[mockComposerProps.length - 1];
+    const last = mockComposerStates[mockComposerStates.length - 1];
+    act(() => {
+      (props.onStateChange as (s: Record<string, unknown>) => void)({ ...last, body: html, bodyFormat: 'HTML' });
+    });
+  };
+
+  it('opens the message in the rich-text editor: the toggle offers plain text and no plain-text box is shown', async () => {
+    setup(planWith(inquiryWithDefaults()));
+    const step = await toInquiry();
+
+    expect(richBody(step)).toBeInTheDocument();
+    expect(within(step).getByRole('button', { name: 'Switch to plain text' })).toBeInTheDocument();
+    expect(within(step).queryByRole('textbox', { name: 'Message body' })).toBeNull();
+  });
+
+  it('an edited rich-text body is committed as plain text: markup dropped, paragraphs kept as blank-line-separated blocks', async () => {
+    mockComposerProps.length = 0;
+    mockComposerStates.length = 0;
+    const { service } = setup(planWith(inquiryWithDefaults()));
+    await toInquiry();
+
+    editRichBody(
+      '<p>Why the <strong>overage</strong>?</p><p>Reply by <a href="https://x.example">Friday</a> &amp; oblige</p>'
+    );
+
+    const review = await recordAfterInquiry(service);
+    const body = review.actions.find(a => a.code === 'send-budget-inquiry')?.values?.body as string;
+    expect(body).toBe('Why the overage?\n\nReply by Friday & oblige');
+    expect(body).not.toMatch(/<|&amp;|&lt;/);
+  }, 30000);
+
+  it('text that looks like markup is committed as the characters typed, never as markup', async () => {
+    mockComposerProps.length = 0;
+    mockComposerStates.length = 0;
+    const { service } = setup(planWith(inquiryWithDefaults()));
+    await toInquiry();
+
+    editRichBody('<p>Is 2 &lt; 3 &amp;&amp; 3 &gt; 2?</p>');
+
+    const review = await recordAfterInquiry(service);
+    expect(review.actions.find(a => a.code === 'send-budget-inquiry')?.values?.body).toBe('Is 2 < 3 && 3 > 2?');
+  }, 30000);
+
+  it('the editor re-serialising the untouched default is not an edit: the default is committed as it was', async () => {
+    mockComposerProps.length = 0;
+    mockComposerStates.length = 0;
+    const { service } = setup(planWith(inquiryWithDefaults()));
+    await toInquiry();
+
+    // The editor's own re-serialisation of the opened paragraphs: spans, classes and runs of spaces.
+    editRichBody(
+      '<p class="p" dir="ltr"><span style="white-space: pre-wrap;">Hello,</span></p>' +
+        '<p><span style="white-space: pre-wrap;">We received notice of a fee or scope change on Acme v. Beta (MTR-00042). The matter\'s budget has  not been revised to reflect it.</span></p>' +
+        '<p><span style="white-space: pre-wrap;">Please send us a revised budget estimate, or confirm that the change does not affect the current budget.</span></p>' +
+        '<p><span style="white-space: pre-wrap;">Thank you,</span><br><span style="white-space: pre-wrap;">Dana Whitfield</span></p>'
+    );
+
+    const review = await recordAfterInquiry(service);
+    expect(review.actions.find(a => a.code === 'send-budget-inquiry')?.values?.body).toBe(DEFAULT_BODY);
+  }, 30000);
+
+  it('must-not-fire: the same words with formatting added are an edit, committed as plain text', async () => {
+    mockComposerProps.length = 0;
+    mockComposerStates.length = 0;
+    const { service } = setup(planWith(inquiryWithDefaults()));
+    await toInquiry();
+
+    editRichBody('<p><strong>Hello,</strong></p><p>Please send us a revised budget.</p>');
+
+    const review = await recordAfterInquiry(service);
+    expect(review.actions.find(a => a.code === 'send-budget-inquiry')?.values?.body).toBe(
+      'Hello,\n\nPlease send us a revised budget.'
+    );
+  }, 30000);
 });

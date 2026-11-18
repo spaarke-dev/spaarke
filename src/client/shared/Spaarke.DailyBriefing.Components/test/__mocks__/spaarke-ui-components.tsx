@@ -68,6 +68,10 @@ export interface ISendEmailDialogMockProps {
   [k: string]: any;
 }
 export const SendEmailDialog: React.FC<ISendEmailDialogMockProps> = () => null;
+// `plainTextToHtml` (task 197) — DailyBriefingApp opens an item's plain-text draft in rich text with it. The real helper
+// (React-free, no Xrm), not a stub, so a test sees the real conversion.
+import { plainTextToHtml } from '../../../Spaarke.UI.Components/src/components/EmailComposer/composeOnlyText';
+export { plainTextToHtml };
 // `describeSendFailure` — DailyBriefingApp.tsx imports it for the failed-send dialog copy.
 export const describeSendFailure: (...args: unknown[]) => {
   title: string;
@@ -478,6 +482,7 @@ export const SECTION_METADATA_CATALOG: ReadonlyArray<{ id: string; widthPreferen
 const _driftGuard = {
   MicrosoftToDoIcon,
   SendEmailDialog,
+  plainTextToHtml,
   ConversationWorkspace,
   ConversationView,
   getCurrentUserId,

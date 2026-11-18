@@ -29,6 +29,7 @@ import {
     EmailComposer,
     createXrmEmailComposeHandlers,
     describeSendFailure,
+    plainTextToHtml,
 } from "@spaarke/ui-components/components/EmailComposer";
 import type { IWizardContext, IEmailComposerHandle } from "@spaarke/ui-components/components/EmailComposer";
 import type { ILookupItem } from "@spaarke/ui-components/types/LookupTypes";
@@ -208,8 +209,9 @@ export function DocumentEmailStep({
         () => buildDefaultSubject(parentEntityName),
         [parentEntityName]
     );
+    // The composer opens in rich text (task 197): the plain-text default is converted with the shared helper.
     const defaultBody = useMemo(
-        () => buildDefaultBody(uploadedFileNames, parentEntityName, parentEntityType),
+        () => plainTextToHtml(buildDefaultBody(uploadedFileNames, parentEntityName, parentEntityType)),
         [uploadedFileNames, parentEntityName, parentEntityType]
     );
 
@@ -305,7 +307,7 @@ export function DocumentEmailStep({
                 bffBaseUrl={bffBaseUrl}
                 initialSubject={defaultSubject}
                 initialBody={defaultBody}
-                initialBodyFormat="PlainText"
+                initialBodyFormat="HTML"
                 associations={associations}
                 wizardContext={wizardContext}
                 // Fixed to the shared mailbox → plain Send button, no From switcher.

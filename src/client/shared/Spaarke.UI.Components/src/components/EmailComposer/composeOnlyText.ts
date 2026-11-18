@@ -37,3 +37,39 @@ export function plainTextToHtml(text: string): string {
     .map(block => `<p>${block.split('\n').map(escapeHtml).join('<br>')}</p>`)
     .join('');
 }
+
+/** Text as the rich-text editor shows it: runs of spaces and tabs collapse, line ends are trimmed. */
+function visibleText(text: string): string {
+  return text
+    .replace(/\u00a0/g, ' ')
+    .split('\n')
+    .map(line => line.replace(/[ \t]+/g, ' ').trim())
+    .join('\n')
+    .trim();
+}
+
+/** Elements a plain paragraph is written with: anything else (bold, a link, a list...) is formatting. */
+const PLAIN_ELEMENTS = new Set(['P', 'BR', 'SPAN', 'DIV']);
+
+/** True when a rich-text body carries formatting: an element other than paragraphs, breaks and spans, or a style. */
+function hasFormatting(html: string): boolean {
+  if (!/</.test(html)) return false;
+  // DOMParser builds an inert document: nothing in the markup runs.
+  const body = new DOMParser().parseFromString(html, 'text/html').body;
+  return Array.from(body.querySelectorAll('*')).some(el => {
+    if (!PLAIN_ELEMENTS.has(el.tagName)) return true;
+    const style = (el.getAttribute('style') ?? '').replace(/white-space\s*:\s*pre-wrap\s*;?/gi, '').trim();
+    return style !== '';
+  });
+}
+
+/**
+ * True when a plain-text body opened as rich-text paragraphs (`plainTextToHtml`) is still that plain text: the rich-text
+ * editor re-serialises the paragraphs and collapses spacing, which is not an edit. Its visible text is unchanged and it
+ * has no formatting. Formatting added to the same text is an edit.
+ */
+export function isUnchangedPlainBody(previousPlain: string, nextHtml: string): boolean {
+  if (hasFormatting(nextHtml)) return false;
+  const asShown = (html: string) => visibleText(toPlainText(html, 'HTML'));
+  return asShown(nextHtml) === asShown(plainTextToHtml(previousPlain));
+}

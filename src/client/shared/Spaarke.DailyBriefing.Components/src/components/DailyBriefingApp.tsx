@@ -59,6 +59,7 @@ import { StatTiles, type StatTile } from './StatTiles';
 import {
   SendEmailDialog,
   describeSendFailure,
+  plainTextToHtml,
   RichFilePreviewDialog,
   OOB_MODAL_SIZES,
   cleanGuid,
@@ -878,8 +879,11 @@ export const DailyBriefingApp: React.FC<DailyBriefingAppProps> = ({ params: _par
           onClose={closeEmailDialog}
           titleOverride={emailDialog.mode === 'briefing' ? 'Email Briefing' : 'Email Item'}
           initialSubject={emailDialog.defaultSubject}
-          initialBody={emailDialog.defaultBody}
-          initialBodyFormat={emailDialog.mode === 'briefing' ? 'HTML' : 'PlainText'}
+          // The briefing body is already HTML; an item's drafted body is plain text, opened in rich text (task 197).
+          initialBody={
+            emailDialog.mode === 'briefing' ? emailDialog.defaultBody : plainTextToHtml(emailDialog.defaultBody)
+          }
+          initialBodyFormat="HTML"
           onSearchRecipients={handleSearchUsers}
           authenticatedFetch={authenticatedFetch}
           bffBaseUrl=""

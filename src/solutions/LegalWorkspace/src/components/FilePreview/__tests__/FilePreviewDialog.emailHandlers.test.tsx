@@ -40,6 +40,10 @@ jest.mock('@spaarke/ui-components', () => ({
     (createXrmEmailComposeHandlersMock as unknown as (...a: unknown[]) => unknown)(...args),
   createXrmNavigationService: jest.fn(() => ({ openRecord: jest.fn(), openRecordModal: jest.fn() })),
   getXrm: jest.fn(() => undefined),
+  // Task 197: the real helper (React-free, no Xrm), not a stub, so the test sees the real conversion.
+  plainTextToHtml: jest.requireActual(
+    '../../../../../../client/shared/Spaarke.UI.Components/src/components/EmailComposer/composeOnlyText'
+  ).plainTextToHtml,
 }));
 jest.mock('@spaarke/ui-components/components/FilePreview/RichFilePreviewDialog', () => ({
   RichFilePreviewDialog: () => <div data-testid="rich-file-preview-stub" />,
@@ -87,5 +91,27 @@ describe('FilePreviewDialog — email dialog compose handlers (task 186, D-219 Q
     expect(sendEmailDialogProps.current?.bffBaseUrl).toBe(BFF_BASE_URL);
     // Attachment-bearing association for the document is untouched.
     expect(sendEmailDialogProps.current?.associations).toEqual([{ entityType: 'sprk_document', entityId: 'doc-1' }]);
+  });
+
+  // Task 197 (owner dev recheck 2026-11-18): every composer host opens in rich text.
+  it('opens the email body in rich text: the plain-text pre-fill is converted to HTML, its text and line breaks kept', () => {
+    render(
+      <FilePreviewDialog
+        open
+        documentId="doc-1"
+        documentName="Fees <draft> & notes.docx"
+        fileSummary={'Line one\nLine two < 5 & done'}
+        onClose={jest.fn()}
+      />
+    );
+
+    expect(sendEmailDialogProps.current?.initialBodyFormat).toBe('HTML');
+    const body = sendEmailDialogProps.current?.initialBody as string;
+    expect(body).toContain('<p>Document: Fees &lt;draft&gt; &amp; notes.docx</p>');
+    expect(body).toContain('<p>Line one<br>Line two &lt; 5 &amp; done</p>');
+    expect(body.startsWith('<p>Dear Colleague,</p>')).toBe(true);
+    // Escaped once, never raw markup.
+    expect(body).not.toContain('<draft>');
+    expect(body).not.toContain('&amp;amp;');
   });
 });
