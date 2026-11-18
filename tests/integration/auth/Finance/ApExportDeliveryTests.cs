@@ -62,6 +62,29 @@ public sealed class ApExportDeliveryTests
         return (batchId, host);
     }
 
+    /// <summary>
+    /// A batch made by hand (the table's Create right, the form or the Web API), never by Export to AP: it carries the Completed status and the formats the
+    /// user typed, owned by the team, with Read and Write granted to the caller - and no Stored File row and no invoice. The status and formats columns are
+    /// editable on the form and no server code owns them on create, so only the routes' own checks can refuse it.
+    /// </summary>
+    private static async Task<(Guid BatchId, ApExportRoutesHost Host)> HandMadeAsync(params string[] formats)
+    {
+        var host = await ApExportRoutesHost.StartAsync();
+        var batchId = Guid.NewGuid();
+        host.World.Dataverse.Put(new Entity("sprk_billingexport", batchId)
+        {
+            ["sprk_name"] = "Hand made",
+            ["sprk_exportstatus"] = new OptionSetValue(ApExportService.StatusCompleted),
+            ["sprk_formats"] = new OptionSetValueCollection(
+                formats.Select(f => new OptionSetValue(f == "csv" ? ApExportService.FormatCsv : ApExportService.FormatJson)).ToList()),
+            ["ownerid"] = new EntityReference("team", ApExportWorld.TeamId),
+        });
+        host.SetApEmail(ApAddress);
+        host.EbillingEnabled = true;
+        host.World.Access.Grant(ApExportAuthorization.BatchEntitySet, batchId, AccessRights.Read | AccessRights.Write);
+        return (batchId, host);
+    }
+
     private static async Task<JsonNode> BodyOf(HttpResponseMessage response) => JsonNode.Parse(await response.Content.ReadAsStringAsync())!;
 
     private static async Task<string> CodeOf(HttpResponseMessage response) => (await BodyOf(response))["errorCode"]!.GetValue<string>();
@@ -316,6 +339,38 @@ public sealed class ApExportDeliveryTests
         response.StatusCode.Should().Be(HttpStatusCode.Conflict);
         (await CodeOf(response)).Should().Be(ApExportCodes.FileNotAvailable);
         host.FakeMailer!.Sent.Should().BeEmpty();
+    }
+
+    [Theory(DisplayName = "ebilling-r1 hand-made batch: Completed with the formats typed in but no Stored File row is 409 file_not_available on Email to AP - nothing read from storage, nothing sent, no date")]
+    [InlineData("csv", "json")]
+    [InlineData("csv")]
+    [InlineData("json")]
+    public async Task Email_HandMadeCompletedBatchWithFormatsButNoFiles_Is409(params string[] formats)
+    {
+        var (batchId, host) = await HandMadeAsync(formats);
+        await using var _ = host;
+
+        var response = await host.SendAsync(HttpMethod.Post, EmailUrl(batchId));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Conflict);
+        (await CodeOf(response)).Should().Be(ApExportCodes.FileNotAvailable);
+        host.FakeMailer!.Sent.Should().BeEmpty();
+        host.World.Gateway.StorageCalls.Should().Be(0);
+        SentToApOf(host, batchId).Should().BeNull();
+    }
+
+    [Fact(DisplayName = "ebilling-r1 hand-made batch: Completed with no formats and no files is 409 file_not_available on Email to AP - nothing sent")]
+    public async Task Email_HandMadeCompletedBatchWithNothing_Is409()
+    {
+        var (batchId, host) = await HandMadeAsync();
+        await using var _ = host;
+
+        var response = await host.SendAsync(HttpMethod.Post, EmailUrl(batchId));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Conflict);
+        (await CodeOf(response)).Should().Be(ApExportCodes.FileNotAvailable);
+        host.FakeMailer!.Sent.Should().BeEmpty();
+        SentToApOf(host, batchId).Should().BeNull();
     }
 
     [Fact(DisplayName = "151c-1a A3: files over the route's 3 MB budget are 409 ebilling.export.attachments_too_large up front and nothing is sent")]
@@ -816,6 +871,73 @@ public sealed class ApExportDeliveryTests
         response.StatusCode.Should().Be(HttpStatusCode.Conflict);
         (await CodeOf(response)).Should().Be(ApExportCodes.BatchNotCompleted);
         SentToApOf(host, batchId).Should().BeNull();
+    }
+
+    [Theory(DisplayName = "ebilling-r1 hand-made batch SEEDED: Mark Sent to AP on a Completed batch with no files is 409 file_not_available and writes nothing")]
+    [InlineData("csv", "json")]
+    [InlineData("csv")]
+    public async Task Mark_HandMadeCompletedBatchWithNoFiles_Is409_AndWritesNothing(params string[] formats)
+    {
+        var (batchId, host) = await HandMadeAsync(formats);
+        await using var _ = host;
+
+        var response = await host.SendAsync(HttpMethod.Post, MarkUrl(batchId));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Conflict);
+        (await CodeOf(response)).Should().Be(ApExportCodes.FileNotAvailable);
+        host.World.Dataverse.WritesTo("sprk_billingexport").Should().Be(0);
+        SentToApOf(host, batchId).Should().BeNull();
+    }
+
+    [Fact(DisplayName = "ebilling-r1 hand-made batch: a communication attached to the batch by hand (the sub-grid's Add Existing) is not an AP send - Mark Sent is still 409, no communication is read, no date")]
+    public async Task Mark_HandAttachedCommunication_IsNotASend()
+    {
+        var (batchId, host) = await HandMadeAsync("csv", "json");
+        await using var _ = host;
+        host.World.Dataverse.Put(new Entity("sprk_communication", Guid.NewGuid())
+        {
+            [ServerSendOptions.BillingExportColumn] = new EntityReference(ServerSendOptions.BillingExportEntity, batchId),
+        });
+
+        var response = await host.SendAsync(HttpMethod.Post, MarkUrl(batchId));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Conflict);
+        (await CodeOf(response)).Should().Be(ApExportCodes.FileNotAvailable);
+        host.World.Dataverse.Log.Should().NotContain(l => l.EndsWith(" sprk_communication", StringComparison.Ordinal), "the Sent to AP Date keys off the BFF's own write, never off a communication");
+        SentToApOf(host, batchId).Should().BeNull();
+    }
+
+    [Fact(DisplayName = "ebilling-r1 hand-made batch: Mark Sent to AP on a batch that holds files but no invoices is 409 file_not_available and writes nothing")]
+    public async Task Mark_BatchWithNoInvoices_Is409_AndWritesNothing()
+    {
+        var (batchId, host) = await ExportedAsync();
+        await using var _ = host;
+        foreach (var invoice in host.World.Dataverse.RowsOf("sprk_invoice"))
+        {
+            host.World.Dataverse.Touch("sprk_invoice", invoice.Id, new Dictionary<string, object> { ["sprk_billingexport"] = null! });
+        }
+
+        var response = await host.SendAsync(HttpMethod.Post, MarkUrl(batchId));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Conflict);
+        (await CodeOf(response)).Should().Be(ApExportCodes.FileNotAvailable);
+        SentToApOf(host, batchId).Should().BeNull();
+    }
+
+    [Fact(DisplayName = "ebilling-r1 hand-made batch control: Mark Sent to AP on a batch Export to AP made (files and invoices) still sets the date once")]
+    public async Task Mark_ExportedBatch_StillSetsTheDate()
+    {
+        var (batchId, host) = await ExportedAsync();
+        await using var _ = host;
+
+        var first = await host.SendAsync(HttpMethod.Post, MarkUrl(batchId));
+        var second = await host.SendAsync(HttpMethod.Post, MarkUrl(batchId));
+
+        first.StatusCode.Should().Be(HttpStatusCode.OK);
+        (await BodyOf(first))["alreadySet"]!.GetValue<bool>().Should().BeFalse();
+        second.StatusCode.Should().Be(HttpStatusCode.OK);
+        (await BodyOf(second))["alreadySet"]!.GetValue<bool>().Should().BeTrue();
+        SentToApOf(host, batchId).Should().Be(host.Clock.Now.UtcDateTime);
     }
 
     [Fact(DisplayName = "151c-1a: a Dataverse fault on Mark Sent to AP is 503 ebilling.export.unavailable")]

@@ -8,14 +8,14 @@ Core business logic library providing:
 
 ## Documentation
 
-📚 **[Technical Overview](docs/TECHNICAL-OVERVIEW.md)** - Complete technical documentation
+📚 **Technical Overview** - Complete technical documentation
 
 ## Quick Links
 
-- [Authorization System](docs/TECHNICAL-OVERVIEW.md#1-authorization-system)
-- [OperationAccessPolicy](docs/TECHNICAL-OVERVIEW.md#operationaccesspolicy) - SPE/Graph operation mappings
-- [Caching System](docs/TECHNICAL-OVERVIEW.md#2-caching-system)
-- [DI Registration](docs/TECHNICAL-OVERVIEW.md#di-registration)
+- Authorization System
+- OperationAccessPolicy - SPE/Graph operation mappings
+- Caching System
+- DI Registration
 
 ## Status
 

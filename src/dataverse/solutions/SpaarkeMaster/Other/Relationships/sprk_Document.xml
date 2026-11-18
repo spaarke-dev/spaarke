@@ -644,7 +644,7 @@
     <ReferencingAttributeName>sprk_SourceEmailDocument</ReferencingAttributeName>
     <RelationshipDescription>
       <Descriptions>
-        <Description description="" languagecode="1033" />
+        <Description description="The .eml Document this from-email submission was read from (095a). A plain reference written by the server in the same create as the row, equal to the sourcedocument of the invoice's Stored Files; not a filing or a regarding, it decides no ownership, isolation or visibility, and it is never returned to an external caller." languagecode="1033" />
       </Descriptions>
     </RelationshipDescription>
     <EntityRelationshipRoles>

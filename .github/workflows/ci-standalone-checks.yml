@@ -294,14 +294,6 @@ jobs:
         working-directory: src/client/shared/Spaarke.UI.Components
         run: npx tsc
 
-      - name: Install Spaarke.DocumentOperations deps
-        working-directory: src/client/shared/Spaarke.DocumentOperations
-        run: npm install --legacy-peer-deps --no-audit --no-fund
-
-      - name: Build Spaarke.DocumentOperations
-        working-directory: src/client/shared/Spaarke.DocumentOperations
-        run: npx tsc
-
       - name: Install Spaarke.Compose.Components deps
         working-directory: src/client/shared/Spaarke.Compose.Components
         run: npm install --legacy-peer-deps --no-audit --no-fund
@@ -357,14 +349,6 @@ jobs:
 
       - name: Build Spaarke.Auth
         working-directory: src/client/shared/Spaarke.Auth
-        run: npx tsc
-
-      - name: Install Spaarke.AI.Context deps
-        working-directory: src/client/shared/Spaarke.AI.Context
-        run: npm install --legacy-peer-deps --no-audit --no-fund
-
-      - name: Build Spaarke.AI.Context
-        working-directory: src/client/shared/Spaarke.AI.Context
         run: npx tsc
 
       - name: Install Spaarke.SdapClient deps
@@ -500,16 +484,21 @@ jobs:
         run: |
           Install-Module Pester -RequiredVersion 5.7.1 -Scope CurrentUser -Force -SkipPublisherCheck
           Import-Module Pester -RequiredVersion 5.7.1
-          $r = Invoke-Pester -Path tests/scripts/Apply-DoLanePolicies.Tests.ps1, tests/scripts/Seed-BillingSystemPolicy.Tests.ps1, tests/scripts/Invoke-OntologyStampBackfill.Tests.ps1, tests/scripts/Deploy-Release.OntologyConfig.Tests.ps1, tests/scripts/Set-FeatureRolePrivileges.Tests.ps1 -Output Detailed -PassThru
+          $r = Invoke-Pester -Path tests/scripts/Apply-DoLanePolicies.Tests.ps1, tests/scripts/Seed-BillingSystemPolicy.Tests.ps1, tests/scripts/Invoke-OntologyStampBackfill.Tests.ps1, tests/scripts/Deploy-Release.OntologyConfig.Tests.ps1, tests/scripts/Deploy-EbillingInvoiceReviewDetailColumn.Tests.ps1, tests/scripts/Set-FeatureRolePrivileges.Tests.ps1, tests/scripts/Set-BffDecisionRecordReaderRole.Tests.ps1 -Output Detailed -PassThru
           if ($r.FailedCount -gt 0 -or $r.TotalCount -eq 0) { exit 1 }
 
   # --------------------------------------------------------------------------
-  # owner-teams-script-tests: the Pester controls for scripts/Set-CustomerOwnerTeams.ps1 (unified-access-control-r2
-  # task 194b R4b-4): no business unit named -SecureBusinessUnitName refuses (Secure Record is never accepted as a
+  # owner-teams-script-tests: the Pester controls for scripts/Set-CustomerOwnerTeams.ps1 and (task 191d)
+  # scripts/Set-ExternalCollaboratorRole.ps1 and (task 191f) scripts/Set-AccessMarkerFieldSecurity.ps1 over the
+  # field-security engine (unified-access-control-r2 task 194b R4b-4): no business unit named -SecureBusinessUnitName refuses (Secure Record is never accepted as a
   # customer unit), Secure Record is refused by its name, and a dry run whose drift is an owner decision exits 1.
   # The script runs over a mocked Invoke-RestMethod and az (any write fails the test) and reads the checked-in
   # config/*-owner-role.json; nothing talks to Dataverse. Pester is pinned to 5.7.1: under 6.x a container can fail
   # with "Export-ModuleMember ... can only be called from inside a module", which would turn this job red on a release.
+  # Also tests/scripts/Set-ThreadFlagFieldSecurity.Tests.ps1 (field-mapping-server-write-path-r1 task 054b): the script
+  # refuses, in every mode and before any write, unless each of its five target columns exists (same mocked shape).
+  # Also scripts/Migrate-DirectMessagesToOwnerTeam.ps1 (field-mapping-server-write-path-r1 task 054c): the field-security
+  # precondition, the Stamp pair rule, the Move assign invariant and the Direct team checks, over the same kind of mock.
   # --------------------------------------------------------------------------
   owner-teams-script-tests:
     name: Owner teams script tests (Pester)
@@ -529,7 +518,7 @@ jobs:
         run: |
           Install-Module Pester -RequiredVersion 5.7.1 -Scope CurrentUser -Force -SkipPublisherCheck
           Import-Module Pester -RequiredVersion 5.7.1
-          $r = Invoke-Pester -Path tests/scripts/Set-CustomerOwnerTeams.Tests.ps1 -Output Detailed -PassThru
+          $r = Invoke-Pester -Path tests/scripts/Set-CustomerOwnerTeams.Tests.ps1, tests/scripts/Set-ExternalCollaboratorRole.Tests.ps1, tests/scripts/Set-AccessMarkerFieldSecurity.Tests.ps1, tests/scripts/Set-ThreadFlagFieldSecurity.Tests.ps1, tests/scripts/Migrate-DirectMessagesToOwnerTeam.Tests.ps1 -Output Detailed -PassThru
           if ($r.FailedCount -gt 0 -or $r.TotalCount -eq 0) { exit 1 }
 
   # --------------------------------------------------------------------------

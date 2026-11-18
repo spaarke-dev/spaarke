@@ -98,12 +98,27 @@ public class InquiryRecordFacts
 
     /// <summary>The label and link lines for an inquiry about <paramref name="coreLogicalName"/> <paramref name="coreId"/> to
     /// <paramref name="recipients"/>. Never throws.</summary>
+    public virtual Task<InquiryEmailExtras> ResolveAsync(
+        string coreLogicalName, Guid coreId, IReadOnlyList<string> recipients, CancellationToken ct) =>
+        ResolveAsync(coreLogicalName, coreId, recipients, recipients, ct);
+
+    /// <summary>
+    /// Task 190 (D-222): as above, with the label decided over EVERYONE who receives the email. The footer and the service request's
+    /// <c>EntityName</c> carry the record's name to To, Cc and Bcc alike, so the label is returned only when every address in
+    /// <paramref name="labelAudience"/> (plus <paramref name="linkRecipients"/>) is confirmed internal. The LINK lines stay decided on
+    /// <paramref name="linkRecipients"/> only: a Bcc address must not add an "External recipients" line, which would reveal that a
+    /// hidden recipient exists.
+    /// </summary>
     public virtual async Task<InquiryEmailExtras> ResolveAsync(
-        string coreLogicalName, Guid coreId, IReadOnlyList<string> recipients, CancellationToken ct)
+        string coreLogicalName, Guid coreId, IReadOnlyList<string> linkRecipients, IReadOnlyList<string> labelAudience, CancellationToken ct)
     {
-        var addresses = recipients.Where(a => !string.IsNullOrWhiteSpace(a)).Select(a => a.Trim())
+        var addresses = linkRecipients.Where(a => !string.IsNullOrWhiteSpace(a)).Select(a => a.Trim())
             .Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
-        var (label, outcomes) = await ReadAsync(coreLogicalName, coreId, addresses, ct).ConfigureAwait(false);
+        var audience = addresses.Concat((labelAudience ?? []).Where(a => !string.IsNullOrWhiteSpace(a)).Select(a => a.Trim()))
+            .Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+        // `audience` starts with `addresses` (same order), so the first addresses.Length outcomes are the link recipients'.
+        var (label, audienceOutcomes) = await ReadAsync(coreLogicalName, coreId, audience, ct).ConfigureAwait(false);
+        var outcomes = audienceOutcomes.Take(addresses.Length).ToArray();
 
         var anyInternal = outcomes.Contains(LicensedUserEmailOutcome.LicensedUser);
         var unknown = outcomes.Count(o => o == LicensedUserEmailOutcome.Unknown);

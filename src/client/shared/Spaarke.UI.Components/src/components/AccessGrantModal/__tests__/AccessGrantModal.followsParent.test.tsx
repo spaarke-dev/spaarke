@@ -14,6 +14,7 @@
 import * as React from 'react';
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { confirmRevoke } from '../../../__tests__/helpers/confirmDialog';
+import { accessNote, openAccessNotes } from '../../../__tests__/helpers/accessNotes';
 import { FluentProvider, webLightTheme } from '@fluentui/react-components';
 import { AccessGrantModal } from '../AccessGrantModal';
 import { throwingAuthenticatedFetch } from '../../../__tests__/helpers/authenticatedFetchDouble';
@@ -23,7 +24,6 @@ import type {
   IAccessGrantRecord,
   IFollowsParent,
   IRecordNoAccessEntry,
-  IUserPick,
 } from '../types';
 import type { IAssignedAccessEntry } from '../AccessGrantModal';
 import {
@@ -171,10 +171,8 @@ function makeProps(setup: ISetup = {}): IAccessGrantModalProps {
     ]),
     fetchExistingGrants: jest.fn(async () => [CONTACT_GRANT]),
     searchContacts: jest.fn(async () => []),
-    pickContact: jest.fn(async () => null),
+    pickPerson: jest.fn(async () => null),
     pickOrganization: jest.fn(async () => null),
-    pickUser: jest.fn(async (): Promise<IUserPick | null> => null),
-    isInternalContact: jest.fn(async () => false),
     ...setup.overrides,
   };
 }
@@ -201,17 +199,18 @@ function currentAccessRow(name: string): HTMLElement {
   return rows[0];
 }
 
-/** The info bar naming the parent, or `null`. */
-function parentBar(): HTMLElement | null {
-  const title = screen.queryByText('Minimum access from the parent', { selector: '.fui-MessageBarTitle' });
-  return title ? (title.closest('.fui-MessageBar') as HTMLElement) : null;
+/** The note naming the parent (task 196: behind the header bell, opened here), or `null`. */
+async function parentBar(): Promise<HTMLElement | null> {
+  // No bell (the no-permission state): no notes at all.
+  if (!screen.queryByRole('button', { name: /^Access notes \(\d+\)$/ })) return null;
+  const popover = screen.queryByTestId('access-notes-popover') ?? (await openAccessNotes());
+  return accessNote(popover, 'Minimum access from the parent');
 }
 
 /** Every grant affordance (owner round 87: all stay available on a child). */
 function expectEveryGrantAffordance(): void {
-  expect(screen.getByRole('button', { name: 'Add contact' })).toBeEnabled();
+  expect(screen.getByRole('button', { name: 'Add person' })).toBeEnabled();
   expect(screen.getByRole('button', { name: 'Add organization' })).toBeEnabled();
-  expect(screen.getByRole('button', { name: 'Add user' })).toBeEnabled();
   expect(screen.getByRole('checkbox', { name: 'Select Cody Candidate' })).toBeEnabled();
   expect(screen.getAllByRole('combobox').length).toBeGreaterThan(0);
   expect(screen.getByRole('button', { name: /^Add \(/ })).toBeInTheDocument();
@@ -253,7 +252,7 @@ describe('AccessGrantModal — a record with a parent (task 175, owner round 87)
     );
     await loaded();
 
-    const bar = parentBar();
+    const bar = await parentBar();
     expect(bar).toHaveTextContent(
       'Minimum access comes from the parent matter Acme v. Beta: this record can be made stricter but not looser.'
     );
@@ -276,7 +275,7 @@ describe('AccessGrantModal — a record with a parent (task 175, owner round 87)
     );
     await loaded();
 
-    const bar = parentBar()!;
+    const bar = (await parentBar())!;
     expect(
       within(bar).getByText('Access Permission: Limited (inherited from Matter Acme v. Beta)')
     ).toBeInTheDocument();
@@ -289,7 +288,7 @@ describe('AccessGrantModal — a record with a parent (task 175, owner round 87)
     renderModal(makeProps({ overrides: { followsParents: [unnamed, PARENT_MATTER, PARENT_MATTER], onOpenParent } }));
     await loaded();
 
-    const bar = parentBar()!;
+    const bar = (await parentBar())!;
     expect(bar).toHaveTextContent(
       'Minimum access comes from the parent project and 2 others: this record can be made stricter but not looser.'
     );
@@ -301,7 +300,7 @@ describe('AccessGrantModal — a record with a parent (task 175, owner round 87)
     renderModal(makeProps({ overrides: { followsParents: [PARENT_MATTER] } }));
     await loaded();
 
-    const bar = parentBar()!;
+    const bar = (await parentBar())!;
     expect(within(bar).queryByRole('button')).not.toBeInTheDocument();
     expect(within(bar).getByText('Acme v. Beta').tagName).toBe('STRONG');
   });
@@ -312,7 +311,7 @@ describe('AccessGrantModal — a record with a parent (task 175, owner round 87)
     expect(
       await screen.findByText('You do not have permission to grant or revoke access for this record.')
     ).toBeInTheDocument();
-    expect(parentBar()).toBeNull();
+    expect(await parentBar()).toBeNull();
   });
 });
 
@@ -326,7 +325,7 @@ describe('AccessGrantModal — a parentless record (task 175)', () => {
     );
     await loaded();
 
-    expect(parentBar()).toBeNull();
+    expect(await parentBar()).toBeNull();
     expectEveryGrantAffordance();
   });
 });
@@ -355,7 +354,7 @@ describe('AccessGrantModal — the 409 access_follows_parent is an inline refusa
 
     expect(await screen.findByText(SERVER_SENTENCE)).toBeInTheDocument();
     expect(screen.queryByText('Write and Share required')).not.toBeInTheDocument();
-    expect(parentBar()).toBeNull();
+    expect(await parentBar()).toBeNull();
     // Not a modal-wide state: every affordance stays, enabled.
     expectEveryGrantAffordance();
   });
@@ -385,7 +384,7 @@ describe('AccessGrantModal — the 409 access_follows_parent is an inline refusa
 
     expect(await screen.findByText(`Granted access to 0 of 1. Cody Candidate: ${SERVER_SENTENCE}`)).toBeInTheDocument();
     expect(screen.queryByText('Write and Share required')).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Add contact' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Add person' })).toBeEnabled();
   });
 
   it('a refused suggestion Grant or Dismiss shows the sentence inline', async () => {

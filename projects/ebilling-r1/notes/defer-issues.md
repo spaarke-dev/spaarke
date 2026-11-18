@@ -10,6 +10,480 @@
 
 ## Open (in priority order)
 
+### ISS-021 — A deactivated Procedure (statecode 1, Status Active) still applies and can still be assigned
+
+| Field | Value |
+|---|---|
+| **Status** | In progress: resolver fix PR https://github.com/spaarke-dev/spaarke/pull/2798 (ontology-r1 reviewed, auto-merge on). Version reads are known limits. The 089 assign refusal was decided by the owner as EB-D-232 and is being built. |
+| **Urgency** | next-round |
+| **Filed** | 2026-11-13 |
+| **Source** | 084d-5a adversarial review (Opus), pre-existing finding, CONFIRMED |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2797 |
+
+**Description**
+
+A Procedure that is deactivated in Dataverse (`statecode` 1) but still has Status Active is applied by the resolver and accepted by 089's assign write, because neither reads `statecode`. An admin who deactivates a Procedure expects it to stop applying. Instead it keeps judging invoices and can still be assigned. The 084d-5a assignable list reads only `statecode` 0, so the list and the write disagree, though only by the list offering less.
+
+**Entry-points**
+
+- `src/server/api/Sprk.Bff.Api/Services/Signals/Billing/ProcedureResolver.cs` ~1033-1041 and ~1062: the Procedure read has no `statecode` filter.
+- `src/server/api/Sprk.Bff.Api/Services/Finance/Procedures/ProcedureAssignmentService.cs` ~450 (the row read) and `AssignRefusalOf` ~457-476: no `statecode` check.
+
+**Suggested fix**
+
+The resolver treats `statecode` != 0 as not applicable, through the same path as Retired. The assign write refuses it, which needs the owner's OK, like EB-D-228. Add parity tests for both.
+
+**Estimated effort**: about half a day.
+**Blockers**: none.
+**Related**: EB-D-228, 084d-5a.
+
+---
+
+### ISS-020 — Invoice family: a filed invoice is never moved; children match their invoice's core record
+
+| Field | Value |
+|---|---|
+| **Status** | Done. Decided by the owner (EB-D-231, 2026-11-13). Built by field-mapping-r1 as task 045g (#2819, merged to master at b76276a314), with line detach also refused; ebilling-r1 reviewed it (round 4 PASS). The operator note for legacy invoices is in `notes/153-wp6-deploy.md`. |
+| **Urgency** | now |
+| **Filed** | 2026-11-13 |
+| **Source** | Owner question 2 (follow-on from #2772 / ISS-017); owner chose return-and-resubmit |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2794 |
+
+**Description**
+
+A wrongly filed invoice is corrected by returning it to the firm and resubmitting it on the right record; it is never moved (EB-D-231, fits EB-D-148). Two rules follow:
+
+1. Every invoice core-record change after create is refused. Today D-96 refuses it only while a line names another core record, and its message suggests detach, move and re-attach. That path splits the family, because approvals, submissions, corrections and identifiers never move. Every invoice has its submission row. The detach hint is dropped and the message points to return-and-resubmit.
+2. The approval, submission, correction and external-identifier rows each name the same core record as their invoice, as lines already must.
+
+**Entry-points**
+
+- `src/server/api/Sprk.Bff.Api/Services/Dataverse/InvoiceFamilyCoreRecordGuard.cs`: D-96 ~282-304, `DetachMoveReattachHint` ~518, `CodeOnlyRefusalMessage` ~508.
+- The generic update paths that call the guard (field-mapping-r1 045d/e/f).
+
+**Suggested fix**: both rules in the guard, in one change by one owner, with tests over every family table and the generic paths plus must-fire controls. Decide whether detaching a line (clearing its invoice) is now refused too.
+
+**Estimated effort**: about a day.
+**Blockers**: none.
+**Related**: #2772 (ISS-017), D-96, D-68, EB-D-148, EB-D-231, field-mapping-r1 045e.
+
+---
+
+### ISS-019 — Procedure assign and dry-run routes: one answer for a named firm (NFR-01)
+
+| Field | Value |
+|---|---|
+| **Status** | Open (known limit K-6 for 084d, accepted by uac-r2 2026-11-13) |
+| **Urgency** | next-round |
+| **Filed** | 2026-11-13 |
+| **Source** | 084d-2a adversarial review; uac-r2 asked for one issue covering both routes |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2782 |
+
+**Description**
+
+The order of checks on a firm named in the request body does not yet give NFR-01's single answer for an unknown id and a denied id. It applies to the assign write route and the 084d dry run alike. uac-r2 rated it low sensitivity. The mechanism is not recorded here; it is in the uac-r2 thread.
+
+**Entry-points**
+
+- `src/server/api/Sprk.Bff.Api/Api/Finance/ProcedureAssignmentEndpoints.cs`
+- `src/server/api/Sprk.Bff.Api/Services/Finance/Procedures/RecordProcedureReadService.cs` (`DryRunAsync`)
+
+**Suggested fix**: check the named firm as the caller before planning runs, on both routes, with tests on both.
+
+**Estimated effort**: about half a day.
+**Blockers**: none; not a blocker for 084d.
+**Related**: NFR-01, 084d, uac-r2
+
+---
+
+### ISS-018 — Pending Spend column missing on dev and from SpaarkeMaster; the rollup's Pending Spend PATCH gets 400
+
+| Field | Value |
+|---|---|
+| **Status** | In progress. Dev DONE 2026-11-13 (owner OK in session; uac-r2 before and after notices): WhatIf, then apply created 2 and published both tables; read-back Money, precision 2, not secured; a re-run skipped 2. Remaining: add both columns to the next SpaarkeMaster version, and put the script on task 112's apply list. |
+| **Urgency** | now |
+| **Filed** | 2026-11-13 (reported by ontology-r1 from the dev log) |
+| **Source** | Dev log, 2026-11-13 03:27:38Z: `POST /api/finance/matters/{id}/recalculate` → Dataverse 400 `0x80048d19` on the Pending Spend PATCH |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2777 |
+
+**Description**
+
+`sprk_pendingspend` (Money, D-104) is missing on dev on both `sprk_matter` and `sprk_project`; a read-only metadata query on 2026-11-13 returned only `sprk_totalspendtodate`. It is also missing from the SpaarkeMaster source. Task 049 wrote `scripts/ebilling/Deploy-EbillingPendingSpendSchema.ps1` and noted "NOT run against any environment", and no later task picked the script up.
+
+The rollup writes Pending Spend in its own PATCH (ontology-r1 review F1), so Dataverse refuses that PATCH and logs an Error. The counted rollup is still written. Pending Spend never gets a value on any matter or project, here or on a customer stamp.
+
+**Entry-points**
+
+- `src/server/api/Sprk.Bff.Api/Services/Finance/FinanceRollupService.cs` (`WriteRollupAsync`, `BuildPendingSpendFields`)
+- `scripts/ebilling/Deploy-EbillingPendingSpendSchema.ps1` (run with `-WhatIf` first)
+
+**Suggested fix**
+
+1. Run the script on dev. This needs the owner's OK, and uac-r2 is told before and after.
+2. Add both columns to the SpaarkeMaster source in the next solution version.
+3. Put the script on task 112's dev apply list.
+
+**Estimated effort**: about 1 hour, plus a solution version.
+**Blockers**: the owner's OK for the live schema write.
+**Related**: D-104, task 049, task 165b-4, task 112, SpaarkeMaster 1.3.1.0
+
+---
+
+### ISS-017 — Invoice-family rows: a regarding pair that disagrees with the core lookup
+
+| Field | Value |
+|---|---|
+| **Status** | Decided: option (a), refuse (owner, 2026-11-13, given in field-mapping-r1's session, recorded there and on #2772). Built by field-mapping task 045e after 045d; ebilling-r1 reviews the diff before merge. |
+| **Urgency** | next-round |
+| **Filed** | 2026-11-13 (by field-mapping-r1 as DI-029, during the 045d review) |
+| **Source** | field-mapping-server-write-path-r1 task 045d adversarial review |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2772 |
+
+**Description**
+
+On invoice-family tables, a write that changes only the regarding pair can leave the core lookup unchanged. The row then names one core record while its derived fields describe another. On an external identifier, the D-68 key moves with it. Filing follows the typed core lookup, so this is a consistency defect, not an access one. Rule options:
+- (a) refuse a pair that disagrees with the stored or written core lookup (ebilling-r1's preferred option);
+- (b) re-derive the derived fields from the core lookup on any write.
+
+It touches field-mapping's FR-23, so the owner decides, and field-mapping-r1 confirms in its own session before acting.
+
+**Entry-points**: the invoice-family core-record guard (`InvoiceFamilyCoreRecordGuard.cs`) and field-mapping's pair-derivation rule (045b rule 3).
+
+**Estimated effort**: small, once decided.
+**Blockers**: none (decided). field-mapping 045e runs after 045d merges.
+**Related**: D-68, D-96; field-mapping 045d (the neighbouring gap was closed there by widening the guard to all six family tables).
+
+---
+
+### DEF-067 — Invoice submission: other file types, supporting files, several invoices (owner E2E feedback)
+
+| Field | Value |
+|---|---|
+| **Status** | Open (scope and design not decided) |
+| **Urgency** | next-round |
+| **Filed** | 2026-11-13 (issue filed by spa-r4 on 2026-11-12, owner's split) |
+| **Source** | Owner's E2E on dev (spa-r4). The invoice flow passed: Submit invoice from a project created a linked invoice with amount and date extracted. |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2770 |
+
+**Description**
+
+The owner's feedback assigns three items to ebilling-r1:
+1. Invoice files other than PDF, for example Excel or other data files.
+2. A "Submit other files" section, for supporting files that are not treated as the invoice.
+3. Several invoices in one submission.
+
+Today submission takes one PDF as the invoice, so a firm that bills in a spreadsheet, or needs to attach backup, cannot do it in one step. R4 separately builds, under our review:
+- (a) Submit invoice as a modal over the record modal;
+- (b) a locked record when launched from a record;
+- (c) Submit invoice in the Invoices grid toolbar.
+
+For (a) and (b), our submission wizard must be hostable in a SprkModal and accept a locked record. spa-r4 will send the proposed contract before writing code.
+
+**Entry-points**
+
+- The submission operation (FR-17, FR-20): the 044 path and the SPA submit wizard.
+- Extraction expects a PDF (Content Understanding analyzer `sprk_invoice_vN`).
+
+**Suggested fix**: none yet. Item 1 needs a design decision: extraction for non-PDF files, or a structured import such as LEDES, which is out of scope for R1. Items 2 and 3 fit the Stored Files model (EB-D-148).
+
+**Estimated effort**: unknown; needs a design pass.
+**Blockers**: none.
+**Related**: #2770; R4's post-E2E rework task.
+
+---
+
+### DEF-066 — Readers field-security profile is not guaranteed on business units created after provisioning
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | next-round |
+| **Filed** | 2026-11-09 |
+| **Source** | unified-access-control-r2 review of the task 166 dev apply |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2651 |
+
+**Description**: EB-D-200 (task 166) field-secures seven `sprk_invoice` columns. Users read them through the "Spaarke BFF-Managed Field Readers" profile on each business unit's default team. That is checked only when the 166 script ((p8), `-Verify`) or the provisioning stamp check runs. A business unit created later (a Customer business unit, #2270/#2278, or one an administrator adds) gets a default team without the profile, so its users see blank totals and a blank firm.
+
+**Fix direction**: a read-only check that every business unit's default team holds the Readers profile, runnable nightly or by an administrator, plus a step in the business-unit create path that assigns it. Coordinate with customer-provisioning-orchestration-r1 and unified-access-control-r2.
+
+**Entry-points**: `scripts/ebilling/Set-EbillingInvoiceMoneyFieldSecurity.ps1` ((p8), `-Verify`); `src/dataverse/solutions/SpaarkeMaster/Other/FieldSecurityProfiles.xml`; `projects/ebilling-r1/notes/166-invoice-field-security.md`.
+
+**Estimated effort**: 0.5–1 day. **Related**: #2270, #2278, EB-D-200, task 166.
+
+---
+
+### DEF-065 — Billing fact loader: an unknown secure-root answer must fail closed
+
+| Field | Value |
+|---|---|
+| **Status** | Open (after the 130 batch) |
+| **Urgency** | next-round |
+| **Filed** | 2026-11-09 (filed by unified-access-control-r2; ebilling-r1 owns the file, task 072) |
+| **Source** | unified-access-control-r2 review |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2644 |
+
+**Description**: `BillingFactLoader.SecureRootsAsync` (~:723) treats one inconclusive answer from the secure-owner lookup as a definite one. Only a misconfigured environment can produce that answer. The fix makes an inconclusive answer fail closed, so prior-invoice detail is never used when it cannot be decided.
+
+**Fix direction**: use the tri-state check that the 198 branch adds (`SecureChildShareSynchronizer.IsSecureOwnerTeamAsync`: true / false / unknown) once it is on our base. Treat unknown as secure. Add a must-fire test for the unknown answer and a must-not-fire test for a decided non-secure answer.
+
+**Entry-points**: `src/server/api/Sprk.Bff.Api/Services/Signals/Billing/BillingFactLoader.cs` (~:723); issue #2644.
+
+**Estimated effort**: 2-4 hours, after the 198 branch is merged into ours.
+**Blockers**: the 198 branch's tri-state helper reaching master. Do not add a local copy (reuse, do not fork); if 198 slips badly, unified-access-control-r2 splits that method out to master first. Scope: only the `BillingFactLoader` half of #2644; the `SignalSuppressionService` half stays open for spaarke-ontology-platform-r1.
+**Related**: task 072, D-112.
+
+---
+
+### DEF-064 — Guard that every BFF writer of an invoice's core-record lookups calls InvoiceFamilyCoreRecordGuard
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | next-round |
+| **Filed** | 2026-11-09 |
+| **Source** | ebilling-r1 task 130b fix round 4, review question Q1 (uac-r2 ruling (ii)) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2643 |
+
+**Description**: an invoice-family row names exactly one core record (matter, project or work assignment). `InvoiceFamilyCoreRecordGuard.Check` enforces that, and today every known BFF write path calls it (submission persist and service, `OwnedChildWrite`, and the three generic update paths), each pinned by tests. Nothing pins the completeness of that set: a new BFF code path that writes those lookups without asking the guard would compile and pass every test. Readers such as the firm-outcome filter rely on "exactly one", so a second core set by such a path would change what they admit.
+
+**Fix direction**: an ArchTest (IL scan, as `FirmFindingsProjectionCallerBoundaryGuardTests` does) that every BFF type writing `sprk_matter` / `sprk_project` / `sprk_regardingworkassignment` on an invoice-family table either calls `InvoiceFamilyCoreRecordGuard` or is on a reviewed allow-list with a one-line reason; must-fire and must-not-fire controls. Writes made outside the BFF stay a documented known limit.
+
+**Entry-points**: `src/server/api/Sprk.Bff.Api/**/InvoiceFamilyCoreRecordGuard.cs` (`Check`, :658-724); its callers (grep `InvoiceFamilyCoreRecordGuard.Check`); `tests/Spaarke.ArchTests/FirmFindingsProjectionCallerBoundaryGuardTests.cs` (pattern).
+
+**Estimated effort**: 0.5 day.
+**Blockers**: none.
+**Related**: task 130b, D-28, unified-access-control-r2 review.
+
+---
+
+### DEF-063 — Import-SolutionScoped.ps1 reports failure for a successful import of a solution with nothing to publish
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | someday |
+| **Filed** | 2026-11-09 |
+| **Source** | ebilling-r1 DEF-059 dev apply (a role-only solution import) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2642 |
+
+**Description**: `scripts/Import-SolutionScoped.ps1` imports the zip, then builds a publish request from the solution's components. A solution whose components need no publish (for example one that carries only a security role) imports successfully, and then the publish step throws "Nothing to publish: refusing to build an empty ParameterXml" and the script exits 1. Refusing the empty publish is correct (it must never widen into a publish-all), but an operator, or a pipeline that checks the exit code, reads a successful import as a failure and may retry or roll back.
+
+**Fix direction**: when the plan has no publishable components, skip the publish step with an explicit "nothing to publish; import complete" line and exit 0. Keep the throw inside the ParameterXml builders so no caller can build an empty publish. Add a Pester case for a role-only solution.
+
+**Entry-points**: `scripts/Import-SolutionScoped.ps1`; `scripts/lib/Publish-SolutionComponents.ps1:149` and `:699`.
+
+**Estimated effort**: 1-2 hours.
+**Blockers**: none.
+**Related**: DEF-059.
+
+---
+
+### DEF-062 — Dormant spend snapshot job sums billing events without the approve-record rule
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | someday |
+| **Filed** | 2026-11-08 |
+| **Source** | ebilling-r1 task 165b-4 adversarial review, finding 11 |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2641 |
+
+**Description**: from 165b-4 on, counted spend comes only from invoices with the writer's approve Decision Record under the invoice's own key (`InvoiceApproveRecord`). `SpendSnapshotService` still sums billing events with no such rule. It is dormant today: nothing enqueues `SpendSnapshotGeneration`. If anything starts enqueuing it, its figures would differ from the rollup, the evaluator and the financial tool, and would count spend that approval never recorded.
+
+**Fix direction**: either retire `SpendSnapshotService` and its job type, or route it through the shared counted reader (`FinanceBaseValues.ReadCountedInvoicesAsync`) and add it to the spend-reader ArchTest guard.
+
+**Entry-points**: `SpendSnapshotService` (grep `SpendSnapshotGeneration`); `src/server/api/Sprk.Bff.Api/Services/Finance/InvoiceApproveRecord.cs`; `projects/ebilling-r1/notes/165b-integrity-checks.md` §8.7.
+
+**Estimated effort**: 2-4 hours.
+**Blockers**: none.
+**Related**: task 165b-4, EB-D-208.
+
+---
+
+### DEF-061 — Record when a Procedure version was published (server-written publish stamp)
+
+| Field | Value |
+|---|---|
+| **Status** | Done: merged into work `0775d2a443` (branch head `340b6c53ad`, ontology-r1 approved). Applied on dev 2026-11-10: column created; `-Backfill` read 0 rows; `-Verify` PASS. The new BFF reaches dev with the next batch deploy. |
+| **Urgency** | next-round |
+| **Filed** | 2026-11-08 |
+| **Source** | ebilling-r1 task 085 pass 2, ontology-r1 ruling (c) on D-203 |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2640 |
+
+**Description**: whether a Retired `sprk_procedureversion` ever opened a window (D-203 (5a)/(9)) is inferred from a Published policy version under it. A version that governed only rate cards, was in force, and was then retired without a successor reads as never opened. Work in its dates is then "not applicable" instead of a gap, so its rates are not checked there, and it does not lock the Procedure's scope. Task 085 tried a Published rate card as the evidence, but a card can be Published while its version is still a Draft, so ontology-r1 ruled the card evidence out.
+
+**Fix direction**: `ProcedureService.PublishVersionAsync` stamps a new `sprk_publishedon` (date and time) on the version when it publishes. "Opened a window" becomes `From` not null AND the stamp not null. Backfill Active and Superseded versions; leave Retired versions on the policy-version evidence. This is a schema change on `sprk_procedureversion`, so it needs the owner's approval. Get ontology-r1's review for the resolver change.
+
+**Entry-points**: `src/server/api/Sprk.Bff.Api/Services/Signals/Billing/ProcedureResolver.cs` (`ProcedureVersionRow.OpenedAWindow`); `ProcedureService.PublishVersionAsync` and `ScopeLockedAsync`; `projects/ebilling-r1/notes/085-ratecard-procedure-version.md`.
+
+**Estimated effort**: 1 day plus the schema apply.
+**Blockers**: the owner's approval of the schema change.
+**Related**: task 085, D-203, 165b (server-written sources).
+
+---
+
+### DEF-060 — No writer populates the Signal firm reason shown to partners
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | next-round |
+| **Filed** | 2026-11-08 |
+| **Source** | ebilling-r1 task 130 prep (firm findings projection) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2637 |
+
+**Description**: task 026 created `sprk_signal.sprk_firmreason`: Memo 2000, field-secured, with a writer profile whose only member is the ontology writer identity. Nothing in `src` writes it. Task 130's firm findings projection reads it, as the BFF identity, to tell partners why a finding applies to their invoice. Until a writer exists, every finding a partner sees carries no firm-facing reason, only the rule name, plus the clause quote when the rule set is visible to firms. Task 130 shows the reason when present and omits it when null; it never substitutes other text.
+
+**Fix direction**: decide the source of the text, for example the rule's firm-facing description resolved when the Signal is created. Then set `sprk_firmreason` in the Signal writer path that the ontology writer runs, with ontology-r1 review because it owns the Signal writer.
+
+**Entry-points**: `projects/ebilling-r1/notes/026-signal-dr-line-subject.md`; `projects/ebilling-r1/tasks/130-firm-findings-projection.poml` (~:62); `src/server/api/Sprk.Bff.Api/Services/Signals/` (Signal creation through `OntologyWriterDataverseClient`).
+
+**Estimated effort**: 0.5-1 day, plus a decision on the text source.
+**Blockers**: the decision on the text source.
+**Related**: task 026 (D-95(2)), task 130.
+
+---
+
+### DEF-059 — Environment setup grants the BFF identity Decision Record read through a SpaarkeMaster role
+
+| Field | Value |
+|---|---|
+| **Status** | Done (2026-11-09) |
+| **Urgency** | next-round |
+| **Filed** | 2026-11-08 |
+| **Source** | ebilling-r1 task 165b-4 design note §7.8 / §7.12 (uac-r2 answer 4) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2635 |
+
+**Description**: from 165b-4, counted spend reads `sprk_decisionrecord` (the writer-created approve record) as the BFF application identity. No SpaarkeMaster role assigned to that identity at environment setup grants that read today. The read works only through whatever other role the identity holds in a given environment. If that role is removed or absent, the spend evaluator loses the read, and the result is unknown spend, so the evaluator fails closed. 165b-4 adds a live privilege check that fails closed or alerts. The durable fix is least privilege: environment setup assigns the BFF identity Spaarke Ontology Service, or a narrower Decision Record read role.
+
+**Fix direction**: add the role assignment to customer environment provisioning and to the customer deployment guide. Add a provisioning verify step that the BFF identity holds `prvReadsprk_DecisionRecord` through a SpaarkeMaster role. Proposed owner: customer-provisioning-orchestration-r1 (hand-off when they accept). **Owner decision needed (2026-11-08):** uac-r2 wants this grant (least privilege), and ontology-r1 does not. ontology-r1 says the live Global-depth test is enough, and a role assignment needs owner sign-off. 165b-4 ships the live test either way.
+
+**Entry-points**: `src/dataverse/solutions/SpaarkeMaster/**/Roles/Spaarke Ontology Service.xml`; `docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md`; the provisioning role-assignment step; `projects/ebilling-r1/notes/165b-integrity-checks.md` §7.8.
+
+**Fails without it**: in an environment where the BFF identity has no broader role, counted spend for every core record is unknown, and spend-based Signals stop evaluating.
+
+**Resolution (2026-11-09, in progress)**: new role `Spaarke Decision Record Reader` with one privilege, `prvReadsprk_DecisionRecord` at Global, in `src/dataverse/solutions/SpaarkeMaster/Roles/Spaarke Decision Record Reader.xml` (pinned by `FeatureRolePrivilegeGuardTests.ExactPrivilegeSets`), assigned to the BFF application users only by `scripts/ebilling/Set-BffDecisionRecordReaderRole.ps1` (`-Verify` exits 1 on drift); the live dev import and assignment follow under the owner's approval.
+
+**Done (2026-11-09)**: owner chose option C (a new role) in the ebilling session; uac-r2 reviewed the source and the script. Merged to `work/ebilling-r1` at `1678e1ae85`. Applied to dev: role-only carrier import through `Import-SolutionScoped.ps1`, added to SpaarkeMaster, carrier solution record deleted; `-Apply` removed the platform-added privileges outside the one declared privilege and assigned the role; `-Verify` exits 0. A smoke read through the dev BFF returned 200. Follow-ons owned elsewhere: customer-environment assignment in provisioning (customer-provisioning-orchestration-r1 accepted it; deployment guide §7.7 covers it until then). Still open, not part of this fix: retiring the BFF identity's broader roles, which needs least-privilege grants for its other app-only writes first (tracked with the unified-access-control-r2 work).
+
+---
+
+### DEF-058 — Only the billing recorder writes billing action codes to the Decision Record
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | next-round |
+| **Filed** | 2026-11-08 |
+| **Source** | ebilling-r1 task 165b-3 part B review (uac-r2, option (b)) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2634 |
+
+**Description**: only `BillingDecisionRecorder` should be able to write a Decision Record with a billing action code (`approve-invoice` and the other billing codes in `DecisionActionCatalog`). The writer's other paths (gate decisions, Signals commits) take an action code from their caller and do not refuse billing codes. ebilling's readers do not rely on this: since 165b-3 they match the billing decision key as well as the writer identity. This is defence in depth for any future reader that counts records by action code alone.
+
+**Fix direction**: the writer refuses a billing action code on every path except the billing recorder's, plus an ArchTest that the recorder is the only caller able to write one; test pair: a gate or commit naming `approve-invoice` is refused, the recorder's approve still writes. Owner: spaarke-ontology-platform-r1 (`DecisionRecordWriter`).
+
+**Entry-points**: `Services/Signals/DecisionRecordWriter.cs` (~:1133); `Services/Signals/DecisionActionCatalog.cs` (~:407); `BillingDecisionRecorder`.
+
+**Fails without it**: a reader that counts writer-created billing records by action code alone would count a record written by a non-billing path.
+
+---
+
+### DEF-057 — App-only write refusals on an update say "No owner could be resolved for a new <table>"
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | next-round |
+| **Filed** | 2026-11-07 |
+| **Source** | ebilling-r1 task 165d adversarial review (pre-existing; not introduced by 165d) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2631 |
+
+**Description**: when `RefuseAppOnlyWrite` refuses an UPDATE from the Update Record node or the playbook output mapping, the thrown `RecordOwnerUnresolvedException` message starts "No owner could be resolved for a new {table}, so it was not written". No record is being created, so the prefix misleads. It affects every refusal thrown from those two update sites. The refusal itself is correct.
+
+**Fix direction**: an update-specific message (or exception type) at the two update sites. Owner of `RefuseAppOnlyWrite` / `RecordOwnerUnresolvedException`: unified-access-control-r2.
+
+**Entry-points**: `Services/Dataverse/RecordOwnershipResolver.cs:1619`; `Services/Ai/Nodes/UpdateRecordNodeExecutor.cs` (~:329); the output-mapping update path.
+
+**Fails without it**: a configuration refusal on an update reads as an owner-resolution failure on a create, so whoever reads it looks in the wrong place.
+
+---
+
+### DEF-056 — A line-decision repeat cannot finish its Decision Record once the invoice leaves In Review
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | next-round |
+| **Filed** | 2026-11-06 |
+| **Source** | ebilling-r1 task 164a fix round (adversarial correctness review; pre-existing) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2614 |
+
+**Description**: a line decision that committed but did not finish its Decision Record (503 `incomplete`, record step) cannot be finished by a repeat once the invoice leaves In Review or while a correction is pending: the status and correction checks refuse the repeat before it recognises its own committed decision. Add line was fixed in 164a by looking up its derived row first; the line row stores no decision id, so the line-decision service cannot tell a repeat from a new decision on a decided line.
+
+**Fix direction** (design choice): a decision marker on the line row in an existing server-written column, or a lookup in the Decision Record store by the decision key, read before the status checks; then always finish the record (the recorder is idempotent).
+
+**Entry-points**: `Services/Finance/InvoiceLineDecisionService.cs` (~:554).
+
+**Fails without it**: the line decision keeps no Decision Record (FR-30, D-75).
+
+---
+
+### DEF-053 — FR-20 held-submission test is not anchored in a field-secured column
+
+| Field | Value |
+|---|---|
+| **Status** | Resolved 2026-11-07 by task 165a (`1864e1ed69`, merged into work in `79e2bf2178`): approve, the approval state view, reject and return decide the FR-20 hold from server-written sources (`InvoiceBlockedHold`). The pending-spend paths follow the same hold in task 165 item 4 (165b). |
+| **Urgency** | next-round (before any release beyond dev) |
+| **Filed** | 2026-11-05 |
+| **Source** | 114 adversarial review pass 1 (pre-existing; not introduced by 114) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2571 |
+
+**Description**: `HeldSubmissionConditions` decides "held" from `sprk_processingstatus` + `sprk_outcomereasoncode` only. Neither is field-secured. The firm hold and the Procedure hold (114, after its F1 fix) are anchored in the field-secured findings column instead.
+
+**Entry-points**: `Services/Finance/FinanceBaseValues.cs:179` and its approval / counted-spend consumers.
+
+**Fix direction**: anchor the FR-20 release on the findings `override` stamp (as 114 does), or field-secure both columns (live FLS step, owner go).
+
+**Fails without it**: the FR-20 hold can be lifted outside the Override path, with no Decision Record.
+
+---
+
+### DEF-052 — The job's document copy and from-email parts skip the per-file size limit
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | next-round |
+| **Filed** | 2026-11-03 |
+| **Source** | 118b adversarial review (finding 2, parity) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2553 |
+
+**Description**: `MaxSubmissionFileSizeMb` (default 25 MB, exposed as `MaxFileBytes`) is enforced on uploads (413) and imports. Two copy paths skip it: `SourceDocumentFileRead.ReadAsync` as called by the processing job, which buffers the whole file at about twice its size, and the from-email marked `.eml` parts. The 118b fix applies the limit to supporting documents at intake only.
+
+**Entry-points**: `Services/Finance/Submission/SourceDocumentFileRead.cs`; `InvoiceSubmissionProcessingJobHandler.cs`; the from-email part reader (094).
+
+**Fails without it**: a file far over the limit is held in memory by the API process, which also runs the job processor. Concurrent submissions multiply that, while an upload of the same file is refused.
+
+---
+
+### DEF-051 — Dates read day-for-month at high confidence get past the reliability gate
+
+| Field | Value |
+|---|---|
+| **Status** | Open, for 162 to decide |
+| **Urgency** | before go-live |
+| **Filed** | 2026-11-03 |
+| **Source** | ebilling-r1 task 161 offline baseline (notes/calibration-report.md section 7) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2547 |
+
+**Description**: on two non-US evaluation items (B-0002 and B-0021), the GA analyzer read the invoice date day-for-month at 0.992 confidence. No D-47 signal checks whether a date is plausible, so the seeded settings would trust both. The preview analyzer read them correctly. The proposed check: when the day and month are both 12 or less and the invoice is not in USD, cap the date below the threshold, or check it against the billing period and the line dates.
+
+**Entry-points**: `Services/Finance/Resolution/` (`CombinedConfidenceCalculator` and its signals); task 162.
+
+**Fails without it**: a misread invoice date is trusted, and can cause a rejection (for example a date outside the billing period or a guideline window). That breaks NFR-06 whenever the GA fallback analyzer is in use.
+
+---
+
 ### DEF-050 — Orphaned submission-marked .eml after a from-email re-attempt race
 
 | Field | Value |
@@ -242,6 +716,69 @@ Owner choice: (1) separate batches for secure invoices, owned by the Secure Reco
 **Suggested fix**: answer ContentConflict as transient instead of replacing, or include the content hash in the staged id.
 
 **Fails without it**: a rare double delivery over a source changed without a new row version is undone instead of retried.
+
+---
+### ISS-016 — WizardShell keeps header navigation and close active while a save is running
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | someday |
+| **Filed** | 2026-11-12 |
+| **Source** | ebilling-r1 task 084b adversarial review (finding 2) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2755 |
+
+**Description**: `WizardShell` disables only its footer buttons while `onFinish` runs (`isFinishing`). The ‹ › `nav` and the × / dismiss it passes to `SprkModal` stay active. After navigating mid-save, the earlier save's result shows under another item's title. After closing mid-save, an error from a multi-call save is never shown. 084b guards this locally in `WizardFrame`; the other WizardShell consumers (9 solutions) do not.
+
+**Entry-points**: `src/client/shared/Spaarke.UI.Components/src/components/Wizard/WizardShell.tsx` (`handleFinish` ~336, the `SprkModal` render ~548); `grep -rln WizardShell src/solutions --include=*.tsx`.
+
+**Suggested fix**: while `isFinishing`, disable `nav` and make `onClose`/dismiss no-ops; add a WizardShell test; then drop 084b's local guard.
+
+**Fails without it**: a save's outcome is shown against the wrong item, or not at all.
+
+**Estimated effort**: 2-3 hours. **Blockers**: none. **Related**: task 084b.
+
+---
+### ISS-015 — eBilling code pages are not linted (lint script without eslint, outside client-lint CI)
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | someday |
+| **Filed** | 2026-11-12 |
+| **Source** | ebilling-r1 task 084a quality gate (the Step 9.5 lint check could not run) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2743 |
+
+**Description**: `src/solutions/{InvoiceFiles,InvoiceReview,CreateInvoiceWizard,RuleReview,RecordProcedures}` declare `"lint": "eslint src --ext .ts,.tsx"` but none lists `eslint` as a dependency, so `npm run lint` fails. CI `client-lint.yml` path filters cover only the shared lib, DocumentUploadWizard, SpaarkeAi, LegalWorkspace, Reporting and SemanticSearch. These pages are linted nowhere.
+
+**Entry-points**: the five `package.json` files; `.github/workflows/client-lint.yml` lines 28-37 and the pull-request filter; `scripts/quality/client-lint/**`.
+
+**Suggested fix**: add the folders to client-lint's filters and package list; fix or ratchet the errors found.
+
+**Fails without it**: hooks-rule and unused-code errors in these pages reach master unchecked.
+
+**Estimated effort**: half a day plus errors found. **Blockers**: none. **Related**: #780, #1966.
+
+---
+### ISS-014 — Invoice Review does not notice the firm gate opening while firmNeeded
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | someday |
+| **Filed** | 2026-11-12 |
+| **Source** | ebilling-r1 task 095d0 review (Codex P2 fix `546296be5c` covers only the re-read case) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2730 |
+
+**Description**: while the approval state's `firmNeeded` is true, the Invoice Review page disables header Correct, Add line, the By-rule suggestions, the bulk Accept / Disallow and Accept all clean, and the wizard's Adjust step (EB-D-185 / EB-D-197). When the firm is set elsewhere (another tab, another user, the From-email firm step), the page does not notice: it stays disabled until something re-reads the review (an action, the Pending-line poll, which runs only while a line is Processing, or a reload). Nothing polls while `firmNeeded`.
+
+**Entry-points**: `src/solutions/InvoiceReview/src/components/InvoiceReviewPage.tsx` (the F-1 poll effect ~line 371; the `firmNeeded` prop ~226 / 292 and its uses ~759–897); the approval state's `firmNeeded` (`InvoiceApprovalService`, `GET .../invoices/{id}/approval`); `notes/095d0-firm-gate.md`.
+
+**Suggested fix**: while `firmNeeded` is true, re-read the approval state at the Pending-line interval and stop when it clears (then re-read the review once); or a Refresh action next to the firm-needed message.
+
+**Fails without it**: a reviewer waiting on the page after the firm was set sees every line action disabled until a reload. No wrong data: the server refuses writes with 409 `firm_missing` while the gate is closed.
+
+**Estimated effort**: 2–4 hours including a jest test. **Blockers**: none.
 
 ---
 ### ISS-001 — InvoiceLiveFactResolver reads non-existent sprk_invoice columns (sprk_total, sprk_status)
@@ -1003,7 +1540,7 @@ Each restamps afterwards, but none refuses any of these:
 
 | Field | Value |
 |---|---|
-| **Status** | Open; fix decided (owner, ontology D-172 / ebilling D-137); fixed by tasks 080 (schema) and 085 (code) |
+| **Status** | Superseded by EB-D-148: cards keyed to Procedure Version (085); live after 079 |
 | **Urgency** | medium (wrong rates applied to a whole firm's invoices) |
 | **Filed** | 2026-10-20 |
 | **Source** | rule-set scope design for #2129 (`notes/rule-set-scope-design.md`); relationships checked live on dev |
@@ -1251,12 +1788,14 @@ K1 (ontology): a D-96 re-file across core records withholds line Duplicates perm
 
 | Field | Value |
 |---|---|
-| **Status** | Open: known limit (uac-r2 090 round-2 K2); fix before StoredFileReconcileJob is enabled anywhere |
+| **Status** | Fixed, merged into work at `1c581b33ae` (owner option B 2026-11-05; 1 adversarial pass, F1 fixed; filtered 6232/0). Not Closed until it is on master AND the L6 live check (Defender rescans an overwrite; notes 090 §14.3) passes on dev. It must be Closed before StoredFileReconcileJob is enabled anywhere |
 | **Urgency** | medium |
 | **Filed** | 2026-10-23 |
 | **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2296 |
 
 **Description**: Staging that reuses an existing blob doesn't write it, so its ETag is unchanged (StoredFileReconcileJob.cs:446-453, StoredFileService.cs:342). If a deterministic-id create is retried more than 24 h after staging, reconcile deletes the orphan, the retry reuses it, and the flip answers BlobMissing: the row stays not servable, with a refusal and an alert. DeleteStagedBlobAsync (null ifMatch) has the same gap. Fix: touch metadata on reuse; carry the ETag in StagedBlob and pin DeleteStagedBlobAsync.
+
+**Fix on branch (option B, owner 2026-11-05)**: the prescribed "touch metadata" was rejected: any ETag-changing metadata call moves Last-Modified, Defender does not rescan metadata-only changes, so the scan rule (`StoredFileBlobs.ClassifyScan`: scan time >= Last-Modified) would hold the blob Pending for good. Instead, on reuse `StoredFileBlobs.StageAsync` rewrites the same verified bytes under `If-Match` on the existing blob's ETag (new `BlobGateway.OverwriteIfMatchAsync`): the ETag and Last-Modified move and Defender scans again, so a delete judged on the old ETag gets 412. `StagedBlob` carries the ETag; `DeleteStagedBlobAsync` and `DeleteStagedAsync` are pinned (412 = kept). `DeleteBlobForUndoAsync` is not pinned (its judgment is the row, not the blob). Details, evidence and live items: `notes/090-file-store-service.md` section 14.
 
 ---
 ### DEF-045 — Stored file: parent-gone pass doesn't check the blob path's parent
@@ -1338,5 +1877,126 @@ K1 (ontology): a D-96 re-file across core records withholds line Duplicates perm
 **Entry-points**: `Services/Finance/Submission/SubmissionCommitGate.cs` (`RunAsync` step 6, `CompensateAsync`); `Services/Finance/Files/StoredFileService.cs` (`ReadRowsForInvoiceAsync`).
 
 **Fails without it**: after O-14 / 150 a Servable export file makes step 6 skip a new copy's re-run (a re-filed copy is served), and an undo deletes files that are not the submission's.
+
+---
+
+### DEF-055 — A failed job is redelivered without delay, so its delivery budget is spent at once (all handlers)
+
+| Field | Value |
+|---|---|
+| **Status** | Open: found in the task 095d-2b-1 fix round (adversarial access review); predates the task |
+| **Urgency** | next-round |
+| **Filed** | 2026-11-06 |
+| **Source** | ebilling-r1 task 095d-2b-1 fix round |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2600 |
+
+*(ID is provisional; renumber on merge.)*
+
+**Description**: `ServiceBusJobProcessor` abandons a message whose handler returned Failure, and the broker redelivers it at once. The five deliveries (`JobContract.MaxDeliveryCount`) therefore happen within moments, and a transient fault that lasts minutes dead-letters the message before it clears. It applies to every `IJobHandler`. Fix: complete the message and re-send it with a scheduled enqueue time (back-off by delivery count), keeping the final-delivery rule.
+
+**Entry-points**: `Services/Jobs/ServiceBusJobProcessor.cs` (Failure outcome: abandon); `Services/Jobs/JobContract.cs` (`DeliveryCount`, `IsFinalDelivery`); `Services/Jobs/JobSubmissionService.cs`.
+
+**Fails without it**: a transient dependency outage longer than a few seconds dead-letters the eBilling re-run job (and any other job whose handler returns Failure on a transient condition), leaving the invoice held until an operator replays it.
+
+---
+
+### DEF-054 — No operator path queues the Set firm rules re-run directly
+
+| Field | Value |
+|---|---|
+| **Status** | Open: found in the task 095d-2b-1 fix round (adversarial access review) |
+| **Urgency** | next-round |
+| **Filed** | 2026-11-06 |
+| **Source** | ebilling-r1 task 095d-2b-1 fix round |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2601 |
+
+*(ID is provisional; renumber on merge.)*
+
+**Description**: the re-run is queued only by the Set firm request (a first apply, or a repeat that names the same firm and is accepted). When that enqueue is lost (503 `incomplete`, failedStep `rerun`) and the repeat then answers 409 `changed` or `no_submission`, or when the re-run was refused and its cause is fixed, nothing queues it again and the invoice stays held. Fix: an operator-only path (script or authenticated admin endpoint) that enqueues the re-run job for a submission whose stored `rulesRerun` is pending, from the stored decision id. The job is idempotent (the re-run commits once), so a second enqueue is safe.
+
+**Update (task 095d-2b-2 re-check, 2026-11-07)**: a repeat Set firm on a committed row (rules completed, `assignFirmRerun.state` not done) now queues the re-run job again, so a dead-lettered after-commit step can be finished from the same route (F4). A permanent Signal-step refusal after the commit (`Refused` in the job's after-commit steps) still leaves the row at state `committed`: decisions on the invoice stay refused as re-run pending until the data is repaired and the job is replayed, and the job's log now says so (K2). Check (g) reports such a row as "re-run committed, after-commit steps incomplete" (K3).
+
+**Entry-points**: `Services/Finance/InvoiceAssignFirmService.cs` (`QueueRerunAsync`, `JudgeRepeatAsync`); `Services/Ai/Jobs/InvoiceSubmissionRerunJobHandler.cs` (`BuildJob`); `scripts/ebilling/Set-EbillingInvoiceFirmHoldColumn.ps1` (check (g)).
+
+**Fails without it**: check (g) reports "recorded, re-run not done" with no supported action that clears it in those cases.
+
+---
+
+### DEF-067 — External callers: rows whose child chain exceeds N hops are withheld (N = 5)
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | next-round |
+| **Filed** | 2026-11-10 |
+| **Source** | ebilling-r1 task 130-0 F3b fix round 1; owner ruling EB-D-215 (uac-r2 condition C4) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2667 |
+
+*(ID is provisional; renumber on merge.)*
+
+**Description**: rows whose child-to-child chain exceeds 5 hops are withheld from external callers (fail closed). On a list, `truncated` is set. On tables with more than one parent edge this can withhold rows that are not invoice-linked, because any one undecidable edge makes the row undecidable. A service request in the chain counts as a hop. Each such row logs one `EXT-INVOICE-WALK-PAST-BOUND` warning (table, row id, hops walked, plane).
+
+**Fix direction**: the deepest chain on dev is measured by a follow-up read-only query (uac-r2 condition C3, not a gate). If any firm-visible row exceeds the bound, raise `InvoiceLinks.MaxWalkHops` to that depth plus 1.
+
+**Entry-points**: `src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/InvoiceLinks.cs` (`MaxWalkHops`, `StepAsync`); `projects/ebilling-r1/notes/130-0-external-invoice-firm-rule.md` ("Fix round 1").
+
+**Fails without it**: a row that has no invoice at all is hidden from a caller who should see it, if its chain is longer than the bound.
+
+---
+
+### DEF-068 — Client resolver: `PolymorphicResolverService.ts` warns where it could refuse; consider refusing
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | someday |
+| **Filed** | 2026-11-10 |
+| **Source** | ebilling-r1 task 130-0 F3b fix round 1 review |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2668 |
+
+*(ID is provisional; renumber on merge.)*
+
+**Description**: `PolymorphicResolverService.ts` (around lines 637-642) logs a warning where it could refuse the operation. Consider refusing instead.
+
+**Fix direction**: return a refusal at that point and cover it with a test.
+
+**Entry-points**: `src/client/shared/Spaarke.UI.Components/src/services/PolymorphicResolverService.ts` (around lines 637-645, the "No nav-prop" warning).
+
+**Fails without it**: the call carries on after the warning instead of stopping.
+
+---
+
+### ISS-022 — Invoice indexing job selected the removed `sprk_invoice.sprk_document`
+
+| Field | Value |
+|---|---|
+| **Status** | In Progress (fix d7f36ddd6d on work; PR to master next) |
+| **Urgency** | now |
+| **Filed** | 2026-11-15, by uac-r2 (its 30-minute gate on dev BFF aa7d6345f3) |
+| **Source** | `InvoiceIndexingJobHandler` faulted on dev at 18:51:58Z |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2844 |
+
+**Description**
+
+Task 094 (merged 2026-10-27) removed `sprk_document` from the invoice, but `InvoiceIndexDocument.InvoiceColumns` still named it. Dataverse refuses a query that names a column the table does not have, so every invoice re-index has failed since then and invoice search went stale.
+
+**Entry-points**
+
+- `src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/InvoiceIndexDocument.cs` (`InvoiceColumns`, `Read`, `ToSearchDocument`)
+
+**Fix**
+
+- Drop the column, and write `documentId` as null so a Merge clears old values. Nothing reads that field.
+- Regression test: `tests/integration/regression/Issue2844_InvoiceIndexRemovedDocumentColumnTests.cs`, which fails on the old code.
+- Guard: `tests/Spaarke.ArchTests/InvoiceIndexColumnsGuardTests.cs`. Every index column must exist in the SpaarkeMaster `Entity.xml`, with must-fire and must-not-fire controls.
+
+**After deploy**
+
+Re-index every `sprk_invoice` with modifiedon ≥ 2026-10-27 through the normal indexing job. This writes to the dev search index, so it needs the owner's go here. Report the count and the result to uac-r2.
+
+**Known limits**
+
+- K2: the guard checks the exported solution source, not live dev.
+- K3: `documentId` is now always null. The index field and `InvoiceSearchDocument.DocumentId` could later be removed with a schema change.
 
 ---

@@ -276,7 +276,9 @@ public sealed class InvoiceIndexingJobHandlerTests
         doc["invoiceDate"].Should().Be(new DateTimeOffset(2026, 9, 30, 0, 0, 0, TimeSpan.Zero));
         doc["billingPeriodStart"].Should().Be(new DateTimeOffset(2026, 9, 1, 0, 0, 0, TimeSpan.Zero));
         doc["billingPeriodEnd"].Should().Be(new DateTimeOffset(2026, 9, 30, 0, 0, 0, TimeSpan.Zero));
-        doc["documentId"].Should().Be(DocumentId.ToString("D"));
+        // #2844: the invoice links no Document (task 094); a stale value on the row is never read, and the field is written null.
+        doc.ContainsKey("documentId").Should().BeTrue();
+        doc["documentId"].Should().BeNull();
         var content = (string)doc["content"];
         content.Should().Contain("Acme Counsel LLP").And.Contain("project Project Orion").And.Contain("Status: InReview")
             .And.Contain("Review the merger agreement").And.Contain("Call with client").And.Contain("Court filing fee")

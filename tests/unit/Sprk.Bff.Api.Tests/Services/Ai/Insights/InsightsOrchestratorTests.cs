@@ -1170,6 +1170,7 @@ public class InsightsOrchestratorTests
             new Mock<Sprk.Bff.Api.Services.Ai.Context.ICallerSystemUserResolver>(MockBehavior.Strict).Object,
             new Mock<Sprk.Bff.Api.Services.Identity.ISystemUserIdentityResolver>(MockBehavior.Strict).Object,
             Sprk.Bff.Api.Tests.Services.Ai.Handlers.DocumentNarrowingReads.NeverCalled,
+            Sprk.Bff.Api.Tests.TestInfrastructure.ExternalVisibilitySeams.Throws,
             NullLogger<RetrievalAccessTrim>.Instance);
         _ragServiceMock
             .Setup(r => r.SearchAsync(It.IsAny<string>(), It.IsAny<RagSearchOptions>(), It.IsAny<CancellationToken>()))

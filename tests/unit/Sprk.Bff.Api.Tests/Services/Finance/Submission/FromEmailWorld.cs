@@ -111,6 +111,13 @@ internal sealed class FromEmailWorld
                 Files.TryGetValue((drive, item), out var bytes) ? new MemoryStream(bytes) : null);
     }
 
+    /// <summary>
+    /// Task 095c-2: the tracking-scope phase the intake reads (<see cref="ITrackingNumberAllocator.NumbersSubmissionsWithoutFirmAsync"/>):
+    /// true is P2 (the scope key Active), false is P0 or P1. Unset, the allocator double answers false (P0), as an environment before the script.
+    /// </summary>
+    public void ScopeKeyActive(bool active = true) =>
+        Intake.Allocator.Setup(a => a.NumbersSubmissionsWithoutFirmAsync(It.IsAny<CancellationToken>())).ReturnsAsync(active);
+
     /// <summary>SPE, read-only here (Strict: any write fails the test).</summary>
     public readonly Mock<SpeFileStore> Spe;
 
@@ -276,6 +283,7 @@ internal sealed class FromEmailWorld
         public bool Available = true;
         public readonly List<FromEmailSubmitInput> Submits = new();
         public readonly List<(Guid Submission, Guid Job)> Requeues = new();
+        public readonly List<string?> RequeueNotes = new();
         /// <summary>What each attempt recorded about its source (the .eml and the Invoice part's SHA-256).</summary>
         public readonly Dictionary<Guid, FromEmailAttemptSource> Sources = new();
 
@@ -304,7 +312,8 @@ internal sealed class FromEmailWorld
             {
                 ["sprk_processingstatus"] = new OptionSetValue((int)InvoiceSubmissionStatus.Received),
                 [TrackingNumberAllocator.TrackingNumberColumn] = tracking,
-                [TrackingNumberAllocator.FirmColumn] = new EntityReference("sprk_organization", input.FirmId),
+                // Task 095c-2: a submission with no firm has no firm on its row.
+                [TrackingNumberAllocator.FirmColumn] = input.FirmId is { } firm ? new EntityReference("sprk_organization", firm) : null,
                 [TrackingNumberAllocator.FirmInvoiceNumberColumn] = input.FirmInvoiceNumber,
                 [RecordCreatorPerson.Column] = new EntityReference("systemuser", input.CallerSystemUserId),
             };
@@ -313,11 +322,12 @@ internal sealed class FromEmailWorld
             return Task.FromResult(FromEmailSubmitResult.Received(tracking));
         }
 
-        public Task<bool> RequeueAsync(Guid submissionId, Guid jobId, string? correlationId, CancellationToken ct)
+        public Task<bool> RequeueAsync(Guid submissionId, Guid jobId, string? correlationId, string? correctionNote, CancellationToken ct)
         {
             lock (Requeues)
             {
                 Requeues.Add((submissionId, jobId));
+                RequeueNotes.Add(correctionNote);
             }
 
             return Task.FromResult(Requeued);

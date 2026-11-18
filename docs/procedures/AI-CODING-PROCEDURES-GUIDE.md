@@ -357,9 +357,7 @@ Or specifically: `/bff-deploy`
 
 ### Scenario: I need to deploy the external workspace SPA
 
-```
-/power-page-deploy
-```
+Run the `.github/workflows/deploy-external-spa.yml` workflow (manual `workflow_dispatch`; Azure Static Web Apps). See `src/client/external-spa/README.md` § Deployment. The Power Pages deploy skill is retired.
 
 ### Scenario: I want to verify a deployment worked
 

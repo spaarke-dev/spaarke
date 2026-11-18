@@ -11,7 +11,8 @@
 // can change — users in the business unit, members of the owner team, a business unit under the wrong parent, a root
 // default team that reaches the secure unit by depth, a field-security writer nobody named (on sprk_issecure or on
 // an identity-binding column), and (T259, §6 T1/T3) a customer business unit that is missing or not under the root, or a
-// BFF application user outside it. Those are
+// BFF application user outside it, and (task 267, S24) an ontology writer unit that is missing, misplaced, shared or not
+// the writer's, and (S25) a "Spaarke Basic User" copy that would reach the Secure Record unit. Those are
 // QuarantineRequired: a retry cannot fix them, and the handler never moves a user, a team member or a business unit.
 // -----------------------------------------------------------------------------
 
@@ -141,6 +142,53 @@ public static class SecureRecordSetupRejectionCodes
     /// </summary>
     public const string IdentityLinkLockOtherWriter = "secure_setup.identity_link_lock_other_writer";
 
+    // ---- Invoice amounts and firm (ebilling-r1 task 166, owner decision EB-D-200) ----
+
+    /// <summary>
+    /// S26: the shipped lock on a column of <see cref="SecureRecordSetupProcedure.InvoiceMoneyColumns"/> is incomplete — the
+    /// column absent or not secured, or the BFF-managed Readers (read 4) / Writers (4/4/4) grant missing (Resumable: import a
+    /// SpaarkeMaster release ABOVE 1.3.0.0 carrying ebilling task 166, H6 — the published 1.3.0.0 predates it — or, only where
+    /// H7b completed before, run scripts/ebilling/Set-EbillingInvoiceMoneyFieldSecurity.ps1 on the environment).
+    /// </summary>
+    public const string InvoiceMoneyLockIncomplete = "secure_setup.invoice_money_lock_incomplete";
+
+    /// <summary>
+    /// S26: a profile other than "Spaarke BFF-Managed Field Writers" (and System Administrator) may create or update an
+    /// invoice amount or the firm — the Readers profile included: every default team is its member (QuarantineRequired).
+    /// </summary>
+    public const string InvoiceMoneyLockOtherWriter = "secure_setup.invoice_money_lock_other_writer";
+
+    // ---- Invoice-family links (unified-access-control-r2 #2799; task 270) ----
+
+    /// <summary>
+    /// S27: the shipped lock on a column of <see cref="SecureRecordSetupProcedure.InvoiceFamilyLinkColumns"/> is incomplete —
+    /// the column absent or not secured, or the BFF-managed Readers (read 4) / Writers (4/4/4) grant missing (Resumable: import a
+    /// SpaarkeMaster release that carries the #2799 lock — 1.3.1.0 and earlier do not — or, only where H7b completed before,
+    /// run scripts/Set-InvoiceFamilyFieldSecurity.ps1 on the environment).
+    /// </summary>
+    public const string InvoiceFamilyLockIncomplete = "secure_setup.invoice_family_lock_incomplete";
+
+    /// <summary>
+    /// S27: a profile other than "Spaarke BFF-Managed Field Writers" (and System Administrator) may create or update an
+    /// invoice-family link — the Readers profile included (QuarantineRequired).
+    /// </summary>
+    public const string InvoiceFamilyLockOtherWriter = "secure_setup.invoice_family_lock_other_writer";
+
+    // ---- Message-access columns (field-mapping-server-write-path-r1 task 054b; task 270) ----
+
+    /// <summary>
+    /// S28: the shipped lock on a column of <see cref="SecureRecordSetupProcedure.MessageAccessColumns"/> (or on the direct
+    /// recipient, where it exists) is incomplete (Resumable: import SpaarkeMaster 1.3.1.0 or later, or, only where the direct
+    /// recipient exists and H7b completed before, run scripts/Set-ThreadFlagFieldSecurity.ps1 on the environment).
+    /// </summary>
+    public const string MessageAccessLockIncomplete = "secure_setup.message_access_lock_incomplete";
+
+    /// <summary>
+    /// S28: a profile other than "Spaarke BFF-Managed Field Writers" (and System Administrator) may create or update a
+    /// message-access column — the Readers profile included (QuarantineRequired).
+    /// </summary>
+    public const string MessageAccessLockOtherWriter = "secure_setup.message_access_lock_other_writer";
+
     /// <summary>
     /// S19 (ISS-020 / #1565): <c>contact.sprk_standinggrant</c> is not secured, or the "Standing Grant Administrators" profile
     /// does not grant read/create/update (4/4/4) on it (Resumable: import SpaarkeMaster, H6).
@@ -267,13 +315,48 @@ public static class SecureRecordSetupRejectionCodes
     public const string OntologyWriterIsBffIdentity = "secure_setup.ontology_writer_is_bff_identity";
 
     /// <summary>
-    /// S24: the ontology writer's application user is not in the customer's business unit, or does not exist
-    /// (QuarantineRequired: moving a user strips its roles - an owner decision).
+    /// S24 (task 267): the ontology writer's application user is not in its own business unit (H10's
+    /// <c>ontologyWriterBusinessUnitId</c>), or does not exist (QuarantineRequired: moving a user strips its roles - H10
+    /// moves the writer, H7b never does).
     /// </summary>
-    public const string OntologyWriterOutsideCustomerBusinessUnit = "secure_setup.ontology_writer_outside_customer_bu";
+    public const string OntologyWriterOutsideItsBusinessUnit = "secure_setup.ontology_writer_outside_its_bu";
 
     /// <summary>
-    /// S24: the ontology writer's application user holds a role other than the customer-unit copy of "Spaarke Ontology
+    /// S24 (task 267): the ontology writer's business unit (H10's <c>ontologyWriterBusinessUnitId</c>) is not known - a run
+    /// whose H10 completed before task 267 never recorded it (Resumable: start a new run) - or Dataverse reports other than
+    /// one default team for it (Resumable).
+    /// </summary>
+    public const string OntologyWriterBusinessUnitUnresolved = "secure_setup.ontology_writer_bu_unresolved";
+
+    /// <summary>S24 (task 267): the ontology writer's business unit H10 recorded does not exist (QuarantineRequired).</summary>
+    public const string OntologyWriterBusinessUnitMissing = "secure_setup.ontology_writer_bu_missing";
+
+    /// <summary>
+    /// S24 (task 267): the ontology writer's business unit is not a DIRECT child of the root (QuarantineRequired:
+    /// re-parenting a unit is an owner decision).
+    /// </summary>
+    public const string OntologyWriterBusinessUnitWrongParent = "secure_setup.ontology_writer_bu_wrong_parent";
+
+    /// <summary>
+    /// S24 (task 267): the ontology writer's business unit IS the customer's unit or the Secure Record unit (compared by id)
+    /// (QuarantineRequired: the writer must be alone in its own unit).
+    /// </summary>
+    public const string OntologyWriterBusinessUnitIsReserved = "secure_setup.ontology_writer_bu_is_reserved";
+
+    /// <summary>
+    /// S24 (task 267): the ontology writer's business unit holds a user other than the writer (QuarantineRequired: moving
+    /// users is an owner decision).
+    /// </summary>
+    public const string OntologyWriterBusinessUnitHasOtherUsers = "secure_setup.ontology_writer_bu_has_other_users";
+
+    /// <summary>
+    /// S24 (task 267): "Spaarke Ontology Service" does not resolve to exactly one copy in the ontology writer's unit
+    /// (Resumable: Dataverse copies a root role into a new unit asynchronously; or import SpaarkeMaster, H6).
+    /// </summary>
+    public const string OntologyWriterRoleUnresolved = "secure_setup.ontology_writer_role_unresolved";
+
+    /// <summary>
+    /// S24: the ontology writer's application user holds a role other than the writer-unit copy of "Spaarke Ontology
     /// Service" (QuarantineRequired: nothing is removed here).
     /// </summary>
     public const string OntologyWriterHoldsOtherRole = "secure_setup.ontology_writer_holds_other_role";
@@ -297,10 +380,27 @@ public static class SecureRecordSetupRejectionCodes
     public const string OntologyWriterTeamAccess = "secure_setup.ontology_writer_team_access";
 
     /// <summary>
-    /// S24: the ontology writer is a direct member of a field-security profile other than the two ontology-writer profiles
-    /// (QuarantineRequired: nothing is removed here).
+    /// S24: the ontology writer is a direct member of a field-security profile other than the two ontology-writer profiles,
+    /// or (task 267) its unit's default team is a member of ANY field-security profile (QuarantineRequired: nothing is
+    /// removed here).
     /// </summary>
     public const string OntologyWriterHoldsOtherProfile = "secure_setup.ontology_writer_holds_other_profile";
+
+    // ---- S25 (task 267, #2618): "Spaarke Basic User" on the customer unit's default team ----
+
+    /// <summary>
+    /// S25: the customer unit reports other than one default team, or "Spaarke Basic User" does not resolve to exactly one
+    /// copy in the customer unit (Resumable: it ships in SpaarkeMaster - import it, H6 - and Dataverse copies a root role
+    /// into a unit asynchronously).
+    /// </summary>
+    public const string BasicUserRoleUnresolved = "secure_setup.basic_user_role_unresolved";
+
+    /// <summary>
+    /// S25: the customer-unit copy of "Spaarke Basic User" holds Read at Global depth on a table of
+    /// config/secure-record-owner-role.json - every customer user would read every secure record (QuarantineRequired: the
+    /// role ships in SpaarkeMaster; changing it is an owner decision).
+    /// </summary>
+    public const string BasicUserRoleReachesSecureUnit = "secure_setup.basic_user_role_reaches_secure_unit";
 
     /// <summary>
     /// S24: the re-read after the writes shows the ontology writer without its role or a profile membership (Resumable: a

@@ -105,6 +105,10 @@ public class GrantLifecycleCharacterizationTests
                 ContactId = contactId,
                 OrganizationId = organizationId,
                 ProjectId = projectId,
+                MatterId = null,
+                WorkAssignmentId = null,
+                GrantedBySystemUserId = null,
+                GrantedByContactId = null,
                 AccessLevel = level,
                 ExpiresDate = expiresDate,
                 StateCode = 0
@@ -141,6 +145,13 @@ public class GrantLifecycleCharacterizationTests
                 });
 
             mock.Setup(c => c.QueryAsync<ExternalGrantRow>(
+                    GrantEntitySet, It.IsAny<string>(), It.IsAny<string>(),
+                    It.IsAny<int?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((string _, string? filter, string? _, int? _, int? _, CancellationToken _) =>
+                    Match(filter).ToList());
+
+            // The grant core's root-row read (the revoke's remaining-grants overlap check) is strict (#2852).
+            mock.Setup(c => c.QueryStrictAsync<ExternalGrantRow>(
                     GrantEntitySet, It.IsAny<string>(), It.IsAny<string>(),
                     It.IsAny<int?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync((string _, string? filter, string? _, int? _, int? _, CancellationToken _) =>
@@ -221,6 +232,10 @@ public class GrantLifecycleCharacterizationTests
                 ContactId = BoundId(payload, "sprk_Contact@odata.bind"),
                 OrganizationId = BoundId(payload, "sprk_Organization@odata.bind"),
                 ProjectId = BoundId(payload, "sprk_Project@odata.bind"),
+                MatterId = BoundId(payload, "sprk_Matter@odata.bind"),
+                WorkAssignmentId = BoundId(payload, "sprk_WorkAssignment@odata.bind"),
+                GrantedBySystemUserId = BoundId(payload, "sprk_GrantedBy@odata.bind"),
+                GrantedByContactId = BoundId(payload, $"{ExternalGrantLifecycle.GrantedByContactNavigationProperty}@odata.bind"),
                 AccessLevel = payload.TryGetValue("sprk_accesslevel", out var lvl) ? (int?)lvl : null,
                 ExpiresDate = payload.TryGetValue("sprk_expiresdate", out var exp) && exp is string expText
                     ? DateOnly.Parse(expText)
@@ -689,6 +704,8 @@ public class GrantLifecycleCharacterizationTests
         {
             Id = Guid.NewGuid(),
             ProjectId = ProjectId,
+            MatterId = null,
+            WorkAssignmentId = null,
             ContactId = ContactId,
             OrganizationId = OrganizationId,
             StateCode = 0

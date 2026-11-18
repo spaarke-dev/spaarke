@@ -78,7 +78,7 @@ src/shared/sdap-client/             ← MOVE HERE (in src/ repo)
 
 ### 📘 Read These Documents in Order
 
-#### 1. [PACKAGE-OVERVIEW.md](./PACKAGE-OVERVIEW.md) - **START HERE**
+#### 1. [PACKAGE-OVERVIEW.md](./SDAP-CLIENT-V2-PACKAGE-OVERVIEW.md) - **START HERE**
 **Read this if:** You need to understand what this package is, why it exists, and how it relates to the platform
 
 **Contents:**
@@ -96,7 +96,7 @@ src/shared/sdap-client/             ← MOVE HERE (in src/ repo)
 
 ---
 
-#### 2. [INTEGRATION-GUIDE.md](./INTEGRATION-GUIDE.md)
+#### 2. [INTEGRATION-GUIDE.md](./SDAP-CLIENT-V2-INTEGRATION-GUIDE.md)
 **Read this if:** You're ready to integrate the package into a platform (PCF, Office.js, web app)
 
 **Contents:**
@@ -111,7 +111,7 @@ src/shared/sdap-client/             ← MOVE HERE (in src/ repo)
 
 ---
 
-#### 3. [MIGRATION-PLAN.md](./MIGRATION-PLAN.md)
+#### 3. [MIGRATION-PLAN.md](./SDAP-CLIENT-V2-MIGRATION-PLAN.md)
 **Read this if:** You're migrating Universal Quick Create or SpeFileViewer to use the shared package
 
 **Contents:**
@@ -126,7 +126,7 @@ src/shared/sdap-client/             ← MOVE HERE (in src/ repo)
 
 ---
 
-#### 4. [FUTURE-PROJECT-BRIEFING.md](./FUTURE-PROJECT-BRIEFING.md) - **YOU ARE HERE**
+#### 4. [FUTURE-PROJECT-BRIEFING.md](./SDAP-CLIENT-V2-FUTURE-PROJECT-BRIEFING.md) - **YOU ARE HERE**
 **Read this if:** You're picking up this project months/years later and need a quick overview
 
 **Contents:**
@@ -228,7 +228,7 @@ git push origin master
 
 **Estimated Effort:** 1 week (includes testing)
 
-**See:** [MIGRATION-PLAN.md](./MIGRATION-PLAN.md) for detailed steps
+**See:** [MIGRATION-PLAN.md](./SDAP-CLIENT-V2-MIGRATION-PLAN.md) for detailed steps
 
 ---
 
@@ -451,9 +451,9 @@ class DeleteOperation {
 **If you're picking up this project and have questions:**
 
 1. **Read the docs first:**
-   - Start with [PACKAGE-OVERVIEW.md](./PACKAGE-OVERVIEW.md)
-   - Check [INTEGRATION-GUIDE.md](./INTEGRATION-GUIDE.md) for your platform
-   - Review [MIGRATION-PLAN.md](./MIGRATION-PLAN.md) for migration steps
+   - Start with [PACKAGE-OVERVIEW.md](./SDAP-CLIENT-V2-PACKAGE-OVERVIEW.md)
+   - Check [INTEGRATION-GUIDE.md](./SDAP-CLIENT-V2-INTEGRATION-GUIDE.md) for your platform
+   - Review [MIGRATION-PLAN.md](./SDAP-CLIENT-V2-MIGRATION-PLAN.md) for migration steps
 
 2. **Check the code:**
    - Source code is well-commented

@@ -21,7 +21,7 @@ TipTap-based ComposeWorkspace + ComposeEditor + ComposeToolbar widgets for the S
 - **mammoth ^1.8.0** (BSD-2-Clause) — DOCX → HTML → TipTap import bridge
 - **docx ^9.0.3** (MIT) — TipTap JSON → DOCX export bridge
 - **@spaarke/auth** (dependency — provides `authenticatedFetch` for BFF calls)
-- **@spaarke/document-operations** (dependency — Open-in-Word handoff per FR-12)
+- **@spaarke/ui-components** (dependency — `useDocumentActions` for the Open-in-Word handoff per FR-12, plus shared dialogs)
 - TypeScript 5.3+ strict mode
 - NOT PCF-safe (React 19)
 

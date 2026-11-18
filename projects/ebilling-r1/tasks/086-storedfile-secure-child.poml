@@ -4,7 +4,7 @@
     <title>Invoice Stored Files join the secure family as a leaf child of sprk_invoice: lineage, role row, creator person, census</title>
     <phase>3 Rules (WP3) — Procedures and files (EB-D-148), wave W3-D</phase>
     <gate>088 applied on dev (sprk_storedfile and its sprk_createdbyperson live); 090 merged (the row builder); 089 merged first (it edits the same uac-r2 files and puts sprk_storedfile on the NFR-05 list); owner OK for the live probe and the two -Apply runs; uac-r2 reviews every edit to its files</gate>
-    <status>not-started</status>
+    <status>in-progress</status>
     <rigor>FULL</rigor>
     <rigor-reason>Record ownership of invoice files on Secure records through uac-r2's lineage, role, census and creator-person guards, plus live role and schema writes on dev: tenant-isolation code.</rigor-reason>
     <model-tier>opus</model-tier>

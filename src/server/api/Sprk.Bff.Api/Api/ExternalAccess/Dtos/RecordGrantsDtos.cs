@@ -40,6 +40,10 @@ public sealed record RecordGrantsResponse(Guid RecordId, IReadOnlyList<RecordGra
 /// The row confers no access today: <c>ExternalParticipationService.ConfersAccessOn</c> is false (the read path's own rule —
 /// the expiry date itself still confers, and an unbounded row confers nothing since task 107).
 /// </param>
+/// <param name="PairedWith">
+/// Task 193 G2: the internal user's share this grant is PAIRED with (kind <c>share</c>, their <c>systemUserId</c> — an id
+/// only, never a name, email or UPN); absent on a deliberate grant, and when the pairing could not be read.
+/// </param>
 public sealed record RecordGrant(
     Guid AccessRecordId,
     Guid? ContactId,
@@ -51,4 +55,6 @@ public sealed record RecordGrant(
     string? GrantedByContactName,
     DateOnly? GrantedDate,
     DateOnly? ExpiresDate,
-    bool IsExpired);
+    bool IsExpired,
+    [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    RecordAccessPairing? PairedWith = null);

@@ -25,8 +25,8 @@ namespace Sprk.Bff.Api.Services.Signals;
 //     did the same for WorkforcePrincipalStrategy.ResolveAsync). The grant notifier cannot be
 //     extended for this: it answers "who to tell about a grant on a root" and sends its own messages; this answers "may this one
 //     assignee be emailed about a task under this record", which adds the task Read check and the external grant check.
-//     uac-r2 task 193's ContactUserRepresentation (the one extracted contact -> user rule) is not on master yet (K-1): the
-//     representation step below mirrors GrantAccessNotifier's lines and is to be replaced by it when 193 merges.
+//     uac-r2 task 193's ContactUserRepresentation (the one extracted contact -> user rule) decides who the contact represents
+//     (K-1 closed at 193's master merge: the mirrored lines are gone).
 //   Cost of doing nothing: D-199's gate does not exist, so the email names a record to a person who cannot see it, and the
 //     system-mailbox fallback would send to anyone the step bound.
 // =====================================================================================================================
@@ -95,7 +95,7 @@ public sealed record AssignTaskRecipient(AssignTaskRecipientKind Kind, AssignTas
 /// D-199 Q1: the Assign Task email goes to the assignee only when they can see the record the task is filed under.
 /// <list type="bullet">
 /// <item><b>Internal</b> (the <see cref="GrantAccessNotifier"/> gate): exactly one eligible user represents the contact
-/// (<see cref="AssignedLinkCandidate.Represents"/>, the oid only where the binder resolves it to this contact alone;
+/// (<see cref="ContactUserRepresentation"/>, the oid only where the binder resolves it to this contact alone;
 /// <see cref="InternalShareEndpoints.ClassifyEligibility"/>, with the record's Restricted state read for a user flagged external);
 /// the No Access check on the record and its secure parents (<see cref="SecureWallRecordScope.AsFlagged"/>) is NotSecure or
 /// NotWalled; and Dataverse answers Read for that user on the task.</item>
@@ -174,67 +174,38 @@ public class AssignTaskRecipientGate
     private async Task<AssignTaskRecipient> DecideCoreAsync(
         Guid contactId, DecisionCoreRecord? core, Guid? taskId, Guid? assignerOid, CancellationToken ct)
     {
-        // ── Who the contact is (status-first: a read that failed is "could not tell", never "represents nobody") ──────────
-        ContactBindingRow? row = null;
-        Guid? boundOid = null;
-        var contact = await _identities.GetContactAsync(contactId, ct).ConfigureAwait(false);
-        switch (contact.Status)
+        // ── Who the contact is and which internal users it represents: uac-r2 task 193's ONE contact -> user rule
+        // (ContactUserRepresentation; status-first: a read that failed is "could not tell", never "represents nobody"; an
+        // inactive or missing contact is nobody's, ADR-003; no binding column decides on the link alone). The Restricted bar is
+        // asked below, once, for the one user it can apply to, so eligibility is classified here as on a record that is not
+        // Restricted (as this gate always did). ──────────────────────────────────────────────────────────────────────────
+        var representation = await new ContactUserRepresentation(_identities, _links, _participations)
+            .ResolveAsync(contactId, rootIsRestricted: false, BindingColumnMissingPolicy.DecideOnLink, ct).ConfigureAwait(false);
+        switch (representation.Status)
         {
-            case LookupStatus.Read:
-                // An inactive (or missing) contact is nobody's (ADR-003), and a reassigned-away or retired assignee is not emailed.
-                if (contact.Rows.FirstOrDefault(r => r.ContactId == contactId) is not { IsActive: true } read)
-                    return Refuse(AssignTaskRefusal.NoAccess, contactId, taskId, "the contact is not active");
-                row = read;
-                boundOid = Guid.TryParse(read.RawOid?.Trim(), out var oid) && oid != Guid.Empty ? oid : null;
+            case ContactRepresentationStatus.Read:
+            case ContactRepresentationStatus.ColumnMissing:
                 break;
-
-            case LookupStatus.ColumnMissing:
-                // No binding column here, so no oid and no onboarding; the contact must still be active.
-                switch (await _participations.ReadContactStateAsync(contactId, ct).ConfigureAwait(false))
-                {
-                    case ContactRecordState.Active:
-                        break;
-                    case ContactRecordState.Inactive:
-                        return Refuse(AssignTaskRefusal.NoAccess, contactId, taskId, "the contact is not active");
-                    default:
-                        return Refuse(AssignTaskRefusal.Unverified, contactId, taskId, "the contact's state could not be read");
-                }
-
-                break;
-
+            case ContactRepresentationStatus.NotFound:
+            case ContactRepresentationStatus.Inactive:
+                // A reassigned-away or retired assignee is not emailed.
+                return Refuse(AssignTaskRefusal.NoAccess, contactId, taskId, "the contact is not active");
             default:
-                return Refuse(AssignTaskRefusal.Unverified, contactId, taskId, "the contact's binding could not be read");
+                return Refuse(AssignTaskRefusal.Unverified, contactId, taskId, "who the contact represents could not be read");
         }
 
-        // ── Which internal users it represents (GrantAccessNotifier's rule; ContactUserRepresentation after uac-r2 193) ─────
-        var candidates = await _links.ReadLinkCandidatesAsync(contactId, boundOid, ct).ConfigureAwait(false)
-                         ?? Array.Empty<AssignedLinkCandidate>();
-        var oidResolvesHere = false;
-        if (boundOid is { } bound && candidates.Any(c => c.PrimaryContactId is null && c.Oid == bound))
+        if (representation.Users.Count == 0)
         {
-            var byOid = await _identities.FindContactsByOidAsync(bound, ct).ConfigureAwait(false);
-            if (byOid.Status != LookupStatus.Read)
-                return Refuse(AssignTaskRefusal.Unverified, contactId, taskId, "the contacts bound to its oid could not be read");
-
-            var decision = ContactBindingDecision.DecideBoundContact(byOid);
-            oidResolvesHere = decision is { Action: BindingAction.ResolveByOid } && decision.ContactId == contactId;
-        }
-
-        var represented = candidates
-            .Where(u => u.SystemUserId != Guid.Empty && u.Represents(contactId, oidResolvesHere ? boundOid : null))
-            .DistinctBy(u => u.SystemUserId)
-            .ToList();
-
-        if (represented.Count == 0)
-        {
-            // External only when NO internal user can be said to represent it (not by link, not by its oid even unconfirmed).
-            if (row is not null && !candidates.Any(u => u.SystemUserId != Guid.Empty && u.Represents(contactId, boundOid)))
+            // External only when NO internal user can be said to represent it: not by link, and not by its oid even unconfirmed
+            // (OidUnconfirmed). No binding column (no row) means no onboarding, so never external.
+            if (representation.Contact is { } row && representation.OidUnconfirmed is null)
                 return await DecideExternalAsync(row, core, taskId, assignerOid, ct).ConfigureAwait(false);
 
             return Refuse(AssignTaskRefusal.NoAccess, contactId, taskId, "no internal user is confirmed for the contact");
         }
 
-        return await DecideInternalAsync(contactId, represented, core, taskId, ct).ConfigureAwait(false);
+        return await DecideInternalAsync(contactId, representation.Users.Select(u => u.User).ToList(), core, taskId, ct)
+            .ConfigureAwait(false);
     }
 
     private async Task<AssignTaskRecipient> DecideInternalAsync(

@@ -61,17 +61,22 @@ namespace Sprk.Bff.Api.Api;
 public static class ChildRecordEndpoints
 {
     /// <summary>
-    /// The tables a browser writer creates through this route (task 147's census, note §2a). <c>sprk_budget</c>,
-    /// <c>sprk_kpiassessment</c> and <c>sprk_billingevent</c> are the secure-record ribbon's "New Budget" / "New KPI
-    /// Assessment" / "New Billing Event" (owner round 28 item 2, E2; the r1c live inventory of every main form found the
-    /// last two on the matter, project, report card and invoice forms): the native subgrid "+ New" under a secure record is
-    /// replaced by a command that creates the row here and then opens it — these tables have no product create surface of
-    /// their own.
+    /// The tables a browser writer creates through this route (task 147's census, note §2a). <c>sprk_budget</c> and
+    /// <c>sprk_kpiassessment</c> are the secure-record ribbon's "New Budget" / "New KPI Assessment" (owner round 28 item 2,
+    /// E2; the r1c live inventory of every main form found the KPI assessment on the matter, project and report card forms):
+    /// the native subgrid "+ New" under a secure record is replaced by a command that creates the row here and then opens
+    /// it — these tables have no product create surface of their own. ebilling-r1 task 164a-1 (uac-r2 Q6): an invoice line
+    /// (<c>sprk_billingevent</c>) is no longer created here; its new rows have one server-side owner (extraction, a line
+    /// decision, Add line), and the general create refuses it (<see cref="RecordTableRule.GenericCreateRefused"/>).
+    /// ebilling-r1 task 096b (EB-D-201): an invoice (<c>sprk_invoice</c>) is no longer created here either; invoices are created
+    /// only by submission (the Create Invoice wizard and the Outlook Submit Invoice, both on the submission operation). A POST for
+    /// either table is the route's unsupported-table answer, before any Dataverse call. The invoice stays in
+    /// <see cref="RefileTables"/> (re-filing is unchanged).
     /// </summary>
     internal static readonly IReadOnlySet<string> CreateTables = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
     {
-        "sprk_todo", "sprk_event", "sprk_memo", "sprk_invoice", "sprk_reportcard", "sprk_analysis", "sprk_document",
-        "sprk_budget", "sprk_kpiassessment", "sprk_billingevent",
+        "sprk_todo", "sprk_event", "sprk_memo", "sprk_reportcard", "sprk_analysis", "sprk_document",
+        "sprk_budget", "sprk_kpiassessment",
         // spaarke-ontology-platform-r1 task 046 (D-21; uac-r2's answer D-113 on #1355): the Create Work Assignment wizard's
         // create and a decision's Assign Work follow-on — ONE server create path for the table, this one. A work assignment is
         // a ROOT, not a child: the secure-create plan decides how it is made (filed under a secure matter or project → INTO
@@ -91,6 +96,8 @@ public static class ChildRecordEndpoints
     /// and Project wizards create here only once they stop (tasks 021, 022). Every other create table asks for mapping only
     /// when the caller names a source, so a create with no <c>mappingSource</c> is exactly what it was before task 020.
     /// Tasks 023-029 add their table HERE (this one set is the switch) when their wizard moves off the client mapping engine.
+    /// Exception: the Event wizard (task 023) names its source (the regarding parent), so <c>sprk_event</c> is not here yet.
+    /// It joins with task 026, whose work-assignment follow-on event is the table's last browser create that names none.
     /// </summary>
     internal static readonly IReadOnlySet<string> InferMappingSourceTables = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
     {
@@ -207,7 +214,7 @@ public static class ChildRecordEndpoints
         // the resolver's team. Authorization is decided in the handler, as the caller, on every record the body binds.
         group.MapPost("/{table}", CreateAsync)
             .WithName("CreateChildRecord")
-            .WithSummary("Create a child record (to-do, event, memo, invoice, report card, analysis, document, budget, KPI assessment, billing event), a work assignment, a matter or a project")
+            .WithSummary("Create a child record (to-do, event, memo, report card, analysis, document, budget, KPI assessment), a work assignment, a matter or a project")
             .WithDescription("Takes the Dataverse Web API payload a browser writer would have sent. Checks AS THE CALLER " +
                 "that they could create it (table privilege, AppendTo on every record it binds, no owner or field-secured " +
                 "column), then the application creates it owned by the team the ownership rule names (the Secure Record " +
@@ -241,7 +248,9 @@ public static class ChildRecordEndpoints
             .ProducesProblem(StatusCodes.Status401Unauthorized)
             .ProducesProblem(StatusCodes.Status403Forbidden)
             .ProducesProblem(StatusCodes.Status404NotFound)
-            .ProducesProblem(StatusCodes.Status409Conflict);
+            .ProducesProblem(StatusCodes.Status409Conflict)
+            // fm task 054 piece 3b: the owner the update needs could not be read now (nothing written; try again).
+            .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
     }
 
     /// <summary>POST /api/v1/child-records/{table}.</summary>
@@ -483,6 +492,22 @@ public static class ChildRecordEndpoints
             Problem(StatusCodes.Status500InternalServerError, refusal.RefusalCode!, $"The {Noun(entity)} was not saved: {refusal.Reason}"),
         _ => Problem(StatusCodes.Status400BadRequest, refusal.RefusalCode ?? InvalidPayloadCode,
             $"The {Noun(entity)} was not saved: {refusal.Reason}"),
+    };
+
+    /// <summary>
+    /// #2799 (uac-r2): a locked invoice-family column the caller's update wrote, in this route's contract. Denied (no Write or
+    /// Append on the row, no AppendTo on a record it names, or either does not exist — one answer) is the route's 403; an
+    /// unanswered check is the invoice-family "could not be read" answer; nothing is written on either. Partly saved (K-1) is a
+    /// 500 with fixed text.
+    /// </summary>
+    internal static IResult LockedWriteRefused(InvoiceFamilyLockedWrite.CallerPatchKind kind, string entity) => kind switch
+    {
+        InvoiceFamilyLockedWrite.CallerPatchKind.Denied => Problem(StatusCodes.Status403Forbidden, DeniedCode,
+            $"The {Noun(entity)} was not saved: you do not have permission to change what it is filed under."),
+        InvoiceFamilyLockedWrite.CallerPatchKind.PartlySaved => Problem(StatusCodes.Status500InternalServerError,
+            InvoiceFamilyLockedWrite.LockedWritePartlySavedCode, InvoiceFamilyLockedWrite.PartlySavedMessage),
+        _ => Problem(StatusCodes.Status500InternalServerError, InvoiceFamilyCoreRecordGuard.ReadFailedCode,
+            $"The {Noun(entity)} was not saved: whether you may change what it is filed under could not be checked; nothing was written."),
     };
 
     /// <summary>
@@ -733,6 +758,16 @@ public static class ChildRecordEndpoints
         if (RecordTableRules.RefuseWriterOnlyTableUpdate(entity) is { } writerOnly)
             return Problem(StatusCodes.Status403Forbidden, DeniedCode, writerOnly.Reason!);
 
+        // ebilling-r1 task 165d fix round (EB-D-207; uac-r2 U1 option A): and a column only the table's typed writer sets (the invoice's AP
+        // export claim), on the body's shape alone, before any read or write. This route writes AS the caller, so only the column check is
+        // asked here, never RefuseAppOnlyWrite. Nothing is written.
+        if (RecordTableRules.RefuseWriterOnlyColumns(
+                entity, body.ValueKind == JsonValueKind.Object ? body.EnumerateObject().Select(p => p.Name) : []) is { } writerOnlyColumn)
+        {
+            return Problem(StatusCodes.Status403Forbidden, RecordTableRules.ChangedOnlyByItsWriterColumnReasonCode,
+                $"The {Noun(entity)} was not saved: {writerOnlyColumn.Reason}.");
+        }
+
         var meta = await user.GetAsync(
             $"EntityDefinitions(LogicalName='{entity}')?$select=EntitySetName,PrimaryIdAttribute", ct).ConfigureAwait(false);
         if (!meta.IsSuccess)
@@ -790,6 +825,8 @@ public static class ChildRecordEndpoints
                 { Invalid: { } pairInvalid } => Problem(StatusCodes.Status400BadRequest, InvalidPayloadCode,
                     $"The {Noun(entity)} was not saved: {pairInvalid}"),
                 { ParentUnavailable: true } => ParentNotFound(entity),
+                // Task 045d: an invoice-family row's resolver fields that could not be derived — the guard's code, as the re-file core's.
+                { InvoiceFamilyRefusal: { } family } => InvoiceFamilyRefused(family, entity),
                 { Denied: { } denied } => Problem(StatusCodes.Status403Forbidden, DeniedCode, denied),
                 _ => Problem(StatusCodes.Status500InternalServerError, "child_record.no_decision", "The record was not updated."),
             };
@@ -797,11 +834,17 @@ public static class ChildRecordEndpoints
 
         mapped = mapped with { Item = prepared.Item };
 
+        // #2799 (uac-r2): the application writer of a locked invoice-family column (checked as the caller first). Absent, a write
+        // of one is unanswered and nothing is written (fail closed); a write without one never uses it.
+        var lockedFields = httpContext.RequestServices?.GetService<IFieldMappingDataverseService>();
         OwnedChildWrite.RefileOutcome outcome;
         try
         {
             outcome = await OwnedChildWrite.RefileAsync(
-                user, ownership, entity, id, entitySet, primaryId, mapped.Item!, CallerObjectId(httpContext), ct, appOnlyEntities)
+                user, ownership, entity, id, entitySet, primaryId, mapped.Item!, CallerObjectId(httpContext), ct, appOnlyEntities,
+                // fm task 054 piece 3b: the step that returns an unfiled Direct message to the Direct team.
+                httpContext.RequestServices?.GetService<Sprk.Bff.Api.Services.Communication.Access.DirectMessageOwnerStep>(),
+                lockedFields, logger, httpContext.TraceIdentifier)
                 .ConfigureAwait(false);
         }
         catch (RecordOwnerUnsettledException)
@@ -815,10 +858,15 @@ public static class ChildRecordEndpoints
 
         if (outcome.NotARefile)
         {
-            // An update that changes nothing the row is filed under: the caller's own PATCH, authorized by Dataverse.
-            var patch = await user.PatchAsync($"{entitySet}({id:D})", mapped.Item!.JsonBody, ct).ConfigureAwait(false);
-            if (!patch.IsSuccess)
-                return CallerFailure(patch, entity);
+            // An update that changes nothing the row is filed under: the caller's own PATCH, authorized by Dataverse. #2799: a
+            // locked invoice-family column in it is checked as the caller and written as the app (a body without one: as before).
+            var patch = await InvoiceFamilyLockedWrite.PatchAsCallerAsync(
+                    user, lockedFields, entity, entitySet, id, mapped.Item!.JsonBody, logger, httpContext.TraceIdentifier, ct)
+                .ConfigureAwait(false);
+            if (patch.Kind == InvoiceFamilyLockedWrite.CallerPatchKind.ClientFailure)
+                return CallerFailure(patch.ClientFailure!, entity);
+            if (patch.Kind != InvoiceFamilyLockedWrite.CallerPatchKind.Written)
+                return LockedWriteRefused(patch.Kind, entity);
         }
         else if (!outcome.Written)
         {
@@ -833,6 +881,7 @@ public static class ChildRecordEndpoints
                     $"The {Noun(entity)} was not saved: {pairInvalid}"),
                 { ParentUnavailable: true } => ParentNotFound(entity),
                 { InvoiceFamilyRefusal: { } family } => InvoiceFamilyRefused(family, entity),
+                { LockedWrite: { } locked } => LockedWriteRefused(locked, entity),
                 { Denied: { } denied } => Problem(StatusCodes.Status403Forbidden, DeniedCode, denied),
                 { Forbidden: { } forbidden } => ProblemDetailsHelper.RecordOwnerRefused(forbidden, Noun(entity), httpContext.TraceIdentifier),
                 { OwnerRefusal: { } refusal } => ProblemDetailsHelper.RecordOwnerRefused(refusal, Noun(entity), httpContext.TraceIdentifier),

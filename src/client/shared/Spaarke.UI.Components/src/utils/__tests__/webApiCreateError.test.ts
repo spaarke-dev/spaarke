@@ -3,9 +3,10 @@
  * unfilled. A privilege or access refusal now becomes one plain sentence naming no ids, users, tables or privilege
  * names, chosen from the privilege the raw message names (Create / AppendTo or Append / none); a BFF child-record
  * refusal (`child_record.denied`) gets the neutral sentence; any other error keeps a clean message. Covers the helper,
- * and the seven BFF-routed create wizards end to end (Event, Invoice, Report Card, To Do, Work Assignment, Matter,
- * Project) through the BFF's 403. The Matter and Project wizards moved to the BFF child-records route in
- * field-mapping-server-write-path-r1 tasks 021 and 022, so no Xrm.WebApi create wizard is left here.
+ * and the six BFF-routed create wizards end to end (Event, Report Card, To Do, Work Assignment, Matter, Project)
+ * through the BFF's 403. The Matter and Project wizards moved to the BFF child-records route in
+ * field-mapping-server-write-path-r1 tasks 021 and 022, so no Xrm.WebApi create wizard is left here. (The Invoice
+ * wizard no longer creates anything itself: ebilling-r1 task 052.)
  */
 
 import { describeWebApiCreateError } from '../webApiCreateError';
@@ -13,12 +14,10 @@ import { ChildRecordWriteError } from '../adapters/bffChildWriteAdapter';
 import { ProjectService } from '../../components/CreateProjectWizard/projectService';
 import { MatterService } from '../../components/CreateMatterWizard/matterService';
 import { EventService } from '../../components/CreateEventWizard/eventService';
-import { InvoiceService } from '../../components/CreateInvoiceWizard/invoiceService';
 import { ReportCardService } from '../../components/CreateReportCardWizard/reportCardService';
 import { TodoService } from '../../components/CreateTodoWizard/todoService';
 import { WorkAssignmentService } from '../../components/CreateWorkAssignmentWizard/workAssignmentService';
 import { EMPTY_EVENT_FORM } from '../../components/CreateEventWizard/formTypes';
-import { buildEmptyInvoiceForm } from '../../components/CreateInvoiceWizard/formTypes';
 import { buildEmptyReportCardForm } from '../../components/CreateReportCardWizard/formTypes';
 import { EMPTY_TODO_FORM } from '../../components/CreateTodoWizard/formTypes';
 import { EMPTY_WORK_ASSIGNMENT_FORM } from '../../components/CreateWorkAssignmentWizard/formTypes';
@@ -227,15 +226,34 @@ describe('describeWebApiCreateError', () => {
     );
   });
 
-  it('a value copied from a secure record that files the record gets its own sentence, which never suggests retrying', () => {
+  // field-mapping-server-write-path-r1 task 022b (review F1): the code is shared by the secure-source and the Restricted-source
+  // refusals, so the server's own sentence is shown; the client's sentence is only the fallback.
+  it.each([
+    "This project can't be created with values copied from a secure record, because it would not be secure. Create it as secure, or file it under a different record.",
+    "This project can't be created with values copied from a record whose access is Restricted, because it would not be Restricted. File it under a different record.",
+  ])('a value copied from a source that files the record shows the server sentence: %s', serverSentence => {
     const asApiError = apiErrorFor(400, {
       title: 'Invalid request',
       status: 400,
-      detail: 'The server words.',
+      detail: serverSentence,
+      reasonCode: 'record_creation.mapping_source_secure_filing',
+    });
+    const asWriteError = new ChildRecordWriteError(serverSentence, 400, 'record_creation.mapping_source_secure_filing');
+    for (const err of [asApiError, asWriteError]) {
+      const text = describeWebApiCreateError(err, 'project');
+      expect(text).toEqual({ message: serverSentence, isAccessDenied: false });
+      expect(text.message.toLowerCase()).not.toContain('try again');
+    }
+  });
+
+  it('a value copied from a secure record, with no server sentence, gets the fallback sentence, which never suggests retrying', () => {
+    const asApiError = apiErrorFor(400, {
+      title: 'Invalid request',
+      status: 400,
       reasonCode: 'record_creation.mapping_source_secure_filing',
     });
     const asWriteError = new ChildRecordWriteError(
-      'The server words.',
+      'Failed to create the record (HTTP 400).',
       400,
       'record_creation.mapping_source_secure_filing'
     );
@@ -403,16 +421,6 @@ describe('the BFF-routed create wizards show the neutral sentence for the BFF re
       'Event',
       'event',
       f => new EventService(readOnlyDataService(), f, BFF).createEvent({ ...EMPTY_EVENT_FORM, eventName: 'Hearing' }),
-    ],
-    [
-      'Invoice',
-      'invoice',
-      f =>
-        new InvoiceService(readOnlyDataService(), f, BFF).createInvoice(
-          { ...buildEmptyInvoiceForm(), name: 'INV' },
-          null,
-          []
-        ),
     ],
     [
       'Report Card',

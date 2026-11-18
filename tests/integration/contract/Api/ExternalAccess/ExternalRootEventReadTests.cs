@@ -90,7 +90,9 @@ public sealed class ExternalRootEventReadTests : IClassFixture<ExternalRootEvent
             e.SprkDuedate == "2026-10-21" && e.SprkStatus == 659490001 && e.SprkCreatedbycontactValue == CallerContact.ToString());
 
         // The query asked for THIS root through THIS root's own lookup, and no other column filtered it.
-        _fixture.Data.Urls.Should().ContainSingle().Which.Should().Contain($"{LookupOf(segment)} eq {RecordA}");
+        // (R4 task 014b: an editor's list also reads the event-type rows for creatableEventTypes — not an events query.)
+        _fixture.Data.Urls.Where(u => u.Contains("/sprk_events?", StringComparison.Ordinal))
+            .Should().ContainSingle().Which.Should().Contain($"{LookupOf(segment)} eq {RecordA}");
     }
 
     [Theory]
@@ -104,12 +106,17 @@ public sealed class ExternalRootEventReadTests : IClassFixture<ExternalRootEvent
         var raw = await client.GetStringAsync($"/api/v1/external/{segment}/{RecordA}/events");
 
         // The wire shape is the project route's: one envelope, one row shape, the creator stamps for Delete, and no
-        // member that names another root (the extra lookups are read to withhold rows, never returned).
+        // member that names another root (the extra lookups are read to withhold rows, never returned). R4 task 008 (uac-r2 C):
+        // plus isTask. R4 task 014b (FR-36): plus the form fields — the type id and name, description, priority, the assignee's
+        // and creator's NAMES (never an id or email), and the row's edit affordances (R4 task 014c: plus canReassign, a boolean).
+        // Still no member that names another root.
         using var doc = JsonDocument.Parse(raw);
         var row = doc.RootElement.GetProperty("value")[0];
         row.EnumerateObject().Select(p => p.Name).Should().BeEquivalentTo(
             "sprk_eventid", "sprk_name", "sprk_duedate", "sprk_status", "createdon", "_sprk_regardingproject_value",
-            "_sprk_createdbyperson_value", "_sprk_createdbycontact_value");
+            "_sprk_createdbyperson_value", "_sprk_createdbycontact_value", "isTask",
+            "eventTypeId", "eventTypeName", "sprk_description", "sprk_priority", "assignedToName", "createdByName",
+            "canEdit", "canChangeStatus", "allowedStatuses", "canReassign");
     }
 
     // =====================================================================
@@ -264,6 +271,44 @@ public sealed class ExternalRootEventReadTests : IClassFixture<ExternalRootEvent
         body!.Value.Select(e => e.SprkName).Should().Equal("Matter and readable project");
     }
 
+    // =====================================================================
+    // R4 task 014b (uac-r2 gate F4): the single read GET /events/{id} serves from, the REAL GetEventByIdAsync over this transport —
+    // the same withholding as the lists, which the route tests (which substitute the read) cannot see.
+    // =====================================================================
+
+    [Theory]
+    [InlineData(true, 0)]  // must fire: also filed to a SECURE matter the caller cannot read — withheld
+    [InlineData(false, 1)] // must not fire: the same matter, not secure — an open second root needs no Read
+    public async Task GetEventById_AnEventAlsoFiledToASecureRootTheCallerCannotRead_IsWithheld_NotTruncated(bool secure, int served)
+    {
+        if (secure)
+            _fixture.Data.AddSecureRoot(ExternalGrantRootType.Matter, Hidden);
+        else
+            _fixture.Data.AddOpenRoot(ExternalGrantRootType.Matter, Hidden);
+        var id = Guid.Parse(_fixture.Data.Add("projects", RecordA, "Project and second matter", matter: Hidden));
+
+        var read = await _fixture.Data.NewService().GetEventByIdAsync(
+            id, Principal("projects", ExternalAccessLevel.Collaborate, RecordA), CancellationToken.None);
+
+        read.Value.Should().HaveCount(served);
+        read.Truncated.Should().BeFalse("a withheld event is an answer, not a fault");
+        _fixture.Data.Urls.Should().Contain(u => u.Contains($"sprk_eventid eq {id}", StringComparison.Ordinal), "the by-id query ran");
+    }
+
+    [Fact]
+    public async Task GetEventById_WhenTheSecureFlagsCannotBeRead_IsTruncated_AndServesNothing()
+    {
+        _fixture.Data.AddOpenRoot(ExternalGrantRootType.Matter, Hidden);
+        var id = Guid.Parse(_fixture.Data.Add("projects", RecordA, "Project and undecided matter", matter: Hidden));
+        _fixture.Data.FlagFault = HttpStatusCode.InternalServerError;
+
+        var read = await _fixture.Data.NewService().GetEventByIdAsync(
+            id, Principal("projects", ExternalAccessLevel.Collaborate, RecordA), CancellationToken.None);
+
+        read.Value.Should().BeEmpty();
+        read.Truncated.Should().BeTrue("an undecided row is the route's 503, never a clean 404 or a 200");
+    }
+
     [Fact]
     public async Task Events_FiledToAMalformedLookup_AreWithheld_FailClosed()
     {
@@ -300,20 +345,22 @@ public sealed class ExternalRootEventReadTests : IClassFixture<ExternalRootEvent
     }
 
     // =====================================================================
-    // Read only: event create stays project-only
+    // Event create on a matter / work assignment: a route since R4 task 002 (FR-08; it was GET-only through R3). Its
+    // contract (201, 400, 403, 409, 503, the ceiling, the bind) is ExternalRootEventCreateContractTests; here, a reader
+    // without Create is refused before anything reaches Dataverse.
     // =====================================================================
 
     [Theory]
     [InlineData("matters")]
     [InlineData("workassignments")]
-    public async Task EventCreate_OnAMatterOrWorkAssignment_IsNotARoute(string segment)
+    public async Task EventCreate_OnAMatterOrWorkAssignment_ForAViewOnlyReader_Is403_AndReachesNoDataverse(string segment)
     {
-        _fixture.Principal = Principal(segment, ExternalAccessLevel.FullAccess, RecordA);
+        _fixture.Principal = Principal(segment, ExternalAccessLevel.ViewOnly, RecordA);
 
         using var client = _fixture.CreateAuthenticatedClient();
         using var response = await client.PostAsJsonAsync($"/api/v1/external/{segment}/{RecordA}/events", new { sprk_name = "x" });
 
-        response.StatusCode.Should().Be(HttpStatusCode.MethodNotAllowed, "the path is a GET-only route");
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden, "the read route's reader may not create");
         _fixture.Data.Urls.Should().BeEmpty();
     }
 
@@ -342,10 +389,17 @@ public sealed class ExternalRootEventReadTests : IClassFixture<ExternalRootEvent
             + "&$select=sprk_eventid,sprk_eventname,sprk_duedate,statuscode,createdon,_sprk_regardingproject_value"
             + ",_sprk_regardingmatter_value,_sprk_regardingworkassignment_value"
             + ",_sprk_createdbyperson_value,_sprk_createdbycontact_value"
+            // R4 task 008 (uac-r2 C): the event type, read server-side only to derive isTask.
+            + ",_sprk_eventtype_ref_value"
+            // R4 task 014b (FR-36): the form fields (the assignee's name is the lookup's FormattedValue).
+            + ",sprk_description,sprk_priority,_sprk_assignedto_value"
             // Task 187: the event's other parents, whose LIVE roots the rule takes in.
             + ",_sprk_regardingagreement_value,_sprk_regardinganalysis_value,_sprk_regardingbudget_value"
             + ",_sprk_regardingcommunication_value,_sprk_regardingevent_value,_sprk_regardinginvoice_value"
             + ",_sprk_regardingreportcard_value"
+            // ebilling-r1 task 130-0b F3b fix round 1: the one filing edge the invoice ancestor walk follows that is not selected
+            // above (InvoiceLinks.ParentValueColumnsOf).
+            + ",_sprk_regardingservicerequest_value"
             + "&$orderby=sprk_duedate asc,sprk_eventid asc");
     }
 
@@ -437,7 +491,8 @@ public sealed class ExternalRootEventReadTests : IClassFixture<ExternalRootEvent
                         .Build(),
                     new ExternalRecordDocumentRoutesTests.InMemoryExternalDataService.TestCredential(),
                     NullLogger<ExternalDataService>.Instance,
-                    Data.FilingReader));
+                    Data.FilingReader,
+                    visibility: Sprk.Bff.Api.Tests.TestInfrastructure.ExternalVisibilitySeams.AllVisible));
             });
         }
     }
@@ -478,10 +533,24 @@ public sealed class ExternalRootEventReadTests : IClassFixture<ExternalRootEvent
             ["sprk_documents"] = "sprk_documentid",
             ["sprk_communications"] = "sprk_communicationid",
             ["sprk_communicationthreads"] = "sprk_communicationthreadid",
+            // ebilling-r1 task 130-0b F3b fix round 1: the invoice ancestor walk reads every parent table of a document, to-do, event
+            // and communication by key, the same way (InvoiceLinks.Descendants).
+            ["sprk_todos"] = "sprk_todoid",
+            ["sprk_events"] = "sprk_eventid",
+            ["sprk_servicerequests"] = "sprk_servicerequestid",
+            ["sprk_agreements"] = "sprk_agreementid",
+            ["sprk_analysises"] = "sprk_analysisid",
         };
 
         /// <summary>Task 188: entity sets whose by-key reads answer this status (a narrowing read fault).</summary>
         public Dictionary<string, HttpStatusCode> KeyReadFaults { get; } = new();
+
+        /// <summary>
+        /// ebilling-r1 task 130-0 F3b: when set, a by-key read whose <c>$select</c> names this text answers 503. Used to fail the invoice
+        /// chain read (it alone selects an invoice link column of a parent document) while the document narrowing's own hop reads
+        /// still answer.
+        /// </summary>
+        public string? KeyReadFaultWhenSelecting { get; set; }
 
         /// <summary>Task 188: every by-key read sent to one of <see cref="KeyReadSets"/> ("set?query", unescaped).</summary>
         public IReadOnlyList<string> KeyReads(string set) =>
@@ -572,6 +641,8 @@ public sealed class ExternalRootEventReadTests : IClassFixture<ExternalRootEvent
             FlagFault = null;
             FlagReadThrows = false;
             KeyReadFaults.Clear();
+            KeyReadFaultWhenSelecting = null;
+            MaskedColumns.Clear();
             FilingReadThrows = false;
             FilingFaultEntity = null;
         }
@@ -746,7 +817,8 @@ public sealed class ExternalRootEventReadTests : IClassFixture<ExternalRootEvent
         /// narrowed (the fail-closed default).
         /// </summary>
         public ExternalDataService NewService(
-            bool withFilingReader = true, Sprk.Bff.Api.Services.Identity.ISystemUserIdentityResolver? identity = null) => new(
+            bool withFilingReader = true, Sprk.Bff.Api.Services.Identity.ISystemUserIdentityResolver? identity = null,
+            Sprk.Bff.Api.Infrastructure.ExternalAccess.AppOnlyExternalVisibility? visibility = null) => new(
             new HttpClient(this),
             new ConfigurationBuilder()
                 .AddInMemoryCollection(new Dictionary<string, string?> { ["Dataverse:ServiceUrl"] = "https://org.test" })
@@ -755,7 +827,8 @@ public sealed class ExternalRootEventReadTests : IClassFixture<ExternalRootEvent
             NullLogger<ExternalDataService>.Instance,
             withFilingReader ? FilingReader : null,
             columns: null,
-            identity: identity);
+            identity: identity,
+            visibility: visibility ?? Sprk.Bff.Api.Tests.TestInfrastructure.ExternalVisibilitySeams.AllVisible);
 
         /// <summary>
         /// Task 188: seeds a communication as the 065 rule reads it: <c>sprk_isinternalonly</c> (<c>null</c> stays null, which
@@ -898,17 +971,20 @@ public sealed class ExternalRootEventReadTests : IClassFixture<ExternalRootEvent
         /// Seeds an invoice with its parent matter and/or project (what <c>GetInvoiceParentsAsync</c> reads), and the same
         /// record in the filing world (task 187 D4: an invoice route walks its own invoice, so both reads see one record).
         /// </summary>
-        public void AddInvoice(Guid id, Guid? matter, Guid? project)
+        public void AddInvoice(Guid id, Guid? matter, Guid? project, Guid? workAssignment = null)
         {
             Seed("sprk_invoices", new Dictionary<string, object?>
             {
                 ["sprk_invoiceid"] = id.ToString(),
                 ["_sprk_matter_value"] = matter?.ToString(),
                 ["_sprk_project_value"] = project?.ToString(),
+                // Task 130-0 fix round 2 (K3, D-28): the work-assignment core record.
+                ["_sprk_regardingworkassignment_value"] = workAssignment?.ToString(),
             });
             var lookups = new List<(string Column, string Target, Guid Id)>();
             if (matter is { } m) lookups.Add(("sprk_matter", "sprk_matter", m));
             if (project is { } p) lookups.Add(("sprk_project", "sprk_project", p));
+            if (workAssignment is { } w) lookups.Add(("sprk_regardingworkassignment", "sprk_workassignment", w));
             AddFilingRow("sprk_invoice", id, lookups.ToArray());
         }
 
@@ -933,6 +1009,51 @@ public sealed class ExternalRootEventReadTests : IClassFixture<ExternalRootEvent
             return id;
         }
 
+        /// <summary>
+        /// ebilling-r1 task 130-0 fix round 3: columns a read never returns even when selected (a field-security-masked or otherwise
+        /// unread column). Dataverse omits such a column, so a reader that takes "absent" for "no value" is caught by a test that
+        /// masks the column.
+        /// </summary>
+        public HashSet<string> MaskedColumns { get; } = new(StringComparer.Ordinal);
+
+        /// <summary>
+        /// A stored row as the Web API answers a <c>$select</c>: every SELECTED column, an unset one as an explicit JSON null (the
+        /// Web API returns a selected lookup that is not set as null), except a <see cref="MaskedColumns"/> one, which is omitted. With
+        /// no <c>$select</c> the whole row, less the masked columns.
+        /// </summary>
+        /// <summary>
+        /// F3b fix round 1: a filing-world (SDK) row as the Web API answers it: the key as text, a lookup <c>x</c> as <c>_x_value</c> (its id
+        /// as text), an option set as its number, any other value as is.
+        /// </summary>
+        private static Dictionary<string, object?> WebApiShapeOf(Entity stored, string keyColumn)
+        {
+            var row = new Dictionary<string, object?> { [keyColumn] = stored.Id.ToString() };
+            foreach (var (name, value) in stored.Attributes)
+            {
+                switch (value)
+                {
+                    case EntityReference reference: row[$"_{name}_value"] = reference.Id.ToString(); break;
+                    case OptionSetValue option: row[name] = option.Value; break;
+                    default: row[name] = value; break;
+                }
+            }
+
+            return row;
+        }
+
+        private Dictionary<string, object?> Project(Dictionary<string, object?> row, HashSet<string>? columns)
+        {
+            var projected = new Dictionary<string, object?>();
+            foreach (var column in columns ?? row.Keys.ToHashSet(StringComparer.Ordinal))
+            {
+                if (MaskedColumns.Contains(column))
+                    continue;
+                projected[column] = row.TryGetValue(column, out var value) ? value : null;
+            }
+
+            return projected;
+        }
+
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
         {
             var url = Uri.UnescapeDataString(request.RequestUri!.ToString());
@@ -941,6 +1062,9 @@ public sealed class ExternalRootEventReadTests : IClassFixture<ExternalRootEvent
 
             if (Fault is { } fault)
                 return Task.FromResult(new HttpResponseMessage(fault));
+
+            if (request.Method == HttpMethod.Post && request.RequestUri!.AbsolutePath.EndsWith("/sprk_events", StringComparison.Ordinal))
+                return AnswerEventCreateAsync(request, ct);
 
             // The secure-flag read: `sprk_matters?$filter=sprk_matterid eq {a} or sprk_matterid eq {b}&$select=...`. Answers the
             // seeded rows whose key is one of the ids, projected through $select, a null value omitted (as Dataverse does).
@@ -992,8 +1116,7 @@ public sealed class ExternalRootEventReadTests : IClassFixture<ExternalRootEvent
 
                 var selected = Regex.Match(url, @"\$select=([^&]*)");
                 var wantedColumns = selected.Success ? selected.Groups[1].Value.Split(',').ToHashSet(StringComparer.Ordinal) : null;
-                var projectedRow = hit.Where(kv => wantedColumns is null || wantedColumns.Contains(kv.Key))
-                    .ToDictionary(kv => kv.Key, kv => kv.Value);
+                var projectedRow = Project(hit, wantedColumns);
                 return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
                 {
                     Content = new StringContent(JsonSerializer.Serialize(projectedRow), System.Text.Encoding.UTF8, "application/json"),
@@ -1009,6 +1132,9 @@ public sealed class ExternalRootEventReadTests : IClassFixture<ExternalRootEvent
             {
                 if (KeyReadFaults.TryGetValue(set, out var keyFault))
                     return Task.FromResult(new HttpResponseMessage(keyFault));
+                if (KeyReadFaultWhenSelecting is { } marker
+                    && Regex.Match(url, @"\$select=([^&]*)").Groups[1].Value.Contains(marker, StringComparison.Ordinal))
+                    return Task.FromResult(new HttpResponseMessage(HttpStatusCode.ServiceUnavailable));
 
                 var keys = Regex.Matches(url, $@"{keyColumn} eq ([0-9a-fA-F-]{{36}})")
                     .Select(m => m.Groups[1].Value).ToHashSet(StringComparer.OrdinalIgnoreCase);
@@ -1019,8 +1145,20 @@ public sealed class ExternalRootEventReadTests : IClassFixture<ExternalRootEvent
                 {
                     keyed = (_sets.TryGetValue(set, out var seededKeyed) ? seededKeyed : new())
                         .Where(r => r.TryGetValue(keyColumn, out var k) && k is string key && keys.Contains(key))
-                        .Select(r => r.Where(kv => keyColumns is null || keyColumns.Contains(kv.Key)).ToDictionary(kv => kv.Key, kv => kv.Value))
+                        .Select(r => Project(r, keyColumns))
                         .ToList();
+                }
+
+                // ebilling-r1 task 130-0b F3b fix round 1: ONE record, two planes. A record seeded only in the filing world (a
+                // communication, an event ... a row is filed under) is the same Dataverse record the Web API answers, so a by-key
+                // read that finds no HTTP-side row answers it from the filing world (its lookups as _col_value ids).
+                var answered = keyed.Select(r => r.TryGetValue(keyColumn, out var k) ? k as string : null).ToHashSet(StringComparer.OrdinalIgnoreCase);
+                lock (_filing)
+                {
+                    keyed.AddRange(_filing
+                        .Where(kv => string.Equals(kv.Key.Table + "id", keyColumn, StringComparison.OrdinalIgnoreCase)
+                                     && keys.Contains(kv.Key.Id.ToString()) && !answered.Contains(kv.Key.Id.ToString()))
+                        .Select(kv => Project(WebApiShapeOf(kv.Value, keyColumn), keyColumns)));
                 }
 
                 return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
@@ -1044,14 +1182,46 @@ public sealed class ExternalRootEventReadTests : IClassFixture<ExternalRootEvent
             }
 
             // $select projection: only the requested columns come back.
-            var projected = match
-                .Select(r => columns is null ? r : r.Where(kv => columns.Contains(kv.Key)).ToDictionary(kv => kv.Key, kv => kv.Value))
-                .ToList();
+            var projected = match.Select(r => Project(r, columns)).ToList();
 
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
             {
                 Content = new StringContent(JsonSerializer.Serialize(new { value = projected }), System.Text.Encoding.UTF8, "application/json"),
             });
+        }
+
+        /// <summary>
+        /// R4 task 008 review round 1 (K4): a <c>POST sprk_events</c> answered as Dataverse does. With
+        /// <c>Prefer: return=representation</c> it is 201 with the created row: each <c>{nav}@odata.bind: "/{set}({id})"</c> comes
+        /// back as the lookup's <c>_{nav}_value</c> id (lower-case logical name), every other column as sent. Without the header it
+        /// is 204 with no body, so a create that stopped asking for the row fails to read one.
+        /// </summary>
+        private static async Task<HttpResponseMessage> AnswerEventCreateAsync(HttpRequestMessage request, CancellationToken ct)
+        {
+            if (!request.Headers.TryGetValues("Prefer", out var prefer)
+                || !prefer.Any(p => p.Contains("return=representation", StringComparison.Ordinal)))
+                return new HttpResponseMessage(HttpStatusCode.NoContent);
+
+            const string Bind = "@odata.bind";
+            using var sent = JsonDocument.Parse(await request.Content!.ReadAsStringAsync(ct));
+            var row = new Dictionary<string, object?> { ["sprk_eventid"] = Guid.NewGuid().ToString() };
+            foreach (var column in sent.RootElement.EnumerateObject())
+            {
+                if (column.Name.EndsWith(Bind, StringComparison.Ordinal))
+                {
+                    var id = Regex.Match(column.Value.GetString() ?? "", @"\(([0-9a-fA-F-]{36})\)$").Groups[1].Value;
+                    row[$"_{column.Name[..^Bind.Length].ToLowerInvariant()}_value"] = id;
+                }
+                else
+                {
+                    row[column.Name] = column.Value.Clone();
+                }
+            }
+
+            return new HttpResponseMessage(HttpStatusCode.Created)
+            {
+                Content = new StringContent(JsonSerializer.Serialize(row), System.Text.Encoding.UTF8, "application/json"),
+            };
         }
     }
 }

@@ -662,6 +662,86 @@ N1/N3/N4 fail-first: 4 fail, 3 pass (the controls).
 - **Publish size:** +0.06 MB against fresh master `534a0e36b4` (39.32 → 39.38 MB, 191/191 files).
 - **CVE:** none.
 
+### §7.8 F-198-1 (post-merge, ontology review)
+
+Branch `task/uac-198c-direct-reown-recheck`, cut from master `c71414c7a0`.
+
+**Defect.** `GateDecisionRecordSharing.ReownToDirectAsync` (reached from `ReownAfterFilingAsync`, ~:377, and from `ShareDirectAsync` for a record the Direct team does not own yet) read the Direct audience and the record's shares once, then granted Read to each missing participant and revoked every other share, with no owner check after either write. In the assign branch the owner read-back ran before the grants, never after. The race: a message is unfiled back to Direct while it is re-filed into a secure record. The Secure reconciler re-owns the gate record to the Secure owner team and mirrors the Secure members; the unfile pass, on its stale reads, then grants the two participants Read and revokes the Secure members' shares. A non-member could read a Decision Record whose message sits on a secure record.
+
+**Fix.** After the audience read (a fault, or an invalid pair, still writes nothing), `ReownToDirectAsync` calls the two helpers `ShareDirectAsync` already uses, which re-read the owner after writing and fail closed:
+- `GrantAndConfirmAsync(..., acceptedTeam: directTeam)`: reads the record's shares strictly, grants only the missing participants, reads the owner back, and revokes this call's grants unless the owner is still the Direct team (or a user).
+- `RevokeOutsideAudienceAsync(..., directTeam, everyPrincipal: true)`: reads the shares strictly, and revokes the leftovers only when the owner reads back as exactly the Direct team.
+
+`everyPrincipal` is a new optional parameter, default `false`, on that private helper. The old revoke loop also revoked a team's share on the record; the helper revoked only user shares. With the flag, the unfile path keeps revoking every non-participant share, and `ShareDirectAsync`'s mirror is unchanged. The old summary log line is replaced by the helpers' own lines; ShareFailed/ReownFailed and their failure counters are raised for the same faults as before. A grant undone because the owner moved is logged at Information ("the {Count} grant(s) are revoked"), as on the mirror path. No new service, DI registration or public surface.
+
+**Tests** (`GateDecisionRecordSharingDirectTests`, `F198_1_*`): the race fires on the pass's first strict share read of the record, where the owner moves to the Secure team and a Secure member is shared.
+1. Must-fire: a Direct-owned record. No participant grant survives, the Secure member's share is not revoked, and the undo is logged.
+2. Must-fire, assign branch: a matter-team-owned record is re-owned to Direct in this pass, then raced. Only this pass's grant is undone; no share it found is revoked.
+3. Must-not-fire: the owner stays Direct. The participants are granted, and Third and a team share are revoked, as before.
+
+Fail-before / pass-after: 2 failed, 1 passed on the unfixed code (both must-fire tests failed for the defect itself: the participants kept Read, and the Secure member's share was revoked). 3/3 pass after.
+
+**Gates:** BFF build 0 warnings, 0 errors. Filter `GateDecisionRecord|DirectThread|DirectMessage|SecureChildShare`: 496/496. ArchTests 2144/2144. `dotnet format whitespace --verify-no-changes` on both changed files: clean.
+
+**K-N2, widened to the write-time path.** A failed write-time grant (`GateDecisionRecordSharing.cs` ~:247-250 for the Direct at-write share, ~:574-577 inside `GrantAndConfirmAsync`) is logged and counted, and never retried. The share job mirrors the gate records only after a pass that granted on the message (`SecureChildShareReconciliationJob.cs` ~:431). The record stays under-shared until the next re-file or grant.
+
+**Known limits.** Only K3 can expose anything:
+- **K2:** one Direct check that cannot be answered (~:352-358) returns before the record loop. That also skips the D-169 re-own of user-owned records for that communication. It is logged, and happens only when Direct is misconfigured.
+- **K3:** secure filing leaves the participant shares for the Secure reconciler to remove (~:632-638, ~:660-666). If that reconcile is incomplete, the participants keep Read until it retries.
+- **K4:** the leftover revoke spares a stamped pair on any filed message, not only one that was Direct (~:399, ~:783-799). The result is fewer revokes, limited to people who can read the message.
+- **K5:** a participant flagged external after the grant keeps Read on the record until the next mirror or re-file, the same as on the message share.
+
+**What the fix leaves open (K-F3 / K-N3 class, the mirror path's own window).** The fix shrinks the race window, but it does not close it. A re-own can still land in two places:
+- between `GrantAndConfirmAsync`'s owner read-back and the end of the pass, which leaves the grants;
+- between `RevokeOutsideAudienceAsync`'s owner read-back and its revokes.
+
+Neither is a new exposure. In the first case, the Secure reconciler's own pass runs after its re-own and revokes the user shares outside the Secure audience. The share job's 5-minute sweep is the backstop when that pass read the shares before the grant landed. Dataverse has no compare-and-set on the owner, so this is the floor for any read-back check (`ShareDirectAsync` has the same window).
+
+**This path assumes a team-owned gate record is never re-owned to a user** (ontology re-check, 2026-11-11). `GrantAndConfirmAsync` keeps its grants on a user owner, which is right for its D-169 branch. If a team-owned gate record could ever be re-owned to a user, this pass's participant grants would stand on it. No path does that today, because filing and the Secure reconciler re-own to teams (D-11). A change that adds such a path must revisit this assumption.
+
+**Test gap:** no guest-domain case on the Direct path (`InternalUsersAsync` filters a guest domain name, but only the D-169 tests exercise it).
+
+### §7.9 198b (FindExistingAsync on the strict-pair rule)
+
+Branch `task/uac-198b-direct-find-existing`, cut from `43f4f12525` (fm 054a piece 2b, PR #2675, plus master `c71414c7a0`).
+
+**What changed** (`DirectThreadAccessService.FindExistingAsync`):
+- **A. The match is fm's one strict-pair rule.** Each candidate goes through `DirectMessageRecipient.ReadStrictPairShapeAsync(_entityService, _accessGrant, threadId, ct)`. It matches only when the answer is `IsStrictPair` and {OwnerId, OtherId} equals {owner candidate, shared candidate} as a set. The rule is called, not forked. `_accessGrant` is the service's existing `IDataverseRecordShareService` (task 060's one POA seam), so no new POA client was added.
+  - A candidate that is not a strict pair is skipped, with an Information log naming the thread id and the reason code: `not_direct`, `typed_regarding`, `not_open`, `not_two_read_participants` or `extra_principal`.
+  - `participant_read_fault` (a fault reading the thread row or its shares) is skipped with a Warning that carries the fault. It is never a match and never thrown. Only the caller's cancellation propagates, as before.
+  - A strict pair of two other people is skipped silently, because it is an ordinary other conversation.
+- **B. Fallback path.** The seam has no "records shared to principal X" read. Every `IDataverseRecordShareService` read is per record (`GetPrincipalAccess*`, `GetPrincipalAccessForRecordsOrThrowAsync` by record ids). Adding a principal-keyed POA query would be a new seam method, not a small extension of an existing query, so none was added. The scan instead:
+  - reads the owner's Direct threads (`ownerid` plus `sprk_threadtype` = Direct, unchanged) newest first: `createdon` descending, then `sprk_communicationthreadid` descending as a tie-break so the paging cookie is stable;
+  - pages them with `PagingInfo` and the cookie (no skip), `CandidatePageSize` = 50;
+  - stops at **`MaxCandidateThreads` = 500** per direction (10 pages). When the bound is hit (`MoreRecords` after page 10) with no match, it logs a Warning that names the bound and says reuse was not decided, so a new thread is created and a duplicate is possible (NFR-03). Exactly 500 threads with no more records is a complete scan and logs nothing.
+- **C. Unchanged:** the create path, the caller-first direction order, the reuse log, and a fault of the candidate query itself (it still propagates, as before).
+
+**Tests** (`DirectThreadAccessServiceTests`, 12 new cases in 6 methods prefixed `F198b_`):
+1. `ACandidateWithAThirdPrincipal_IsNotReused`: a third user at mask 0 (`extra_principal`) or at Read (`not_two_read_participants`) is not reused. A new thread is created, and the Information log names the thread and the reason.
+2. `ACandidateThatIsNotAStrictDirectShape_IsNotReused`: a typed regarding, privacy not Open, or no privacy value.
+3. `AStrictPairCandidate_IsReused_InBothDirections`: the strict pair is reused past a newer team-shared candidate, both directions.
+4. `ACandidateWhoseReadFaults_IsSkipped_WithAWarning`: a share-read fault or a thread-row fault. No throw, a new thread, and a Warning naming the thread.
+5. `ThePairsThreadPastTheOld50Window_IsFound`: the 60th newest of 70 is found, and every candidate query orders by `createdon` descending.
+6. `TheScanBound_IsVisible`: 520 owned threads give one bound Warning (it names 500 and "duplicate"); exactly 500 give none. Both read exactly 500 candidates.
+
+The two existing reuse tests now set up an Open, regarding-free thread row (`PairThread`), because the strict rule reads the row.
+
+**Fail before / pass after:**
+- Before, with the original service restored and the new tests in place: `DirectThreadAccessServiceTests` 11 failed, 64 passed (75). All 11 failures are new cases. The one new case that passed before is the share-read fault: the old code skipped that candidate too.
+- After: 75/75.
+
+**Gates** (in `C:\wt198b`):
+- `dotnet build src/server/api/Sprk.Bff.Api/`: 0 warnings, 0 errors. The unit test project, rebuilt `--no-incremental`, is also 0/0.
+- The filter `DirectThread|DirectMessage|Communication.Access` passed 336/336.
+- ArchTests built 0/0; the `--no-build` run passed 2145/2145.
+- `dotnet format whitespace --verify-no-changes` on both changed `.cs` files is clean.
+
+**Known limits:**
+- **No unique key.** Two concurrent find-or-creates for the same pair can both miss and both create (unchanged from before 198b).
+- **Past the bound, a duplicate is possible.** An owner with more than 500 Direct threads whose pair thread is older than the 500 newest gets a new thread. That outcome is now logged as a Warning, never silent.
+- **Read cost.** Each candidate costs two reads (the thread row and its shares) where the old scan made one share read. In the worst case (no thread for the pair, 500 or more owned threads in both directions) a first message costs about 2,000 reads plus 20 page queries. The common case is a short newest-first scan. A principal-keyed POA read on the seam would make this one query, but it is a new seam method and is out of this scope. **The cost repeats on every routed send, not only the first message of a pair** (fm review): `FindOrCreateDirectThreadAsync` runs per send. Every Direct thread the owner created more recently than the pair's own thread costs two reads on each message to that pair, up to the bound in each direction. Ordering by the thread's `modifiedon` would bring an active pair to the front, but only if filing a message updates the thread row, and that is unverified. The non-strict skip log is Debug for the same reason; a read fault stays a Warning.
+- **No reuse, by design.** A pair thread that was widened (a third principal or a team share) or filed (a typed regarding) is no longer reused. The pair gets a fresh strict thread, and the widened thread keeps its messages.
+
 ## Open questions
 
 - **Q1:** After an ordinary record → unfiled move (owner back to the Direct team), should anchor-grantee shares be removed so the audience is exactly the participants? No current path removes them.

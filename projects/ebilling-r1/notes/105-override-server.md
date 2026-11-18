@@ -252,7 +252,7 @@ Seeded mutations (each applied alone, the filtered suites run, the source restor
 | Mutation | Caught by |
 |---|---|
 | 105 trusts the findings' set (no row check, no bounds) | 105 F1-1 (c) foreign Signal ×2; F1-1 (3) read time ×2; F1-1 own Signal trusted |
-| repeat takes record id and decider from the stamp | 105 F1-1 (2) "never from an edited stamp" |
+| repeat takes record id and decider from the stamp | 105 F1-1 (2) "never from the stamp" |
 | no writer-created record → fall back to the findings' set and stamp | 105 F1-1 (2) "NO writer-created record re-closes nothing" |
 | read-time bounds removed | 049 and 105 F1-1 (3) read time ×2 each |
 | 049 resumes a stored set unchecked | 049 F1-1 foreign Signal; 049 read time ×2 |

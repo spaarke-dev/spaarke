@@ -7,6 +7,7 @@ using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Services.Dataverse;
+using Sprk.Bff.Api.Services.Finance.Resolution;
 using Sprk.Bff.Api.Services.Finance.Submission;
 using Sprk.Bff.Api.Services.Jobs;
 using Sprk.Bff.Api.Services.Jobs.Handlers;
@@ -51,6 +52,11 @@ public enum AdjustmentStatus
 
     /// <summary>The adjustment row was written (or deactivated) but the totals step did not finish. Repeating the same request finishes it.</summary>
     Incomplete,
+
+    /// <summary>Task 095c-4: the invoice has no firm, so it has no rules to list or cite (409, nothing written). Task 095d-0 (EB-D-197): an add
+    /// or a remove of an adjustment - rule-less or rule-cited - is refused with this status too, while the invoice has no firm, is held for one,
+    /// or its Set-firm re-run is pending (<see cref="InvoiceFirmGate"/>).</summary>
+    FirmMissing,
 }
 
 /// <summary>Stable ProblemDetails codes (ADR-019). Callers branch on these, never on a message.</summary>
@@ -73,6 +79,36 @@ public static class AdjustmentCodes
     public const string OwnerUnresolved = LineDecisionCodes.OwnerUnresolved;
     public const string Unavailable = LineDecisionCodes.Unavailable;
     public const string ReviewerUnresolved = LineDecisionCodes.DeciderUnresolved;
+
+    /// <summary>409 (task 095c-4): see <see cref="AdjustmentStatus.FirmMissing"/>.</summary>
+    public const string FirmMissing = "ebilling.adjustment.firm_missing";
+
+    /// <summary>The sentence a reviewer reads with <see cref="FirmMissing"/>.</summary>
+    public const string FirmMissingDetail = "This invoice has no firm, so no billing rule can be cited. Add the firm first, or add the adjustment without a rule.";
+
+    /// <summary>095c-5 review K2: the sentence with <see cref="FirmMissing"/> when the invoice shows a firm but is held for one
+    /// (<see cref="InvoiceFirmNeed.Held"/>); the code is the same as for no firm, as approve does.</summary>
+    public const string FirmHeldDetail = "This invoice is waiting for its firm to be assigned, so no billing rule can be cited. Add the adjustment without a rule, or cite one once the firm is assigned.";
+
+    /// <summary>The <see cref="FirmMissing"/> sentence for <paramref name="need"/>.</summary>
+    public static string FirmDetailFor(InvoiceFirmNeed need) => need == InvoiceFirmNeed.Held ? FirmHeldDetail : FirmMissingDetail;
+
+    /// <summary>EB-D-197: the sentence with <see cref="FirmMissing"/> when an adjustment (rule-less or rule-cited) is added or removed on an invoice with no firm.</summary>
+    public const string AdjustFirmMissingDetail = "This invoice has no firm. Add the firm before adjusting it; nothing was changed.";
+
+    /// <summary>EB-D-197: as <see cref="AdjustFirmMissingDetail"/>, for an invoice held for its firm.</summary>
+    public const string AdjustFirmHeldDetail = "This invoice is waiting for its firm to be assigned. It can be adjusted once the firm is assigned; nothing was changed.";
+
+    /// <summary>EB-D-197: as <see cref="AdjustFirmMissingDetail"/>, while the Set-firm re-run is pending (the same sentence the line decisions give).</summary>
+    public const string AdjustFirmRerunPendingDetail = "This invoice's firm was just assigned and its billing rules are being checked again. Try again when the check finishes; nothing was changed.";
+
+    /// <summary>EB-D-197: the <see cref="FirmMissing"/> sentence of an add or a remove for <paramref name="gate"/> (<see cref="InvoiceFirmGateResult.Open"/> has none and gets the no-firm sentence).</summary>
+    public static string AdjustFirmDetailFor(InvoiceFirmGateResult gate) => gate switch
+    {
+        InvoiceFirmGateResult.HeldForFirm => AdjustFirmHeldDetail,
+        InvoiceFirmGateResult.RerunPending => AdjustFirmRerunPendingDetail,
+        _ => AdjustFirmMissingDetail,
+    };
 }
 
 /// <summary>An Adjustment line as the reviewer needs it to update the screen without a second read.</summary>
@@ -80,6 +116,8 @@ public sealed record AdjustmentDto(
     Guid LineId, Guid AdjustmentId, string Method, decimal Value, decimal Amount, string Reason, Guid? RuleId, DateTimeOffset ReviewedOn);
 
 /// <summary>One rule a reviewer may cite on an adjustment (D-74): a published billing rule version in force on the invoice date. No document link (D-66).</summary>
+// ebilling-r1 082c-2 fix round 2 (uac-r2 K4): PolicyCode (a record rule's is its BRR- code) sits next to RuleId on the INTERNAL adjustment route only.
+// If any external module or SPA surface maps this DTO, it must go through ProcedureRulesOnDate.ForReaders() (base code + record-rule flag) first.
 public sealed record AdjustmentRuleOptionDto(
     Guid RuleId, string PolicyCode, string? Headline, Guid RuleSetId, string? RuleSetName, string Scope, int Version, string? ClauseReference, string? ClauseLocation);
 
@@ -171,8 +209,13 @@ public sealed class InvoiceAdjustmentService
         InvoiceReviewReadService.LineReason, LineRule, InvoiceReviewReadService.LineReviewedOn, InvoiceTotalsService.VersionNumber,
     ];
 
-    /// <summary>The seam the unit tests use: the rules of an invoice's firm, as the evaluator loads them (<see cref="BillingFactLoader.LoadRulesAsync"/>).</summary>
-    internal delegate Task<IReadOnlyList<BillingRuleCandidate>> LoadRules(Guid firmId, CancellationToken ct);
+    /// <summary>
+    /// The seam the unit tests use: the rules in force on <paramref name="date"/> for an invoice of <paramref name="firmId"/> on <paramref name="core"/>,
+    /// one version per policy, legacy and Procedure alike (<see cref="BillingFactLoader.LoadRulesOnAsync"/>, ebilling-r1 082c).
+    /// <paramref name="latestWorkDate"/> is the latest dated line's work date (082c K1, rule (c)), or <see langword="null"/> when no line is dated.
+    /// </summary>
+    internal delegate Task<IReadOnlyList<BillingRuleCandidate>> LoadRules(
+        Guid firmId, CoreRecordReference? core, DateOnly date, DateOnly? latestWorkDate, CancellationToken ct);
 
     private readonly IGenericEntityService _entities;
     private readonly IInvoiceTotalsService _totals;
@@ -191,7 +234,7 @@ public sealed class InvoiceAdjustmentService
         BillingFactLoader rules,
         ILogger<InvoiceAdjustmentService> logger,
         JobSubmissionService? jobs = null)
-        : this(entities, totals, locks, ownership, (rules ?? throw new ArgumentNullException(nameof(rules))).LoadRulesAsync, logger, time: null, jobs)
+        : this(entities, totals, locks, ownership, (rules ?? throw new ArgumentNullException(nameof(rules))).LoadRulesOnAsync, logger, time: null, jobs)
     {
     }
 
@@ -237,6 +280,13 @@ public sealed class InvoiceAdjustmentService
                 return new AdjustmentRulesResult(AdjustmentStatus.InvoiceNotFound, "ebilling.invoice.not_found");
             }
 
+            // Task 095c-4: the options are the firm's rules; with no firm there are none to offer (never the empty firm's).
+            // Task 095c-5 review K2: nor for a held invoice, whatever its firm column says now (read app-only; a fault is Unavailable below).
+            if (await InvoiceFirmHold.CheckAsync(_entities, invoice, ct).ConfigureAwait(false) is not InvoiceFirmNeed.None and var need)
+            {
+                return new AdjustmentRulesResult(AdjustmentStatus.FirmMissing, AdjustmentCodes.FirmMissing, AdjustmentCodes.FirmDetailFor(need));
+            }
+
             var (asOf, rules) = await ReadOptionsAsync(invoice, ct).ConfigureAwait(false);
             return new AdjustmentRulesResult(AdjustmentStatus.Applied, "ok", AsOf: asOf, Rules: rules);
         }
@@ -255,24 +305,52 @@ public sealed class InvoiceAdjustmentService
             return (null, []);
         }
 
-        var firm = invoice.GetAttributeValue<EntityReference>(InvoiceSubmissionPersister.InvoiceVendorOrg)?.Id ?? Guid.Empty;
-        var candidates = await _loadRules(firm, ct).ConfigureAwait(false);
+        // Task 095c-4: both callers refuse a no-firm invoice first; the empty firm's rules are never loaded.
+        if (invoice.GetAttributeValue<EntityReference>(InvoiceSubmissionPersister.InvoiceVendorOrg)?.Id is not { } firm || firm == Guid.Empty)
+        {
+            throw new InvalidOperationException("The invoice names no firm; its rule options cannot be read.");
+        }
 
-        // One version per policy, the one in force on the invoice date (the evaluator's own selection). A type the catalogue does not know, a
-        // non-billing type and a system type are never offered: fail closed (FR-24).
-        var chosen = candidates
+        // ebilling-r1 082c: the Procedures that apply are those of the invoice's core record, so it must name exactly one (013); none or several
+        // is a read failure (Unavailable), never a guess at one.
+        if (InvoiceLineDecisionService.SingleCoreOf(invoice) is not { } single)
+        {
+            throw new InvalidOperationException("The invoice names no single core record; its rule options cannot be read.");
+        }
+
+        var core = new CoreRecordReference(
+            single.Entity switch
+            {
+                "sprk_matter" => CoreRecordKind.Matter,
+                "sprk_project" => CoreRecordKind.Project,
+                "sprk_workassignment" => CoreRecordKind.WorkAssignment,
+                _ => throw new InvalidOperationException("The invoice's core record is of an unknown table."),
+            },
+            single.Id);
+
+        // One version per policy in force on the invoice date: legacy by the evaluator's own selection, Procedure by the resolver (082c). No
+        // precedence: a reviewer may cite any rule in force. A type the catalogue does not know, a non-billing type and a system type are never
+        // offered: fail closed (FR-24).
+        // 082c K1: a Procedure with no version on the invoice date is judged (and so citable) by its version on the latest dated line's work date,
+        // as the evaluator judges the invoice subject; the line dates are the stored columns, which already hold any correction.
+        var lineRows = await InvoiceReviewReadService.ReadPagedAsync(_entities, InvoiceReviewReadService.LineQuery(invoice.Id), ct).ConfigureAwait(false);
+        var workDates = lineRows
+            .Where(r => r.GetAttributeValue<OptionSetValue>(InvoiceTotalsService.LineCostType)?.Value != (int)InvoiceLineCostType.Adjustment)
+            .Select(r => r.GetAttributeValue<DateTime?>(InvoiceSubmissionPersister.LineEventDate))
+            .OfType<DateTime>()
+            .Select(DateOnly.FromDateTime)
+            .ToList();
+        DateOnly? latestWorkDate = workDates.Count > 0 ? workDates.Max() : null;
+
+        var chosen = (await _loadRules(firm, core, date, latestWorkDate, ct).ConfigureAwait(false))
             .Where(IsCitableType)
-            .GroupBy(c => c.PolicyId)
-            .Select(g => InvoiceComplianceEvaluator.SelectVersion(g.ToList(), date))
-            .Where(v => v is not null)
-            .Select(v => v!)
             .ToList();
 
         var names = await ReadRuleSetNamesAsync(chosen.Select(c => c.RuleSetId).Distinct().ToList(), ct).ConfigureAwait(false);
         var options = chosen
             .Select(c => new AdjustmentRuleOptionDto(
                 c.PolicyVersionId, c.PolicyCode, c.ShortHeadline, c.RuleSetId, names.GetValueOrDefault(c.RuleSetId),
-                c.Scope.ToString(), c.VersionNumber, c.ClauseReference, c.ClauseLocation))
+                c.Source == BillingRuleSource.Procedure ? "Procedure" : c.Scope?.ToString() ?? "Procedure", c.VersionNumber, c.ClauseReference, c.ClauseLocation))
             .OrderBy(o => o.RuleSetName, StringComparer.OrdinalIgnoreCase).ThenBy(o => o.PolicyCode, StringComparer.Ordinal).ThenBy(o => o.RuleId)
             .ToList();
         return (date, options);
@@ -407,6 +485,15 @@ public sealed class InvoiceAdjustmentService
                 return new AdjustmentResult(AdjustmentStatus.NotInReview, AdjustmentCodes.NotInReview, "Adjustments can be changed only while the invoice is In Review.");
             }
 
+            // Task 095d-0 (EB-D-197, owner): a firm comes first for an adjustment too - rule-less or rule-cited, exactly as for a line decision.
+            // No firm, held for one, or the Set-firm re-run pending is 409 (the route's 403 came first), before any read of the lines and every
+            // write. It is read once, app-only (InvoiceFirmGate; a fault is Unavailable below), and it also means the firm copied onto the line is
+            // always a CONFIRMED one.
+            if (await InvoiceFirmGate.CheckAsync(_entities, invoice, ct).ConfigureAwait(false) is not InvoiceFirmGateResult.Open and var gate)
+            {
+                return new AdjustmentResult(AdjustmentStatus.FirmMissing, AdjustmentCodes.FirmMissing, AdjustmentCodes.AdjustFirmDetailFor(gate));
+            }
+
             lineRows = await InvoiceReviewReadService.ReadPagedAsync(_entities, InvoiceReviewReadService.LineQuery(command.InvoiceId), ct).ConfigureAwait(false);
             existing = await ReadRowAsync(lineId, ct).ConfigureAwait(false);
         }
@@ -429,7 +516,7 @@ public sealed class InvoiceAdjustmentService
                 .ConfigureAwait(false);
         }
 
-        // ── F-8 / D-74: a cited rule must be one of this invoice's options. ──
+        // ── F-8 / D-74: a cited rule must be one of this invoice's options (the firm gate above already proved the invoice has a confirmed firm). ──
         if (command.RuleId is { } ruleId)
         {
             IReadOnlyList<AdjustmentRuleOptionDto> options;
@@ -589,6 +676,8 @@ public sealed class InvoiceAdjustmentService
             row[LineRule] = new EntityReference(PolicyVersionEntity, ruleId);
         }
 
+        // 095c-5 pass-2 review, EB-D-197: only a CONFIRMED firm is copied onto the line. The firm gate has proven the invoice is not held for one
+        // (a firm written to the column directly while held is refused above), so the firm on the invoice is the confirmed one.
         if (invoice.GetAttributeValue<EntityReference>(InvoiceSubmissionPersister.InvoiceVendorOrg) is { } firm && firm.Id != Guid.Empty)
         {
             row[LineVendorOrg] = new EntityReference("sprk_organization", firm.Id);
@@ -649,6 +738,12 @@ public sealed class InvoiceAdjustmentService
             if (invoice.GetAttributeValue<OptionSetValue>("statuscode")?.Value != InvoiceStatusCodes.InReview)
             {
                 return new AdjustmentResult(AdjustmentStatus.NotInReview, AdjustmentCodes.NotInReview, "Adjustments can be changed only while the invoice is In Review.");
+            }
+
+            // Task 095d-0 (EB-D-197): removing an adjustment is a change to a reviewer's adjustment too - "only Return and Set firm stay available".
+            if (await InvoiceFirmGate.CheckAsync(_entities, invoice, ct).ConfigureAwait(false) is not InvoiceFirmGateResult.Open and var gate)
+            {
+                return new AdjustmentResult(AdjustmentStatus.FirmMissing, AdjustmentCodes.FirmMissing, AdjustmentCodes.AdjustFirmDetailFor(gate));
             }
 
             row = await ReadRowAsync(command.LineId, ct).ConfigureAwait(false);
@@ -813,7 +908,8 @@ public sealed class InvoiceAdjustmentService
             row.GetAttributeValue<Money>(InvoiceTotalsService.LineApprovedAmount)?.Value,
             status is { } s && Enum.IsDefined(typeof(InvoiceLineStatus), s) ? (InvoiceLineStatus)s : null,
             method is { } m && Enum.IsDefined(typeof(InvoiceAdjustmentMethod), m) ? (InvoiceAdjustmentMethod)m : null,
-            row.GetAttributeValue<decimal?>(InvoiceTotalsService.LineAdjustmentValue));
+            row.GetAttributeValue<decimal?>(InvoiceTotalsService.LineAdjustmentValue),
+            InvoiceTotalsService.ReviewerAddedOf(row));
     }
 
     private static ReviewTotalsDto TotalsOf(Entity invoice, InvoiceTotalsCalculation calculation) => new(

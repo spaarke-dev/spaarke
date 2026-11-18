@@ -2133,6 +2133,10 @@ public class SecureChildShareMirrorTests
 
         run.ResultJson.Should().Contain("\"hardDenyWiderThanRead\":1").And.Contain("\"hardDenyUnchecked\":1");
         _shares.MaskOf("sprk_policy", PolicyOfMatter, User(UserA)).Should().Be(ViewOnly);
+        // #1821: an unchecked hard-deny row is named in the error the scheduler records.
+        run.Success.Should().BeFalse();
+        run.ErrorMessage.Should().Be(
+            "1 child(ren) not updated and 0 held; 0 hard-deny row(s) not narrowed to Read and 1 unchecked; the next run retries.");
     }
 
     [Fact]
@@ -2144,7 +2148,9 @@ public class SecureChildShareMirrorTests
         var run = await Job(World().Synchronizer(_shares)).ExecuteAsync(RunContext(), CancellationToken.None);
 
         run.Success.Should().BeFalse();
-        run.ErrorMessage.Should().Contain("1 child(ren) not updated");
+        // #1821: exactly the secure-child counts — no hard-deny clause (none unchecked or failed), no Direct-message clause
+        // (the Direct pass is unavailable here, which is not a failure).
+        run.ErrorMessage.Should().Be("1 child(ren) not updated and 0 held; the next run retries.");
     }
 
     [Fact]

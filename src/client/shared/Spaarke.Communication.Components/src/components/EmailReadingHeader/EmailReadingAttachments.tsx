@@ -23,17 +23,29 @@
  * semantic tokens only (ADR-021) — themes correctly via the host `FluentProvider`.
  */
 import * as React from 'react';
-import { makeStyles, tokens, shorthands, Text, Spinner, MessageBar, MessageBarBody } from '@fluentui/react-components';
+import {
+  makeStyles,
+  tokens,
+  shorthands,
+  Badge,
+  Button,
+  Text,
+  Spinner,
+  MessageBar,
+  MessageBarBody,
+} from '@fluentui/react-components';
 import { RichFilePreviewDialog } from '@spaarke/ui-components';
 import {
   CommunicationAttachmentsService,
   AttachmentApiService,
   fileTypeLabel,
+  isInvoiceDocumentType,
   type IAttachmentItem,
   type IAttachmentRecord,
   type IAttachmentsWebApi,
 } from '../../logic/attachments';
 import { AttachmentList } from '../AttachmentList';
+import { isPdfFileName } from '../SubmitInvoice/invoiceAttachments';
 import type { IEmailReadingAttachmentsProps } from './EmailReadingHeader.types';
 
 const useStyles = makeStyles({
@@ -81,6 +93,7 @@ export const EmailReadingAttachments: React.FC<IEmailReadingAttachmentsProps> = 
   navigation,
   apiBaseUrl,
   onCountChange,
+  onSubmitAsInvoice,
 }) => {
   const s = useStyles();
 
@@ -146,6 +159,34 @@ export const EmailReadingAttachments: React.FC<IEmailReadingAttachmentsProps> = 
     setPreviewItem(item);
   }, []);
 
+  // ebilling-r1 task 118: the profile's Invoice flag (`sprk_documenttype`, read with the upload status: no extra query)
+  // shows an "Invoice" badge. It is a hint only (any PDF can be submitted); a document not yet profiled shows none.
+  const renderInvoiceAccessory = React.useCallback(
+    (item: IAttachmentItem): React.ReactNode => {
+      if (!item.documentId || !isInvoiceDocumentType(item.documentType)) return null;
+      const documentId = item.documentId;
+      return (
+        <>
+          <Badge appearance="tint" color="success" size="small" data-testid="attachment-invoice-badge">
+            Invoice
+          </Badge>
+          {/* The Invoice mark is PDF only: a flagged non-PDF keeps the badge but offers no action that cannot work. */}
+          {onSubmitAsInvoice && isPdfFileName(item.name || item.documentName) && (
+            <Button
+              size="small"
+              appearance="subtle"
+              data-testid="attachment-submit-as-invoice"
+              onClick={() => onSubmitAsInvoice(documentId)}
+            >
+              Submit as invoice
+            </Button>
+          )}
+        </>
+      );
+    },
+    [onSubmitAsInvoice]
+  );
+
   if (loadError) {
     return (
       <div className={s.root}>
@@ -173,7 +214,7 @@ export const EmailReadingAttachments: React.FC<IEmailReadingAttachmentsProps> = 
       {items.length === 0 ? (
         <Text className={s.empty}>No attachments on this email.</Text>
       ) : (
-        <AttachmentList items={items} onActivate={handleRowActivate} />
+        <AttachmentList items={items} onActivate={handleRowActivate} renderRowAccessory={renderInvoiceAccessory} />
       )}
 
       {previewItem && previewItem.documentId && (

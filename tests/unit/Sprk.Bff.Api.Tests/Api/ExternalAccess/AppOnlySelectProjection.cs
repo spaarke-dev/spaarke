@@ -40,8 +40,13 @@ internal static class AppOnlySelectProjection
             },
             odata);
 
+    /// <summary>
+    /// ebilling-r1 task 130-0 fix round 3: a SELECTED lookup (<c>_x_value</c>) the seeded row does not carry comes back as an explicit
+    /// JSON null, as the Web API answers a selected lookup that is not set; a column in <paramref name="omit"/> is never returned even
+    /// when selected (a masked or otherwise unread column), so a reader that takes "absent" for "no link" is caught.
+    /// </summary>
     public static IReadOnlyList<Dictionary<string, JsonElement>> Project(
-        IEnumerable<Dictionary<string, JsonElement>> rows, string? odata)
+        IEnumerable<Dictionary<string, JsonElement>> rows, string? odata, IReadOnlySet<string>? omit = null)
     {
         var start = odata?.IndexOf("$select=", StringComparison.Ordinal) ?? -1;
         if (odata is null || start < 0)
@@ -51,9 +56,19 @@ internal static class AppOnlySelectProjection
         var list = odata[(start + "$select=".Length)..(end < 0 ? odata.Length : end)];
         var columns = list.Split(',', StringSplitOptions.RemoveEmptyEntries).ToHashSet(StringComparer.Ordinal);
         return rows
-            .Select(r => r
-                .Where(kv => columns.Contains(kv.Key.Split('@')[0]))
-                .ToDictionary(kv => kv.Key, kv => kv.Value))
+            .Select(r =>
+            {
+                var projected = r
+                    .Where(kv => columns.Contains(kv.Key.Split('@')[0]) && omit?.Contains(kv.Key.Split('@')[0]) != true)
+                    .ToDictionary(kv => kv.Key, kv => kv.Value);
+                foreach (var column in columns.Where(c => c.StartsWith('_') && c.EndsWith("_value", StringComparison.Ordinal)))
+                {
+                    if (omit?.Contains(column) != true && !projected.ContainsKey(column))
+                        projected[column] = JsonSerializer.SerializeToElement<object?>(null);
+                }
+
+                return projected;
+            })
             .ToList();
     }
 }

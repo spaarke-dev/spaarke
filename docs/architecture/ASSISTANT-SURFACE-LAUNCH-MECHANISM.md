@@ -195,6 +195,6 @@ For the hand-off kinds, the surface is opened in a separate navigation context, 
 ## Related
 - **[Notification & Action Spine architecture](SPAARKE-NOTIFICATION-SPINE-ARCHITECTURE.md)** — the **proactive** counterpart (§1.1). Server-initiated `kind`-typed signal → outbox → SignalR → suggestion card → `openRecordModal`. Reuse it for proactive push; never build a second channel ([ADR-047](../../.claude/adr/ADR-047-notification-action-spine.md)).
 - [ADR-039 — grounded execution & closed catalogs](../../.claude/adr/ADR-039-grounded-execution-closed-catalogs.md) (the "one decider" principle)
-- [ADR-040 — ledger store-before-render](../../.claude/adr/ADR-040-*.md) (the `OutputRouter` pass-through)
+- [ADR-040 — ledger store-before-render](../../.claude/adr/ADR-040-session-ledger.md) (the `OutputRouter` pass-through)
 - [SpaarkeAi workspace architecture](SPAARKEAI-WORKSPACE-ARCHITECTURE.md) · [DataGrid framework](SPAARKE-DATAGRID-FRAMEWORK-ARCHITECTURE.md) (grid surfaces)
 - [Assistant surface hand-off architecture](../../projects/spaarkeai-assistant-enhancements-r1/notes/012-assistant-surface-handoff-design.md) (original design)

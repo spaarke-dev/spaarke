@@ -82,7 +82,7 @@ internal static class BillingHandlerKit
         RackRate = approved + 100m,
         RateCardId = Guid.Parse("07100000-0000-4000-8000-0000000000c1"),
         RateId = Guid.Parse("07100000-0000-4000-8000-0000000000c2"),
-        Scope = RateCardScope.Firm,
+        Rank = new ProcedureRank(ProcedureLevel.Firm, 0, FirmSpecific: true),
         Basis = RateBasis.Timekeeper,
     };
 

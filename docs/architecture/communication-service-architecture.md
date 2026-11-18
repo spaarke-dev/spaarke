@@ -31,7 +31,7 @@ The critical design principle is **Graph send is the critical path** — if the 
 | IncomingCommunicationProcessor | `src/server/api/Sprk.Bff.Api/Services/Communication/IncomingCommunicationProcessor.cs` | Processes inbound emails: dedup, fetch from Graph, create record, resolve associations, process attachments, archive .eml |
 | IncomingAssociationResolver | `src/server/api/Sprk.Bff.Api/Services/Communication/IncomingAssociationResolver.cs` | 3-level priority cascade: thread → sender → subject pattern matching |
 | GraphSubscriptionManager | `src/server/api/Sprk.Bff.Api/Services/Communication/GraphSubscriptionManager.cs` | BackgroundService (30-min cycle): creates, renews, recreates Graph webhook subscriptions; orphan cleanup |
-| InboundPollingBackupService | `src/server/api/Sprk.Bff.Api/Services/Communication/InboundPollingBackupService.cs` | BackgroundService (5-min cycle): polls Graph for unread messages missed by webhooks |
+| InboundPollingBackupService | `src/server/api/Sprk.Bff.Api/Services/Communication/InboundPollingBackupService.cs` | `IScheduledJob` `inbound-polling-backup` (every 5 min, ADR-036; one run per tick across instances): polls Graph for unread messages missed by webhooks |
 | DailySendCountResetService | `src/server/api/Sprk.Bff.Api/Services/Communication/DailySendCountResetService.cs` | BackgroundService (midnight UTC): resets `sprk_sendstoday` to 0 for all accounts |
 | MailboxVerificationService | `src/server/api/Sprk.Bff.Api/Services/Communication/MailboxVerificationService.cs` | Tests send/read capabilities, persists results, auto-creates Graph subscription on successful read verification |
 | EmlGenerationService | `src/server/api/Sprk.Bff.Api/Services/Communication/EmlGenerationService.cs` | Generates RFC 2822 `.eml` files for archival |
@@ -148,12 +148,11 @@ The rung ladder that replaces this (rung 0 explicit-ref → 1 thread-continuity 
 
 ## Background Services
 
-Three hand-rolled timer `BackgroundService` implementations (existing debt — each migrates to an `IScheduledJob` when next touched, ADR-052 §1):
+Two hand-rolled timer `BackgroundService` implementations (existing debt — each migrates to an `IScheduledJob` when next touched, ADR-052 §1). The inbound polling backup was the third; #2749 (PR #2757) migrated it to the `inbound-polling-backup` `IScheduledJob` (cron `*/5 * * * *`, no startup run, at most 500 messages per mailbox per run, keyset paging from a watermark persisted in `IDistributedCache`):
 
 | Service | Interval | Startup Delay | Purpose |
 |---------|----------|---------------|---------|
 | GraphSubscriptionManager | 30 min | 10s | Subscription lifecycle: create, renew, recreate, orphan cleanup |
-| InboundPollingBackupService | 5 min | 15s | Queries unread messages in Graph to catch webhooks missed during deployments (max 50 per poll) |
 | DailySendCountResetService | Midnight UTC | — | Resets `sprk_sendstoday` to 0 for all accounts |
 
 ---

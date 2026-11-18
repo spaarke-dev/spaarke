@@ -628,27 +628,11 @@
   "src/client/shared/Spaarke.UI.Components/src/components/CreateEventWizard/eventService.ts": {
     "@typescript-eslint/no-unnecessary-condition": {
       "count": 1
-    },
-    "no-restricted-syntax": {
-      "count": 1
     }
   },
   "src/client/shared/Spaarke.UI.Components/src/components/CreateEventWizard/handoffSeedMapping.ts": {
     "@typescript-eslint/no-unnecessary-condition": {
       "count": 3
-    }
-  },
-  "src/client/shared/Spaarke.UI.Components/src/components/CreateInvoiceWizard/CreateInvoiceStep.tsx": {
-    "@typescript-eslint/no-unnecessary-condition": {
-      "count": 1
-    }
-  },
-  "src/client/shared/Spaarke.UI.Components/src/components/CreateInvoiceWizard/invoiceService.ts": {
-    "@typescript-eslint/no-unnecessary-condition": {
-      "count": 3
-    },
-    "no-restricted-syntax": {
-      "count": 1
     }
   },
   "src/client/shared/Spaarke.UI.Components/src/components/CreateMatterWizard/CreateMatterWizard.tsx": {

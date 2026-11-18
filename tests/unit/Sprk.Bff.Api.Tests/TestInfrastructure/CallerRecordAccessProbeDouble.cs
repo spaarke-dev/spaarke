@@ -235,11 +235,31 @@ public sealed class CallerRecordAccessProbeDouble : CallerRecordAccessProbe
         AppOnlyPrivilegeCalls.Clear();
         AppOnlyWire = null;
         AppOnlyTimeoutOverride = null;
+        AppOnlyAnswerDelay = null;
+        Interlocked.Exchange(ref _appOnlyInFlight, 0);
+        Interlocked.Exchange(ref _maxAppOnlyInFlight, 0);
     }
+
+    /// <summary>
+    /// R4 task 014b review pass 2 (F3): when set, each seeded app-only rights answer is held this long, and
+    /// <see cref="MaxAppOnlyInFlight"/> records the most questions outstanding at once — so a test can bound a fan-out.
+    /// </summary>
+    public TimeSpan? AppOnlyAnswerDelay { get; set; }
+
+    private int _appOnlyInFlight;
+    private int _maxAppOnlyInFlight;
+
+    /// <summary>The most app-only rights questions outstanding at once while <see cref="AppOnlyAnswerDelay"/> was set.</summary>
+    public int MaxAppOnlyInFlight => Volatile.Read(ref _maxAppOnlyInFlight);
 
     public override Task<AccessRights?> GetPrincipalRightsAppOnlyOrUnknownAsync(
         Guid principalSystemUserId, string entitySet, Guid recordId, CancellationToken ct = default)
     {
+        if (AppOnlyAnswerDelay is { } delay && AppOnlyWire is null && AppOnlyFault is null)
+        {
+            return DelayedAppOnlyAnswerAsync(principalSystemUserId, entitySet, recordId, delay, ct);
+        }
+
         AppOnlyCalls.Enqueue((principalSystemUserId, entitySet, recordId));
         if (AppOnlyWire is not null)
         {
@@ -254,6 +274,28 @@ public sealed class CallerRecordAccessProbeDouble : CallerRecordAccessProbe
         return Task.FromResult(AppOnlyAnswers.TryGetValue((principalSystemUserId, entitySet, recordId), out var rights)
             ? rights
             : AccessRights.None);
+    }
+
+    private async Task<AccessRights?> DelayedAppOnlyAnswerAsync(
+        Guid principalSystemUserId, string entitySet, Guid recordId, TimeSpan delay, CancellationToken ct)
+    {
+        AppOnlyCalls.Enqueue((principalSystemUserId, entitySet, recordId));
+        var now = Interlocked.Increment(ref _appOnlyInFlight);
+        int seen;
+        while (now > (seen = Volatile.Read(ref _maxAppOnlyInFlight))
+               && Interlocked.CompareExchange(ref _maxAppOnlyInFlight, now, seen) != seen)
+        {
+        }
+
+        try
+        {
+            await Task.Delay(delay, ct);
+            return AppOnlyAnswers.TryGetValue((principalSystemUserId, entitySet, recordId), out var rights) ? rights : AccessRights.None;
+        }
+        finally
+        {
+            Interlocked.Decrement(ref _appOnlyInFlight);
+        }
     }
 
     public override Task<bool?> PrincipalHoldsPrivilegeAppOnlyOrUnknownAsync(

@@ -1,4 +1,5 @@
 using FluentAssertions;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Microsoft.Xrm.Sdk;
@@ -58,6 +59,178 @@ public class InvoiceSubmissionProcessorTests
         h.Evaluated!.CoreRecord.Should().Be(new CoreRecordReference(CoreRecordKind.Matter, Matter));
     }
 
+    // ── 082c-2: the Procedure gap hold (C11, C13) and the final-delivery hold (C14, C15) ──
+
+    /// <summary>A Procedure whose only version ended before the invoice date (1 June): the invoice date and the lines are in a gap.</summary>
+    private static ProcedureResolution GappedProcedures()
+    {
+        var kit = new Sprk.Bff.Api.Tests.Domain.Signals.Billing.ProcedureKit().Procedure("Ended", to: new DateOnly(2026, 3, 10));
+        kit.Rule("Ended", "ENDED-INCREMENT", RuleType.TimeIncrement);
+        return kit.Build();
+    }
+
+    [Fact(DisplayName = "082c-2 C11: SPA with a Procedure gap is Accepted with procedure_gap; one pipeline finding names the Procedure, its first date and kind (no id)")]
+    public async Task AProcedureGap_OnSpa_IsAcceptedAndHeld()
+    {
+        var h = new Harness { Procedures = GappedProcedures() };
+
+        var outcome = await h.RunAsync();
+
+        outcome.Kind.Should().Be(SubmissionEvaluationKind.Accepted);
+        outcome.ReasonCode.Should().Be(SubmissionReasonCodes.ProcedureGap);
+        outcome.Evaluation!.Gaps.Should().NotBeEmpty();
+        outcome.Decision.Should().NotBeNull("the rules that did run are still decided");
+        var gap = outcome.PipelineFindings.Should().ContainSingle(p => p.ReasonCode == SubmissionReasonCodes.ProcedureGap).Subject;
+        gap.Values[SubmissionReasonCodes.ProcedureNameValue].Should().Be("Ended");
+        gap.Values[SubmissionReasonCodes.ProcedureGapKindValue].Should().Be(nameof(ProcedureGapKind.AfterLastVersion));
+        gap.Values[SubmissionReasonCodes.ProcedureWorkDateValue].Should().MatchRegex(@"^\d{4}-\d{2}-\d{2}$");
+        string.Join("|", gap.Values.Values).Should().NotContain(Sprk.Bff.Api.Tests.Domain.Signals.Billing.ProcedureKit.ProcedureId("Ended").ToString("D"));
+    }
+
+    [Fact(DisplayName = "082c-2 C11: Internal with a Procedure gap is Blocked (the FR-20 hold)")]
+    public async Task AProcedureGap_OnInternal_IsBlocked()
+    {
+        var h = new Harness { Procedures = GappedProcedures(), Channel = InvoiceSubmissionChannel.Internal };
+
+        var outcome = await h.RunAsync();
+
+        outcome.Kind.Should().Be(SubmissionEvaluationKind.Blocked);
+        outcome.ReasonCode.Should().Be(SubmissionReasonCodes.Blocked);
+        outcome.PipelineFindings.Should().Contain(p => p.ReasonCode == SubmissionReasonCodes.ProcedureGap);
+    }
+
+    [Fact(DisplayName = "082c-2 C11: SPA with a gap and a 073 rejection is Accepted and held, never AutoRejected (the gap reason wins)")]
+    public async Task AProcedureGap_OverA073Rejection_OnSpa_IsNeverAutoRejected()
+    {
+        // The version ends on 10 January, so the aged 20 January line (which InvoiceAge rejects) and the invoice date are both in the gap.
+        var kit = new Sprk.Bff.Api.Tests.Domain.Signals.Billing.ProcedureKit().Procedure("Ended", from: new DateOnly(2025, 1, 1), to: new DateOnly(2026, 1, 10));
+        kit.Rule("Ended", "ENDED-INCREMENT", RuleType.TimeIncrement);
+        var h = new Harness { Procedures = kit.Build(), Rules = [InvoiceAgeReject()] };
+        h.Lines = [FeeLine(date: new DateOnly(2026, 1, 20))];
+
+        var outcome = await h.RunAsync();
+
+        outcome.Decision!.Outcome.Should().Be(SubmissionOutcome.Rejected, "control: 073 did reject");
+        outcome.Kind.Should().Be(SubmissionEvaluationKind.Accepted);
+        outcome.ReasonCode.Should().Be(SubmissionReasonCodes.ProcedureGap);
+    }
+
+    [Fact(DisplayName = "082c-2 C11: SPA with a gap and uncoded lines is AcceptedUncoded; the gap reason wins over the coding code, which stays a pipeline finding")]
+    public async Task AProcedureGap_Uncoded_OnSpa_KeepsTheGapReason()
+    {
+        var h = new Harness { Procedures = GappedProcedures() };
+        h.Coding.Failure = new FeatureDisabledException(SubmissionReasonCodes.AiLinearConsumersDisabled, "off");
+
+        var outcome = await h.RunAsync();
+
+        outcome.Kind.Should().Be(SubmissionEvaluationKind.AcceptedUncoded);
+        outcome.ReasonCode.Should().Be(SubmissionReasonCodes.ProcedureGap);
+        outcome.PipelineFindings.Select(p => p.ReasonCode).Should().Contain(SubmissionReasonCodes.CodingUnavailableHold);
+    }
+
+    [Fact(DisplayName = "082c-2 control: a Procedure in force on every date (no gap) is evaluated and Accepted with no reason and no gap finding")]
+    public async Task AProcedureWithNoGap_IsAccepted_Control()
+    {
+        var kit = new Sprk.Bff.Api.Tests.Domain.Signals.Billing.ProcedureKit().Procedure("Open");
+        kit.Rule("Open", "OPEN-HOURS", RuleType.DailyHoursCap);
+        var h = new Harness { Procedures = kit.Build() };
+
+        var outcome = await h.RunAsync();
+
+        outcome.Kind.Should().Be(SubmissionEvaluationKind.Accepted);
+        outcome.ReasonCode.Should().BeNull();
+        outcome.Evaluation!.Gaps.Should().BeEmpty();
+        outcome.PipelineFindings.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "082c-2 C11: the classifier holds a gap on both channels whatever 073 decided; without a gap it is unchanged")]
+    public void Classify_HoldsAGap_OnBothChannels()
+    {
+        var accepted = new SubmissionDecision { Outcome = SubmissionOutcome.Accepted, Findings = [] };
+
+        InvoiceSubmissionProcessor.Classify(accepted, InvoiceSubmissionChannel.Spa, procedureGap: true)
+            .Should().Be((SubmissionEvaluationKind.Accepted, SubmissionReasonCodes.ProcedureGap));
+        InvoiceSubmissionProcessor.Classify(accepted, InvoiceSubmissionChannel.Internal, procedureGap: true)
+            .Should().Be((SubmissionEvaluationKind.Blocked, SubmissionReasonCodes.Blocked));
+        InvoiceSubmissionProcessor.Classify(accepted, InvoiceSubmissionChannel.Spa, procedureGap: false)
+            .Should().Be((SubmissionEvaluationKind.Accepted, (string?)null));
+    }
+
+    [Theory(DisplayName = "082c-2 C14 (1): a resolver fault on a delivery that is not the final one propagates as it is; nothing is held")]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task AResolverFault_BeforeTheFinalDelivery_Propagates(bool rowsInconsistent)
+    {
+        Exception fault = rowsInconsistent
+            ? new ProcedureResolutionFaultException("two versions in force")
+            : new CoreRecordChainUnreadableException("chain unreadable");
+        var h = new Harness { EvaluationFault = fault, FinalDelivery = false };
+
+        var run = () => h.RunAsync();
+
+        (await run.Should().ThrowAsync<InvalidOperationException>()).Which.Should().BeSameAs(fault);
+    }
+
+    [Theory(DisplayName = "082c-2 C14 (2), C15: a resolver fault on the final delivery is held with its cause; no rule result; SPA Accepted, Internal Blocked")]
+    [InlineData(true, InvoiceSubmissionChannel.Spa)]
+    [InlineData(false, InvoiceSubmissionChannel.Spa)]
+    [InlineData(true, InvoiceSubmissionChannel.Internal)]
+    [InlineData(false, InvoiceSubmissionChannel.Internal)]
+    public async Task AResolverFault_OnTheFinalDelivery_IsHeld(bool rowsInconsistent, InvoiceSubmissionChannel channel)
+    {
+        const string Sentinel = "SENTINEL-ex-message 0123456789abcdef0123456789abcdef";
+        Exception fault = rowsInconsistent ? new ProcedureResolutionFaultException(Sentinel) : new CoreRecordChainUnreadableException(Sentinel);
+        var h = new Harness { EvaluationFault = fault, FinalDelivery = true, Channel = channel };
+
+        var outcome = await h.RunAsync();
+
+        outcome.Kind.Should().Be(channel == InvoiceSubmissionChannel.Spa ? SubmissionEvaluationKind.Accepted : SubmissionEvaluationKind.Blocked);
+        outcome.ReasonCode.Should().Be(channel == InvoiceSubmissionChannel.Spa ? SubmissionReasonCodes.ProceduresUnresolved : SubmissionReasonCodes.Blocked);
+        outcome.Evaluation.Should().BeNull("no rule finding at all");
+        outcome.Decision.Should().BeNull();
+        outcome.RulesSkippedForUnresolvedProcedures.Should().BeTrue();
+        var finding = outcome.PipelineFindings.Should().ContainSingle(p => p.ReasonCode == SubmissionReasonCodes.ProceduresUnresolved).Subject;
+        finding.Values[SubmissionReasonCodes.ProcedureCauseValue].Should().Be(
+            rowsInconsistent ? SubmissionReasonCodes.CauseRowsInconsistent : SubmissionReasonCodes.CauseChainUnreadable);
+        string.Join("|", outcome.PipelineFindings.SelectMany(p => p.Values.Values)).Should().NotContain("SENTINEL");
+    }
+
+    [Theory(DisplayName = "082c-2 fix round 1 (K1): a chain a failed READ could not complete is held as rows_inconsistent (it may clear); one that stored data could not complete stays chain_unreadable")]
+    [InlineData(true, SubmissionReasonCodes.CauseRowsInconsistent)]
+    [InlineData(false, SubmissionReasonCodes.CauseChainUnreadable)]
+    public async Task AChainThatAFailedReadCouldNotComplete_IsHeldAsTransient(bool transient, string cause)
+    {
+        var h = new Harness { EvaluationFault = new CoreRecordChainUnreadableException("chain unreadable", transient), FinalDelivery = true };
+
+        var outcome = await h.RunAsync();
+
+        outcome.PipelineFindings.Should().ContainSingle(p => p.ReasonCode == SubmissionReasonCodes.ProceduresUnresolved).Subject
+            .Values[SubmissionReasonCodes.ProcedureCauseValue].Should().Be(cause);
+        InvoiceSubmissionProcessor.UnresolvedCauseOf(new CoreRecordChainUnreadableException("x", transient)).Should().Be(cause);
+    }
+
+    [Fact(DisplayName = "082c-2 C14: a raw read fault on the final delivery keeps today's path (it propagates; the job marks the submission Failed); never held or passed")]
+    public async Task ARawFault_OnTheFinalDelivery_Propagates()
+    {
+        var fault = new TimeoutException("dataverse read timed out");
+        var h = new Harness { EvaluationFault = fault, FinalDelivery = true };
+
+        var run = () => h.RunAsync();
+
+        (await run.Should().ThrowAsync<TimeoutException>()).Which.Should().BeSameAs(fault);
+    }
+
+    [Fact(DisplayName = "082c-2 (d), D-205 item 5: the gap-kind map is closed: every kind has its own text; an unmapped kind throws")]
+    public void GapKindMap_IsClosed()
+    {
+        var texts = Enum.GetValues<ProcedureGapKind>().Select(BillingSystemFindings.GapKindText).ToList();
+
+        texts.Should().OnlyContain(t => !string.IsNullOrWhiteSpace(t)).And.OnlyHaveUniqueItems();
+        var unmapped = () => BillingSystemFindings.GapKindText((ProcedureGapKind)99);
+        unmapped.Should().Throw<ArgumentOutOfRangeException>();
+        var unknownCause = () => BillingSystemFindings.CauseText("timeout");
+        unknownCause.Should().Throw<ArgumentOutOfRangeException>();
+    }
     [Fact(DisplayName = "097b: a Correction is judged with its replaced invoice derived on the server from sprk_resubmissionof; a New submission names none and reads nothing")]
     public async Task ACorrection_CarriesItsReplacedInvoice_DerivedFromItsResubmissionOf()
     {
@@ -658,6 +831,89 @@ public class InvoiceSubmissionProcessorTests
         SubmissionReasonCodes.CodingUnavailableHold.Should().Be("ebilling.submission.coding_unavailable");
     }
 
+    // ── 095c-3: a submission with no firm ──
+
+    /// <summary>An Internal submission whose row names no firm (the from-email route, mode New, owner 2026-11-03).</summary>
+    internal static Harness NoFirm(params BillingRuleCandidate[] rules)
+    {
+        var h = new Harness { Channel = InvoiceSubmissionChannel.Internal, Rules = rules };
+        h.Row.Attributes.Remove("sprk_vendororg");
+        return h;
+    }
+
+    [Fact(DisplayName = "095c-3: an Internal submission with no firm is Accepted, held firm_missing; it reads no roster or rate, skips the firm-code step and runs no rule (a rule that would block does not)")]
+    public async Task NoFirm_IsAcceptedHeldFirmMissing_SkipsEveryFirmScopedStep_AndJudgesNoRule()
+    {
+        var h = NoFirm(InvoiceAgeReject());
+        h.Lines = [FeeLine(date: new DateOnly(2026, 1, 20))];
+
+        var outcome = await h.RunAsync();
+
+        outcome.Kind.Should().Be(SubmissionEvaluationKind.Accepted);
+        outcome.ReasonCode.Should().Be(SubmissionReasonCodes.FirmMissing).And.Be("ebilling.submission.firm_missing");
+        outcome.Submission!.FirmId.Should().BeNull();
+        outcome.RulesSkippedForNoFirm.Should().BeTrue();
+        outcome.PipelineFindings.Should().ContainSingle().Which.Should().Match<SubmissionPipelineFinding>(f =>
+            f.ReasonCode == SubmissionReasonCodes.FirmMissing && f.Values.Count == 0);
+        outcome.Read.Should().NotBeNull();
+        outcome.Resolution.Should().NotBeNull();
+        outcome.Coding.Should().NotBeNull("coding by the record's code set still runs");
+        outcome.EvaluationRequest.Should().BeNull();
+        outcome.Evaluation.Should().BeNull();
+        outcome.Decision.Should().BeNull();
+        h.Evaluated.Should().BeNull("steps 4 and 5 do not run: no rule set, no Duplicate prior read, no partial evaluation");
+        h.Resolution.Input!.FirmId.Should().BeNull("no roster and no rate card is chosen without a firm");
+        h.Coding.Request!.IncludeFirmCodes.Should().BeFalse("the firm-code step is skipped");
+
+        // Must-not-fire control: the same submission WITH its firm is judged (and this rule blocks it), with the firm-code step.
+        var withFirm = new Harness { Channel = InvoiceSubmissionChannel.Internal, Rules = [InvoiceAgeReject()] };
+        withFirm.Lines = [FeeLine(date: new DateOnly(2026, 1, 20))];
+        var judged = await withFirm.RunAsync();
+        judged.Kind.Should().Be(SubmissionEvaluationKind.Blocked);
+        judged.RulesSkippedForNoFirm.Should().BeFalse();
+        judged.PipelineFindings.Should().NotContain(f => f.ReasonCode == SubmissionReasonCodes.FirmMissing);
+        withFirm.Resolution.Input!.FirmId.Should().Be(Firm);
+        withFirm.Coding.Request!.IncludeFirmCodes.Should().BeTrue();
+    }
+
+    [Fact(DisplayName = "095c-3: no firm and no code set is AcceptedUncoded with firm_missing as its reason, both holds kept as pipeline findings")]
+    public async Task NoFirm_AndUncoded_IsAcceptedUncoded_WithTheFirmHoldAsTheReason()
+    {
+        var h = NoFirm();
+        h.Coding.Failure = new LineCodingException(LineCodingException.NoCodeSet, "none");
+
+        var outcome = await h.RunAsync();
+
+        outcome.Kind.Should().Be(SubmissionEvaluationKind.AcceptedUncoded);
+        outcome.ReasonCode.Should().Be(SubmissionReasonCodes.FirmMissing, "the hold that decides approval");
+        outcome.PipelineFindings.Select(f => f.ReasonCode).Should().Equal(SubmissionReasonCodes.FirmMissing, SubmissionReasonCodes.CodingNoCodeSetHold);
+        outcome.Evaluation.Should().BeNull();
+        h.Evaluated.Should().BeNull();
+    }
+
+    [Theory(DisplayName = "095c-3 (fail closed): the empty firm id, or no firm on an SPA submission, is still Failed firm_missing before anything is read")]
+    [InlineData(InvoiceSubmissionChannel.Internal, true)]
+    [InlineData(InvoiceSubmissionChannel.Spa, false)]
+    public async Task EmptyFirm_OrNoFirmOnSpa_FailsClosed(InvoiceSubmissionChannel channel, bool emptyId)
+    {
+        var h = new Harness { Channel = channel };
+        if (emptyId)
+        {
+            h.Row["sprk_vendororg"] = new EntityReference("sprk_organization", Guid.Empty);
+        }
+        else
+        {
+            h.Row.Attributes.Remove("sprk_vendororg");
+        }
+
+        var outcome = await h.RunAsync();
+
+        outcome.Kind.Should().Be(SubmissionEvaluationKind.Failed);
+        outcome.ReasonCode.Should().Be(SubmissionReasonCodes.FirmMissing);
+        outcome.Submission.Should().BeNull();
+        h.DocumentLoads.Should().Be(0);
+    }
+
     // ── builders ──
 
     internal static BillingRuleCandidate InvoiceAgeReject() => Version("BILL-AGE", RuleType.InvoiceAge) with { Consequence = Reject };
@@ -704,6 +960,16 @@ public class InvoiceSubmissionProcessorTests
     internal sealed class Harness
     {
         public IReadOnlyList<BillingRuleCandidate> Rules { get; init; } = [];
+
+        /// <summary>082c: the Procedure stream the evaluation sees (none by default).</summary>
+        public ProcedureResolution? Procedures { get; init; }
+
+        /// <summary>082d fix round 3: edits the evaluation's result (e.g. pads its Procedure basis past the findings column), or null.</summary>
+        public Func<BillingEvaluationResult, BillingEvaluationResult>? EvaluationEdit { get; init; }
+
+        /// <summary>082c: what the evaluation throws instead of evaluating (a resolver fault), or null.</summary>
+        public Exception? EvaluationFault { get; set; }
+
         public InvoiceSubmissionChannel Channel
         {
             get => (InvoiceSubmissionChannel)Row.GetAttributeValue<OptionSetValue>("sprk_channel").Value;
@@ -744,7 +1010,15 @@ public class InvoiceSubmissionProcessorTests
             };
         }
 
-        public Task<SubmissionEvaluationOutcome> RunAsync() => Build().EvaluateAsync(Row, LoadDocument);
+        /// <summary>082c-2: the job's <c>IsFinalDelivery</c> (false by default: an earlier delivery).</summary>
+        public bool FinalDelivery { get; init; }
+
+        /// <summary>095d-2a-1 (review X5): one logger the processor, the rejection rule and the rule evaluator all write to (none by default).</summary>
+        public ILogger? Logger { get; init; }
+
+        private ILogger<T> LoggerFor<T>() => Logger is null ? NullLogger<T>.Instance : new ForwardingLogger<T>(Logger);
+
+        public Task<SubmissionEvaluationOutcome> RunAsync() => Build().EvaluateAsync(Row, LoadDocument, FinalDelivery);
 
         /// <summary>The document loader the harness hands the processor (counts the loads).</summary>
         public Task<InvoiceReadRequest> LoadDocument(SubmissionSnapshot snapshot, CancellationToken _)
@@ -772,7 +1046,13 @@ public class InvoiceSubmissionProcessorTests
                 (request, _) =>
                 {
                     Evaluated = request;
-                    var result = Evaluator().Evaluate(request, Loaded([.. Rules]));
+                    if (EvaluationFault is { } fault)
+                    {
+                        throw fault;
+                    }
+
+                    var result = Evaluator(LoggerFor<InvoiceComplianceEvaluator>()).Evaluate(request, Loaded([.. Rules]) with { Procedures = Procedures ?? NoProcedures() });
+                    result = EvaluationEdit?.Invoke(result) ?? result;
 
                     // A row written outside the publish path: the evaluation gate would downgrade the consequence, so the decider's
                     // own guard is proved by restoring Reject after the gate (defence in depth, as 073's DecideAsync warns about).
@@ -780,9 +1060,9 @@ public class InvoiceSubmissionProcessorTests
                         ? result with { RulesByVersion = result.RulesByVersion.ToDictionary(r => r.Key, r => r.Value with { Consequence = Reject }) }
                         : result);
                 },
-                new SubmissionRejectionRule(settings.Object, NullLogger<SubmissionRejectionRule>.Instance),
+                new SubmissionRejectionRule(settings.Object, LoggerFor<SubmissionRejectionRule>()),
                 monitor,
-                NullLogger<InvoiceSubmissionProcessor>.Instance,
+                LoggerFor<InvoiceSubmissionProcessor>(),
                 Entities.Object);
 
             return sut;
@@ -829,6 +1109,17 @@ public class InvoiceSubmissionProcessorTests
             AnalyzerId = "test",
             ApiVersion = "test",
         };
+    }
+
+    /// <summary>095d-2a-1: an <see cref="ILogger{T}"/> that writes to one shared logger, so a test sees every step's log lines in one place.</summary>
+    internal sealed class ForwardingLogger<T>(ILogger inner) : ILogger<T>
+    {
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => inner.BeginScope(state);
+
+        public bool IsEnabled(LogLevel logLevel) => inner.IsEnabled(logLevel);
+
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter) =>
+            inner.Log(logLevel, eventId, state, exception, formatter);
     }
 
     /// <summary>046 at its interface: combined confidence = the analyzer confidence (0 when none), every timekeeper matched unless told otherwise.</summary>

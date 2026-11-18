@@ -4,7 +4,7 @@
 |-------|-------|
 | Status | **Accepted** (Amended) |
 | Date | 2025-10-03 |
-| Updated | 2026-11-10 |
+| Updated | 2026-11-13 |
 | Authors | Spaarke Engineering |
 | Sprint | Sprint 5 - Universal Dataset PCF |
 
@@ -15,7 +15,7 @@
 **AI-Optimized Versions** (load these for efficient context):
 - [ADR-012 Concise](../../.claude/adr/ADR-012-shared-components.md) - ~150 lines, decision + constraints + service architecture
 - [PCF Constraints](../../.claude/constraints/pcf.md) - MUST/MUST NOT rules for PCF development
-- [React Hooks Pattern](../../.claude/patterns/pcf/react-hooks.md) - Shared hooks examples
+- React Hooks Pattern - Shared hooks examples
 
 **When to load this full ADR**: Component examples, directory structure, governance model, service portability details
 
@@ -135,7 +135,7 @@ In this codebase the risk is **over-promotion**: feature areas becoming their ow
    - `@spaarke/auth`: ADR-028.
    - `@spaarke/notifications`: ADR-047.
    - `@spaarke/ai-widgets`: ADR-030 and ADR-031.
-3. **Grandfathered — under review** (9): `@spaarke/sdap-client`, `@spaarke/smart-todo-components`, `@spaarke/communication-components`, `@spaarke/daily-briefing-components`, `@spaarke/compose-components`, `@spaarke/document-operations`, `@spaarke/ai-outputs`, `@spaarke/ai-context`, `@spaarke/legal-workspace`.
+3. **Grandfathered — under review** (9 at the census; 6 since 2026-11-13): `@spaarke/sdap-client`, `@spaarke/smart-todo-components`, `@spaarke/communication-components`, `@spaarke/daily-briefing-components`, `@spaarke/compose-components`, `@spaarke/ai-outputs`. (`@spaarke/ai-context`, `@spaarke/legal-workspace` and `@spaarke/document-operations` were retired on 2026-11-13; see "Census changes" below.)
    - They may be used and extended.
    - Each one is later either sanctioned by a further amendment or consolidated into a sanctioned package.
    - This list is a ratchet baseline. It may shrink, and nothing is added to it.
@@ -157,6 +157,16 @@ Each detector has negative and positive controls, and the maintenance procedure 
 
 - Adding a shared package is now a visible, owner-approved decision, not a side effect of a feature project.
 - The nine grandfathered packages are an explicit review backlog. Resolving them is out of scope for this amendment.
+
+### Census changes
+
+Each change below was approved by the owner in `projects/reuse-governance-tightening-r1/notes/package-reviews.md` and lands with its census-table row and `SharedPackageCensusTests` entry in the same change.
+
+| Date | Package | Change |
+|---|---|---|
+| 2026-11-13 | `@spaarke/ai-context` | Retired. The package held only six types (`EntityContext`, `EntityType`, `StreamingState`, `AiPaneEvent`, `StreamingCallbacks`, `IChatSession`); they moved to `@spaarke/ai-widgets` (`src/types/aiContext.ts`, exported from the barrel), whose `AiSessionProvider` was their main consumer. |
+| 2026-11-13 | `@spaarke/legal-workspace` | Retired. The package was a one-line `export *` of `src/solutions/LegalWorkspace/src/index.ts` with one consumer (SpaarkeAi), created by dataset-grid-framework-r2 FR-10 to replace a raw Vite source alias. SpaarkeAi now declares a `file:` dependency on the solution itself (package `legal-workspace`, which gained an `exports` entry for `./src/index.ts`), so FR-10's declared-dependency goal holds without a shared package. A solution exposing its entry point to another solution is not a shared package and is not in the census. |
+| 2026-11-13 | `@spaarke/document-operations` | Retired. The package held one hook, `useDocumentActions` (open in web / desktop, download, delete, email a link, send to index, all through the BFF with `@spaarke/auth`). It moved unchanged into `@spaarke/ui-components` (`src/hooks/useDocumentActions.ts`), the default home for abstracted-I/O hooks, exported from the main barrel and not from `pcf-safe.ts` (no PCF control uses it). Its two consumers, SemanticSearch and Compose, already imported from ui-components, which already depended on `@spaarke/auth`, so no new dependency edge was added. |
 
 ---
 

@@ -30,7 +30,7 @@ namespace Sprk.Bff.Api.Tests.Api.FieldMappings;
 /// substituted is the caller-scoped query seam (a scripted Dataverse that answers the family walk and the current values) and
 /// the caller-rights probe. No HTTP handler is mocked (ADR-038).
 /// </remarks>
-public class FieldMappingPushFamilyContractTests
+public partial class FieldMappingPushFamilyContractTests
 {
     private static readonly Guid MatterId = Guid.Parse("16616616-1111-4000-8000-000000000166");
     private static readonly Guid CallerSystemUserId = Guid.Parse("16616616-2222-4000-8000-000000000166");

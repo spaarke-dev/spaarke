@@ -1,0 +1,116 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="030" project="spaarke-SPA-external-access-platform-r4">
+  <metadata>
+    <title>Live-metadata check of the §5 candidate Information columns (owner-approved read-only commands) (FR-18a)</title>
+    <phase>3 Grids, information, messages</phase>
+    <gate>after 028 — owner sees and approves the read-only commands before any runs</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Live read-only verification feeding task 031; produces a notes file, no code</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Scripted metadata reads with a fixed candidate list</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Live read against SPAARKE DEV 1, owner-gated</parallel-reason>
+    <deps>028</deps>
+    <tags>dataverse, fields</tags>
+    <estimated-effort>1-2 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Verify against live Dataverse metadata (SPAARKE DEV 1) which design §5 candidate Information columns exist, with their type, lookup target and field-security flag, so task 031 allow-lists only real columns.</prompt>
+  <role>SPAARKE platform developer. Dataverse metadata reader. Follow ADRs strictly.</role>
+  <goal>`notes/task-030-information-fields.md` lists each candidate column as FOUND (logical name, type, lookup targets, IsSecured, already allow-listed or not) or NOT FOUND (dropped), plus the owner's decisions on the open items, and the final per-type column list for task 031.</goal>
+
+  <context>
+    <background>Spec FR-18 and Assumptions: "The first task in P3 verifies each candidate column; 'not found' columns are dropped, not invented." Candidates are design §5 (`design.md:98-122`), with internal people's names allowed by the owner (2026-11-08), each subject to UAC review in 031. The current allow-lists are in `src/server/api/Sprk.Bff.Api/Infrastructure/DI/ExternalAccessModule.cs` (verified 2026-11-10): project `:450-455`, documents `:494-501`, invoice `:528-539`, work assignment `:556-562`, matter `:580-585`, service request `:830-833`. They are wider than design §5's snapshot (project `sprk_projecttype_ref`, matter/WA `sprk_mattertype`, `modifiedon`): cite the code, not the design. The environment URL is `https://spaarkedev1.crm.dynamics.com` (`docs/procedures/dev-bff-deploy-coordination.md:20`).</background>
+    <relevant-files>
+      <file role="canonical-reference">projects/spaarke-SPA-external-access-platform-r4/design.md</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Infrastructure/DI/ExternalAccessModule.cs</file>
+      <file role="new-artifact">projects/spaarke-SPA-external-access-platform-r4/notes/task-030-information-fields.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="028" status="pending">P2 deployed (phase-deploy convention)</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec FR-18, MUST rules">Every command in this task is read-only (metadata GETs or the Dataverse MCP `describe` tool). No create, update, delete, publish or solution import. The owner sees the exact command list in step 1 and approves it before the first runs.</constraint>
+    <constraint source="spec FR-18">A candidate not found in live metadata is DROPPED and listed as dropped. Never substitute a similar-sounding column, never propose creating one. `createdon` stands in for a matter open date only if the owner says so in this task (record the answer).</constraint>
+    <constraint source="NFR-04">No `sprk_signal` column is a candidate. Record no token, email, UPN or object id in the notes; the access token is acquired into a variable and never printed.</constraint>
+    <constraint source="ADR-002">No plugin, no schema change: this task only reads.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-SPA-external-access-platform-r4/CLAUDE.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r4/spec.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r4/design.md</file>
+      <file>.claude/skills/dataverse-mcp-usage/SKILL.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>.claude/constraints/plugins.md</file>
+      <file>.claude/patterns/dataverse/plugin-structure.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+    </files>
+    <patterns>
+      <pattern name="Owner-gated live read" location="projects/spaarke-SPA-external-access-platform-r3/notes/task-002-notes.md">show the commands, run read-only, record raw results</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Context + rigor declaration">Load the knowledge files, read the relevant files, declare rigor and model tier per task-execute Step 0.5.</step>
+    <step order="1" name="Show the commands">Write the command list below into the notes file and show it to the owner. Do not run anything until the owner approves.
+      Candidate columns (design §5; "already" = in ReadableColumns today):
+      - sprk_matter: sprk_practicearea, sprk_assignedoutsidecounsel, sprk_matterdescription, sprk_assignedattorney1, sprk_assignedparalegal1, sprk_responsibleattorney (design: not found), sprk_opendate (design: not found), createdon; already: sprk_mattertype, modifiedon.
+      - sprk_project: sprk_matter, sprk_projectdescription, sprk_assignedattorney1, sprk_assignedparalegal1, sprk_startdate, sprk_duedate, sprk_practicearea, sprk_projectlead (design: not found); already: sprk_projecttype_ref, modifiedon.
+      - sprk_workassignment: sprk_regardingmatter, sprk_assignedto, sprk_description, sprk_assignedby (design: not found), sprk_instructions (design: not found); already: sprk_mattertype, modifiedon.
+      - sprk_invoice: sprk_invoicedescription, sprk_billingperiod (design: not found).
+      Option A — Dataverse MCP (read-only), one call per table: `describe` with table `sprk_matter`, then `sprk_project`, `sprk_workassignment`, `sprk_invoice`.
+      Option B — Web API metadata (read-only), PowerShell:
+      `$org = 'https://spaarkedev1.crm.dynamics.com'`
+      `$tok = az account get-access-token --resource $org --query accessToken -o tsv`   (never echoed)
+      `$h = @{ Authorization = "Bearer $tok"; Accept = 'application/json'; 'OData-Version' = '4.0' }`
+      per table T and its candidate list C:
+      `Invoke-RestMethod -Headers $h -Uri "$org/api/data/v9.2/EntityDefinitions(LogicalName='T')/Attributes?`$select=LogicalName,AttributeType,IsSecured,IsValidForRead&amp;`$filter=LogicalName eq 'c1' or LogicalName eq 'c2' …"`
+      lookups only:
+      `Invoke-RestMethod -Headers $h -Uri "$org/api/data/v9.2/EntityDefinitions(LogicalName='T')/Attributes/Microsoft.Dynamics.CRM.LookupAttributeMetadata?`$select=LogicalName,Targets&amp;`$filter=LogicalName eq 'c1' or …"`</step>
+    <step order="2">After approval, run the approved option exactly as shown; save the raw JSON responses (no headers, no token) under notes/task-030-raw/.</step>
+    <step order="3">Fill the table: per candidate FOUND/NOT FOUND, AttributeType, lookup Targets, IsSecured, already allow-listed. Mark every IsSecured=true column "needs UAC/owner decision" (field security on the external read path).</step>
+    <step order="4">Ask the owner the open items and record the answers: createdon as matter open date; each internal-person column (sprk_assignedattorney1, sprk_assignedparalegal1, sprk_assignedto, sprk_assignedoutsidecounsel) shown or not.</step>
+    <step order="5">Write the final per-type list for task 031 (FOUND, owner-approved, not secured unless approved) and the dropped list.</step>
+    <step order="6">Update tasks/TASK-INDEX.md: set this task's status cell to `✅ [done]` and this POML's &lt;status&gt; to completed; run `pwsh scripts/check-task-status-drift.ps1`.</step>
+    <step order="7">Record deviations in projects/spaarke-SPA-external-access-platform-r4/notes/task-030-notes.md.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the owner does not approve the commands, STOP; task 031 stays blocked.</trigger>
+    <trigger>If a read returns 401/403, or any command would need a write or a privilege change to succeed, STOP and report; do not change roles or settings.</trigger>
+    <trigger>If a found column is field-secured (IsSecured=true), do not propose it for 031 without an explicit owner/UAC decision recorded here.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="terminal">Read-only metadata queries (PowerShell / az / Dataverse MCP describe)</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/spaarke-SPA-external-access-platform-r4/notes/task-030-information-fields.md</output>
+    <output type="docs">projects/spaarke-SPA-external-access-platform-r4/notes/task-030-notes.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The notes file holds the exact command list, and records the owner's approval before the first command's output.</criterion>
+    <criterion testable="true">Every candidate listed in step 1 has a FOUND or NOT FOUND result backed by a saved raw response.</criterion>
+    <criterion testable="true">Every NOT FOUND column is listed as dropped; no substitute or new column is proposed.</criterion>
+    <criterion testable="true">Each FOUND column records AttributeType, IsSecured and, for lookups, Targets; each already allow-listed column is marked.</criterion>
+    <criterion testable="true">The owner's answers on createdon and on each internal-person column are recorded.</criterion>
+    <criterion testable="true">The final per-type list for task 031 contains only FOUND, owner-approved columns.</criterion>
+    <criterion testable="true">No write, publish or import was run; no token, email, UPN or object id appears in the notes or raw files.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-18 (a). The design's "not found" items are re-checked live, not assumed. The `@formattedValues` question (does the module fetch return a lookup's formatted name without reading the _ref table) is answered from code in task 031, not live here.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

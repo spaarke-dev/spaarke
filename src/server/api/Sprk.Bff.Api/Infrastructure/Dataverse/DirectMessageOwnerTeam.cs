@@ -18,7 +18,9 @@ namespace Sprk.Bff.Api.Infrastructure.Dataverse;
 /// configured name that is the unit's DEFAULT team, and a short-lived cache.</para>
 ///
 /// <para><b>No defaults.</b> <see cref="BusinessUnitNameConfigKey"/> and <see cref="OwnerTeamNameConfigKey"/> have no compiled
-/// fallback: an unset value refuses at use (<see cref="DirectMessageOwnerTeamRefusal.NotConfigured"/>) and never fails startup.
+/// fallback and never fail startup. Both unset refuses at use as <see cref="DirectMessageOwnerTeamRefusal.NotConfigured"/> (the
+/// Direct owner rule is off); exactly one set refuses as <see cref="DirectMessageOwnerTeamRefusal.PartiallyConfigured"/> (a
+/// configuration error: unknown, fail closed). Blank is unset, for both keys.
 /// Never the root business unit, never a default team, never the Secure Record unit: each is a refusal, not a fallback.</para>
 ///
 /// <para><b>Names are matched by Dataverse only.</b> Dataverse's <c>name eq</c> ignores case AND accents, so no name is ever
@@ -93,7 +95,11 @@ public sealed class DirectMessageOwnerTeam
         var buName = Configured(BusinessUnitNameConfigKey);
         var teamName = Configured(OwnerTeamNameConfigKey);
         if (buName is null || teamName is null)
-            return DirectMessageOwnerTeamResolution.Refused(DirectMessageOwnerTeamRefusal.NotConfigured);
+        {
+            return MissingSetting(buName, teamName) is { } missing
+                ? DirectMessageOwnerTeamResolution.PartiallyConfiguredFor(missing)
+                : DirectMessageOwnerTeamResolution.Refused(DirectMessageOwnerTeamRefusal.NotConfigured);
+        }
 
         // The Secure Record names are part of the key: the Secure Record exclusion is decided against them (by id).
         var key = new VerdictKey(new NamedOwnerTeamLookup(buName, teamName), SecureRecordOwnerTeam.SecureRecordLookup(_configuration));
@@ -141,8 +147,9 @@ public sealed class DirectMessageOwnerTeam
     /// <item>Both ids, whenever the unit and its named team both exist and neither is the Secure Record unit or team, whatever
     /// their member, user or placement state (<see cref="DirectMessageOwnerTeamIdentity.IsIdentified"/>). The same lookup
     /// <see cref="ResolveDirectMessageOwnerTeamAsync"/> runs first, so Resolve can never select any other team.</item>
-    /// <item><see cref="DirectMessageOwnerTeamIdentity.IsNotConfigured"/> when either setting is unset or blank: no ids, no fault,
-    /// no read. Only this answer means "no Direct team can exist".</item>
+    /// <item><see cref="DirectMessageOwnerTeamIdentity.IsNotConfigured"/> when BOTH settings are unset or blank: no ids, no fault,
+    /// no read. Only this answer means "no Direct team can exist". Exactly one set is
+    /// <see cref="DirectMessageOwnerTeamRefusal.PartiallyConfigured"/> (no ids, no fault, no read, the missing setting named).</item>
     /// <item>The unit or team IS the Secure Record unit or team (by id — Dataverse's name match ignores accents): no ids,
     /// <see cref="DirectMessageOwnerTeamRefusal.BusinessUnitIsSecureRecord"/>. A caller comparing a row's owner with
     /// <see cref="DirectMessageOwnerTeamIdentity.TeamId"/> therefore never reads a Secure-owned row as Direct-owned.</item>
@@ -165,7 +172,11 @@ public sealed class DirectMessageOwnerTeam
         var buName = Configured(BusinessUnitNameConfigKey);
         var teamName = Configured(OwnerTeamNameConfigKey);
         if (buName is null || teamName is null)
-            return DirectMessageOwnerTeamIdentity.NotConfigured;
+        {
+            return MissingSetting(buName, teamName) is { } missing
+                ? DirectMessageOwnerTeamIdentity.PartiallyConfiguredFor(missing)
+                : DirectMessageOwnerTeamIdentity.NotConfigured;
+        }
 
         var identity = await SecureRecordOwnerTeam.IdentifyNamedAsync(
             _dataverse, new NamedOwnerTeamLookup(buName, teamName), ct).ConfigureAwait(false);
@@ -202,9 +213,19 @@ public sealed class DirectMessageOwnerTeam
         return identity.IsIdentified && identity.TeamId != teamId;
     }
 
-    /// <summary>The trimmed setting, or <c>null</c> when it is unset or blank (no default).</summary>
+    /// <summary>The trimmed setting, or <c>null</c> when it is unset or blank (no default). Whitespace is unset, for both keys.</summary>
     private string? Configured(string key) =>
         _configuration[key] is { } value && !string.IsNullOrWhiteSpace(value) ? value.Trim() : null;
+
+    /// <summary>
+    /// The NAME of the one setting that is unset when exactly one is (<see cref="DirectMessageOwnerTeamRefusal.PartiallyConfigured"/>);
+    /// <c>null</c> when both are set or both are unset (<see cref="DirectMessageOwnerTeamRefusal.NotConfigured"/>). Never a
+    /// configured value.
+    /// </summary>
+    private static string? MissingSetting(string? buName, string? teamName) =>
+        (buName is null) == (teamName is null) ? null
+        : buName is null ? BusinessUnitNameConfigKey
+        : OwnerTeamNameConfigKey;
 
     /// <summary>The cached verdict for <paramref name="key"/> while it is younger than <see cref="CacheLifetime"/>.</summary>
     private DirectMessageOwnerTeamResolution? Fresh(VerdictKey key)
@@ -420,8 +441,16 @@ public static class DirectMessageOwnerTeamRefusal
 {
     private const string Prefix = "sdap.communication.direct_owner_team.";
 
-    /// <summary><c>DirectMessage:BusinessUnitName</c> or <c>DirectMessage:OwnerTeamName</c> is unset or blank.</summary>
+    /// <summary>BOTH <c>DirectMessage:BusinessUnitName</c> and <c>DirectMessage:OwnerTeamName</c> are unset or blank: the Direct
+    /// owner rule is off.</summary>
     public const string NotConfigured = Prefix + "not_configured";
+
+    /// <summary>
+    /// Exactly one of <c>DirectMessage:BusinessUnitName</c> and <c>DirectMessage:OwnerTeamName</c> is set (blank counts as unset).
+    /// A configuration error, never "off": the answer is unknown. The refusal names the missing setting by NAME
+    /// (<see cref="DirectMessageOwnerTeamResolution.MissingSetting"/>), never a value. Agreed with uac-r2 (2026-11-11).
+    /// </summary>
+    public const string PartiallyConfigured = Prefix + "partially_configured";
 
     /// <summary>The configured business unit is the Secure Record business unit, or the team is its owner team (decided by id).</summary>
     public const string BusinessUnitIsSecureRecord = Prefix + "bu_is_secure_record";
@@ -489,14 +518,22 @@ public sealed record DirectMessageOwnerTeamResolution(Guid? TeamId, string? Refu
     public bool IsResolved => Refusal is null && TeamId is { } id && id != Guid.Empty;
 
     /// <summary>
-    /// True only when a Direct setting is unset or blank (<see cref="DirectMessageOwnerTeamRefusal.NotConfigured"/>): no Direct
-    /// team can exist. The one refusal a caller may read as "not the Direct team".
+    /// True only when BOTH Direct settings are unset or blank (<see cref="DirectMessageOwnerTeamRefusal.NotConfigured"/>): no Direct
+    /// team can exist. The one refusal a caller may read as "not the Direct team". One setting set is
+    /// <see cref="DirectMessageOwnerTeamRefusal.PartiallyConfigured"/>, which is not this.
     /// </summary>
     public bool IsNotConfigured => Refusal == DirectMessageOwnerTeamRefusal.NotConfigured;
+
+    /// <summary>The NAME of the unset setting of a <see cref="DirectMessageOwnerTeamRefusal.PartiallyConfigured"/> refusal; otherwise
+    /// <c>null</c>. Never a configured value.</summary>
+    public string? MissingSetting { get; init; }
 
     internal static DirectMessageOwnerTeamResolution Resolved(Guid teamId) => new(teamId, null, null);
 
     internal static DirectMessageOwnerTeamResolution Refused(string refusal, Exception? fault = null) => new(null, refusal, fault);
+
+    internal static DirectMessageOwnerTeamResolution PartiallyConfiguredFor(string missingSetting) =>
+        new(null, DirectMessageOwnerTeamRefusal.PartiallyConfigured, null) { MissingSetting = missingSetting };
 }
 
 /// <summary>
@@ -517,9 +554,16 @@ public sealed record DirectMessageOwnerTeamIdentity(Guid? BusinessUnitId, Guid? 
     public bool IsIdentified =>
         Refusal is null && BusinessUnitId is { } bu && bu != Guid.Empty && TeamId is { } team && team != Guid.Empty;
 
-    /// <summary>True only when a Direct setting is unset or blank: no Direct team can exist. No ids, no fault.</summary>
+    /// <summary>True only when BOTH Direct settings are unset or blank: no Direct team can exist. No ids, no fault.</summary>
     public bool IsNotConfigured => Refusal == DirectMessageOwnerTeamRefusal.NotConfigured;
+
+    /// <summary>The NAME of the unset setting of a <see cref="DirectMessageOwnerTeamRefusal.PartiallyConfigured"/> refusal; otherwise
+    /// <c>null</c>. Never a configured value.</summary>
+    public string? MissingSetting { get; init; }
 
     internal static DirectMessageOwnerTeamIdentity NotConfigured { get; } =
         new(null, null, DirectMessageOwnerTeamRefusal.NotConfigured, null);
+
+    internal static DirectMessageOwnerTeamIdentity PartiallyConfiguredFor(string missingSetting) =>
+        new(null, null, DirectMessageOwnerTeamRefusal.PartiallyConfigured, null) { MissingSetting = missingSetting };
 }

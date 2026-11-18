@@ -303,6 +303,8 @@ public class OutputMappingRunIdentityTests
         { "sprk_communicationaccount", "sprk_name", "x", InheritedAccessPermission.AppOnlyAccessTableWriteReasonCode },
         { "sprk_communication", "sprk_isinternalonly", false, InheritedAccessPermission.AppOnlyAccessColumnWriteReasonCode },
         { "sprk_matter", "sprk_containerid", "b!forged", InheritedAccessPermission.AppOnlySecureRootWriteReasonCode },
+        // #2250: a root's Assigned-To column (it would cause an Assigned-To grant).
+        { "sprk_project", "sprk_assignedtointernal", "x", InheritedAccessPermission.PlaybookAssignedToWriteReasonCode },
     };
 
     [Theory]

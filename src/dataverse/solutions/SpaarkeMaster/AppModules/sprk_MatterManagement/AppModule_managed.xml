@@ -46,7 +46,9 @@
     <AppModuleComponent type="1" schemaName="sprk_analysistool" />
     <AppModuleComponent type="1" schemaName="sprk_analysisworkingversion" />
     <AppModuleComponent type="1" schemaName="sprk_approlemodulemap" />
+    <AppModuleComponent type="1" schemaName="sprk_billingevent" />
     <AppModuleComponent type="1" schemaName="sprk_billingexport" />
+    <AppModuleComponent type="1" schemaName="sprk_budget" />
     <AppModuleComponent type="1" schemaName="sprk_chartdefinition" />
     <AppModuleComponent type="1" schemaName="sprk_charttype" />
     <AppModuleComponent type="1" schemaName="sprk_communication" />
@@ -55,6 +57,8 @@
     <AppModuleComponent type="1" schemaName="sprk_container" />
     <AppModuleComponent type="1" schemaName="sprk_dataverseenvironment" />
     <AppModuleComponent type="1" schemaName="sprk_document" />
+    <AppModuleComponent type="1" schemaName="sprk_ebillingoverride" />
+    <AppModuleComponent type="1" schemaName="sprk_ebillingsetting" />
     <AppModuleComponent type="1" schemaName="sprk_emailartifact" />
     <AppModuleComponent type="1" schemaName="sprk_emailsaverule" />
     <AppModuleComponent type="1" schemaName="sprk_emailupdatefield" />
@@ -67,6 +71,8 @@
     <AppModuleComponent type="1" schemaName="sprk_fieldmappingrule" />
     <AppModuleComponent type="1" schemaName="sprk_gridconfiguration" />
     <AppModuleComponent type="1" schemaName="sprk_invoice" />
+    <AppModuleComponent type="1" schemaName="sprk_invoiceapproval" />
+    <AppModuleComponent type="1" schemaName="sprk_invoicecorrection" />
     <AppModuleComponent type="1" schemaName="sprk_invoicesubmission" />
     <AppModuleComponent type="1" schemaName="sprk_kpiassessment" />
     <AppModuleComponent type="1" schemaName="sprk_matter" />
@@ -80,12 +86,15 @@
     <AppModuleComponent type="1" schemaName="sprk_practicearea_ref" />
     <AppModuleComponent type="1" schemaName="sprk_project" />
     <AppModuleComponent type="1" schemaName="sprk_projecttype_ref" />
+    <AppModuleComponent type="1" schemaName="sprk_ratecard" />
+    <AppModuleComponent type="1" schemaName="sprk_ratecardrate" />
     <AppModuleComponent type="1" schemaName="sprk_recordtype_ref" />
     <AppModuleComponent type="1" schemaName="sprk_registrationrequest" />
     <AppModuleComponent type="1" schemaName="sprk_reportcard" />
     <AppModuleComponent type="1" schemaName="sprk_reportingentity" />
     <AppModuleComponent type="1" schemaName="sprk_reportingview" />
     <AppModuleComponent type="1" schemaName="sprk_servicerequest" />
+    <AppModuleComponent type="1" schemaName="sprk_signal" />
     <AppModuleComponent type="1" schemaName="sprk_speauditlog" />
     <AppModuleComponent type="1" schemaName="sprk_specontainertypeconfig" />
     <AppModuleComponent type="1" schemaName="sprk_speenvironment" />

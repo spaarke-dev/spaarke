@@ -98,12 +98,15 @@ public sealed partial class DataverseUpdateRecordHandler : IToolHandler
     private readonly Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver _ownership;
     private readonly Sprk.Bff.Api.Services.Access.SecureRootFilingGate _rootFiling;
     private readonly Spaarke.Dataverse.IGenericEntityService? _appOnlyEntities;
+    private readonly Sprk.Bff.Api.Services.Communication.Access.DirectMessageOwnerStep? _directOwner;
 
     /// <param name="scopes">Task 142 (L1): the scope the Assigned-To materializer is resolved from after an update that
     /// wrote a root's "Assigned *" column. Optional for the same reason as on <c>DataverseCreateRecordHandler</c>.</param>
     /// <param name="appOnlyEntities">ebilling-r1 D-96: the app-only reader an invoice's lines are counted with when this tool
     /// moves an invoice to another core record (<c>OwnedChildWrite.RefileAsync</c>). Registered unconditionally by the host;
     /// optional so the test compositions keep compiling — absent, such a move fails closed.</param>
+    /// <param name="directOwner">fm task 054 piece 3b: the step that returns an unfiled Direct message to the Direct team
+    /// (<c>OwnedChildWrite.RefileAsync</c>). Registered by the host; absent, an unfiled communication keeps its owner.</param>
     public DataverseUpdateRecordHandler(
         IDataverseUserClient dataverse,
         Sprk.Bff.Api.Services.Dataverse.CoreAncestorAfterWriteRestamp restamp,
@@ -111,7 +114,8 @@ public sealed partial class DataverseUpdateRecordHandler : IToolHandler
         Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver ownership,
         Sprk.Bff.Api.Services.Access.SecureRootFilingGate rootFiling,
         IServiceScopeFactory? scopes = null,
-        Spaarke.Dataverse.IGenericEntityService? appOnlyEntities = null)
+        Spaarke.Dataverse.IGenericEntityService? appOnlyEntities = null,
+        Sprk.Bff.Api.Services.Communication.Access.DirectMessageOwnerStep? directOwner = null)
     {
         _dataverse = dataverse ?? throw new ArgumentNullException(nameof(dataverse));
         // Owner round 8 item 1: unconditionally registered beside the restamper (AddCoreAncestorResolver, which
@@ -125,6 +129,7 @@ public sealed partial class DataverseUpdateRecordHandler : IToolHandler
         _rootFiling = rootFiling ?? throw new ArgumentNullException(nameof(rootFiling));
         _scopes = scopes;
         _appOnlyEntities = appOnlyEntities;
+        _directOwner = directOwner;
     }
 
     /// <inheritdoc />
@@ -184,8 +189,14 @@ public sealed partial class DataverseUpdateRecordHandler : IToolHandler
         if (string.IsNullOrWhiteSpace(context.TenantId))
             return ToolValidationResult.Failure("TenantId is required.");
 
-        if (!TryParseArgs(context.ToolArgumentsJson, out var tablename, out _, out _, out var error))
+        if (!TryParseArgs(context.ToolArgumentsJson, out var tablename, out _, out var item, out var error))
             return ToolValidationResult.Failure(error!);
+
+        // The one update-side check (RecordTableRules.RefuseFixedAfterCreateColumns: the core record pair, and fm task 054b's
+        // BFF-owned columns of a communication and its thread) is asked here too, so a proposal naming one is refused before
+        // the confirm dialog and never suspends; ExecuteChatAsync asks again, in the same words.
+        if (RecordTableRules.RefuseFixedAfterCreateColumns(tablename, item.EnumerateObject().Select(p => p.Name)) is { } fixedRefusal)
+            return ToolValidationResult.Failure(FixedAfterCreateMessage(fixedRefusal));
 
         // Task 048 (owner decision 2026-11-04, D-204 extended to updates): a Signal, a Decision Record and a Budget Revision are
         // changed only by their writers. Refused here too, as the create tool refuses them, so the gate shows the refusal and
@@ -193,14 +204,29 @@ public sealed partial class DataverseUpdateRecordHandler : IToolHandler
         if (RecordTableRules.RefuseWriterOnlyTableUpdate(tablename) is not null)
             return ToolValidationResult.Failure(ChangedOnlyByItsWriterChatMessage(tablename));
 
+        // ebilling-r1 task 165d fix round (EB-D-207; uac-r2 U1 option A): this tool writes AS the person, so only the writer-only COLUMN
+        // refusal is asked, never the full RefuseAppOnlyWrite (the document, owner and creator refusals are not a person's edit's).
+        // A column only the table's typed writer sets (the invoice's AP export claim) is refused before the dialog too.
+        if (RecordTableRules.RefuseWriterOnlyColumns(tablename, item.EnumerateObject().Select(p => p.Name)) is { } writerOnlyColumn)
+            return ToolValidationResult.Failure(WriterOnlyColumnChatMessage(writerOnlyColumn));
+
         return ToolValidationResult.Success();
     }
+
+    /// <summary>The chat tool's wording of <see cref="RecordTableRules.RefuseFixedAfterCreateColumns"/>, before the confirm dialog
+    /// (<see cref="ValidateChat"/>) and after it (<see cref="ExecuteChatAsync"/>).</summary>
+    private static string FixedAfterCreateMessage(RecordOwnerResolution refusal) =>
+        $"The update was NOT written: {refusal.Reason} ({refusal.RefusalCode}).";
 
     /// <summary>The chat tool's wording of <see cref="RecordTableRules.RefuseWriterOnlyTableUpdate"/> (model-facing, as the create
     /// tool's <c>CreatedOnlyByItsWriterCreateBlockedMessage</c>); every other path answers with
     /// <see cref="RecordTableRules.ChangedOnlyByItsWriterMessage"/>, a plain sentence.</summary>
     internal static string ChangedOnlyByItsWriterChatMessage(string tablename) =>
         ChatMessageFor(RecordTableRules.Find(tablename)?.Table ?? tablename);
+
+    /// <summary>The chat tool's wording of <see cref="RecordTableRules.RefuseWriterOnlyColumns"/>: the same words in both legs, with the code.</summary>
+    private static string WriterOnlyColumnChatMessage(RecordOwnerResolution refused) =>
+        $"The update was NOT written: {refused.Reason} ({refused.RefusalCode}).";
 
     private static string ChatMessageFor(string tablename) =>
         $"'{tablename}' records can't be changed from chat — this update was REJECTED and nothing was written. They are changed " +
@@ -228,8 +254,7 @@ public sealed partial class DataverseUpdateRecordHandler : IToolHandler
         if (RecordTableRules.RefuseFixedAfterCreateColumns(tablename, item.EnumerateObject().Select(p => p.Name)) is { } fixedRefusal)
         {
             return LogOutcome(context, tablename, recordId,
-                Error(tool, $"The update was NOT written: {fixedRefusal.Reason} ({fixedRefusal.RefusalCode}).",
-                    fixedRefusal.RefusalCode!, startedAt),
+                Error(tool, FixedAfterCreateMessage(fixedRefusal), fixedRefusal.RefusalCode!, startedAt),
                 stopwatch);
         }
 
@@ -240,6 +265,14 @@ public sealed partial class DataverseUpdateRecordHandler : IToolHandler
         {
             return LogOutcome(context, tablename, recordId,
                 Error(tool, ChangedOnlyByItsWriterChatMessage(tablename), writerOnly.RefusalCode!, startedAt), stopwatch);
+        }
+
+        // ebilling-r1 task 165d fix round (EB-D-207; uac-r2 U1 option A): and a column only the table's typed writer sets, asked as ValidateChat
+        // asks it (the column check alone: this tool writes AS the person). Nothing is written.
+        if (RecordTableRules.RefuseWriterOnlyColumns(tablename, item.EnumerateObject().Select(p => p.Name)) is { } writerOnlyColumn)
+        {
+            return LogOutcome(context, tablename, recordId,
+                Error(tool, WriterOnlyColumnChatMessage(writerOnlyColumn), writerOnlyColumn.RefusalCode!, startedAt), stopwatch);
         }
 
         try
@@ -361,9 +394,15 @@ public sealed partial class DataverseUpdateRecordHandler : IToolHandler
                 ? await ReadCommunicationMatterAsync(recordId).ConfigureAwait(false)
                 : default;
 
+            // #2799 (uac-r2): the application writer of a locked invoice-family column (checked as the caller first). Absent, a
+            // write of one is unanswered and nothing is written (fail closed); a write without one never uses it.
+            using var lockedScope = _scopes?.CreateScope();
+            var lockedFields = lockedScope?.ServiceProvider.GetService<Spaarke.Dataverse.IFieldMappingDataverseService>();
+
             // Task 146 r2 (verifier item 2): a change to the records the row is FILED under is a re-file.
             var refile = await RefileIfFiledAsync(
-                tool, tablename, recordId, entitySetName, primaryIdAttribute, mapped.Item!, context, startedAt, cancellationToken)
+                tool, tablename, recordId, entitySetName, primaryIdAttribute, mapped.Item!, context, startedAt, cancellationToken,
+                lockedFields)
                 .ConfigureAwait(false);
             if (refile.Result is { } refileResult)
             {
@@ -373,16 +412,21 @@ public sealed partial class DataverseUpdateRecordHandler : IToolHandler
             // (#1616 / task 195: an update that writes a project's pair returned above, through ProjectMatterFiling.)
             if (!refile.Written)
             {
-                // PATCH carries If-Match: * (update-only) — see IDataverseUserClient.PatchAsync.
-                var response = await _dataverse.PatchAsync(
-                    $"{entitySetName}({recordId:D})",
+                // PATCH carries If-Match: * (update-only) — see IDataverseUserClient.PatchAsync. #2799: a locked invoice-family
+                // column in it is checked as the caller and written as the app (a body without one: the caller's PATCH as before).
+                var response = await InvoiceFamilyLockedWrite.PatchAsCallerAsync(
+                    _dataverse, lockedFields, tablename, entitySetName, recordId,
                     mapped.Item!.JsonBody,
+                    _logger, traceId: null,
                     cancellationToken).ConfigureAwait(false);
-                if (!response.IsSuccess)
+                if (response.Kind == InvoiceFamilyLockedWrite.CallerPatchKind.ClientFailure)
                 {
                     // Privilege-denied update surfaces the USER's own access error — never escalates.
-                    return LogOutcome(context, tablename, recordId, MapClientError(tool, response, startedAt), stopwatch);
+                    return LogOutcome(context, tablename, recordId, MapClientError(tool, response.ClientFailure!, startedAt), stopwatch);
                 }
+
+                if (response.Kind != InvoiceFamilyLockedWrite.CallerPatchKind.Written)
+                    return LogOutcome(context, tablename, recordId, LockedWriteError(tool, response.Kind, startedAt), stopwatch);
             }
 
             // Task 156, owner round 8 item 1 (§6.5 path B — see the class remarks): the copies this write moved are
@@ -402,7 +446,9 @@ public sealed partial class DataverseUpdateRecordHandler : IToolHandler
 
             // Task 147 r1c (round 36), AFTER the re-stamp (the stamps on the rows filed under it are lookups the ownership rule
             // reads): the re-filed row's mirror and task 148's pass over everything filed under it.
-            if (refile.Written && children is not null && wasIsolated is not null)
+            // #2091 / fm 054 piece 3b: not when the reparent moved none of the row's parents (ParentsUnchanged — a clear of a link
+            // that files nothing, a re-bind onto the record a column already holds): written, but no re-file, as on the route.
+            if (refile.Written && refile.Resolution?.ParentsUnchanged != true && children is not null && wasIsolated is not null)
             {
                 // #2143 round 7 (F1): with the caller the re-file's F3 check acted for, so the thread that follows moves on it.
                 // #2159 slice 2: with the reparent's answer (its F3 permission), so a re-filed document's file release is recorded.
@@ -477,11 +523,13 @@ public sealed partial class DataverseUpdateRecordHandler : IToolHandler
     /// </summary>
     private async Task<RefileStep> RefileIfFiledAsync(
         AnalysisTool tool, string tablename, Guid recordId, string entitySetName, string? primaryIdAttribute,
-        DataverseWriteItemMapper.MappedItem item, ChatInvocationContext context, DateTimeOffset startedAt, CancellationToken ct)
+        DataverseWriteItemMapper.MappedItem item, ChatInvocationContext context, DateTimeOffset startedAt, CancellationToken ct,
+        Spaarke.Dataverse.IFieldMappingDataverseService? lockedFields)
     {
         var callerOid = Guid.TryParse(context.UserId, out var oid) && oid != Guid.Empty ? oid : (Guid?)null;
         var outcome = await OwnedChildWrite.RefileAsync(
-            _dataverse, _ownership, tablename, recordId, entitySetName, primaryIdAttribute, item, callerOid, ct, _appOnlyEntities)
+            _dataverse, _ownership, tablename, recordId, entitySetName, primaryIdAttribute, item, callerOid, ct, _appOnlyEntities,
+            _directOwner, lockedFields, _logger)
             .ConfigureAwait(false);
 
         return outcome switch
@@ -687,6 +735,7 @@ public sealed partial class DataverseUpdateRecordHandler : IToolHandler
             // ebilling-r1 FR-05 (ISS-010): the invoice-family guard, run by the re-file core — its stable code.
             { InvoiceFamilyRefusal: { } family } => Error(tool, $"The update was NOT written: {family.Reason} ({family.RefusalCode}).",
                 family.RefusalCode ?? ToolErrorCodes.ValidationFailed, startedAt),
+            { LockedWrite: { } locked } => LockedWriteError(tool, locked, startedAt),
             { Denied: { } denied } => Error(tool, denied, DataverseUserClientErrorCodes.AccessDenied, startedAt),
             { SecureFilingRefused: { } owner } => Error(tool,
                 $"A '{tablename}' record cannot be filed under a secure record from chat; the update was NOT written" +
@@ -701,6 +750,25 @@ public sealed partial class DataverseUpdateRecordHandler : IToolHandler
                 $"The update was NOT written: the record's owner could not be decided — {refused.Reason} ({refused.RefusalCode}).",
                 refused.RefusalCode ?? ToolErrorCodes.ValidationFailed, startedAt),
             _ => throw new InvalidOperationException("A re-file outcome with no decision."),
+        };
+
+    /// <summary>
+    /// #2799 (uac-r2): a locked invoice-family column the caller's update wrote, in this tool's words. Denied (one answer for a
+    /// record they may not use and one that does not exist) is the tool's access-denied error; an unanswered check is the
+    /// invoice-family "could not be read" code; nothing is written on either. Partly saved (K-1) is a service error with fixed
+    /// text.
+    /// </summary>
+    private ToolResult LockedWriteError(AnalysisTool tool, InvoiceFamilyLockedWrite.CallerPatchKind kind, DateTimeOffset startedAt) =>
+        kind switch
+        {
+            InvoiceFamilyLockedWrite.CallerPatchKind.Denied => Error(tool,
+                "The update was NOT written: you do not have permission to change what this record is filed under.",
+                DataverseUserClientErrorCodes.AccessDenied, startedAt),
+            InvoiceFamilyLockedWrite.CallerPatchKind.PartlySaved => Error(tool,
+                InvoiceFamilyLockedWrite.PartlySavedMessage, DataverseUserClientErrorCodes.ServiceError, startedAt),
+            _ => Error(tool,
+                $"The update was NOT written: whether you may change what this record is filed under could not be checked ({InvoiceFamilyCoreRecordGuard.ReadFailedCode}).",
+                InvoiceFamilyCoreRecordGuard.ReadFailedCode, startedAt),
         };
 
     // ── helpers ───────────────────────────────────────────────────────────────

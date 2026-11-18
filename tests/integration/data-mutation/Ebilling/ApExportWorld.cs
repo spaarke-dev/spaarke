@@ -6,11 +6,15 @@ using Microsoft.Xrm.Sdk.Query;
 using Moq;
 using Spaarke.Core.Auth;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Services.Ai.Membership;
 using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Finance;
 using Sprk.Bff.Api.Services.Finance.Files;
 using Sprk.Bff.Api.Services.Finance.Models;
+using Sprk.Bff.Api.Services.Signals;
 using Sprk.Bff.Api.Tests.Finance.Files;
+using Sprk.Bff.Api.Tests.Services.Finance;
+using Sprk.Bff.Api.Tests.Services.Signals;
 using FinAuth = Sprk.Bff.Api.Tests.Api.Finance.FinanceEndpointsAuthorizationContractTests;
 
 namespace Sprk.Bff.Api.Tests.DataMutation.Ebilling;
@@ -44,12 +48,31 @@ internal sealed class ApExportWorld
     public ApExportAuthorization Authorization { get; }
     public ApExportService Service { get; }
 
+    /// <summary>Task 165b-3 part B: the Decision Record writer's harness, whose WhoAmI answers the writer identity
+    /// (<see cref="DecisionRecordWriterTests.WriterUser"/>) or, with <c>WhoAmIFault</c> set, faults. The export reads only that identity from it.</summary>
+    public DecisionRecordWriterTests.Harness Writer { get; } = new();
+
+    /// <summary>Task 165b-3 part B: the export's log lines (level, rendered message).</summary>
+    public ApprovalListLogger<ApExportService> Log { get; } = new();
+
     /// <summary>When set, the settings mapping JSON (null = the D-56 default).</summary>
     public string? MappingJson { get; set; }
 
     public bool OwnerRefused { get; set; }
 
     public bool OwnerThrows { get; set; }
+
+    /// <summary>
+    /// The acting user sits in the ROOT business unit (a System Administrator whose systemuser is in the root unit, dev 2026-11-03). Default false: the
+    /// caller is in a customer business unit (BU1), where the restricted-content owner team resolves.
+    /// </summary>
+    public bool CallerInRootBusinessUnit { get; set; }
+
+    /// <summary>
+    /// A scripted owner answer (question, how many questions were asked before it, this one included): a non-null answer is returned as is, and it may
+    /// throw. Null falls through to <see cref="OwnerThrows"/> / <see cref="CallerInRootBusinessUnit"/> / <see cref="OwnerRefused"/>.
+    /// </summary>
+    public Func<RecordOwnershipContext, int, RecordOwnerResolution?>? OwnerAnswer { get; set; }
 
     public InvoiceContextService.InvoiceCaller Caller { get; } = new("caller-oid", CallerToken);
 
@@ -60,7 +83,29 @@ internal sealed class ApExportWorld
             NullLogger.Instance, timeProvider: new GatewayClock(Gateway));
         Owners.Setup(o => o.ResolveOwnerAsync(It.IsAny<RecordOwnershipContext>(), It.IsAny<CancellationToken>()))
             .Callback((RecordOwnershipContext context, CancellationToken _) => OwnerQuestions.Add(context))
-            .Returns(() => OwnerThrows ? throw new InvalidOperationException("resolver down") : Task.FromResult(OwnerRefused ? RecordOwnerResolution.Refused("record_owner_test_refusal", "test refusal") : RecordOwnerResolution.Owned(TeamId)));
+            .Returns((RecordOwnershipContext context, CancellationToken _) =>
+            {
+                if (OwnerAnswer?.Invoke(context, OwnerQuestions.Count) is { } scripted)
+                {
+                    return Task.FromResult(scripted);
+                }
+
+                if (OwnerThrows)
+                {
+                    throw new InvalidOperationException("resolver down");
+                }
+
+                // The resolver's own contract for a hard-deny row (RecordOwnershipResolver.OrdinaryExitAsync): a caller in the ROOT business unit has no
+                // customer business unit, so the restricted-content owner team refuses (AnswerIsRootBusinessUnit); the ordinary question (the batch's) is
+                // still answered with the unit's default team, which is how dev's batch was created in the root unit before the file refused.
+                if (CallerInRootBusinessUnit && RecordOwnershipResolver.IsRestrictedContentTable(context.ChildEntityLogicalName))
+                {
+                    return Task.FromResult(RecordOwnerResolution.Refused(
+                        RecordOwnerRefusal.RestrictedContentOwnerTeamUnresolved, "the restricted-content owner team cannot be used (AnswerIsRootBusinessUnit)"));
+                }
+
+                return Task.FromResult(OwnerRefused ? RecordOwnerResolution.Refused("record_owner_test_refusal", "test refusal") : RecordOwnerResolution.Owned(TeamId));
+            });
         Settings.Setup(s => s.GetAsync(It.IsAny<CancellationToken>()))
             .Returns(() => Task.FromResult(new EbillingSettings { ApExportMappingJson = MappingJson }));
         Lifecycle = new WorldLifecycle(Dataverse);
@@ -69,7 +114,9 @@ internal sealed class ApExportWorld
         Authorization = new ApExportAuthorization(
             new AuthorizationService(Access, Array.Empty<IAuthorizationRule>(), NullLogger<AuthorizationService>.Instance), Probe,
             NullLogger<ApExportAuthorization>.Instance);
-        Service = new ApExportService(Dataverse.Service, Lifecycle, Settings.Object, Authorization, Files, Blobs, Owners.Object, NullLogger<ApExportService>.Instance);
+        var recorder = new BillingDecisionRecorder(Writer.Writer, new Mock<IIdentityNormalizationService>().Object, NullLogger<BillingDecisionRecorder>.Instance);
+        Service = new ApExportService(
+            Dataverse.Service, Lifecycle, Settings.Object, Authorization, Files, Blobs, Owners.Object, recorder, Log);
 
         Dataverse.Put(new Entity("sprk_organization", FirmId) { ["sprk_organizationname"] = "Acme Law LLP" });
         Dataverse.Put(new Entity("contact", ApproverContact) { ["fullname"] = "Pat Approver" });
@@ -85,9 +132,12 @@ internal sealed class ApExportWorld
         }
     }
 
-    /// <summary>Adds an invoice (default: Approved, no batch) with one approval and <paramref name="lines"/> lines, and returns it.</summary>
+    /// <summary>Adds an invoice (default: Approved, no batch) with one approval and <paramref name="lines"/> lines, and returns it. Task 165b-3 part B:
+    /// with <paramref name="approveRecord"/> (the default) an invoice in Approved, Sent to AP or Paid also gets the approve Decision Record the writer
+    /// identity created (<see cref="AddApproveRecord"/>), as every approved invoice on dev has.</summary>
     public Entity AddInvoice(
-        string number, int status = InvoiceStatusCodes.Approved, decimal approved = 900m, int lines = 2, bool grant = true, Guid? batch = null)
+        string number, int status = InvoiceStatusCodes.Approved, decimal approved = 900m, int lines = 2, bool grant = true, Guid? batch = null,
+        bool approveRecord = true)
     {
         var id = Guid.NewGuid();
         var invoice = new Entity("sprk_invoice", id)
@@ -100,10 +150,9 @@ internal sealed class ApExportWorld
             ["sprk_billingperiodstart"] = new DateTime(2026, 9, 1, 0, 0, 0, DateTimeKind.Utc),
             ["sprk_billingperiodend"] = new DateTime(2026, 9, 30, 0, 0, 0, DateTimeKind.Utc),
             ["sprk_currency"] = "USD",
-            ["sprk_totalamount"] = new Money(1000m),
-            ["sprk_lineadjustmentstotal"] = new Money(60m),
-            ["sprk_invoiceadjustmentstotal"] = new Money(40m),
-            ["sprk_approvedtotal"] = new Money(approved),
+            // Task 165b-2: the billed total is the requested approved total (no line is decided, so the calculator derives approved = billed); the five
+            // derived totals are stored from the lines below (StoreTotalsFromLines), as the totals service stores them.
+            ["sprk_totalamount"] = new Money(approved),
             ["sprk_vendororg"] = new EntityReference("sprk_organization", FirmId),
             ["sprk_matter"] = new EntityReference("sprk_matter", Guid.NewGuid()),
             ["sprk_regardingrecordnumber"] = "M-1001",
@@ -131,6 +180,7 @@ internal sealed class ApExportWorld
             });
         }
 
+        StoreTotalsFromLines(id);
         Dataverse.Put(new Entity("sprk_invoiceapproval", Guid.NewGuid())
         {
             ["sprk_invoice"] = new EntityReference("sprk_invoice", id),
@@ -143,13 +193,50 @@ internal sealed class ApExportWorld
             Access.Grant("sprk_invoices", id, AccessRights.Read | AccessRights.Write);
         }
 
+        if (approveRecord && status is InvoiceStatusCodes.Approved or InvoiceStatusCodes.SentToAp or InvoiceStatusCodes.Paid)
+        {
+            AddApproveRecord(invoice);
+        }
+
         return invoice;
     }
 
-    /// <summary>Adds one more line to <paramref name="invoice"/> (cost type: Fee 100000000, Expense 100000001, Adjustment 100000002; state: 0 Active, 1 Inactive).</summary>
-    public Entity AddLine(Entity invoice, int costType, decimal amount, int sequence, int? state = null, int? status = null, decimal? approvedAmount = null)
+    /// <summary>Task 165b-3 part B: an approve Decision Record regarding <paramref name="invoice"/>, as Dataverse stores it: <c>createdby</c> is
+    /// <paramref name="createdBy"/> (default the writer identity) and <c>createdonbehalfby</c> is <paramref name="onBehalfBy"/> (default empty).
+    /// Fix round (uac-r2 F1): its <c>sprk_steps</c> carries the key the writer gives the approval of the invoice's portion
+    /// (<see cref="ApprovalKeyOf"/>), or <paramref name="reviewId"/> when given.</summary>
+    public Entity AddApproveRecord(Entity invoice, Guid? createdBy = null, Guid? onBehalfBy = null, Guid? reviewId = null)
     {
-        var line = new Entity("sprk_billingevent", Guid.NewGuid())
+        var record = new Entity("sprk_decisionrecord", Guid.NewGuid())
+        {
+            ["sprk_regardinginvoice"] = new EntityReference("sprk_invoice", invoice.Id),
+            ["sprk_actioncode"] = "approve-invoice",
+            ["createdby"] = new EntityReference("systemuser", createdBy ?? DecisionRecordWriterTests.WriterUser),
+            ["sprk_steps"] = $"{{\"reviewId\":\"{reviewId ?? ApprovalKeyOf(invoice):D}\",\"steps\":[{{\"code\":\"approve-invoice\"}}]}}",
+        };
+        if (onBehalfBy is { } behalf)
+        {
+            record["createdonbehalfby"] = new EntityReference("systemuser", behalf);
+        }
+
+        Dataverse.Put(record);
+        return record;
+    }
+
+    /// <summary>The approve record's key for <paramref name="invoice"/>'s one portion: <see cref="BillingDecisionKey.IdOf"/>(<c>sprk_invoice</c>, invoice,
+    /// <see cref="InvoiceApprovalService.DecisionIdFor"/>(portion)), as the Decision Record writer stores it.</summary>
+    public Guid ApprovalKeyOf(Entity invoice)
+    {
+        var portion = Dataverse.RowsOf("sprk_invoiceapproval").Single(r => r.GetAttributeValue<EntityReference>("sprk_invoice")?.Id == invoice.Id);
+        return BillingDecisionKey.IdOf("sprk_invoice", invoice.Id, InvoiceApprovalService.DecisionIdFor(portion.Id));
+    }
+
+    /// <summary>Adds one more line to <paramref name="invoice"/> (cost type: Fee 100000000, Expense 100000001, Adjustment 100000002; state: 0 Active, 1 Inactive).</summary>
+    public Entity AddLine(
+        Entity invoice, int costType, decimal amount, int sequence, int? state = null, int? status = null, decimal? approvedAmount = null,
+        Guid? id = null, string? extraction = null)
+    {
+        var line = new Entity("sprk_billingevent", id ?? Guid.NewGuid())
         {
             ["sprk_invoice"] = new EntityReference("sprk_invoice", invoice.Id),
             ["sprk_linesequence"] = sequence,
@@ -172,8 +259,48 @@ internal sealed class ApExportWorld
             line["sprk_approvedamount"] = new Money(approved);
         }
 
+        if (extraction is not null)
+        {
+            line["sprk_extractionconfidence"] = extraction;
+        }
+
+        if (costType == (int)InvoiceLineCostType.Adjustment)
+        {
+            // Task 165b-2: an Adjustment line as the adjustment service writes it: a Fixed adjustment whose value is its computed amount, so the
+            // calculator accepts it (a line with no method or value is refused) and the stored totals derive from the lines.
+            line["sprk_adjustmentmethod"] = new OptionSetValue((int)InvoiceAdjustmentMethod.Fixed);
+            line["sprk_adjustmentvalue"] = amount;
+        }
+
         Dataverse.Put(line);
+        StoreTotalsFromLines(invoice.Id);
         return line;
+    }
+
+    /// <summary>
+    /// Task 165b-2: stores the invoice's five derived totals as the totals service does after every line change: <see cref="InvoiceTotalsCalculator"/>
+    /// over the invoice's counted lines with its stored billed total. A refused calculation stores nothing (as the service). A test that sets a stored total
+    /// afterwards (<see cref="ExportDataverse.Touch"/>) makes it differ from the lines.
+    /// </summary>
+    public void StoreTotalsFromLines(Guid invoiceId)
+    {
+        var lines = Dataverse.RowsOf("sprk_billingevent")
+            .Where(l => l.GetAttributeValue<EntityReference>("sprk_invoice")?.Id == invoiceId && InvoiceTotalsService.IsCounted(l))
+            .Select(InvoiceTotalsService.ToRow).ToList();
+        var calculation = InvoiceTotalsCalculator.Calculate(Invoice(invoiceId).GetAttributeValue<Money>("sprk_totalamount")?.Value, lines);
+        if (calculation.IsRefused)
+        {
+            return;
+        }
+
+        Dataverse.Touch("sprk_invoice", invoiceId, new Dictionary<string, object>
+        {
+            ["sprk_feestotal"] = new Money(calculation.FeesTotal),
+            ["sprk_expensestotal"] = new Money(calculation.ExpensesTotal),
+            ["sprk_lineadjustmentstotal"] = new Money(calculation.LineAdjustmentsTotal),
+            ["sprk_invoiceadjustmentstotal"] = new Money(calculation.InvoiceAdjustmentsTotal),
+            ["sprk_approvedtotal"] = new Money(calculation.ApprovedTotal),
+        });
     }
 
     private static InvoiceLifecycleStatus StatusOf(int statuscode) =>
@@ -461,8 +588,10 @@ internal sealed class ExportDataverse
 
     private static bool Matches(Entity row, ConditionExpression condition)
     {
-        var has = row.Contains(condition.AttributeName) && row[condition.AttributeName] is not null;
-        var value = has ? Comparable(row[condition.AttributeName]) : null;
+        // A row's primary key ({table}id) is its id, as Dataverse filters it (task 095c-5: the invoice-side firm hold is read by sprk_invoiceid In ...).
+        var isKey = condition.AttributeName == row.LogicalName + "id";
+        var has = isKey || (row.Contains(condition.AttributeName) && row[condition.AttributeName] is not null);
+        var value = isKey ? row.Id : has ? Comparable(row[condition.AttributeName]) : null;
         if (!has && condition.AttributeName == "statecode")
         {
             // Every Dataverse row has a statecode; a row put here without one is Active.
@@ -563,7 +692,7 @@ internal sealed class WorldLifecycle(ExportDataverse dataverse) : IInvoiceLifecy
     public InvoiceTransitionRequestResult BuildSupersedeRequest(Guid invoiceId, InvoiceLifecycleStatus current, long rowVersion) =>
         throw new NotSupportedException();
 
-    public InvoiceTransitionRequestResult BuildSupersedeUndoRequest(Guid invoiceId, InvoiceLifecycleStatus current, long rowVersion) =>
+    public InvoiceTransitionRequestResult BuildSupersedeUndoRequest(Guid invoiceId, InvoiceLifecycleStatus current, long rowVersion, int? reviewDetail = null) =>
         throw new NotSupportedException();
 }
 

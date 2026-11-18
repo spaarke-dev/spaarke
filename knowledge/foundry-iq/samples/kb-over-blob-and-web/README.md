@@ -21,7 +21,7 @@ Deploy all required Azure resources with one click — this creates AI Search, A
 >
 > Some Azure tenants enforce policies that block key-based access on storage accounts. This can cause the **data seeding script** to fail while all other resources deploy successfully. If this happens, your Azure resources are fully deployed — only the sample data and knowledge base setup is missing. You can seed the data manually using either of these alternatives:
 >
-> 1. **Run the Episode 1 cookbook**: Open the [Episode 1 cookbook](../../1-Foundry-IQ-Unlocking-Knowledge-for-Agents/cookbook/) and run it end-to-end — it indexes the same NASA "Earth at Night" sample data to your AI Search and creates the knowledge source and knowledge base.
+> 1. **Run the Episode 1 cookbook**: Open the Episode 1 cookbook and run it end-to-end — it indexes the same NASA "Earth at Night" sample data to your AI Search and creates the knowledge source and knowledge base.
 > 2. **Seed via Foundry IQ UI**: Create an index in AI Search manually using the [NASA Earth at Night dataset](https://raw.githubusercontent.com/Azure-Samples/azure-search-sample-data/main/nasa-e-book/earth-at-night-json/documents.json), then create a knowledge source and knowledge base pointing to it through the Foundry IQ portal.
 
 In the deployment form:
@@ -53,7 +53,7 @@ BLOB_CONTAINER_NAME=<your-container-name>
 
 **Where to find these values:** All values are available in the deployment **Outputs** tab in the Azure portal. Copy `searchEndpoint`, `openAiEndpoint`, `blobConnectionString`, and `blobContainerName` directly from the outputs.
 
-For CLI deployment and cleanup instructions, see the [Infrastructure Guide](../../infra/README.md).
+For CLI deployment and cleanup instructions, see the Infrastructure Guide.
 
 ## 📓 Cookbook Notebook
 
@@ -79,6 +79,6 @@ The [**Foundry IQ Cookbook**](./foundry-iq-cookbook.ipynb) walks you through bui
 
 ## Additional Resources
 
-- [Episode 2 README](../README.md)
+- Episode 2 README
 - [Microsoft Foundry Documentation](https://learn.microsoft.com/azure/ai-foundry/)
 - [Knowledge Sources Overview](https://learn.microsoft.com/azure/search/agentic-retrieval-how-to-create-knowledge-source)

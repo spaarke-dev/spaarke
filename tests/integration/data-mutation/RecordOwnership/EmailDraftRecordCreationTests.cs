@@ -1,6 +1,7 @@
 using System.Text.Json;
 using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Xrm.Sdk;
 using Moq;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
@@ -171,6 +172,100 @@ public sealed partial class SecureChildOwnershipAiToolTests
         _appCreates.Should().BeEmpty("an unfiled draft keeps its creator (E1): it is not the service's create");
         var post = _user.Posts.Should().ContainSingle().Subject;
         post.Body.Should().NotContain("sprk_SentBy", "only a draft the application creates records its sender");
+    }
+
+    // ── UAC-r2 191f R1: the access marker on a field-locked column ─────────────────────────────────────────────────────
+
+    /// <summary>
+    /// <see cref="OrdinaryMatter"/> at Restricted in a stamp world whose column probe has <c>sprk_accesspermission</c> (as the
+    /// host's does), so BOTH the handler's derivation and the service's step 10 give the inherited level.
+    /// </summary>
+    private static (CoreAncestorResolver Ancestors, CoreAncestorRestamper Restamper) TheRestrictedOrdinaryMatter()
+    {
+        var stamps = new StampWorld()
+            .Row("sprk_matter", OrdinaryMatter)
+            .Set("sprk_matter", OrdinaryMatter, InheritedAccessPermission.Column, new OptionSetValue(InheritedAccessPermission.Restricted));
+        var resolver = new CoreAncestorResolver(
+            stamps.Service, Sprk.Bff.Api.Tests.DataMutation.ExternalAccess.SecureChildShareWorld.ColumnProbe(),
+            NullLogger<CoreAncestorResolver>.Instance);
+        return (resolver, new CoreAncestorRestamper(stamps.Service, resolver, NullLogger<CoreAncestorRestamper>.Instance));
+    }
+
+    [Fact]
+    public async Task EmailDraft_FiledUnderARestrictedMatter_WithTheMarkerFieldLocked_IsCreated_AndTakesTheInheritedLevelFromTheStamp()
+    {
+        // 191f locks sprk_accesspermission: an internal caller is a writer, but the server create's as-the-caller check refuses
+        // ANY field-secured column in the caller's item (CallerWriteAuthorization.NoFieldSecuredColumnAsync). Before R1 the
+        // handler put the derived level in that item, so every filed draft was refused once the lock was applied.
+        _user.SecuredColumns.Add(InheritedAccessPermission.Column);
+        var (ancestors, restamper) = TheRestrictedOrdinaryMatter();
+
+        var result = await Draft(ancestors, DraftCreation(restamper), "sprk_matter", OrdinaryMatter);
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        _user.Posts.Should().BeEmpty("a filed draft is created by the application, never as the user");
+        var fields = TheDraftCreate();
+        fields.Should().ContainKey(InheritedAccessPermission.Column)
+            .WhoseValue.Should().Be(InheritedAccessPermission.Restricted,
+                "the server create's step 10 stamps the level the draft inherits from the matter");
+        Owner(fields).Should().Be(Directory.ChildTeam);
+        DraftBind(fields, "sprk_SentBy").Should().Be($"/systemusers({Caller:D})");
+    }
+
+    [Fact]
+    public async Task EmailDraft_FiledUnderARestrictedMatter_WithoutTheLock_StillTakesTheSameInheritedLevel()
+    {
+        // Regression guard: before the lock the value was the stamp's too (step 10 overwrote the handler's own copy).
+        var (ancestors, restamper) = TheRestrictedOrdinaryMatter();
+
+        var result = await Draft(ancestors, DraftCreation(restamper), "sprk_matter", OrdinaryMatter);
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        TheDraftCreate().Should().ContainKey(InheritedAccessPermission.Column)
+            .WhoseValue.Should().Be(InheritedAccessPermission.Restricted, "the value is the stamp's, lock or no lock");
+    }
+
+    [Fact]
+    public async Task EmailDraft_RegardingAnInvoiceUnderARestrictedMatter_WithTheMarkerFieldLocked_TakesTheMattersLevelThroughTheStamp()
+    {
+        // The I-1 case: the invoice's matter is a derived stamp, not the regarding, and its level still reaches the draft.
+        _user.SecuredColumns.Add(InheritedAccessPermission.Column);
+        _world.WithOrdinaryRoot("sprk_matter", DraftMatter);
+        _world.WithRecord("sprk_invoice", DraftInvoice, Directory.ChildBu, owningTeam: Directory.ChildTeam,
+            extra: new() { ["sprk_matter"] = new EntityReference("sprk_matter", DraftMatter) });
+        var stamps = new StampWorld()
+            .Row("sprk_matter", DraftMatter)
+            .Row("sprk_invoice", DraftInvoice, [("sprk_matter", "sprk_matter", DraftMatter)])
+            .Set("sprk_matter", DraftMatter, InheritedAccessPermission.Column, new OptionSetValue(InheritedAccessPermission.Restricted));
+        var resolver = new CoreAncestorResolver(
+            stamps.Service, Sprk.Bff.Api.Tests.DataMutation.ExternalAccess.SecureChildShareWorld.ColumnProbe(),
+            NullLogger<CoreAncestorResolver>.Instance);
+        var restamper = new CoreAncestorRestamper(stamps.Service, resolver, NullLogger<CoreAncestorRestamper>.Instance);
+
+        var result = await Draft(resolver, DraftCreation(restamper), "sprk_invoice", DraftInvoice);
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        var fields = TheDraftCreate();
+        DraftBind(fields, "sprk_RegardingMatter").Should().Be($"/sprk_matters({DraftMatter:D})");
+        fields.Should().ContainKey(InheritedAccessPermission.Column)
+            .WhoseValue.Should().Be(InheritedAccessPermission.Restricted, "step 10 reads the stamped matter's level");
+    }
+
+    [Fact]
+    public async Task EmailDraft_UnfiledDraft_IsCreatedAsTheDrafter_AsToday_WithNoMarker()
+    {
+        // Must-not-fire: no core parent, so no server create and no inherited level; the drafter's own create is unchanged
+        // and names no marker. (This fake does not enforce field security on the user's own POST; Dataverse does, and an
+        // internal user is a writer there.)
+        _user.SecuredColumns.Add(InheritedAccessPermission.Column);
+
+        var result = await Draft(CoreAncestorResolverFixtures.Inert(), DraftCreation());
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        _appCreates.Should().BeEmpty("an unfiled draft keeps its creator (E1): it is not the service's create");
+        var post = _user.Posts.Should().ContainSingle().Subject;
+        post.Body.Should().NotContain(InheritedAccessPermission.Column, "a parentless draft keeps the column's default");
+        post.Body.Should().Contain("\"sprk_subject\"", "the drafter's body is built as before");
     }
 
     // ── refusals: today's codes, nothing created ───────────────────────────────────────────────────────────────────────

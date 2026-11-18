@@ -121,8 +121,8 @@
 
 ### Project Context
 - **Project**: {project-name}
-- **Project CLAUDE.md**: [`CLAUDE.md`](./CLAUDE.md)
-- **Task Index**: [`tasks/TASK-INDEX.md`](./tasks/TASK-INDEX.md)
+- **Project CLAUDE.md**: `CLAUDE.md` (in the project folder)
+- **Task Index**: `tasks/TASK-INDEX.md` (in the project folder)
 
 ### Applicable ADRs
 <!-- From task constraints -->

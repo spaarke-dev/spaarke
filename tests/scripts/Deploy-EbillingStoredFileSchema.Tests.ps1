@@ -137,11 +137,17 @@ Describe 'Get-Grants (F3 permission rows)' {
 }
 
 # Test-ProfilePreconditions with the Dataverse reads stubbed (no call, no write). Teams: name == its BU's name, as on dev.
+# Test-ProfilePreconditions leaves the ontology writer business unit's default team out (scripts/common/OntologyWriterUnit.ps1): no such unit exists in these worlds.
+# (The exclusion itself is tested in tests/scripts/EbillingDefaultTeamExclusion.Tests.ps1.)
+. (Join-Path $repoRoot 'scripts/common/OntologyWriterUnit.ps1')
+$State = [pscustomobject]@{ ApiBase = 'https://example.invalid/api/data/v9.2' }
+function Get-DataverseToken { 'token' }
+function Invoke-RestMethod { param($Uri, $Headers, $Method) if ($Uri -like '*/businessunits?*') { return [pscustomobject]@{ value = @() } }; throw "unexpected REST read: $Uri" }
 function Write-Report([string]$StateText, [string]$What) { $script:Reports += ,@($StateText, $What) }
 function Get-ProfileByName([string]$Name) { if ($Name -eq 'Readers') { @([pscustomobject]@{ fieldsecurityprofileid = 'r-id' }) } else { @([pscustomobject]@{ fieldsecurityprofileid = 'w-id' }) } }
 function Invoke-Dv {
     param([string]$Path)
-    if ($Path -like 'teams?*') { return [pscustomobject]@{ value = @($script:DefaultTeams | ForEach-Object { [pscustomobject]@{ teamid = $_.Id; name = $_.Bu; businessunitid = [pscustomobject]@{ name = $_.Bu; isdisabled = $false } } }) } }
+    if ($Path -like 'teams?*') { return [pscustomobject]@{ value = @($script:DefaultTeams | ForEach-Object { [pscustomobject]@{ teamid = $_.Id; name = $_.Bu; _businessunitid_value = "bu-$($_.Bu)"; businessunitid = [pscustomobject]@{ name = $_.Bu; isdisabled = $false } } }) } }
     if ($Path -like 'fieldsecurityprofiles(r-id)/teamprofiles_association*') { return [pscustomobject]@{ value = @($script:ReaderTeamIds | ForEach-Object { [pscustomobject]@{ teamid = $_; name = 'x' } }) } }
     if ($Path -like 'fieldsecurityprofiles(w-id)/systemuserprofiles_association*') { return [pscustomobject]@{ value = @([pscustomobject]@{ systemuserid = 'u-bff'; fullname = 'bff'; applicationid = 'app-1' }) } }
     if ($Path -like 'fieldsecurityprofiles(w-id)/teamprofiles_association*') { return [pscustomobject]@{ value = @() } }
@@ -164,7 +170,7 @@ Describe 'Test-ProfilePreconditions (the reader profile is checked against the n
         $ReaderBusinessUnits = $DefaultReaderBusinessUnits
         Set-PreflightWorld $DefaultReaderBusinessUnits $DefaultReaderBusinessUnits
         { Test-ProfilePreconditions } | Should Not Throw
-        @($script:Reports | Where-Object { $_[0] -eq 'INFO' }).Count | Should Be 0
+        @($script:Reports | Where-Object { $_[0] -eq 'INFO' -and $_[1] -notmatch 'ontology writer business unit' }).Count | Should Be 0
     }
     It 'escalates (exit 2) when a named business unit default team lacks the profile (must-fire)' {
         $ReaderBusinessUnits = $DefaultReaderBusinessUnits
@@ -176,7 +182,7 @@ Describe 'Test-ProfilePreconditions (the reader profile is checked against the n
         $ReaderBusinessUnits = $DefaultReaderBusinessUnits
         Set-PreflightWorld (@($DefaultReaderBusinessUnits) + 'External Collaborators') $DefaultReaderBusinessUnits
         { Test-ProfilePreconditions } | Should Not Throw
-        $info = @($script:Reports | Where-Object { $_[0] -eq 'INFO' })
+        $info = @($script:Reports | Where-Object { $_[0] -eq 'INFO' -and $_[1] -notmatch 'ontology writer business unit' })
         $info.Count | Should Be 1
         $info[0][1] | Should Match "'External Collaborators'"
         @($script:Reports | Where-Object { $_[1] -match 'External Collaborators' -and $_[0] -eq 'OK' }).Count | Should Be 0
@@ -551,5 +557,31 @@ Describe 'the script text (what it never does)' {
     }
     It 'refuses (escalation) when sprk_procedureversion does not exist (task 080 first)' {
         $script:Text -match "throw \[EscalationException\]::new\(`"\`$Version does not exist" | Should Be $true
+    }
+}
+
+# The module's request helper asks for strongly consistent reads: attribute metadata (IsSecured) is cached per server, and a plain read soon
+# after a change can come back stale. Invoke-RestMethod is mocked inside the module, so nothing leaves the machine.
+Describe 'EbillingSchema Invoke-Dv sends Consistency: Strong' {
+    Import-Module (Join-Path $repoRoot 'scripts/ebilling/EbillingSchema.psm1') -Force
+    $null = Initialize-EbillingSchema -EnvironmentUrl 'https://example.invalid' -SolutionUniqueName 'S'
+    Mock -ModuleName EbillingSchema Get-DataverseToken { 'test-token' }
+    Mock -ModuleName EbillingSchema Invoke-RestMethod { $global:EbSchemaSentHeaders = $Headers; return [pscustomobject]@{ IsSecured = $true } }
+    BeforeEach { $global:EbSchemaSentHeaders = $null }
+    # This file defines a stand-in Invoke-Dv of its own (above); the module's real one is run inside the module's scope.
+    function Invoke-ModuleDv([string]$Path, [hashtable]$ExtraHeaders = @{}) {
+        & (Get-Module EbillingSchema) { param($p, $h) Invoke-Dv -Path $p -ExtraHeaders $h } $Path $ExtraHeaders
+    }
+
+    It 'sends Consistency: Strong on a metadata read (must fire without the header)' {
+        $null = Invoke-ModuleDv "EntityDefinitions(LogicalName='sprk_invoice')/Attributes(LogicalName='sprk_totalamount')?`$select=IsSecured"
+        $global:EbSchemaSentHeaders['Consistency'] | Should Be 'Strong'
+    }
+    It 'keeps the other default headers and lets a caller header through (must not fire)' {
+        $null = Invoke-ModuleDv 'WhoAmI' @{ Prefer = 'return=representation' }
+        $global:EbSchemaSentHeaders['Authorization'] | Should Be 'Bearer test-token'
+        $global:EbSchemaSentHeaders['OData-Version'] | Should Be '4.0'
+        $global:EbSchemaSentHeaders['Prefer'] | Should Be 'return=representation'
+        $global:EbSchemaSentHeaders['Consistency'] | Should Be 'Strong'
     }
 }

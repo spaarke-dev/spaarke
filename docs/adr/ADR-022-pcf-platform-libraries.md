@@ -347,7 +347,7 @@ When creating **React Code Pages** (standalone dialogs):
 
 ## References
 
-- [Microsoft PCF Platform Libraries Documentation](https://learn.microsoft.com/en-us/power-apps/developer/component-framework/reference/feature-usage#platform-libraries)
+- [Microsoft PCF Platform Libraries Documentation](https://learn.microsoft.com/en-us/power-apps/developer/component-framework/react-controls-platform-libraries)
 - [React 16 Legacy Documentation](https://legacy.reactjs.org/)
 - [Fluent UI v9 Documentation](https://react.fluentui.dev/)
 

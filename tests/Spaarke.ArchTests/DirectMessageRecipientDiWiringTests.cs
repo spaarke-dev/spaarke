@@ -49,6 +49,36 @@ public sealed class DirectMessageRecipientDiWiringTests
         }
     }
 
+    /// <summary>
+    /// Task 054a piece 2b: the outbound Direct pair routing needs the Direct thread access service and the internal-user email
+    /// read. Both are optional constructor parameters, and without either the routing silently routes nothing (every outbound
+    /// Direct send takes the resolver path and gets no recipient).
+    /// </summary>
+    [Fact(DisplayName = "Direct pair routing: the composed CommunicationService holds the Direct thread access service and the internal-user email read (Development and Production boots)")]
+    public void CommunicationService_IsComposedWithThePairRoutingDependencies()
+    {
+        foreach (var app in new[] { _booted.Development, _booted.Production })
+        {
+            var service = app.Services.GetRequiredService<CommunicationService>();
+            AssertHolds(app.Environment, service, "_directThreadAccess", typeof(Sprk.Bff.Api.Services.Communication.Access.IDirectThreadAccessService));
+            AssertHolds(app.Environment, service, "_contactIdentities", typeof(Sprk.Bff.Api.Infrastructure.ExternalAccess.IContactIdentityStore));
+        }
+    }
+
+    private static void AssertHolds(string environment, object composed, string fieldName, Type expected)
+    {
+        var type = composed.GetType();
+        var field = type.GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.True(field is not null,
+            $"{type.Name} no longer has a private field '{fieldName}'; update this guard to the field that holds the {expected.Name}.");
+
+        var held = field!.GetValue(composed);
+        Assert.True(held is not null,
+            $"{environment}: the composed {type.Name} holds NO {expected.Name}, so the outbound Direct pair routing silently routes nothing. " +
+            "Its constructor parameter is optional: check the DI registration and the constructor binding.");
+        Assert.IsAssignableFrom(expected, held);
+    }
+
     private static void AssertHoldsRecordShares(string environment, object composed)
     {
         var type = composed.GetType();

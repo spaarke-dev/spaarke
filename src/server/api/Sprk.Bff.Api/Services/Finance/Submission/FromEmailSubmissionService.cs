@@ -168,7 +168,8 @@ internal sealed class FromEmailSubmissionService
             correctedInvoice = correction.Invoice;
         }
 
-        // ── 4. The firm: active (400 / 503), then linked to the record (D-106: 403 / 503) ──
+        // ── 4. The firm: active (400 / 503), then linked to the record (D-106: 403 / 503). No firm: nothing to check here; the
+        //       refusal for it is step 6b (EB-D-223), after the replay of K ──
         if (await CheckFirmAsync(input, ct) is { } firmRefusal)
         {
             return firmRefusal;
@@ -212,6 +213,24 @@ internal sealed class FromEmailSubmissionService
         {
             return FromEmailSubmissionOutcome.Refused(StatusCodes.Status409Conflict, InvoiceSubmissionErrors.SubmissionAlreadyEnded,
                 "This email was already submitted as an invoice too many times. Nothing was saved.");
+        }
+
+        // ── 6b. EB-D-223 (task 095e): a submission that names no firm is refused, in every channel. The refusal sits AFTER the replay, so a
+        //        retry of a no-firm submission that was accepted before this rule is answered with that row (a replay, not a refusal). It is
+        //        still before step 7, so a refusal has saved and filed nothing. ──
+        if (input.FirmId is null && CheckNoFirm() is { } noFirmRefusal)
+        {
+            return noFirmRefusal;
+        }
+
+        // ── 6c. EB-D-225 (task 095f): a Correction must say why. A missing or blank note is 400 correction_note_required. Like 6b it sits AFTER
+        //        the replay of K (an accepted Correction's retry is answered as a replay) and before the communication read and the save, so a
+        //        refusal has written and filed nothing. A New request carries no note (the body check refuses one). ──
+        if (input.Mode == FromEmailModes.Correction && string.IsNullOrWhiteSpace(input.CorrectionNote))
+        {
+            _logger.LogInformation("From-email Correction with no note refused before any write (400)");
+            return FromEmailSubmissionOutcome.Refused(StatusCodes.Status400BadRequest, FromEmailSubmissionErrors.CorrectionNoteRequired,
+                "A correction needs a note saying why the invoice is corrected.");
         }
 
         // ── 7. The communication, if the email was already captured, must not be filed under another core record (409) ──
@@ -283,6 +302,7 @@ internal sealed class FromEmailSubmissionService
             Mode = input.Mode,
             InvoiceId = input.InvoiceId,
             ResubmissionOf = resubmissionOf,
+            CorrectionNote = input.Mode == FromEmailModes.Correction ? input.CorrectionNote : null,
             CallerSystemUserId = callerId,
             CallerObjectId = Guid.TryParse(CallerResolution.ResolveObjectId(http.User), out var oid) ? oid : null,
             CorrelationId = http.TraceIdentifier,
@@ -333,14 +353,25 @@ internal sealed class FromEmailSubmissionService
     // The firm
     // ═══════════════════════════════════════════════════════════════════════════
 
+    /// <summary>
+    /// The firm: active (400 / 503), then linked to the record (D-106: 403 / 503). A no-firm request (null or absent) has no firm to check, so
+    /// it passes here; <see cref="CheckNoFirm"/> refuses it after the replay of K. The empty id is the 400 <c>firm_invalid</c>. A
+    /// Correction's firm is compared with the replaced invoice's later (<see cref="InvoiceSubmissionService.CorrectionKeepsFirm"/>).
+    /// </summary>
     private async Task<FromEmailSubmissionOutcome?> CheckFirmAsync(FromEmailSubmissionInput input, CancellationToken ct)
     {
-        if (input.FirmId == Guid.Empty)
+        if (input.FirmId is not { } firmId)
+        {
+            // No firm: no firm to check. The refusal is CheckNoFirm, run after the replay of K (review F1).
+            return null;
+        }
+
+        if (firmId == Guid.Empty)
         {
             return FromEmailSubmissionOutcome.Refused(StatusCodes.Status400BadRequest, InvoiceSubmissionErrors.FirmInvalid, "A firm is required.");
         }
 
-        switch (await _submissions.IsActiveFirmForFromEmailAsync(input.FirmId, ct))
+        switch (await _submissions.IsActiveFirmForFromEmailAsync(firmId, ct))
         {
             case null:
                 return FirmUnverifiable();
@@ -349,13 +380,25 @@ internal sealed class FromEmailSubmissionService
                     "The firm was not found or is not active.");
         }
 
-        return await _submissions.CheckFirmLinkAsync(input.CoreRecord, input.FirmId, ct) switch
+        return await _submissions.CheckFirmLinkAsync(input.CoreRecord, firmId, ct) switch
         {
             InvoiceFirmLink.Linked => null,
             InvoiceFirmLink.NotLinked => FromEmailSubmissionOutcome.Refused(StatusCodes.Status403Forbidden, InvoiceSubmissionErrors.FirmNotLinked,
                 "The firm you chose is not linked to this record, so an invoice cannot be submitted for it."),
             _ => FirmUnverifiable(),
         };
+    }
+
+    /// <summary>
+    /// EB-D-223 (task 095e; supersedes the 095c-2 phase gate): a submission that names no firm is refused in every channel, so no new invoice
+    /// is created held for a firm. It is the 400 <c>firm_invalid</c> "A firm is required." that the empty id gets. It runs after the replay of K
+    /// (a retry of an earlier accepted no-firm submission is still answered as a replay) and before the communication read and the save, so a
+    /// refusal has written and filed nothing.
+    /// </summary>
+    private FromEmailSubmissionOutcome? CheckNoFirm()
+    {
+        _logger.LogInformation("From-email submission with no firm refused before any write (400)");
+        return FromEmailSubmissionOutcome.Refused(StatusCodes.Status400BadRequest, InvoiceSubmissionErrors.FirmInvalid, "A firm is required.");
     }
 
     /// <summary>A firm or firm-link read fault. Contract section 6 lists one code for a transient Dataverse fault on this route,
@@ -497,9 +540,19 @@ internal sealed class FromEmailSubmissionService
             return NotQueued();
         }
 
+        // Task 095f review F2: a still-Received Correction is re-queued, so its job must carry a note. A retry with no note would re-queue a job
+        // the persister saves with no note; refuse it (400) and write nothing. Replays of any other status are unchanged.
+        if (status == InvoiceSubmissionStatus.Received && input.Mode == FromEmailModes.Correction && string.IsNullOrWhiteSpace(input.CorrectionNote))
+        {
+            _logger.LogInformation("From-email submission {SubmissionId}: a retry of a Received Correction carries no note; refused (400), not re-queued", row.Id);
+            return FromEmailSubmissionOutcome.Refused(StatusCodes.Status400BadRequest, FromEmailSubmissionErrors.CorrectionNoteRequired,
+                "A correction needs a note saying why the invoice is corrected.");
+        }
+
         var jobId = FromEmailSubmissionKey.JobIdFor(k, generation);
         if (status == InvoiceSubmissionStatus.Received
-            && !await _operation.RequeueAsync(row.Id, jobId, http.TraceIdentifier, CancellationToken.None))
+            && !await _operation.RequeueAsync(
+                row.Id, jobId, http.TraceIdentifier, input.Mode == FromEmailModes.Correction ? input.CorrectionNote : null, CancellationToken.None))
         {
             return NotQueued();
         }

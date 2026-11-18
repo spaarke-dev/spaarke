@@ -213,7 +213,7 @@ The framework's first real consumer surfaced four **pre-existing latent bugs** i
 
 ## Related
 
-- [ADR-012](../../.claude/adr/ADR-012-shared-component-library.md) — context-agnostic shared library rule the engine complies with
+- [ADR-012](../../.claude/adr/ADR-012-shared-components.md) — context-agnostic shared library rule the engine complies with
 - [ADR-024](../../.claude/adr/ADR-024-polymorphic-resolver-pattern.md) — the polymorphic regarding pattern the engine's `sourceEntity`/`sourceId` inputs come from, and the `sprk_recordtype_ref` registry this framework's profiles reference
 - `.claude/constraints/bff-extensions.md` — the additive-DTO-extension checklist this project's BFF change followed
 - `projects/set-regarding-and-field-mapping-resolver-r2/design.md` — full decision log (source of the creation-time-vs-update-time amendment and same-entity resolution)

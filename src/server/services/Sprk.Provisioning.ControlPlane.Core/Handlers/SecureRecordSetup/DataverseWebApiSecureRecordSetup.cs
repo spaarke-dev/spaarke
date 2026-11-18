@@ -174,6 +174,10 @@ public sealed class DataverseWebApiSecureRecordSetup : ISecureRecordSetupDataver
         => Session(target).ListUserProfilesAsync(systemUserId, cancellationToken);
 
     /// <inheritdoc/>
+    public Task<IReadOnlyList<Guid>> ListTeamProfilesAsync(SecureRecordSetupTarget target, Guid teamId, CancellationToken cancellationToken)
+        => Session(target).ListTeamProfilesAsync(teamId, cancellationToken);
+
+    /// <inheritdoc/>
     public Task AssociateUserRoleAsync(SecureRecordSetupTarget target, Guid systemUserId, Guid roleId, CancellationToken cancellationToken)
         => Session(target).AssociateUserRoleAsync(systemUserId, roleId, cancellationToken);
 
@@ -428,6 +432,12 @@ internal sealed class SecureRecordSetupWebApi
         => (await GetAllValuesAsync(
                 $"systemusers({systemUserId})/systemuserprofiles_association?$select=fieldsecurityprofileid",
                 "Reading the user's field-security profiles", ct).ConfigureAwait(false))
+            .Select(r => Id(r, "fieldsecurityprofileid")).ToArray();
+
+    internal async Task<IReadOnlyList<Guid>> ListTeamProfilesAsync(Guid teamId, CancellationToken ct)
+        => (await GetAllValuesAsync(
+                $"teams({teamId})/teamprofiles_association?$select=fieldsecurityprofileid",
+                "Reading the team's field-security profiles", ct).ConfigureAwait(false))
             .Select(r => Id(r, "fieldsecurityprofileid")).ToArray();
 
     internal async Task<IReadOnlyList<SecureSetupRole>> ListTeamRolesAsync(Guid teamId, CancellationToken ct)

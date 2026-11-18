@@ -1,0 +1,147 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="041" project="spaarke-SPA-external-access-platform-r4">
+  <metadata>
+    <title>Licensed user's first sign-in skips the profile form; link-popup timeout set in the auth review (FR-25, #2192)</title>
+    <phase>4 Access, sign-in, carry-overs, Teams</phase>
+    <gate>after 038 (P3 deploy)</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Tag auth; modifies .ts/.tsx on the first-sign-in path and possibly the BFF registration_required answer</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Security/auth-sensitive first-sign-in routing (ADR-028 A9); auth/UAC review gate</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>May modify CallerPrincipalResolver.cs (the registration_required answer), which task 043 modifies in the same wave — if the BFF change is needed, start it after 043 merges</parallel-reason>
+    <deps>038</deps>
+    <tags>frontend, react, auth</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Make a licensed user's first sign-in on the workforce home plane go straight to the account link instead of the profile form, by letting the gate learn before the form that the token email belongs to a licensed user. Agree the link-popup timeout value in the auth/UAC review and apply it.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. Expert in the external SPA's MSAL sign-in (WorkforceHomeGate, RegistrationPage) and ADR-028 A9.</role>
+  <goal>A licensed user's first sign-in never shows the profile form; a non-licensed workforce contact still sees it; the popup timeout value is decided in the auth/UAC review and applied; the review is recorded.</goal>
+
+  <context>
+    <background>Today (WorkforceHomeGate.tsx:1-20, :100-135): /me answers 403 `registration_required`; the gate tries the stored link silently; with no token (`afterSilentLinkFailure`, :57) it shows the profile form (RegistrationPage). Only after the form's registration POST answers 403 `licensed_user_link_required` (ExternalRegistrationEndpoints.cs:36, :228) does the page show "Link my account" (RegistrationPage.tsx:142-143, :283-306). So a licensed user fills a form that can never register them (#2192). The BFF already knows how to tell a licensed email (the registration route's licensed-user refusal; ContactIdentityStore.cs `systemusers by email` lookup, :1902). The registration_required answer and its prefill are built in CallerPrincipalResolver.cs:735-754. The 60 s link-popup timeout named in the spec is not an explicit constant in src/client/external-spa/src (searched 2026-11-10); locate where it comes from (likely the MSAL popup default around `acquireTokenPopup`, msal-auth.ts:1449) before changing it.</background>
+    <relevant-files>
+      <file role="modify">src/client/external-spa/src/components/auth/WorkforceHomeGate.tsx</file>
+      <file role="modify">src/client/external-spa/src/pages/RegistrationPage.tsx</file>
+      <file role="modify">src/client/external-spa/src/auth/registration-client.ts</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/CallerPrincipalResolver.cs (only if the hint must come from the BFF)</file>
+      <file role="canonical-reference">src/client/external-spa/src/auth/msal-auth.ts</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ExternalRegistrationEndpoints.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ContactIdentityStore.cs</file>
+      <file role="canonical-reference">src/client/external-spa/tests/workforce-home-auth.test.ts</file>
+      <file role="canonical-reference">src/client/external-spa/tests/registration-refusals.test.ts</file>
+      <file role="new-artifact">projects/spaarke-SPA-external-access-platform-r4/notes/task-041-notes.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="038" status="pending">P3 deployed and E2E-proved (phase-deploy convention)</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-028 A9 / R3 binding rule">The licensed hint is routing only: it decides which screen shows, never grants, never chooses a link target, never authorizes on email/UPN. The stored link still proves the guest oid server-side (`POST /api/v1/external/workforce/link`).</constraint>
+    <constraint source="spec Out of scope">No auth-plane change beyond FR-25's first-sign-in path: no new scope, client, authority, token acceptance rule or credential.</constraint>
+    <constraint source="R3 task 075 (WorkforceHomeGate.tsx:50-56)">No gesture-less popup: the Spaarke sign-in popup still opens only from a user click ("Link my account"). Skipping the form means showing the link step, not auto-opening a popup.</constraint>
+    <constraint source="NFR-04">The hint reveals only whether the caller's OWN token email is licensed; no response, log or error carries the email, UPN, tenant, oid or token. Logs use codes and hashed ids as the registration route does.</constraint>
+    <constraint source="bff-extensions">If any BFF file changes: Placement Justification in the PR (.claude/constraints/bff-extensions.md); publish-size delta against a fresh master build, at or under 60 MB; no new HIGH CVE; tests with the change; /conflict-check before the PR (shared with unified-access-control-r2 and ebilling-r1). Never deploy the dev BFF directly — request via uac-r2 (docs/procedures/dev-bff-deploy-coordination.md).</constraint>
+    <constraint source="spec FR-25">The popup timeout value is set from the auth/UAC review decision; do not pick a value unilaterally.</constraint>
+    <constraint source="project wave E">Do not edit me-client.ts or tests/no-mock-identity.test.tsx (tasks 043, 044).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-SPA-external-access-platform-r4/spec.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r4/CLAUDE.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r3/CLAUDE.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/patterns/auth/spaarke-sso-binding.md</file>
+      <file>.claude/patterns/auth/obo-flow.md</file>
+      <file>.claude/patterns/auth/oauth-scopes.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>docs/guides/auth-deployment-setup.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/skills/fluent-v9-component/SKILL.md</file>
+      <file>.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+      <file>src/client/external-spa/README.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+    <patterns>
+      <pattern name="Link step" location="src/client/external-spa/src/pages/RegistrationPage.tsx">The existing `linkRequired` view (:283-306) is the screen a licensed user should land on; reuse it, do not build a second link UI.</pattern>
+      <pattern name="Registration refusal shape" location="src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ExternalRegistrationEndpoints.cs">How the BFF tells a licensed email (`licensed_user_link_required`) without logging it.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load the knowledge files, read the relevant files, declare rigor and model tier per task-execute Step 0.5.</step>
+    <step order="1">Trace the first-sign-in path end to end (gate → /me → silent link → form → registration POST → link) and record where the licensed fact can be known earliest without a new endpoint.</step>
+    <step order="2">Preferred: the registration_required answer carries a boolean licensed hint computed by the same check the registration route uses; the gate passes it to RegistrationPage, which opens in the `linkRequired` view. If an alternative avoids the BFF change, record why it is equivalent.</step>
+    <step order="3">Locate the 60 s link-popup timeout; write the options (keep, change, configurable) in the task notes; request the auth/UAC review; apply the decided value.</step>
+    <step order="4">Tests: licensed first sign-in → link step, no form; non-licensed → form; a licensed hint never skips the server link proof; BFF test (if changed) under tests/integration/auth/** for hint true/false and no email in the body beyond the existing prefill.</step>
+    <step order="5">Run the SPA tests and, if the BFF changed, build + affected tests + publish-size measurement.</step>
+    <step order="6">Update tasks/TASK-INDEX.md: set this task's status cell to `✅ [done]` and this POML's &lt;status&gt; to completed; run `pwsh scripts/check-task-status-drift.ps1`.</step>
+    <step order="7">Record deviations, decisions and measurements in projects/spaarke-SPA-external-access-platform-r4/notes/task-041-notes.md.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If learning "licensed" before the form needs a new endpoint, a new scope, or reading anything other than the caller's own token email, STOP and escalate (root CLAUDE.md §6) — auth-plane change.</trigger>
+    <trigger>If the auth/UAC review has not decided the popup timeout when the code is ready, ship FR-25's routing change with the timeout unchanged, mark the timeout open in the notes and TASK-INDEX, and tell the owner; do not choose the value.</trigger>
+  </escalation>
+
+  <ui-tests>
+    <test name="Licensed user first sign-in">
+      <url>https://{spa-dev-host}/</url>
+      <steps>
+        <step>Sign in with the company account of a licensed user who has no stored link yet</step>
+        <step>Observe the first screen after sign-in; click "Link my account"; complete the Spaarke sign-in</step>
+        <step>Check the console for errors (no token or email printed)</step>
+      </steps>
+      <expected>No profile form appears; the link step shows; after linking the workspace opens.</expected>
+    </test>
+    <test name="Non-licensed contact still sees the form + dark mode (ADR-021)">
+      <steps>
+        <step>Sign in as a new workforce contact who is not a licensed user</step>
+        <step>Switch to dark theme on the form</step>
+      </steps>
+      <expected>The profile form shows as before; semantic tokens only in dark mode.</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">Run the external-spa vitest suite</tool>
+    <tool name="dotnet">Build and test the BFF if it changes</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/external-spa/src/components/auth/WorkforceHomeGate.tsx</output>
+    <output type="code">src/client/external-spa/src/pages/RegistrationPage.tsx</output>
+    <output type="code">src/client/external-spa/src/auth/registration-client.ts</output>
+    <output type="test">src/client/external-spa/tests/workforce-home-auth.test.ts (extended) or a new test file beside it</output>
+    <output type="docs">projects/spaarke-SPA-external-access-platform-r4/notes/task-041-notes.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a licensed user's first sign-in on the home plane, the profile form is never rendered; the link step is shown and linking reaches the workspace.</criterion>
+    <criterion testable="true">Negative: a non-licensed workforce contact's first sign-in still shows the profile form.</criterion>
+    <criterion testable="true">Negative: the licensed hint alone never links or grants; without a successful server link the user stays out of the workspace.</criterion>
+    <criterion testable="true">No popup opens without a user click.</criterion>
+    <criterion testable="true">No response body, log line or console message added by this task carries an email, UPN, tenant, oid or token.</criterion>
+    <criterion testable="true">The popup timeout value comes from the auth/UAC review, is applied (or recorded as open per the escalation), and the review is recorded in the notes and the PR.</criterion>
+    <criterion testable="true">If the BFF changed: build green, publish size at or under 60 MB with the delta recorded, no new HIGH CVE, /conflict-check run.</criterion>
+    <criterion testable="true">All SPA tests (and affected BFF tests) pass.</criterion>
+    <criterion testable="true">Test scope: cover the stated contract plus the negative cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-25; issue #2192; unresolved question "#2192 popup timeout value". Two adversarial-review passes (auth). Task 042 builds on this change in RegistrationPage.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

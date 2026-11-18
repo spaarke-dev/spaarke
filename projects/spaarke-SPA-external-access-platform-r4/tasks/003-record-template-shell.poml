@@ -1,0 +1,162 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="003" project="spaarke-SPA-external-access-platform-r4">
+  <metadata>
+    <title>RecordTemplateConfig + record template shell: layout, states, deep links (FR-01 config, FR-02)</title>
+    <phase>1 Record template and actions</phase>
+    <gate>after 001</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Creates new .tsx/.ts files in the external SPA (tags frontend, fluent-ui; code implementation)</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Central new pattern: the config contract every later R4 task builds on</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Sequential chain on the template files: 003 → 005 → 004 → 006 → 007</parallel-reason>
+    <deps>001</deps>
+    <tags>frontend, fluent-ui, react, typescript</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Build the config-driven record template shell for the external SPA: a `RecordTemplateConfig` per record type (title, header facts, optional tabs, left/right sections, toolbar actions) and a modal on SprkModal `lg` that renders only from that config, keeps R3's states and navigation guard, and keeps `?record={type}:{id}` deep links working. Section renderers and the switch-over come in task 005.</prompt>
+  <role>SPAARKE platform developer. Expert in React, Fluent UI v9 and the SprkModal system (ADR-050). Follow ADRs strictly.</role>
+  <goal>`src/client/external-spa/src/components/record/` holds the config types, the six-type config map, the record reads moved out of `RecordDetailModal.tsx`, and `RecordTemplateModal.tsx`; vitest tests prove every state, the fixed chrome, the column layout classes, Refresh, Copy link and deep-link coverage; the R3 modal still works unchanged for users (it now imports the moved reads).</goal>
+
+  <context>
+    <background>Spec FR-01 (the per-type table), FR-02; design §3; owner 2026-11-08: title = type + number, tabs off by default, all six types. R3's `RecordDetailModal.tsx` stacks sections; its states (loading, denied, notfound, error with retry, deleted) and its `nav.onBeforeNavigate` hold (:600-628) are the behaviour to keep. The prototype `c:\code_files\spaarke-prototype\projects\2026-10-spa-record-modal\src\template\` (`types.ts`, `RecordModal.tsx`, `RecordModalHeader.tsx`, `RecordSection.tsx`) is the visual reference, not the spec.</background>
+    <relevant-files>
+      <file role="new">src/client/external-spa/src/components/record/recordTemplate.types.ts</file>
+      <file role="new">src/client/external-spa/src/components/record/recordTemplates.ts</file>
+      <file role="new">src/client/external-spa/src/components/record/recordReads.ts</file>
+      <file role="new">src/client/external-spa/src/components/record/RecordTemplateModal.tsx</file>
+      <file role="new">src/client/external-spa/tests/RecordTemplateModal.test.tsx</file>
+      <file role="modify">src/client/external-spa/src/components/detail/RecordDetailModal.tsx</file>
+      <file role="modify">src/client/external-spa/src/components/detail/record-targets.ts</file>
+      <file role="canonical-reference">src/client/external-spa/src/components/detail/RecordDetailFields.tsx</file>
+      <file role="canonical-reference">src/client/external-spa/src/components/detail/RecordOpener.tsx</file>
+      <file role="canonical-reference">src/client/external-spa/src/components/detail/RecordDeepLink.tsx</file>
+      <file role="canonical-reference">src/client/external-spa/tests/RecordDetailModal.test.tsx</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/SprkModal/SprkModal.tsx</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/SprkModal/SprkModal.types.ts</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/RecordHeader/RecordHeaderShell.tsx</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/theme/scrollbar.ts</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="001" status="pending">`RecordCommandBar` and `RECORD_ACTION_ICONS` from `@spaarke/ui-components`</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-050 / FR-02">`RecordTemplateModal` is a `SprkModal` with `size="lg"`; no bespoke envelope, no nested `RecordNavigationModalShell`. Browse uses `nav` with `onBeforeNavigate`; the footer is Close only (in `footer`).</constraint>
+    <constraint source="FR-01">The modal renders only from `RecordTemplateConfig`: no `cfg.entity === '…'` branches in `RecordTemplateModal.tsx`. A config entry gives `entity`, `label`, `titleNumberAttribute`, `headerFacts`, optional `tabs` (absent by default), `left` and `right` section ids, and `toolbar` action ids drawn from `RECORD_ACTION_ICONS` keys. The six entries match the spec FR-01 table exactly (Document has no right column).</constraint>
+    <constraint source="FR-02">Toolbar, header and tabs stay outside the scroll area; only the content region scrolls, styled with `thinScrollbarStyle`. Left/right columns are 66% / 34% and stack (left first) when the viewport is below 1000px. Title = type label + record number (fallback: name, then label alone).</constraint>
+    <constraint source="FR-02">States kept, each with R3's text and test id semantics: loading, denied (no field or section rendered), notfound, error (retry only when retryable), deleted; navigation held while a child operation is in flight (`onBeforeNavigate` returns false and Close is held).</constraint>
+    <constraint source="FR-04 / FR-05">The toolbar is `RecordCommandBar`; icons come only from `RECORD_ACTION_ICONS`. This task wires Refresh (re-reads the record) and Copy link (copies `{origin}{path}?record={token}:{id}`, the inverse of `parseRecordLink`, built in `record-targets.ts`); every other action id is passed with `visible: false` until tasks 005/006 wire it.</constraint>
+    <constraint source="project">`recordReads.ts` receives `buildFetchXml`, `postFetch`, `useRecord` and `useRelatedRows` MOVED from `RecordDetailModal.tsx` (:96-227) unchanged; `RecordDetailModal.tsx` imports them. No new server read and no change to what is fetched.</constraint>
+    <constraint source="ADR-021">Fluent v9 semantic tokens via `makeStyles` only; light, dark, high-contrast and Teams themes.</constraint>
+    <constraint source="project">Do not switch `RecordOpener` to the template and do not delete R3 code in this task (task 005 does both).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-SPA-external-access-platform-r4/CLAUDE.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r4/spec.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r4/design.md</file>
+      <file>.claude/adr/ADR-050-canonical-modal-shell.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>docs/standards/MODAL-DESIGN-SYSTEM.md</file>
+      <file>docs/standards/MODAL-DECISION-CRITERIA.md</file>
+      <file>.claude/patterns/ui/record-modal-selection.md</file>
+      <file>.claude/patterns/ui/thin-scrollbar.md</file>
+      <file>.claude/skills/fluent-v9-component/SKILL.md</file>
+      <file>.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r3/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="R3 modal states" location="src/client/external-spa/src/components/detail/RecordDetailModal.tsx">States and navigation hold at :584-711 — port the behaviour, not the stacked layout.</pattern>
+      <pattern name="Prototype template layout" location="c:\code_files\spaarke-prototype\projects\2026-10-spa-record-modal\src\template\RecordModal.tsx">Toolbar/header/columns arrangement to mirror visually.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load the knowledge files, read the relevant files, declare rigor and model tier per task-execute Step 0.5.</step>
+    <step order="1">Move the record reads into `recordReads.ts`; point `RecordDetailModal.tsx` at them; run the existing `tests/RecordDetailModal.test.tsx` to prove no change.</step>
+    <step order="2">Write `recordTemplate.types.ts` and `recordTemplates.ts` (six entries per FR-01; header facts from the existing `RECORD_DETAIL_ENTITIES` fields).</step>
+    <step order="3">Add `recordLinkFor(entityName, id)` to `record-targets.ts` (inverse of `RECORD_LINK_TOKENS`).</step>
+    <step order="4">Write `RecordTemplateModal.tsx`: SprkModal lg, fixed chrome (RecordCommandBar, header with an empty "Your access" slot for task 006, optional TabList), scrolling content with two column regions rendering section placeholders by id through a `renderSection(id)` prop.</step>
+    <step order="5">Choose the header: reuse `RecordHeaderShell` if it renders "title + up to three facts + one access line" without changing it; otherwise build it from Fluent primitives in the SPA. Record the choice in the task notes.</step>
+    <step order="6">Write `tests/RecordTemplateModal.test.tsx` (vitest).</step>
+    <step order="7">Run `npm run typecheck`, `npm run lint` and `npm test` in `src/client/external-spa`.</step>
+    <step order="8">Update `tasks/TASK-INDEX.md`: set this task's status cell to `✅ [done]` and this POML's &lt;status&gt; to completed; run `pwsh scripts/check-task-status-drift.ps1`.</step>
+    <step order="9">Record deviations and decisions in `projects/spaarke-SPA-external-access-platform-r4/notes/task-003-notes.md`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If fixed chrome with a scrolling content region cannot be built inside SprkModal's body without changing SprkModal, STOP and escalate (shared component, ADR-050) rather than forking an envelope.</trigger>
+    <trigger>If a field in the FR-01 table has no data source today (for example a header fact not in `RECORD_DETAIL_ENTITIES` or the allow-list), leave it out, note it, and do not add a column — FR-18 (task 031) owns new columns.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>`RECORD_DETAIL_ENTITIES` (`RecordDetailFields.tsx:73`) already configures fields, `documentsRoot`, `invoicesBy` and `showsEventsAndTasks` per type; `RecordDetailModal.tsx:558` renders them stacked.</existing>
+    <extension>Partly: the template config reuses `RECORD_DETAIL_ENTITIES`'s field lists and the moved reads, but the stacked modal cannot express columns, tabs, toolbar actions or per-type section order, and FR-01 retires it.</extension>
+    <cost-of-doing-nothing>FR-01/FR-02 fail: no type can show the two-column layout, fixed toolbar or record actions, and every later P1 task (005, 004, 006, 007) has no shell to plug into.</cost-of-doing-nothing>
+  </justification>
+
+  <ui-tests>
+    <test name="States render">
+      <url>{spa-dev-url}/?record=matter:{matter-id}</url>
+      <steps><step>Open an accessible matter, an inaccessible one, and a missing id.</step><step>Force a failed read (offline) and press Try again.</step><step>Check the console.</step></steps>
+      <expected>Loading, ready, denied, notfound and retryable error each render with R3's text; no console errors.</expected>
+    </test>
+    <test name="Layout at three widths">
+      <steps><step>Open a project at 1440px, 1000px and 375px viewport widths.</step><step>Scroll the content.</step></steps>
+      <expected>Two columns (66/34) at 1440 and 1000; stacked at 375 with no horizontal page scroll; toolbar, header and tabs stay fixed while content scrolls with the thin scrollbar.</expected>
+    </test>
+    <test name="Dark Mode and Teams theme (ADR-021)">
+      <steps><step>Switch the SPA to dark, then open it in the Teams host (dark and high contrast).</step><step>Verify backgrounds, text and icons adapt.</step></steps>
+      <expected>All colours use Fluent v9 semantic tokens; no white panels in dark mode.</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">typecheck, lint and vitest in src/client/external-spa</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/external-spa/src/components/record/recordTemplate.types.ts</output>
+    <output type="code">src/client/external-spa/src/components/record/recordTemplates.ts</output>
+    <output type="code">src/client/external-spa/src/components/record/recordReads.ts</output>
+    <output type="code">src/client/external-spa/src/components/record/RecordTemplateModal.tsx</output>
+    <output type="code">src/client/external-spa/src/components/detail/record-targets.ts</output>
+    <output type="test">src/client/external-spa/tests/RecordTemplateModal.test.tsx</output>
+    <output type="docs">projects/spaarke-SPA-external-access-platform-r4/notes/task-003-notes.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`RECORD_TEMPLATES` has exactly six entries (Project, Matter, Work assignment, Invoice, Service request, Document) whose left, right and toolbar lists equal the spec FR-01 table; a test asserts it.</criterion>
+    <criterion testable="true">Every entity in `RECORD_LINK_TOKENS` and `FEED_RECORD_TYPES` has a template entry (deep links and notification links resolve to a config).</criterion>
+    <criterion testable="true">Given a ready record, the title is "{label} {number}"; with no number it is "{label} {name}", then "{label}".</criterion>
+    <criterion testable="true">Loading, denied, notfound, error (with Try again only when retryable) and deleted each render; in denied no field and no section is in the DOM.</criterion>
+    <criterion testable="true">Toolbar, header and tabs are outside the scrolling content element; the content element carries the thin-scrollbar class.</criterion>
+    <criterion testable="true">With no `tabs` in a config no TabList renders; with a test config that has two tabs, the TabList renders and switches content.</criterion>
+    <criterion testable="true">Refresh re-reads the record; Copy link writes `?record={token}:{id}` for the shown record to the clipboard; a clipboard failure shows an inline message, not an exception.</criterion>
+    <criterion testable="true">Toolbar actions other than Refresh and Copy link are not rendered (hidden, not disabled).</criterion>
+    <criterion testable="true">While `holdNavigation` is true, `onBeforeNavigate` returns false and Close does not close; when false both work.</criterion>
+    <criterion testable="true">`tests/RecordDetailModal.test.tsx` still passes after the reads move; RecordOpener still opens the R3 modal.</criterion>
+    <criterion testable="true">typecheck, lint and the vitest suite pass.</criterion>
+    <criterion testable="true">Test scope: cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-01, FR-02, NFR-01, NFR-03. Anchors verified 2026-11-10: SprkModal `size="lg"` at `RecordDetailModal.tsx:617`, `onBeforeNavigate` :622, reads :86-227, `RECORD_DETAIL_ENTITIES` `RecordDetailFields.tsx:73`, `RECORD_LINK_TOKENS` `record-targets.ts:35`, `thinScrollbarStyle` `theme/scrollbar.ts:32`. SprkModal's body is the `overflowY: auto` region (`SprkModal.tsx:109-117`): make the template root fill it (height 100%) so the body never scrolls and the inner content region does. Width tests at 1440/1000/375 are ui-tests (jsdom has no layout). External SPA tests run under vitest (`npm test` = `vitest run`).
+
+Completion (2026-11-11): `components/record/` holds recordTemplate.types.ts, recordTemplates.ts (six configs, FR-01 table exact, tabs off), recordReads.ts (R3 reads moved unchanged; only `export` added), RecordTemplateHeader.tsx and RecordTemplateModal.tsx; `recordLinkFor` added to record-targets.ts; RecordDetailModal.tsx imports the moved reads. Header built from Fluent primitives, not RecordHeaderShell (reasons in notes/task-003-notes.md). Escalation 2 fired softly: Matter "Responsible attorney"/"Last modified" and Project "Project lead" have no data source and are left out (no column added). RecordOpener still opens the R3 modal. 40 new vitest tests; suite 1332/1332, typecheck and lint clean. Review: no open F-class; D-4 (Copy link without `?customer=`, owner question) filed PENDING. Width/theme checks are ui-tests for task 018. Detail: notes/task-003-notes.md.
+rework: none task 003</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

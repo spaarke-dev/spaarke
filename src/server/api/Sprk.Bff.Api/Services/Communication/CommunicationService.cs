@@ -47,8 +47,18 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
     private readonly IThreadResolver? _threadResolver;
     private readonly IServiceScopeFactory? _scopeFactory;
     private readonly IDirectThreadAccessService? _directThreadAccess;
+
+    /// <summary>
+    /// fm task 054 piece 3a: the one step after a message joins a thread (the grant, then the Direct owner team for a Direct
+    /// message filed under nothing), and the pre-send check of a 1:1 message. Optional so existing unit constructions keep
+    /// compiling (they keep the bare grant); production DI always supplies it.
+    /// </summary>
+    private readonly Access.DirectMessageOwnerStep? _directMessageOwnerStep;
     // Task 054: the strict POA share read the respond path's Direct participant stamp decides from; null stamps nothing.
     private readonly Sprk.Bff.Api.Services.Access.IDataverseRecordShareService? _recordShares;
+    // Task 054a piece 2b: the internal-user email read (the A9 licensed-user read) the outbound Direct pair routing maps its one
+    // address with; null routes nothing (today's resolver path).
+    private readonly Sprk.Bff.Api.Infrastructure.ExternalAccess.IContactIdentityStore? _contactIdentities;
     private readonly CommunicationParticipantIndexer? _participantIndexer;
     private readonly CommunicationArrivedProducer? _arrivedProducer;
     // FR-A1 (task 010/012): the outbound tracking-footer signer + per-tenant gate. Optional/null-tolerant so
@@ -115,9 +125,13 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
         CommunicationArrivedProducer? arrivedProducer = null,
         ITrackingTokenSigner? trackingTokenSigner = null,
         TrackingFooterGate? trackingFooterGate = null,
-        Sprk.Bff.Api.Services.Access.IDataverseRecordShareService? recordShares = null)
+        Sprk.Bff.Api.Services.Access.IDataverseRecordShareService? recordShares = null,
+        Sprk.Bff.Api.Infrastructure.ExternalAccess.IContactIdentityStore? contactIdentities = null,
+        Access.DirectMessageOwnerStep? directMessageOwnerStep = null)
     {
         _recordShares = recordShares;
+        _contactIdentities = contactIdentities;
+        _directMessageOwnerStep = directMessageOwnerStep;
         _channelDispatcher = channelDispatcher;
         _senderValidator = senderValidator;
         _communicationService = communicationService;
@@ -928,6 +942,10 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
             request, senderEmail, senderParticipant.RecordId, correlationId, ct,
             Sprk.Bff.Api.Services.Dataverse.RecordRequester.OfCaller(httpContext.User));
 
+        // fm task 054 piece 3a: a 1:1 message is refused here, before anything is sent, when the Direct message owner team is
+        // configured but unusable (409) or unreadable (503).
+        await RefuseOneToOneSendWhenDirectTeamUnusableAsync(request, preparedRecord, senderEmail, correlationId, ct);
+
         try
         {
             // Dispatch by CommunicationType through the EXISTING dispatcher (ADR-045 — no second send path). The
@@ -985,10 +1003,14 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
             // Thread resolution (task 040 / FR-06) — best-effort, non-fatal (NFR-02). Unlike the email path the
             // outbound message HAS its authoritative ACS thread id (ProviderThreadId), so the messaging key
             // strategy can group by it now (find-or-create sprk_communicationthread + channel-ref row).
+            // Task 054a piece 2b: an outbound Direct send is filed into its pair's Direct thread when its one recipient maps
+            // to one eligible systemuser; otherwise, and on any fault of that step, the path above runs unchanged.
+            Access.DirectOwnerJoin? directJoin = null;
             if (communicationId.HasValue)
             {
-                await ResolveOutboundMessageThreadAsync(
-                    communicationId.Value, request, sendResult.ProviderThreadId, correlationId, ct);
+                directJoin = await ResolveSentMessageThreadAsync(
+                    communicationId.Value, request, preparedRecord, senderParticipant.RecordId,
+                    sendResult.ProviderThreadId, correlationId, ct);
             }
 
             // Direction-symmetric enrichment (ADR-045 / FR-08) — best-effort, non-fatal (NFR-02).
@@ -1020,6 +1042,10 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
                 await WriteParticipantIndexAsync(
                     communicationId.Value, senderEmail, senderParticipant,
                     request.To, request.Cc, request.Bcc, ct);
+
+                // fm task 054 (F1): the owner part of a Direct join, after the enrichment rows and the participant index, so they move
+                // with the message to the Direct team and its second grant covers them. The join's grant ran at the join.
+                await OwnDirectAfterContentAsync(directJoin, correlationId, ct);
 
                 // communication-arrived (spaarke-notification-spine-r1 task 024 / FR-09) — non-fatal, emitted
                 // AFTER thread resolution + participant index so the fan-out junction + thread lookup are populated
@@ -1290,6 +1316,7 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
 
         communication[field] = regarding;
         await StampCoreAncestorOrThrowAsync(communication, regarding.LogicalName, regarding.Id, correlationId, ct);
+        MarkFiledBySender(communication);
 
         // The denormalized pointer, as MapAssociationFieldsAsync writes it for an associated record. A pointer a reply copied
         // from its source describes the source's record: it goes unless the thread names that same record.
@@ -1297,8 +1324,10 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
         if (!string.IsNullOrWhiteSpace(thread.RegardingName))
             communication["sprk_regardingrecordname"] = TruncateTo(thread.RegardingName, 100);
         communication["sprk_regardingrecordid"] = TruncateTo(regarding.Id.ToString(), 100);
+        // Task 045f: the url is the one of the record the row is now filed under (the thread's typed regarding), never the
+        // thread's stored text, which can describe another record.
         if (!string.IsNullOrWhiteSpace(thread.RegardingUrl))
-            communication["sprk_regardingrecordurl"] = TruncateTo(thread.RegardingUrl, 200);
+            communication["sprk_regardingrecordurl"] = Dataverse.InvoiceFamilyCoreRecordGuard.CanonicalRecordUrl(regarding.LogicalName, regarding.Id);
 
         _logger.LogInformation(
             "Inherited regarding {EntityType}:{RegardingId} from target thread {ThreadId} | CorrelationId: {CorrelationId}",
@@ -1342,6 +1371,85 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
 
         if (parentThreadId is { } threadId)
             await ApplyTargetThreadAsync(communication, request, threadId, correlationId, ct, inheritRegarding: false);
+    }
+
+    /// <summary>
+    /// Issue #2033 (owner decision, NFR-01 fail closed): the problem code (403) of a send-as-user email refused because the
+    /// caller has no ENABLED Dataverse systemuser: disabled in Dataverse while still active in Entra, or no systemuser at all.
+    /// Nothing is sent or written.
+    /// </summary>
+    public const string SenderDisabledCode = "sdap.communication.sender_disabled";
+
+    /// <summary>
+    /// Issue #2033: the problem code (503) of a send-as-user email refused because the caller's Dataverse user could not be
+    /// read, so it could not be confirmed enabled. Nothing is sent or written.
+    /// </summary>
+    public const string SenderStatusUnavailableCode = "sdap.communication.sender_status_unavailable";
+
+    /// <summary>
+    /// Issue #2033: the problem code (401) of a send-as-user email refused because the caller's claims carry no Entra object
+    /// id, so their Dataverse user cannot be read (<see cref="CallerResolution.ResolveObjectId"/>: null is 401). Nothing is
+    /// sent or written.
+    /// </summary>
+    public const string SenderUnidentifiedCode = "sdap.communication.sender_unidentified";
+
+    /// <summary>
+    /// Issue #2033: the gate a send-as-user email passes BEFORE anything is sent or written. The caller sends as themselves,
+    /// so their Dataverse systemuser must be enabled. Uses the existing oid → systemuserid resolution, which answers only an
+    /// enabled user (#1576), and returns that user for <c>sprk_sentby</c>. Shared-mailbox and system sends do not take it.
+    /// </summary>
+    /// <exception cref="SdapProblemException">
+    /// 401 <see cref="SenderUnidentifiedCode"/> (no oid); 403 <see cref="SenderDisabledCode"/> (no enabled systemuser);
+    /// 503 <see cref="SenderStatusUnavailableCode"/> (the read failed).
+    /// </exception>
+    private async Task<Guid> RequireEnabledSenderAsync(string? userObjectId, string correlationId, CancellationToken ct)
+    {
+        if (string.IsNullOrEmpty(userObjectId))
+        {
+            _logger.LogWarning(
+                "Send as user REFUSED: the caller's claims carry no object id, so the sender cannot be checked | CorrelationId: {CorrelationId}",
+                correlationId);
+            throw new SdapProblemException(
+                code: SenderUnidentifiedCode,
+                title: "Sender Not Identified",
+                detail: "The message was not sent: the sender could not be identified from the authentication claims.",
+                statusCode: 401,
+                extensions: new Dictionary<string, object> { ["correlationId"] = correlationId });
+        }
+
+        Guid? systemUserId;
+        try
+        {
+            systemUserId = await _communicationService.QuerySystemUserByAzureAdOidAsync(userObjectId, ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogError(
+                ex,
+                "Send as user REFUSED: the sender's Dataverse user could not be read (Azure AD OID: {UserObjectId}) | CorrelationId: {CorrelationId}",
+                userObjectId, correlationId);
+            throw new SdapProblemException(
+                code: SenderStatusUnavailableCode,
+                title: "Sender Status Unavailable",
+                detail: "The message was not sent: the sender's user status could not be checked. Please try again.",
+                statusCode: 503,
+                extensions: new Dictionary<string, object> { ["correlationId"] = correlationId });
+        }
+
+        if (systemUserId is not { } enabledSystemUserId)
+        {
+            _logger.LogWarning(
+                "Send as user REFUSED: no enabled Dataverse systemuser for Azure AD OID {UserObjectId} | CorrelationId: {CorrelationId}",
+                userObjectId, correlationId);
+            throw new SdapProblemException(
+                code: SenderDisabledCode,
+                title: "Sender Disabled",
+                detail: "The message was not sent: the sender's user account is disabled or not set up in Spaarke.",
+                statusCode: 403,
+                extensions: new Dictionary<string, object> { ["correlationId"] = correlationId });
+        }
+
+        return enabledSystemUserId;
     }
 
     /// <summary>
@@ -1527,6 +1635,419 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
         }
     }
 
+    // ── Outbound Direct pair routing (field-mapping-server-write-path-r1 task 054a piece 2b, owner 2026-11-10, option a) ──
+
+    /// <summary>Information: an outbound Direct send was not filed through its pair's Direct thread; the reason code says why.</summary>
+    internal const string PairRoutingSkippedEventCode = "direct_message.pair_routing_skipped";
+
+    /// <summary>Warning: the recipient of an outbound Direct send could not be resolved (a read faulted); today's path ran.</summary>
+    internal const string PairRoutingUnresolvedEventCode = "direct_message.pair_routing_unresolved";
+
+    /// <summary>Warning: finding or creating the pair's Direct thread faulted; today's path ran.</summary>
+    internal const string PairThreadFailedEventCode = "direct_message.pair_thread_failed";
+
+    /// <summary>Information: an outbound Direct send is being filed into its pair's Direct thread (the thread passed the shape check).</summary>
+    internal const string PairRoutedEventCode = "direct_message.pair_routed";
+
+    /// <summary>Warning: the pair's Direct thread, once found or created, could not be read for its shape; today's path ran.</summary>
+    internal const string PairThreadUnreadEventCode = "direct_message.pair_thread_unread";
+
+    private static readonly EventId PairRoutingSkippedEvent = new(5406, PairRoutingSkippedEventCode);
+    private static readonly EventId PairRoutingUnresolvedEvent = new(5407, PairRoutingUnresolvedEventCode);
+    private static readonly EventId PairThreadFailedEvent = new(5408, PairThreadFailedEventCode);
+    // 5409 is DirectMessageRecipient's recipient_not_expected.
+    private static readonly EventId PairRoutedEvent = new(5410, PairRoutedEventCode);
+    private static readonly EventId PairThreadUnreadEvent = new(5411, PairThreadUnreadEventCode);
+
+    /// <summary>
+    /// Information: the join into the pair's Direct thread refused before any write — the thread, as the join read it, is not a
+    /// strict Direct thread of exactly the routed pair (<see cref="Access.DirectPairFilingRefusedException"/>); nothing was
+    /// filed or granted there, and today's path ran. Warning, with the fault, when a read before the write faulted
+    /// (<c>read_fault</c>).
+    /// </summary>
+    internal const string PairFilingRefusedEventCode = "direct_message.pair_filing_refused";
+
+    private static readonly EventId PairFilingRefusedEvent = new(5412, PairFilingRefusedEventCode);
+
+    /// <summary>The reason codes of <see cref="PairRoutingSkippedEventCode"/>. Never an address.</summary>
+    internal static class PairRoutingSkipReason
+    {
+        /// <summary>The Direct thread access service or the internal-user email read is not composed.</summary>
+        public const string NotConfigured = "not_configured";
+
+        /// <summary>To ∪ Cc ∪ Bcc, normalized and de-duplicated, is not exactly one address.</summary>
+        public const string NotOneAddress = "not_one_address";
+
+        /// <summary>The address maps to no enabled systemuser (an external address; a disabled user's address).</summary>
+        public const string NoInternalUser = "no_internal_user";
+
+        /// <summary>The address maps to more than one enabled systemuser.</summary>
+        public const string AmbiguousAddress = "ambiguous_address";
+
+        /// <summary>The one mapped systemuser is the sender.</summary>
+        public const string RecipientIsSender = "recipient_is_sender";
+
+        /// <summary>The one mapped systemuser reads disabled.</summary>
+        public const string RecipientDisabled = "recipient_disabled";
+
+        /// <summary>The one mapped systemuser is an application user.</summary>
+        public const string RecipientApplicationUser = "recipient_application_user";
+
+        /// <summary>The one mapped systemuser has no row at the eligibility read.</summary>
+        public const string RecipientMissing = "recipient_missing";
+
+        /// <summary>
+        /// The prefix of a refusal by the Direct-pair shape rule (<see cref="Access.DirectMessageRecipient.ReadStrictPairShapeAsync"/>)
+        /// on the thread the find-or-create answered: <c>pair_thread_</c> + its reason (<see cref="Access.DirectPairShapeReason"/>:
+        /// <c>not_direct</c>, <c>typed_regarding</c>, <c>not_open</c>, <c>not_two_read_participants</c>, <c>extra_principal</c>).
+        /// </summary>
+        public const string PairThreadPrefix = "pair_thread_";
+
+        /// <summary>The found thread is a strict pair, but its two participants are not the sender and the mapped recipient.</summary>
+        public const string PairThreadNotThePair = "pair_thread_not_the_pair";
+    }
+
+    /// <summary>
+    /// <c>true</c> for an <b>outbound Direct send</b>: a Message send that names no <see cref="SendCommunicationRequest.ThreadId"/>
+    /// and whose prepared row is filed under no record (no typed regarding lookup:
+    /// <see cref="Access.DirectMessageRecipient.CarriesATypedRegarding"/>, the same test the Direct filing stamp makes).
+    /// </summary>
+    internal static bool IsOutboundDirectSend(SendCommunicationRequest request, DataverseEntity preparedRecord) =>
+        request.CommunicationType == CommunicationType.Message
+        && !request.ThreadId.HasValue
+        && !Access.DirectMessageRecipient.CarriesATypedRegarding(preparedRecord);
+
+    /// <summary>
+    /// fm task 054 piece 3a: <c>true</c> for a Message send whose prepared row is filed under no record (no typed regarding lookup).
+    /// Only such a send can become a Direct message, so only it can be checked against the Direct message owner team.
+    /// </summary>
+    internal static bool IsUnfiledMessageSend(SendCommunicationRequest request, DataverseEntity preparedRecord) =>
+        request.CommunicationType == CommunicationType.Message
+        && !Access.DirectMessageRecipient.CarriesATypedRegarding(preparedRecord);
+
+    /// <summary>
+    /// fm task 054 piece 3a: <c>true</c> for a <b>1:1 message send by its addressees</b>, the rule for a send that names no
+    /// <see cref="SendCommunicationRequest.ThreadId"/>: an unfiled Message send (<see cref="IsUnfiledMessageSend"/>) whose
+    /// To ∪ Cc ∪ Bcc (<see cref="DistinctRecipientAddresses"/>), without the sender's own address, names exactly one other person.
+    /// A send into a thread is decided by the thread's shape instead (<see cref="Access.DirectMessageOwnerStep.CheckBeforeSendAsync(Guid?, CancellationToken)"/>).
+    /// </summary>
+    /// <remarks>Known limit: a recipient address that resolves to a contact or an external person still counts here; that
+    /// resolution runs only after the send (<see cref="ResolveDirectRecipientAsync"/>), so it is not available before it.</remarks>
+    internal static bool IsOneToOneMessageSend(SendCommunicationRequest request, DataverseEntity preparedRecord, string? senderEmail)
+    {
+        if (request.ThreadId.HasValue || !IsUnfiledMessageSend(request, preparedRecord))
+            return false;
+
+        var sender = string.IsNullOrWhiteSpace(senderEmail) ? null : CommunicationParticipantIndexer.NormalizeAddress(senderEmail);
+        return DistinctRecipientAddresses(request).Count(a => !string.Equals(a, sender, StringComparison.Ordinal)) == 1;
+    }
+
+    /// <summary>To ∪ Cc ∪ Bcc, each normalized as the participant index does, empty entries dropped and duplicates counted once.</summary>
+    private static List<string> DistinctRecipientAddresses(SendCommunicationRequest request) =>
+        (request.To ?? Array.Empty<string>())
+            .Concat(request.Cc ?? Array.Empty<string>())
+            .Concat(request.Bcc ?? Array.Empty<string>())
+            .Where(a => !string.IsNullOrWhiteSpace(a))
+            .Select(CommunicationParticipantIndexer.NormalizeAddress)
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+
+    /// <summary>
+    /// fm task 054 piece 3a: refuses a 1:1 message send before anything is sent when the Direct message owner team is configured
+    /// but cannot be used (409) or cannot be read (503). No Direct setting at all, or a resolved team, sends. A send into a thread
+    /// (a reply) is 1:1 when the thread is a strict Direct pair, whoever it names in To/Cc/Bcc; a send with no thread is 1:1 by its
+    /// addressees (<see cref="IsOneToOneMessageSend"/>). A thread shape that cannot be read is a 503.
+    /// </summary>
+    private async Task RefuseOneToOneSendWhenDirectTeamUnusableAsync(
+        SendCommunicationRequest request, DataverseEntity preparedRecord, string senderEmail, string correlationId, CancellationToken ct)
+    {
+        if (_directMessageOwnerStep is null)
+            return;
+
+        Access.DirectOwnerSendCheck check;
+        if (request.ThreadId is { } threadId)
+        {
+            if (!IsUnfiledMessageSend(request, preparedRecord))
+                return;
+            check = await _directMessageOwnerStep.CheckBeforeSendAsync(threadId, ct);
+        }
+        else
+        {
+            if (!IsOneToOneMessageSend(request, preparedRecord, senderEmail))
+                return;
+            check = await _directMessageOwnerStep.CheckBeforeSendAsync(ct);
+        }
+
+        if (check.CanSend)
+            return;
+
+        var code = check.RefusalCode ?? Access.DirectOwnerSendCheck.DirectOwnerSendUnavailableCode;
+        throw new SdapProblemException(
+            code: code,
+            title: check.IsTransient ? "Direct messages are temporarily unavailable" : "Direct messages are not set up",
+            detail: check.IsTransient
+                ? "The message was not sent: direct messaging could not be checked right now. Try again in a moment."
+                : "The message was not sent: direct messaging is not fully set up in this environment. Contact your administrator.",
+            statusCode: check.IsTransient ? 503 : 409,
+            extensions: new Dictionary<string, object>
+            {
+                ["correlationId"] = correlationId,
+                ["reasonCode"] = code,
+            });
+    }
+
+    /// <summary>
+    /// fm task 054 piece 3a: the one step after a message joins a thread (<see cref="Access.DirectMessageOwnerStep.GrantThenOwnDirectAsync"/>).
+    /// A construction without the step keeps the bare grant.
+    /// </summary>
+    /// <param name="deferOwner">A path that still writes the message's content rows (the Message send): only the join's grant runs
+    /// here, and its Direct join is added to this list for <see cref="OwnDirectAfterContentAsync"/>. <c>null</c>: the whole step runs
+    /// now.</param>
+    private async Task GrantThenOwnDirectAsync(
+        Guid communicationId, ThreadAssignment assignment, CancellationToken ct, List<Access.DirectOwnerJoin>? deferOwner = null)
+    {
+        if (_directMessageOwnerStep is not null && deferOwner is not null)
+        {
+            if (await _directMessageOwnerStep.GrantAtJoinAsync(communicationId, assignment, ct) is { } join)
+                deferOwner.Add(join);
+        }
+        else if (_directMessageOwnerStep is not null)
+            await _directMessageOwnerStep.GrantThenOwnDirectAsync(communicationId, assignment, ct);
+        else if (_directThreadAccess is not null)
+            await _directThreadAccess.GrantMessageAccessAsync(communicationId, assignment, ct);
+    }
+
+    /// <summary>
+    /// fm task 054 (F1): the owner part of the step for a Message send's Direct join (<see cref="Access.DirectMessageOwnerStep.OwnDirectAfterContentAsync"/>),
+    /// once the send has written its enrichment rows and its participant index, so they move with the message and its second
+    /// grant covers them. Best-effort, non-fatal (NFR-02): the message is already sent and persisted.
+    /// </summary>
+    private async Task OwnDirectAfterContentAsync(Access.DirectOwnerJoin? join, string correlationId, CancellationToken ct)
+    {
+        if (join is null || _directMessageOwnerStep is null)
+            return;
+
+        try
+        {
+            await _directMessageOwnerStep.OwnDirectAfterContentAsync(join, ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "Direct owner step failed (non-fatal) | CorrelationId: {CorrelationId}, CommunicationId: {CommunicationId}",
+                correlationId, join.CommunicationId);
+        }
+    }
+
+    /// <summary>
+    /// The thread step of <see cref="SendMessageAsync"/> (task 054a piece 2b). An outbound Direct send
+    /// (<see cref="IsOutboundDirectSend"/>) whose one recipient resolves and whose pair's thread passes the Direct-pair shape rule
+    /// (<see cref="FindDirectPairThreadAsync"/>) is filed into that thread through the respond path's explicit join
+    /// (<see cref="AssignExplicitThreadAsync"/>: the join, the Direct filing stamp in the same update as the thread lookup, then
+    /// the grant), naming the routed pair: the join files the message only when its own read of the thread still shows a strict
+    /// Direct thread of exactly that pair, and otherwise refuses before any write (one Information
+    /// <see cref="PairFilingRefusedEventCode"/>). Every other send, an outbound Direct send that does not resolve, and a refused
+    /// join take <see cref="ResolveOutboundMessageThreadAsync"/> unchanged. Never throws.
+    /// <para>fm task 054 (F1): the join grants only. Its Direct join is returned for <see cref="OwnDirectAfterContentAsync"/>, which
+    /// the send runs once its content rows are written; <c>null</c> when the message joined no Direct audience.</para>
+    /// </summary>
+    private async Task<Access.DirectOwnerJoin?> ResolveSentMessageThreadAsync(
+        Guid communicationId, SendCommunicationRequest request, DataverseEntity preparedRecord, Guid senderSystemUserId,
+        string? acsThreadId, string correlationId, CancellationToken ct)
+    {
+        var deferOwner = new List<Access.DirectOwnerJoin>(1);
+        if (IsOutboundDirectSend(request, preparedRecord)
+            && await FindDirectPairThreadAsync(communicationId, request, senderSystemUserId, correlationId, ct) is { } pair)
+        {
+            try
+            {
+                await AssignExplicitThreadAsync(
+                    communicationId, pair.ThreadId, correlationId, ct, filing: "outbound Direct pair thread",
+                    expected: new Access.ExpectedDirectPair(senderSystemUserId, pair.Recipient), deferOwner: deferOwner);
+                return deferOwner.LastOrDefault();
+            }
+            catch (Access.DirectPairFilingRefusedException refused)
+            {
+                // Fix round 2 (F2-2): the join refused before any write — nothing filed, nothing granted — so today's path runs.
+                // A read fault before the write (F-2b-1) is the same refusal, logged as a Warning with its fault.
+                _logger.Log(
+                    refused.Reason == Access.DirectPairFilingRefusedException.ReadFault ? LogLevel.Warning : LogLevel.Information,
+                    PairFilingRefusedEvent,
+                    refused.InnerException,
+                    "{EventCode}: outbound Direct message {CommunicationId} was not filed into Direct thread {ThreadId} ({Reason}); " +
+                    "filed by the thread resolver instead | CorrelationId: {CorrelationId}",
+                    PairFilingRefusedEventCode, communicationId, refused.ThreadId, refused.Reason, correlationId);
+            }
+        }
+
+        await ResolveOutboundMessageThreadAsync(communicationId, request, acsThreadId, correlationId, ct, deferOwner: deferOwner);
+        return deferOwner.LastOrDefault();
+    }
+
+    /// <summary>
+    /// The Direct thread of the pair (sender, recipient) for an outbound Direct send and the mapped recipient, or <c>null</c> for
+    /// today's path. The recipient is resolved on the server (<see cref="ResolveDirectRecipientAsync"/>); then
+    /// <see cref="IDirectThreadAccessService.FindOrCreateDirectThreadAsync"/> answers the pair's thread, which is used only when
+    /// the Direct-pair shape rule (<see cref="Access.DirectMessageRecipient.ReadStrictPairShapeAsync"/>) finds it a strict pair
+    /// AND its two participants are exactly the sender and the mapped recipient. Best-effort (NFR-02): a refusal logs one
+    /// Information <see cref="PairRoutingSkippedEventCode"/> with its reason; a fault resolving the recipient one Warning
+    /// <see cref="PairRoutingUnresolvedEventCode"/>; a fault of the find-or-create one Warning <see cref="PairThreadFailedEventCode"/>;
+    /// a fault reading the found thread one Warning <see cref="PairThreadUnreadEventCode"/>. None of them fails the send. Writes
+    /// nothing itself and assigns no owner.
+    /// </summary>
+    private async Task<(Guid ThreadId, Guid Recipient)?> FindDirectPairThreadAsync(
+        Guid communicationId, SendCommunicationRequest request, Guid senderSystemUserId, string correlationId, CancellationToken ct)
+    {
+        if (_directThreadAccess is null || _contactIdentities is null || _recordShares is null)
+        {
+            SkipPairRouting(PairRoutingSkipReason.NotConfigured, communicationId, correlationId);
+            return null;
+        }
+
+        // Fix round 2 (F2-5): the caller's cancellation is not a fault. The message is already sent and persisted and this step
+        // never throws, so a cancelled routing returns quietly — no Warning — and the message takes today's path, which handles
+        // the cancellation as it always has.
+        (string? SkipReason, Guid Recipient) resolved;
+        try
+        {
+            resolved = await ResolveDirectRecipientAsync(request, senderSystemUserId, ct);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            return null;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(
+                PairRoutingUnresolvedEvent,
+                ex,
+                "{EventCode}: the recipient of outbound Direct message {CommunicationId} could not be resolved; filed by the " +
+                "thread resolver instead | CorrelationId: {CorrelationId}",
+                PairRoutingUnresolvedEventCode, communicationId, correlationId);
+            return null;
+        }
+
+        if (resolved.SkipReason is { } reason)
+        {
+            SkipPairRouting(reason, communicationId, correlationId);
+            return null;
+        }
+
+        Guid pairThreadId;
+        try
+        {
+            pairThreadId = await _directThreadAccess.FindOrCreateDirectThreadAsync(senderSystemUserId, resolved.Recipient, ct);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            return null;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(
+                PairThreadFailedEvent,
+                ex,
+                "{EventCode}: the Direct thread of outbound Direct message {CommunicationId} could not be found or created; " +
+                "filed by the thread resolver instead | CorrelationId: {CorrelationId}",
+                PairThreadFailedEventCode, communicationId, correlationId);
+            return null;
+        }
+
+        // F1-a (fix round 1): the found thread is joined only when it is a strict pair of exactly these two people.
+        // The shape rule answers a fault as ParticipantReadFault itself; only the caller's cancellation is thrown, and that
+        // returns quietly as above.
+        Access.DirectPairShape shape;
+        try
+        {
+            shape = await Access.DirectMessageRecipient.ReadStrictPairShapeAsync(_genericEntityService, _recordShares, pairThreadId, ct);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            return null;
+        }
+
+        if (shape.Reason == Access.DirectPairShapeReason.ParticipantReadFault)
+        {
+            _logger.LogWarning(
+                PairThreadUnreadEvent,
+                shape.Fault,
+                "{EventCode}: the Direct thread {ThreadId} found for outbound Direct message {CommunicationId} could not be read; " +
+                "filed by the thread resolver instead | CorrelationId: {CorrelationId}",
+                PairThreadUnreadEventCode, pairThreadId, communicationId, correlationId);
+            return null;
+        }
+
+        if (!shape.IsStrictPair)
+        {
+            SkipPairRouting(PairRoutingSkipReason.PairThreadPrefix + shape.Reason, communicationId, correlationId);
+            return null;
+        }
+
+        var isThePair = (shape.OwnerId == senderSystemUserId && shape.OtherId == resolved.Recipient)
+                        || (shape.OwnerId == resolved.Recipient && shape.OtherId == senderSystemUserId);
+        if (!isThePair)
+        {
+            SkipPairRouting(PairRoutingSkipReason.PairThreadNotThePair, communicationId, correlationId);
+            return null;
+        }
+
+        _logger.LogInformation(
+            PairRoutedEvent,
+            "{EventCode}: outbound Direct message {CommunicationId} is filed into its pair's Direct thread {ThreadId} | " +
+            "CorrelationId: {CorrelationId}",
+            PairRoutedEventCode, communicationId, pairThreadId, correlationId);
+        return (pairThreadId, resolved.Recipient);
+    }
+
+    /// <summary>
+    /// The recipient of an outbound Direct send, by systemuser id, or the reason there is none. To ∪ Cc ∪ Bcc, each normalized
+    /// as the participant index does (<see cref="CommunicationParticipantIndexer.NormalizeAddress"/>), empty entries dropped and
+    /// duplicates counted once, must be exactly one address. It is mapped through the existing internal-user email read (the A9
+    /// licensed-user read: <see cref="Sprk.Bff.Api.Infrastructure.ExternalAccess.IContactIdentityStore.FindEnabledSystemUsersByEmailAsync"/>,
+    /// decided by <see cref="Sprk.Bff.Api.Infrastructure.ExternalAccess.ContactBindingDecision.MatchingEnabledSystemUserIds"/>),
+    /// which must answer exactly one enabled systemuser. From there every comparison is by id: it is not the sender, and the
+    /// Direct participant rule (<see cref="Access.DirectMessageRecipient.ReadEligibilityAsync"/>) reads it enabled and not an
+    /// application user. A read that does not complete throws.
+    /// </summary>
+    private async Task<(string? SkipReason, Guid Recipient)> ResolveDirectRecipientAsync(
+        SendCommunicationRequest request, Guid senderSystemUserId, CancellationToken ct)
+    {
+        var addresses = DistinctRecipientAddresses(request);
+        if (addresses.Count != 1)
+            return (PairRoutingSkipReason.NotOneAddress, Guid.Empty);
+
+        var lookup = await _contactIdentities!.FindEnabledSystemUsersByEmailAsync(addresses[0], ct);
+        if (lookup.Status != Sprk.Bff.Api.Infrastructure.ExternalAccess.LookupStatus.Read)
+            throw new InvalidOperationException($"The internal-user email read did not complete ({lookup.Status}).");
+
+        var matches = Sprk.Bff.Api.Infrastructure.ExternalAccess.ContactBindingDecision.MatchingEnabledSystemUserIds(lookup, addresses[0]);
+        if (matches.Count == 0)
+            return (PairRoutingSkipReason.NoInternalUser, Guid.Empty);
+        if (matches.Count > 1)
+            return (PairRoutingSkipReason.AmbiguousAddress, Guid.Empty);
+
+        var recipient = matches[0];
+        if (recipient == senderSystemUserId)
+            return (PairRoutingSkipReason.RecipientIsSender, Guid.Empty);
+
+        var eligibility = await Access.DirectMessageRecipient.ReadEligibilityAsync(_genericEntityService, new[] { recipient }, ct);
+        return eligibility[recipient] switch
+        {
+            Access.ParticipantEligibility.Eligible => (null, recipient),
+            Access.ParticipantEligibility.Disabled => (PairRoutingSkipReason.RecipientDisabled, Guid.Empty),
+            Access.ParticipantEligibility.ApplicationUser => (PairRoutingSkipReason.RecipientApplicationUser, Guid.Empty),
+            _ => (PairRoutingSkipReason.RecipientMissing, Guid.Empty),
+        };
+    }
+
+    private void SkipPairRouting(string reason, Guid communicationId, string correlationId) =>
+        _logger.LogInformation(
+            PairRoutingSkippedEvent,
+            "{EventCode}: outbound Direct message {CommunicationId} was not filed through its pair's Direct thread ({Reason}); " +
+            "filed by the thread resolver instead | CorrelationId: {CorrelationId}",
+            PairRoutingSkippedEventCode, communicationId, reason, correlationId);
+
     /// <summary>
     /// Resolves the outbound message's <c>sprk_communicationthread</c>. Two paths (task 062 / FR-12):
     /// <b>(1) Explicit target</b> — when <see cref="SendCommunicationRequest.ThreadId"/> is supplied (the
@@ -1539,14 +2060,16 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
     /// <paramref name="requireOpenDefaultThread"/> (D8; the external thread post only) makes the record-default-thread
     /// step join only an EXPLICITLY Open default thread, else find-or-create a new Open one. Returns the resolved thread id (or null
     /// on failure/no resolver) so the caller can chain the task-043 Direct-thread message access grant.
+    /// <paramref name="deferOwner"/>: see <see cref="GrantThenOwnDirectAsync"/>.
     /// </summary>
     private async Task<Guid?> ResolveOutboundMessageThreadAsync(
         Guid communicationId, SendCommunicationRequest request, string? acsThreadId, string correlationId, CancellationToken ct,
-        CommunicationDirection direction = CommunicationDirection.Outgoing, bool requireOpenDefaultThread = false)
+        CommunicationDirection direction = CommunicationDirection.Outgoing, bool requireOpenDefaultThread = false,
+        List<Access.DirectOwnerJoin>? deferOwner = null)
     {
         if (request.ThreadId.HasValue)
         {
-            return await AssignExplicitThreadAsync(communicationId, request.ThreadId.Value, correlationId, ct);
+            return await AssignExplicitThreadAsync(communicationId, request.ThreadId.Value, correlationId, ct, deferOwner: deferOwner);
         }
 
         if (_threadResolver is null)
@@ -1576,10 +2099,10 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
             // app-only identity, so a Direct-thread message is invisible to BOTH participants under the
             // impersonated read (task 050) unless explicitly shared. Best-effort inside GrantMessageAccessAsync
             // itself (failures are logged and swallowed). #1629: the audience is the one the join fixed.
-            if (assignment is not null && _directThreadAccess is not null)
-            {
-                await _directThreadAccess.GrantMessageAccessAsync(communicationId, assignment, ct);
-            }
+            // fm 054 piece 3a: the owner step grants first, then assigns a Direct message filed under nothing to the Direct team
+            // (for a Message send, after its content rows: deferOwner).
+            if (assignment is not null)
+                await GrantThenOwnDirectAsync(communicationId, assignment, ct, deferOwner);
 
             return assignment?.ThreadId;
         }
@@ -1600,9 +2123,17 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
     /// R1-vs-R2 scope note). Chains the SAME task-043 Direct-thread message-access grant the find-or-create
     /// path uses, so a message stamped this way is equally visible under the impersonated read (task 050).
     /// Best-effort / non-fatal (NFR-02): a stamp failure MUST NOT fail the already-sent + persisted message.
+    /// <para>Task 054a piece 2b: the outbound Direct pair routing files through here too. <paramref name="filing"/> names the path in
+    /// the log; <paramref name="expected"/> is the pair it routed to. The join then files only into a strict Direct thread of
+    /// exactly that pair, as its own read shows; otherwise it writes and grants nothing and
+    /// <see cref="Access.DirectPairFilingRefusedException"/> propagates to the caller, which files the message by today's path.
+    /// Every other fault is caught here as before. A respond passes neither.</para>
+    /// <para><paramref name="deferOwner"/>: see <see cref="GrantThenOwnDirectAsync"/>.</para>
     /// </summary>
     private async Task<Guid?> AssignExplicitThreadAsync(
-        Guid communicationId, Guid threadId, string correlationId, CancellationToken ct)
+        Guid communicationId, Guid threadId, string correlationId, CancellationToken ct,
+        string filing = "respond-into-thread", Access.ExpectedDirectPair? expected = null,
+        List<Access.DirectOwnerJoin>? deferOwner = null)
     {
         try
         {
@@ -1621,22 +2152,22 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
                 threadId,
                 (alongside, token) => Access.DirectMessageRecipient.WriteThreadFilingAsync(
                     _genericEntityService, _logger, communicationId, threadId, alongside, token),
-                ct);
+                ct,
+                expected);
 
             _logger.LogInformation(
-                "Stamped explicit thread target {ThreadId} (respond-into-thread) | CommunicationId: {CommunicationId}, CorrelationId: {CorrelationId}",
-                threadId, communicationId, correlationId);
+                "Stamped explicit thread target {ThreadId} ({Filing}) | CommunicationId: {CommunicationId}, CorrelationId: {CorrelationId}",
+                threadId, filing, communicationId, correlationId);
 
             // task 043 CRITICAL RISK fix applies here too — grant this ONE message to the target thread's audience as the
             // stamp read it (#1629: Direct two-party list, the anchor record's grantees, or nobody; never re-read).
-            if (_directThreadAccess is not null)
-            {
-                await _directThreadAccess.GrantMessageAccessAsync(communicationId, assignment, ct);
-            }
+            // fm 054 piece 3a: through the owner step (grant first, then the Direct team for a Direct message filed under nothing;
+            // for a Message send, after its content rows: deferOwner).
+            await GrantThenOwnDirectAsync(communicationId, assignment, ct, deferOwner);
 
             return threadId;
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not Access.DirectPairFilingRefusedException)
         {
             _logger.LogWarning(
                 ex,
@@ -2338,6 +2869,10 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
         // Resolve user object ID for sprk_sentby (Azure AD oid claim)
         var userObjectId = CallerResolution.ResolveObjectId(httpContext.User);
 
+        // Step 2b (issue #2033, NFR-01): the caller sends as themselves, so their Dataverse user must be ENABLED. Checked
+        // before anything is sent or written; a disabled user (still active in Entra) is refused, and a failed read refuses.
+        var senderSystemUserId = await RequireEnabledSenderAsync(userObjectId, correlationId, ct);
+
         _logger.LogInformation(
             "Sending as user (OBO) | CorrelationId: {CorrelationId}, UserEmail: {UserEmail}",
             correlationId,
@@ -2346,7 +2881,7 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
         // Step 2c (task 146 r1, verifier item 10): the record — its filing and OWNER — is prepared BEFORE the send: a
         // refusal is a 409 and nothing is sent or created; a fault is the request's 5xx.
         var preparedRecord = await BuildDataverseRecordForUserAsync(
-            request, userEmail, userObjectId, correlationId, ct, Sprk.Bff.Api.Services.Dataverse.RecordRequester.OfObjectId(userObjectId));
+            request, userEmail, senderSystemUserId, correlationId, ct, Sprk.Bff.Api.Services.Dataverse.RecordRequester.OfObjectId(userObjectId));
 
         // Step 3+4: Send via the email channel seam in user (OBO) mode — dispatch by CommunicationType.
         // The sender resolves the OBO Graph client and sends as /me; provider failures surface as
@@ -2610,13 +3145,14 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
 
     /// <summary>
     /// Builds — BEFORE the send — the Dataverse sprk_communication record for a user-mode send, with its filing and
-    /// owner decided (task 146 r1). Sets sprk_from to user's email and sprk_sentby to user's Azure AD object ID.
+    /// owner decided (task 146 r1). Sets sprk_from to user's email and sprk_sentby to the caller's enabled systemuser
+    /// (<see cref="RequireEnabledSenderAsync"/>, issue #2033).
     /// </summary>
     /// <exception cref="SdapProblemException">409 owner refusal (nothing sent or written).</exception>
     private async Task<DataverseEntity> BuildDataverseRecordForUserAsync(
         SendCommunicationRequest request,
         string userEmail,
-        string? userObjectId,
+        Guid senderSystemUserId,
         string correlationId,
         CancellationToken ct,
         Sprk.Bff.Api.Services.Dataverse.RecordRequester? requestedBy = null)
@@ -2638,11 +3174,10 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
             ["sprk_isinternalonly"] = RequestedInternalOnly(request),
             ["sprk_graphmessageid"] = correlationId,
             ["sprk_sentat"] = DateTimeOffset.UtcNow.DateTime,
-            ["sprk_correlationid"] = correlationId
+            ["sprk_correlationid"] = correlationId,
+            // The sender read before the send (issue #2033) resolved the caller's enabled systemuser; it is not read twice.
+            ["sprk_sentby"] = new EntityReference("systemuser", senderSystemUserId)
         };
-
-        // Resolve Azure AD oid → Dataverse systemuserid for sprk_sentby lookup
-        await StampSentByFromObjectIdAsync(communication, userObjectId, ct);
 
         // Only set CC/BCC if provided
         if (request.Cc is { Length: > 0 })
@@ -2959,6 +3494,8 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
             // otherwise carry no matter stamp and stay invisible to everyone whose access comes from
             // that matter.
             await StampCoreAncestorOrThrowAsync(communication, primary.EntityType, primary.EntityId, correlationId, ct);
+
+            MarkFiledBySender(communication);
         }
         else
         {
@@ -2979,9 +3516,23 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
 
         communication["sprk_regardingrecordid"] = TruncateTo(primary.EntityId.ToString(), 100);
 
-        if (primary.EntityUrl is not null)
-            communication["sprk_regardingrecordurl"] = TruncateTo(primary.EntityUrl, 200);
+        // Task 045f: the url is the one of the association's own record, never the text the request carried; an association
+        // of a table the map does not know names no record this row can be filed under, so it carries no url.
+        if (primary.EntityUrl is not null && primary.EntityType is { } urlTable && RegardingLookupMap.ContainsKey(urlTable))
+            communication["sprk_regardingrecordurl"] = Dataverse.InvoiceFamilyCoreRecordGuard.CanonicalRecordUrl(urlTable, primary.EntityId);
     }
+
+    /// <summary>
+    /// Marks an outgoing communication's regarding as settled (<see cref="Engine.AssociationStatusCodes.Resolved"/>) when the
+    /// send itself filed it: an explicit association the sender chose, or the record whose thread the message was posted
+    /// into. The association engine never evaluates an outgoing row, so without this the status stays empty and the email
+    /// page's "Related to" panel offers the row for review ("No confident match") although its regarding lookup is set.
+    /// A reply's inherited regarding is marked only when the parent's was settled (<see cref="CopyRegardingFromSourceAsync"/>).
+    /// An association whose type maps to no regarding lookup files nothing, so it is not marked. A post into a record's
+    /// thread is marked whoever sends it (an external contact's post included): the thread's record is the filing.
+    /// </summary>
+    private static void MarkFiledBySender(DataverseEntity communication) =>
+        communication["sprk_associationstatus"] = new OptionSetValue(Engine.AssociationStatusCodes.Resolved);
 
     /// <summary>
     /// The FR-26 core-ancestor stamp for a communication whose typed regarding lookup is already bound (task 052), shared
@@ -3040,6 +3591,7 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
             {
                 "sprk_regardingrecordid", "sprk_regardingrecordtype", "sprk_regardingrecordname",
                 "sprk_regardingrecordurl", "sprk_regardingrecordnumber", "sprk_associationcount", "sprk_isinternalonly",
+                "sprk_associationstatus",
             };
             columns.AddRange(Engine.RegardingFieldMap.AllRegardingFields);
 
@@ -3072,7 +3624,7 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
                     source.GetAttributeValue<string>("sprk_regardingrecordid")))
             {
                 CopyStringIfPresent(source, communication, "sprk_regardingrecordname");
-                CopyStringIfPresent(source, communication, "sprk_regardingrecordurl");
+                CopyRecordUrlOfTheCopiedRecord(source, communication);
                 CopyStringIfPresent(source, communication, "sprk_regardingrecordnumber");
 
                 if (source.GetAttributeValue<EntityReference>("sprk_regardingrecordtype") is { Id: var typeId } && typeId != Guid.Empty
@@ -3085,6 +3637,16 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
             var count = source.GetAttributeValue<int?>("sprk_associationcount");
             if (count is > 0 && !communication.Attributes.ContainsKey("sprk_associationcount"))
                 communication["sprk_associationcount"] = count.Value;
+
+            // An inherited regarding is settled only when the parent's was: a reply to an email still awaiting review is not
+            // settled by replying, and it is not added to the review queue either (CommunicationQueueFeedService lists every
+            // non-empty, non-Resolved status), so any other parent status leaves the reply's empty, as before. An explicit
+            // association mapped afterwards marks the row settled regardless (MarkFiledBySender).
+            if (copied > 0
+                && source.GetAttributeValue<OptionSetValue>("sprk_associationstatus")?.Value == Engine.AssociationStatusCodes.Resolved)
+            {
+                MarkFiledBySender(communication);
+            }
 
             _logger.LogInformation(
                 "Inherited {Count} regarding lookup(s) from source communication {SourceId} onto new draft | CorrelationId: {CorrelationId}",
@@ -3126,6 +3688,27 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
         communication.Attributes.Remove("sprk_regardingrecordnumber");
         communication.Attributes.Remove("sprk_regardingrecordname");
         communication.Attributes.Remove("sprk_regardingrecordurl");
+    }
+
+    /// <summary>
+    /// Task 045f: a reply's copy of its source's record url, as the url of the record the copied id names — never the source's
+    /// stored text, which can describe another record. The table is the copied typed regarding lookup that names that id;
+    /// with none, the url's own table when its id is that id. A url naming another record, or none, is not copied. Additive:
+    /// a url the row already carries is kept.
+    /// </summary>
+    private static void CopyRecordUrlOfTheCopiedRecord(DataverseEntity source, DataverseEntity target)
+    {
+        if (target.Attributes.ContainsKey("sprk_regardingrecordurl")
+            || !Guid.TryParse(target.GetAttributeValue<string>("sprk_regardingrecordid"), out var pairId))
+        {
+            return;
+        }
+
+        var table = Engine.RegardingFieldMap.All
+            .Select(r => target.GetAttributeValue<EntityReference>(r.RegardingField))
+            .FirstOrDefault(r => r is not null && r.Id == pairId && !string.IsNullOrWhiteSpace(r.LogicalName))?.LogicalName;
+        if (Dataverse.RegardingPairWrite.TryAdmitRecordUrl(source.GetAttributeValue<string>("sprk_regardingrecordurl"), table, pairId, out var canonical))
+            target["sprk_regardingrecordurl"] = canonical;
     }
 
     /// <summary>Copies a non-empty string attribute from <paramref name="source"/> to <paramref name="target"/>

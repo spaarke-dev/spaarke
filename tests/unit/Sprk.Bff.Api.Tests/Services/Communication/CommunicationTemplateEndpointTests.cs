@@ -66,6 +66,7 @@ public class CommunicationTemplateEndpointTests
             .Setup(s => s.FetchAndRenderAsync(
                 templateId,
                 It.IsAny<Dictionary<string, object?>>(),
+                It.IsAny<string?>(),
                 It.IsAny<string>(),
                 It.IsAny<string>(),
                 It.IsAny<CancellationToken>()))
@@ -90,6 +91,7 @@ public class CommunicationTemplateEndpointTests
             .Setup(s => s.FetchAndRenderAsync(
                 It.IsAny<Guid>(),
                 It.IsAny<Dictionary<string, object?>>(),
+                It.IsAny<string?>(),
                 It.IsAny<string>(),
                 It.IsAny<string>(),
                 It.IsAny<CancellationToken>()))
@@ -113,6 +115,7 @@ public class CommunicationTemplateEndpointTests
             .Setup(s => s.FetchAndRenderAsync(
                 It.IsAny<Guid>(),
                 It.IsAny<Dictionary<string, object?>>(),
+                It.IsAny<string?>(),
                 It.IsAny<string>(),
                 It.IsAny<string>(),
                 It.IsAny<CancellationToken>()))
@@ -136,6 +139,7 @@ public class CommunicationTemplateEndpointTests
             .Setup(s => s.FetchAndRenderAsync(
                 It.IsAny<Guid>(),
                 It.IsAny<Dictionary<string, object?>>(),
+                It.IsAny<string?>(),
                 It.IsAny<string>(),
                 It.IsAny<string>(),
                 It.IsAny<CancellationToken>()))
@@ -156,15 +160,17 @@ public class CommunicationTemplateEndpointTests
         // Arrange
         var templateId = Guid.NewGuid();
         Dictionary<string, object?>? capturedVariables = null;
+        string? capturedType = "unset";
         _emailTemplateServiceMock
             .Setup(s => s.FetchAndRenderAsync(
                 It.IsAny<Guid>(),
                 It.IsAny<Dictionary<string, object?>>(),
+                It.IsAny<string?>(),
                 It.IsAny<string>(),
                 It.IsAny<string>(),
                 It.IsAny<CancellationToken>()))
-            .Callback<Guid, Dictionary<string, object?>, string, string, CancellationToken>(
-                (_, vars, _, _, _) => capturedVariables = vars)
+            .Callback<Guid, Dictionary<string, object?>, string?, string, string, CancellationToken>(
+                (_, vars, type, _, _, _) => { capturedVariables = vars; capturedType = type; })
             .ReturnsAsync(EmailTemplateResult.Ok("s", "b", isHtml: true));
 
         // Act — no RegardingEntityType / RegardingRecordId
@@ -174,6 +180,7 @@ public class CommunicationTemplateEndpointTests
         result.Should().BeOfType<Ok<CommunicationTemplateRenderResponse>>();
         capturedVariables.Should().NotBeNull();
         capturedVariables!.Should().BeEmpty("no regarding record was supplied");
+        capturedType.Should().BeNull("with no regarding record no placeholder may be filled");
     }
 
     [Fact]
@@ -199,15 +206,17 @@ public class CommunicationTemplateEndpointTests
                 """));
 
         Dictionary<string, object?>? capturedVariables = null;
+        string? capturedType = "unset";
         _emailTemplateServiceMock
             .Setup(s => s.FetchAndRenderAsync(
                 It.IsAny<Guid>(),
                 It.IsAny<Dictionary<string, object?>>(),
+                It.IsAny<string?>(),
                 It.IsAny<string>(),
                 It.IsAny<string>(),
                 It.IsAny<CancellationToken>()))
-            .Callback<Guid, Dictionary<string, object?>, string, string, CancellationToken>(
-                (_, vars, _, _, _) => capturedVariables = vars)
+            .Callback<Guid, Dictionary<string, object?>, string?, string, string, CancellationToken>(
+                (_, vars, type, _, _, _) => { capturedVariables = vars; capturedType = type; })
             .ReturnsAsync(EmailTemplateResult.Ok("s", "b", isHtml: true));
 
         // Act — a mixed-case type is read as its logical name
@@ -223,8 +232,9 @@ public class CommunicationTemplateEndpointTests
         capturedSet.Should().Be("sprk_matters");
         capturedQuery.Should().Be($"$filter=sprk_matterid eq {recordId}&$top=1");
         capturedCaller.Should().Be(CallerSystemUserId);
+        capturedType.Should().Be("sprk_matter", "the renderer is told the regarding type so it fills only that entity's placeholders");
         capturedVariables!["sprk_mattername"].Should().Be("Acme v. Widgets");
-        capturedVariables["sprk_status"].Should().Be(2, "an option set renders its integer, as the SDK value did");
+        capturedVariables["sprk_status"].Should().Be("Open", "an option set merges as the caller's formatted label, not its integer");
         capturedVariables.Keys.Should().NotContain(k => k.Contains('@'), "annotations are not merge variables");
     }
 
@@ -279,31 +289,30 @@ public class CommunicationTemplateEndpointTests
         ex.Which.Code.Should().Be("VALIDATION_ERROR");
     }
 
-    // ── Template merge parity (task 161, constraint "template merge parity") ────────────────────────────
+    // ── What the recipient sees (task 195 fix round) ────────────────────────────────────────────────────
     //
-    // CHARACTERIZATION: the rendered subject and body for one field code of each value kind the regarding
-    // record can carry. The expected strings were pinned against the PRE-161 handler — regarding read through
-    // the app-only IGenericEntityService, SDK-typed values: Money(25000.0000000000m), int 5, OptionSetValue(1),
-    // EntityReference { Name = "Ralph Schroeder" }, DateTime(2026-06-08 02:59:06, Utc), bool false — and the test
-    // passed there BEFORE the handler changed (task-161 note §4). The SDK shapes are the live ones (spaarkedev1
-    // read-only probe, 2026-10-03, note §2): Money/Decimal carry 10 decimal places, a DateTime is UTC and Handlebars
-    // renders it round-trip ("O"), a bool renders "True"/"False", an option set its integer, a lookup its name.
-    //
-    // AFTER 161 the same record arrives as the caller's impersonated OData row (the shapes below are the live JSON
-    // shapes for those columns), and the SAME strings must come out.
-    internal const string ParitySubjectTemplate = "Matter {{sprk_mattername}} ({{sprk_invoicecount}} invoices)";
-    internal const string ParityBodyTemplate =
-        "<p>Status {{statuscode}}; budget {{sprk_totalbudget}}; owner {{ownerid}}; opened {{createdon}}; secure {{sprk_issecure}}</p>";
-    internal const string ExpectedParitySubject = "Matter Acme v. Widgets (5 invoices)";
-    internal const string ExpectedParityBody =
-        "<p>Status 1; budget 25000.0000000000; owner Ralph Schroeder; opened 2026-06-08T02:59:06.0000000Z; secure False</p>";
+    // The merge values are the CALLER's own formatted text: the impersonated read annotates every typed column with
+    // @OData.Community.Display.V1.FormattedValue in the caller's language, currency and time zone, and the route hands
+    // that string to the renderer verbatim. The shapes below are the live JSON shapes for those columns (statuscode
+    // option set, money, createdon in UTC with a local-zone annotation, a two-option column with a custom label).
+    // The render is the REAL EmailTemplateService over a Dataverse-shaped safehtml row; the earlier test ran the
+    // variables through RenderFromContent (Handlebars), a path no Dataverse template takes, and pinned strings no
+    // user sees.
+    private const string MergeSubjectSafeHtml =
+        "Matter <span class=\"dataslug\" data-value=\"{!sprk_matter:sprk_mattername;}\">x</span>"
+        + " (<span class=\"dataslug\" data-value=\"{!sprk_matter:sprk_invoicecount;}\">x</span> invoices)";
+
+    private const string MergeBodySafeHtml =
+        "<p>Status <span data-value=\"{!sprk_matter:statuscode;}\">x</span>;"
+        + " budget <span data-value=\"{!sprk_matter:sprk_totalbudget;}\">x</span>;"
+        + " owner <span data-value=\"{!sprk_matter:ownerid/@name;}\">x</span>;"
+        + " opened <span data-value=\"{!sprk_matter:createdon;}\">x</span>;"
+        + " secure <span data-value=\"{!sprk_matter:sprk_issecure;}\">x</span></p>";
 
     [Fact]
-    public async Task RenderTemplate_MergeParity_EachValueKindRendersAsBefore()
+    public async Task RenderTemplate_EachValueKindRendersAsTheCallersFormattedText()
     {
-        var templateId = Guid.NewGuid();
         var recordId = Guid.NewGuid();
-
         _queryMock
             .Setup(q => q.QueryAsync("sprk_matters", It.IsAny<string?>(), CallerSystemUserId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(Rows($$"""
@@ -315,73 +324,101 @@ public class CommunicationTemplateEndpointTests
                   "sprk_invoicecount@OData.Community.Display.V1.FormattedValue": "5",
                   "statuscode": 1,
                   "statuscode@OData.Community.Display.V1.FormattedValue": "Draft",
-                  "sprk_totalbudget": 25000.0000000000,
-                  "sprk_totalbudget@OData.Community.Display.V1.FormattedValue": "$25,000.00",
+                  "sprk_totalbudget": 25000.5000000000,
+                  "sprk_totalbudget@OData.Community.Display.V1.FormattedValue": "$25,000.50",
                   "_ownerid_value": "1d02f31c-1872-f011-b4cb-7c1e52671ad0",
                   "_ownerid_value@OData.Community.Display.V1.FormattedValue": "Ralph Schroeder",
                   "createdon": "2026-06-08T02:59:06Z",
                   "createdon@OData.Community.Display.V1.FormattedValue": "6/7/2026 10:59 PM",
                   "sprk_issecure": false,
-                  "sprk_issecure@OData.Community.Display.V1.FormattedValue": "No"
+                  "sprk_issecure@OData.Community.Display.V1.FormattedValue": "Not Secure"
                 }
                 """));
-        UseRealRendering();
 
-        var result = await InvokeAsync(new CommunicationTemplateRenderRequest
-        {
-            TemplateId = templateId,
-            RegardingEntityType = "sprk_matter",
-            RegardingRecordId = recordId,
-        });
+        var service = CreateRealRenderer(MergeSubjectSafeHtml, MergeBodySafeHtml);
+
+        var result = await CommunicationTemplateEndpoints.RenderTemplateAsync(
+            new CommunicationTemplateRenderRequest
+            {
+                TemplateId = Guid.NewGuid(),
+                RegardingEntityType = "sprk_matter",
+                RegardingRecordId = recordId,
+            },
+            service,
+            _queryMock.Object,
+            _callerResolverMock.Object,
+            new FakeTokenCredential(),
+            _dataverseOptions,
+            _loggerMock.Object,
+            new DefaultHttpContext(),
+            CancellationToken.None);
 
         var ok = result.Should().BeOfType<Ok<CommunicationTemplateRenderResponse>>().Subject;
-        ok.Value!.Subject.Should().Be(ExpectedParitySubject);
-        ok.Value.Body.Should().Be(ExpectedParityBody);
+        ok.Value!.Subject.Should().Be("Matter Acme v. Widgets (5 invoices)");
+        ok.Value.Body.Should().Be(
+            "<p>Status Draft; budget $25,000.50; owner Ralph Schroeder; opened 6/7/2026 10:59 PM; secure Not Secure</p>");
     }
 
     [Fact]
-    public void ToMergeVariables_DateOnlyAndPlainStrings_KeepTheirSdkShapes()
+    public void ToMergeVariables_AnnotatedValuesAreTheFormattedText_UnannotatedKeepTheirRawValues()
     {
-        // A date-only value (no offset) stays an UNSPECIFIED-kind DateTime, as the SDK returns it; a plain string that
-        // merely looks like a date (no FormattedValue annotation — Dataverse annotates only typed columns) stays text.
         var variables = CommunicationTemplateEndpoints.ToMergeVariables(Rows("""
             {
               "sprk_duedate": "2026-03-30",
               "sprk_duedate@OData.Community.Display.V1.FormattedValue": "3/30/2026",
+              "statuscode": 2,
+              "statuscode@OData.Community.Display.V1.FormattedValue": "Open",
+              "sprk_budget": 25000.5000000000,
+              "sprk_budget@OData.Community.Display.V1.FormattedValue": "$25,000.50",
               "sprk_reference": "2026-03-30",
+              "sprk_count": 7,
+              "sprk_flag": true,
               "_sprk_client_value": "11111111-2222-3333-4444-555555555555"
             }
             """)[0]);
 
-        variables["sprk_duedate"].Should().Be(new DateTime(2026, 3, 30, 0, 0, 0, DateTimeKind.Unspecified));
-        ((DateTime)variables["sprk_duedate"]!).Kind.Should().Be(DateTimeKind.Unspecified);
-        variables["sprk_reference"].Should().Be("2026-03-30");
+        variables["sprk_duedate"].Should().Be("3/30/2026");
+        variables["statuscode"].Should().Be("Open");
+        variables["sprk_budget"].Should().Be("$25,000.50");
+        variables["sprk_reference"].Should().Be("2026-03-30", "a column with no annotation keeps its raw string");
+        variables["sprk_count"].Should().Be(7, "a column with no annotation keeps its raw number");
+        variables["sprk_flag"].Should().Be(true, "a column with no annotation keeps its raw boolean");
         variables["sprk_client"].Should().Be("11111111-2222-3333-4444-555555555555",
-            "a lookup with no name renders its id, as EntityReference.Name ?? Id did");
+            "a lookup with no name renders its id");
     }
 
     /// <summary>
-    /// Renders through the REAL <see cref="Sprk.Bff.Api.Services.Ai.TemplateEngine"/> (Handlebars) so the parity
-    /// test pins the text a user sees, not just the variable dictionary. The template fetch is the only thing
-    /// replaced: the fixture template is already in the engine's <c>{{x}}</c> form, which is what
-    /// EmailTemplateService normalizes a Dataverse <c>{!x}</c> code into.
+    /// The REAL <see cref="EmailTemplateService"/>, fetching a Dataverse-shaped <c>template</c> row (only the HTTP
+    /// exchange is substituted, with a hand-written handler) so the test pins the text a user sees.
     /// </summary>
-    private void UseRealRendering()
+    private static EmailTemplateService CreateRealRenderer(string subjectSafeHtml, string safeHtml)
     {
-        var renderer = new EmailTemplateService(
-            new Sprk.Bff.Api.Services.Ai.TemplateEngine(Mock.Of<ILogger<Sprk.Bff.Api.Services.Ai.TemplateEngine>>()),
-            Mock.Of<IHttpClientFactory>(),
-            Mock.Of<ILogger<EmailTemplateService>>());
+        var row = JsonSerializer.Serialize(new Dictionary<string, object?>
+        {
+            ["templateid"] = Guid.NewGuid(),
+            ["title"] = "Matter summary",
+            ["ispersonal"] = false,
+            ["templatetypecode"] = "sprk_matter",
+            ["subjectsafehtml"] = subjectSafeHtml,
+            ["safehtml"] = safeHtml,
+        });
+        var factory = new Mock<IHttpClientFactory>();
+        factory.Setup(f => f.CreateClient("Dataverse"))
+            .Returns(() => new HttpClient(new StaticJsonHandler(row), disposeHandler: false));
 
-        _emailTemplateServiceMock
-            .Setup(s => s.FetchAndRenderAsync(
-                It.IsAny<Guid>(),
-                It.IsAny<Dictionary<string, object?>>(),
-                It.IsAny<string>(),
-                It.IsAny<string>(),
-                It.IsAny<CancellationToken>()))
-            .ReturnsAsync((Guid _, Dictionary<string, object?> vars, string _, string _, CancellationToken _) =>
-                renderer.RenderFromContent(ParitySubjectTemplate, ParityBodyTemplate, vars));
+        return new EmailTemplateService(
+            Mock.Of<Sprk.Bff.Api.Services.Ai.ITemplateEngine>(),
+            factory.Object,
+            Mock.Of<ILogger<EmailTemplateService>>());
+    }
+
+    private sealed class StaticJsonHandler(string body) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
+            Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.OK)
+            {
+                Content = new StringContent(body, System.Text.Encoding.UTF8, "application/json"),
+            });
     }
 
     private static IReadOnlyList<Dictionary<string, JsonElement>> Rows(string json) =>

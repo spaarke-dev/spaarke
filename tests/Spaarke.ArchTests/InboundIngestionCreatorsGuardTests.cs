@@ -25,7 +25,10 @@ namespace Spaarke.ArchTests;
 /// unfiled create on an <c>OwnershipException</c> table. (4) Attachment rows take their owner from the resolver and from
 /// nothing else. (5) No inbound principal: <c>RequestedBy</c> is never fed by a message field. (6) The client's one document
 /// create stages the parent link and the association on the entity it creates, so a caller that sets them on the create
-/// request has them in the create.</para>
+/// request has them in the create. (7) fm task 054 piece 3: the creators still create with today's owner, and after a join the only
+/// owner change is <c>DirectMessageOwnerStep</c> (the Direct owner rule's one writer): the chat ingestor calls its two join
+/// members once each, in order, names no Assign and does not read the Direct team, and no file but the chat ingestor and the outbound
+/// send calls them.</para>
 /// <para><b>What is not pinned here.</b> How many creates the outbound <c>CommunicationService</c> makes (the census owns
 /// counts there), the satellites the ingestors call after the create (threads, participants, review logs: the census), and the
 /// dedupe on the message id (<see cref="InboundIngestionDedupeGuardTests"/>). Known limit: the rules read source text with line
@@ -48,6 +51,7 @@ public class InboundIngestionCreatorsGuardTests
     /// <summary>The attachment filter: in ingestion code, and a creator of nothing (C6).</summary>
     internal const string EmailAttachmentFilterFile = Email + "EmailAttachmentProcessor.cs";
     internal const string OutboundFile = Communication + "CommunicationService.cs";
+    internal const string DirectOwnerStepFile = Communication + "Access/DirectMessageOwnerStep.cs";
     internal const string CreationServiceFile = "src/server/api/Sprk.Bff.Api/Services/RecordCreation/RecordCreationService.cs";
     internal const string DataverseClientFile = "src/server/shared/Spaarke.Dataverse/DataverseServiceClientImpl.cs";
 
@@ -197,6 +201,91 @@ public class InboundIngestionCreatorsGuardTests
                 + "unfiled row gets its owner and stamp when a record thread claims it.");
         }
 
+        return violations;
+    }
+
+    /// <summary>The members of <c>DirectMessageOwnerStep</c> the chat ingestor may call (fm task 054 piece 3a).</summary>
+    private static readonly IReadOnlySet<string> DirectOwnerStepJoinMembers = new HashSet<string>(StringComparer.Ordinal)
+    {
+        "GrantAtJoinAsync", "OwnDirectAfterContentAsync",
+    };
+
+    private static readonly Regex DirectOwnerStepMemberCall = new(@"_directMessageOwnerStep\s*\.\s*(\w+)", RegexOptions.Compiled);
+
+    /// <summary>A call of the Direct owner step's join members through any receiver (the step file declares them, never calls them with a dot).</summary>
+    private static readonly Regex DirectOwnerStepJoinCall = new(
+        @"\.\s*(?:GrantAtJoinAsync|OwnDirectAfterContentAsync|GrantThenOwnDirectAsync)\s*\(", RegexOptions.Compiled);
+
+    /// <summary>What an ingestor must not name to change an owner or to read the Direct team itself: the step does both.</summary>
+    private static readonly (Regex Pattern, string Why)[] DirectOwnerIngestorForbidden =
+    [
+        (new Regex(@"\.\s*AssignAsync\b|\bAssignRequest\b", RegexOptions.Compiled), "an Assign (an owner change outside the step)"),
+        (new Regex(@"\bDirectMessageOwnerTeam\b", RegexOptions.Compiled), "the Direct message owner team lookup (the step reads it)"),
+        (new Regex(@"\bWriteDirectTeamOwnerAsync\b", RegexOptions.Compiled), "the step's owner write"),
+    ];
+
+    /// <summary>
+    /// Piece 3a, C1: the chat ingestor creates the row with today's owner (the rules above), and after the join the ONLY owner change is
+    /// <c>DirectMessageOwnerStep</c>: the grant at the join, then the owner part once the participant rows and the enrichment exist,
+    /// each called once, in that order, after the thread resolver's join; no other member of the step, no Assign and no read of the
+    /// Direct team in this file.
+    /// </summary>
+    internal static IReadOnlyList<string> DirectOwnerAfterJoinViolations(string code)
+    {
+        var violations = new List<string>(InOrder("MessagingIngestor", code,
+            "ResolveAndAssignAsync(", "_directMessageOwnerStep.GrantAtJoinAsync(", "_directMessageOwnerStep.OwnDirectAfterContentAsync("));
+
+        foreach (var member in DirectOwnerStepJoinMembers.Order(StringComparer.Ordinal))
+        {
+            var calls = Regex.Matches(code, @"_directMessageOwnerStep\s*\.\s*" + member + @"\s*\(").Count;
+            if (calls != 1)
+                violations.Add($"MessagingIngestor calls {member} {calls} times; the Direct owner step runs once at the join and once after the content rows exist.");
+        }
+
+        foreach (Match call in DirectOwnerStepMemberCall.Matches(code))
+        {
+            if (!DirectOwnerStepJoinMembers.Contains(call.Groups[1].Value))
+            {
+                violations.Add($"MessagingIngestor calls the Direct owner step's {call.Groups[1].Value}; after the join it may call only "
+                    + string.Join(" and ", DirectOwnerStepJoinMembers.Order(StringComparer.Ordinal)) + ".");
+            }
+        }
+
+        foreach (var (pattern, why) in DirectOwnerIngestorForbidden)
+        {
+            if (pattern.IsMatch(code))
+            {
+                violations.Add($"MessagingIngestor names {why}. After the join the only owner change is DirectMessageOwnerStep "
+                    + "(fm task 054 piece 3a); the ingestor creates the row with today's owner and calls the step.");
+            }
+        }
+
+        return violations;
+    }
+
+    /// <summary>The files (repo-relative) that may call the Direct owner step's join members: the chat ingestor and the outbound send.</summary>
+    internal static readonly IReadOnlySet<string> DirectOwnerStepCallers = new HashSet<string>(StringComparer.Ordinal)
+    {
+        MessagingIngestorFile, OutboundFile,
+    };
+
+    /// <summary>
+    /// The Direct owner step is called from exactly the inventory's chat ingestor and the outbound send. The email ingestors (C2, C5) and
+    /// the attachment materializer (C7) create their rows with today's owner and move none of them to the Direct team.
+    /// </summary>
+    internal static IReadOnlyList<string> DirectOwnerStepCallerViolations(IEnumerable<(string Path, string Code)> files)
+    {
+        var found = files.Where(f => f.Path != DirectOwnerStepFile && DirectOwnerStepJoinCall.IsMatch(f.Code))
+            .Select(f => f.Path).ToHashSet(StringComparer.Ordinal);
+        var violations = new List<string>();
+        foreach (var extra in found.Except(DirectOwnerStepCallers, StringComparer.Ordinal).Order(StringComparer.Ordinal))
+        {
+            violations.Add($"{extra} calls the Direct owner step. Only the chat ingestor and the outbound send move a message to the Direct team "
+                + "after a join; another caller is a new owner path: list it with its reason in the census and DirectMessageOwnerStepGuardTests.");
+        }
+
+        foreach (var gone in DirectOwnerStepCallers.Except(found, StringComparer.Ordinal).Order(StringComparer.Ordinal))
+            violations.Add($"{gone} no longer calls the Direct owner step; remove it from the inventory.");
         return violations;
     }
 
@@ -370,7 +459,11 @@ public class InboundIngestionCreatorsGuardTests
 
     private static IReadOnlyList<string> RulesFor(string file, string code) => file switch
     {
-        MessagingIngestorFile => [.. CreateCountViolations(file, code), .. AlwaysUnfiledViolations(code), .. PrincipalViolations(file, code)],
+        MessagingIngestorFile =>
+        [
+            .. CreateCountViolations(file, code), .. AlwaysUnfiledViolations(code), .. DirectOwnerAfterJoinViolations(code),
+            .. PrincipalViolations(file, code),
+        ],
         IncomingProcessorFile =>
         [
             .. CreateCountViolations(file, code), .. EmailIngestorOwnerViolations("IncomingCommunicationProcessor", code),
@@ -531,6 +624,12 @@ public class InboundIngestionCreatorsGuardTests
         { MessagingIngestorFile, "if (message.Cc.Count > 0)", "var r = await ResolveOwnerAsync(null!, ct); if (message.Cc.Count > 0)", "owner resolution" },
         { MessagingIngestorFile, "return await _genericEntityService.CreateAsync(communication, ct);", "var other = await _genericEntityService.CreateAsync(communication, ct); return await _genericEntityService.CreateAsync(communication, ct);", "holds 2 generic creates" },
         { MessagingIngestorFile, "var assignment = await _threadResolver.ResolveAndAssignAsync(", "var assignment = await _threadResolver.Other(", "ResolveAndAssignAsync" },
+        // C1, fm 054 piece 3a: after the join the only owner change is the Direct owner step, called once at the join and once after the content.
+        { MessagingIngestorFile, "await _directMessageOwnerStep.OwnDirectAfterContentAsync(directJoin, cancellationToken);", "await _genericEntityService.AssignAsync(\"sprk_communication\", communicationId, null!, cancellationToken);", "names an Assign" },
+        { MessagingIngestorFile, "await _directMessageOwnerStep.OwnDirectAfterContentAsync(directJoin, cancellationToken);", "await _genericEntityService.AssignAsync(\"sprk_communication\", communicationId, null!, cancellationToken);", "_directMessageOwnerStep.OwnDirectAfterContentAsync(" },
+        { MessagingIngestorFile, "await _directMessageOwnerStep.OwnDirectAfterContentAsync(directJoin, cancellationToken);", "await _directMessageOwnerStep.WriteDirectTeamOwnerAsync(directJoin, cancellationToken);", "calls the Direct owner step's WriteDirectTeamOwnerAsync" },
+        { MessagingIngestorFile, "directJoin = await _directMessageOwnerStep.GrantAtJoinAsync(communicationId, assignment, cancellationToken);", "directJoin = await _directMessageOwnerStep.GrantAtJoinAsync(communicationId, assignment, cancellationToken); directJoin = await _directMessageOwnerStep.GrantAtJoinAsync(communicationId, assignment, cancellationToken);", "calls GrantAtJoinAsync 2 times" },
+        { MessagingIngestorFile, "if (message.Cc.Count > 0)", "var team = typeof(DirectMessageOwnerTeam); if (message.Cc.Count > 0)", "Direct message owner team lookup" },
         // C2: the mailbox path asks the owner classes in order and writes only the resolver's team.
         { IncomingProcessorFile, "_ownership.ResolveOwnerAsync(ownershipContext, ct)", "_ownership.Guess(ownershipContext, ct)", "ResolveOwnerAsync" },
         { IncomingProcessorFile, "_associationResolver.OwnershipContextForNewRecordAsync(decision, ct)", "_associationResolver.Other(decision, ct)", "OwnershipContextForNewRecordAsync" },
@@ -576,6 +675,8 @@ public class InboundIngestionCreatorsGuardTests
         // A comment that names every forbidden token is not code.
         { MessagingIngestorFile, "public sealed class MessagingIngestor", "// \"ownerid\" ResolveOwnerAsync ReparentAsync sprk_regardingmatter EntityReference RecordOwnerResolution\npublic sealed class MessagingIngestor" },
         { IncomingProcessorFile, "public sealed class IncomingCommunicationProcessor", "// ResolveOwnerAsync(x) \"ownerid\" RequestedBy\npublic sealed class IncomingCommunicationProcessor" },
+        // The Direct owner step's shapes named in a comment are not calls (fm 054 piece 3a).
+        { MessagingIngestorFile, "public sealed class MessagingIngestor", "// x.AssignAsync(a) new AssignRequest DirectMessageOwnerTeam WriteDirectTeamOwnerAsync _directMessageOwnerStep.Other(\npublic sealed class MessagingIngestor" },
         { UploadCaptureFile, "public sealed class EmailUploadCaptureService", "// \"ownerid\" = ResolveOwnerAsync( owner RequestedBy\npublic sealed class EmailUploadCaptureService" },
         { ChatAttachmentFile, "public sealed class MessageAttachmentMaterializer", "// \"ownerid\" RequestedBy\npublic sealed class MessageAttachmentMaterializer" },
         // A whitespace-only change (blank lines before the class) changes nothing the rules read, and does not tie a control to log wording.
@@ -608,5 +709,51 @@ public class InboundIngestionCreatorsGuardTests
 
         Assert.Contains(CreateCountViolations(IncomingProcessorFile, CodeOf(mutated)), v => v.Contains("generic creates", StringComparison.Ordinal));
         Assert.Empty(CreateCountViolations(IncomingProcessorFile, Code(IncomingProcessorFile)));
+    }
+
+    // ── fm 054 piece 3a: the Direct owner step is the only owner change after a join ───────────────────────────────────────
+
+    [Fact]
+    public void TheDirectOwnerStep_IsCalledOnlyByTheChatIngestorAndTheSend()
+    {
+        var violations = DirectOwnerStepCallerViolations(ServerFiles());
+        Assert.True(violations.Count == 0, "The callers of the Direct owner step drifted from the inventory (fm task 054 piece 3a):\n" + string.Join("\n", violations));
+    }
+
+    [Fact]
+    public void DirectOwnerStepCallers_FireOnAnEmailIngestorThatCallsTheStep()
+    {
+        const string from = "communication[\"sprk_cc\"] = string.Join(\"; \", ccRecipients);";
+        var source = Read(IncomingProcessorFile);
+        Assert.True(source.Contains(from, StringComparison.Ordinal), $"control is vacuous: `{from}` is not in {IncomingProcessorFile}");
+        var mutated = source.Replace(from, from + " await _step.OwnDirectAfterContentAsync(join, ct);", StringComparison.Ordinal);
+
+        var files = ServerFiles().Select(f => f.Path == IncomingProcessorFile ? (f.Path, CodeOf(mutated)) : f).ToList();
+
+        var violations = DirectOwnerStepCallerViolations(files);
+        Assert.Single(violations);
+        Assert.Contains(IncomingProcessorFile, violations[0], StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void DirectOwnerStepCallers_FireWhenAnInventoryCallerStopsCalling()
+    {
+        var files = ServerFiles().Select(f => f.Path == MessagingIngestorFile
+            ? (f.Path, f.Code.Replace(".OwnDirectAfterContentAsync(", ".Other(", StringComparison.Ordinal)
+                .Replace(".GrantAtJoinAsync(", ".Other(", StringComparison.Ordinal))
+            : f).ToList();
+
+        Assert.Contains(DirectOwnerStepCallerViolations(files), v => v.Contains(MessagingIngestorFile, StringComparison.Ordinal) && v.Contains("no longer calls", StringComparison.Ordinal));
+    }
+
+    [Theory]
+    [InlineData("// await _step.GrantAtJoinAsync(id, a, ct);")] // a comment (the real scan strips comments first)
+    [InlineData("public async Task<DirectOwnerJoin?> GrantAtJoinAsync(Guid id, ThreadAssignment a, CancellationToken ct) => null;")] // a declaration, not a call
+    [InlineData("await _step.GrantAtJoinAsyncLater(id, a, ct);")] // another member
+    [InlineData("await _step.AfterReparentAsync(id, reparent, ct);")] // the unfile member is not a join member
+    public void DirectOwnerStepCallers_IgnoreWhatIsNotAJoinCall(string line)
+    {
+        var files = ServerFiles().Append(("src/server/Other.cs", CodeOf(line))).ToList();
+        Assert.Empty(DirectOwnerStepCallerViolations(files));
     }
 }

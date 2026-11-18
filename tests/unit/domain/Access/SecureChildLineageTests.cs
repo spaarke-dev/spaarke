@@ -183,14 +183,16 @@ public class SecureChildLineageTests
     /// <summary>
     /// #2084 (owner round 102 item 4): a rule is filed under its matter, a version under its rule (solution XML:
     /// sprk_policy_matter, sprk_policyversion_policy). The rule is a reparentable child of the resolver; the version is a lineage
-    /// child only, because Signals and Decision Records name the version they cite.
+    /// child only, because Signals and Decision Records name the version they cite. ebilling-r1 task 089a (model 5.2): a record rule
+    /// is also filed under its record-scoped rule set.
     /// </summary>
     [Fact]
     public void ARuleIsFiledUnderItsMatter_AndAVersionUnderItsRule()
     {
         var rule = SecureChildLineage.Children["sprk_policy"];
         rule.EntitySet.Should().Be("sprk_policies");
-        rule.Lookups.Should().BeEquivalentTo(new Dictionary<string, string> { ["sprk_matter"] = "sprk_matter" },
+        rule.Lookups.Should().BeEquivalentTo(
+            new Dictionary<string, string> { ["sprk_matter"] = "sprk_matter", ["sprk_ruleset"] = "sprk_ruleset" },
             "sprk_currentversion names the rule's own version and can add no root");
 
         var version = SecureChildLineage.Children["sprk_policyversion"];
@@ -200,6 +202,56 @@ public class SecureChildLineageTests
         RecordOwnershipResolver.IsReparentableChild("sprk_policy").Should().BeTrue();
         RecordOwnershipResolver.IsOwnershipParent("sprk_policyversion").Should().BeFalse(
             "a Signal or Decision Record citing a version is not filed under it");
+    }
+
+    /// <summary>
+    /// ebilling-r1 task 086 (procedure model 5.2/9.1): an invoice Stored File is a leaf child filed under its invoice ONLY. The
+    /// Procedure-version, export and source lookups are not lineage lookups (a Procedure document or an export file is never reached from
+    /// a secure root, and no secure root's walk reaches a Stored File through its source). The invoice is the row's PRIMARY (must fire:
+    /// first in the order the writer and the reconciler ask in); the source document and communication stay in the row's question as
+    /// secure-if-any parents, not citations (uac-r2 194b re-check K: a Secure source still gives the Secure team; pinned by
+    /// StoredFileServiceOwnershipTests). sprk_storedfile is not an ownership parent: nothing is filed under a Stored File.
+    /// </summary>
+    [Fact]
+    public void AnInvoiceStoredFileIsFiledUnderItsInvoiceOnly_TheInvoiceIsItsPrimary()
+    {
+        var file = SecureChildLineage.Children["sprk_storedfile"];
+        file.EntitySet.Should().Be("sprk_storedfiles");
+        file.Lookups.Should().BeEquivalentTo(
+            new Dictionary<string, string> { ["sprk_invoice"] = "sprk_invoice" },
+            "the Procedure-version, export and source lookups do not file a Stored File under a secure root");
+        file.Lookups.Keys.First().Should().Be("sprk_invoice", "uac-r2 194b: declaration order is the primary-parent order");
+
+        RecordOwnershipResolver.OwnershipParentEntities.Should().NotContain("sprk_storedfile");
+        RecordOwnershipResolver.IsReparentableChild("sprk_storedfile").Should().BeFalse();
+
+        var (invoice, document, communication, version, billingExport) = (Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
+        // The source lookups come first in the row, so the order below is the lineage's, not the attributes'.
+        var row = new Microsoft.Xrm.Sdk.Entity("sprk_storedfile", Guid.NewGuid())
+        {
+            ["sprk_sourcedocument"] = new Microsoft.Xrm.Sdk.EntityReference("sprk_document", document),
+            ["sprk_sourcecommunication"] = new Microsoft.Xrm.Sdk.EntityReference("sprk_communication", communication),
+            ["sprk_invoice"] = new Microsoft.Xrm.Sdk.EntityReference("sprk_invoice", invoice),
+        };
+        var ordered = RecordOwnershipContext.OrderedParentsOf(row);
+        ordered.First().Should().Be(new RecordOwnershipParent("sprk_invoice", invoice), "the invoice decides an invoice file's business unit");
+        ordered.Should().BeEquivalentTo(new[]
+        {
+            new RecordOwnershipParent("sprk_invoice", invoice),
+            new RecordOwnershipParent("sprk_document", document),
+            new RecordOwnershipParent("sprk_communication", communication),
+        });
+        RecordOwnershipContext.ForChild(row).Parents.First().Should().Be(new RecordOwnershipParent("sprk_invoice", invoice),
+            "the writer's question has the reconciler's primary");
+        RecordOwnershipResolver.IsCitation("sprk_storedfile", "sprk_invoice").Should().BeFalse();
+        RecordOwnershipResolver.IsCitation("sprk_storedfile", "sprk_sourcedocument").Should().BeFalse("uac-r2 194b re-check K");
+
+        // A Procedure-source or export file names no ownership parent: nothing re-owns it.
+        RecordOwnershipContext.ParentsOf(new Microsoft.Xrm.Sdk.Entity("sprk_storedfile", Guid.NewGuid())
+        {
+            ["sprk_procedureversion"] = new Microsoft.Xrm.Sdk.EntityReference("sprk_procedureversion", version),
+            ["sprk_billingexport"] = new Microsoft.Xrm.Sdk.EntityReference("sprk_billingexport", billingExport),
+        }).Should().BeEmpty();
     }
 
     /// <summary>
@@ -261,6 +313,85 @@ public class SecureChildLineageTests
         {
             ["sprk_policy"] = new Microsoft.Xrm.Sdk.EntityReference("sprk_policy", rule),
         }).Parents.Should().Equal(new RecordOwnershipParent("sprk_policy", rule));
+    }
+
+    /// <summary>
+    /// ebilling-r1 task 089a (procedure model 5.2): a Procedure assignment and a record-scoped rule set are filed under the core
+    /// record they name (live metadata 2026-11-03: sprk_matter, sprk_project, sprk_workassignment on both tables). Both are
+    /// reparentable children of the resolver; a Procedure rule set (sprk_procedure only) has no lineage parent and stays outside.
+    /// </summary>
+    [Theory]
+    [InlineData("sprk_procedureassignment", "sprk_procedureassignments")]
+    [InlineData("sprk_ruleset", "sprk_rulesets")]
+    public void AnAssignmentAndARecordScopedRuleSet_AreFiledUnderTheirCoreRecord(string table, string entitySet)
+    {
+        var row = SecureChildLineage.Children[table];
+
+        row.EntitySet.Should().Be(entitySet);
+        row.Lookups.Should().BeEquivalentTo(new Dictionary<string, string>
+        {
+            ["sprk_matter"] = "sprk_matter",
+            ["sprk_project"] = "sprk_project",
+            ["sprk_workassignment"] = "sprk_workassignment",
+        });
+        RecordOwnershipResolver.IsOwnershipParent(table).Should().BeTrue();
+        RecordOwnershipResolver.IsReparentableChild(table).Should().BeTrue();
+    }
+
+    /// <summary>
+    /// ebilling-r1 task 089a: an assignment CITES the Procedure, the pinned version and the excluded rule it names; it is filed
+    /// only under its core record (must fire: the cited lookups are dropped). A Procedure rule set names no core record, so its
+    /// row has no ownership parent (must not fire: it stays outside the secure family).
+    /// </summary>
+    [Fact]
+    public void AnAssignmentsProcedureVersionAndRule_AreCitations_AndAProcedureRuleSetHasNoParent()
+    {
+        var (matter, procedure, version, policy) = (Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
+        var assignment = new Microsoft.Xrm.Sdk.Entity("sprk_procedureassignment", Guid.NewGuid())
+        {
+            ["sprk_matter"] = new Microsoft.Xrm.Sdk.EntityReference("sprk_matter", matter),
+            ["sprk_procedure"] = new Microsoft.Xrm.Sdk.EntityReference("sprk_procedure", procedure),
+            ["sprk_pinnedversion"] = new Microsoft.Xrm.Sdk.EntityReference("sprk_procedureversion", version),
+            ["sprk_excludedpolicy"] = new Microsoft.Xrm.Sdk.EntityReference("sprk_policy", policy),
+        };
+
+        RecordOwnershipContext.ParentsOf(assignment).Should().Equal(new RecordOwnershipParent("sprk_matter", matter));
+        RecordOwnershipContext.ForChild(assignment).TargetEntityLogicalName.Should().Be("sprk_matter");
+        RecordOwnershipResolver.IsCitation("sprk_procedureassignment", "sprk_excludedpolicy").Should().BeTrue(
+            "sprk_policy is an ownership parent, so without the citation an assignment would be filed under the rule it excludes");
+        RecordOwnershipResolver.IsCitation("sprk_procedureassignment", "sprk_procedure").Should().BeTrue();
+        RecordOwnershipResolver.IsCitation("sprk_procedureassignment", "sprk_pinnedversion").Should().BeTrue();
+        RecordOwnershipResolver.IsCitation("sprk_procedureassignment", "sprk_matter").Should().BeFalse();
+
+        var procedureSet = new Microsoft.Xrm.Sdk.Entity("sprk_ruleset", Guid.NewGuid())
+        {
+            ["sprk_procedure"] = new Microsoft.Xrm.Sdk.EntityReference("sprk_procedure", procedure),
+        };
+        RecordOwnershipContext.ParentsOf(procedureSet).Should().BeEmpty("a Procedure rule set is not a secure child (model 5.2)");
+
+        // 089a review K7: a LEGACY uploaded set carries the document it was read from (RuleSetService). sprk_document is an
+        // ownership parent, so without the citation the set would be filed under the document. ebilling-r1 task 116: these cases pin
+        // the entry until the column's -Delete run; they go in the same change that removes the entry.
+        var legacySourceDocument = Guid.NewGuid();
+        var legacySet = new Microsoft.Xrm.Sdk.Entity("sprk_ruleset", Guid.NewGuid())
+        {
+            ["sprk_sourcedocument"] = new Microsoft.Xrm.Sdk.EntityReference("sprk_document", legacySourceDocument),
+        };
+        RecordOwnershipResolver.IsCitation("sprk_ruleset", "sprk_sourcedocument").Should().BeTrue();
+        RecordOwnershipContext.ParentsOf(legacySet).Should().BeEmpty("a legacy set's source document is provenance, not parentage");
+
+        var legacyRecordSet = new Microsoft.Xrm.Sdk.Entity("sprk_ruleset", Guid.NewGuid())
+        {
+            ["sprk_matter"] = new Microsoft.Xrm.Sdk.EntityReference("sprk_matter", matter),
+            ["sprk_sourcedocument"] = new Microsoft.Xrm.Sdk.EntityReference("sprk_document", legacySourceDocument),
+        };
+        RecordOwnershipContext.ParentsOf(legacyRecordSet).Should().Equal(new RecordOwnershipParent("sprk_matter", matter));
+
+        var recordRule = new Microsoft.Xrm.Sdk.Entity("sprk_policy", Guid.NewGuid())
+        {
+            ["sprk_ruleset"] = new Microsoft.Xrm.Sdk.EntityReference("sprk_ruleset", Guid.NewGuid()),
+        };
+        RecordOwnershipContext.ParentsOf(recordRule).Select(p => p.EntityLogicalName).Should().Equal("sprk_ruleset");
     }
 
     // ── The core record pair (a Signal's and Decision Record's core record) ─────────────────────────────────────────────
@@ -395,9 +526,11 @@ public class SecureChildLineageTests
         foreach (var table in RecordOwnershipResolver.RestrictedContentTables)
             RecordShareLevels.ChildMirrorMask(table, 327703 | 524288 | 32).Should().Be(1, $"{table} is a hard-deny table");
 
-        // Which hard-deny tables are secure-lineage children today (the others are covered by name all the same).
+        // Which hard-deny tables are secure-lineage children today (the others are covered by name all the same). eBilling's rule set,
+        // Procedure assignment and Stored File tables (ebilling-r1 tasks 089 / 090, on master since #2689) are both hard-deny and
+        // filed under a secure root.
         SecureChildLineage.Children.Keys.Where(RecordOwnershipResolver.IsRestrictedContentTable)
-            .Should().BeEquivalentTo("sprk_policy", "sprk_policyversion");
+            .Should().BeEquivalentTo("sprk_policy", "sprk_policyversion", "sprk_ruleset", "sprk_procedureassignment", "sprk_storedfile");
     }
 
     [Fact]
@@ -489,5 +622,105 @@ public class SecureChildLineageTests
     {
         var blank = () => RecordShareLevels.ChildMirrorRights(" ", 1);
         blank.Should().Throw<ArgumentException>();
+    }
+
+    // ── unified-access-control-r2 task 191b: the external markers ────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Task 191b (#2179 design v2 §3.3): every registry table's marker, pinned. A table added without a decision does not
+    /// compile (the marker is a required positional argument); a marker changed by accident fails here.
+    /// </summary>
+    [Fact]
+    public void EveryTable_DeclaresTheExpectedExternalMarker()
+    {
+        var expected = new Dictionary<string, ExternalMarker>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["sprk_communication"] = ExternalMarker.Predicate(ExternalOwnRule.Communication065),
+            ["sprk_communicationthread"] = ExternalMarker.Predicate(ExternalOwnRule.ThreadOpen),
+            ["sprk_document"] = ExternalMarker.Predicate(ExternalOwnRule.DocumentNarrowing),
+            ["sprk_invoice"] = ExternalMarker.Predicate(ExternalOwnRule.InvoiceSource),
+            ["sprk_emailartifact"] = ExternalMarker.Never,
+            ["sprk_attachmentartifact"] = ExternalMarker.Never,
+            ["sprk_emailreviewlog"] = ExternalMarker.Never,
+            ["sprk_analysis"] = ExternalMarker.DocumentText,
+            ["sprk_analysisoutput"] = ExternalMarker.DocumentText,
+            ["sprk_policy"] = ExternalMarker.HardDeny,
+            ["sprk_policyversion"] = ExternalMarker.HardDeny,
+            ["sprk_procedureassignment"] = ExternalMarker.HardDeny,
+            ["sprk_ruleset"] = ExternalMarker.HardDeny,
+            ["sprk_storedfile"] = ExternalMarker.HardDeny,
+        };
+
+        foreach (var table in SecureChildLineage.Children.Values)
+        {
+            table.External.Should().NotBeNull($"{table.LogicalName} declares a marker");
+            table.External.Should().Be(
+                expected.TryGetValue(table.LogicalName, out var marker) ? marker : ExternalMarker.None,
+                $"{table.LogicalName}'s external marker");
+        }
+
+        SecureChildLineage.OutsideLineage.Should().BeEquivalentTo(
+            new Dictionary<string, ExternalMarker> { ["sprk_affinity"] = ExternalMarker.Never });
+    }
+
+    /// <summary>Task 191b: the communication-content tables (the guard's refused list) are the registry's Never markers.</summary>
+    [Fact]
+    public void NeverExternalTables_AreTheCommunicationContentTables()
+    {
+        SecureChildLineage.NeverExternalTables.Should().BeEquivalentTo(
+            "sprk_emailartifact", "sprk_attachmentartifact", "sprk_emailreviewlog", "sprk_affinity");
+        SecureChildLineage.ExternalMarkerOf("sprk_affinity").Should().Be(ExternalMarker.Never);
+        SecureChildLineage.ExternalMarkerOf("sprk_matter").Should().BeNull("a root declares no marker: its own flags decide it");
+        SecureChildLineage.ExternalMarkerOf("sprk_unknown").Should().BeNull();
+    }
+
+    [Fact]
+    public void ExternalMarker_Predicate_RefusesNoRule_AndTheKindsAreDistinct()
+    {
+        var none = () => ExternalMarker.Predicate(ExternalOwnRule.None);
+        none.Should().Throw<ArgumentOutOfRangeException>();
+
+        ExternalMarker.None.Kind.Should().Be(ExternalMarkerKind.None);
+        ExternalMarker.DocumentText.Kind.Should().Be(ExternalMarkerKind.None);
+        ExternalMarker.DocumentText.CarriesDocumentText.Should().BeTrue();
+        ExternalMarker.None.CarriesDocumentText.Should().BeFalse();
+        ExternalMarker.Never.Kind.Should().Be(ExternalMarkerKind.Never);
+        ExternalMarker.HardDeny.Kind.Should().Be(ExternalMarkerKind.HardDeny);
+        ExternalMarker.HardDeny.Should().NotBe(ExternalMarker.Never);
+        ExternalMarker.Predicate(ExternalOwnRule.ThreadOpen).Should().Be(ExternalMarker.Predicate(ExternalOwnRule.ThreadOpen));
+        ExternalMarker.None.Should().NotBe(ExternalMarker.DocumentText);
+    }
+
+    /// <summary>
+    /// Task 191b (#2179 design §0 item 1): every hard-deny table (<see cref="RecordOwnershipResolver.RestrictedContentTables"/>)
+    /// the registry knows is <see cref="ExternalMarkerKind.HardDeny"/> (or <see cref="ExternalMarkerKind.Never"/>), so a new
+    /// hard-deny table cannot arrive as None and be shared with externals; and none is in the Never set, which is the
+    /// assistant guard's refused list and message (unchanged).
+    /// </summary>
+    [Fact]
+    public void EveryHardDenyTableInTheRegistry_IsNeverExternallyVisible()
+    {
+        var inRegistry = RecordOwnershipResolver.RestrictedContentTables
+            .Where(t => SecureChildLineage.ExternalMarkerOf(t) is not null)
+            .ToList();
+
+        inRegistry.Should().NotBeEmpty();
+        foreach (var table in inRegistry)
+            SecureChildLineage.ExternalMarkerOf(table)!.Kind.Should().BeOneOf(
+                new[] { ExternalMarkerKind.HardDeny, ExternalMarkerKind.Never }, $"{table} is a hard-deny table");
+        SecureChildLineage.NeverExternalTables.Should().NotIntersectWith(RecordOwnershipResolver.RestrictedContentTables);
+    }
+
+    /// <summary>Task 191b: the predicate's two document edges are registry lookups of the document (a renamed column would
+    /// silently stop the chain bound).</summary>
+    [Fact]
+    public void TheDocumentChainAndLinkColumns_AreDocumentLookups()
+    {
+        var document = SecureChildLineage.Children["sprk_document"];
+
+        document.Lookups[Sprk.Bff.Api.Infrastructure.ExternalAccess.ExternalDocumentNarrowing.ParentDocumentAttribute]
+            .Should().Be("sprk_document");
+        document.Lookups[Sprk.Bff.Api.Infrastructure.ExternalAccess.ExternalDocumentNarrowing.RelatedCommunicationAttribute]
+            .Should().Be("sprk_communication");
     }
 }

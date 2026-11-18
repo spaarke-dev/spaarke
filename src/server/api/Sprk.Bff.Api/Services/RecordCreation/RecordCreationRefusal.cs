@@ -67,7 +67,8 @@ internal sealed record RecordCreationRefusal
     internal const string InvalidPayloadCode = "record_creation.invalid_payload";
 
     /// <summary>The table has no entry in <see cref="RecordTableRules"/>, or its entry is
-    /// <see cref="RecordTableRule.CreatedOnlyByItsWriter"/> (task 042c fix round 4): this service does not create it.</summary>
+    /// <see cref="RecordTableRule.GenericCreateRefused"/> (task 042c fix round 4; ebilling-r1 task 164a-1): this service does not
+    /// create it.</summary>
     internal const string TableUnsupportedCode = "record_creation.table_unsupported";
 
     /// <summary>A check before the create faulted (an exception or timeout): nothing was created (NFR-01).</summary>
@@ -77,6 +78,10 @@ internal sealed record RecordCreationRefusal
     /// Task 022 fix round 3: a value mapped from a secure source files the row, and the row's owner is not that source's secure
     /// owner, so the value cannot be removed and the create is refused (400). The same request is refused again: create the row
     /// as secure, or file it differently.
+    /// <para>Task 022b (UAC-r2, 2026-11-12): also the code when a value mapped from a source whose Access Permission is
+    /// Restricted files the row and the row is not Restricted once created (<c>RecordCreationService.MappingSourceRestrictedFilingRefused</c>,
+    /// with its own Restricted wording). One code for "a value copied from a protected source would file this row": the same
+    /// request is refused every time, for either reason.</para>
     /// </summary>
     internal const string MappingSourceSecureFilingCode = "record_creation.mapping_source_secure_filing";
 

@@ -69,8 +69,66 @@ public static class SubmissionReasonCodes
     /// <summary>The submission has no <c>createdon</c>, so the date its rules are judged on (072 <c>ReceivedOn</c>) is unknown. Never defaulted.</summary>
     public const string ReceivedOnMissing = "ebilling.submission.received_on_missing";
 
-    /// <summary>The submission names no firm (<c>sprk_vendororg</c>).</summary>
+    /// <summary>
+    /// The submission names no firm (<c>sprk_vendororg</c>). Two uses (task 095c-3):
+    /// <list type="bullet">
+    /// <item>A <b>failure</b> (Failed, no invoice) for a firm that is the empty id, or for a submission without a firm on a channel that always
+    /// sends one (SPA).</item>
+    /// <item>A <b>pipeline finding and hold</b> for an Internal submission taken without a firm (the from-email route, mode New, owner
+    /// 2026-11-03): the invoice is created In Review with no firm, the firm-scoped steps are skipped, every line is
+    /// <c>rules.not_checked</c>, and the submission is Accepted with this code as its reason. Part D writes it as the SubmissionIntegrity
+    /// reason <c>submission.firm_missing</c>. It holds for review and never rejects.</item>
+    /// </list>
+    /// </summary>
     public const string FirmMissing = "ebilling.submission.firm_missing";
+
+    /// <summary>
+    /// ebilling-r1 082c-2 (brief 082c C11): an applicable Procedure has no version in force on a work date of the invoice, so its rules judged
+    /// nothing there. A <b>pipeline finding and hold</b>: one per gapped Procedure (values <see cref="ProcedureNameValue"/>,
+    /// <see cref="ProcedureWorkDateValue"/>, <see cref="ProcedureGapKindValue"/>), the lines dated in the gap <c>rules.not_checked</c> with this
+    /// code as their cause, and part D writes it as the SubmissionIntegrity reason <c>submission.procedure_gap</c>. SPA: the submission is
+    /// Accepted / AcceptedUncoded with this code as its reason, never AutoRejected (even when 073 rejected). Internal: Blocked. Approval is
+    /// refused until a re-check clears it (<see cref="InvoiceProcedureHold"/>).
+    /// </summary>
+    public const string ProcedureGap = "ebilling.submission.procedure_gap";
+
+    /// <summary>
+    /// ebilling-r1 082c-2 (brief 082c C14, ontology-r1 ruling): the invoice's Procedures could not be resolved on the job's final delivery
+    /// (<c>ProcedureResolutionFaultException</c> or <c>CoreRecordChainUnreadableException</c>). A <b>pipeline finding and hold</b> naming its
+    /// cause (<see cref="ProcedureCauseValue"/>: <see cref="CauseChainUnreadable"/> or <see cref="CauseRowsInconsistent"/>); no billing rule ran,
+    /// every line is <c>rules.not_checked</c> with this code as its cause. SPA: Accepted / AcceptedUncoded with this code as its reason. Internal:
+    /// Blocked. A delivery that is not the final one rethrows instead (the job retries; nothing is persisted).
+    /// </summary>
+    public const string ProceduresUnresolved = "ebilling.submission.procedures_unresolved";
+
+    /// <summary>The <see cref="ProcedureGap"/> value naming the Procedure (its catalogue name; never an id).</summary>
+    public const string ProcedureNameValue = "procedureName";
+
+    /// <summary>The <see cref="ProcedureGap"/> value naming the first work date in the gap (<c>yyyy-MM-dd</c>).</summary>
+    public const string ProcedureWorkDateValue = "workDate";
+
+    /// <summary>The <see cref="ProcedureGap"/> value naming the gap kind (<c>ProcedureGapKind</c>'s name; mapped through the closed
+    /// <c>BillingSystemFindings.GapKindText</c>).</summary>
+    public const string ProcedureGapKindValue = "gapKind";
+
+    /// <summary>The <see cref="ProceduresUnresolved"/> value naming the cause.</summary>
+    public const string ProcedureCauseValue = "cause";
+
+    /// <summary>K3 cause (brief 082c C15): the core record's chain could not be read in full (<c>CoreRecordChainUnreadableException</c>).
+    /// Permanent: a retry does not help until the record's stored parent data is repaired.</summary>
+    public const string CauseChainUnreadable = "chain_unreadable";
+
+    /// <summary>K3 cause (brief 082c C15): the Procedure rows are inconsistent (<c>ProcedureResolutionFaultException</c>). May clear once an
+    /// administrator's change completes.</summary>
+    public const string CauseRowsInconsistent = "rows_inconsistent";
+
+    /// <summary>Transient (072 part L): the submission's core record changed between the evaluation and the commit, so the evaluation is
+    /// not persisted and the job re-evaluates (once; a second change under one run retries with this code).</summary>
+    public const string CoreRecordChanged = "ebilling.submission.core_record_changed";
+
+    /// <summary>Transient (task 095c-4): as <see cref="CoreRecordChanged"/>, for the submission's firm (set or cleared since the evaluation; a
+    /// firm decides which steps ran). Its own code so a log or a retry names what changed.</summary>
+    public const string FirmChanged = "ebilling.submission.firm_changed";
 
     /// <summary>FR-05: the submission names no core record, or more than one.</summary>
     public const string CoreRecordMissing = "ebilling.submission.core_record_missing";
@@ -138,6 +196,13 @@ public static class SubmissionReasonCodes
 
     /// <summary>ebilling-r1 task 092: the uploaded invoice PDF's malware scan said Malicious; it is never read. Permanent; no invoice.</summary>
     public const string FileMalicious = "ebilling.submission.file_malicious";
+
+    /// <summary>
+    /// ebilling-r1 task 092 (review F1): the uploaded invoice PDF's malware scan gave no verdict in time. Each delivery of the job waits up to
+    /// <c>InvoiceSubmissionProcessingJobHandler.ScanWaitBudget</c> (3 min 50 s) for it; while deliveries remain it is transient, and on the final
+    /// delivery the submission is Failed with this code (about 19 minutes in all). No invoice; the PDF was never read.
+    /// </summary>
+    public const string FileScanTimeout = "ebilling.submission.file_scan_timeout";
 
     // ── Rejected, not read: no invoice (FR-21, D-101) ──
 

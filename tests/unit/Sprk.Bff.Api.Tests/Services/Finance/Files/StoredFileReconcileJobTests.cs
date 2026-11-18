@@ -464,6 +464,72 @@ public sealed class StoredFileReconcileJobTests
         h.Log.Entries.Should().Contain(e => e.Message.Contains("412", StringComparison.Ordinal));
     }
 
+    private static StoredFileRowSpec StagedSpec() => new()
+    {
+        FileId = Guid.NewGuid(),
+        Purpose = StoredFilePurpose.InvoicePdf,
+        Parent = new StoredFileParent(StoredFileParentKind.Invoice, Guid.NewGuid()),
+        Name = "invoice.pdf",
+        ContentType = "application/pdf",
+    };
+
+    [Fact(DisplayName = "Must-fire (DEF-044, A1a): a row-less blob that a retry REUSES between the listing and the delete (the rewrite moves its ETag) is kept by the reconcile delete (412), the bytes intact and the grace restarted")]
+    public async Task Orphan_ReusedAfterListed_KeptWithBytesIntact()
+    {
+        var h = new Harness();
+        var spec = StagedSpec();
+        var first = (await h.Rig.Service.StageAsync(spec, new MemoryStream(Pdf), CancellationToken.None)).Blob!;
+        var path = h.PathOf(spec.Parent, spec.FileId);
+        var listedAs = h.Rig.Gateway.Get("invoice-files", path)!.ETag; // what the job's listing will see (E1)
+        listedAs.Should().Be(first.ETag);
+        StagedBlob? reused = null;
+        h.Rig.Gateway.BeforeOp = (op, name) =>
+        {
+            if (op == "delete" && name == "invoice-files/" + path)
+            {
+                // A retry of the same deterministic id stages again, now: it reuses the blob (rewrite: E2).
+                h.Rig.Gateway.Now = h.Clock.GetUtcNow();
+                reused = h.Rig.Service.StageAsync(spec, new MemoryStream(Pdf), CancellationToken.None).GetAwaiter().GetResult().Blob;
+            }
+        };
+
+        var result = await h.RunAsync();
+
+        reused.Should().NotBeNull();
+        reused!.Reused.Should().BeTrue();
+        var blob = h.Rig.Gateway.Get("invoice-files", path);
+        blob.Should().NotBeNull("the delete judged E1 and the blob is E2 now: refused, so the retry's blob survives");
+        blob!.ETag.Should().NotBe(listedAs).And.Be(reused.ETag);
+        blob.Content.Should().Equal(Pdf, "the bytes are intact");
+        result.Success.Should().BeTrue();
+        result.ErrorMessage.Should().BeNull("a refused delete is kept, not a faulted unit");
+        h.Counts(result)["blobsChangedSinceJudged"].GetInt32().Should().Be(1);
+        h.Counts(result)["blobsDeleted"].GetInt32().Should().Be(0);
+        h.Counts(result)["unitFaults"].GetInt32().Should().Be(0);
+        h.Log.Entries.Should().Contain(e => e.Message.Contains("412", StringComparison.Ordinal));
+
+        // The rewrite moved Last-Modified, so the orphan grace starts again from the retry: the next run leaves it in the grace.
+        h.Rig.Gateway.BeforeOp = null;
+        var next = await h.RunAsync();
+        h.Counts(next)["blobsInGrace"].GetInt32().Should().Be(1);
+        h.Rig.Gateway.Get("invoice-files", path).Should().NotBeNull();
+    }
+
+    [Fact(DisplayName = "Must-not-fire (DEF-044, A2a): a blob the store staged and nobody reused is still deleted by the reconcile once it is past the grace and row-less")]
+    public async Task Orphan_StagedByTheStore_NotReused_StillDeleted()
+    {
+        var h = new Harness();
+        var spec = StagedSpec();
+        (await h.Rig.Service.StageAsync(spec, new MemoryStream(Pdf), CancellationToken.None)).Blob!.Reused.Should().BeFalse();
+        var path = h.PathOf(spec.Parent, spec.FileId);
+
+        var result = await h.RunAsync();
+
+        h.Rig.Gateway.Get("invoice-files", path).Should().BeNull("a truly orphaned blob is removed");
+        h.Counts(result)["blobsDeleted"].GetInt32().Should().Be(1);
+        h.Counts(result)["blobsChangedSinceJudged"].GetInt32().Should().Be(0);
+    }
+
     [Theory(DisplayName = "Row-less blob past the grace naming a submission: kept while the submission is not terminal")]
     [InlineData(100000000, false)]
     [InlineData(100000001, false)]

@@ -294,6 +294,9 @@ public class BudgetInquiryEmailFilingTests
             entities.Setup(e => e.RetrieveAsync("sprk_communicationthread", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
                 .Returns((string _, Guid id, string[] _, CancellationToken _) => Task.FromResult(Threads.FirstOrDefault(t => t.Id == id)!));
             var communications = new Mock<ICommunicationDataverseService>(MockBehavior.Loose);
+            // Issue #2033: a send as user needs the caller's enabled systemuser.
+            communications.Setup(c => c.QuerySystemUserByAzureAdOidAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(Guid.NewGuid());
 
             var dispatcher = new CommunicationChannelDispatcher(
                 new ICommunicationChannelSender[] { new AcceptingSender() }, Array.Empty<ICommunicationArchiver>());
@@ -851,16 +854,29 @@ public class BudgetInquiryEmailFilingTests
                     return Task.FromResult<IReadOnlyList<Dictionary<string, JsonElement>>>(Array.Empty<Dictionary<string, JsonElement>>());
 
                 var openOnly = odata.Contains(CommunicationOpenThreadGate.OpenOnlyThreadFilterClause, StringComparison.Ordinal);
+                // The Web API returns every selected lookup as its GUID or an explicit null; the list read selects the typed
+                // regarding lookups and withholds a row that does not carry them all (unknown anchor).
+                var selectedLookups = System.Text.RegularExpressions.Regex.Match(odata, @"\$select=([^&]*)").Groups[1].Value
+                    .Split(',', StringSplitOptions.RemoveEmptyEntries)
+                    .Where(c => c.StartsWith('_') && c.EndsWith("_value", StringComparison.Ordinal))
+                    .ToList();
                 var answer = rows
                     .Where(t => !odata.Contains("_sprk_regardingmatter_value eq ", StringComparison.Ordinal)
                                 || odata.Contains($"_sprk_regardingmatter_value eq {t.GetAttributeValue<EntityReference>("sprk_regardingmatter")?.Id}", StringComparison.Ordinal))
                     .Where(t => !openOnly || CommunicationInternalOnlyFloor.IsConfirmedOpen(t))
-                    .Select(t => new Dictionary<string, JsonElement>
+                    .Select(t =>
                     {
-                        ["sprk_communicationthreadid"] = JsonSerializer.SerializeToElement(t.Id.ToString("D")),
-                        ["sprk_name"] = JsonSerializer.SerializeToElement(t.GetAttributeValue<string>("sprk_name")),
-                        ["createdon"] = JsonSerializer.SerializeToElement("2026-11-10T09:00:00Z"),
-                        ["sprk_ispinned"] = JsonSerializer.SerializeToElement(false),
+                        var row = new Dictionary<string, JsonElement>
+                        {
+                            ["sprk_communicationthreadid"] = JsonSerializer.SerializeToElement(t.Id.ToString("D")),
+                            ["sprk_name"] = JsonSerializer.SerializeToElement(t.GetAttributeValue<string>("sprk_name")),
+                            ["createdon"] = JsonSerializer.SerializeToElement("2026-11-10T09:00:00Z"),
+                            ["sprk_ispinned"] = JsonSerializer.SerializeToElement(false),
+                        };
+                        foreach (var column in selectedLookups)
+                            row[column] = JsonSerializer.SerializeToElement(
+                                t.GetAttributeValue<EntityReference>(column[1..^"_value".Length])?.Id.ToString("D"));
+                        return row;
                     })
                     .ToList();
                 return Task.FromResult<IReadOnlyList<Dictionary<string, JsonElement>>>(answer);

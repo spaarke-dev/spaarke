@@ -583,6 +583,30 @@ public sealed class SubmitInvoiceFromEmailOperationTests
         H.JobsSent.Should().BeEmpty();
     }
 
+    [Fact(DisplayName = "095e (EB-D-223, defence in depth): a submission with no firm is refused before anything is read, allocated, saved or queued (the route refuses it first, so this is a wiring defect)")]
+    public async Task Submit_NoFirm_IsRefusedBeforeAnything()
+    {
+        var submit = async () => await Build().SubmitAsync(Input() with { FirmId = null }, CancellationToken.None);
+
+        await submit.Should().ThrowAsync<ArgumentException>();
+        H.Allocations.Should().BeEmpty();
+        H.JobsSent.Should().BeEmpty();
+        H.OwnerContexts.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "095c-2 (defence in depth): the allocator's firm_required is still the route's 400 firm_invalid, with no job")]
+    public async Task Submit_TheAllocatorRefusesFirmRequired_Is400FirmInvalid()
+    {
+        H.Allocation = TrackingNumberResult.Refused(TrackingNumberReasons.FirmRequired);
+
+        var result = await Build().SubmitAsync(Input(), CancellationToken.None);
+
+        (result.Outcome, result.Status, result.ErrorCode).Should().Be(
+            (FromEmailSubmitOutcome.Refused, StatusCodes.Status400BadRequest, InvoiceSubmissionErrors.FirmInvalid));
+        result.Detail.Should().StartWith("A firm is required.");
+        H.JobsSent.Should().BeEmpty();
+    }
+
     [Fact]
     public async Task Submit_OtherBytesAreStagedUnderThisAttempt_Is409DocumentAlreadySubmitted_NoRow()
     {
@@ -735,12 +759,69 @@ public sealed class SubmitInvoiceFromEmailOperationTests
             .Should().Be(new EntityReference(InvoiceSubmissionService.SubmissionEntity, target));
     }
 
+    [Fact(DisplayName = "095f (review F3, seed-proof): a Correction's queued job carries its correctionNote in the payload")]
+    public async Task Submit_ACorrection_QueuesTheJob_WithTheNote()
+    {
+        var target = Guid.NewGuid();
+        var input = Input() with
+        {
+            Mode = FromEmailModes.Correction,
+            InvoiceId = InvoiceSubmissionPersister.InvoiceIdFor(target),
+            ResubmissionOf = target,
+            CorrectionNote = "The firm re-issued the invoice.",
+        };
+
+        await Build().SubmitAsync(input, CancellationToken.None);
+
+        var payload = H.JobsSent.Single().Payload!.RootElement;
+        payload.GetProperty("correctionNote").GetString().Should().Be("The firm re-issued the invoice.");
+        payload.GetProperty("submissionId").GetGuid().Should().Be(input.SubmissionId);
+    }
+
+    [Fact(DisplayName = "095f (review F3, must-not-fire): a New submission's queued job has no correctionNote property")]
+    public async Task Submit_New_QueuesTheJob_WithNoNote()
+    {
+        await Build().SubmitAsync(Input(), CancellationToken.None);
+
+        H.JobsSent.Single().Payload!.RootElement.TryGetProperty("correctionNote", out _).Should().BeFalse();
+    }
+
     [Fact(DisplayName = "097b: a New submission from an email writes no sprk_resubmissionof")]
     public async Task Submit_New_RecordsNoTarget()
     {
         await Build().SubmitAsync(Input(), CancellationToken.None);
 
         H.Allocations.Should().ContainSingle().Which.Fields!.Should().NotContainKey("sprk_resubmissionof");
+    }
+
+    [Theory(DisplayName = "095a: every from-email attempt (New or Correction) creates its submission with sprk_sourceemaildocument = the staged source .eml, the id sprk_storedfile.sprk_sourcedocument is written from")]
+    [InlineData(FromEmailModes.New)]
+    [InlineData(FromEmailModes.Correction)]
+    public async Task Submit_RecordsTheSourceEml_OnTheSubmission(string mode)
+    {
+        var target = Guid.NewGuid();
+        var input = mode == FromEmailModes.New
+            ? Input()
+            : Input() with { Mode = FromEmailModes.Correction, InvoiceId = InvoiceSubmissionPersister.InvoiceIdFor(target), ResubmissionOf = target };
+
+        await Build().SubmitAsync(input, CancellationToken.None);
+
+        var fields = H.Allocations.Should().ContainSingle().Which.Fields!;
+        fields["sprk_sourceemaildocument"].Should().Be(new EntityReference("sprk_document", input.SourceEmlDocumentId));
+        fields["sprk_sourceemaildocument"].Should().Be(new EntityReference("sprk_document", W.EmlId));
+        fields.Should().NotContainKey("sprk_document", "the from-email submission still has no document of its own (092); the link is a citation, not a filing parent");
+    }
+
+    [Fact(DisplayName = "095a: the source-email link is a column the external view never selects or serializes (uac-r2: it never reaches an external response)")]
+    public void SourceEmailLink_IsNotInTheViewColumns_AndNotOnTheViewType()
+    {
+        InvoiceSubmissionService.ViewColumns.Should().NotContain("sprk_sourceemaildocument");
+        InvoiceSubmissionService.ViewColumns.Should().NotContain(c => c.Contains("sourceemail", StringComparison.OrdinalIgnoreCase));
+        typeof(InvoiceSubmissionView).GetProperties().Select(p => p.Name)
+            .Should().NotContain(n => n.Contains("SourceEmail", StringComparison.OrdinalIgnoreCase) || n.Contains("Eml", StringComparison.OrdinalIgnoreCase));
+
+        // Control (must fire): a column that IS in the view is found by the same probes.
+        InvoiceSubmissionService.ViewColumns.Should().Contain("sprk_trackingnumber");
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -799,10 +880,24 @@ public sealed class SubmitInvoiceFromEmailOperationTests
         var submissionId = FromEmailSubmissionKey.SubmissionIdFor(K, 1);
         var jobId = FromEmailSubmissionKey.JobIdFor(K, 1);
 
-        (await Build().RequeueAsync(submissionId, jobId, "trace", CancellationToken.None)).Should().BeTrue();
+        (await Build().RequeueAsync(submissionId, jobId, "trace", null, CancellationToken.None)).Should().BeTrue();
         H.JobsSent.Should().ContainSingle().Which.JobId.Should().Be(jobId);
 
         H.JobFailure = new InvalidOperationException("queue down");
-        (await Build().RequeueAsync(submissionId, jobId, "trace", CancellationToken.None)).Should().BeFalse();
+        (await Build().RequeueAsync(submissionId, jobId, "trace", null, CancellationToken.None)).Should().BeFalse();
+    }
+
+    [Fact(DisplayName = "095f (review F3, seed-proof): a re-queued Correction's job carries the note it is given; one with no note has no correctionNote property")]
+    public async Task Requeue_QueuesTheJob_WithTheNote()
+    {
+        var submissionId = FromEmailSubmissionKey.SubmissionIdFor(K, 1);
+        var jobId = FromEmailSubmissionKey.JobIdFor(K, 1);
+
+        (await Build().RequeueAsync(submissionId, jobId, "trace", "why", CancellationToken.None)).Should().BeTrue();
+        (await Build().RequeueAsync(submissionId, jobId, "trace", null, CancellationToken.None)).Should().BeTrue();
+
+        H.JobsSent.Should().HaveCount(2);
+        H.JobsSent[0].Payload!.RootElement.GetProperty("correctionNote").GetString().Should().Be("why");
+        H.JobsSent[1].Payload!.RootElement.TryGetProperty("correctionNote", out _).Should().BeFalse();
     }
 }

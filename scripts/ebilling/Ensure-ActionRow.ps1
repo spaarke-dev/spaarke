@@ -67,6 +67,9 @@ $headers = @{
     Accept             = 'application/json'
     'Content-Type'     = 'application/json; charset=utf-8'
     'OData-Version'    = '4.0'
+    # Strongly consistent reads: attribute metadata (IsSecured) is cached per server, and a plain read soon after a change can
+    # come back stale (a secured column reported as unsecured). The header is ignored on data requests.
+    Consistency        = 'Strong'
     'OData-MaxVersion' = '4.0'
 }
 

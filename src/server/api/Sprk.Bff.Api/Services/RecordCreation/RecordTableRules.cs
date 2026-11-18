@@ -33,7 +33,8 @@ namespace Sprk.Bff.Api.Services.RecordCreation;
 /// <para><b>OWNER REVIEW (defaults).</b> Field mapping applies unless a table names a <see cref="RecordTableRule.MappingExclusion"/>:
 /// a table with no mapping profile maps nothing (the Office create's "missing profile is a silent no-op"), so the default
 /// widens nothing. Spec FR-16 names the wizard tables; <c>sprk_memo</c>, <c>sprk_budget</c>, <c>sprk_kpiassessment</c>,
-/// <c>sprk_billingevent</c> and <c>sprk_communication</c> are not among them and take the default. The
+/// <c>sprk_billingevent</c> and <c>sprk_communication</c> are not among them and take the default (<c>sprk_billingevent</c>:
+/// generic create refused; update and delete as before — ebilling-r1 task 164a-1, <see cref="RecordTableRule.GenericCreateOnlyRefused"/>). The
 /// <see cref="RecordTableRule.ServerDefaults"/> are read from today's server writers (cited per entry), not from an old
 /// list; tasks 013 and 015 confirm them when they consume them.</para>
 /// <para><b>ADR-010.</b> A static class: no DI registration, no interface.</para>
@@ -89,13 +90,43 @@ internal static partial class RecordTableRules
     /// and the re-file still asks (<see cref="OwnedChildWrite.CheckInvoiceFamilyAsync"/>, create shape: no stored row), as the caller
     /// (<see cref="PreWriteRow.Caller"/>), on the row as it will be written; the guard owns the rule, this only maps its answer
     /// (<see cref="InvoiceFamilyPreWrite"/>). Declared before <see cref="All"/>: static initialisers run in textual order.
+    /// <para>Task 045d (owner ruling Q8 (a)): an admitted row gets the five resolver fields of the core record the guard decided
+    /// (<see cref="InvoiceFamilyCoreRecordGuard.DeriveGenericResolverFieldsAsync"/>: the type, id and URL always, the name and
+    /// number when the caller may read them), read with the row's readers (<see cref="PreWriteRow.Records"/>, as the caller;
+    /// the catalog app-only) — step 5½ runs after step 5's AppendTo on every record the row names. A derive that fails refuses
+    /// through the same mapping (fail closed): the row is never written without them.</para>
     /// </summary>
     internal static readonly PreWriteRule InvoiceFamilyRule = new(
         new NamedRule("InvoiceFamilyCoreRecord",
             "ebilling-r1 FR-05 (ISS-010, #1973): an invoice-family row names exactly one core record, and an invoice " +
-            "supersedes only an invoice of that record; asked as the caller after AppendTo on every record the row binds."),
-        async (row, ct) => InvoiceFamilyPreWrite(
-            await OwnedChildWrite.CheckInvoiceFamilyAsync(row.Caller, row.Table, row.Item, stored: null, ct).ConfigureAwait(false)));
+            "supersedes only an invoice of that record; asked as the caller after AppendTo on every record the row binds. " +
+            "Owner ruling Q8 (a): the row carries the five resolver fields of that record, derived by the server."),
+        async (row, ct) =>
+        {
+            // Task 045e: and a regarding pair the caller sends must name that record (the catalog read app-only, row.RecordTypes),
+            // asked before the derive below replaces it.
+            var family = await OwnedChildWrite.DecideInvoiceFamilyAsync(row.Caller, row.Table, row.Item, stored: null, ct,
+                    recordTypes: row.RecordTypes)
+                .ConfigureAwait(false);
+            if (family.Admitted is not { } admitted)
+                return PreWriteResult.Of(InvoiceFamilyPreWrite(family.Refusal));
+
+            var derived = await InvoiceFamilyCoreRecordGuard.DeriveGenericResolverFieldsAsync(
+                admitted, row.Records ?? NoRecordReader, row.RecordTypes ?? NoRecordTypeReader, ct).ConfigureAwait(false);
+            // A derive with no fields and no refusal is a step that refuses nothing it can name: undecided (the mapping's last arm).
+            return derived is { IsRefused: false, ResolverFields: { } fields }
+                ? PreWriteResult.Add(fields.ToGenericFields())
+                : PreWriteResult.Of(InvoiceFamilyPreWrite(
+                    new OwnedChildWrite.InvoiceFamilyStep(derived.IsRefused ? derived : null, null, false)));
+        });
+
+    /// <summary>A row with no app-only record reader: the derive's read faults, so the row is refused (fail closed).</summary>
+    private static Task<Entity?> NoRecordReader(string table, Guid id, string[] columns, CancellationToken ct) =>
+        throw new InvalidOperationException("no record reader is available");
+
+    /// <summary>A row with no catalog reader: the derive's read faults, so the row is refused (fail closed).</summary>
+    private static Task<Entity?> NoRecordTypeReader(string table, CancellationToken ct) =>
+        throw new InvalidOperationException("no record-type reader is available");
 
     /// <summary>
     /// The invoice-family check's answer as a pre-write refusal, in the child-record route's contract
@@ -292,7 +323,24 @@ internal static partial class RecordTableRules
             SearchIndexed = true,
             // Task 014 (ebilling-r1's review of 013, item 3): a fill-only mapping that filled a second core lookup would fail
             // a valid create with multiple_core_records. The core record is the caller's to name.
-            MappingProtectedColumns = InvoiceFamilyCoreLookupsOf("sprk_invoice"),
+            // ebilling-r1 082c-2 (uac-r2 2026-11-04): plus the review detail, which only its typed BFF writers derive (InvoiceReviewDetail), so a
+            // field-mapping rule may not set it.
+            // ebilling-r1 task 166 fix round (EB-D-200): plus the billed total and the five derived totals, field-secured and written only by the
+            // typed finance writers (the BFF application user is a Writers member, so field security alone does not stop a generic mapping).
+            // ebilling-r1 task 165d (EB-D-207): plus the AP export claim, which only AP export sets and clears (WriterOnlyColumns below).
+            MappingProtectedColumns = Columns([
+                .. InvoiceFamilyCoreLookupsOf("sprk_invoice"),
+                Sprk.Bff.Api.Services.Finance.Submission.InvoiceReviewDetail.Column,
+                Sprk.Bff.Api.Services.Finance.InvoiceReviewService.InvTotalAmount,
+                Sprk.Bff.Api.Services.Finance.InvoiceTotalsService.InvoiceFeesTotal,
+                Sprk.Bff.Api.Services.Finance.InvoiceTotalsService.InvoiceExpensesTotal,
+                Sprk.Bff.Api.Services.Finance.InvoiceTotalsService.InvoiceLineAdjustmentsTotal,
+                Sprk.Bff.Api.Services.Finance.InvoiceTotalsService.InvoiceInvoiceAdjustmentsTotal,
+                Sprk.Bff.Api.Services.Finance.InvoiceTotalsService.InvoiceApprovedTotal,
+                Sprk.Bff.Api.Services.Finance.ApExportService.BatchLookup]),
+            // ebilling-r1 task 165d (EB-D-207, uac-r2 U1-U2, approved 2026-11-07): the AP export claim (the invoice's batch lookup) is set and cleared
+            // only by ApExportService, which selects an invoice for a batch only while the lookup is empty. No generic writer sets or clears it.
+            WriterOnlyColumns = Columns(Sprk.Bff.Api.Services.Finance.ApExportService.BatchLookup),
             PreWriteRules = [InvoiceFamilyRule],
         },
         new RecordTableRule { Table = "sprk_reportcard", Kind = RecordTableKind.Child },
@@ -331,6 +379,27 @@ internal static partial class RecordTableRules
             // Task 014 (ebilling-r1's review of 013, item 3): as sprk_invoice.
             MappingProtectedColumns = InvoiceFamilyCoreLookupsOf("sprk_billingevent"),
             PreWriteRules = [InvoiceFamilyRule],
+            // ebilling-r1 task 164a-1 (uac-r2 Q6, approved 2026-11-06): one server-side owner of a NEW invoice line (extraction, a
+            // line decision, Add line), so a generic create is refused (record_creation.table_unsupported). Create only: D-96's
+            // detach / move / re-attach updates a line through the generic update paths, so update and delete are as before
+            // (CreatedOnlyByItsWriter, which also drives those refusals, stays false).
+            GenericCreateOnlyRefused = true,
+        },
+        // ebilling-r1 DEF-061 (owner-approved schema change, 2026-11-09): the Procedure Version's publish stamp. Only ProcedureService.PublishVersionAsync
+        // writes it, and the resolver reads "this version opened a window" from it, so no generic writer that asks InheritedAccessPermission.RefuseAppOnlyWrite
+        // (a field-mapping rule, an AI output mapping, the Update Record node, the record-creation mapping) sets, moves or clears it: a user-set stamp
+        // would make a never-published Draft hold work as a gap, and a cleared one would hide a published version's window. Registered for those two
+        // columns only, and every other column of the table is exactly as it was. A Procedure Version is created by ProcedureService alone, so the generic
+        // create is refused (GenericCreateOnlyRefused): RecordCreationService answers record_creation.table_unsupported, the same as for an unregistered
+        // table, and the chat create tool answers in its own words (DataverseCreateRecordHandler.CreatedOnlyByItsWriterCreateBlockedMessage). Repair
+        // skips the table (RecordCreationService.AppendOnlyTables) because it has no generic owner to repair.
+        new RecordTableRule
+        {
+            Table = "sprk_procedureversion",
+            Kind = RecordTableKind.Child,
+            MappingProtectedColumns = Columns(Sprk.Bff.Api.Services.Finance.Procedures.ProcedureEntity.VersionPublishedOnColumn),
+            WriterOnlyColumns = Columns(Sprk.Bff.Api.Services.Finance.Procedures.ProcedureEntity.VersionPublishedOnColumn),
+            GenericCreateOnlyRefused = true,
         },
 
         // ── The rest of the invoice family (task 017): InvoiceFamilyCoreRecordGuard.CoreRecordLookups keys ──────────
@@ -342,7 +411,12 @@ internal static partial class RecordTableRules
         {
             Table = "sprk_invoicesubmission",
             Kind = RecordTableKind.Child,
-            MappingProtectedColumns = InvoiceFamilyCoreLookupsOf("sprk_invoicesubmission"),
+            // 095d-1c F4-1: and the stored findings, whose assignFirm member decides the immutable Decision Record (typed writers only).
+            // 095d (uac-r2): and sprk_previoussequence, which only TrackingNumberAllocator's renumber writes (it is an AccessColumn in ParentLineage).
+            MappingProtectedColumns = Columns(
+                [.. InvoiceFamilyCoreLookupsOf("sprk_invoicesubmission"),
+                    Sprk.Bff.Api.Services.Finance.Submission.InvoiceSubmissionPersister.SubmissionFindingsJson,
+                    Sprk.Bff.Api.Services.Finance.Submission.TrackingNumberAllocator.PreviousSequenceColumn]),
             PreWriteRules = [InvoiceFamilyRule],
         },
         new RecordTableRule
@@ -378,8 +452,11 @@ internal static partial class RecordTableRules
             OwnershipException = new NamedRule(
                 "UnfiledCommunicationKeepsCreator",
                 "Escalation E1: a communication filed under nothing keeps its creator (UnfiledOwnership.KeepCreator; " +
-                "OwnedChildWrite.PathFor / KeepsItsCreatorWhenUnfiled). The per-user master thread and Direct-thread " +
-                "privacy rest on it; a team owner would show one person's mail to their whole business unit."),
+                "OwnedChildWrite.PathFor / KeepsItsCreatorWhenUnfiled). The per-user master thread rests on it. This service never " +
+                "creates a communication filed under nothing, so it never creates a Direct message. The Direct owner rule is a " +
+                "writer rule, not a registry rule: DirectMessageOwnerStep assigns a Direct message filed under no record to the " +
+                "Direct message owner team after the ingestor or send path has created it (and on an unfile), the same way the " +
+                "gate Decision Record follows its communication through GateDecisionRecordSharing."),
         },
 
         // Task 017 (item 9): the budget inquiry's service request (BudgetInquiryExecutor, spec FR-36 of the ontology's task
@@ -467,21 +544,28 @@ internal static partial class RecordTableRules
     /// <c>_{column}_value</c>) is matched by its column (<see cref="Sprk.Bff.Api.Services.Access.SecureRootInheritance.NormalizeColumn"/>).
     /// Never asked by a create: the create paths take these columns (<see cref="RecordTableRule.TableServerOwnedColumns"/> is the
     /// create-side refusal).
+    /// <para>fm task 054b: the same check also refuses an update naming a BFF-owned column of a communication or its thread
+    /// (<see cref="InheritedAccessPermission.RefuseBffOwnedCommunicationColumn"/>, code
+    /// <see cref="InheritedAccessPermission.BffOwnedCommunicationColumnReasonCode"/>), for every payload source and identity,
+    /// a proposal confirmed by the user the write impersonates included. Every generic update path already asks this check
+    /// (ArchTest <c>CoreRecordPairUpdateCheckGuardTests</c>), so a new one inherits the refusal. The BFF's typed writers of
+    /// those columns do not use these paths.</para>
     /// </summary>
     /// <param name="table">The table the update names.</param>
     /// <param name="keys">The payload's keys, in any form a writer sends.</param>
     internal static RecordOwnerResolution? RefuseFixedAfterCreateColumns(string? table, IEnumerable<string> keys)
     {
         ArgumentNullException.ThrowIfNull(keys);
+        var keyList = keys as IReadOnlyCollection<string> ?? keys.ToList();
         if (Find(table) is not { FixedAfterCreateColumns.Count: > 0 } rule)
-            return null;
+            return InheritedAccessPermission.RefuseBffOwnedCommunicationColumn(table, keyList);
 
         // Trimmed after the normalization too, so a space before the '@' of a bind key ("sprk_corerecordtype @odata.bind")
         // still names its column.
-        var named = keys.Select(k => Sprk.Bff.Api.Services.Access.SecureRootInheritance.NormalizeColumn(k).Trim())
+        var named = keyList.Select(k => Sprk.Bff.Api.Services.Access.SecureRootInheritance.NormalizeColumn(k).Trim())
             .FirstOrDefault(rule.FixedAfterCreateColumns.Contains);
         return named is null
-            ? null
+            ? InheritedAccessPermission.RefuseBffOwnedCommunicationColumn(table, keyList)
             : RecordOwnerResolution.Refused(FixedAfterCreateReasonCode,
                 $"{named} of a {rule.Table} is set when the record is created and cannot be changed");
     }
@@ -510,6 +594,37 @@ internal static partial class RecordTableRules
         Find(table) is { CreatedOnlyByItsWriter: true } rule
             ? RecordOwnerResolution.Refused(ChangedOnlyByItsWriterReasonCode, ChangedOnlyByItsWriterMessage(rule.Table))
             : null;
+
+    /// <summary>
+    /// The reason code when a generic write names a column of <see cref="RecordTableRule.WriterOnlyColumns"/>
+    /// (<see cref="RefuseWriterOnlyColumns"/>). It extends the <see cref="ChangedOnlyByItsWriterReasonCode"/> marker, so a query that counts
+    /// <c>changed_only_by_its_writer</c> counts this refusal too; the message names the column. Nothing is written.
+    /// </summary>
+    internal const string ChangedOnlyByItsWriterColumnReasonCode = ChangedOnlyByItsWriterReasonCode + ".column";
+
+    /// <summary>
+    /// The column-level counterpart of <see cref="RefuseWriterOnlyTableUpdate"/> (ebilling-r1 task 165d, EB-D-207; unified-access-control-r2
+    /// U1-U2, approved 2026-11-07): a payload naming a column of <see cref="RecordTableRule.WriterOnlyColumns"/> on <paramref name="table"/> is
+    /// refused whole, or <c>null</c> when it names none. Asked ONLY from <c>InheritedAccessPermission.RefuseAppOnlyWrite</c>, which the generic
+    /// writers already ask, so none carries a check of its own. Pure: it reads nothing, answers the same for any record and identity, and
+    /// matches the table trimmed and in any case. A key is matched in any form a writer sends (<c>col</c>, <c>col@odata.bind</c>,
+    /// <c>_col_value</c>, any case).
+    /// </summary>
+    /// <param name="table">The table the write names.</param>
+    /// <param name="keys">The payload's keys, in any form a writer sends.</param>
+    internal static RecordOwnerResolution? RefuseWriterOnlyColumns(string? table, IEnumerable<string> keys)
+    {
+        ArgumentNullException.ThrowIfNull(keys);
+        if (Find(table) is not { WriterOnlyColumns.Count: > 0 } rule)
+            return null;
+
+        var named = keys.Select(k => Sprk.Bff.Api.Services.Access.SecureRootInheritance.NormalizeColumn(k).Trim())
+            .FirstOrDefault(rule.WriterOnlyColumns.Contains);
+        return named is null
+            ? null
+            : RecordOwnerResolution.Refused(ChangedOnlyByItsWriterColumnReasonCode,
+                $"{named} of a {rule.Table} is changed only by Spaarke itself and can't be changed by this write");
+    }
 
     /// <summary>The reason code when a generic BFF delete path is asked to remove a row of a table only its writer changes
     /// (<see cref="RefuseWriterOnlyTableDelete"/>). Nothing is removed.</summary>
@@ -963,7 +1078,58 @@ internal sealed record NamedRule
 /// The row a pre-write rule decides on: the table and the payload AS IT WILL BE WRITTEN (caller values merged with mapped
 /// values), with the caller's own Dataverse client for any read the rule needs as the caller (ADR-028).
 /// </summary>
-internal sealed record PreWriteRow(IDataverseUserClient Caller, string Table, DataverseWriteItemMapper.MappedItem Item);
+/// <param name="Records">Task 045d: the reader of a record the row names, for a rule that derives columns from it (asked only
+/// after step 5's AppendTo on every record the row names). Fix round 5: its values as the CALLER reads them; a record the
+/// caller may not read is checked to exist app-only and comes back with no values. Null: such a rule fails closed.</param>
+/// <param name="RecordTypes">Task 045d: the APP-ONLY reader of a table's <c>sprk_recordtype_ref</c> row. Null: such a rule
+/// fails closed.</param>
+internal sealed record PreWriteRow(
+    IDataverseUserClient Caller, string Table, DataverseWriteItemMapper.MappedItem Item,
+    InvoiceFamilyCoreRecordGuard.RecordLookup? Records = null, InvoiceFamilyCoreRecordGuard.RecordTypeLookup? RecordTypes = null);
+
+/// <summary>
+/// Task 045d (owner ruling Q8 (a)): a pre-write rule's answer — a <see cref="PreWriteRefusal"/> (nothing is created), or the
+/// row may be written with <see cref="AdditionalColumns"/> (column → value; an <see cref="EntityReference"/> is a lookup) set
+/// over the caller's own, which step 5½ applies before step 6. A rule that adds nothing returns <see cref="Admit"/>. The
+/// refusal is the same record as before, so its contract (NFR-07) is unchanged.
+/// </summary>
+internal sealed record PreWriteResult
+{
+    private static readonly IReadOnlyDictionary<string, object?> NoColumns =
+        new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+
+    private PreWriteResult(PreWriteRefusal? refusal, IReadOnlyDictionary<string, object?> columns)
+    {
+        Refusal = refusal;
+        AdditionalColumns = columns;
+    }
+
+    /// <summary>The refusal; <c>null</c> when the row may be written.</summary>
+    public PreWriteRefusal? Refusal { get; }
+
+    /// <summary>The columns the rule sets on the row (empty for a refusal, and for a rule that adds nothing).</summary>
+    public IReadOnlyDictionary<string, object?> AdditionalColumns { get; }
+
+    /// <summary>The row may be written as it is.</summary>
+    public static PreWriteResult Admit { get; } = new(null, NoColumns);
+
+    /// <summary>The row may not be written.</summary>
+    public static PreWriteResult Refuse(PreWriteRefusal refusal)
+    {
+        ArgumentNullException.ThrowIfNull(refusal);
+        return new(refusal, NoColumns);
+    }
+
+    /// <summary>The row may be written with <paramref name="columns"/> set over its own.</summary>
+    public static PreWriteResult Add(IReadOnlyDictionary<string, object?> columns)
+    {
+        ArgumentNullException.ThrowIfNull(columns);
+        return new(null, new Dictionary<string, object?>(columns, StringComparer.OrdinalIgnoreCase));
+    }
+
+    /// <summary><see cref="Refuse"/> for a refusal, otherwise <see cref="Admit"/>.</summary>
+    public static PreWriteResult Of(PreWriteRefusal? refusal) => refusal is null ? Admit : Refuse(refusal);
+}
 
 /// <summary>
 /// A pre-write rule's refusal. Nothing is created. Exactly one of: a stable refusal <see cref="Code"/> with its
@@ -1029,8 +1195,8 @@ internal sealed record PreWriteRefusal
     }
 }
 
-/// <summary>A pre-write check: <c>null</c> when the row may be written.</summary>
-internal delegate Task<PreWriteRefusal?> PreWriteCheck(PreWriteRow row, CancellationToken ct);
+/// <summary>A pre-write check: a refusal, or the row may be written (with any columns the rule adds; task 045d).</summary>
+internal delegate Task<PreWriteResult> PreWriteCheck(PreWriteRow row, CancellationToken ct);
 
 /// <summary>
 /// A table-keyed rule that runs on the row as it will be written, AFTER the caller checks (Create / Append privilege and
@@ -1080,6 +1246,25 @@ internal sealed record RecordTableRule
     /// Decision Record, the playbook writers.
     /// </remarks>
     public IReadOnlySet<string> FixedAfterCreateColumns { get; init; } = NoColumns;
+
+    /// <summary>
+    /// Columns of THIS table that only the table's typed writer sets or clears (ebilling-r1 task 165d, EB-D-207; unified-access-control-r2
+    /// U1-U2): every generic writer is refused a payload naming one, whoever it writes as
+    /// (<see cref="RecordTableRules.RefuseWriterOnlyColumns"/>, asked from <c>InheritedAccessPermission.RefuseAppOnlyWrite</c> for every
+    /// <c>WriteIdentity</c>), with the <c>changed_only_by_its_writer</c> marker. The column-level sibling of
+    /// <see cref="CreatedOnlyByItsWriter"/>, which is table-level. Today <c>sprk_invoice</c> → { the AP export claim,
+    /// <c>ApExportService.BatchLookup</c> }. The typed writer reaches Dataverse through its own seam and never asks the refusal
+    /// (<c>BillingExportClaimWriterOnlyGuardTests</c>). Empty when the table has none.
+    /// </summary>
+    /// <remarks>
+    /// <b>Component justification (CLAUDE.md §11).</b> Existing — <c>InheritedAccessPermission.AccessColumns</c> (columns that confer or narrow
+    /// access; its owner declines a workflow claim there), <see cref="MappingProtectedColumns"/> (create-time mapping only) and
+    /// <see cref="CreatedOnlyByItsWriter"/> (a whole table). Extension — none reaches an update writer's payload for a column of an otherwise
+    /// ordinary table, so a sibling per-table set that the one existing refusal also reads is the narrow fit. Cost of doing nothing — a
+    /// playbook Update Record node or an output mapping can set or clear an invoice's AP export claim, which removes an approved invoice from
+    /// payment selection or attaches it to a batch it was never exported in.
+    /// </remarks>
+    public IReadOnlySet<string> WriterOnlyColumns { get; init; } = NoColumns;
 
     /// <summary>The column the platform autonumber fills (the create leaves it empty and retries on its alternate key).</summary>
     public string? AutonumberColumn { get; init; }
@@ -1131,6 +1316,25 @@ internal sealed record RecordTableRule
     /// Task 048 (owner decision 2026-11-04, D-204 extended to updates): the same flag says the rows are CHANGED only by the
     /// writer too; every generic update path refuses such a table through <see cref="RecordTableRules.RefuseWriterOnlyTableUpdate"/>,
     /// so create and update read one list.
+    /// <para>The create sites read <see cref="GenericCreateRefused"/>, which also covers <see cref="GenericCreateOnlyRefused"/>;
+    /// the update and delete refusals read this flag alone.</para>
     /// </summary>
     public bool CreatedOnlyByItsWriter { get; init; }
+
+    /// <summary>
+    /// Whether ONLY the generic create of the table is refused (ebilling-r1 task 164a-1; uac-r2 Q6, approved 2026-11-06): its new
+    /// rows have one server-side owner (its typed writers), but the generic update and delete paths keep serving it, unlike
+    /// <see cref="CreatedOnlyByItsWriter"/>. Today only <c>sprk_billingevent</c>: D-96's supported detach / move / re-attach
+    /// sequence updates an invoice line through the playbook update and the output orchestrator. Never read on its own; the
+    /// create sites read <see cref="GenericCreateRefused"/>.
+    /// </summary>
+    public bool GenericCreateOnlyRefused { get; init; }
+
+    /// <summary>
+    /// Whether a GENERIC create of the table is refused: <see cref="CreatedOnlyByItsWriter"/> or
+    /// <see cref="GenericCreateOnlyRefused"/>. Every generic create site reads this (<see cref="RecordCreationService"/>, the chat
+    /// create tool's validate and execute); the update and delete refusals read <see cref="CreatedOnlyByItsWriter"/> alone, so a
+    /// create-only table is still updated and deleted as before.
+    /// </summary>
+    public bool GenericCreateRefused => CreatedOnlyByItsWriter || GenericCreateOnlyRefused;
 }

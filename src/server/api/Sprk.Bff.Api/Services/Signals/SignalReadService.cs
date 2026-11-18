@@ -1670,9 +1670,10 @@ public sealed class SignalReadService
 
             // UAC review F4 / DEF-043 (#2294): the line's invoice counts only when it is filed under the Signal's FROZEN core record
             // (sprk_corerecordtype + sprk_corerecordid, refused to app-only generic writers). sprk_billingevent.sprk_invoice is not
-            // refused (D-96's detach sequence writes it through the generic paths; a same-core re-attach through an Update Record
-            // node or an output mapping, a person's run, or a native edit by a user with Write re-points it, no misconfiguration
-            // needed), so a line re-pointed to an invoice of another core record would otherwise be judged by that invoice. No
+            // refused as a column. Through the BFF no write detaches a line or moves an invoice (EB-D-231 rules 1 and 3), and a line may
+            // only name an invoice of its own core record (rule 2); but a native edit by a user with Write, or a row filed before those
+            // rules, can still re-point a line, so a line re-pointed to an invoice of another core record would otherwise be judged by
+            // that invoice. No
             // invoice, an invoice the caller cannot read or with no single core record, a Signal with no core record, or a
             // mismatch: withheld.
             var lineInvoices = eventOf.Values.Where(invoiceOfEvent.ContainsKey).Select(e => invoiceOfEvent[e]).Distinct().ToList();

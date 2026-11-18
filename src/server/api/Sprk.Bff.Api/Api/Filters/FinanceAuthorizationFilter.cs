@@ -1,10 +1,12 @@
 using Spaarke.Core.Auth;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Api.Finance;
 using Sprk.Bff.Api.Infrastructure.Auth;
 using Sprk.Bff.Api.Infrastructure.Authentication;
 using Sprk.Bff.Api.Infrastructure.Errors;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Services.Ai.Context;
+using Sprk.Bff.Api.Services.Finance.Submission;
 using Sprk.Bff.Api.Services.Identity;
 
 namespace Sprk.Bff.Api.Api.Filters;
@@ -185,6 +187,32 @@ public enum FinanceDenial
     /// the check and the compute.
     /// </summary>
     UniformNotFound,
+
+    /// <summary>
+    /// The uniform 404 for a GENUINE denial only (no table privilege, a step-0 refusal of an external caller or of a caller with no
+    /// systemuser row, no Read), and the route's 503 (<c>ebilling.submission.record_unavailable</c>, the submission read fault) for
+    /// EVERY system-failure outcome: a step-0 flag or lookup read fault, a table-privilege read that has no complete answer
+    /// (<see cref="CallerPrivilegeAnswer.Faulted"/>), a record-rights answer Dataverse did not complete (<see cref="AccessSnapshot.Faulted"/>,
+    /// task 095g) whose rights do not hold the operation, a target declaration or check that threw, a missing probe or caller resolver.
+    /// For a route whose 404 means "no match" (<c>GET /api/finance/invoice-submissions?internetMessageId=</c>, ebilling-r1 task 095a
+    /// review F1, uac-r2 binding): it must NEVER answer the no-match 404 when it could not decide. Opt-in: every other route keeps
+    /// <see cref="UniformNotFound"/> or <see cref="Forbidden"/>, where a fault is denied as before.
+    /// </summary>
+    UniformNotFoundFailClosed,
+}
+
+/// <summary>The answer of <see cref="FinanceAuthorizationFilter.EvaluateCheckForCallerAsync"/> for one check (ebilling-r1 task 084g).</summary>
+/// <remarks><see cref="Faulted"/> is the zero value, so <c>default</c> is never <see cref="Allowed"/>.</remarks>
+public enum FinanceCheckVerdict
+{
+    /// <summary>No answer: no caller, a missing service, a check that threw, or a system failure.</summary>
+    Faulted = 0,
+
+    /// <summary>Answered, and the caller does not hold it.</summary>
+    Denied = 1,
+
+    /// <summary>Answered, and the caller holds it.</summary>
+    Allowed = 2,
 }
 
 /// <summary>Which authorization path a <see cref="FinanceAuthorizationCheck"/> takes.</summary>
@@ -539,15 +567,134 @@ public class FinanceAuthorizationFilter : IEndpointFilter
     /// The Record path's decision, AS THE CALLER: the caller's rights on <paramref name="entitySetName"/>(<paramref name="recordId"/>)
     /// (<see cref="AuthorizationService.GetCallerRecordAccessAsync"/>) against <paramref name="operation"/>'s required rights. The ONE
     /// definition of it: the filter's Record check and a handler that must put a SECOND record to the caller (the correction prefill's
-    /// replacement invoice, ebilling-r1 task 097e) both call it, so the two cannot differ. A fault propagates; the filter denies on it, a
-    /// handler decides what its own fault means.
+    /// replacement invoice, ebilling-r1 task 097e) both call it, so the two cannot differ. A thrown fault propagates; the filter denies on it,
+    /// a handler decides what its own fault means. The answer is held exactly when the snapshot's rights satisfy the operation, faulted or
+    /// not: a degraded answer that still carries the rights is held (<see cref="CallerRecordVerdictAsync"/>).
     /// </summary>
     internal static async Task<bool> CallerHoldsRightsAsync(
         AuthorizationService authorizationService, string userId, string entitySetName, Guid recordId, string operation, string? callerToken,
+        CancellationToken ct) =>
+        await CallerRecordVerdictAsync(authorizationService, userId, entitySetName, recordId, operation, callerToken, ct)
+            .ConfigureAwait(false) == FinanceCheckVerdict.Allowed;
+
+    /// <summary>
+    /// The Record path's decision with the fault told apart (ebilling-r1 task 095g, reviews 1 and 2). The rights decide first:
+    /// <see cref="FinanceCheckVerdict.Allowed"/> when the snapshot's rights satisfy <paramref name="operation"/>, WHATEVER
+    /// <see cref="AccessSnapshot.Faulted"/> says. The source can return a degraded but genuine answer marked faulted (Read, when the full
+    /// rights question went unanswered and the record is still readable), and a request it satisfies gets exactly the rights it always did.
+    /// Only an answer that is not held is split: <see cref="FinanceCheckVerdict.Faulted"/> when the snapshot is faulted, otherwise
+    /// <see cref="FinanceCheckVerdict.Denied"/>. The one question and the one allow rule: <see cref="CallerHoldsRightsAsync"/> and the
+    /// filter's Record check (in every mode) both go through it.
+    /// </summary>
+    internal static async Task<FinanceCheckVerdict> CallerRecordVerdictAsync(
+        AuthorizationService authorizationService, string userId, string entitySetName, Guid recordId, string operation, string? callerToken,
         CancellationToken ct)
     {
-        var snapshot = await authorizationService.GetCallerRecordAccessAsync(userId, entitySetName, recordId, callerToken, ct);
-        return OperationAccessPolicy.HasRequiredRights(snapshot.AccessRights, operation);
+        var snapshot = await authorizationService.GetCallerRecordAccessAsync(userId, entitySetName, recordId, callerToken, ct).ConfigureAwait(false);
+        if (OperationAccessPolicy.HasRequiredRights(snapshot.AccessRights, operation))
+        {
+            return FinanceCheckVerdict.Allowed;
+        }
+
+        return snapshot.Faulted ? FinanceCheckVerdict.Faulted : FinanceCheckVerdict.Denied;
+    }
+
+    /// <summary>
+    /// The check half of this filter, for code that is not this filter (ebilling-r1 task 084g, EB-D-221: the record read routes report the
+    /// caller's write permissions). It evaluates ONE check for the caller of <paramref name="httpContext"/> through the same
+    /// <see cref="EvaluateAsync"/> the filter's loop runs: the caller's own token, the same Record, Privilege and Document paths and the
+    /// same allow rule, no app-only branch. It runs in the <see cref="FinanceDenial.UniformNotFoundFailClosed"/> mode, whose only difference
+    /// from <see cref="FinanceDenial.Forbidden"/> in <see cref="EvaluateAsync"/> is that a table-privilege question with no complete answer is
+    /// reported as a system failure instead of a denial (the same question is asked, and only <see cref="CallerPrivilegeAnswer.Held"/> allows
+    /// in both), so a fault can be told apart and logged. It does not run step 0 or a target declaration and renders no response; the
+    /// caller's route has run step 0 already.
+    /// Never throws except on a cancelled request: no caller, a missing service, a check that threw or a system failure is
+    /// <see cref="FinanceCheckVerdict.Faulted"/>, logged at Warning.
+    /// <para><b>A record-rights answer Dataverse did not complete</b> (084g fix round 1, review A2). The production rights source does not
+    /// throw on a fault: it returns a snapshot with <see cref="AccessSnapshot.Faulted"/> set, carrying no rights or a degraded Read.
+    /// <see cref="CallerRecordVerdictAsync"/> reports a faulted answer that does not satisfy the operation as
+    /// <see cref="FinanceCheckVerdict.Faulted"/>; the filter denies on it in the uniform-404 and 403 modes and answers it as a system failure
+    /// in this mode (task 095g). The evaluator also runs on an <see cref="AuthorizationService"/> over the same registered
+    /// <see cref="IAccessDataSource"/>, seen through a decorator that only notes whether a snapshot came back faulted, so ANY faulted answer
+    /// (one the degraded rights satisfy included, and one on the Document path) is <see cref="FinanceCheckVerdict.Faulted"/> here: this
+    /// evaluator reports permissions, and a degraded answer cannot say which the caller holds. Every question and answer is the registered
+    /// source's own, so the record decision is still <see cref="CallerRecordVerdictAsync"/>'s.</para>
+    /// </summary>
+    internal static async Task<FinanceCheckVerdict> EvaluateCheckForCallerAsync(
+        HttpContext httpContext, FinanceAuthorizationCheck check, ILogger? logger, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(httpContext);
+        ArgumentNullException.ThrowIfNull(check);
+
+        var userId = CallerResolution.ResolveObjectId(httpContext.User);
+        var services = httpContext.RequestServices;
+        var accessSource = services.GetService<IAccessDataSource>();
+        if (string.IsNullOrEmpty(userId) || accessSource is null || services.GetService<AuthorizationService>() is null)
+        {
+            logger?.LogWarning(
+                "Finance check {Operation} on {EntitySet} [{Source}] could not run (caller resolved: {HasCaller}); answered as faulted",
+                check.Operation, check.EntitySetName, check.Source, !string.IsNullOrEmpty(userId));
+            return FinanceCheckVerdict.Faulted;
+        }
+
+        var observed = new FaultObservingAccessDataSource(accessSource);
+        var authService = new AuthorizationService(
+            observed, services.GetServices<IAuthorizationRule>(),
+            services.GetService<ILogger<AuthorizationService>>() ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<AuthorizationService>.Instance);
+        var evaluator = new FinanceAuthorizationFilter(
+            authService, static _ => FinanceAuthorizationTargets.Authorize(), FinanceDenial.UniformNotFoundFailClosed,
+            services.GetService<CallerRecordAccessProbe>());
+        string? reason;
+        try
+        {
+            reason = await evaluator.EvaluateAsync(check, userId, TokenHelper.ExtractBearerTokenOrNull(httpContext), httpContext, logger, ct);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            logger?.LogWarning(ex,
+                "Finance check {Operation} on {EntitySet} [{Source}] faulted for caller {UserId}; answered as faulted",
+                check.Operation, check.EntitySetName, check.Source, userId);
+            return FinanceCheckVerdict.Faulted;
+        }
+
+        if (reason == SystemFailureReasonCode || observed.SawFaultedSnapshot)
+        {
+            logger?.LogWarning(
+                "Finance check {Operation} on {EntitySet} [{Source}] had no answer for caller {UserId}; answered as faulted",
+                check.Operation, check.EntitySetName, check.Source, userId);
+            return FinanceCheckVerdict.Faulted;
+        }
+
+        return reason is null ? FinanceCheckVerdict.Allowed : FinanceCheckVerdict.Denied;
+    }
+
+    /// <summary>
+    /// <see cref="EvaluateCheckForCallerAsync"/>'s view of the registered rights source: every call passes straight through, and a snapshot
+    /// that comes back <see cref="AccessSnapshot.Faulted"/> is noted. One instance per evaluated check, so nothing is shared.
+    /// </summary>
+    private sealed class FaultObservingAccessDataSource(IAccessDataSource inner) : IAccessDataSource
+    {
+        public bool SawFaultedSnapshot { get; private set; }
+
+        public async Task<AccessSnapshot> GetUserAccessAsync(string userId, string resourceId, string? userAccessToken = null, CancellationToken ct = default) =>
+            Note(await inner.GetUserAccessAsync(userId, resourceId, userAccessToken, ct).ConfigureAwait(false));
+
+        public async Task<AccessSnapshot> GetRecordAccessAsync(string userId, string entitySetName, Guid recordId, string? userAccessToken, CancellationToken ct = default) =>
+            Note(await inner.GetRecordAccessAsync(userId, entitySetName, recordId, userAccessToken, ct).ConfigureAwait(false));
+
+        private AccessSnapshot Note(AccessSnapshot snapshot)
+        {
+            if (snapshot.Faulted)
+            {
+                SawFaultedSnapshot = true;
+            }
+
+            return snapshot;
+        }
     }
 
     /// <summary>Returns <c>null</c> when allowed, otherwise the deny reason code.</summary>
@@ -562,6 +709,17 @@ public class FinanceAuthorizationFilter : IEndpointFilter
             if (probe is null)
             {
                 return SystemFailureReasonCode;
+            }
+
+            if (_denial == FinanceDenial.UniformNotFoundFailClosed)
+            {
+                // A fault is not a "no": it is reported as the system failure the route renders as its own 503.
+                return await probe.CallerPrivilegeAnswerAsync(callerToken, check.Operation, ct) switch
+                {
+                    CallerPrivilegeAnswer.Held => null,
+                    CallerPrivilegeAnswer.NotHeld => InsufficientPrivilegeReasonCode,
+                    _ => SystemFailureReasonCode,
+                };
             }
 
             return await probe.CallerHoldsPrivilegeAsync(callerToken, check.Operation, ct)
@@ -593,10 +751,18 @@ public class FinanceAuthorizationFilter : IEndpointFilter
 
             case FinanceCheckPath.Record:
                 {
-                    return await CallerHoldsRightsAsync(
-                        _authorizationService, userId, check.EntitySetName, check.RecordId, check.Operation, callerToken, ct)
-                        ? null
-                        : InsufficientRightsReasonCode;
+                    var verdict = await CallerRecordVerdictAsync(
+                        _authorizationService, userId, check.EntitySetName, check.RecordId, check.Operation, callerToken, ct);
+                    return verdict switch
+                    {
+                        FinanceCheckVerdict.Allowed => null,
+
+                        // ebilling-r1 task 095g (design 3e): in the fail-closed mode an answer Dataverse did not complete, and that does not
+                        // hold the operation's rights, is the route's 503, never the uniform 404. Every other mode refuses it exactly as before
+                        // (a degraded answer that holds the rights was Allowed above, in every mode).
+                        FinanceCheckVerdict.Faulted when _denial == FinanceDenial.UniformNotFoundFailClosed => SystemFailureReasonCode,
+                        _ => InsufficientRightsReasonCode,
+                    };
                 }
 
             default:
@@ -604,8 +770,15 @@ public class FinanceAuthorizationFilter : IEndpointFilter
         }
     }
 
-    private IResult Deny(HttpContext httpContext, string reasonCode) =>
-        _denial == FinanceDenial.UniformNotFound
-            ? UniformRecordNotFound(httpContext)
-            : ProblemDetailsHelper.Forbidden(reasonCode, traceId: httpContext.TraceIdentifier);
+    private IResult Deny(HttpContext httpContext, string reasonCode) => _denial switch
+    {
+        FinanceDenial.UniformNotFound => UniformRecordNotFound(httpContext),
+
+        // Only a genuine denial is the no-match 404; any system failure is the route's 503 (see FinanceDenial.UniformNotFoundFailClosed).
+        FinanceDenial.UniformNotFoundFailClosed => reasonCode == SystemFailureReasonCode
+            ? InvoiceSubmissionHttp.ReadFault(InvoiceSubmissionService.ReadUnavailable())
+            : UniformRecordNotFound(httpContext),
+
+        _ => ProblemDetailsHelper.Forbidden(reasonCode, traceId: httpContext.TraceIdentifier),
+    };
 }

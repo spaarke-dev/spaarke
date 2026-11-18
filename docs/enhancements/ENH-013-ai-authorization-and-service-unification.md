@@ -293,5 +293,5 @@ To understand the exact failure mode for Phase 2 implementation, diagnostic logg
 
 - [UAC Architecture](../architecture/uac-access-control.md)
 - [Auth Constraints](../../.claude/constraints/auth.md)
-- [ADR-003: Authorization Seams](../../.claude/adr/ADR-003-lean-authorization-seams.md)
+- [ADR-003: Authorization Seams](../adr/ADR-003-lean-authorization-seams.md)
 - [ADR-013: AI Architecture](../../.claude/adr/ADR-013-ai-architecture.md)

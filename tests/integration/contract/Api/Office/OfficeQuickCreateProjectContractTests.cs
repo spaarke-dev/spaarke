@@ -184,7 +184,7 @@ public class OfficeQuickCreateProjectContractTests
         // owner and secure flag (the mapping-source rule's own columns, read in the same request).
         requestedColumns.Single().Should().BeEquivalentTo(
             "sprk_clientreference", "sprk_client", "sprk_projectname", "sprk_notonsource", "sprk_projectnumber",
-            "ownerid", "sprk_issecure");
+            "ownerid", "sprk_issecure", "sprk_accesspermission"); // task 022b: the Restricted-source check reads the source's access permission in the same request
 
         var project = created.Entity!;
         project.GetAttributeValue<string>("sprk_clientreference").Should().Be("ACME-REF");

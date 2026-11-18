@@ -25,12 +25,12 @@ import {
   MessageBarActions,
 } from "@fluentui/react-components";
 import { ChatRegular, ChatAddRegular, DismissRegular, ArrowClockwiseRegular } from "@fluentui/react-icons";
-import { PaneHeader, SprkChat, createConsumerDispatcher, RichFilePreviewDialog, createXrmNavigationService, createXrmDataService, searchUsersAndContacts, launchSurface, resolveSurfaceLaunch, launchSummarizeFilesWizard, SendEmailDialog } from "@spaarke/ui-components";
+import { PaneHeader, SprkChat, createConsumerDispatcher, RichFilePreviewDialog, createXrmNavigationService, createXrmDataService, searchUsersAndContacts, launchSurface, resolveSurfaceLaunch, launchSummarizeFilesWizard, SendEmailDialog, createXrmEmailComposeHandlers } from "@spaarke/ui-components";
 import { WelcomeStartCards } from "./WelcomeStartCards";
 import { QuickStartModal } from "./QuickStartModal";
 import { MemoryDialog } from "./MemoryDialog";
 import { useAiSession, useDispatchPaneEvent, usePaneEvent, clearExecutionTraceBuffer } from "@spaarke/ai-widgets";
-import type { WorkspacePaneEvent } from "@spaarke/ai-widgets";
+import type { WorkspacePaneEvent, IChatSession } from "@spaarke/ai-widgets";
 // task 033 (FR-17 wizard→review auto-run bridge): the typed compose-seed shape the wizard hand-off
 // listener narrows `widget_load{widgetType:'compose'}` payloads to (composeSessionId / analysisId /
 // subDomain / autoRunReview — declared additively on the SAME seed every compose door already uses).
@@ -43,7 +43,6 @@ import type {
   ResolvedLookup,
   ConsumerChip,
 } from "@spaarke/ui-components";
-import type { IChatSession } from "@spaarke/ai-context";
 import { WelcomePanel } from "../WelcomePanel";
 // Compose three-pane coordination — ASSISTANT leg (task 104 / E2E-R5). Typed
 // receivers for Flow 2 (compose_selection_offer) + Flow 4 (compose_context_offer).
@@ -915,6 +914,15 @@ export function ConversationPane(): React.JSX.Element {
   const handleSearchRecipients = React.useCallback(
     (query: string) => searchUsersAndContacts(emailLookupDataService, query),
     [emailLookupDataService]
+  );
+  // D-219 Q3 (task 186) + Q1 (task 193): the Send Email dialog shows the compose template picker, the AI-draft
+  // sparkle, the side-pane To/Cc/Bcc buttons and the Related-to picker only when the host passes these handlers
+  // (EmailComposer hides each otherwise). The same
+  // Xrm-backed factory the per-item cards (EmailPerItemCards) and EmailWorkspaceWidget use; one
+  // instance for this pane's dialog.
+  const emailComposeHandlers = React.useMemo(
+    () => createXrmEmailComposeHandlers({ authenticatedFetch, bffBaseUrl }),
+    [authenticatedFetch, bffBaseUrl]
   );
   // task 025 (FR-09/FR-10) — email per-item ACTION CARDS (Reply/Reply All/Forward/Summarize the
   // thread), keyed to the active-item conduit's email handle (`generalizedActiveItem`, task 001/012).
@@ -3595,6 +3603,14 @@ export function ConversationPane(): React.JSX.Element {
         onSearchRecipients={handleSearchRecipients}
         authenticatedFetch={authenticatedFetch}
         bffBaseUrl={bffBaseUrl}
+        onListEmailTemplates={emailComposeHandlers.onListEmailTemplates}
+        onRenderEmailTemplate={emailComposeHandlers.onRenderEmailTemplate}
+        onDraftWithAi={emailComposeHandlers.onDraftWithAi}
+        onUploadLocalAttachment={emailComposeHandlers.onUploadLocalAttachment}
+        onLookupRecipients={emailComposeHandlers.onLookupRecipients}
+        recordLookupCatalog={emailComposeHandlers.recordLookupCatalog}
+        onLookupRecord={emailComposeHandlers.onLookupRecord}
+        onAddRelationship={emailComposeHandlers.onAddRelationship}
         onSent={() => setEmailSeed(null)}
       />
 

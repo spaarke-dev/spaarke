@@ -18,6 +18,7 @@
 import { describeWebApiCreateError } from '../../utils/webApiCreateError';
 import type { ICreateProjectFormState } from './projectFormTypes';
 import type { ILookupItem } from '../../types/LookupTypes';
+import { searchOrganizationsAsLookup } from '../CreateMatterWizard/matterService';
 import type { IDataService } from '../../types/serviceInterfaces';
 import type { AssociationResult } from '../AssociateToStep/types';
 import type { IUserBuCascadeDefaults, AuthenticatedFetchFn } from '../../services/EntityCreationService';
@@ -185,29 +186,9 @@ export class ProjectService {
    * Returns up to 10 matching organizations as ILookupItem.
    */
   async searchOrganizations(nameFilter: string): Promise<ILookupItem[]> {
-    if (!nameFilter || nameFilter.trim().length < 2) {
-      return [];
-    }
-
-    const safeFilter = nameFilter.trim().replace(/'/g, "''");
-    const query =
-      `?$select=sprk_organizationid,sprk_name` +
-      `&$filter=contains(sprk_name,'${safeFilter}')` +
-      `&$orderby=sprk_name asc` +
-      `&$top=10`;
-
-    console.info('[ProjectService] searchOrganizations query:', 'sprk_organization', query);
-    try {
-      const result = await this._dataService.retrieveMultipleRecords('sprk_organization', query);
-      console.info('[ProjectService] searchOrganizations results:', result.entities.length);
-      return result.entities.map(e => ({
-        id: e['sprk_organizationid'] as string,
-        name: e['sprk_name'] as string,
-      }));
-    } catch (err) {
-      console.error('[ProjectService] searchOrganizations error:', err);
-      throw err;
-    }
+    // sprk_organization's name column is sprk_organizationname (it has no sprk_name), so the
+    // matter wizard's search is the one source of the query (F-R4-1, ontology UAT 2026-11-12).
+    return searchOrganizationsAsLookup(this._dataService, nameFilter);
   }
 
   // ── Record creation ───────────────────────────────────────────────────

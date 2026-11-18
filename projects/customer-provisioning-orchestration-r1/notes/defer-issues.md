@@ -10,6 +10,24 @@
 
 ## Open (in priority order)
 
+### ISS-029 — New stamps lack the invoice-family (#2799) and message-access field locks; H7b does not check them (#2859)
+
+| Field | Value |
+|---|---|
+| Found | 2026-11-15, master review (`9fef284de0`..`ce6c241964`) |
+| Issue | https://github.com/spaarke-dev/spaarke/issues/2859 |
+| Fails without it | On a new stamp, users can write the 24 invoice-family lookups (#2799: `Set-InvoiceFamilyFieldSecurity.ps1`; not secured in SpaarkeMaster 1.3.1.0) and so re-file invoice records past the BFF's checks. The message-access lock (`Set-ThreadFlagFieldSecurity.ps1`) is described in guide §7.4 as run by provisioning, but nothing runs it. H7b checks only S14 and S26. |
+| Owner | This project: task 270 (owner go 2026-11-16). Owner chose path A on 2026-11-16: uac-r2 packages the #2799 lock in SpaarkeMaster (branch `fix/2859-invoice-lock-in-spaarkemaster`, planned 1.3.2.0), and H7b verifies it (S27) and the message-access lock (S28, procedure version 10). Open until uac-r2's release is published and S27's package-row check is added to `BffManagedLinkColumnLockListTests`. |
+
+### ISS-028 — Operator scripts excuse the System Administrator field-security profile by name (#2725)
+
+| Field | Value |
+|---|---|
+| Found | 2026-11-11, task 268 review (H7b had the same defect; fixed there by the fixed id `572329c1-a042-4e22-be47-367c6374ea45`) |
+| Issue | https://github.com/spaarke-dev/spaarke/issues/2725 |
+| Fails without it | A profile NAMED "System Administrator" with create/update on a locked column is excused by 19 scripts' `-Verify` (list in the issue), so the script reports the lock whole while an ordinary member can write the column. |
+| Owner | unified-access-control-r2 / external-access r3 (most scripts), ebilling-r1 (four). Not ours to fix in 268. |
+
 ### ISS-001 — Hand-off owed by UAC-r2: how a new environment gets `sprk_noaccessentry`
 
 | Field | Value |

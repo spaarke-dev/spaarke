@@ -1,6 +1,10 @@
 # sprk_noaccessentry Entity Schema
 
-> **Entity Purpose**: The FR-23 deny-list store — the ethical-wall and per-child-revocation mechanism.
+> **Entity Purpose**: The FR-23 deny-list store — the ethical-wall and per-record (root) revocation mechanism.
+> A record object is enforced only on the three roots (project, matter, work assignment). A child record
+> (document, event, to-do, communication, invoice, analysis) is never denied on its own: it follows its root
+> through the core-ancestor stamp, so walling the root walls its children (example 2 below; corrected by task
+> 090, absorbing 058).
 > Each row is a **veto**, never a level: a matching active entry means the subject has **no access** to
 > the object, full stop. This table is read by the BFF's `NoAccessListReader` (fail-closed) and feeds
 > Slot 1 of `AccessibleRecordSetService.ApplyVetoPipeline` (wired by task 039 — this task delivers the
@@ -39,7 +43,7 @@
 | **Plural Display Name** | No Access Entries |
 | **Primary Name Field** | sprk_name |
 | **Ownership Type** | Organization |
-| **Description** | Deny-list entry (FR-23): vetoes access for a subject (contact, organization or — since task 143 — internal user; exactly one populated) against an object (an organization reference — ethical wall — or a specific polymorphic record — per-child revocation; exactly one populated). A veto is never a level: a matching active entry REMOVES the subject's access rather than writing a low access value. |
+| **Description** | Deny-list entry (FR-23): vetoes access for a subject (contact, organization or — since task 143 — internal user; exactly one populated) against an object (an organization reference — ethical wall — or a specific polymorphic record — per-record revocation, enforced on the three roots only; exactly one populated). A veto is never a level: a matching active entry REMOVES the subject's access rather than writing a low access value. |
 
 **Why Organization-owned, not User-owned**: mirrors `sprk_externalrecordaccess` (the sibling grant table).
 A deny entry is an administrative/governance record, not something a single user "owns" in the
@@ -76,7 +80,7 @@ row nobody should be routinely reassigning.
 | Logical Name | Display Name | Type | Target Entity | Description |
 |--------------|--------------|------|----------------|-------------|
 | sprk_objectorganization | Object Organization | Lookup | sprk_organization | **Ethical wall.** Denies every candidate record whose referenced-organization set contains this organization — **ANY** reference, including a non-conferring one (e.g. opposing counsel referenced on a matter). The over-match is the specified behavior (spec FR-23 / register B-10), not a bug. |
-| sprk_objectrecordtype | Object Record Type | Lookup | sprk_recordtype_ref | **Per-child revocation.** The entity type of the specific denied record — the ADR-024 resolver-pair pattern (type + id), deliberately **without** an entity-specific lookup per possible type (the task's own constraint: "do NOT create one lookup per possible entity type" — the object here can be ANY record type, unlike the small closed parent-type sets ADR-024's dual-field strategy targets). |
+| sprk_objectrecordtype | Object Record Type | Lookup | sprk_recordtype_ref | **Per-record revocation** (enforced for project, matter and work assignment only; the entry form refuses any other type, task 154). The entity type of the specific denied record — the ADR-024 resolver-pair pattern (type + id), deliberately **without** an entity-specific lookup per possible type (the task's own constraint: "do NOT create one lookup per possible entity type" — the object here can be ANY record type, unlike the small closed parent-type sets ADR-024's dual-field strategy targets). |
 | sprk_objectrecordid | Object Record Id | String(50) | — | GUID (as text) of the specific denied record. Paired with `sprk_objectrecordtype`. **Matching is by id alone** — `NoAccessListReader` does not additionally require the entity-logical-name to match, because Dataverse record ids are effectively globally unique (random v4 GUIDs assigned per row); the recordtype lookup exists for provenance/audit legibility, not as a second matching key. **Canonical form required (task 154):** the readers match this text by string equality against the lowercase hyphenated id, so a value with braces, in the 32-digit form, or with a leading space matches nothing. Such a row is MALFORMED (Business Rule 1). The entry form normalises the id before saving (and flags a stored non-canonical one on load, without rewriting an existing entry), and the record picker writes it in canonical form. The rule (`NoAccessListReader.TryParseObjectRecordId` / `FoldLikeDataverse`) accepts exactly what Dataverse's own comparison matches, as measured live on 2026-10-07: case, full-width forms, U+FEFF and the combining marks U+0300-U+036F are ignored, and trailing U+0020 / U+3000 are padding; every other combining mark (e.g. Arabic U+064B, Thai U+0E31), a leading space, braces, a trailing tab, NBSP, em space, LF or zero-width space are significant, so such a row is malformed. |
 
 ### Governance Field
@@ -134,7 +138,7 @@ map to "None" because absence (a removed key) is the only representation of deni
    "+ User"). A task-142 Assigned-To auto share is the exception — 142's own invariant restores it.
 3. **No expiry field.** Unlike `sprk_externalrecordaccess.sprk_expiresdate` (which the design register
    flags as write-only/unenforced — finding A-5), this table deliberately has **no** expiry column: an
-   ethical wall or a per-child revocation is not the kind of grant that should silently lapse. Time-boxed
+   ethical wall or a per-record revocation is not the kind of grant that should silently lapse. Time-boxed
    denials, if ever needed, are a future extension — not a gap this task leaves open, a decision this task
    makes.
 4. **A veto row is never read as "somewhat denied."** There is no partial-strength deny; a matching active

@@ -5,7 +5,7 @@ fetched: 2026-05-14
 
 # Declarative agent schema 1.6 for Microsoft 365 Copilot
 
-This article describes the 1.6 schema used by the declarative agent manifest. The manifest is a machine-readable document that provides a Large Language Model (LLM) with the necessary instructions, knowledge, and actions to specialize in addressing a select set of user problems. Microsoft 365 app manifest references declarative agent manifests inside an [app package](agents-are-apps#app-package).
+This article describes the 1.6 schema used by the declarative agent manifest. The manifest is a machine-readable document that provides a Large Language Model (LLM) with the necessary instructions, knowledge, and actions to specialize in addressing a select set of user problems. Microsoft 365 app manifest references declarative agent manifests inside an [app package](https://learn.microsoft.com/en-us/microsoft-365/copilot/extensibility/plugins-overview).
 
 > **Important**: The latest version of the declarative agent manifest schema is **version 1.7**. Use the latest schema version for new agents.
 
@@ -54,7 +54,7 @@ Localizable strings can use a localization key instead of a literal value: `[[ke
 | `instructions` | String | Required. Detailed instructions or guidelines on how the agent should behave, its functions, and any behaviors to avoid. Must contain at least one nonwhitespace character and be 8,000 characters or less. |
 | `capabilities` | Array of Capabilities object | Optional. The array can't contain more than one of each derived type of Capabilities object. |
 | `conversation_starters` | Array of Conversation starter object | Optional. Title and Text are localizable. The array can't contain more than 12 objects. |
-| `actions` | Array of Action object | Optional. A list of 1-10 objects that identify [plugins](plugin-manifest-2.4) that provide actions accessible to the declarative agent. |
+| `actions` | Array of Action object | Optional. A list of 1-10 objects that identify [plugins](https://learn.microsoft.com/en-us/microsoft-365/copilot/extensibility/plugin-manifest-2.4) that provide actions accessible to the declarative agent. |
 | `behavior_overrides` | Behavior overrides object | Optional. Contains configuration settings that modify the behavior of the agent. |
 | `disclaimer` | Disclaimer object | Optional. Disclaimer text displayed to the user at the start of a conversation. |
 | `sensitivity_label` | Sensitivity label object | Optional. Specifies a Microsoft Purview sensitivity label for the agent. |

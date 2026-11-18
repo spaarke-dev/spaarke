@@ -20,7 +20,9 @@
 //   IsReservedUnit, nothing written — IDs, never names compared in code.
 //   EnsureAppUserAsync — an existing App User in another unit is refused
 //   (InForeignBusinessUnit, nothing written: a business-unit change strips every
-//   role); a new one is created with businessunitid = the customer's unit; the
+//   role) — except (task 267, #2618) a role-less request's MoveFromBusinessUnitId:
+//   a row in exactly that unit whose azureactivedirectoryobjectid is the requested
+//   principal id is PATCHed into the requested unit and read back; a new one is created with businessunitid = the customer's unit; the
 //   role is resolved in THAT unit (Dataverse assigns a user only its own unit's
 //   roles) — exactly one match, never a name-only fallback that could pick a
 //   copy from another unit.
@@ -223,6 +225,28 @@ public sealed class DataverseWebApiAppUserCreator : IDataverseAppUserCreator
             // null = no role (task 266); a blank name is a caller bug, never "no role".
             ArgumentException.ThrowIfNullOrWhiteSpace(request.SecurityRoleName);
         }
+        if (request.MoveFromBusinessUnitId is { } moveFrom)
+        {
+            // Task 267: a move strips every role, so only a role-less identity (the ontology writer) may be moved, and only
+            // when its object id can be checked first. Never the BFF's System Administrator users.
+            if (request.SecurityRoleName is not null)
+            {
+                throw new ArgumentException("MoveFromBusinessUnitId is allowed only with SecurityRoleName null.", nameof(request));
+            }
+            if (string.IsNullOrWhiteSpace(request.SystemUserAzureActiveDirectoryObjectId)
+                || !Guid.TryParse(request.SystemUserAzureActiveDirectoryObjectId, out _))
+            {
+                // A GUID, so MoveAsync's comparison can never throw on it.
+                throw new ArgumentException(
+                    "MoveFromBusinessUnitId requires SystemUserAzureActiveDirectoryObjectId as a GUID: the row's object id is " +
+                    "checked before any move.",
+                    nameof(request));
+            }
+            if (moveFrom == Guid.Empty || moveFrom == request.BusinessUnitId)
+            {
+                throw new ArgumentException("MoveFromBusinessUnitId must be a unit other than BusinessUnitId.", nameof(request));
+            }
+        }
 
         if (!Uri.TryCreate(request.EnvironmentUrl, UriKind.Absolute, out var envUri))
         {
@@ -288,6 +312,12 @@ public sealed class DataverseWebApiAppUserCreator : IDataverseAppUserCreator
             {
                 systemUserId = Id(existing[0], "systemuserid");
                 var unit = OptionalId(existing[0], "_businessunitid_value");
+                if (unit is { } foundIn && foundIn == request.MoveFromBusinessUnitId)
+                {
+                    // Task 267: the one move H10 makes (see MoveAsync) - object id first, then PATCH, then read back.
+                    return await MoveAsync(envUri, token, request, systemUserId, foundIn,
+                        OptionalId(existing[0], "azureactivedirectoryobjectid"), cancellationToken).ConfigureAwait(false);
+                }
                 if (unit != request.BusinessUnitId)
                 {
                     // T259: never moved — a business-unit change strips every role of the user.
@@ -374,6 +404,51 @@ public sealed class DataverseWebApiAppUserCreator : IDataverseAppUserCreator
             return new DataverseAppUserCreationOutcome.Failure(
                 $"Dataverse Web API error: {ex.GetType().Name}: {ex.Message}");
         }
+    }
+
+    /// <summary>
+    /// Task 267 (#2618): moves the role-less App User found in <paramref name="from"/> (the request's
+    /// <see cref="DataverseAppUserCreationRequest.MoveFromBusinessUnitId"/>) into the requested unit. The object id is checked
+    /// BEFORE anything is written: a row holding another principal is not this identity's and is never moved
+    /// (<see cref="DataverseAppUserCreationOutcome.InForeignBusinessUnit"/> with a reason). The move is read back.
+    /// <para>
+    /// UNVERIFIED LIVE: whether Dataverse accepts a <c>businessunitid</c> PATCH on systemuser, or requires the
+    /// <c>SetBusinessSystemUser</c> message, has not been tried against a live environment. A rejection surfaces as an HTTP
+    /// fault, so <see cref="DataverseAppUserCreationOutcome.Failure"/> (H10: Resumable), and an accepted PATCH that did not
+    /// move the row fails the read-back the same way — never a wrong outcome.
+    /// </para>
+    /// </summary>
+    private async Task<DataverseAppUserCreationOutcome> MoveAsync(
+        Uri envUri, AccessToken token, DataverseAppUserCreationRequest request, Guid systemUserId, Guid from,
+        Guid? heldObjectId, CancellationToken ct)
+    {
+        var wanted = Guid.Parse(request.SystemUserAzureActiveDirectoryObjectId!);
+        if (heldObjectId != wanted)
+        {
+            return new DataverseAppUserCreationOutcome.InForeignBusinessUnit(systemUserId.ToString("D"), from,
+                $"its azureactivedirectoryobjectid is '{heldObjectId?.ToString("D") ?? "(empty)"}', not the identity's principal " +
+                $"id {wanted:D}, so it is not this identity's row and H10 does not move it");
+        }
+
+        await SendAsync(envUri, token, HttpMethod.Patch, $"systemusers({systemUserId:D})",
+            new Dictionary<string, object?> { ["businessunitid@odata.bind"] = $"/businessunits({request.BusinessUnitId:D})" },
+            ct).ConfigureAwait(false);
+
+        using var reread = await GetAsync(envUri, token, $"systemusers({systemUserId:D})?$select=_businessunitid_value", ct)
+            .ConfigureAwait(false);
+        var now = OptionalId(reread.RootElement, "_businessunitid_value");
+        if (now != request.BusinessUnitId)
+        {
+            return new DataverseAppUserCreationOutcome.Failure(
+                $"The App User {systemUserId:D} was moved from business unit {from:D} to {request.BusinessUnitId:D}, but it reads " +
+                $"business unit {now?.ToString("D") ?? "(none)"} afterwards. Dataverse may still be applying the move; resume " +
+                "re-reads it.");
+        }
+
+        _logger.LogWarning(
+            "H10 moved App User {SystemUserId} from business unit {From} to {To} (task 267); the move strips its roles",
+            systemUserId, from, request.BusinessUnitId);
+        return new DataverseAppUserCreationOutcome.Success(systemUserId.ToString("D"), MovedFromBusinessUnitId: from);
     }
 
     /// <summary>

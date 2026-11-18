@@ -21,7 +21,7 @@ The sample includes three interactive widgets:
 
 <a href="https://youtu.be/Zre_6fFKBXg" target="_blank"><img src="https://img.youtube.com/vi/Zre_6fFKBXg/maxresdefault.jpg" alt="Watch the Approvals Box demo"></a>
 
-![Approvals Box detail widget](demos/screenshots/approvals-box-detail.png)
+*(image not included in this snapshot: Approvals Box detail widget)*
 
 ## 2. Sample prompts
 

@@ -152,6 +152,13 @@ public sealed record LineCodingRequest
     /// <summary>The lines to code. <see cref="InvoiceLineToCode.LineKey"/> must be unique within the request.</summary>
     public required IReadOnlyList<InvoiceLineToCode> Lines { get; init; }
 
+    /// <summary>
+    /// Whether FR-22 step 1 (a code set that holds every code the firm billed) may choose the set. False for an invoice submitted without a
+    /// firm (ebilling-r1 task 095c-3): the firm-code step is skipped and the record's code set (matter type, practice area, suggestion,
+    /// settings default) applies. Default true.
+    /// </summary>
+    public bool IncludeFirmCodes { get; init; } = true;
+
     /// <summary>Tenant id for the AI run context. Not sent to the model.</summary>
     public string? TenantId { get; init; }
 }

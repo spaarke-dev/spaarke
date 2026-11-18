@@ -64,7 +64,7 @@ Status: see `tasks/TASK-INDEX.md` and `current-task.md`. Spec: `spec.md`. Design
 
 **ADR tensions approved for this project** (root §6.5):
 - Path B, applied: ADR-003 (task 030); ADR-028 A2, Dataverse's answer replaces the ADR-034 derivation (031); ADR-034 per-surface allow-list (040) and A4, Assigned-To as removable Collaborate grants (round 11).
-- Path B, **approved, not yet merged:** 036's ADR-034 amendment (system-user ACCESS on SPA/Teams = Dataverse's answer; round 75). The ADR text merges with or before 036's PR.
+- Path B, **merged:** 036's ADR-034 Amendment A2 (system-user ACCESS on SPA/Teams = Dataverse's answer; round 75), in #2078 (`4f5f22694c`) with 036's code.
 - Path B: the AI tools' "User-OBO ONLY" rule yields to the G5 pattern and the inline re-stamp (rounds 7, 8, 13).
 - Path A: 143 reuses `IScheduledJobLease` as the per-record mutex (ADR-036 A1-7 / ADR-052 §5; round 10 item 6).
 - The 1-hop cap needs no exception (the ancestor stamp makes every chain one hop).

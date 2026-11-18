@@ -66,7 +66,8 @@ export function invoiceFiledRecord(identity: DocumentIdentityState | undefined):
   };
 }
 
-const LOGICAL_NAME_BY_CORE_TYPE: Readonly<Record<InvoiceCoreRecordType, string>> = {
+/** The Dataverse logical name of each core record type (the view's "Open in Spaarke" for a record whose result carries none). */
+export const LOGICAL_NAME_BY_CORE_TYPE: Readonly<Record<InvoiceCoreRecordType, string>> = {
   Matter: 'sprk_matter',
   Project: 'sprk_project',
   WorkAssignment: 'sprk_workassignment',
@@ -113,11 +114,17 @@ export interface InvoiceSubmissionMark {
 export interface InvoiceSubmissionInput {
   targetEntity: InvoiceSubmissionTarget;
   marks: InvoiceSubmissionMark[];
+  /** The firm (contract §2). Never empty: the server refuses an invoice with no firm, so the pane never sends one. */
   firmId: string;
   firmInvoiceNumber: string;
   poNumber: string | null;
   mode: 'New' | 'Correction';
   invoiceId: string | null;
+  /**
+   * Why the invoice is corrected (contract §2, 095f): trimmed, 1-2000 characters. Present on a Correction ONLY; a New
+   * input never carries the property (the server refuses a note on New).
+   */
+  correctionNote?: string;
 }
 
 /** One user action. A Retry of the same action reuses `actionId` (the contract's `X-Idempotency-Key` rule). */
@@ -166,13 +173,58 @@ export interface InvoiceFirmOption {
 /** The firms linked to a core record (contract §8; `invoiceSubmissionService.loadInvoiceFirms`). */
 export type LoadInvoiceFirms = (target: InvoiceSubmissionTarget) => Promise<InvoiceFirmOption[]>;
 
+/** One page of the law firms a record can be given (ebilling 095g `GET /api/finance/firms`). */
+export interface LawFirmPage {
+  items: InvoiceFirmOption[];
+  page: number;
+  /** True while the server has a later page (the list then loads it as the user scrolls: ADR-051). */
+  hasMore: boolean;
+}
+
+/** `listLawFirms`'s arguments: `search` is trimmed and capped at 100 characters, and omitted when blank. */
+export interface ListLawFirmsArgs {
+  search?: string;
+  page?: number;
+  pageSize?: number;
+}
+
+/**
+ * Lists the active law firms a record can be given (`invoiceSubmissionService.listLawFirms`). Any failure THROWS with a
+ * sentence for the user, as {@link LoadInvoiceFirms} does.
+ */
+export type ListLawFirms = (args: ListLawFirmsArgs, signal?: AbortSignal) => Promise<LawFirmPage>;
+
+/**
+ * What became of one add-a-firm request (ebilling 095g `POST /api/finance/core-records/{type}/{id}/firms`, the add alone).
+ * - `added`: the 200. `changed: false` means the firm was already on the record. `firms` is the record's firm list
+ *   after the write, or null when the server could not read it back (the view then reloads it). `accessState`
+ *   `pending` means the slots stand and the access pass did not finish: resending the same request finishes it.
+ *   `notice` is the server's plain sentence about who gets access (null when it has none);
+ * - `refused`: nothing was written; `message` is the pane's sentence for the code (never the server's `detail`), and
+ *   `code` is `errorCode ?? reasonCode` (undefined when the server sent neither).
+ */
+export type AddFirmOutcome =
+  | {
+      kind: 'added';
+      changed: boolean;
+      firms: InvoiceFirmOption[] | null;
+      accessState: 'applied' | 'pending';
+      recordActive: boolean;
+      notice: string | null;
+    }
+  | { kind: 'refused'; status: number; code: string | undefined; message: string };
+
+/** Adds one firm to a core record. The pane only ever ADDS: it never removes, replaces or clears a firm. */
+export type AddFirmToRecord = (target: InvoiceSubmissionTarget, firmId: string) => Promise<AddFirmOutcome>;
+
 /**
  * What a correction of an invoice must keep, and whether it can be made (contract §10, ebilling 097e). A correction is
  * sent with the invoice's own firm, core record and firm invoice number; `canCorrect` is the intake's own guard.
  */
 export interface InvoiceCorrectionPrefill {
   invoiceId: string;
-  firm: { id: string; name: string };
+  /** The invoice's firm, or null when it was submitted without one (§10, EB-D-185); a correction then sends no firm. */
+  firm: { id: string; name: string } | null;
   coreRecord: InvoiceFiledUnder;
   /** The lifecycle status name (`InReview`, `SentToAp`, `Superseded`, ...), or null when the server doesn't know it. */
   invoiceStatus: string | null;
@@ -211,6 +263,11 @@ export interface InvoicePreviousSubmission {
   /** The submitter's name, or null when none is recorded. */
   submittedBy: string | null;
   isCorrection: boolean;
+  /**
+   * The firm the invoice was submitted for, when the server says (the top-level `firmName` string on the §11 body, 095e;
+   * null on the wire when the attempt has no firm). Absent or null: the banner does not name a firm.
+   */
+  firmName?: string | null;
 }
 
 /**
@@ -243,8 +300,8 @@ export function previousSubmissionTitle(submission: InvoicePreviousSubmission): 
 }
 
 /**
- * "Submitted on 3 Nov 2026, 10:04 as INV-012.2 by Ana Diaz." — each part only when known; the date in the user's own
- * locale and time zone. `locale` is for tests.
+ * "Submitted on 3 Nov 2026, 10:04 as INV-012.2 for Ravenscroft and Vance LLP by Ana Diaz." — each part only when known;
+ * the date in the user's own locale and time zone. `locale` is for tests.
  */
 export function describeSubmittedLine(submission: InvoicePreviousSubmission, locale?: string): string {
   const when = submission.submittedOn ? new Date(submission.submittedOn) : null;
@@ -256,6 +313,7 @@ export function describeSubmittedLine(submission: InvoicePreviousSubmission, loc
     `${submission.isCorrection ? 'A correction was submitted' : 'Submitted'}` +
     `${date ? ` on ${date}` : ''}` +
     `${submission.trackingNumber ? ` as ${submission.trackingNumber}` : ''}` +
+    `${submission.firmName ? ` for ${submission.firmName}` : ''}` +
     `${submission.submittedBy ? ` by ${submission.submittedBy}` : ''}.`
   );
 }
@@ -437,7 +495,51 @@ export function normalizeFirmInvoiceNumber(raw: string): string | null {
   return trimmed.length >= 1 && trimmed.length <= FIRM_INVOICE_NUMBER_MAX ? trimmed : null;
 }
 
-/** Builds the seam input. GUIDs are canonicalized (ADR-044); a blank PO number is null. */
+/** The contract's `correctionNote` bound (095f): at most 2000 characters after trimming. */
+export const CORRECTION_NOTE_MAX = 2000;
+
+/** What is wrong with a correction note (the contract's three refusals, 095f). */
+export type CorrectionNoteProblem = 'blank' | 'too-long' | 'control-characters';
+
+/** The sentence for each {@link CorrectionNoteProblem}; the view shows the last two next to the field. */
+export const CORRECTION_NOTE_PROBLEM_MESSAGES: Readonly<Record<CorrectionNoteProblem, string>> = {
+  blank: 'Enter a correction note saying why the invoice is corrected.',
+  'too-long': `The correction note can be at most ${CORRECTION_NOTE_MAX} characters.`,
+  'control-characters': 'The correction note has a character that cannot be sent. Remove it.',
+};
+
+/** A control character the contract refuses: any Unicode control character except a line break (\n, \r) or a tab. */
+function hasDisallowedControlCharacter(text: string): boolean {
+  for (let i = 0; i < text.length; i++) {
+    const code = text.charCodeAt(i);
+    if (code === 0x09 || code === 0x0a || code === 0x0d) continue;
+    if (code <= 0x1f || (code >= 0x7f && code <= 0x9f)) return true;
+  }
+  return false;
+}
+
+/**
+ * Checks a correction note as the server will: trimmed first, then blank / over 2000 characters / a control character
+ * other than \n, \r or \t. Surrounding whitespace never counts toward the length (the server trims it too).
+ */
+export function correctionNoteProblem(raw: string): CorrectionNoteProblem | null {
+  const trimmed = raw.trim();
+  if (trimmed.length === 0) return 'blank';
+  if (trimmed.length > CORRECTION_NOTE_MAX) return 'too-long';
+  if (hasDisallowedControlCharacter(trimmed)) return 'control-characters';
+  return null;
+}
+
+/** Why {@link buildInvoiceSubmissionInput} refuses a blank firm (never shown: the view keeps Submit disabled first). */
+export const NO_FIRM_REFUSAL = 'An invoice cannot be submitted without a firm.';
+
+/**
+ * Builds the seam input. GUIDs are canonicalized (ADR-044); a blank PO number is null. A blank firm is REFUSED (throws
+ * {@link NO_FIRM_REFUSAL}): an invoice is never submitted without a firm, so the input never carries a null or empty
+ * `firmId`. A Correction also needs a note ({@link correctionNoteProblem}): it is refused (throws the problem's sentence)
+ * when blank, over 2000 characters or with a disallowed control character, and the input carries it trimmed. A New
+ * invoice never carries a note, whatever is passed.
+ */
 export function buildInvoiceSubmissionInput(args: {
   target: InvoiceSubmissionTarget;
   attachments: readonly InvoiceListedAttachment[];
@@ -447,15 +549,25 @@ export function buildInvoiceSubmissionInput(args: {
   poNumber: string;
   mode: 'New' | 'Correction';
   invoiceId?: string | null;
+  correctionNote?: string;
 }): InvoiceSubmissionInput {
   const po = args.poNumber.trim();
+  const firmId = cleanGuid(args.firmId);
+  if (!firmId) throw new Error(NO_FIRM_REFUSAL);
+  let correctionNote: string | undefined;
+  if (args.mode === 'Correction') {
+    const problem = correctionNoteProblem(args.correctionNote ?? '');
+    if (problem) throw new Error(CORRECTION_NOTE_PROBLEM_MESSAGES[problem]);
+    correctionNote = (args.correctionNote ?? '').trim();
+  }
   return {
     targetEntity: { entityType: args.target.entityType, entityId: cleanGuid(args.target.entityId) },
     marks: toSubmissionMarks(args.attachments, args.marking),
-    firmId: cleanGuid(args.firmId),
+    firmId,
     firmInvoiceNumber: args.firmInvoiceNumber.trim(),
     poNumber: po.length > 0 ? po : null,
     mode: args.mode,
     invoiceId: args.mode === 'Correction' && args.invoiceId ? cleanGuid(args.invoiceId) : null,
+    ...(correctionNote !== undefined ? { correctionNote } : {}),
   };
 }

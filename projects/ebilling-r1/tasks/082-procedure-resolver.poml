@@ -4,7 +4,7 @@
     <title>Procedure resolver (7.1): firm condition, gaps and holds, re-keyed version selection (7.2), snapshot, ratchet ArchTest</title>
     <phase>3 Rules (WP3) — Procedure model (EB-D-148), wave W3-D</phase>
     <gate>080, 081 and 089 merged; task 070 on master (model 7.2 precondition); uac-r2 agrees the NamePairParentAsync entry point before step 1; ontology-r1 owner review of the loader and evaluator change</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Decides which rules judge every invoice, reads core records across the secure wall app-only, and raises holds; a widened or silently dropped rule is a wrong judgement of a firm's invoice.</rigor-reason>
     <model-tier>opus</model-tier>

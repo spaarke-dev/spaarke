@@ -125,7 +125,7 @@ public sealed class AssignTaskNotifierTests
             var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?> { ["ExternalAccess:PortalUrl"] = PortalUrl }).Build();
             var customer = new CustomerIdentity(Options.Create(new CustomerOptions { Id = CustomerKey }), config, NullLogger<CustomerIdentity>.Instance);
 
-            Gate = new Mock<AssignTaskRecipientGate>(Identities.Object, Links, null!, null!, null!, null!, null!, GateLog) { CallBase = true };
+            Gate = new Mock<AssignTaskRecipientGate>(Identities.Object, Links, new Sprk.Bff.Api.Tests.AccessControl.GrantPolicyTestDoubles.FlagStubParticipationService(Sprk.Bff.Api.Infrastructure.ExternalAccess.RootRecordFlags.None) /* task 193: ContactUserRepresentation needs it */, null!, null!, null!, null!, GateLog) { CallBase = true };
             Gate.Setup(g => g.WallAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
                 .Returns((string entity, Guid id, Guid user, CancellationToken _) =>
                 {
@@ -401,6 +401,28 @@ public sealed class AssignTaskNotifierTests
     }
 
     // ── Must fire: an onboarded external assignee with a grant (D-199) ───────────────────────────────────────────────────
+
+    /// <summary>
+    /// uac-r2 task 193 (master merge): the gate reads who the contact represents through ContactUserRepresentation. A user with
+    /// NO link who carries the contact's bound oid, where the binder does not resolve that oid to this contact alone (two
+    /// contacts carry it), is not confirmed as the contact's user — and the contact is not external either: nobody is emailed.
+    /// </summary>
+    [Fact]
+    public async Task AContactWhoseOidAnUnlinkedUserCarries_Unconfirmed_IsNeitherInternalNorExternal_MustNotFire()
+    {
+        var h = new Harness();
+        h.MakeExternal();
+        h.Links.UsersByOid.GetOrAdd(PortalOid, _ => new List<AssignedLinkCandidate>())
+            .Add(new AssignedLinkCandidate(LinkedUser, null, PortalOid, false, 0, null, false));
+        h.Identities.Setup(i => i.FindContactsByOidAsync(PortalOid, It.IsAny<CancellationToken>())).ReturnsAsync(ContactLookup.Of(
+            new ContactBindingRow(Contact, 0, PortalOid.ToString("D"), (int)IdentityPlaneMarker.External, Email: Address),
+            new ContactBindingRow(Guid.NewGuid(), 0, PortalOid.ToString("D"), (int)IdentityPlaneMarker.External, Email: Address)));
+
+        (await h.Gate.Object.DecideAsync(Contact, new DecisionCoreRecord("sprk_matter", Matter), TaskId, AssignerOid, CancellationToken.None))
+            .Should().Be(AssignTaskRecipient.Refused(AssignTaskRefusal.NoAccess));
+        (await h.NotifyAsync()).Should().Equal(AssignTaskRecipient.NoAccessWarning);
+        h.NothingWasSent();
+    }
 
     [Fact]
     public async Task OnboardedExternal_WithAGrant_GetsThePortalLink_NoModelDrivenLink_NoRecordName_NoBell_AndTheAssignerByDisplayNameOnly()

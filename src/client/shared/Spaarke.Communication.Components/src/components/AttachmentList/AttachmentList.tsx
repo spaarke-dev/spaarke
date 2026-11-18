@@ -76,15 +76,21 @@ const useStyles = makeStyles({
     whiteSpace: 'nowrap',
   },
   typeBadge: { flexShrink: 0 },
+  accessory: { display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalS, flexShrink: 0 },
 });
 
 export interface IAttachmentListProps {
   items: readonly IAttachmentItem[];
   /** Fired when a row (with a resolvable document) is activated. */
   onActivate: (item: IAttachmentItem) => void;
+  /**
+   * Optional extra content at the end of a row (ebilling-r1 task 118: the "Invoice" badge and the
+   * "Submit as invoice" action). Clicks inside it never activate the row. Omitted: the list is unchanged.
+   */
+  renderRowAccessory?: (item: IAttachmentItem) => React.ReactNode;
 }
 
-export const AttachmentList: React.FC<IAttachmentListProps> = ({ items, onActivate }) => {
+export const AttachmentList: React.FC<IAttachmentListProps> = ({ items, onActivate, renderRowAccessory }) => {
   const s = useStyles();
 
   return (
@@ -138,6 +144,15 @@ export const AttachmentList: React.FC<IAttachmentListProps> = ({ items, onActiva
                 {isEml ? 'Email' : fileTypeLabel(item.name)}
               </Badge>
             </Tooltip>
+            {renderRowAccessory &&
+              (() => {
+                const accessory = renderRowAccessory(item);
+                return accessory ? (
+                  <div className={s.accessory} onClick={(ev: React.MouseEvent) => ev.stopPropagation()}>
+                    {accessory}
+                  </div>
+                ) : null;
+              })()}
           </div>
         );
       })}

@@ -7,15 +7,16 @@
  *  - a per-row "Pick access level" Dropdown (NO default — a row can't be granted
  *    until a level is chosen),
  *  - an "Add (N)" button (N = checked rows),
- *  - icon-only "+" (aria "Add contact"/"Add organization") that open the host's
- *    NATIVE advanced lookup via pickContact/pickOrganization,
+ *  - icon-only "+" (aria "Add person"/"Add organization") that open the host's
+ *    NATIVE advanced lookup via pickPerson/pickOrganization (task 193: one
+ *    "Add person" over contacts and users),
  *  - contact names as links (onOpenContact) opening the Contact record,
  *  - NO standing-grant checkbox (standing is set on the Contact record),
  *  - a "Current Access" list with per-row level badge + Revoke.
  *
- * These tests cover: open/closed, external→/invite-and-grant, internal→/grant +
- * internal-grant success (task 181), missing-level guard, revoke, canGrantAccess gate, dark mode,
- * polymorphic root, the native pickers (contact + organization), and onOpenContact.
+ * These tests cover: open/closed, every contact→/grant (task 193: the server decides, never
+ * /invite-and-grant) + internal-grant success (task 181), missing-level guard, revoke, canGrantAccess gate,
+ * dark mode, polymorphic root, the native pickers (person + organization), and onOpenContact.
  */
 
 import * as React from 'react';
@@ -30,7 +31,9 @@ import type {
   IAccessGrantRecord,
   IContactSearchResult,
   IOrganizationPick,
+  IPersonPick,
 } from '../types';
+import { personFromContact } from './personPickDouble';
 
 const renderWithTheme = (ui: React.ReactElement, theme = webLightTheme) =>
   render(<FluentProvider theme={theme}>{ui}</FluentProvider>);
@@ -73,16 +76,8 @@ function makeProps(overrides?: Partial<IAccessGrantModalProps>): IAccessGrantMod
   const fetchCandidates = jest.fn(async () => [CANDIDATE_EXTERNAL, CANDIDATE_INTERNAL]);
   const fetchExistingGrants = jest.fn(async () => [EXISTING_GRANT]);
   const searchContacts = jest.fn(async (): Promise<IContactSearchResult[]> => []);
-  const isInternalContact = jest.fn(async (contactId: string) => contactId === CANDIDATE_INTERNAL.contactId);
   const authenticatedFetch = throwingAuthenticatedFetch(async (url: string) => {
-    if (url.includes('/invite-and-grant')) {
-      return jsonResponse({
-        contactId: CANDIDATE_EXTERNAL.contactId,
-        onboardStatus: 'Provisioned',
-        accessRecordId: 'new-1',
-        portalUrl: 'https://portal',
-      });
-    }
+    if (url.includes('/invite-and-grant')) throw new Error('not expected: every contact is granted through /grant');
     if (url.includes('/grant')) {
       return jsonResponse({ accessRecordId: 'new-2', speContainerMembershipGranted: false });
     }
@@ -109,7 +104,6 @@ function makeProps(overrides?: Partial<IAccessGrantModalProps>): IAccessGrantMod
     fetchCandidates,
     fetchExistingGrants,
     searchContacts,
-    isInternalContact,
     // Stated EXPLICITLY since task 118 inverted the default to `false` (fail closed). These tests are
     // about the grant UI, so they must say that the host got a "yes" from the server — inheriting it from
     // a default was exactly what let the retired fail-open go unnoticed. The default itself is asserted
@@ -165,7 +159,7 @@ describe('AccessGrantModal (v1.0.26)', () => {
   });
 
   describe('grant writes', () => {
-    it('granting an external candidate (with a chosen level) calls /invite-and-grant with {recordType, recordId, accessLevel, email}', async () => {
+    it('granting an external candidate (with a chosen level) calls /grant with {contactId, recordType, recordId, accessLevel} — never /invite-and-grant (task 193)', async () => {
       const props = makeProps();
       renderWithTheme(<AccessGrantModal {...props} />);
 
@@ -176,20 +170,24 @@ describe('AccessGrantModal (v1.0.26)', () => {
 
       await waitFor(() => {
         expect(props.authenticatedFetch).toHaveBeenCalledWith(
-          '/api/v1/external-access/invite-and-grant',
+          '/api/v1/external-access/grant',
           expect.objectContaining({ method: 'POST' })
         );
       });
-      const init = await findGrantInit(
-        props.authenticatedFetch as jest.Mock,
-        '/api/v1/external-access/invite-and-grant'
-      );
-      expect(JSON.parse(init.body as string)).toMatchObject({
-        email: CANDIDATE_EXTERNAL.email,
+      const init = await findGrantInit(props.authenticatedFetch as jest.Mock, '/api/v1/external-access/grant');
+      const body = JSON.parse(init.body as string);
+      expect(body).toMatchObject({
+        contactId: CANDIDATE_EXTERNAL.contactId,
         recordType: 'project',
         recordId: 'project-1',
         accessLevel: 100000001,
       });
+      // The server decides who is invited; the modal sends no email of its own.
+      expect(body.email).toBeUndefined();
+      expect(props.authenticatedFetch).not.toHaveBeenCalledWith(
+        '/api/v1/external-access/invite-and-grant',
+        expect.anything()
+      );
     });
 
     it('granting an internal candidate calls /grant (not /invite-and-grant) and shows a plain success, not the old dev notice (task 181)', async () => {
@@ -247,14 +245,11 @@ describe('AccessGrantModal (v1.0.26)', () => {
 
       await waitFor(() =>
         expect(props.authenticatedFetch).toHaveBeenCalledWith(
-          '/api/v1/external-access/invite-and-grant',
+          '/api/v1/external-access/grant',
           expect.objectContaining({ method: 'POST' })
         )
       );
-      const init = await findGrantInit(
-        props.authenticatedFetch as jest.Mock,
-        '/api/v1/external-access/invite-and-grant'
-      );
+      const init = await findGrantInit(props.authenticatedFetch as jest.Mock, '/api/v1/external-access/grant');
       const body = JSON.parse(init.body as string);
       expect(body).toMatchObject({ recordType: 'matter', recordId: 'matter-9', accessLevel: 100000002 });
       expect(body.projectId).toBeUndefined();
@@ -262,28 +257,28 @@ describe('AccessGrantModal (v1.0.26)', () => {
   });
 
   describe('native advanced-lookup pickers', () => {
-    it('"+ Contact" opens the native lookup (pickContact), stages + auto-selects the pick, and grants it', async () => {
-      const pickContact = jest.fn(
-        async (): Promise<IContactSearchResult | null> => ({
-          contactId: 'contact-picked-1',
-          fullName: 'Picked Person',
-          email: 'picked@outsidefirm.com',
-        })
+    it('"Add person" opens the native lookup (pickPerson), stages + auto-selects a picked contact, and grants it through /grant', async () => {
+      const pickPerson = jest.fn(
+        async (): Promise<IPersonPick | null> =>
+          personFromContact({
+            contactId: 'contact-picked-1',
+            fullName: 'Picked Person',
+            email: 'picked@outsidefirm.com',
+          })
       );
       const props = makeProps({
         recordType: 'workassignment',
         recordId: 'wa-3',
         fetchCandidates: jest.fn(async () => []),
-        pickContact,
-        isInternalContact: jest.fn(async () => false),
+        pickPerson,
       });
       renderWithTheme(<AccessGrantModal {...props} />);
 
       // No inline search box exists anymore.
       expect(screen.queryByPlaceholderText('Search contacts by name or email…')).not.toBeInTheDocument();
 
-      fireEvent.click(await screen.findByRole('button', { name: 'Add contact' }));
-      await waitFor(() => expect(pickContact).toHaveBeenCalled());
+      fireEvent.click(await screen.findByRole('button', { name: 'Add person' }));
+      await waitFor(() => expect(pickPerson).toHaveBeenCalledWith({ includeContacts: true, excludeExternal: false }));
       expect(await screen.findByText('Picked Person')).toBeInTheDocument();
 
       await pickLevelFor('Picked Person', 'View Only');
@@ -291,18 +286,15 @@ describe('AccessGrantModal (v1.0.26)', () => {
 
       await waitFor(() =>
         expect(props.authenticatedFetch).toHaveBeenCalledWith(
-          '/api/v1/external-access/invite-and-grant',
+          '/api/v1/external-access/grant',
           expect.objectContaining({ method: 'POST' })
         )
       );
-      const init = await findGrantInit(
-        props.authenticatedFetch as jest.Mock,
-        '/api/v1/external-access/invite-and-grant'
-      );
+      const init = await findGrantInit(props.authenticatedFetch as jest.Mock, '/api/v1/external-access/grant');
       expect(JSON.parse(init.body as string)).toMatchObject({
         recordType: 'workassignment',
         recordId: 'wa-3',
-        email: 'picked@outsidefirm.com',
+        contactId: 'contact-picked-1',
       });
     });
 
@@ -342,10 +334,10 @@ describe('AccessGrantModal (v1.0.26)', () => {
       expect(body.contactId).toBeUndefined();
     });
 
-    it('does not render the "+ Contact"/"+ Organization" buttons when the pickers are not supplied', async () => {
+    it('does not render the "Add person"/"+ Organization" buttons when the pickers are not supplied', async () => {
       renderWithTheme(<AccessGrantModal {...makeProps()} />);
       await screen.findByText('Jane Outside');
-      expect(screen.queryByRole('button', { name: 'Add contact' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Add person' })).not.toBeInTheDocument();
       expect(screen.queryByRole('button', { name: 'Add organization' })).not.toBeInTheDocument();
     });
   });

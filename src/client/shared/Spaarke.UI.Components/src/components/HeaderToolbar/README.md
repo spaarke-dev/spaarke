@@ -48,7 +48,7 @@ import { Sparkle20Regular, Checkmark20Regular, Note20Regular } from '@fluentui/r
 
 The three-icon toolbar shipped by `useRecordHeaderToolbarActions` gets its `badge` values from `useRelatedCount('sprk_todo', filter)` and `useRelatedCount('sprk_memo', filter)`. If you're adding a NEW icon that shows a "N related things" count, use `useRelatedCount` — it hides the `Xrm.WebApi` shape gotcha that silently zeroed our badges from v1.0.11 → v1.0.15.
 
-**Pattern reference**: [`.claude/patterns/pcf/xrm-webapi-related-count.md`](../../../../../../.claude/patterns/pcf/xrm-webapi-related-count.md). Read that BEFORE writing any code that reads `@odata.count` or fetches "how many related X's exist for parent Y" from `Xrm.WebApi`. The pattern documents:
+**Pattern reference**: [`.claude/patterns/pcf/xrm-webapi-related-count.md`](../../../../../../../.claude/patterns/pcf/xrm-webapi-related-count.md). Read that BEFORE writing any code that reads `@odata.count` or fetches "how many related X's exist for parent Y" from `Xrm.WebApi`. The pattern documents:
 
 - Why `Xrm.WebApi.retrieveMultipleRecords` strips `@odata.count` and how to count via `entities.length` with `$top` cap instead.
 - The unit-test discipline that let the bug ship (fabricated `@odata.count` in mocks → tests passed against a fiction).
@@ -59,5 +59,5 @@ The three-icon toolbar shipped by `useRecordHeaderToolbarActions` gets its `badg
 - `RecordHeaderShell` — hosts `HeaderToolbar` at the top of the card (FR-02).
 - `useRecordHeaderToolbarActions` — hook that produces a fully-wired `IHeaderToolbarProps` for the three canonical record actions (sparkle / checkmark / annotation).
 - `useRelatedCount` — the primitive count hook (`useRecordHeaderToolbarActions` calls it for both `sprk_todo` and `sprk_memo`).
-- [`.claude/patterns/pcf/xrm-webapi-related-count.md`](../../../../../../.claude/patterns/pcf/xrm-webapi-related-count.md) — full pattern reference.
+- [`.claude/patterns/pcf/xrm-webapi-related-count.md`](../../../../../../../.claude/patterns/pcf/xrm-webapi-related-count.md) — full pattern reference.
 - `src/client/pcf/VisualHost/control/components/CardChrome.tsx` — behavior reference only; DO NOT reuse.

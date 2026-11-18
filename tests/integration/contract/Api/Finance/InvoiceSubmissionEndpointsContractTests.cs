@@ -9,6 +9,8 @@ using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Http.Metadata;
+using Microsoft.AspNetCore.Routing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -24,7 +26,11 @@ using Sprk.Bff.Api.Api.Finance;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Services.Finance;
+using Sprk.Bff.Api.Services.Finance.Resolution;
 using Sprk.Bff.Api.Services.Finance.Submission;
+using Sprk.Bff.Api.Services.Signals;
+using Sprk.Bff.Api.Services.Signals.Billing;
+using Sprk.Bff.Api.Tests.Domain.Signals.Billing;
 using Sprk.Bff.Api.Tests.Services.Finance.Submission;
 using Xunit;
 using static Sprk.Bff.Api.Tests.Api.Finance.FinanceEndpointsAuthorizationContractTests;
@@ -58,12 +64,18 @@ public sealed class InvoiceSubmissionEndpointsContractTests : IAsyncLifetime
 
     /// <summary>Task 094: the caller's own rights the from-document route's step 1 asks (gate variant) on the source document and communication.</summary>
     private readonly Sprk.Bff.Api.Tests.Finance.Files.RecordingRightsProbe _sourceRights = new();
+
+    /// <summary>Task 118b-2: SharePoint Embedded's download, which the shared document read calls for a supporting document (its item's bytes).</summary>
+    private readonly Mock<Sprk.Bff.Api.Infrastructure.Graph.ISpeFileOperations> _spe = new();
     private WebApplication _app = null!;
     // ebilling-r1 task 098 (review round 4b): the submission routes' seam is the REAL ExternalDataService.HideSubmissionsForAsync over
     // an app-only Web API double (InvoiceWorld): a test seeds the invoice's and the documents' rows the way their writers do.
     private readonly Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.InvoiceWorld _world = new();
     private readonly List<InvoiceSubmissionView[]> _submissionDecisions = new();
+    private readonly List<Guid[]> _invoiceDecisions = new(); // task 130-0 fix round 1: each call of the caller-aware invoice seam
     private bool _registerSubmissionHiding = true;
+    // Task 130-0 fix round 3b: when set, replaces the real invoice decision (a test of how a decision's per-invoice fault is read).
+    private Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceHidingStub? _invoiceDecisionOverride;
     private HttpClient _client = null!;
 
     public InvoiceSubmissionEndpointsContractTests()
@@ -75,6 +87,8 @@ public sealed class InvoiceSubmissionEndpointsContractTests : IAsyncLifetime
         // D-106: the firm is one of the matter's assigned law firms (the work-assignment and project below are linked per test).
         _participations.Links[("sprk_matter", MatterId)] = new[] { FirmId };
         _resolver.Principal = Collaborator(AccessRights.Read | AccessRights.Create | AccessRights.Write);
+        _spe.Setup(s => s.DownloadFileAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string _, string item, CancellationToken _) => (Stream?)new MemoryStream(System.Text.Encoding.ASCII.GetBytes("bytes of " + item)));
     }
 
     public async Task InitializeAsync()
@@ -105,6 +119,10 @@ public sealed class InvoiceSubmissionEndpointsContractTests : IAsyncLifetime
         // Task 094: Submit Invoice step 1 (from-document route): the caller's rights probe and the app-only reader (the harness's Dataverse).
         builder.Services.AddSingleton<CallerRecordAccessProbe>(_sourceRights);
         builder.Services.AddSingleton(_h.Entities.Object);
+        // Task 118b-2: the shared document read's seams the route binds for a supporting document (the download, and the REAL container
+        // check over a world whose business unit claims the test drive).
+        builder.Services.AddSingleton(_spe.Object);
+        builder.Services.AddSingleton(TestRecordContainerResolver.ForBusinessUnitContainers("b!drive"));
         // ebilling-r1 task 098: the submission routes' (a') seam, as AddExternalAccess registers it (each call recorded).
         if (_registerSubmissionHiding)
             builder.Services.AddScoped<ExternalInvoiceSubmissionHiding>(_ => (caller, submissions, ct) =>
@@ -112,6 +130,15 @@ public sealed class InvoiceSubmissionEndpointsContractTests : IAsyncLifetime
                 lock (_submissionDecisions) _submissionDecisions.Add(submissions.ToArray());
                 return _world.NewService(SubmissionIdentity.Object).HideSubmissionsForAsync(caller, submissions, _world.RootFlags, ct);
             });
+        // ebilling-r1 task 130-0 fix round 1: the caller-aware invoice seam the submission reads also apply (a submission follows its
+        // invoice), as AddExternalAccess registers it: the REAL HideInvoicesForAsync over the same world, with the world's caller firms.
+        builder.Services.AddScoped<ExternalInvoiceHiding>(_ => (caller, invoiceIds, ct) =>
+        {
+            lock (_invoiceDecisions) _invoiceDecisions.Add(invoiceIds.ToArray());
+            if (_invoiceDecisionOverride is { } overridden)
+                return overridden.Seam(caller, invoiceIds, ct);
+            return _world.NewService(SubmissionIdentity.Object).HideInvoicesForAsync(caller, invoiceIds, _world.RootFlags, _world.CallerFirms, ct);
+        });
 
         builder.WebHost.UseTestServer();
         _app = builder.Build();
@@ -239,6 +266,146 @@ public sealed class InvoiceSubmissionEndpointsContractTests : IAsyncLifetime
         allocation.FirmId.Should().Be(FirmId);
         ((OptionSetValue)allocation.Fields!["sprk_channel"]).Value.Should().Be((int)InvoiceSubmissionChannel.Spa);
         _h.JobsSent.Should().ContainSingle().Which.JobType.Should().Be(InvoiceSubmissionService.JobType);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // External: the provisional billing-terms warning on the 202 (ebilling-r1 082c-3; uac-r2 conditions (a) to (d))
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    private static ProcedureResolution HeldForTerms()
+    {
+        var kit = new ProcedureKit().Procedure("Ended", from: new DateOnly(2000, 1, 1), to: new DateOnly(2001, 1, 1));
+        kit.Rule("Ended", "ENDED-INCREMENT", RuleType.TimeIncrement);
+        return kit.Build();
+    }
+
+    [Fact(DisplayName = "082c-3 must fire: a held-for-terms pre-check puts `warning {code, message}` (the exact approved constants) on the SPA 202")]
+    public async Task External_202_CarriesTheProvisionalWarning_WhenTheRecordIsHeldForTerms()
+    {
+        _h.ProcedureRead = HeldForTerms;
+
+        var response = await PostExternalAsync(Form());
+
+        response.StatusCode.Should().Be(HttpStatusCode.Accepted);
+        using var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        body.RootElement.EnumerateObject().Select(p => p.Name).Should().Equal("submissionId", "jobId", "trackingNumber", "statusUrl", "warning");
+        var warning = body.RootElement.GetProperty("warning");
+        warning.EnumerateObject().Select(p => p.Name).Should().Equal("code", "message");
+        warning.GetProperty("code").GetString().Should().Be("ebilling.submission.procedure_gap");
+        warning.GetProperty("message").GetString().Should().Be(
+            "As of today, no billing terms are set up for the record you chose. If the invoice's work dates are not covered either, it will be held for review, not rejected.");
+        _h.Allocations.Should().ContainSingle("the warning is advisory: the submission is received either way");
+    }
+
+    [Fact(DisplayName = "082c-3 must not fire: terms in force give a 202 with no `warning` member at all (the four fields, as before)")]
+    public async Task External_202_HasNoWarning_WhenTheRecordIsNotHeld()
+    {
+        var response = await PostExternalAsync(Form());
+
+        response.StatusCode.Should().Be(HttpStatusCode.Accepted);
+        using var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        body.RootElement.EnumerateObject().Select(p => p.Name).Should().Equal("submissionId", "jobId", "trackingNumber", "statusUrl");
+        _h.PrecheckReads.Should().ContainSingle("the pre-check ran, and judged the record not held");
+    }
+
+    [Fact(DisplayName = "082c-3 fail quiet (seed 1): a pre-check fault gives the same 202 without a warning; the submission is received and its job enqueued")]
+    public async Task External_202_SurvivesAPrecheckFault_WithNoWarning()
+    {
+        _h.ProcedureRead = () => throw new InvalidOperationException("SECRET-RECORD-NAME 6f1c0d7e-aaaa-4bbb-8ccc-0123456789ab");
+
+        var response = await PostExternalAsync(Form());
+
+        response.StatusCode.Should().Be(HttpStatusCode.Accepted);
+        var text = await response.Content.ReadAsStringAsync();
+        text.Should().NotContain("warning").And.NotContain("SECRET").And.NotContain("6f1c0d7e");
+        using var body = JsonDocument.Parse(text);
+        body.RootElement.GetProperty("trackingNumber").GetString().Should().Be("INV-1.1");
+        _h.Allocations.Should().ContainSingle();
+        _h.JobsSent.Should().ContainSingle();
+    }
+
+    [Fact(DisplayName = "082c-3 (uac-r2 (a)): a refused submission never runs the pre-check (it runs only after the submission's own authorization passed and it was received)")]
+    public async Task External_RefusedSubmission_NeverRunsThePrecheck()
+    {
+        _h.ProcedureRead = HeldForTerms;
+        _resolver.Principal = Collaborator(AccessRights.Read);
+
+        var forbidden = await PostExternalAsync(Form());
+        var notPdf = await PostExternalAsync(Form(contentType: "text/plain", pdf: new byte[] { 1, 2, 3 }));
+
+        forbidden.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        notPdf.IsSuccessStatusCode.Should().BeFalse();
+        (await forbidden.Content.ReadAsStringAsync()).Should().NotContain("warning");
+        (await notPdf.Content.ReadAsStringAsync()).Should().NotContain("warning");
+        _h.PrecheckReads.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "082c-3 (uac-r2 (b)): FORM fields naming another record or firm are ignored (the firm is the `?firmId=` query, not a field); the pre-check reads the filter's record and firm")]
+    public async Task External_FormFieldsNamingAnotherRecordOrFirm_AreIgnored()
+    {
+        _h.ProcedureRead = HeldForTerms;
+        var otherRecord = Guid.NewGuid();
+        var form = Form();
+        form.Add(new StringContent(OtherFirmId.ToString()), "firmId");
+        form.Add(new StringContent(otherRecord.ToString()), "coreRecordId");
+        form.Add(new StringContent(otherRecord.ToString()), "matterId");
+        form.Add(new StringContent("sprk_project"), "coreRecordKind");
+
+        var plain = await PostExternalAsync(Form());
+        var crafted = await PostExternalAsync(form);
+
+        crafted.StatusCode.Should().Be(plain.StatusCode);
+        using var plainBody = JsonDocument.Parse(await plain.Content.ReadAsStringAsync());
+        using var craftedBody = JsonDocument.Parse(await crafted.Content.ReadAsStringAsync());
+        craftedBody.RootElement.GetProperty("warning").GetRawText().Should().Be(plainBody.RootElement.GetProperty("warning").GetRawText());
+        _h.PrecheckReads.Should().HaveCount(2).And.OnlyContain(
+            r => r.Core == new CoreRecordReference(CoreRecordKind.Matter, MatterId) && r.FirmId == FirmId,
+            "the record and firm come from the authorized scope, never from the body");
+    }
+
+    [Fact(DisplayName = "082c-3 (uac-r2 (b), K3): the firm the caller NAMES (the `?firmId=` query) is another firm: 403 before the pre-check, which reads nothing")]
+    public async Task External_QueryNamingAnotherFirm_Is403_AndThePrecheckReadsNothing()
+    {
+        _h.ProcedureRead = HeldForTerms;
+
+        var response = await PostExternalAsync(Form(), $"?firmId={OtherFirmId}");
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        (await response.Content.ReadAsStringAsync()).Should().NotContain("warning");
+        _h.PrecheckReads.Should().BeEmpty("the pre-check runs only for the firm the caller's own authorization passed");
+        NothingWritten();
+    }
+
+    [Fact(DisplayName = "082c-3 F1 (seed 2): a pre-check read that never completes is cut off at the budget; the 202 goes out with no `warning`, the submission is received and its job enqueued")]
+    public async Task External_202_HasNoWarning_WhenThePrecheckReadTimesOut()
+    {
+        _h.PrecheckTimeLimit = TimeSpan.FromMilliseconds(50);
+        // A read that IGNORES its token (as the Dataverse SDK's channel call does): only the wait itself can cut it off.
+        _h.ProcedureReadAsync = _ => new TaskCompletionSource<ProcedureResolution>(TaskCreationOptions.RunContinuationsAsynchronously).Task;
+
+        var response = await PostExternalAsync(Form()).WaitAsync(TimeSpan.FromSeconds(10));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Accepted);
+        var text = await response.Content.ReadAsStringAsync();
+        text.Should().NotContain("warning");
+        using var body = JsonDocument.Parse(text);
+        body.RootElement.EnumerateObject().Select(p => p.Name).Should().Equal("submissionId", "jobId", "trackingNumber", "statusUrl");
+        _h.PrecheckReads.Should().ContainSingle("the pre-check ran and was cut off");
+        _h.Allocations.Should().ContainSingle();
+        _h.JobsSent.Should().ContainSingle();
+    }
+
+    [Fact(DisplayName = "082c-3 scope: the internal route's 202 never carries the warning and never runs the pre-check (the SPA channel only)")]
+    public async Task Internal_202_HasNoWarning_AndNeverRunsThePrecheck()
+    {
+        _h.ProcedureRead = HeldForTerms;
+        GrantInternalSubmit();
+
+        var response = await PostInternalAsync(Form());
+
+        response.StatusCode.Should().Be(HttpStatusCode.Accepted);
+        (await response.Content.ReadAsStringAsync()).Should().NotContain("warning");
+        _h.PrecheckReads.Should().BeEmpty();
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -936,6 +1103,30 @@ public sealed class InvoiceSubmissionEndpointsContractTests : IAsyncLifetime
         body.RootElement.GetProperty("status").GetString().Should().Be("Received");
     }
 
+    [Fact(DisplayName = "095a (uac-r2): a submission that carries sprk_sourceemaildocument is answered to an external caller without it (single read and list), and without the .eml id")]
+    public async Task External_get_and_list_never_carry_the_source_email_link()
+    {
+        var eml = Guid.NewGuid();
+        var id = Guid.NewGuid();
+        var row = StoredSubmission(id, FirmId);
+        row[InvoiceSubmissionService.SourceEmailDocumentColumn] = new EntityReference("sprk_document", eml);
+
+        var single = await (await SendAsync(HttpMethod.Get, $"/api/v1/external/invoice-submissions/{id}")).Content.ReadAsStringAsync();
+        var listed = SubmissionRow("INV-LIST", Spa);
+        listed[InvoiceSubmissionService.SourceEmailDocumentColumn] = new EntityReference("sprk_document", eml);
+        ListReturns(listed);
+        var list = await (await SendAsync(HttpMethod.Get, "/api/v1/external/invoice-submissions")).Content.ReadAsStringAsync();
+
+        // Control (must fire): the rows ARE answered, so the absence below is not an empty body.
+        single.Should().Contain("INV-1.1");
+        list.Should().Contain("INV-LIST");
+        foreach (var text in new[] { single, list })
+        {
+            text.ToLowerInvariant().Should().NotContain("sourceemail");
+            text.Should().NotContain(eml.ToString());
+        }
+    }
+
     [Fact]
     public async Task External_get_of_another_firms_submission_is_the_same_404_as_a_missing_one()
     {
@@ -949,6 +1140,152 @@ public sealed class InvoiceSubmissionEndpointsContractTests : IAsyncLifetime
         foreignResponse.StatusCode.Should().Be(HttpStatusCode.NotFound);
         missingResponse.StatusCode.Should().Be(HttpStatusCode.NotFound);
         (await foreignResponse.Content.ReadAsStringAsync()).Should().NotContain("INV-1.1");
+    }
+
+    // ── ebilling-r1 task 095c (P2 precondition, uac-r2): sprk_invoicesubmission.sprk_vendororg may become blank for internal from-email
+    //    rows. The partner read routes must FAIL CLOSED on a submission with no firm: never read, listed or named. ──
+
+    /// <summary><paramref name="row"/> with no firm (<c>sprk_vendororg</c> never written, as a blank-able internal row would read).</summary>
+    private static Entity WithoutFirm(Entity row)
+    {
+        row.Attributes.Remove("sprk_vendororg").Should().BeTrue("the row must have carried a firm for this to be a blank-firm row");
+        return row;
+    }
+
+    [Fact(DisplayName = "095c A1 (uac-r2): the single read of a submission with no firm is the same 404 as a missing one, naming no field of the row; the caller's own firm's submission is still 200")]
+    public async Task External_get_of_a_submission_with_no_firm_is_the_same_404_as_a_missing_one()
+    {
+        var blank = Guid.NewGuid();
+        var row = WithoutFirm(StoredSubmission(blank, FirmId)); // the caller can otherwise reach it: the matter is readable and linked to their firm
+
+        await ReadIsTheSameAsMissingAsync(row, "a submission with no firm belongs to none of the caller's firms");
+        _h.Submission = row;
+        var body = await (await SendAsync(HttpMethod.Get, $"/api/v1/external/invoice-submissions/{blank}")).Content.ReadAsStringAsync();
+        body.Should().NotContain("INV-1.1").And.NotContain("trackingNumber").And.NotContain(MatterId.ToString());
+
+        // Control (must fire): the same row WITH the caller's firm is read, so the 404 above is the missing firm and nothing else.
+        row["sprk_vendororg"] = new EntityReference("sprk_organization", FirmId);
+        (await SendAsync(HttpMethod.Get, $"/api/v1/external/invoice-submissions/{blank}")).StatusCode.Should().Be(HttpStatusCode.OK);
+    }
+
+    /// <summary>
+    /// The list's Dataverse double: answers a <c>sprk_invoicesubmission</c> query that names the firm column from <paramref name="store"/>,
+    /// EVALUATING every <c>In</c> condition of the query against the row's attributes (an entity reference by its id; an absent or null
+    /// attribute matches nothing), as Dataverse does. Every such query is recorded.
+    /// </summary>
+    private List<Microsoft.Xrm.Sdk.Query.QueryExpression> ListIsEvaluated(params Entity[] store)
+    {
+        var queries = new List<Microsoft.Xrm.Sdk.Query.QueryExpression>();
+        _h.Entities.Setup(e => e.RetrieveMultipleAsync(
+                It.Is<Microsoft.Xrm.Sdk.Query.QueryExpression>(q => q.EntityName == "sprk_invoicesubmission"
+                    && q.Criteria.Conditions.Any(c => c.AttributeName == "sprk_vendororg")),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Microsoft.Xrm.Sdk.Query.QueryExpression q, CancellationToken _) =>
+            {
+                lock (queries) queries.Add(q);
+                return new EntityCollection(store.Where(row => q.Criteria.Conditions
+                    .Where(c => c.Operator == Microsoft.Xrm.Sdk.Query.ConditionOperator.In)
+                    .All(c => row.Attributes.TryGetValue(c.AttributeName, out var value)
+                        && value is EntityReference reference
+                        && c.Values.Contains(reference.Id))).ToList());
+            });
+        return queries;
+    }
+
+    [Fact(DisplayName = "095c A2 (uac-r2): the list never includes a submission with no firm (the query is firm In [caller's firms] with no OR/null branch, and the evaluated result keeps only the firm's row)")]
+    public async Task External_list_excludes_a_submission_with_no_firm()
+    {
+        var inFirm = SubmissionRow("INV-FIRM", Spa);
+        var blank = WithoutFirm(SubmissionRow("INV-BLANK", Spa));
+        var otherFirm = SubmissionRow("INV-OTHER", Spa);
+        otherFirm["sprk_vendororg"] = new EntityReference("sprk_organization", OtherFirmId);
+        var queries = ListIsEvaluated(blank, inFirm, otherFirm);
+
+        var response = await SendAsync(HttpMethod.Get, ExternalRoute);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var body = await response.Content.ReadAsStringAsync();
+        body.Should().Contain("INV-FIRM", "positive control: the caller's firm's row is listed")
+            .And.NotContain("INV-BLANK").And.NotContain("INV-OTHER");
+
+        // Query level: the firm condition is a plain conjunct, an In over exactly the caller's firms, with no nested or alternative branch.
+        queries.Should().NotBeEmpty();
+        foreach (var query in queries)
+        {
+            query.Criteria.FilterOperator.Should().Be(Microsoft.Xrm.Sdk.Query.LogicalOperator.And);
+            query.Criteria.Filters.Should().BeEmpty("no OR / null branch can widen the firm condition");
+            var firm = query.Criteria.Conditions.Where(c => c.AttributeName == "sprk_vendororg").Should().ContainSingle().Subject;
+            firm.Operator.Should().Be(Microsoft.Xrm.Sdk.Query.ConditionOperator.In);
+            firm.Values.Cast<Guid>().Should().BeEquivalentTo(new[] { FirmId });
+        }
+    }
+
+    [Theory(DisplayName = "098 (uac-r2): even if the store returned a submission with no firm, the registered seam withholds it from the list, whatever its channel and document")]
+    [InlineData("spa")]
+    [InlineData("internal-with-document")]
+    public async Task External_list_withholds_a_returned_submission_with_no_firm(string kind)
+    {
+        var document = _world.Document(Guid.NewGuid(), permission: StandardPermission);
+        // The firmless Internal row has its own readable document (its id is derived from it), so only the firm check can withhold it.
+        var blankDocument = _world.Document(Guid.NewGuid(), permission: StandardPermission);
+        var blank = kind == "spa" ? SubmissionRow("INV-BLANK", Spa) : SubmissionRow("INV-BLANK", Internal, blankDocument);
+        WithoutFirm(blank);
+        var control = kind == "spa" ? SubmissionRow("INV-CONTROL", Spa) : SubmissionRow("INV-CONTROL", Internal, document);
+
+        var body = await ListBodyAsync(blank, control); // ListReturns does not filter: the withholding is the seam's
+
+        body.Should().Contain("INV-CONTROL", "the same shape with a firm is listed").And.NotContain("INV-BLANK");
+    }
+
+    [Fact(DisplayName = "095c A2 (uac-r2): a caller with no firm is answered an empty list and no submission query is issued")]
+    public async Task External_list_of_a_caller_with_no_firm_issues_no_query()
+    {
+        _participations.Firms = Array.Empty<Guid>();
+        var queries = ListIsEvaluated(SubmissionRow("INV-FIRM", Spa), WithoutFirm(SubmissionRow("INV-BLANK", Spa)));
+
+        var response = await SendAsync(HttpMethod.Get, ExternalRoute);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        (await response.Content.ReadAsStringAsync()).Should().Be("[]");
+        queries.Should().BeEmpty("an empty firm set reads nothing: the scope IS the query");
+    }
+
+    [Fact(DisplayName = "095c A4 (uac-r2): a blank firm id never reaches the list query (hygiene), and a set of only blanks reads nothing")]
+    public async Task External_list_drops_a_blank_firm_id_before_the_query()
+    {
+        _participations.Firms = new[] { Guid.Empty, FirmId };
+        var queries = ListIsEvaluated(SubmissionRow("INV-FIRM", Spa));
+        (await SendAsync(HttpMethod.Get, ExternalRoute)).StatusCode.Should().Be(HttpStatusCode.OK);
+
+        queries.Should().NotBeEmpty();
+        queries.SelectMany(q => q.Criteria.Conditions.Where(c => c.AttributeName == "sprk_vendororg"))
+            .Should().OnlyContain(c => c.Values.Cast<Guid>().SequenceEqual(new[] { FirmId }), "Guid.Empty is not a firm");
+
+        _participations.Firms = new[] { Guid.Empty };
+        queries.Clear();
+        var blankOnly = await SendAsync(HttpMethod.Get, ExternalRoute);
+        blankOnly.StatusCode.Should().Be(HttpStatusCode.OK);
+        (await blankOnly.Content.ReadAsStringAsync()).Should().Be("[]");
+        queries.Should().BeEmpty("a firm set of only Guid.Empty is an empty firm set");
+    }
+
+    [Fact(DisplayName = "095c A3 (uac-r2): the replaced-by-correction note never names a correcting submission with no firm; one of the caller's firm is named")]
+    public async Task External_ReplacementWithNoFirm_IsNotNamed()
+    {
+        SeedSuperseded();
+        _h.PriorSubmissions.Clear();
+        AddReplacement(NewSubmissionId, NewInvoiceId, InvoiceStatusCodes.InReview, "INV-1.2");
+        WithoutFirm(_h.PriorSubmissions.Single());
+
+        var (blank, text) = await ReadAsync(ExternalRoute, OldSubmissionId);
+
+        blank.GetProperty("outcomeReasonCode").GetString().Should().Be(ReplacedByCorrection, "the old submission still answers that it was replaced");
+        text.Should().NotContain("replacedBy").And.NotContain("INV-1.2").And.NotContain(NewSubmissionId.ToString());
+
+        _h.PriorSubmissions.Clear();
+        AddReplacement(NewSubmissionId, NewInvoiceId, InvoiceStatusCodes.InReview, "INV-1.2");
+        (await ReadAsync(ExternalRoute, OldSubmissionId)).Body.GetProperty("replacedBy").GetProperty("submissionId").GetGuid()
+            .Should().Be(NewSubmissionId, "control: the same replacement is named once it carries the caller's firm");
     }
 
     [Fact]
@@ -985,7 +1322,8 @@ public sealed class InvoiceSubmissionEndpointsContractTests : IAsyncLifetime
     // invoice by the invoice predicate, one without by its own source. The seam is the real ExternalDataService over InvoiceWorld.
     // ═══════════════════════════════════════════════════════════════════════════
 
-    private static readonly Guid HiddenInvoice = Guid.Parse("09800000-0000-4000-8000-00000000c0de");
+    private static readonly Guid HiddenSubmission = Guid.Parse("09800000-0000-4000-8000-00000000c0df");
+    private static readonly Guid HiddenInvoice = InvoiceSubmissionPersister.InvoiceIdFor(HiddenSubmission); // its own invoice (task 165c)
     private static readonly Guid FlaggedSystemUser = Guid.Parse("09800000-0000-4000-8000-0000000000f2");
     private const int RestrictedPermission = 100000002;
     private const int StandardPermission = 100000000;
@@ -1020,9 +1358,11 @@ public sealed class InvoiceSubmissionEndpointsContractTests : IAsyncLifetime
     /// <summary>A submission row of the caller's firm on the matter, as <c>ToView</c> reads it.</summary>
     private static Entity SubmissionRow(
         string number, int? channel, Guid? document = null, Guid? invoice = null,
-        InvoiceSubmissionStatus status = InvoiceSubmissionStatus.Received)
+        InvoiceSubmissionStatus status = InvoiceSubmissionStatus.Received, Guid? id = null)
     {
-        var row = new Entity("sprk_invoicesubmission", Guid.NewGuid())
+        // Task 165f: a row naming a document is, by default, the submission derived from it (as the confirm route creates it).
+        var row = new Entity("sprk_invoicesubmission",
+            id ?? (document is { } own ? InvoiceSubmissionService.ExistingDocumentSubmissionIdFor(own) : Guid.NewGuid()))
         {
             ["sprk_trackingnumber"] = number,
             ["sprk_vendororg"] = new EntityReference("sprk_organization", FirmId),
@@ -1088,7 +1428,7 @@ public sealed class InvoiceSubmissionEndpointsContractTests : IAsyncLifetime
     public async Task Task098_get_of_a_submission_whose_invoice_is_hidden_is_the_same_404_as_a_missing_one()
     {
         _world.Source(HiddenInvoice, permission: RestrictedPermission);
-        var id = Guid.NewGuid();
+        var id = HiddenSubmission;
 
         await ReadIsTheSameAsMissingAsync(StoredSubmissionWithInvoice(id, HiddenInvoice), "its invoice is hidden");
 
@@ -1129,7 +1469,7 @@ public sealed class InvoiceSubmissionEndpointsContractTests : IAsyncLifetime
     {
         _world.Faults["sprk_storedfiles"] = HttpStatusCode.ServiceUnavailable;
         var id = Guid.NewGuid();
-        StoredSubmissionWithInvoice(id, Guid.NewGuid());
+        StoredSubmissionWithInvoice(id, InvoiceSubmissionPersister.InvoiceIdFor(id));
 
         var response = await SendAsync(HttpMethod.Get, $"/api/v1/external/invoice-submissions/{id}");
 
@@ -1139,9 +1479,9 @@ public sealed class InvoiceSubmissionEndpointsContractTests : IAsyncLifetime
     [Fact]
     public async Task Task098_get_of_a_submission_whose_invoice_is_visible_or_absent_is_200_as_before()
     {
-        var invoice = Guid.NewGuid();
-        _world.SpaUpload(invoice);
         var withInvoice = Guid.NewGuid();
+        var invoice = InvoiceSubmissionPersister.InvoiceIdFor(withInvoice);
+        _world.SpaUpload(invoice, withInvoice);
         StoredSubmissionWithInvoice(withInvoice, invoice);
         (await SendAsync(HttpMethod.Get, $"/api/v1/external/invoice-submissions/{withInvoice}")).StatusCode.Should().Be(HttpStatusCode.OK);
 
@@ -1154,7 +1494,7 @@ public sealed class InvoiceSubmissionEndpointsContractTests : IAsyncLifetime
     public async Task Task098_get_never_returns_the_invoice_id()
     {
         var id = Guid.NewGuid();
-        var invoice = Guid.NewGuid();
+        var invoice = InvoiceSubmissionPersister.InvoiceIdFor(id);
         StoredSubmissionWithInvoice(id, invoice);
 
         var body = await (await SendAsync(HttpMethod.Get, $"/api/v1/external/invoice-submissions/{id}")).Content.ReadAsStringAsync();
@@ -1168,7 +1508,7 @@ public sealed class InvoiceSubmissionEndpointsContractTests : IAsyncLifetime
         _world.Source(HiddenInvoice, permission: RestrictedPermission);
 
         var body = await ListBodyAsync(
-            SubmissionRow("INV-HIDDEN", Spa, invoice: HiddenInvoice, status: InvoiceSubmissionStatus.Accepted),
+            SubmissionRow("INV-HIDDEN", Spa, invoice: HiddenInvoice, status: InvoiceSubmissionStatus.Accepted, id: HiddenSubmission),
             SubmissionRow("INV-PENDING", Spa));
 
         body.Should().Contain("INV-PENDING").And.NotContain("INV-HIDDEN");
@@ -1178,11 +1518,107 @@ public sealed class InvoiceSubmissionEndpointsContractTests : IAsyncLifetime
     [Fact]
     public async Task Task098_list_keeps_a_submission_whose_invoice_is_visible()
     {
-        var invoice = Guid.NewGuid();
-        _world.SpaUpload(invoice);
+        var id = Guid.NewGuid();
+        var invoice = InvoiceSubmissionPersister.InvoiceIdFor(id);
+        _world.SpaUpload(invoice, id);
 
-        (await ListBodyAsync(SubmissionRow("INV-VISIBLE", Spa, invoice: invoice, status: InvoiceSubmissionStatus.Accepted)))
+        (await ListBodyAsync(SubmissionRow("INV-VISIBLE", Spa, invoice: invoice, status: InvoiceSubmissionStatus.Accepted, id: id)))
             .Should().Contain("INV-VISIBLE");
+    }
+
+    // ── ebilling-r1 task 130-0 fix round 1: a submission follows its invoice (a partner sees only invoices of its own firms) ──
+
+    /// <summary>A submission of the caller's own firm on an invoice whose own source is visible; the invoice is <paramref name="invoiceFirm"/>'s.</summary>
+    private (Guid Submission, Guid Invoice) OwnFirmSubmissionOn(Guid? invoiceFirm)
+    {
+        var id = Guid.NewGuid();
+        var invoice = InvoiceSubmissionPersister.InvoiceIdFor(id);
+        _world.SpaUpload(invoice, id);
+        if (invoiceFirm is { } firm)
+            _world.InvoiceFirm(invoice, firm);
+        return (id, invoice);
+    }
+
+    [Fact(DisplayName = "130-0 fix1 submission read (must fire): the caller's firm's submission on another firm's invoice is the same 404 as a missing one")]
+    public async Task Task130_0_get_of_an_own_firm_submission_whose_invoice_is_another_firms_is_the_same_404_as_a_missing_one()
+    {
+        var (id, invoice) = OwnFirmSubmissionOn(OtherFirmId);
+
+        await ReadIsTheSameAsMissingAsync(StoredSubmissionWithInvoice(id, invoice), "its invoice is another firm's");
+
+        _invoiceDecisions.Should().ContainSingle("the missing submission never reaches the invoice decision")
+            .Which.Should().Equal(invoice);
+    }
+
+    [Fact(DisplayName = "130-0 fix1 submission list (must fire): the caller's firm's submission on another firm's invoice is absent; the others are listed, in one invoice decision")]
+    public async Task Task130_0_list_omits_an_own_firm_submission_whose_invoice_is_another_firms()
+    {
+        var (other, otherInvoice) = OwnFirmSubmissionOn(OtherFirmId);
+        var (own, ownInvoice) = OwnFirmSubmissionOn(invoiceFirm: null);
+
+        var body = await ListBodyAsync(
+            SubmissionRow("INV-OTHER-FIRM", Spa, invoice: otherInvoice, status: InvoiceSubmissionStatus.Accepted, id: other),
+            SubmissionRow("INV-OWN-FIRM", Spa, invoice: ownInvoice, status: InvoiceSubmissionStatus.Accepted, id: own),
+            SubmissionRow("INV-PENDING", Spa));
+
+        body.Should().Contain("INV-OWN-FIRM").And.Contain("INV-PENDING").And.NotContain("INV-OTHER-FIRM");
+        _invoiceDecisions.Should().ContainSingle("one invoice decision for the page")
+            .Which.Should().BeEquivalentTo(new[] { otherInvoice, ownInvoice });
+    }
+
+    [Fact(DisplayName = "130-0 fix1 submission read and list (must not fire): the caller's firm's submission on its own firm's invoice is served")]
+    public async Task Task130_0_an_own_firm_submission_on_an_own_firm_invoice_is_served_on_the_read_and_the_list()
+    {
+        var (id, invoice) = OwnFirmSubmissionOn(invoiceFirm: null);
+
+        (await ReadStatusAsync(StoredSubmissionWithInvoice(id, invoice))).Should().Be(HttpStatusCode.OK);
+        (await ListBodyAsync(SubmissionRow("INV-OWN-FIRM", Spa, invoice: invoice, status: InvoiceSubmissionStatus.Accepted, id: id)))
+            .Should().Contain("INV-OWN-FIRM");
+        _invoiceDecisions.Should().HaveCount(2).And.OnlyContain(call => call.SequenceEqual(new[] { invoice }));
+    }
+
+    [Fact(DisplayName = "130-0 fix1 submission read and list (fault): the caller's firms cannot be read: a retryable 503, never a row; a missing submission is still the 404")]
+    public async Task Task130_0_when_the_firm_read_fails_the_read_and_the_list_are_503_and_a_missing_submission_is_404()
+    {
+        var (id, invoice) = OwnFirmSubmissionOn(invoiceFirm: null);
+        _world.CallerFirmsFault = new TimeoutException("The caller-firm read failed (test).");
+
+        _h.Submission = StoredSubmissionWithInvoice(id, invoice);
+        await ShouldBeRetryable503Async(await SendAsync(HttpMethod.Get, $"/api/v1/external/invoice-submissions/{id}"), "trackingNumber");
+        _h.Submission = null;
+        (await SendAsync(HttpMethod.Get, $"/api/v1/external/invoice-submissions/{Guid.NewGuid()}")).StatusCode
+            .Should().Be(HttpStatusCode.NotFound, "the record check comes first: the 503 is no existence oracle");
+
+        ListReturns(SubmissionRow("INV-OWN-FIRM", Spa, invoice: invoice, status: InvoiceSubmissionStatus.Accepted, id: id));
+        await ShouldBeRetryable503Async(await SendAsync(HttpMethod.Get, "/api/v1/external/invoice-submissions"), "INV-OWN-FIRM");
+    }
+
+    // Task 130-0 fix round 3b: one notion of a fault. A decision that failed for one invoice alone (not for the whole result) is the
+    // same retryable 503 as a whole-result fault, on the read and the list; a decided hidden invoice stays the refusal / absent row.
+    [Fact(DisplayName = "130-0 fix3b submission read and list (must fire): an invoice decision that failed for the submission's invoice alone is the retryable 503")]
+    public async Task Task130_0_fix3b_a_per_invoice_decision_fault_is_the_503_on_the_read_and_the_list()
+    {
+        var (id, invoice) = OwnFirmSubmissionOn(invoiceFirm: null);
+        _invoiceDecisionOverride = Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceHidingStub.PerInvoiceFault(invoice);
+
+        _h.Submission = StoredSubmissionWithInvoice(id, invoice);
+        await ShouldBeRetryable503Async(await SendAsync(HttpMethod.Get, $"/api/v1/external/invoice-submissions/{id}"), "trackingNumber");
+
+        ListReturns(SubmissionRow("INV-OWN-FIRM", Spa, invoice: invoice, status: InvoiceSubmissionStatus.Accepted, id: id));
+        await ShouldBeRetryable503Async(await SendAsync(HttpMethod.Get, "/api/v1/external/invoice-submissions"), "INV-OWN-FIRM");
+    }
+
+    [Fact(DisplayName = "130-0 fix3b submission read and list (must not fire): an invoice decided hidden is the same 404 as a missing one and an absent row, not the 503")]
+    public async Task Task130_0_fix3b_a_decided_hidden_invoice_is_not_the_503()
+    {
+        var (id, invoice) = OwnFirmSubmissionOn(invoiceFirm: null);
+        _invoiceDecisionOverride = Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceHidingStub.Hiding(invoice);
+
+        await ReadIsTheSameAsMissingAsync(StoredSubmissionWithInvoice(id, invoice), "its invoice is decided hidden");
+        (await ListBodyAsync(
+                SubmissionRow("INV-HIDDEN", Spa, invoice: invoice, status: InvoiceSubmissionStatus.Accepted, id: id),
+                SubmissionRow("INV-PENDING", Spa)))
+            .Should().Contain("INV-PENDING").And.NotContain("INV-HIDDEN");
     }
 
     // ── Without an invoice: the submission's own source decides (review round 4b), on BOTH routes ──
@@ -1265,8 +1701,10 @@ public sealed class InvoiceSubmissionEndpointsContractTests : IAsyncLifetime
     public async Task EB_D_169_list_is_503_when_the_invoice_read_fails()
     {
         _world.Faults["sprk_storedfiles"] = HttpStatusCode.ServiceUnavailable;
+        var with = Guid.NewGuid();
         ListReturns(
-            SubmissionRow("INV-WITH", Spa, invoice: Guid.NewGuid(), status: InvoiceSubmissionStatus.Accepted), SubmissionRow("INV-PENDING", Spa));
+            SubmissionRow("INV-WITH", Spa, invoice: InvoiceSubmissionPersister.InvoiceIdFor(with), status: InvoiceSubmissionStatus.Accepted, id: with),
+            SubmissionRow("INV-PENDING", Spa));
 
         await ShouldBeRetryable503Async(
             await SendAsync(HttpMethod.Get, "/api/v1/external/invoice-submissions"), "INV-WITH", "INV-PENDING");
@@ -2121,6 +2559,262 @@ public sealed class InvoiceSubmissionEndpointsContractTests : IAsyncLifetime
         NothingWritten();
     }
 
+    // ── ebilling-r1 task 118b-1: supportingDocumentIds on POST from-document (contract, the caller's Read, the same communication) ──
+
+    private static readonly Guid SupportingA = Guid.Parse("118b0000-0000-4000-8000-0000000000a1");
+    private static readonly Guid SupportingB = Guid.Parse("118b0000-0000-4000-8000-0000000000b1");
+
+    private static object SupportingBody(params Guid[] supporting) => new
+    {
+        communicationId = SourceCommunicationId,
+        documentId = SourceDocumentId,
+        coreRecord = new { kind = "matter", id = MatterId },
+        firmId = FirmId,
+        firmInvoiceNumber = "INV-94",
+        supportingDocumentIds = supporting,
+    };
+
+    /// <summary>A supporting document row linking <paramref name="communication"/> (null: none), readable by the caller when <paramref name="readable"/>.</summary>
+    private void SupportingDocumentExists(Guid id, Guid? communication, bool readable = true, int? fileSize = null)
+    {
+        var row = new Entity("sprk_document", id)
+        {
+            ["sprk_graphdriveid"] = "b!drive",
+            ["sprk_graphitemid"] = "item-" + id.ToString("N"),
+            ["versionnumber"] = 5L,
+            ["sprk_mimetype"] = "application/pdf",
+            ["sprk_filename"] = "Timesheet.pdf",
+        };
+        if (fileSize is { } recorded)
+        {
+            row["sprk_filesize"] = recorded;
+        }
+
+        if (communication is { } linked)
+        {
+            row["sprk_relatedcommunication"] = new EntityReference("sprk_communication", linked);
+        }
+
+        _h.OtherDocuments[id] = row;
+        if (readable)
+        {
+            _sourceRights.Grant(FinanceAuthorizationFilter.DocumentEntitySet, id, AccessRights.Read);
+        }
+    }
+
+    [Fact(DisplayName = "118b-2 (acceptance: two readable supporting documents): 202 with the document's submission; each supporting document checked once as the caller (OBO), read through the shared read (its container verified, its bytes downloaded) and staged under its part id with its own source; one submission, one job")]
+    public async Task FromDocument_two_readable_supporting_documents_are_202_and_each_copy_is_staged_with_its_source()
+    {
+        GrantInternalSubmit();
+        SourceDocumentExists();
+        SupportingDocumentExists(SupportingA, SourceCommunicationId);
+        SupportingDocumentExists(SupportingB, SourceCommunicationId);
+
+        var response = await PostFromDocumentAsync(SupportingBody(SupportingB, SupportingA, SupportingB));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Accepted, await response.Content.ReadAsStringAsync());
+        var submissionId = InvoiceSubmissionService.ExistingDocumentSubmissionIdFor(SourceDocumentId);
+        using (var receipt = JsonDocument.Parse(await response.Content.ReadAsStringAsync()))
+        {
+            receipt.RootElement.GetProperty("submissionId").GetGuid().Should().Be(submissionId, "the id is still the document's (D-134)");
+        }
+
+        foreach (var id in new[] { SupportingA, SupportingB })
+        {
+            _sourceRights.Calls.Should().ContainSingle(c => c.Set == FinanceAuthorizationFilter.DocumentEntitySet && c.Id == id && c.Token != null,
+                "each supporting document is checked once (repeats ignored), as the caller");
+            _spe.Verify(s => s.DownloadFileAsync("b!drive", "item-" + id.ToString("N"), It.IsAny<CancellationToken>()), Times.Once());
+        }
+
+        var parent = new Sprk.Bff.Api.Services.Finance.Files.StoredFileParent(
+            Sprk.Bff.Api.Services.Finance.Files.StoredFileParentKind.Invoice, InvoiceSubmissionPersister.InvoiceIdFor(submissionId));
+        var container = Sprk.Bff.Api.Services.Finance.Files.StoredFileSchema.ContainerOf(Sprk.Bff.Api.Services.Finance.Files.StoredFilePurpose.InvoiceSupportingFile);
+        _h.Stages.Should().HaveCount(2);
+        var sorted = new[] { SupportingA, SupportingB }.Order().ToArray();
+        for (var number = 1; number <= sorted.Length; number++)
+        {
+            var blob = _h.Files.Gateway.Get(container, Sprk.Bff.Api.Services.Finance.Files.StoredFileBlobName.Build(
+                _h.Files.TenantId, parent, InvoiceSubmissionPersister.DocumentPartFileId(submissionId, number)))!;
+            blob.Metadata[Sprk.Bff.Api.Services.Finance.Files.StoredFileBlobs.MetadataSourceDocument].Should().Be(
+                sorted[number - 1].ToString("D"), "part numbers follow the sorted ids");
+            blob.Metadata[Sprk.Bff.Api.Services.Finance.Files.StoredFileBlobs.MetadataSourceCommunication].Should().Be(SourceCommunicationId.ToString("D"));
+            blob.Metadata[Sprk.Bff.Api.Services.Finance.Files.StoredFileBlobs.MetadataSourceVersion].Should().Be("5");
+        }
+
+        _h.Allocations.Should().ContainSingle().Which.SubmissionId.Should().Be(submissionId);
+        _h.JobsSent.Should().ContainSingle();
+    }
+
+    [Theory(DisplayName = "118b-1 (seed-proof, the Read guard; must fire): a supporting document the caller cannot Read, an unknown one, one of another communication or of none is the uniform 404, byte-for-byte the same; an unreadable row is never read; nothing written")]
+    [InlineData("unreadable")]
+    [InlineData("other_communication")]
+    [InlineData("no_communication")]
+    public async Task FromDocument_supporting_document_refusals_are_the_uniform_404(string state)
+    {
+        GrantInternalSubmit();
+        SourceDocumentExists();
+        SupportingDocumentExists(SupportingA, SourceCommunicationId);
+        switch (state)
+        {
+            case "unreadable":
+                SupportingDocumentExists(SupportingB, SourceCommunicationId, readable: false);
+                break;
+            case "other_communication":
+                SupportingDocumentExists(SupportingB, Guid.NewGuid());
+                break;
+            default:
+                SupportingDocumentExists(SupportingB, communication: null);
+                break;
+        }
+
+        var refused = await PostFromDocumentAsync(SupportingBody(SupportingA, SupportingB));
+        var unknown = await PostFromDocumentAsync(SupportingBody(SupportingA, Guid.Parse("118b0000-0000-4000-8000-0000000000ff")));
+
+        refused.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        unknown.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        var refusedBody = await refused.Content.ReadAsStringAsync();
+        using (var problem = JsonDocument.Parse(refusedBody))
+        {
+            problem.RootElement.GetProperty("reasonCode").GetString().Should().Be("sdap.access.deny.record_unavailable");
+        }
+
+        WithoutCorrelation(await unknown.Content.ReadAsStringAsync()).Should().Be(WithoutCorrelation(refusedBody), "the answer reveals nothing about the document");
+        refusedBody.Should().NotContain(SupportingB.ToString());
+        if (state == "unreadable")
+        {
+            _h.Entities.Verify(e => e.RetrieveAsync("sprk_document", SupportingB, It.IsAny<string[]>(), It.IsAny<CancellationToken>()), Times.Never(),
+                "the row of a document the caller cannot Read is never read");
+        }
+
+        NothingWritten();
+    }
+
+    [Fact(DisplayName = "118b review F1-b (must fire): a supporting document whose row records a size over the configured file limit is 413 ebilling.submission.too_large (the upload's code) through the route's own binding of the shared read; nothing downloaded for it, nothing staged or created")]
+    public async Task FromDocument_a_supporting_document_over_the_file_limit_is_413_nothing_written()
+    {
+        GrantInternalSubmit();
+        SourceDocumentExists();
+        SupportingDocumentExists(SupportingA, SourceCommunicationId);
+        // 2 MB against the harness's 1 MB limit: over the file's own limit and far under the total, so it is the per-file path (review 2 F1
+        // sums recorded sizes first: a size over the whole request cap would be the total's refusal instead).
+        SupportingDocumentExists(SupportingB, SourceCommunicationId, fileSize: 2 * 1024 * 1024);
+
+        var response = await PostFromDocumentAsync(SupportingBody(SupportingA, SupportingB));
+
+        response.StatusCode.Should().Be(HttpStatusCode.RequestEntityTooLarge, await response.Content.ReadAsStringAsync());
+        (await ErrorCodeAsync(response)).Should().Be(InvoiceSubmissionErrors.TooLarge);
+        _spe.Verify(s => s.DownloadFileAsync("b!drive", "item-" + SupportingB.ToString("N"), It.IsAny<CancellationToken>()), Times.Never(),
+            "the row says it is too big: no download");
+        NothingWritten();
+    }
+
+    [Fact(DisplayName = "118b review 2 F1 (must fire): supporting documents whose rows record sizes that add up to more than the upload route's request cap are 413 ebilling.submission.too_large through the route's own binding, in the total's own words; not one is downloaded; nothing staged or created")]
+    public async Task FromDocument_supporting_documents_over_the_total_are_413_nothing_downloaded()
+    {
+        GrantInternalSubmit();
+        SourceDocumentExists();
+        _h.Options.MaxSubmissionFileSizeMb = EbillingOptions.MaxSubmissionFileSizeMbCeiling; // no single file is over its limit
+        var third = (int)(InvoiceSubmissionHttp.MaxRequestBodyBytes / 3) + 1;
+        var ids = new[] { SupportingA, SupportingB, Guid.Parse("118b0000-0000-4000-8000-0000000000c1") };
+        foreach (var id in ids)
+        {
+            SupportingDocumentExists(id, SourceCommunicationId, fileSize: third);
+        }
+
+        var response = await PostFromDocumentAsync(SupportingBody(ids));
+
+        response.StatusCode.Should().Be(HttpStatusCode.RequestEntityTooLarge, await response.Content.ReadAsStringAsync());
+        (await ErrorCodeAsync(response)).Should().Be(InvoiceSubmissionErrors.TooLarge);
+        (await response.Content.ReadAsStringAsync()).Should().Contain("together");
+        _spe.Verify(s => s.DownloadFileAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never(),
+            "the recorded sizes already pass the cap: no download");
+        NothingWritten();
+    }
+
+    [Fact(DisplayName = "118b review 2 F4 (must fire): the from-document route's OpenAPI contract lists 413 as a problem response and the description names too_large, document_unavailable and storage_not_configured among its refusals")]
+    public void FromDocument_route_metadata_lists_413_and_the_supporting_document_refusals()
+    {
+        var endpoint = _app.Services.GetRequiredService<EndpointDataSource>().Endpoints
+            .OfType<RouteEndpoint>()
+            .Single(e => e.RoutePattern.RawText == "/api/finance/invoice-submissions/from-document");
+
+        endpoint.Metadata.GetOrderedMetadata<IProducesResponseTypeMetadata>().Select(m => m.StatusCode)
+            .Should().Contain(StatusCodes.Status413PayloadTooLarge);
+        endpoint.Metadata.GetMetadata<IEndpointDescriptionMetadata>()!.Description.Should()
+            .Contain("413 too_large").And.Contain("document_unavailable").And.Contain("storage_not_configured");
+    }
+
+    public static TheoryData<string> SupportingShapeRefusals => new() { "invoice_document", "empty_id", "too_many" };
+
+    [Theory(DisplayName = "118b-1 (must fire): the invoice document listed as supporting, an empty id, or more than 50 files in all is 400 supportingDocumentIds before anything is read; nothing written")]
+    [MemberData(nameof(SupportingShapeRefusals))]
+    public async Task FromDocument_invalid_supporting_documents_are_400(string shape)
+    {
+        GrantInternalSubmit();
+        SourceDocumentExists();
+
+        var response = await PostFromDocumentAsync(shape switch
+        {
+            "invoice_document" => SupportingBody(SupportingA, SourceDocumentId),
+            "empty_id" => SupportingBody(SupportingA, Guid.Empty),
+            _ => SupportingBody(Enumerable.Range(1, SubmissionCommitGate.MaxFiles).Select(_ => Guid.NewGuid()).ToArray()),
+        });
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        using var problem = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        problem.RootElement.GetProperty("errors").TryGetProperty("supportingDocumentIds", out _).Should().BeTrue();
+        _sourceRights.Calls.Should().BeEmpty("the body is validated before anything is asked");
+        NothingWritten();
+    }
+
+    [Fact(DisplayName = "118b-1 (must not fire): 49 supporting documents (50 files with the invoice document) pass the limit, and repeats are not counted")]
+    public async Task FromDocument_the_file_limit_counts_distinct_documents_and_the_invoice_document()
+    {
+        GrantInternalSubmit();
+        SourceDocumentExists();
+        var ids = Enumerable.Range(1, SubmissionCommitGate.MaxFiles - 1).Select(_ => Guid.NewGuid()).ToArray();
+        foreach (var id in ids)
+        {
+            SupportingDocumentExists(id, SourceCommunicationId);
+        }
+
+        var response = await PostFromDocumentAsync(SupportingBody([.. ids, .. ids.Take(5)]));
+
+        // Task 118b review: the whole request goes through (not only "past the 400"): 202, one stage per distinct supporting document,
+        // repeats not counted, and the limit's own count (49 + the invoice document = MaxFiles) is not off by one at the intake.
+        response.StatusCode.Should().Be(HttpStatusCode.Accepted, await response.Content.ReadAsStringAsync());
+        _sourceRights.Calls.Count(c => c.Set == FinanceAuthorizationFilter.DocumentEntitySet && ids.Contains(c.Id)).Should().Be(ids.Length);
+        _h.Stages.Should().HaveCount(SubmissionCommitGate.MaxFiles - 1, "49 distinct supporting documents are staged, one part each");
+        _h.Allocations.Should().ContainSingle();
+        _h.JobsSent.Should().ContainSingle();
+    }
+
+    [Fact(DisplayName = "118b (must fire): a retry of an earlier submission of the document that staged no supporting documents (the empty set), naming some, is 409 document_already_submitted; the same request without them replays; nothing written")]
+    public async Task FromDocument_retry_with_another_supporting_set_is_409()
+    {
+        GrantInternalSubmit();
+        SourceDocumentExists();
+        SupportingDocumentExists(SupportingA, SourceCommunicationId);
+        _h.Submission = new Entity("sprk_invoicesubmission", InvoiceSubmissionService.ExistingDocumentSubmissionIdFor(SourceDocumentId))
+        {
+            ["sprk_trackingnumber"] = "INV-94.1",
+            ["sprk_firminvoicenumber"] = "INV-94",
+            ["sprk_vendororg"] = new EntityReference("sprk_organization", FirmId),
+            ["sprk_processingstatus"] = new OptionSetValue((int)InvoiceSubmissionStatus.Accepted),
+            ["sprk_channel"] = new OptionSetValue((int)InvoiceSubmissionChannel.Internal),
+            ["sprk_document"] = new EntityReference("sprk_document", SourceDocumentId),
+            ["sprk_regardingmatter"] = new EntityReference("sprk_matter", MatterId),
+        };
+
+        var withSet = await PostFromDocumentAsync(SupportingBody(SupportingA));
+        var without = await PostFromDocumentAsync(FromDocumentBody());
+
+        withSet.StatusCode.Should().Be(HttpStatusCode.Conflict, await withSet.Content.ReadAsStringAsync());
+        (await ErrorCodeAsync(withSet)).Should().Be(InvoiceSubmissionErrors.DocumentAlreadySubmitted);
+        without.StatusCode.Should().Be(HttpStatusCode.Accepted, "the same request without the field replays as before");
+        NothingWritten();
+    }
+
 
     // ═══════════════════════════════════════════════════════════════════════════
     // ebilling-r1 task 097f (EB-D-180): the status read of an Accepted submission whose invoice a correction Superseded answers Accepted with
@@ -2131,12 +2825,13 @@ public sealed class InvoiceSubmissionEndpointsContractTests : IAsyncLifetime
     private const string InternalRoute = "/api/finance/invoice-submissions";
     private const string ExternalRoute = "/api/v1/external/invoice-submissions";
     private static readonly Guid OldSubmissionId = Guid.Parse("097f0000-0000-4000-8000-000000000001");
-    private static readonly Guid OldInvoiceId = Guid.Parse("097f0000-0000-4000-8000-000000000002");
+    private static readonly Guid OldInvoiceId = InvoiceSubmissionPersister.InvoiceIdFor(OldSubmissionId); // its own invoice (task 165c)
     private static readonly Guid NewSubmissionId = Guid.Parse("097f0000-0000-4000-8000-000000000003");
-    private static readonly Guid NewInvoiceId = Guid.Parse("097f0000-0000-4000-8000-000000000004");
+    private static readonly Guid NewInvoiceId = InvoiceSubmissionPersister.InvoiceIdFor(NewSubmissionId);
     private static readonly Guid SecondSubmissionId = Guid.Parse("097f0000-0000-4000-8000-000000000005");
-    private static readonly Guid SecondInvoiceId = Guid.Parse("097f0000-0000-4000-8000-000000000006");
-    private static readonly Guid OtherInvoiceId = Guid.Parse("097f0000-0000-4000-8000-000000000009");
+    private static readonly Guid SecondInvoiceId = InvoiceSubmissionPersister.InvoiceIdFor(SecondSubmissionId);
+    private static readonly Guid OtherSubmissionId = Guid.Parse("097f0000-0000-4000-8000-000000000008");
+    private static readonly Guid OtherInvoiceId = InvoiceSubmissionPersister.InvoiceIdFor(OtherSubmissionId);
 
     private static Entity InvoiceRow(Guid id, int status) =>
         new("sprk_invoice", id) { ["statuscode"] = new OptionSetValue(status) };
@@ -2155,7 +2850,7 @@ public sealed class InvoiceSubmissionEndpointsContractTests : IAsyncLifetime
             [InvoiceSubmissionService.ResubmissionOfColumn] = new EntityReference("sprk_invoicesubmission", OldSubmissionId),
         });
         _h.Invoices[invoiceId] = InvoiceRow(invoiceId, invoiceStatus);
-        _world.SpaUpload(invoiceId); // visible to a firm by the (a') predicate
+        _world.SpaUpload(invoiceId, submissionId); // visible to a firm by the (a') predicate
         _access.Grant(FinanceAuthorizationFilter.InvoiceSubmissionEntitySet, submissionId, AccessRights.Read);
     }
 
@@ -2166,7 +2861,7 @@ public sealed class InvoiceSubmissionEndpointsContractTests : IAsyncLifetime
         old["sprk_processingstatus"] = new OptionSetValue((int)InvoiceSubmissionStatus.Accepted);
         old["sprk_trackingnumber"] = "INV-1.1";
         _h.Invoices[OldInvoiceId] = InvoiceRow(OldInvoiceId, InvoiceStatusCodes.Superseded);
-        _world.SpaUpload(OldInvoiceId);
+        _world.SpaUpload(OldInvoiceId, OldSubmissionId);
         _access.Grant(FinanceAuthorizationFilter.InvoiceSubmissionEntitySet, OldSubmissionId, AccessRights.Read);
         AddReplacement(NewSubmissionId, NewInvoiceId, InvoiceStatusCodes.InReview, "INV-1.2");
         return old;
@@ -2325,9 +3020,9 @@ public sealed class InvoiceSubmissionEndpointsContractTests : IAsyncLifetime
     public async Task ExternalList_NotesOnlyTheSuperseded_WithOneStatusRead()
     {
         var old = SeedSuperseded();
-        var other = SubmissionRow("INV-9.1", Spa, invoice: OtherInvoiceId, status: InvoiceSubmissionStatus.Accepted);
+        var other = SubmissionRow("INV-9.1", Spa, invoice: OtherInvoiceId, status: InvoiceSubmissionStatus.Accepted, id: OtherSubmissionId);
         _h.Invoices[OtherInvoiceId] = InvoiceRow(OtherInvoiceId, InvoiceStatusCodes.InReview);
-        _world.SpaUpload(OtherInvoiceId);
+        _world.SpaUpload(OtherInvoiceId, OtherSubmissionId);
         var received = SubmissionRow("INV-9.2", Spa);
         _h.Entities.Setup(e => e.RetrieveMultipleAsync(
                 It.Is<Microsoft.Xrm.Sdk.Query.QueryExpression>(q => q.EntityName == "sprk_invoicesubmission"

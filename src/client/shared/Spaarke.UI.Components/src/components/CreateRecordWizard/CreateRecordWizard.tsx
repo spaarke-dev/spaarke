@@ -63,6 +63,8 @@ import {
   SendEmailFollowOnStep,
 } from '../WizardFollowOns';
 import type { FollowOnCardConfig, WorkAssignmentPriorityValue } from '../WizardFollowOns';
+import { EMPTY_COMPOSED_EMAIL, isComposedEmailReady, joinRecipientAddresses } from '../EmailComposer/composeOnlySend';
+import type { IComposedEmail } from '../EmailComposer/composeOnlySend';
 
 // ---------------------------------------------------------------------------
 // File reducer
@@ -211,11 +213,14 @@ export const CreateRecordWizard: React.FC<ICreateRecordWizardProps> = ({
   const [createEventDueDate, setCreateEventDueDate] = React.useState('');
   const [createEventPriority, setCreateEventPriority] = React.useState(100000001); // Normal
   const [createEventDescription, setCreateEventDescription] = React.useState('');
+  const [createEventAssignedToId, setCreateEventAssignedToId] = React.useState('');
+  const [createEventAssignedToName, setCreateEventAssignedToName] = React.useState('');
 
-  // -- Send Email state --
-  const [emailTo, setEmailTo] = React.useState('');
-  const [emailSubject, setEmailSubject] = React.useState('');
-  const [emailBody, setEmailBody] = React.useState('');
+  // -- Send Email state (task 182: the whole composed email — From, To/Cc/Bcc, subject, body, attachments) --
+  const [email, setEmail] = React.useState<IComposedEmail>(EMPTY_COMPOSED_EMAIL);
+  // The Send Email pre-fill runs once per opening: clearing the subject to retype it must not reset the subject and body
+  // (and lose a template or AI draft).
+  const emailPrefilledRef = React.useRef(false);
 
   // -- SPE container ID --
   const [speContainerId, setSpeContainerId] = React.useState('');
@@ -263,9 +268,10 @@ export const CreateRecordWizard: React.FC<ICreateRecordWizardProps> = ({
       setCreateEventDueDate('');
       setCreateEventPriority(100000001);
       setCreateEventDescription('');
-      setEmailTo('');
-      setEmailSubject('');
-      setEmailBody('');
+      setCreateEventAssignedToId('');
+      setCreateEventAssignedToName('');
+      setEmail(EMPTY_COMPOSED_EMAIL);
+      emailPrefilledRef.current = false;
     }
     // Intentionally depends on `open` only — re-running on every `config` change
     // would clobber in-progress wizard state. The initial-association seed is read
@@ -314,12 +320,12 @@ export const CreateRecordWizard: React.FC<ICreateRecordWizardProps> = ({
   createEventPriorityRef.current = createEventPriority;
   const createEventDescriptionRef = React.useRef(createEventDescription);
   createEventDescriptionRef.current = createEventDescription;
-  const emailToRef = React.useRef(emailTo);
-  emailToRef.current = emailTo;
-  const emailSubjectRef = React.useRef(emailSubject);
-  emailSubjectRef.current = emailSubject;
-  const emailBodyRef = React.useRef(emailBody);
-  emailBodyRef.current = emailBody;
+  const createEventAssignedToIdRef = React.useRef(createEventAssignedToId);
+  createEventAssignedToIdRef.current = createEventAssignedToId;
+  const createEventAssignedToNameRef = React.useRef(createEventAssignedToName);
+  createEventAssignedToNameRef.current = createEventAssignedToName;
+  const emailRef = React.useRef(email);
+  emailRef.current = email;
   const selectedActionsRef = React.useRef(selectedActions);
   selectedActionsRef.current = selectedActions;
   const fileStateRef = React.useRef(fileState);
@@ -463,6 +469,7 @@ export const CreateRecordWizard: React.FC<ICreateRecordWizardProps> = ({
               outsideCounselValue={ocVal}
               onOutsideCounselChange={handleOutsideCounselChange}
               onSearchOutsideCounsel={searchOrganizations}
+              navigationService={config.navigationService}
             />
           );
         },
@@ -491,12 +498,13 @@ export const CreateRecordWizard: React.FC<ICreateRecordWizardProps> = ({
             description: createEventDescriptionRef.current,
             regardingRecordId: '',
             regardingRecordName: '',
-            assignedToId: '',
-            assignedToName: '',
+            assignedToId: createEventAssignedToIdRef.current,
+            assignedToName: createEventAssignedToNameRef.current,
           };
           return (
             <CreateEventFollowOnStep
               dataService={config.eventDataService}
+              navigationService={config.navigationService}
               formValues={currentFormValues}
               onFormValues={vals => {
                 setCreateEventName(vals.eventName);
@@ -505,6 +513,8 @@ export const CreateRecordWizard: React.FC<ICreateRecordWizardProps> = ({
                 setCreateEventDueDate(vals.dueDate);
                 setCreateEventPriority(vals.priority);
                 setCreateEventDescription(vals.description);
+                setCreateEventAssignedToId(vals.assignedToId);
+                setCreateEventAssignedToName(vals.assignedToName);
               }}
               onValidChange={() => {
                 /* canAdvance is always true for follow-on */
@@ -521,20 +531,14 @@ export const CreateRecordWizard: React.FC<ICreateRecordWizardProps> = ({
         stepLabel: 'Send Email',
         icon: <MailRegular fontSize={28} />,
         description: 'Compose and queue an introductory email to the client.',
-        canAdvance: () =>
-          emailToRef.current.trim() !== '' &&
-          emailSubjectRef.current.trim() !== '' &&
-          emailBodyRef.current.trim() !== '',
+        canAdvance: () => isComposedEmailReady(emailRef.current),
+        // Task 182 (D-219): the shared EmailComposer, compose-only; the entity's onFinish sends it with the created record.
         renderStep: () => (
           <SendEmailFollowOnStep
-            emailTo={emailToRef.current}
-            onEmailToChange={setEmailTo}
-            emailSubject={emailSubjectRef.current}
-            onEmailSubjectChange={setEmailSubject}
-            emailBody={emailBodyRef.current}
-            onEmailBodyChange={setEmailBody}
-            onSearchUsers={searchUsers}
-            infoNote="This email will be saved as a draft activity on the record. You can review and send it from there."
+            value={emailRef.current}
+            onChange={setEmail}
+            composeHandlers={config.emailComposeHandlers}
+            onSearchRecipients={searchUsers}
           />
         ),
       },
@@ -550,20 +554,20 @@ export const CreateRecordWizard: React.FC<ICreateRecordWizardProps> = ({
 
   // -- Email pre-fill when send-email is selected --
   React.useEffect(() => {
-    if (selectedActions.includes('send-email') && !emailSubject) {
+    if (selectedActions.includes('send-email') && !email.subject && !emailPrefilledRef.current) {
       const entityName = config.getEntityName?.() ?? '';
       if (entityName) {
+        emailPrefilledRef.current = true;
         const subject = config.buildEmailSubject ? config.buildEmailSubject(entityName) : `New Record: ${entityName}`;
-        setEmailSubject(subject);
 
         const fields = config.getFormFields?.() ?? {};
         const body = config.buildEmailBody
           ? config.buildEmailBody(fields)
           : `Dear Client,\n\nA new record "${entityName}" has been created.\n\nKind regards`;
-        setEmailBody(body);
+        setEmail(prev => ({ ...prev, subject, body, bodyFormat: 'PlainText' }));
       }
     }
-  }, [selectedActions, emailSubject, config]);
+  }, [selectedActions, email.subject, config]);
 
   // -- File handler callbacks --
   const handleFilesAccepted = React.useCallback((files: IUploadedFile[]) => {
@@ -650,10 +654,13 @@ export const CreateRecordWizard: React.FC<ICreateRecordWizardProps> = ({
         createEventDueDate: createEventDueDateRef.current,
         createEventPriority: createEventPriorityRef.current,
         createEventDescription: createEventDescriptionRef.current,
-        // Send Email fields
-        emailTo: emailToRef.current,
-        emailSubject: emailSubjectRef.current,
-        emailBody: emailBodyRef.current,
+        createEventAssignedToId: createEventAssignedToIdRef.current,
+        createEventAssignedToName: createEventAssignedToNameRef.current,
+        // Send Email fields (the strings stay for existing readers; `email` is what onFinish sends)
+        emailTo: joinRecipientAddresses(emailRef.current.to),
+        emailSubject: emailRef.current.subject,
+        emailBody: emailRef.current.body,
+        email: emailRef.current,
       },
     });
   }, [config]);

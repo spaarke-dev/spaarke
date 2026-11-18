@@ -344,12 +344,15 @@ public partial class RouteAuthorizationGuardTests
             + "Each route declares the Dataverse table privileges the caller must hold (AddFinanceAuthorizationFilter, D-76, fail closed), "
             + "plus a Read check on any matter, project or work assignment the card is scoped to; the eBilling kill switch runs after it."),
         new GovernedFile("Api/Finance/RuleSetEndpoints.cs", Scope.RouteLevelGate,
-            "/api/finance/rulesets/* (ebilling-r1 task 076, FR-28) -- create a rule set from a source document, list / read it with its rules, "
-            + "edit / accept / reject a rule, publish, assign, visibility, and (task 075, FR-27) POST .../{ruleSetId}/draft which queues the rule "
-            + "drafting job (the count of endpoint files is unchanged at 137: a route in an existing file). Each route declares the billing-admin Dataverse table privileges the "
+            "/api/finance/rulesets/* (ebilling-r1 task 076, FR-28) -- list / read a rule set with its rules, "
+            + "edit / accept / reject a rule, publish, assign, visibility. Task 116 RETIRED POST / (create from a source document) and POST "
+            + ".../{ruleSetId}/draft (drafting moved per Procedure Version to ProcedureEndpoints.cs); the count of endpoint files is unchanged. "
+            + "Each route declares the billing-admin Dataverse table privileges the "
             + "caller must hold (BillingAdminAuthorization via AddFinanceAuthorizationFilter, D-76, fail closed; Write on sprk_ruleset is the marker "
             + "because the Ontology Administrator holds every privilege on the shared policy tables); reads of the proposals are admin-only too. "
-            + "The eBilling kill switch runs after it."),
+            + "The eBilling kill switch runs after it. Task 089e: every route that takes a rule set id then carries RequireAccessToTheRuleSet "
+            + "(the caller's Read on the set and, for a record-scoped set, on its record; the uniform 404 otherwise, 409 ruleset.record_scoped "
+            + "when both pass), before the Procedure filter where the route has one."),
         new GovernedFile("Api/Finance/ProcedureEndpoints.cs", Scope.RouteLevelGate,
             "/api/finance/procedures/* (ebilling-r1 task 081, EB-D-148) -- Procedures and their versions. Step 0 on the group "
             + "(RequireInternalFinanceCaller, reads included: Procedures are internal-only). Each route then declares its basis through "
@@ -358,7 +361,47 @@ public partial class RouteAuthorizationGuardTests
             + "Procedure (Record path, sprk_procedures); PATCH /{procedureId}, PATCH .../versions/{versionId}, POST .../versions/{versionId}/retire "
             + "and GET .../retire-preview -- Write on the Procedure AND the billing-admin marker (Write on sprk_ruleset); POST .../versions -- the "
             + "same plus Create on sprk_policyversion; POST .../versions/{versionId}/publish -- the same plus Write on sprk_policyversion and "
-            + "sprk_policy; POST .../retire -- the same plus Write on sprk_policy. The eBilling kill switch runs after it."),
+            + "sprk_policy; POST .../retire -- the same plus Write on sprk_policy. Task 116 adds two routes in this file (the count of endpoint "
+            + "files is unchanged): POST .../versions/{versionId}/draft -- BillingAdminAuthorization.DraftProcedureVersion: Write on the Procedure "
+            + "(Record path) plus DraftRules() (Write on sprk_ruleset, Create on sprk_policy and sprk_policyversion) plus DecideRule()'s privileges "
+            + "(what a reject of the drafts needs), no Delete check (EB-D-216); then, in the handler, the version's own Read and Write (K1), and "
+            + "BEFORE any read of draft state the reject route's two caller checks on the version's rule set, by the same bodies its filters run: "
+            + "RuleSetEndpoints.CallerAccessToTheRuleSetRefusalAsync (Read on the set, answered as the missing-version 404, its record when "
+            + "record-scoped) and BillingAdminAuthorization.CallerRightsOnTheRuleSetsProcedureRefusalAsync (Write on its Procedure, 403) "
+            + "(EB-D-216a: row-level rights on draft rows are not the gate). A superseded draft outside the checked set or version is 409 "
+            + "ruleset.redraft_scope_mismatch, nothing written; the route holds the drafting job's per-version lock around plan, deactivate and "
+            + "queue (409 ruleset.drafting_in_progress when a run holds it), and the application deactivates the drafts all or none; PUT .../versions/{versionId}/file "
+            + "-- WriteProcedure, then the file store's own step 0 and the caller's Write on the version (UploadForCallerAsync). On both, a version of "
+            + "another Procedure is the unknown-id 404. The eBilling kill switch runs after it."),
+        new GovernedFile("Api/Finance/ProcedureAssignmentEndpoints.cs", Scope.RouteLevelGate,
+            "POST /api/finance/{matters|projects|workassignments}/{recordId}/procedure-assignments and .../rule-overrides/exclude (ebilling-r1 "
+            + "task 089b, EB-D-148) -- assign, pin or exclude a Procedure, and exclude a rule, for one core record; the core table is fixed per "
+            + "literal route chain. Step 0 on the group (RequireInternalFinanceCaller). Each route then carries two AddFinanceAuthorizationFilter "
+            + "declarations, as the caller, fail closed: Write and AppendTo on the route record (ebilling.record.override, the uniform 404), then "
+            + "(403) Read on the body's Procedure (assign) or rule's policy (exclude) plus the billing-admin privilege composed from "
+            + "BillingAdminAuthorization.Admin() (Write on sprk_ruleset). Task 089c adds POST .../rule-overrides/change (the same record "
+            + "filter, then Read on the body's policy plus Create and Write on sprk_ruleset, sprk_policy and sprk_policyversion), GET "
+            + ".../overrides/{overrideId}/removal-preview (record filter, Admin()) and DELETE .../overrides/{overrideId} (record filter, "
+            + "Admin() plus Write on sprk_policy); both removal routes then carry RequireReadOnTheOverridesSubject (the caller's Read on "
+            + "the stored row's Procedure or rule; unreadable is the 404 a missing row gets), after the eBilling kill switch (review K2)."),
+        new GovernedFile("Api/Finance/RecordProcedureEndpoints.cs", Scope.RouteLevelGate,
+            "GET /api/finance/{matters|projects|workassignments}/{recordId}/procedures and .../rules-in-force (ebilling-r1 task 084, EB-D-218) -- "
+            + "the Procedures a core record is subject to and the rules in force on it for a firm and a date; the core table is fixed per literal "
+            + "route chain. Step 0 on the group (RequireInternalFinanceCaller). Each route carries AddFinanceAuthorizationFilter(\"finance.read\", the "
+            + "core record set, recordId, UniformNotFound): Read on the route record as the caller, fail closed, unknown and unreadable the same "
+            + "404; the eBilling kill switch runs after it. RecordProcedureReadService then reads the rows once, app-only, and makes ONE batched "
+            + "CallerRecordAccessProbe check that the caller can Read EVERY row the answer exposes (chain records, Procedures, versions, rule sets, "
+            + "policies, override rows, firms, creators); an unreadable row, an unanswered rights question or a faulted read is 503 "
+            + "procedures.unavailable with no list. Reads only. Task 084d-2a adds POST .../procedures/dry-run (the same chain, nothing written): "
+            + "ONE AddFinanceAuthorizationFilter on the route record asking finance.read and ebilling.record.override (uniform 404), then a "
+            + "second AddFinanceAuthorizationFilter (403) with the planned writes' own subject Read and privileges (DryRunTargets, built from the "
+            + "write routes' AssignChecks / ExcludeChecks / ChangeChecks / RemoveChecks), the kill switch, then "
+            + "RequireReadOnTheDryRunsOverridesSubject for a removal or a replaced override; the service's one batched check covers Now and After. "
+            + "Task 084d-5a adds GET /api/finance/{matters|projects|workassignments}/{recordId}/procedures/assignable (EB-D-227..230, nothing "
+            + "written): the dry run's record filter (finance.read and ebilling.record.override, uniform 404), then a second "
+            + "AddFinanceAuthorizationFilter (403) with the assign write's privileges (AssignableTargets = AssignOrExcludePrivileges, Admin()), the "
+            + "kill switch; the service's one batched check covers Now, the planned After and every refused own row (503 procedures.unavailable), "
+            + "on the tooMany path too."),
         new GovernedFile("Api/Finance/InvoiceAdjustmentEndpoints.cs", Scope.RouteLevelGate,
             "GET /api/finance/invoices/{invoiceId}/adjustment-rules, POST .../adjustments and DELETE .../adjustments/{lineId} (ebilling-r1 task 102, "
             + "FR-32) -- the invoice-level adjustments. Every route carries AddFinanceAuthorizationFilter on sprk_invoices(invoiceId) as the caller, fail "
@@ -380,9 +423,10 @@ public partial class RouteAuthorizationGuardTests
             + "from their own token) and a correction never touches a line's status, approved amount or decision."),
         new GovernedFile("Api/Finance/InvoiceLineReviewEndpoints.cs", Scope.RouteLevelGate,
             "GET /api/finance/invoices/{invoiceId}/review and POST /api/finance/invoices/{invoiceId}/lines/{lineId}/decision, .../lines/decisions, "
-            + ".../lines/accept-clean (ebilling-r1 task 100, FR-31) -- the Invoice Review read model and the line decisions. Every route carries "
+            + ".../lines/accept-clean (ebilling-r1 task 100, FR-31) -- the Invoice Review read model and the line decisions -- and POST "
+            + "/api/finance/invoices/{invoiceId}/lines (Add line, task 164, EB-D-188). Every route carries "
             + "AddFinanceAuthorizationFilter on sprk_invoices(invoiceId) as the caller, fail closed: the read with \"finance.read\" (Read), the three "
-            + "decisions with \"ebilling.invoice.decide\" (Write, D-77); invoice access reaches the caller through the core record (013, ADR-034). The "
+            + "decisions and Add line with \"ebilling.invoice.decide\" (Write, D-77); invoice access reaches the caller through the core record (013, ADR-034). The "
             + "eBilling kill switch runs after it. Every line id is checked against the invoice's own lines (uniform 404) before a write; the decider "
             + "is the caller's systemuserid from their own token, never the body."),
         new GovernedFile("Api/Finance/InvoiceRelatedWorkEndpoints.cs", Scope.RouteLevelGate,
@@ -405,7 +449,15 @@ public partial class RouteAuthorizationGuardTests
             + "CheckFirmLinkAsync. And GET /api/finance/core-records/{entityType}/{entityId}/firms (finance.read on the core record, "
             + "uniform 404), which lists only the record's active linked firms. Task 097e adds GET /api/finance/invoices/{invoiceId}/correction-prefill "
             + "(\"ebilling.invoice.decide\", Write on the invoice as the caller, uniform 404 for no Write, an unknown invoice, step 0 and a rights fault); "
-            + "its canCorrect is the Correction intake's own guard, and its optional replacedBy is put to the caller's own Read (finance.read) on the replacement."),
+            + "its canCorrect is the Correction intake's own guard, and its optional replacedBy is put to the caller's own Read (finance.read) on the replacement. "
+            + "Task 095a adds GET /api/finance/invoice-submissions?internetMessageId=... (the add-in's \"already submitted\" banner): the Finance filter with "
+            + "step 0 (uniform 404 for a genuine refusal), the Message-ID shape check (uniform 404) and the caller's table-level Read on "
+            + "sprk_invoicesubmissions as the credited check; the filter runs in the fail-closed mode (FinanceDenial.UniformNotFoundFailClosed): a "
+            + "refusal that is a system failure (a step-0 flag-read or lookup fault, an OBO, WhoAmI or privilege-read fault) is the route's 503 "
+            + "ebilling.submission.record_unavailable, never the no-match 404; the handler then puts the .eml documents the Message-ID names, and EACH candidate submission (found by sprk_sourceemaildocument, newest "
+            + "first), to the caller's own Read (finance.read, per record): an unreadable .eml or submission is skipped and is indistinguishable from no match "
+            + "(the uniform 404); a read or rights-read fault (including a Faulted rights snapshot with no Read) is a 503, never \"not submitted\". "
+            + "submittedBy is the sprk_createdbyperson name (null when none), never createdby; the source-email link is never returned."),
         new GovernedFile("Api/Finance/CodeSetMappingEndpoints.cs", Scope.RouteLevelGate,
             "/api/finance/code-set-mappings/* (ebilling-r1 task 048, FR-22) -- AI code-set proposals (GET) and the admin confirm that writes one "
             + "default code set (POST). Each route declares the Dataverse table privileges the caller must hold (AddFinanceAuthorizationFilter, "
@@ -425,7 +477,27 @@ public partial class RouteAuthorizationGuardTests
             + "the invoice named in the path (finance.read: Read; ebilling.invoice.decide: Write), fail closed; the eBilling kill switch runs after "
             + "it. Approve additionally resolves the caller's eligibility LIVE from the invoice's core record inside InvoiceApprovalService on every "
             + "call (403 ebilling.approver.not_eligible, nothing written); the stored eligible-approver set never grants. The decider and the "
-            + "decision id are derived server-side, never taken from the request."),
+            + "decision id are derived server-side, never taken from the request. From task 095d-1b, POST /api/finance/invoices/{invoiceId}/firm "
+            + "(Set firm on a held no-firm invoice): Write and Append on the invoice in the path, which holds the firm lookup (ebilling.invoice.assign_firm, uniform 404), then Read and "
+            + "AppendTo on the body's firm (read, finance.attach_invoice: 403; no firm is the 400 before any rights query), as the caller, fail "
+            + "closed; the kill switch runs after them. InvoiceAssignFirmService then asks, as the caller, AppendTo on the core record and Write on "
+            + "the firm_missing Signal's subject, and the firm's link to the core record; the submission, the number and the decision id are "
+            + "derived server-side."),
+        new GovernedFile("Api/Finance/CoreRecordFirmEndpoints.cs", Scope.RouteLevelGate,
+            "GET /api/finance/firms and POST /api/finance/core-records/{entityType}/{entityId}/firms (ebilling-r1 task 095g, EB-D-224) -- the "
+            + "law firms an internal user may assign, and add / replace / clear of a matter's, project's or work assignment's assigned firm. "
+            + "Step 0 on the group (RequireInternalFinanceCaller). Both routes carry AddFinanceAuthorizationFilter in the fail-closed mode "
+            + "(FinanceDenial.UniformNotFoundFailClosed: a denial is the uniform 404, a rights fault 503), and the eBilling kill switch runs "
+            + "after it. The LIST is credited by step 0 plus the caller's Read privilege on sprk_organization (prvReadsprk_Organization): it is "
+            + "internal only, firm names are not access-sensitive, and the access decision is made when a firm is assigned, so internal "
+            + "callers may see every active law firm. The ASSIGN asks, as the caller and from one snapshot, Read, Write and Append on the "
+            + "route record for an add or replace (ebilling.record.assign_firm) or Read and Write for a clear (ebilling.record.remove_firm; "
+            + "Read because every answer describes the record's firms); an unknown "
+            + "record answers no rights, the same 404. CoreRecordFirmAssignmentService then asks the caller's Read and AppendTo on the body's "
+            + "firm (the same Finance check, as the caller; unknown = denied, the same 404), refuses a Restricted, secure or limited record "
+            + "through the materializer's own organization rule, an inactive or non-law firm and a firm on the record's No Access list, "
+            + "writes only the two slot columns app-only under a row-version condition, and runs the Assigned-To materializer inline with "
+            + "the caller as grantor."),
         new GovernedFile("Api/Finance/InvoiceRejectReturnEndpoints.cs", Scope.RouteLevelGate,
             "POST /api/finance/invoices/{invoiceId}/reject and POST /api/finance/invoices/{invoiceId}/return (ebilling-r1 task 104, FR-36, "
             + "FR-11, D-43, D-122) -- an eligible approver rejects an invoice (final) or returns it to the firm. Each route carries "
@@ -530,7 +602,10 @@ public partial class RouteAuthorizationGuardTests
             "the aggregator's own routes: /me, /me/entitlements and the inline close-project (sweep S-39; task 166)."),
         new GovernedFile("Api/ExternalAccess/ExternalProjectDataEndpoints.cs", Scope.GroupGated,
             "the external data plane: every handler checks the caller principal's rights on the route record "
-            + "(HoldsReadOnProject / RightsForRoot) before any read — the Wave-3 reference implementation."),
+            + "(HoldsReadOnProject / RightsForRoot) before any read — the Wave-3 reference implementation. R4 task 014b adds "
+            + "GET and PATCH /events/{id} (CheckEventReadableAsync: Read on every parent, else the uniform 404; PATCH then "
+            + "EventEditDecisionAsync: Write on every parent, and for a systemuser Dataverse Write on the row) and GET "
+            + "/{projects|matters|workassignments}/{id}/assignable-people (RightsForRoot Read, then the event create or edit right)."),
         new GovernedFile("Api/ExternalAccess/ExternalModuleDataEndpoints.cs", Scope.GroupGated,
             "scoped module reads (Tier2ScopeFilterInjector, IsRecordAccessible) and schema/view passthrough, under the nested "
             + "/api/dataverse group of /api/v1/external."),
@@ -557,7 +632,21 @@ public partial class RouteAuthorizationGuardTests
             + "memberships; it lists only ids from the caller's own readable sets that the firm is linked to, at most 200 per kind from at "
             + "most 500 examined, with partial and truncated flags; a systemuser is refused), a systemuser refusal on a submit before any "
             + "write, and the firm-to-record link a submit requires. The filter's link check is an early copy: the owner is "
-            + "InvoiceSubmissionService.SubmitAsync (D-110), so the internal route enforces the same rule with the same codes."),
+            + "InvoiceSubmissionService.SubmitAsync (D-110), so the internal route enforces the same rule with the same codes. Task 093 adds "
+            + "GET /api/v1/external/invoices/{id}/files and GET /api/v1/external/invoices/{id}/files/{fileId}/content under the same filter "
+            + "(the InvoiceFiles gate, DecideInvoiceFilesAsync): an internal systemuser, or a caller whose firms include the invoice's vendor "
+            + "firm; Read through the invoice's parents after the secure-roots rule and the (a') predicate (GetRecordRightsDecisionAsync); "
+            + "then only the invoice's own firm-visible, sourceless Invoice PDF rows the download rule would serve or is scanning. Every "
+            + "refusal is the uniform 404, every fault a 503; the content handler streams only a file of the gate's set."),
+        new GovernedFile("Api/ExternalAccess/FirmOutcomeEndpoints.cs", Scope.GroupGated,
+            "GET /api/v1/external/ebilling/invoices/{invoiceId}/outcome and GET /api/v1/external/ebilling/submissions/{submissionId}/outcome "
+            + "(ebilling-r1 task 130b, FR-38, NFR-10) on the COLLABORATION group, each chain attaching AddFirmOutcomeAuthorizationFilter "
+            + "(FirmOutcomeEndpoints.cs:28, :39) BEFORE RequireEbillingEnabled (:30, :41). The filter requires a non-systemuser caller, "
+            + "the item's firm among the caller's active firms, Read on the item's core record and that the (a') predicate does not hide the "
+            + "item; every refusal and a missing item are the same 403, a firm or visibility read that cannot be completed is 403/503, "
+            + "never a pass. The handlers read the FirmFindingsProjection only for the id the filter admitted (a handler that finds no "
+            + "admitted subject answers 403, :55-75; the submission handler passes the filter's InvoiceDecided to the projection, :75); a "
+            + "Degraded or Unavailable outcome is a 503."),
         new GovernedFile("Api/ExternalAccess/ExternalRegistrationEndpoints.cs", Scope.RouteLevelGate,
             "POST /api/v1/external/registration (spaarke-SPA-external-access-platform-r3 task 047, ADR-028 A9) on its OWN "
             + "group: RequireAuthorization(ExternalCollaboration) WITHOUT CallerPrincipalAuthorizationFilter (the caller is "
@@ -1138,7 +1227,28 @@ public partial class RouteAuthorizationGuardTests
     // GET /api/finance/export-batches/candidates, POST /api/finance/export-batches, GET /api/finance/export-batches/{batchId}. Classified by GovernedFiles
     // (RouteLevelGate: step 0 on the group, then AddFinanceAuthorizationFilter on each route; the per-invoice decide right is asked inside the service
     // through the one authorization seam); .RequireEbillingEnabled is already in NotAuthorizationForms.
-    private const int ExpectedEndpointFileCount = 150;
+    //
+    // 150 -> 151 (2026-11-03, ebilling-r1 task 089b, EB-D-148). Net +1: Api/Finance/ProcedureAssignmentEndpoints.cs ADDED -- POST
+    // /api/finance/{matters|projects|workassignments}/{recordId}/procedure-assignments and .../rule-overrides/exclude. Classified by
+    // GovernedFiles (RouteLevelGate: step 0 on the group, then AddFinanceAuthorizationFilter twice per route as the caller: the record's
+    // ebilling.record.override, then Read on the Procedure or rule plus the billing-admin privilege); .RequireEbillingEnabled is already in
+    // NotAuthorizationForms.
+    //
+    // 151 -> 152 (2026-11-08, ebilling-r1 task 130b, FR-38). Net +1: Api/ExternalAccess/FirmOutcomeEndpoints.cs ADDED -- GET
+    // /api/v1/external/ebilling/invoices/{invoiceId}/outcome and GET /api/v1/external/ebilling/submissions/{submissionId}/outcome on the
+    // external collaboration group. Classified by GovernedFiles (GroupGated: AddFirmOutcomeAuthorizationFilter, credited above);
+    // .RequireEbillingEnabled is already in NotAuthorizationForms.
+    //
+    // 152 -> 153 (2026-11-12, ebilling-r1 task 084, EB-D-218). Net +1: Api/Finance/RecordProcedureEndpoints.cs ADDED -- GET
+    // /api/finance/{matters|projects|workassignments}/{recordId}/procedures and .../rules-in-force. Classified by GovernedFiles
+    // (RouteLevelGate: step 0 on the group, then AddFinanceAuthorizationFilter("finance.read") on the route record as the caller);
+    // .RequireEbillingEnabled is already in NotAuthorizationForms.
+    //
+    // 153 -> 154 (2026-11-14, ebilling-r1 task 095g, EB-D-224). Net +1: Api/Finance/CoreRecordFirmEndpoints.cs ADDED -- GET
+    // /api/finance/firms and POST /api/finance/core-records/{entityType}/{entityId}/firms. Classified by GovernedFiles (RouteLevelGate: step 0
+    // on the group, then AddFinanceAuthorizationFilter in the fail-closed mode as the caller); .RequireEbillingEnabled is already in
+    // NotAuthorizationForms.
+    private const int ExpectedEndpointFileCount = 154;
 
     // =============================================================================================
     // THE CREDITED ALLOW-LIST — the only attachment forms Rule A credits as a per-resource decision
@@ -1184,13 +1294,42 @@ public partial class RouteAuthorizationGuardTests
             "Each route declares the id it authorizes; the filter evaluates it as the caller via GetCallerRecordAccessAsync + "
             + "OperationAccessPolicy.HasRequiredRights (FinanceAuthorizationFilter.cs:409-412), uniform 404 on deny (task 130)."),
         new CreditedForm("RequireWriteOnTheRuleSetsProcedure", "Api/Finance/BillingAdminAuthorization.cs",
-            "Reads the route rule set's Procedure (BillingAdminAuthorization.cs:172) and, when set, asks the caller's own Write on "
-            + "sprk_procedures via CallerReadCheck.CheckAsync (:191); a read fault or an unanswered question is 403 system_failure (:178, :200) "
-            + "(ebilling-r1 081, uac D; /draft added in re-check round 2)."),
+            "Reads the route rule set's Procedure (BillingAdminAuthorization.cs:301) and, when set, asks the caller's own Write on "
+            + "sprk_procedures via CallerReadCheck.CheckAsync (:319); a read fault or an unanswered question is 403 system_failure (:307, :332) "
+            + "(ebilling-r1 081, uac D; /draft added in re-check round 2; the body is CallerRightsOnTheRuleSetsProcedureRefusalAsync (:295), "
+            + "which the Procedure Version /draft handler also calls for the version's rule set, task 116 fix round 5)."),
+        new CreditedForm("RequireWriteOnTheVersionsProcedure", "Api/Finance/RateCardImportEndpoints.cs",
+            "Reads the Procedure of the route's procedureVersionId app-only (RateCardImportEndpoints.cs:148, :241) and asks the caller's own Write "
+            + "on sprk_procedures via CallerReadCheck.CheckAsync (:159, :267); a read fault or an unanswered question is 403 system_failure "
+            + "(:151, :280), denied is 403 insufficient_rights (:277) (ebilling-r1 085, I-P5)."),
+        new CreditedForm("RequireWriteOnTheCardsProcedure", "Api/Finance/RateCardImportEndpoints.cs",
+            "The publish route's own check: reads the route card's Procedure Version app-only (RateCardImportEndpoints.cs:194), that version's "
+            + "Procedure (:214, :241) and asks the caller's own Write on sprk_procedures via the same CallerReadCheck.CheckAsync body as the import "
+            + "(:225, :267); an unknown card, a card with no version and a version with no Procedure are 403 insufficient_rights (:211, :222), a "
+            + "read fault or an unanswered question 403 system_failure (:206, :217, :280); it records the version it checked (:231) and the "
+            + "service refuses 409 ratecard.version_changed if the card names another (ebilling-r1 085 fix round 1, uac-r2 approved)."),
         new CreditedForm("RequireReadOnTheRuleSetsProcedure", "Api/Finance/BillingAdminAuthorization.cs",
-            "The sibling for the rule set READ: the same Procedure resolution (BillingAdminAuthorization.cs:172) and CallerReadCheck.CheckAsync "
-            + "(:191) asking Read; denied is 403 insufficient_rights, an unanswered question or a read fault 403 system_failure (:178, :200) "
+            "The sibling for the rule set READ: the same Procedure resolution (BillingAdminAuthorization.cs:301) and CallerReadCheck.CheckAsync "
+            + "(:319) asking Read; denied is 403 insufficient_rights (:329), an unanswered question or a read fault 403 system_failure (:307, :332) "
             + "(ebilling-r1 081, uac r2 I-P5)."),
+        new CreditedForm("RequireAccessToTheRuleSet", "Api/Finance/RuleSetEndpoints.cs",
+            "Asks the caller's own Read on the route rule set via CallerReadCheck.CheckAsync (RuleSetEndpoints.cs:468) and answers anything but "
+            + "Readable with the uniform 404 ruleset.not_found (:473) before reading the set; then reads the set's record home app-only "
+            + "(:479, a fault is 403 system_failure :484) and, for a record-scoped set, asks the caller's Read on its core record through "
+            + "FinanceAuthorizationFilter.CallerHoldsRightsAsync, the record routes' own check (:502); a refusal, a fault or no single core "
+            + "record is the same 404 (:496, :513), and only then 409 ruleset.record_scoped (:528) (ebilling-r1 089e; the body is "
+            + "CallerAccessToTheRuleSetRefusalAsync, which the Procedure Version /draft handler also calls, task 116 fix round 5)."),
+        new CreditedForm("RequireReadOnTheOverridesSubject", "Api/Finance/ProcedureAssignmentEndpoints.cs",
+            "Reads the route record's stored override through ProcedureAssignmentService.SubjectOfOverrideAsync "
+            + "(ProcedureAssignmentEndpoints.cs:346) and asks the caller's own Read on the Procedure or rule it overrides via "
+            + "CallerReadCheck.CheckAsync with AuthorizationService (:364); denied is the same 404 assignment.override_not_found a missing "
+            + "row gets, also when there is no row at all and the filter answers it itself (:359, :375; review K1, pass 2), an unparseable id, a read fault or an unanswered question 403 system_failure (:339, :351, :376) "
+            + "(ebilling-r1 089c)."),
+        new CreditedForm("RequireReadOnTheDryRunsOverridesSubject", "Api/Finance/ProcedureAssignmentEndpoints.cs",
+            "The dry run's removal step (ebilling-r1 084d-2a): for a body that removes or replaces an override it calls "
+            + "RefuseUnlessCallerReadsOverridesSubjectAsync, the same body RequireReadOnTheOverridesSubject runs (ProcedureAssignmentEndpoints.cs:537): "
+            + "the stored row read app-only, the caller's own Read on its Procedure or rule, the same 404 assignment.override_not_found and 403 "
+            + "system_failure; an unparseable record id is 403 system_failure (ProcedureAssignmentEndpoints.cs:534)."),
         new CreditedForm("AddStoredFileAccessFilter", "Api/Finance/StoredFileEndpoints.cs",
             "StoredFileAccessFilter decides before the handler: step 0 via FinanceAuthorizationFilter.EvaluateStepZeroAsync "
             + "(StoredFileEndpoints.cs:241, 403), then RetrievePrincipalAccess as the caller over OBO via "
@@ -1275,7 +1414,23 @@ public partial class RouteAuthorizationGuardTests
             "ebilling-r1 task 044: a submit needs Read and Create on the route's core record from the evaluator's post-veto rights "
             + "(principal.RightsOn, ExternalInvoiceSubmissionAuthorizationFilter.cs:153) and a firm among the caller contact's conferring "
             + "memberships (:180, :256; an unreadable read is 503, never 'no firm'); a read needs the submission's firm among them and "
-            + "Read on its core record, else one uniform 404 (:206-225); a missing principal denies (:119)."),
+            + "Read on its core record, else one uniform 404 (:206-225); a missing principal denies (:119). Task 093 (InvoiceFiles): the "
+            + "invoice's vendor firm among the caller's firms (an internal systemuser exempt), Read through its parents from the record gate "
+            + "with the secure-roots rule and the (a') predicate, and the visible file set (DecideInvoiceFilesAsync); every refusal the "
+            + "uniform 404, every fault 503."),
+        new CreditedForm("AddFirmOutcomeAuthorizationFilter", "Api/ExternalAccess/FirmOutcomeAuthorizationFilter.cs",
+            "ebilling-r1 task 130b: a systemuser is refused (FirmOutcomeAuthorizationFilter.cs:135); the invoice's (or submission's) firm "
+            + "must be among the caller contact's ACTIVE firms (:227, :379; an unreadable or faulting firm read is a retryable 503, never "
+            + "'no firm' and never a pass, :150-153 and :183-189; a decided empty set is the 403, :155-158) AND the caller holds Read on its "
+            + "core record from the evaluator's post-veto rights (principal.RightsOn, :235, :385; on the submission's own row as read a second time, :412, fix round 7), AND every secure root the record (an invoice, "
+            + "or a submission's own row, whether or not its invoice exists yet) names is one the caller can read, by the invoices module's own "
+            + "rule (ExternalMultiRootRule, one function, DecideSecureRootsAsync :291-325, called at :243 and :418; a status read that "
+            + "failed is a 503, never a pass), AND the item is not hidden by the (a') "
+            + "predicate (:251-276, :426-439); every refusal, a missing item included, is the same 403 (:218), and a missing principal "
+            + "denies (:127-130). A submission's derived invoice is then decided by the same invoice rule (:453; fix round 1). The "
+            + "InvoiceDecided rule (fix round 2): a submission's invoice that does not exist yet passes UNDECIDED (:218), the decision is "
+            + "stored with the admitted id (:168), and the projection then reads nothing of that invoice "
+            + "(in progress: no billed total; Accepted: 503)."),
         new CreditedForm("AddInsightsAskAuthorizationFilter", "Api/Insights/InsightEndpoints.cs",
             "Task 163 f1: the shared playbook-parameter policy, registered insights-ask playbooks only, then Read on the subject "
             + "matter (Write when a node that can write reaches it) and each record parameter, as the caller, through "
@@ -1464,6 +1619,11 @@ public partial class RouteAuthorizationGuardTests
             + "filter. It switches on step 0 inside the route's own AddFinanceAuthorizationFilter (CreditedForms), which refuses a "
             + "flagged-external, row-less or unreadable caller before its record checks. It only narrows that filter and decides "
             + "nothing itself; FinanceStepZeroCoverageGuardTests pins it on every /api/finance route."),
+        new NotAuthorizationForm("RequireRateCardCreateOnARateCardProcedure",
+            "ebilling-r1 task 085 fix round 1: a table-privilege requirement (Create on sprk_ratecard and sprk_ratecardrate) on the Procedure "
+            + "version-create route, applied only when the route's Procedure is a Rate card Procedure, because copy-forward then creates cards "
+            + "(BillingAdminAuthorization.cs). It only narrows who may call; the route's record decision stays its AddFinanceAuthorizationFilter "
+            + "and it decides nothing about any record."),
         new NotAuthorizationForm("AddEndpointFilter(ValidateFilingRequestAsync)",
             "Task 147 r1c: PATCH /api/v1/events/{id}/filing request SHAPE only (EventEndpoints.cs:172-177, "
             + "ChildRecordEndpoints.FilingShapeProblem, no I/O), before the route's RecordRouteAccessAuthorizationFilter(\"write\")."),
@@ -2059,22 +2219,6 @@ public partial class RouteAuthorizationGuardTests
         new HandlerDecision("GET /api/v1/external/servicerequests/{id:guid}/documents/{documentId:guid}/versions", "GetServiceRequestDocumentVersions", "IsRecordAccessible", new[] { "ExternalProjectDataEndpoints.RightsForDocumentParentAsync" },
             "Delegates to ListDocumentVersionsForParent: the requester check (ExternalProjectDataEndpoints.cs:989) and the "
             + "document's service-request scoping (:1445, IsReadableUnder: also Read on every SECURE linked root, by effective status (ExternalMultiRootRule / ExternalDataService.GetNonSecureRootsAsync; unknown counts as secure), one uniform 403) before the version read."),
-        // Task 031 (FR-24, owner decision 2026-10-11 option A): an invoice is not a root and is not securable — its rights
-        // are INHERITED, the union of the caller's RightsForRoot on the invoice's sprk_matter and sprk_project
-        // (ExternalProjectDataEndpoints.RightsForInvoiceAsync), the rule ExternalMessageEndpoints.RightsThroughParents
-        // already applies to an invoice post.
-        new HandlerDecision("GET /api/v1/external/invoices/{id:guid}/documents", "GetInvoiceDocuments", "RightsForRoot", new[] { "ExternalProjectDataEndpoints.RightsForDocumentParentAsync" },
-            "Delegates to ListDocumentsForParent: Read on the route invoice (ExternalProjectDataEndpoints.cs:560), the union "
-            + "of RightsForRoot on its matter and project (RightsForInvoiceAsync, :925), before the document list."),
-        new HandlerDecision("GET /api/v1/external/invoices/{id:guid}/documents/{documentId:guid}/content", "DownloadInvoiceDocumentContent", "RightsForRoot", new[] { "ExternalProjectDataEndpoints.RightsForDocumentParentAsync" },
-            "Delegates to DownloadDocumentForParent: the inherited Read on the invoice (ExternalProjectDataEndpoints.cs:606, RightsForInvoiceAsync :925) "
-            + "AND the document's sprk_invoice scoping (:624, IsReadableUnder: also Read on every SECURE linked root, by effective status (ExternalMultiRootRule / ExternalDataService.GetNonSecureRootsAsync; unknown counts as secure), one uniform 403) before the app-only stream."),
-        new HandlerDecision("POST /api/v1/external/invoices/{id:guid}/documents", "UploadInvoiceDocument", "AccessRights", Array.Empty<string>(),
-            "Delegates to UploadDocumentForParent: Create on the route invoice, inherited from its matter or project "
-            + "(rights.HasFlag(AccessRights.Create), ExternalProjectDataEndpoints.cs:1269) before any SPE write."),
-        new HandlerDecision("GET /api/v1/external/invoices/{id:guid}/documents/{documentId:guid}/versions", "GetInvoiceDocumentVersions", "RightsForRoot", new[] { "ExternalProjectDataEndpoints.RightsForDocumentParentAsync" },
-            "Delegates to ListDocumentVersionsForParent: the inherited Read on the invoice (ExternalProjectDataEndpoints.cs:1435, RightsForInvoiceAsync :925) "
-            + "and the document's invoice scoping (:1445, IsReadableUnder: also Read on every SECURE linked root, by effective status (ExternalMultiRootRule / ExternalDataService.GetNonSecureRootsAsync; unknown counts as secure), one uniform 403) before the version read."),
         // Task 039 (external-access-platform-r3, FR-03): the project event read is generalized over the root kind, as the
         // to-do read is; the matter and work-assignment routes are two more adapters on the same handler.
         new HandlerDecision("GET /api/v1/external/projects/{id:guid}/events", "GetEvents", "RightsForRoot", Array.Empty<string>(),
@@ -2089,8 +2233,49 @@ public partial class RouteAuthorizationGuardTests
             + "(ExternalProjectDataEndpoints.cs:1524) before any Dataverse read; an event also filed to a SECURE linked root the "
             + "caller cannot read is withheld, by effective status (ExternalDataService.ReadableEventsAsync, ExternalMultiRootRule; unknown counts as secure)."),
         new HandlerDecision("POST /api/v1/external/projects/{id:guid}/events", "CreateEvent", "AccessRights", Array.Empty<string>(),
-            "Requires Create on the route project (RightsForRootWriteAsync, ExternalProjectDataEndpoints.cs:1895-1897; "
-            + "task 036 confirms it against Dataverse for a Dataverse-decided caller) before the write."),
+            "Delegates to CreateEventForRoot (R4 task 002): Read from RightsForRoot on the route project, then Create "
+            + "(RightsForRootWriteAsync, ExternalProjectDataEndpoints.cs:2409, :2416-2421; task 036 confirms it against "
+            + "Dataverse for a Dataverse-decided caller) before the write."),
+        // spaarke-SPA-external-access-platform-r4 task 002 (FR-08): the project event create, generalized over the root kind
+        // as the to-do create is; the matter and work-assignment routes are two more adapters on the same handler.
+        new HandlerDecision("POST /api/v1/external/matters/{id:guid}/events", "CreateMatterEvent", "RightsForRoot", Array.Empty<string>(),
+            "Delegates to CreateEventForRoot: Read from RightsForRoot on the route matter (ExternalProjectDataEndpoints.cs:2409), "
+            + "then Create through RightsForRootWriteAsync (:2416-2421, Dataverse-confirmed for a Dataverse-decided caller) "
+            + "before the owner read and the write."),
+        new HandlerDecision("POST /api/v1/external/workassignments/{id:guid}/events", "CreateWorkAssignmentEvent", "RightsForRoot", Array.Empty<string>(),
+            "Delegates to CreateEventForRoot: Read from RightsForRoot on the route work assignment "
+            + "(ExternalProjectDataEndpoints.cs:2409), then Create through RightsForRootWriteAsync (:2416-2421, "
+            + "Dataverse-confirmed for a Dataverse-decided caller) before the owner read and the write."),
+        // spaarke-SPA-external-access-platform-r4 task 014b (FR-35/FR-36): the event record read and edit, and the
+        // assignable-people lists. The record routes reach RightsForRoot through CheckEventReadableAsync ->
+        // RightsForDocumentParentAsync on EVERY parent the row is filed under (uniform 404 otherwise) before any read of the
+        // event's own fields (uac-r2 G5); the PATCH then requires Write on every parent (RightsForRootWriteAsync) and, for a
+        // systemuser, Dataverse Write on the event row (app-only impersonation, no OBO) before the app-only patch.
+        new HandlerDecision("GET /api/v1/external/events/{id:guid}", "GetEvent", "RightsForRoot",
+            new[] { "ExternalProjectDataEndpoints.CheckEventReadableAsync", "ExternalProjectDataEndpoints.RightsForDocumentParentAsync" },
+            "Read on every parent (CheckEventReadableAsync, ExternalProjectDataEndpoints.cs:3020-3051; uniform 404) before the "
+            + "row read (GetEventByIdAsync, :3094)."),
+        new HandlerDecision("PATCH /api/v1/external/events/{id:guid}", "UpdateEvent", "RightsForRoot",
+            new[] { "ExternalProjectDataEndpoints.CheckEventReadableAsync", "ExternalProjectDataEndpoints.RightsForDocumentParentAsync" },
+            "Read on every parent plus the live-parent, visibility and invoice-link checks (CheckEventReadableAsync, "
+            + "ExternalProjectDataEndpoints.cs:3349), then the edit decision (EventEditDecisionAsync, :2949, :3354: Write on every "
+            + "parent; a systemuser also row Write) before any app-only read or write (G5). A reassign (R4 task 014c) then also "
+            + "needs a readable caller contact (:3372, ContactUnreadable is a 503), the Contact Read ceiling (AdmitsEventAssignAsync, "
+            + ":3381, before any assignable set is asked), open work on the current status (IsReassignable, :3399) and the assignee "
+            + "in EVERY parent's Known assignable set (RecordContactAccessService, :3432; Unknown is a 503) before the app-only patch "
+            + "(UpdateEventAsync, :3451) writes the internal reassign's columns (EventDueAssigneeWrite.AddReassignColumns)."),
+        new HandlerDecision("GET /api/v1/external/projects/{id:guid}/assignable-people", "GetProjectAssignablePeople", "RightsForRoot", Array.Empty<string>(),
+            "Delegates to ListAssignablePeopleForRoot: 403 unless RightsForRoot gives Read on the route project "
+            + "(ExternalProjectDataEndpoints.cs:3217), then Create or Write on it (RightsForRootWriteAsync, :3220) before the "
+            + "contact-access read."),
+        new HandlerDecision("GET /api/v1/external/matters/{id:guid}/assignable-people", "GetMatterAssignablePeople", "RightsForRoot", Array.Empty<string>(),
+            "Delegates to ListAssignablePeopleForRoot: 403 unless RightsForRoot gives Read on the route matter "
+            + "(ExternalProjectDataEndpoints.cs:3217), then Create or Write on it (RightsForRootWriteAsync, :3220) before the "
+            + "contact-access read."),
+        new HandlerDecision("GET /api/v1/external/workassignments/{id:guid}/assignable-people", "GetWorkAssignmentAssignablePeople", "RightsForRoot", Array.Empty<string>(),
+            "Delegates to ListAssignablePeopleForRoot: 403 unless RightsForRoot gives Read on the route work assignment "
+            + "(ExternalProjectDataEndpoints.cs:3217), then Create or Write on it (RightsForRootWriteAsync, :3220) before the "
+            + "contact-access read."),
         new HandlerDecision("GET /api/v1/external/projects/{id:guid}/contacts", "GetContacts", "HoldsReadOnProject", Array.Empty<string>(),
             "Read on the route project (ExternalProjectDataEndpoints.cs:1612)."),
         new HandlerDecision("GET /api/v1/external/projects/{id:guid}/organizations", "GetOrganizations", "HoldsReadOnProject", Array.Empty<string>(),
@@ -2141,18 +2326,22 @@ public partial class RouteAuthorizationGuardTests
             "Refused unless the record is in the caller principal's accessible set (module.IsRecordAccessible, "
             + "ExternalModuleDataEndpoints.cs:405)."),
         new HandlerDecision("GET /api/v1/external/{root}/{id:guid}/messages", "GetMessagesAsync", "IsRecordAccessible",
-            new[] { "ExternalMessageEndpoints.GetMessagesCoreAsync", "ExternalMessageEndpoints.IsRootRecordReadableAsync" },
+            new[] { "ExternalMessageEndpoints.GetMessagesCoreAsync", "ExternalMessageEndpoints.EvaluateRecordGateAsync" },
             "403 unless the route record is in the caller principal's accessible set, decided by the registered module "
             + "(module.IsRecordAccessible for project / matter / work assignment; the module's ScopeRows over the record's "
             + "own scope lookups for an invoice or the caller's own service request), before the app-only message read "
-            + "(ExternalMessageEndpoints.cs:339 the gate call, :506 EvaluateRecordGateAsync, :563 ScopeRows); an unsupported root is a 404 with no read."),
+            + "(ExternalMessageEndpoints.cs:427 the gate call, :765 EvaluateRecordGateAsync, :793 IsRecordAccessible, :833/:843 "
+            + "ScopeRows); an unsupported root is a 404 with no read. R4 task 002: the core calls the gate evaluation directly "
+            + "(its former boolean wrapper IsRootRecordReadableAsync was removed) so the thread's canCreate reuses it with no "
+            + "second gate read."),
         new HandlerDecision("POST /api/v1/external/{root}/{id:guid}/messages", "PostMessageAsync", "IsRecordAccessible",
             new[] { "ExternalMessageEndpoints.PostMessageCoreAsync", "ExternalMessageEndpoints.GetRecordRightsAsync" },
             "Task 034 (FR-11): the SAME record gate as the GET (module.IsRecordAccessible / ScopeRows, through "
-            + "EvaluateRecordGateAsync, ExternalMessageEndpoints.cs:506, :563) — outside the set, absent or no grants is the "
+            + "EvaluateRecordGateAsync, ExternalMessageEndpoints.cs:664, :765) — outside the set, absent or no grants is the "
             + "same 403 — and then Create on the record (the caller's rights on the root, on an invoice's parent root, or "
-            + "the requester on their own service request; :211, :223) before CommunicationService.PostToRecordThreadAsync "
-            + "writes app-only (:233). The body is validated and an unattributable sender refused before any read (:191, :200)."),
+            + "the requester on their own service request; RightsFromGate :696, the check :299) before "
+            + "CommunicationService.PostToRecordThreadAsync writes app-only (:310). The body is validated and an unattributable "
+            + "sender refused before any read (:235, :244, :253)."),
         new HandlerDecision("POST /api/v1/external/servicerequests", "SubmitServiceRequestAsync", "IsEntitledAsync", Array.Empty<string>(),
             "Task 035 (FR-05/FR-06): 403 unless the caller principal is entitled to legal-front-door "
             + "(ModuleEntitlementResolver.IsEntitledAsync, ExternalIntakeEndpoints.cs:161 — a CIAM partner only with the partner "
@@ -3286,7 +3475,8 @@ public partial class RouteAuthorizationGuardTests
             + "no other principal's record is read."),
         Permanent("GET /api/v1/external/me", PermanentBasis.CallerScopedOnly, "167",
             "The resolved caller principal's own access context: ExternalUserContextEndpoint.HandleAsync (the mapped handler) returns "
-            + "Handle's answer (ExternalUserContextEndpoint.cs:46, :75 — caller.ReadableProjects) plus the caller's own firms "
+            + "Handle's answer (ExternalUserContextEndpoint.cs:46, :75 — caller.ReadableProjects; :86 — caller.ReadableRecordLevels, the "
+            + "caller's own MatterAccess / WorkAssignmentAccess filtered to Read, r4 task 008) plus the caller's own firms "
             + "(ExternalInvoiceSubmissionAuthorizationFilter.ReadCallerFirmsAsync: the caller contact's memberships only, id and name). "
             + "Takes no id."),
         Permanent("GET /api/v1/external/me/entitlements", PermanentBasis.CallerScopedOnly, "167",

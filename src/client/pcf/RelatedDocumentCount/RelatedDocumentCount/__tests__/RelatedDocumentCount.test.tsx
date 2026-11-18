@@ -210,5 +210,15 @@ describe('RelatedDocumentCount', () => {
       // viewerUrl is null because documentId is empty, so handleOpen returns early
       expect(capturedDialogProps.open).toBe(false);
     });
+
+    // Ontology task 194: on a form this dialog shares the page with the lookup side pane, so the viewer's Email
+    // documents To/Cc/Bcc lookup would open behind it. The opt-in makes the dialog yield to the pane while the framed
+    // viewer reports an open lookup (the yield itself is tested on the real dialog in the shared library).
+    it('opts in to yielding to the lookup pane the framed viewer opens', async () => {
+      await act(async () => {
+        renderComponent();
+      });
+      expect(capturedDialogProps.yieldToFrameSidePane).toBe(true);
+    });
   });
 });

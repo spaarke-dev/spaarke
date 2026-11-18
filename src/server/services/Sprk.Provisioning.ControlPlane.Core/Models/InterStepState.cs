@@ -261,14 +261,27 @@ public sealed class InterStepState
 
     /// <summary>
     /// Task 266 (#2605): the Dataverse <c>systemuser</c> id of the ontology writer UAMI's application user, which H10
-    /// found (by applicationid) or created IN the customer business unit with NO security role. H7b S24 gives it exactly
-    /// the writer role and the writer field-security profiles. Canonical lowercase GUID (ADR-044).
+    /// found (by applicationid) or created with NO security role — since task 267 IN its own business unit
+    /// (<see cref="OntologyWriterBusinessUnitId"/>). H7b S24 gives it exactly the writer role and the writer field-security
+    /// profiles. Canonical lowercase GUID (ADR-044).
     /// </summary>
     /// <remarks>CONTROLLED SCHEMA EXTENSION (task 266).</remarks>
     [JsonPropertyName("ontologyWriterSystemUserId")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     [ProducedBy(HandlerIds.H10)]
     public string? OntologyWriterSystemUserId { get; set; }
+
+    /// <summary>
+    /// Task 267 (#2618): the Dataverse <c>businessunit</c> id of the ontology writer's own unit ("Spaarke Ontology Writer"),
+    /// which H10 found or created directly under the root, holding the writer's application user only. H7b S24 checks it
+    /// by id (direct child of the root, neither the customer's nor the Secure Record unit, no other user) and assigns the
+    /// writer the copy of "Spaarke Ontology Service" in it. Canonical lowercase GUID (ADR-044).
+    /// </summary>
+    /// <remarks>CONTROLLED SCHEMA EXTENSION (task 267). A run whose H10 completed before task 267 lacks it: H7b refuses.</remarks>
+    [JsonPropertyName("ontologyWriterBusinessUnitId")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [ProducedBy(HandlerIds.H10)]
+    public string? OntologyWriterBusinessUnitId { get; set; }
 
     /// <summary>Correlation ID for the SPE consent flow (design intent: H0.5 output). No handler writes it today.</summary>
     [JsonPropertyName("speConsentCorrelationId")]

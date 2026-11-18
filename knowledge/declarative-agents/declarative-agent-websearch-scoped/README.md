@@ -10,7 +10,7 @@ Common features that the agent can help with:
 
 This is based off the blog post: [Building a blog post helper agent for Microsoft 365 Copilot | pkbullock.com](https://pkbullock.com/blog/2025/building-a-blog-post-helper-agent-for-microsoft-365-copilot)
 
-![Screenshot of the agent start screen](assets/screenshot.png)
+*(image not included in this snapshot: Screenshot of the agent start screen)*
 
 ## Version history
 

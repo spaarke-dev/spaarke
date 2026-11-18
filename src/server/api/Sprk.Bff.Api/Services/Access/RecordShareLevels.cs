@@ -86,6 +86,16 @@ internal static class RecordShareLevels
     internal const string FullAccessRights = CollaborateRights + ",DeleteAccess";
 
     /// <summary>
+    /// uac-r2 task 191c (#2179 design §3.4, owner Q3 = a): the External Collaborators team's share on a visible row of a
+    /// table partners file under (the role grants AppendTo there): Read + AppendTo. Never Write, Share, Assign or Delete.
+    /// </summary>
+    internal static readonly RecordShareRights ExternalTeamFilingRights = new("ReadAccess,AppendToAccess", Read | AppendTo);
+
+    /// <summary>uac-r2 task 191c: the External Collaborators team's share on a visible row of every other partner-readable table:
+    /// Read only (the role holds no AppendTo there, design §3.2).</summary>
+    internal static readonly RecordShareRights ExternalTeamReadRights = new(ViewOnlyRights, ViewOnlyMask);
+
+    /// <summary>
     /// The rights for <paramref name="level"/>. <c>false</c> for <c>null</c> or any value outside the three levels —
     /// an unrecognised level never becomes a share.
     /// </summary>

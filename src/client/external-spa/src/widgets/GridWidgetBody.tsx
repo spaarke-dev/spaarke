@@ -22,7 +22,8 @@
  *
  * ROW-OPEN (R3 task 050, FR-01). The grid's default row-open is `Xrm.Navigation.navigateTo`, which no-ops without
  * `Xrm` (R2 UAT 3E: "row click does nothing"). This wrapper passes `onRecordOpen` so the primary-name link opens the
- * in-app read-only `RecordDetailModal` (SprkModal, ADR-050) with the grid's loaded row ids for "1 of N" browsing, and
+ * in-app record view, `RecordTemplateModal` (SprkModal, ADR-050; R4 task 005), with the grid's loaded row ids for
+ * "1 of N" browsing, and
  * `onRecordsLoaded` to keep those ids. The handler lives here and not in `<ExternalDataGrid>` because that wrapper's
  * text is pinned by ExternalSpaGridViewSelectorGuardTests (a security guard); it already forwards both props.
  * Browse order is the grid's loaded order (the server's query order, accumulated page by page); a column the user
@@ -46,9 +47,11 @@ import { makeStyles, webLightTheme, type Theme } from '@fluentui/react-component
 import { resolveCodePageTheme, setupCodePageThemeListener } from '@spaarke/ui-components/utils/themeStorage';
 import { gridDataverseClient } from '../services/gridDataverseClient';
 import { ExternalDataGrid } from './ExternalDataGrid';
-import { RecordDetailModal } from '../components/detail/RecordDetailModal';
 import { getRecordDetailEntity } from '../components/detail/RecordDetailFields';
-import type { WidgetBodyComponent, WidgetBodyProps } from '../registry/PlaceholderWidgetBody';
+import { RecordTemplateModal } from '../components/record/RecordTemplateModal';
+import { getRecordTemplate } from '../components/record/recordTemplates';
+import type { RecordTemplateConfig } from '../components/record/recordTemplate.types';
+import type { WidgetBodyProps } from '../registry/PlaceholderWidgetBody';
 
 const useStyles = makeStyles({
   root: {
@@ -69,10 +72,20 @@ type RecordOpenHandler = NonNullable<React.ComponentProps<typeof ExternalDataGri
 
 /** The record the detail modal is showing, and the row set it pages through. */
 interface DetailTarget {
-  entityName: string;
+  config: RecordTemplateConfig;
   ids: readonly string[];
   index: number;
 }
+
+/**
+ * Commands the host of a grid body adds to the shared grid's command bar (the grid's generic `hostCommands` slot),
+ * read off the wrapper's props so this file never imports the shared grid's module. Placement and id-collision rules
+ * are on the shared `DataGridHostCommand` type. Absent: the grid's toolbar is exactly what its configuration gives.
+ */
+export type GridHostCommands = React.ComponentProps<typeof ExternalDataGrid>['hostCommands'];
+
+/** The props of a grid widget body: the registry's `WidgetBodyProps` plus the optional host commands. */
+export type GridWidgetBodyProps = WidgetBodyProps & { hostCommands?: GridHostCommands };
 
 /** Resolves + live-tracks the ambient light/dark/Teams theme (same source as the app shell). */
 function useAmbientTheme(): Theme {
@@ -85,10 +98,11 @@ function useAmbientTheme(): Theme {
  * Builds a widget-body component bound to one `sprk_gridconfiguration` record id. The returned
  * component ignores the incoming `title`/`description` props (the shared grid framework renders its
  * OWN header from `sprk_configjson.display.title`) — matches `WidgetBodyComponent`'s contract so it
- * plugs into `widgetRegistry.ts`'s `lazyLoader` unchanged.
+ * plugs into `widgetRegistry.ts`'s `lazyLoader` unchanged. The one extra, optional prop is `hostCommands`: commands
+ * the host widget adds to the grid's toolbar (see {@link GridHostCommands}); the registry never passes it.
  */
-export function createGridWidgetBody(configId: string): WidgetBodyComponent {
-  const GridWidgetBody: React.FC<WidgetBodyProps> = () => {
+export function createGridWidgetBody(configId: string): React.ComponentType<GridWidgetBodyProps> {
+  const GridWidgetBody: React.FC<GridWidgetBodyProps> = ({ hostCommands }) => {
     const s = useStyles();
     const theme = useAmbientTheme();
     // The grid's loaded rows, in grid order. A ref, not state: the grid re-fires `onRecordsLoaded` whenever its
@@ -108,13 +122,15 @@ export function createGridWidgetBody(configId: string): WidgetBodyComponent {
 
     const handleRecordOpen = React.useCallback<RecordOpenHandler>((recordId, _record, ctx) => {
       const cfg = getRecordDetailEntity(ctx.entityName);
-      if (!cfg || !recordId) return; // an entity with no detail view: row-open stays a no-op (as before)
+      const template = getRecordTemplate(ctx.entityName);
+      // An entity with no record view (no read description or no template): row-open stays a no-op (as before).
+      if (!cfg || !template || !recordId) return;
       const wanted = recordId.toLowerCase();
       const ids = rowsRef.current.map(r => String(r[cfg.idAttribute] ?? '')).filter(id => id.length > 0);
       const at = ids.findIndex(id => id.toLowerCase() === wanted);
       // The opened row is always in the set; if the grid has not reported it, browse just that one record.
       const target: DetailTarget =
-        at >= 0 ? { entityName: cfg.entity, ids, index: at } : { entityName: cfg.entity, ids: [recordId], index: 0 };
+        at >= 0 ? { config: template, ids, index: at } : { config: template, ids: [recordId], index: 0 };
       setDetail(prev => (prev?.open ? { ...prev, ...target } : { ...target, open: true, seq: (prev?.seq ?? 0) + 1 }));
     }, []);
 
@@ -140,13 +156,14 @@ export function createGridWidgetBody(configId: string): WidgetBodyComponent {
           theme={theme}
           onRecordsLoaded={handleRecordsLoaded}
           onRecordOpen={handleRecordOpen}
+          hostCommands={hostCommands}
         />
         {detail && (
-          <RecordDetailModal
+          <RecordTemplateModal
             key={detail.seq}
             open={detail.open}
             onClose={handleClose}
-            entityName={detail.entityName}
+            config={detail.config}
             recordIds={detail.ids}
             index={detail.index}
             onIndexChange={handleIndexChange}

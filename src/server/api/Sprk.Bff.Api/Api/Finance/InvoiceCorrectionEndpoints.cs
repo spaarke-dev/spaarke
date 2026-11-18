@@ -172,7 +172,9 @@ public static class InvoiceCorrectionEndpoints
         CorrectionStatus.InvoiceNotFound or CorrectionStatus.LineNotFound => FinanceAuthorizationFilter.UniformRecordNotFound(httpContext),
         CorrectionStatus.NotInReview or CorrectionStatus.LineNotCorrectable or CorrectionStatus.NoProvenance
             or CorrectionStatus.CodeSetUnavailable or CorrectionStatus.Changed
-            or CorrectionStatus.TotalsRefused or CorrectionStatus.TooLarge or CorrectionStatus.ExtractionUnavailable => InvoiceLineReviewEndpoints.Refused(StatusCodes.Status409Conflict, code, detail),
+            or CorrectionStatus.TotalsRefused or CorrectionStatus.TooLarge or CorrectionStatus.ExtractionUnavailable or CorrectionStatus.FirmMissing
+            or CorrectionStatus.ProcedureGap
+            => InvoiceLineReviewEndpoints.Refused(StatusCodes.Status409Conflict, code, detail),
         CorrectionStatus.OwnerUnresolved => InvoiceLineReviewEndpoints.Refused(StatusCodes.Status500InternalServerError, code, detail),
         _ => InvoiceLineReviewEndpoints.Refused(StatusCodes.Status503ServiceUnavailable, code, detail),
     };

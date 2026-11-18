@@ -109,11 +109,16 @@ async function openWithSendEmail(assignedTo: Assignee) {
     )!;
     mockEmail.props = null;
     emailTree.rerender(<>{card.renderStep()}</>);
-    return mockEmail.props as {
-      emailBody: string;
-      emailSubject: string;
-      onEmailBodyChange: (v: string) => void;
-      onEmailSubjectChange: (v: string) => void;
+    // Task 182: the step takes the whole composed email (`value` / `onChange`); read its subject and body.
+    const step = mockEmail.props as {
+      value: { subject: string; body: string };
+      onChange: (next: { subject: string; body: string }) => void;
+    };
+    return {
+      emailBody: step.value.body,
+      emailSubject: step.value.subject,
+      onEmailBodyChange: (v: string) => step.onChange({ ...step.value, body: v }),
+      onEmailSubjectChange: (v: string) => step.onChange({ ...step.value, subject: v }),
     };
   };
   await waitFor(() => expect(readEmail().emailBody).toContain('Priority:'));

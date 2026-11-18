@@ -54,7 +54,7 @@ export interface ExportBatch {
 /** One entry of the 400 `ebilling.export.selection_refused` body's `invoices[]`. */
 export interface InvoiceRefusal {
   invoiceId: string;
-  /** `invoice_not_approved`, `invoice_already_exported` or `invoice_not_found`. */
+  /** `invoice_not_approved`, `invoice_already_exported`, `invoice_not_found` or `invoice_firm_missing` (no firm, or waiting for one; task 095c-4). */
   reason: string;
 }
 

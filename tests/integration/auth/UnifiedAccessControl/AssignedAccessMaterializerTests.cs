@@ -286,6 +286,45 @@ public class AssignedAccessMaterializerTests
         _h.Grants.ActiveRowsOf(_matter, contact).Should().ContainSingle();
     }
 
+    /// <summary>
+    /// Task 193 (deliberate correction, ContactUserRepresentation): a user with no link is this contact's through the oid only
+    /// where the binder's oid decision resolves the oid to this contact alone — the read path's answer. Two contacts on the oid
+    /// resolve to neither there, so the user is not shared with; the contact gets a grant, as an unlinked contact does.
+    /// </summary>
+    [Fact]
+    public async Task AUserKnownOnlyByAnOidTwoContactsCarry_IsNotThisContacts_SoTheContactGetsAGrant()
+    {
+        var oid = Guid.NewGuid();
+        var contact = _h.Contact(oid: oid.ToString());
+        _h.Identities.AddContact(Guid.NewGuid(), oid: oid.ToString());
+        var user = Guid.NewGuid();
+        _h.Store.UsersByOid[oid] = new() { new AssignedLinkCandidate(user, null, oid, false, 0, null, false) };
+        _h.Store.Assign(Matter, _matter, Attorney1, contact);
+
+        await Sync();
+
+        ShareMask(user).Should().BeNull();
+        _h.Grants.ActiveRowsOf(_matter, contact).Should().ContainSingle();
+    }
+
+    /// <summary>Task 193: the oid confirmation read failing is "could not tell" — nothing is written, never a contact grant.</summary>
+    [Fact]
+    public async Task AUserKnownOnlyByTheOid_WhenTheOidBindingCannotBeRead_WritesNothing_AndTheLedgerSaysLinkUnreadable()
+    {
+        var oid = Guid.NewGuid();
+        var contact = _h.Contact(oid: oid.ToString());
+        var user = Guid.NewGuid();
+        _h.Store.UsersByOid[oid] = new() { new AssignedLinkCandidate(user, null, oid, false, 0, null, false) };
+        _h.Identities.OidLookupStatus = LookupStatus.Failed;
+        _h.Store.Assign(Matter, _matter, Attorney1, contact);
+
+        await Sync();
+
+        ShareMask(user).Should().BeNull();
+        _h.Grants.Rows.Should().BeEmpty();
+        LedgerRow(contact, Attorney1).Reason.Should().Be(AssignedAccessReason.LinkUnreadable);
+    }
+
     // ─────────────────────────────────────────────────────────────────────────────
     // Criterion 4 — organizations
     // ─────────────────────────────────────────────────────────────────────────────

@@ -1,6 +1,7 @@
 using System.Text.Json.Serialization;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Services.Dataverse;
+using Sprk.Bff.Api.Services.Signals.Billing;
 
 namespace Sprk.Bff.Api.Services.Finance.Submission;
 
@@ -103,8 +104,12 @@ public sealed record InvoiceSubmissionRequest
     /// The firm the invoice is from (NFR-10): the external caller's own organization, or the firm an internal caller chose. The route decides
     /// who may name it; <see cref="InvoiceSubmissionService.SubmitAsync"/> then checks it is active and LINKED to <see cref="CoreRecord"/>
     /// (D-106 / D-110), whichever channel the request came through.
+    /// <para>Task 095c-2: null means "no firm", and only the internal from-email route (mode New, or a Correction of a no-firm invoice) may
+    /// send it, through <see cref="InvoiceSubmissionService.DecideForFromEmailAsync"/>. Every other entry (the SPA upload, the internal
+    /// upload, the from-document route and the reviewer confirm) refuses null as 400 <see cref="InvoiceSubmissionErrors.FirmInvalid"/>
+    /// "A firm is required.", as it refuses the empty id; their routes always set a firm.</para>
     /// </summary>
-    public required Guid FirmId { get; init; }
+    public required Guid? FirmId { get; init; }
 
     /// <summary>The core record the invoice is filed against.</summary>
     public required InvoiceCoreRecord CoreRecord { get; init; }
@@ -162,6 +167,25 @@ public sealed record InvoiceSubmissionRequest
     /// and records the target on the new submission (<see cref="InvoiceSubmissionService.ResubmissionOfColumn"/>).
     /// </summary>
     public Microsoft.Xrm.Sdk.Entity? CorrectedInvoice { get; init; }
+
+    /// <summary>
+    /// ebilling-r1 task 118b: the from-document route's supporting documents, de-duplicated and sorted, already checked by the route (the
+    /// caller's Read, the same communication). Empty (the default) behaves exactly as before 118b. Read only by
+    /// <see cref="InvoiceSubmissionService.SubmitExistingDocumentAsync"/>: the set joins the "same details?" comparison with an earlier
+    /// attempt, never the submission id (D-134: one submission per document and attempt).
+    /// </summary>
+    public IReadOnlyList<Guid> SupportingDocumentIds { get; init; } = [];
+
+    /// <summary>
+    /// ebilling-r1 task 118b-2: the read of one supporting document's file, the route's binding of the ONE shared read
+    /// (<see cref="SourceDocumentFileRead.ReadAsync"/>, app-only, the pointer's container verified first) to its own SharePoint Embedded and
+    /// container seams, which the intake does not take (it never reaches SharePoint Embedded itself, task 092). Required when
+    /// <see cref="SupportingDocumentIds"/> is not empty and the request makes a new attempt; a fault throws. The <c>long</c> is the file size
+    /// limit the read enforces (the lesser of <see cref="InvoiceSubmissionService.MaxFileBytes"/> and what is left of
+    /// <see cref="InvoiceSubmissionService.SupportingBudgetBytes"/> after the documents already read; task 118b review F1-b and review 2 F1):
+    /// a file over it answers <see cref="SourceDocumentFileOutcome.TooLarge"/>.
+    /// </summary>
+    internal Func<Guid, long, CancellationToken, Task<SourceDocumentFile>>? ReadSupportingDocument { get; init; }
 }
 
 /// <summary>A submission that was received: the row exists with its tracking number and the processing job is enqueued.</summary>
@@ -293,6 +317,64 @@ public sealed record InvoiceSubmissionView
     /// </summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public SubmissionReplacement? ReplacedBy { get; init; }
+
+    /// <summary>
+    /// ebilling-r1 082c-2 (brief 082c section 3(c), section 7 R4 wording, owner-approved 2026-11-04): a received invoice that is on hold for its
+    /// billing terms. Derived from <see cref="OutcomeReasonCode"/> only (<see cref="SubmissionHoldWarning.For"/>), with a fixed sentence: never a
+    /// stored text, a Procedure name, a date, a count or an id (C16, C18). Null, and then absent from the JSON, for every other reason, and
+    /// (fix round 2, F2) once the invoice is no longer In Review: the reason code outlives the hold, so the status routes keep this only while
+    /// the invoice is In Review, and drop it when its status cannot be read (<see cref="InvoiceSubmissionService.WithReplacementNoteAsync"/>).
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public SubmissionHoldWarning? Warning { get; init; }
+}
+
+/// <summary>
+/// ebilling-r1 082c-2: the warning of a received invoice held for its billing terms (<see cref="InvoiceSubmissionView.Warning"/>). <see cref="Code"/>
+/// is the outcome reason code; <see cref="Message"/> is the owner-approved partner text for it. Clients branch on <see cref="Code"/> only in tests
+/// (R4: one copy of the wording, the server's).
+/// </summary>
+public sealed record SubmissionHoldWarning(string Code, string Message)
+{
+    /// <summary>The gap text (R4 edit, owner-approved 2026-11-04; brief section 7, verbatim).</summary>
+    public const string ProcedureGapMessage =
+        "We received this invoice. It has not been rejected, but it is on hold for review: no billing terms are set up for some of its work dates on the record you chose. Check that you chose the right record and that the work dates are correct. If both are right, you don't need to do anything; the client will follow up.";
+
+    /// <summary>The unresolved text (R4 edit, owner-approved 2026-11-04; brief section 7, verbatim).</summary>
+    public const string ProceduresUnresolvedMessage =
+        "We received this invoice. It has not been rejected, but it is on hold for review because its billing terms could not be checked. You don't need to do anything; the client will follow up.";
+
+    /// <summary>
+    /// ebilling-r1 082c-3: the provisional text of the 202 pre-check (R4 edit, owner-approved 2026-11-04; brief section 7, verbatim). It judges
+    /// TODAY; the hold judges the work dates, so the sentence says "if" and the client drops it when the terminal status view arrives.
+    /// </summary>
+    public const string ProcedureGapPrecheckMessage =
+        "As of today, no billing terms are set up for the record you chose. If the invoice's work dates are not covered either, it will be held for review, not rejected.";
+
+    /// <summary>
+    /// ebilling-r1 082c-3: the 202's provisional warning: the status view's gap code (<see cref="SubmissionReasonCodes.ProcedureGap"/>) with the
+    /// pre-check's own fixed sentence. The ONLY warning the 202 can carry; a constant, never built from a name, a date, a count, an id or a rule code.
+    /// </summary>
+    public static SubmissionHoldWarning ForPrecheck() => new(SubmissionReasonCodes.ProcedureGap, ProcedureGapPrecheckMessage);
+
+    /// <summary>
+    /// ebilling-r1 082c-3: the pre-check's judgement. Held for billing terms TODAY is the same fact the hold is made of: an applicable Procedure
+    /// with no version on the date (<see cref="ProcedureRulesOnDate.Gaps"/>, the resolver's own answer the evaluator turns into the hold). Pure:
+    /// reads nothing; a resolution fault from <see cref="ProcedureResolution.RulesOn"/> propagates to the caller, which fails quiet.
+    /// </summary>
+    internal static SubmissionHoldWarning? Precheck(ProcedureResolution resolution, DateOnly today)
+    {
+        ArgumentNullException.ThrowIfNull(resolution);
+        return resolution.RulesOn(today).Gaps.Count > 0 ? ForPrecheck() : null;
+    }
+
+    /// <summary>The warning for a stored outcome reason code, or null when the code is not a Procedure hold.</summary>
+    public static SubmissionHoldWarning? For(string? outcomeReasonCode) => outcomeReasonCode switch
+    {
+        SubmissionReasonCodes.ProcedureGap => new(SubmissionReasonCodes.ProcedureGap, ProcedureGapMessage),
+        SubmissionReasonCodes.ProceduresUnresolved => new(SubmissionReasonCodes.ProceduresUnresolved, ProceduresUnresolvedMessage),
+        _ => null,
+    };
 }
 
 /// <summary>The correcting submission a Superseded invoice's submission names (<see cref="InvoiceSubmissionView.ReplacedBy"/>): its id and tracking number.</summary>

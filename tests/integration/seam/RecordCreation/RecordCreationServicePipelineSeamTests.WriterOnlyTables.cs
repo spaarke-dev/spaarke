@@ -88,6 +88,35 @@ public sealed partial class RecordCreationServicePipelineSeamTests
         Owner(_creates[0].Fields).Should().Be(Directory.ChildTeam);
     }
 
+    // ── ebilling-r1 task 164a-1 (uac-r2 Q6): an invoice line's generic create alone is refused ─────────────────────────
+    // RecordTableRule.GenericCreateOnlyRefused: the same refusal, at the same point, as the three writer-only tables, while the
+    // line's update and delete stay open (CreatedOnlyByItsWriter is false; D-96's detach / move / re-attach updates it).
+
+    [Theory(DisplayName = "164a-1 (must fire): a create of an invoice line is refused before any read, for the caller and the system principal")]
+    [InlineData("caller-webapi")]
+    [InlineData("caller-mapped")]
+    [InlineData("system")]
+    public async Task CreateAsync_AnInvoiceLine_IsRefused_BeforeAnyReadOrWrite(string way)
+    {
+        var rule = RecordTableRules.Get("sprk_billingevent");
+        rule.GenericCreateRefused.Should().BeTrue();
+        rule.CreatedOnlyByItsWriter.Should().BeFalse("create only: the line's update and delete are not refused");
+
+        await CreateAsync_ATableOnlyItsWriterCreates_IsRefused_BeforeAnyReadOrWrite("sprk_billingevent", way);
+    }
+
+    [Fact(DisplayName = "164a-1: an invoice line's refusal is a table the service does not create, word for word")]
+    public Task CreateAsync_AnInvoiceLine_IsRefusedAsAnUnregisteredTableIs() =>
+        CreateAsync_ATableOnlyItsWriterCreates_IsRefusedAsAnUnregisteredTableIs("sprk_billingevent");
+
+    [Fact(DisplayName = "164a-1 (must not fire): another table's create, an event, is unaffected by the invoice line's refusal")]
+    public async Task CreateAsync_AnEvent_IsStillCreated_TheInvoiceLineRefusalDoesNotFire()
+    {
+        RecordTableRules.Get("sprk_event").GenericCreateRefused.Should().BeFalse();
+
+        await CreateAsync_AnEvent_IsStillCreated_TheRefusalDoesNotFire();
+    }
+
     /// <summary>A create of <paramref name="table"/> filed under the Secure matter, the way <paramref name="way"/> names.</summary>
     private (RecordCreationRequest Request, RecordCreationPrincipal Principal) WriterOnlyRequest(string table, string way)
     {

@@ -60,6 +60,18 @@ describe('exportOutcome: refused per invoice (400 selection_refused)', () => {
     expect(o.kind === 'failed' && o.message).toBe('The total is out of range. (ebilling.export.batch_total_out_of_range)');
   });
 
+  it('a firm-missing refusal (task 095c-4) shows its own text, not the raw code', () => {
+    const firm = problem(400, 'ebilling.export.selection_refused', { invoices: [{ invoiceId: INV_C, reason: 'invoice_firm_missing' }] });
+    const o = exportOutcome(failed(firm), [INV_A, INV_C]);
+    expect(o.kind).toBe('refused');
+    if (o.kind !== 'refused') return;
+    expect(o.refused).toEqual([
+      { invoiceId: INV_C, reason: 'invoice_firm_missing', text: 'No firm, or waiting for one: a reviewer must add the firm first.' },
+    ]);
+    expect(o.refused[0].text).not.toContain('invoice_firm_missing');
+    expect(o.remaining).toEqual([INV_A]);
+  });
+
   it('an unknown reason still shows a line', () => {
     expect(refusalText('invoice_on_hold')).toBe('Refused (invoice_on_hold).');
     expect(refusalText('')).toBe('Refused (no reason given).');
