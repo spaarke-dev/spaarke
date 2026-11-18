@@ -174,16 +174,16 @@ public sealed partial class RecordRepairPassJobTests
         var reportQueries = _pass.ReportQueries.Count;
         var onDemand = await RunOnDemandAsync(OnDemand("sprk_event"));
 
+        World.Writes.Should().NotContain(w => RecordRepairCorePairReport.Tables.Contains(w.Table));
+        _pass.EntityMocks.SelectMany(m => m.Invocations).Select(i => i.Method.Name).Should().OnlyContain(
+            name => ReadOnlyCalls.Contains(name), "the report sends reads only");
+
         PassWorld.Count(scheduled, "corePairHalf").Should().Be(4);
         PassWorld.Count(scheduled, "corePairChanged").Should().Be(2);
         PassWorld.Count(scheduled, "corePairUndecided").Should().Be(2);
         PassWorld.Count(scheduled, "corePairRowsUnread").Should().Be(2);
         onDemand.Success.Should().BeTrue(onDemand.ErrorMessage);
         _pass.ReportQueries.Should().HaveCount(reportQueries, "an on-demand run repairs one table and does not report");
-
-        World.Writes.Should().NotContain(w => RecordRepairCorePairReport.Tables.Contains(w.Table));
-        _pass.EntityMocks.SelectMany(m => m.Invocations).Select(i => i.Method.Name).Should().OnlyContain(
-            name => ReadOnlyCalls.Contains(name), "the report sends reads only");
     }
 
     // =====================================================================================
