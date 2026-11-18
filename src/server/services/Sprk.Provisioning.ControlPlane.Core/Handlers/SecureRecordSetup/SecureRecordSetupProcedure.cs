@@ -245,8 +245,8 @@ public sealed class SecureRecordSetupProcedure
 
     /// <summary>S27: the remedy an incomplete invoice-family lock names.</summary>
     internal const string InvoiceFamilyLockRemedy =
-        "SpaarkeMaster 1.3.1.0 and earlier do not carry the #2799 lock (unified-access-control-r2 packages it in a later " +
-        "release): import a SpaarkeMaster release that carries it (a new run, H6). Only where H7b has completed on this " +
+        "SpaarkeMaster 1.3.1.0 and earlier do not carry the #2799 lock; 1.3.2.0 does (#2859): import SpaarkeMaster 1.3.2.0 " +
+        "or later (a new run, H6). Only where H7b has completed on this " +
         "environment before (the BFF-managed profiles have their members; on a stamp's first H7b run they do not, and the " +
         "script refuses) may the operator instead run scripts/Set-InvoiceFamilyFieldSecurity.ps1 (dry run, then " +
         "-BffWritesInvoiceFamilyLinksAsApp -Apply, then -Verify) with the owner's OK, then resume. Nothing was written.";
