@@ -2,6 +2,7 @@
 <task id="132" project="ebilling-r1">
   <amendment source="EB-D-254, owner 2026-11-17 (option b)">No PDF report file in R1; task 133 is withdrawn. The firm report is the on-screen report (130's projection) in the SPA, plus the findings table in the 131 notice email body. FR-40 and D-36 are amended. This amendment overrides every PDF, report-download and 133 reference below.</amendment>
   <amendment-detail>132: send the 131 notice as the email body (its HTML already carries the findings table and totals); attach no report file; drop the dependency on 133 and the step that ensures 133's report exists; the criterion's "133 PDF attached" becomes "the findings table in the body".</amendment-detail>
+  <amendment source="uac-r2 review of 131 (N2), 2026-11-17">Send renders prose the reviewer may have edited: render it only through FirmNoticeComposer.RenderHtml (which encodes every value); give a reviewer-edited subject the same header safety as CleanTrackingNumber (no line breaks or control characters). 132 goes to uac-r2 as its own review before merge.</amendment>
   <metadata>
     <title>Notifications: email, SPA feed, approver in-app</title>
     <phase>5 Firm feedback (WP5) — wave W5-3</phase>
