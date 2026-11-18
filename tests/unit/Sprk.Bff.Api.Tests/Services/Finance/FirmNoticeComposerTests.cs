@@ -801,6 +801,35 @@ public sealed class FirmNoticeComposerTests
         html.Should().Contain("Billed total: 9,876.54");
     }
 
+    // ── 132 / 130f: the confirmed send path passes the notice kind to RenderHtml ──
+
+    [Theory(DisplayName = "132 D4 (130f): a confirmed Return or Reject email, composed while the invoice is still In Review, has no Approved column")]
+    [InlineData(FirmNoticeKind.ReturnedToFirm)]
+    [InlineData(FirmNoticeKind.InvoiceRejected)]
+    public async Task ConfirmedReturnOrReject_HasNoApprovedColumn_EvenWhileTheInvoiceIsStillInReview(FirmNoticeKind kind)
+    {
+        var rig = new Rig();
+        rig.Outcome = InReview(Reduced());
+
+        var result = await rig.Composer().ComposeConfirmedForInvoiceAsync(
+            kind, InvoiceId, "Please correct your invoice", "Hello,\n\nWe could not accept the hours on the research entry.", CancellationToken.None);
+
+        result.Status.Should().Be(ConfirmedFirmNoticeStatus.Composed);
+        result.Draft!.Html.Should().Contain(">Billed</th>", "the table is there").And.NotContain(">Approved</th>", "nothing is approved by a Reject or a Return");
+    }
+
+    [Fact(DisplayName = "132 D4 (130f): an approved-with-adjustments email keeps the Approved column")]
+    public async Task ApprovedWithAdjustments_KeepsTheApprovedColumn()
+    {
+        var rig = new Rig();
+        rig.Outcome = Of(FirmOutcomeKind.ApprovedWithAdjustments, Reduced());
+        rig.AiReturns("Invoice approved with adjustments", "Your invoice has been approved with some adjustments.");
+
+        var draft = await rig.ComposeAsync(FirmNoticeKind.ApprovedWithAdjustments);
+
+        draft.Html.Should().Contain(">Approved</th>");
+    }
+
     // ── Helpers ──
 
     /// <summary>The text a reader sees: the markup removed and the entities decoded.</summary>

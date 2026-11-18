@@ -535,7 +535,7 @@ public sealed class FirmNoticeComposer
 
         var finalProse = NormalizeProse(prose!);
         var draft = new FirmNoticeDraft(
-            kind, baseSubject + suffix, finalProse, RenderHtml(outcome, finalProse), FirmNoticeSource.Reviewer, null, null);
+            kind, baseSubject + suffix, finalProse, RenderHtml(outcome, finalProse, kind), FirmNoticeSource.Reviewer, null, null);
         _logger.LogInformation(
             "Confirmed firm notice composed | Kind {Kind}, Id {Id}, Items {Items}", kind, invoiceId, outcome.Items.Count);
         return new ConfirmedFirmNoticeResult(ConfirmedFirmNoticeStatus.Composed, draft, null);
