@@ -210,6 +210,13 @@ internal class EbillingNotificationJobHandler : IJobHandler
                 "eBilling notification job {JobId}: the firm has no billing contact with a usable address; the submitter alone is told | Event {Event}, Subject {SubjectId}, Firm {FirmId}",
                 job.JobId, evt, subjectId, facts.FirmId);
         }
+        else if (recipients.BillingContactDenied)
+        {
+            // Ids only (ADR-015): the firm has a billing contact, but the outcome route's row rule refused it, so only the others are told.
+            _logger.LogInformation(
+                "eBilling notification job {JobId}: the billing contact was not told because the row rule denied it | Event {Event}, Subject {SubjectId}, Firm {FirmId}",
+                job.JobId, evt, subjectId, facts.FirmId);
+        }
 
         if (recipients.Addresses.Count == 0)
         {

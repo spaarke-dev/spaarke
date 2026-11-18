@@ -4,6 +4,19 @@ using Sprk.Bff.Api.Services.Finance.Submission;
 
 namespace Sprk.Bff.Api.Api.ExternalAccess;
 
+/// <summary>The answer to "may this contact be emailed about the subject?": a settled yes, a settled no, or "could not decide" (the job retries).</summary>
+internal enum RecipientAccessDecision
+{
+    /// <summary>The route's row rule is Visible for the contact: tell it.</summary>
+    Told,
+
+    /// <summary>The row rule refused (or the contact has no firm or subject): drop that recipient.</summary>
+    Denied,
+
+    /// <summary>The answer could not be had (a fault, or an Unavailable decision): never a drop; the job is retried.</summary>
+    Unavailable,
+}
+
 /// <summary>
 /// May a firm contact be EMAILED about an invoice (or a rejected submission)? (ebilling-r1 task 132, owner ruling D-70 of 2026-11-08: an external
 /// contact sees only its own firms' invoices on records it can access.) The answer is the outcome route's and the feed's own row rule, asked for the
@@ -12,8 +25,10 @@ namespace Sprk.Bff.Api.Api.ExternalAccess;
 /// route's own decision for one id. Nothing of the rule is copied, so an email can never reach a contact the route would refuse.
 /// </summary>
 /// <remarks>
-/// <para><b>Fail closed.</b> Only a Visible decision is a yes. A Denied or Unavailable decision, a composition that faulted, and a contact with no firm
-/// are all no; the caller drops that recipient. Nothing is thrown (except the caller's cancellation) and nothing but ids is logged (ADR-015).</para>
+/// <para><b>Three answers, fail closed.</b> <see cref="RecipientAccessDecision.Told"/> only for a Visible decision. <see cref="RecipientAccessDecision.Denied"/>
+/// is a settled no (the row rule refused, or the contact has no firm): the caller drops that recipient. <see cref="RecipientAccessDecision.Unavailable"/> is
+/// "could not decide" (an Unavailable decision, or a composition or read that faulted): it is NOT a no, because dropping on a transient fault would lose the
+/// email for good. The caller retries the job instead, before anything is marked or sent. Nothing but ids is logged (ADR-015).</para>
 /// <para><b>Known limit.</b> Every contact is composed as a CIAM sign-in (grants only). A contact whose home sign-in confers more (standing-grant
 /// membership) is judged on its grants alone, so such a contact can lose an email, never gain one.</para>
 /// <para>§11: <i>Existing</i> — <see cref="FirmOutcomeAuthorizationFilter"/> and the portal's principal composition. <i>Extension</i> — the filter only
@@ -57,15 +72,16 @@ internal class EbillingRecipientAccessRule
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
     /// <summary>
-    /// True when the route's row rule is Visible for <paramref name="contactId"/> (whose active firms are <paramref name="firms"/>) on the notice's
-    /// subject: the invoice (<paramref name="subject"/> = Invoice) or the rejected submission. False on anything else, including a fault.
+    /// Whether the route's row rule lets <paramref name="contactId"/> (whose active firms are <paramref name="firms"/>) be told about the notice's
+    /// subject: the invoice (<paramref name="subject"/> = Invoice) or the rejected submission. Told on Visible; Denied on a settled no; Unavailable when
+    /// the answer could not be had (a fault, or an Unavailable decision).
     /// </summary>
-    public virtual async Task<bool> MayBeToldAsync(
+    public virtual async Task<RecipientAccessDecision> MayBeToldAsync(
         Guid contactId, IReadOnlyList<Guid> firms, EbillingNotificationSubject subject, Guid subjectId, CancellationToken ct)
     {
         if (contactId == Guid.Empty || subjectId == Guid.Empty || firms.Count == 0)
         {
-            return false;
+            return RecipientAccessDecision.Denied;
         }
 
         try
@@ -75,18 +91,23 @@ internal class EbillingRecipientAccessRule
             if (decision != InvoiceFeedDecision.Visible)
             {
                 _logger.LogInformation(
-                    "eBilling notice: the outcome route's row rule is not Visible for a recipient, so it is not told | Contact {ContactId}, Subject {SubjectId}, Decision {Decision}",
+                    "eBilling notice: the outcome route's row rule is not Visible for a recipient | Contact {ContactId}, Subject {SubjectId}, Decision {Decision}",
                     contactId, subjectId, decision);
             }
 
-            return decision == InvoiceFeedDecision.Visible;
+            return decision switch
+            {
+                InvoiceFeedDecision.Visible => RecipientAccessDecision.Told,
+                InvoiceFeedDecision.Unavailable => RecipientAccessDecision.Unavailable,
+                _ => RecipientAccessDecision.Denied,
+            };
         }
         catch (Exception ex) when (!ct.IsCancellationRequested)
         {
             _logger.LogWarning(
-                "eBilling notice: the outcome route's row rule could not be decided for a recipient, so it is not told (fail closed) | Contact {ContactId}, Subject {SubjectId}, ExceptionType {ExceptionType}",
+                "eBilling notice: the outcome route's row rule could not be decided for a recipient; the job is retried | Contact {ContactId}, Subject {SubjectId}, ExceptionType {ExceptionType}",
                 contactId, subjectId, ex.GetType().Name);
-            return false;
+            return RecipientAccessDecision.Unavailable;
         }
     }
 

@@ -31,8 +31,11 @@ public sealed record EbillingNotificationFacts(
     string? CoreEntity,
     Guid? CoreId);
 
-/// <summary>The addresses a firm notice goes to. <paramref name="BillingContactMissing"/>: the firm has no billing contact with a usable address, so the submitter alone is told.</summary>
-public sealed record FirmRecipients(IReadOnlyList<string> Addresses, bool BillingContactMissing);
+/// <summary>
+/// The addresses a firm notice goes to. <paramref name="BillingContactMissing"/>: the firm has no billing contact with a usable address, so the submitter alone is told.
+/// <paramref name="BillingContactDenied"/>: the firm has a billing contact but the outcome route's row rule refused it, so it is not told (a different cause; never also "missing").
+/// </summary>
+public sealed record FirmRecipients(IReadOnlyList<string> Addresses, bool BillingContactMissing, bool BillingContactDenied = false);
 
 /// <summary>
 /// Reads the facts and resolves the recipients of an eBilling notification (task 132; D-45, FR-39): a firm notice goes to the SUBMITTER and the
@@ -48,7 +51,8 @@ public sealed record FirmRecipients(IReadOnlyList<string> Addresses, bool Billin
 /// billing contact is not an error: the submitter alone is told, and the caller logs the ids. Logs carry ids and codes only (ADR-015): never an address.
 /// <para><b>Row rule (D-70).</b> A recipient is also dropped unless the outcome route's own row rule is Visible for that contact on the notice's subject
 /// (<see cref="EbillingRecipientAccessRule"/>): a contact without Read on the invoice's core record or its secure roots, or for whom the invoice is hidden,
-/// is not told, and a decision that cannot be made drops the recipient (fail closed). The email follows the same rule as the route and the feed.</para>
+/// is not told (only a settled Denied drops a recipient). A decision that cannot be made THROWS, so the job retries before anything is marked or sent: a
+/// transient fault never loses the email. The email follows the same rule as the route and the feed.</para>
 /// <para><b>Own submission.</b> The invoice's submission is always its OWN (<see cref="InvoiceBlockedHold.ReadOwnSubmissionAsync"/>); never the oldest one linked.</para>
 /// </remarks>
 internal sealed class EbillingNotificationRecipients
@@ -167,6 +171,7 @@ internal sealed class EbillingNotificationRecipients
         // Then the route's own row rule for that contact on the notice's subject (D-70). No subject on record means nothing to decide: nobody is told.
         var subjectId = subject == EbillingNotificationSubject.Invoice ? facts.InvoiceId : facts.SubmissionId;
         var members = new List<Guid>();
+        var billingDenied = false;
         foreach (var id in contactIds)
         {
             var firms = await ActiveFirmsOfMemberAsync(id, facts.FirmId, ct).ConfigureAwait(false);
@@ -175,23 +180,35 @@ internal sealed class EbillingNotificationRecipients
                 _logger.LogInformation(
                     "eBilling notification recipient is not an active member of the firm and is not told | Contact {ContactId}, Firm {FirmId}", id, facts.FirmId);
             }
-            else if (subjectId is { } subjectRecord && subjectRecord != Guid.Empty
-                && await _access.MayBeToldAsync(id, firms, subject, subjectRecord, ct).ConfigureAwait(false))
-            {
-                members.Add(id);
-            }
             else
             {
-                _logger.LogInformation(
-                    "eBilling notification recipient may not open the subject under the outcome route's row rule and is not told | Contact {ContactId}, Subject {SubjectId}",
-                    id, subjectId);
+                var access = subjectId is { } subjectRecord && subjectRecord != Guid.Empty
+                    ? await _access.MayBeToldAsync(id, firms, subject, subjectRecord, ct).ConfigureAwait(false)
+                    : RecipientAccessDecision.Denied;
+                switch (access)
+                {
+                    case RecipientAccessDecision.Told:
+                        members.Add(id);
+                        break;
+
+                    case RecipientAccessDecision.Unavailable:
+                        // Could not decide: not a no. Nothing is marked or sent yet, so the job retries (a dropped recipient here would be lost for good).
+                        throw new InvalidOperationException("The row rule for a recipient could not be decided.");
+
+                    default:
+                        billingDenied |= billing == id;
+                        _logger.LogInformation(
+                            "eBilling notification recipient may not open the subject under the outcome route's row rule and is not told | Contact {ContactId}, Subject {SubjectId}",
+                            id, subjectId);
+                        break;
+                }
             }
         }
 
         contactIds = members;
         if (contactIds.Count == 0)
         {
-            return new FirmRecipients([], BillingContactMissing: true);
+            return new FirmRecipients([], BillingContactMissing: !billingDenied, BillingContactDenied: billingDenied);
         }
 
         var query = new QueryExpression(ContactEntity)
@@ -222,11 +239,11 @@ internal sealed class EbillingNotificationRecipients
             }
         }
 
-        var billingMissing = billing is not { } b || !usable.ContainsKey(b);
+        var billingMissing = !billingDenied && (billing is not { } b || !usable.ContainsKey(b));
         _logger.LogInformation(
-            "eBilling notification recipients resolved | Invoice {InvoiceId}, Submission {SubmissionId}, Count {Count}, BillingContactMissing {BillingContactMissing}",
-            facts.InvoiceId, facts.SubmissionId, addresses.Count, billingMissing);
-        return new FirmRecipients(addresses, billingMissing);
+            "eBilling notification recipients resolved | Invoice {InvoiceId}, Submission {SubmissionId}, Count {Count}, BillingContactMissing {BillingContactMissing}, BillingContactDenied {BillingContactDenied}",
+            facts.InvoiceId, facts.SubmissionId, addresses.Count, billingMissing, billingDenied);
+        return new FirmRecipients(addresses, billingMissing, billingDenied);
     }
 
     /// <summary>

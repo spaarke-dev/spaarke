@@ -720,33 +720,46 @@ public sealed class EbillingNotificationJobHandlerSeamTests
             new[] { (rig.SubmitterId, EbillingNotificationSubject.Invoice, rig.World.InvoiceId), (rig.BillingId, EbillingNotificationSubject.Invoice, rig.World.InvoiceId) },
             "each recipient is asked the route's rule for THIS invoice");
         rig.Log.Lines.Should().NotContain(l => l.Contains(SubmitterEmail) || l.Contains(BillingEmail), "ADR-015: ids only");
+        rig.Log.Lines.Should().NotContain(l => l.Contains("no billing contact with a usable address"), "the firm HAS a billing contact: the row rule refused it");
+        rig.Log.Lines.Should().ContainSingle(l => l.Contains("billing contact was not told because the row rule denied it") && l.Contains(FirmId.ToString()));
     }
 
-    [Fact(DisplayName = "132 D-70 (must-fire): a decision that is Unavailable, and a principal that cannot be composed, each drop THAT recipient (fail closed); the other is still told")]
-    public async Task ADecisionThatCannotBeMade_DropsThatRecipient_FailClosed()
+    [Fact(DisplayName = "132 D-70 round 3 (must-fire): a decision that is Unavailable, and a principal that cannot be composed, make the job retry (Failed, not Completed): nothing is sent and NO marker is written")]
+    public async Task ADecisionThatCannotBeMade_RetriesTheJob_BeforeAnyMarkerOrSend()
     {
         var unavailable = new Rig();
         unavailable.Access.Decisions[unavailable.BillingId] = InvoiceFeedDecision.Unavailable;
         unavailable.InvoiceOutcome = unavailable.Outcome(FirmOutcomeKind.ReturnedToFirm, Reduced);
-        await unavailable.Handler().ProcessAsync(
+        var first = await unavailable.Handler().ProcessAsync(
             unavailable.InvoiceJob(EbillingNotificationEvent.ReturnedToFirm, ConfirmedSubject, ConfirmedProse), CancellationToken.None);
-        Recipients(unavailable.Channel.Sent.Should().ContainSingle().Subject).Should().Equal(SubmitterEmail);
+        first.Status.Should().Be(JobStatus.Failed, "a transient fault must not lose the email: the job is retried");
+        unavailable.Channel.Sent.Should().BeEmpty();
+        unavailable.Cache.Marked.Should().BeEmpty("the marker is written only after the recipients are known");
+
+        // The retry, with the fault gone: BOTH are told (the marker did not swallow it).
+        unavailable.Access.Decisions.Clear();
+        var retry = await unavailable.Handler().ProcessAsync(
+            unavailable.InvoiceJob(EbillingNotificationEvent.ReturnedToFirm, ConfirmedSubject, ConfirmedProse), CancellationToken.None);
+        retry.Status.Should().Be(JobStatus.Completed);
+        Recipients(unavailable.Channel.Sent.Should().ContainSingle().Subject).Should().BeEquivalentTo(SubmitterEmail, BillingEmail);
 
         var faulted = new Rig();
         faulted.Access.ComposeFaults.Add(faulted.SubmitterId);
         faulted.InvoiceOutcome = faulted.Outcome(FirmOutcomeKind.ReturnedToFirm, Reduced);
-        await faulted.Handler().ProcessAsync(
+        var outcome = await faulted.Handler().ProcessAsync(
             faulted.InvoiceJob(EbillingNotificationEvent.ReturnedToFirm, ConfirmedSubject, ConfirmedProse), CancellationToken.None);
-        Recipients(faulted.Channel.Sent.Should().ContainSingle().Subject).Should().Equal(BillingEmail);
+        outcome.Status.Should().Be(JobStatus.Failed);
+        faulted.Channel.Sent.Should().BeEmpty();
+        faulted.Cache.Marked.Should().BeEmpty();
         faulted.Log.Lines.Should().Contain(l => l.Contains("could not be decided") && l.Contains(faulted.SubmitterId.ToString()) && l.Contains("InvalidOperationException"));
     }
 
-    [Fact(DisplayName = "132 D-70 (must-fire): when the rule is not Visible for anyone nothing is sent, nothing is marked, and the job completes (the no-recipient path)")]
+    [Fact(DisplayName = "132 D-70 (must-fire): when the rule DENIES everyone nothing is sent, nothing is marked, and the job completes (the no-recipient path)")]
     public async Task WhenNobodyMayOpenTheInvoice_NothingIsSent_AndNoMarkerIsWritten()
     {
         var rig = new Rig();
         rig.Access.Decisions[rig.SubmitterId] = InvoiceFeedDecision.Denied;
-        rig.Access.ComposeFaults.Add(rig.BillingId);
+        rig.Access.Decisions[rig.BillingId] = InvoiceFeedDecision.Denied;
         rig.InvoiceOutcome = rig.Outcome(FirmOutcomeKind.ReturnedToFirm, Reduced);
 
         var outcome = await rig.Handler().ProcessAsync(
@@ -756,6 +769,7 @@ public sealed class EbillingNotificationJobHandlerSeamTests
         rig.Channel.Sent.Should().BeEmpty();
         rig.Cache.Marked.Should().BeEmpty();
         rig.Log.Lines.Should().Contain(l => l.Contains("nobody has a usable address"));
+        rig.Log.Lines.Should().NotContain(l => l.Contains("no billing contact with a usable address"), "the billing contact was denied, not missing");
     }
 
     [Fact(DisplayName = "132 D-70: a rejected submission is asked the route's SUBMISSION rule for the submission, not the invoice rule")]
@@ -1022,7 +1036,6 @@ public sealed class EbillingNotificationJobHandlerSeamTests
         public Task ReleaseProcessingLockAsync(string eventId, CancellationToken cancellationToken = default) => Task.CompletedTask;
     }
 
-    /// <summary>The firm memberships of the contacts (the real <c>ReadContactFirmsAsync</c> rule runs over this double of the two Dataverse reads).</summary>
     /// <summary>
     /// The row rule's seams, over the REAL <see cref="EbillingRecipientAccessRule.MayBeToldAsync"/> (its fault handling is what a fault test exercises):
     /// the principal is composed trivially and the decision per contact is stated by the test (default Visible). What the real filter decides is tested
@@ -1057,6 +1070,7 @@ public sealed class EbillingNotificationJobHandlerSeamTests
         }
     }
 
+    /// <summary>The firm memberships of the contacts (the real <c>ReadContactFirmsAsync</c> rule runs over this double of the two Dataverse reads).</summary>
     private sealed class Memberships : ExternalParticipationService
     {
         public Memberships()
