@@ -2,14 +2,14 @@
 
 > **Format**: CURRENT state only, REWRITTEN at each checkpoint (≤ 10 KB) — never prepend. Standing rules → project `CLAUDE.md` §2/§3/§6. Decisions → `notes/model1-dedicated-remediation-plan.md`. Narrative → commit messages. Full detail of every open item below as of 2026-11-06 (verbatim): `notes/handoff-history/current-task-archive-2026-11-06.md`.
 
-> **Last Updated**: 2026-11-16 (Desktop session `provisioning-r1`; task 270 merged, PR #2862 → `4256166205`; 1.3.2.0 follow-up in PR).
+> **Last Updated**: 2026-11-18 (Desktop session `provisioning-r1`; task 270 + follow-up merged: #2862 → `4256166205`, #2871 → `2f224a78f4`).
 
 ## 🎯 Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
 |-------|-------|
 | **Task** | None in progress. Last completed: **270** (H7b procedure 10: S27 verifies the #2799 invoice-family lock, S28 the message-access lock; owner path A 2026-11-16) — PR #2862 merged → `4256166205` (2026-11-16, owner go "Yes proceed"). Before it: 269 → PR #2780 `3ab55ee877`; 268 → PR #2766 `4b45bdf3fe`. |
-| **Next Action** | Task 270 follow-up (SpaarkeMaster 1.3.2.0 named in S27; uac-r2 #2865 → `57431c8e6a`, #2859 closed, ISS-029 resolved): PR open — merge only on the owner's go when every check is green. 1.3.2.0 is merged but **not published or imported anywhere** (uac-r2, owner go). Also, with owner go: H7c (#2429) — `wip/h7c-customer-owner-teams` (`8ca1c13911`, unreviewed): merge master into it (it also edits Set-CustomerOwnerTeams.ps1 and H7b — resolve against tasks 269/270), review, resume. |
+| **Next Action** | Task 270 closed: follow-up PR #2871 merged → `2f224a78f4` (2026-11-18, owner "Merge", 45 checks terminal). Branch = master `2f224a78f4` (includes ebilling-r1 #2904 `fe51619cfc`: 1.3.2.0 source also locks `sprk_ruleset.sprk_visibletofirms` and `sprk_invoicesubmission.sprk_firmnoticetext` and removes five Core User privileges on `sprk_invoicecorrection` → managed stage-and-upgrade, which H6 already uses for an older managed package; S27 transitively requires 1.3.2.0, so no new H7b check). Waiting: uac-r2's caveat on Readers default-team association; 1.3.2.0 publish (lifts the L2 Worker rule). Also, with owner go: H7c (#2429) — `wip/h7c-customer-owner-teams` (`8ca1c13911`, unreviewed): merge master into it (it also edits Set-CustomerOwnerTeams.ps1 and H7b — resolve against tasks 269/270), review, resume. |
 | **Done 2026-11-11/13** | PR #2676 (task 267) → `df93d2029c`. ebilling #2689 → `2fc434c912`. Task 268 → PR #2766 `4b45bdf3fe`; #2725 / ISS-028 filed (19 operator scripts excuse System Administrator by name; ebilling fixing its 4 sites). SpaarkeMaster 1.3.1.0 published 2026-11-13. |
 | **Quality alert** | #1821 mutation-nightly open (2026-11-15); not started. |
 | **Working tree** | Clean after the close-out commit. |
