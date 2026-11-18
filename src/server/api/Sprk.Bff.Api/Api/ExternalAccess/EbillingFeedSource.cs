@@ -50,6 +50,12 @@ internal sealed class EbillingFeedSource
     /// <summary>The most audience candidates read for one feed (newest first); the access decision runs over all of them.</summary>
     public const int MaxCandidatesRead = 100;
 
+    /// <summary>
+    /// The most projection reads (one per VISIBLE Approved candidate, to learn whether the approval carries an adjustment) made for one feed. Reaching it
+    /// stops the reading and flags the feed truncated, so a poll costs at most this many projection reads however many Approved invoices are visible.
+    /// </summary>
+    public const int MaxProjectionReads = MaxItems;
+
     /// <summary>The fixed sender label on an eBilling item: the SPA's feed shows a sender name for a "message" item (the existing item shape; no new kind).</summary>
     public const string SenderLabel = "Billing";
 
@@ -300,6 +306,7 @@ internal sealed class EbillingFeedSource
         }
 
         var items = new List<EbillingFeedItem>();
+        var projectionReads = 0;
         foreach (var row in candidates)
         {
             // Denied is dropped; an invoice with no answer, or an Unavailable one, is dropped and the feed says truncated.
@@ -313,6 +320,14 @@ internal sealed class EbillingFeedSource
             if (decision != InvoiceFeedDecision.Visible)
             {
                 continue;
+            }
+
+            // An Approved invoice needs one projection read to know whether it is news. The reads are bounded per poll: at the bound the reading stops
+            // and the feed says truncated (never silent), so the cost of a poll does not grow with the number of visible Approved invoices.
+            if (row.GetAttributeValue<OptionSetValue>("statuscode")?.Value == InvoiceStatusCodes.Approved && ++projectionReads > MaxProjectionReads)
+            {
+                truncated = true;
+                break;
             }
 
             var news = await IsNewsAsync(row, ct).ConfigureAwait(false);

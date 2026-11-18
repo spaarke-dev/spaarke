@@ -225,6 +225,42 @@ public sealed class EbillingFeedSourceTests
         result.Truncated.Should().BeFalse();
     }
 
+    [Fact(DisplayName = "132 feed review K4 (must-fire): more visible Approved candidates than the cap make at most the cap's projection reads per poll, and the feed says truncated")]
+    public async Task ManyApprovedCandidates_ProjectionReadsAreBounded_AndTruncated()
+    {
+        var rig = new Rig();
+        for (var i = 0; i < EbillingFeedSource.MaxProjectionReads + 10; i++)
+        {
+            var id = Guid.NewGuid();
+            rig.Candidates.Add(Candidate(id, InvoiceStatusCodes.Approved, new DateTime(2026, 10, 20, 0, 0, 0, DateTimeKind.Utc).AddMinutes(-i)));
+            rig.Decisions[id] = InvoiceFeedDecision.Visible;
+            rig.Outcomes[id] = Outcome(FirmOutcomeKind.Approved); // no adjustment: none of them is news, so only the bound stops the reading
+        }
+
+        var result = await rig.Build().ReadAsync(Contact(), Cutoff, CancellationToken.None);
+
+        rig.OutcomeReads.Should().HaveCount(EbillingFeedSource.MaxProjectionReads, "a poll makes at most the cap's projection reads");
+        result.Truncated.Should().BeTrue("the reading stopped at the bound, so the list may be incomplete");
+    }
+
+    [Fact(DisplayName = "132 feed review K4 (must-not-fire): Approved candidates within the cap are all read and the feed is not truncated by the bound")]
+    public async Task ApprovedCandidatesWithinTheCap_AreAllRead_NotTruncated()
+    {
+        var rig = new Rig();
+        for (var i = 0; i < EbillingFeedSource.MaxProjectionReads; i++)
+        {
+            var id = Guid.NewGuid();
+            rig.Candidates.Add(Candidate(id, InvoiceStatusCodes.Approved, new DateTime(2026, 10, 20, 0, 0, 0, DateTimeKind.Utc).AddMinutes(-i)));
+            rig.Decisions[id] = InvoiceFeedDecision.Visible;
+            rig.Outcomes[id] = Outcome(FirmOutcomeKind.Approved);
+        }
+
+        var result = await rig.Build().ReadAsync(Contact(), Cutoff, CancellationToken.None);
+
+        rig.OutcomeReads.Should().HaveCount(EbillingFeedSource.MaxProjectionReads);
+        result.Truncated.Should().BeFalse();
+    }
+
     [Fact(DisplayName = "132 feed (must-fire): an Approved invoice whose outcome cannot be read, or is degraded or unavailable, is dropped and the feed says truncated")]
     public async Task Approved_WithAnOutcomeThatCannotBeRead_IsDropped_AndTruncated()
     {
