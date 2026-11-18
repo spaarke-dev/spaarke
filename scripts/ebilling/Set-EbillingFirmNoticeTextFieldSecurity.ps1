@@ -303,8 +303,9 @@ function Grant-MissingWriter {
 function Write-MaskedRecovery([string]$Cause) {
     Write-Host ''
     Write-Host "  !!! RECOVERY REQUIRED NOW - $Table.$Column may be field-secured WITHOUT the BFF writer permission !!!" -ForegroundColor Red
-    Write-Host '  A BFF application user without System Administrator then reads the stored notice text as null:' -ForegroundColor Red
-    Write-Host '  /review and /blocked show none, Override and Return refuse, and the submission job cannot finish.' -ForegroundColor Red
+    Write-Host '  A BFF application user without System Administrator then cannot store the sent notice text (the write is refused):' -ForegroundColor Red
+    Write-Host '  only keeping the sent firm notice fails, as a Warning in the notification job after the email is out. No decision,' -ForegroundColor Red
+    Write-Host '  submission or review path is affected.' -ForegroundColor Red
     Write-Host "  Cause: $Cause" -ForegroundColor Red
     Write-Host '  Do ONE of these, now:' -ForegroundColor Red
     Write-Host '    (1) fix the cause and re-run this script: on an already-secured column it grants only the missing writer' -ForegroundColor Red
