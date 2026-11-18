@@ -42,9 +42,19 @@ Fail-before (old projection restored, new tests kept): 14 of the 179 `FirmFindin
 
 ## Known limits
 
-- K1. An invoice rejected or returned while a line is still Pending or Flagged shows no item for that line (an item exists only for a line a reviewer decided or added). Same as In Review; the firm sees the decided lines only.
+- K1. A whole-invoice reject or return record that carries a LINE link (hostile or malformed) is refused twice: by the action-code rule of the record query (`reduce-line`, `disallow-line`, `add-line`) and by the later match of each record's code to the code its line needs. Test: `RejectedOrReturned_AWholeInvoiceRecordWithALineLink_IsNeverTheReasonOfThatLine`. The two rules cover each other: removing the query rule alone does not fail the test (the match still refuses the record); removing both fails it, and the override leak test with it. The test rig now applies the query's action-code rule too, so the query rule is exercised.
 - K2. The firm notice for a Return still carries the fixed sentence ("returned to you and is now closed"); the reviewer's reason in firm-safe words arrives with 130g after 132.
-- K3. The `FirmOutcome` doc comment in the 130 note and earlier fix-round notes still describe "status and billed total" for these kinds; they are history and were not edited.
+- K3. The doc comments in the 130 note and earlier fix-round notes still describe "status and billed total" for these kinds; they are history and were not edited. The `FirmOutcome.ApprovedTotal` comment now says it is null for every state with no approval, Rejected and Returned included.
+- K4. After a decision, a fault reading the items gives the decided status only, `Degraded`: the SPA route answers 503 and the composer returns `Unavailable` (no notice). This fails closed, as In Review does. Before 130f a Rejected or Returned invoice read no items and so could not fault there; the surface is now the same as In Review's.
+- K5. A line left Pending or Flagged when the invoice is rejected or returned shows no item: an item exists only for a line a reviewer decided or added (FR-38). Same as In Review.
+
+## Notice table: no Approved column after a Reject or Return (coordinator decision, fix round 1)
+
+`FirmNoticeComposer.FindingsHtml` drops the Approved column (its heading and its cells) when the outcome kind is Rejected or ReturnedToFirm: nothing was approved on those invoices. Every label's wording is unchanged (EB-D-255); only one column is dropped. In Review, Approved, Sent to AP and Paid keep the column, including the reviewer's preview of a Reject or Return notice while the invoice is still In Review (the column follows the invoice's state, not the notice kind). No SPA code renders this table (no client file references the notice).
+
+## Fix round 1: leak tests seed the real places
+
+The decision's reason and note are seeded where the code writes them: the reject or return Decision Record's `sprk_reason` and its `sprk_steps` envelope (the `DecisionRecordWriter` shape: `steps[].values.reason` and `.note`), and `sprk_decisionnote` on the invoice row (`InvoiceRejectReturnService` writes `note ?? reason`). The controls assert the store holds those values. The earlier seed used a column that does not exist on the record.
 
 ## Gates
 

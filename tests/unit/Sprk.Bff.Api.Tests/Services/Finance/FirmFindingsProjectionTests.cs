@@ -170,6 +170,13 @@ public sealed partial class FirmFindingsProjectionTests
                     return false;
                 }
 
+                // 130f: the action-code rule of the record query is applied by the store too, so a record the query would not return is not returned.
+                if (condition.AttributeName == "sprk_actioncode" && condition.Operator == ConditionOperator.In
+                    && !condition.Values.Cast<object>().Contains(row.GetAttributeValue<string>("sprk_actioncode")))
+                {
+                    return false;
+                }
+
                 if (condition.AttributeName == "createdonbehalfby" && condition.Operator == ConditionOperator.Null
                     && row.GetAttributeValue<EntityReference>("createdonbehalfby") is not null)
                 {
@@ -354,6 +361,31 @@ public sealed partial class FirmFindingsProjectionTests
 
             Signals.Add(signal);
             return signal;
+        }
+
+        /// <summary>
+        /// The whole-invoice decision as it is stored (130f): the Decision Record of the reject or return, with the reviewer's reason in
+        /// <c>sprk_reason</c> and its reason and note in the <c>sprk_steps</c> envelope (the shape <c>DecisionRecordWriter</c> writes), and the note on
+        /// the invoice row (<c>sprk_decisionnote</c>, which <c>InvoiceRejectReturnService</c> writes as <c>note ?? reason</c>). It carries the invoice link only.
+        /// </summary>
+        public Entity AddWholeInvoiceDecision(string actionCode, string reason, string note, Guid? line = null)
+        {
+            var record = AddRecord(actionCode, line, reason, InvoiceId);
+            record["sprk_steps"] = JsonSerializer.Serialize(new Dictionary<string, object?>
+            {
+                ["reviewId"] = Guid.NewGuid().ToString("D"),
+                ["resolvedSignalIds"] = Array.Empty<string>(),
+                ["steps"] = new[]
+                {
+                    new
+                    {
+                        code = actionCode, label = "Decision", taken = true, values = new Dictionary<string, string> { ["reason"] = reason, ["note"] = note },
+                        outcome = "Decided", written = Array.Empty<object>(),
+                    },
+                },
+            });
+            Invoices[0]["sprk_decisionnote"] = note;
+            return record;
         }
 
         public Entity AddSubmission(int status, string tracking = "TRK-1")
@@ -767,20 +799,47 @@ public sealed partial class FirmFindingsProjectionTests
         const string decisionReason = "SENT-DECISION-REASON";
         const string decisionNote = "SENT-DECISION-NOTE";
         const string overrideReason = "SENT-OVERRIDE-REASON";
-        Entity? decision = null;
+        World? seeded = null;
         var outcome = await DecidedWorldProjection(status, world =>
         {
-            // The whole-invoice decision's record (reason and note) carries the INVOICE link only; an override record carries the line's.
-            decision = world.AddRecord(actionCode, null, decisionReason, InvoiceId);
-            decision["sprk_note"] = decisionNote;
+            // The whole-invoice decision's record (reason in sprk_reason and sprk_steps, note in sprk_steps and on the invoice row) carries the
+            // INVOICE link only; an override record carries the line's.
+            world.AddWholeInvoiceDecision(actionCode, decisionReason, decisionNote);
             world.AddRecord("override-submission", world.Lines[0].Id, overrideReason, InvoiceId);
+            seeded = world;
         });
 
         var json = JsonSerializer.Serialize(outcome);
         json.Should().NotContain(decisionReason).And.NotContain(decisionNote).And.NotContain(overrideReason);
-        // Controls: the records really were in the store, and the line-level reasons the firm sees In Review really are in the output.
-        decision!["sprk_note"].Should().Be(decisionNote);
+        // Controls: the store really holds the reason and note where the code writes them (the record's steps, the invoice's decision note) and
+        // the override record, and the line-level reasons the firm sees In Review really are in the output.
+        seeded!.Records.Should().ContainSingle(r => r.GetAttributeValue<string>("sprk_actioncode") == actionCode)
+            .Which.GetAttributeValue<string>("sprk_steps").Should().Contain(decisionNote).And.Contain(decisionReason);
+        seeded.Invoices[0].GetAttributeValue<string>("sprk_decisionnote").Should().Be(decisionNote);
+        seeded.Records.Should().Contain(r => r.GetAttributeValue<string>("sprk_reason") == overrideReason);
         json.Should().Contain("Rate exceeds the agreed rate.").And.Contain("Block billing.");
+    }
+
+    [Theory(DisplayName = "130f hardening (K1): a hostile reject-invoice or return-to-firm record that carries a LINE link is refused by the action-code rule, even when it is the newest")]
+    [InlineData(InvoiceStatusCodes.Rejected, "reject-invoice")]
+    [InlineData(InvoiceStatusCodes.ReturnedToFirm, "return-to-firm")]
+    public async Task RejectedOrReturned_AWholeInvoiceRecordWithALineLink_IsNeverTheReasonOfThatLine(int status, string actionCode)
+    {
+        const string hostileReason = "SENT-HOSTILE-REASON";
+        const string hostileNote = "SENT-HOSTILE-NOTE";
+        World? seeded = null;
+        var outcome = await DecidedWorldProjection(status, world =>
+        {
+            var hostile = world.AddWholeInvoiceDecision(actionCode, hostileReason, hostileNote, world.Lines[0].Id);
+            hostile["sprk_decidedon"] = new DateTime(2026, 10, 9, 0, 0, 0, DateTimeKind.Utc); // newer than the line's own reduce-line record
+            seeded = world;
+        });
+
+        JsonSerializer.Serialize(outcome).Should().NotContain(hostileReason).And.NotContain(hostileNote);
+        outcome.Items[0].Reason.Should().Be("Rate exceeds the agreed rate.", "the line keeps the reason of its own reduce-line decision");
+        // Control: the hostile record was in the store, against the line, and newer than the line's own record.
+        seeded!.Records.Should().ContainSingle(r => r.GetAttributeValue<string>("sprk_actioncode") == actionCode)
+            .Which.GetAttributeValue<Microsoft.Xrm.Sdk.EntityReference>("sprk_regardinginvoiceline").Id.Should().Be(seeded.Lines[0].Id);
     }
 
     [Theory(DisplayName = "130f (EB-D-209): with the rule set's firm flag off, a Rejected or Returned item shows the reason only: no clause, section or rule set name")]

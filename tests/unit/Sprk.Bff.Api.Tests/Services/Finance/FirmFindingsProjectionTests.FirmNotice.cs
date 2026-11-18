@@ -121,6 +121,37 @@ public sealed partial class FirmFindingsProjectionTests
         html.Should().NotContain("Invoice adjustment");
     }
 
+    [Theory(DisplayName = "130f K4: the notice table of a Rejected or Returned invoice has no Approved column and no approved amount; In Review and Approved keep it")]
+    [InlineData(InvoiceStatusCodes.Rejected, FirmNoticeKind.InvoiceRejected, false)]
+    [InlineData(InvoiceStatusCodes.ReturnedToFirm, FirmNoticeKind.ReturnedToFirm, false)]
+    [InlineData(InvoiceStatusCodes.InReview, FirmNoticeKind.InvoiceRejected, true)]
+    [InlineData(InvoiceStatusCodes.InReview, FirmNoticeKind.ReturnedToFirm, true)]
+    [InlineData(InvoiceStatusCodes.Approved, FirmNoticeKind.ApprovedWithAdjustments, true)]
+    public async Task Notice_TheApprovedColumn_IsShownOnlyWhenSomethingCouldBeApproved(int status, FirmNoticeKind kind, bool showsApproved)
+    {
+        var world = new World(status);
+        world.AddReducedWithCitation(1, "Rate exceeds the agreed rate.", VersionA, "Your agreed rate is lower.", 100m, 60m);
+        world.Clause = _ => FlagOnText;
+
+        var result = await NoticeComposer(world, aiEnabled: false).ComposeForInvoiceAsync(kind, InvoiceId, CancellationToken.None);
+
+        result.Status.Should().Be(FirmNoticeStatus.Composed);
+        var html = result.Draft!.Html;
+        // The other column labels are untouched either way; the amounts: 100.00 billed (always), 60.00 approved (only with the column).
+        html.Should().Contain(">Item<").And.Contain(">Decision<").And.Contain(">Billed<").And.Contain(">Reason<").And.Contain(">Rule<").And.Contain("100.00");
+        if (showsApproved)
+        {
+            html.Should().Contain(">Approved<").And.Contain("60.00");
+        }
+        else
+        {
+            html.Should().NotContain(">Approved<").And.NotContain("60.00").And.NotContain("Approved total");
+            // Six cells per row became five: one th and one td fewer than the Approved-column layout.
+            System.Text.RegularExpressions.Regex.Matches(html, "<th ").Count.Should().Be(5);
+            System.Text.RegularExpressions.Regex.Matches(html, "<td ").Count.Should().Be(5);
+        }
+    }
+
     [Theory(DisplayName = "130f must-not-fire (EB-D-259): a reject or return reason and note, and an override reason, seeded in the store, appear in no part of the notice or of the model request")]
     [InlineData(InvoiceStatusCodes.Rejected, FirmNoticeKind.InvoiceRejected, "reject-invoice")]
     [InlineData(InvoiceStatusCodes.ReturnedToFirm, FirmNoticeKind.ReturnedToFirm, "return-to-firm")]
@@ -131,8 +162,7 @@ public sealed partial class FirmFindingsProjectionTests
         const string overrideReason = "SENT-OVERRIDE-REASON";
         var world = new World(status);
         var (line, _) = world.AddReducedWithCitation(1, "Shown reason.", VersionA, "Shown firm reason");
-        var decision = world.AddRecord(actionCode, null, decisionReason, InvoiceId);
-        decision["sprk_note"] = decisionNote;
+        world.AddWholeInvoiceDecision(actionCode, decisionReason, decisionNote);
         world.AddRecord("override-submission", line.Id, overrideReason, InvoiceId);
         world.Clause = _ => FlagOnText;
 
@@ -154,6 +184,8 @@ public sealed partial class FirmFindingsProjectionTests
         }
 
         world.Records.Should().Contain(r => r.GetAttributeValue<string>("sprk_reason") == decisionReason);
+        world.Records.Should().Contain(r => (r.GetAttributeValue<string>("sprk_steps") ?? string.Empty).Contains(decisionNote));
+        world.Invoices[0].GetAttributeValue<string>("sprk_decisionnote").Should().Be(decisionNote);
         world.Records.Should().Contain(r => r.GetAttributeValue<string>("sprk_reason") == overrideReason);
     }
 

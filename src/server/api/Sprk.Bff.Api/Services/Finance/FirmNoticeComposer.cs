@@ -650,7 +650,9 @@ public sealed class FirmNoticeComposer
         var sb = new StringBuilder();
         sb.Append("<h2 style=\"margin:8px 0 8px;color:#242424;font-size:16px;\">").Append(Encode(FirmNoticeFallbackText.FindingsHeading)).Append("</h2>");
         sb.Append("<table role=\"presentation\" cellspacing=\"0\" cellpadding=\"0\" border=\"0\" style=\"border-collapse:collapse;width:100%;\"><thead><tr>");
-        foreach (var heading in new[] { "Item", "Decision", "Billed", "Approved", "Reason", "Rule" })
+        // 130f (EB-D-259, K4): nothing was approved on a Rejected or Returned invoice, so its table has no Approved column (same labels, one column fewer).
+        var showApproved = outcome.Kind is not (FirmOutcomeKind.Rejected or FirmOutcomeKind.ReturnedToFirm);
+        foreach (var heading in new[] { "Item", "Decision", "Billed", "Approved", "Reason", "Rule" }.Where(h => showApproved || h != "Approved"))
         {
             sb.Append("<th style=\"").Append(cell).Append("background-color:#f4f6f8;\">").Append(Encode(heading)).Append("</th>");
         }
@@ -659,11 +661,15 @@ public sealed class FirmNoticeComposer
         foreach (var item in outcome.Items)
         {
             sb.Append("<tr>");
-            foreach (var html in new[]
+            var cells = new List<string> { ItemCell(item), Encode(DecisionLabel(item.Decision)), Money(item.Line?.BilledAmount) };
+            if (showApproved)
             {
-                ItemCell(item), Encode(DecisionLabel(item.Decision)), Money(item.Line?.BilledAmount), Money(item.Line?.ApprovedAmount),
-                ReasonCell(item), RuleCell(item),
-            })
+                cells.Add(Money(item.Line?.ApprovedAmount));
+            }
+
+            cells.Add(ReasonCell(item));
+            cells.Add(RuleCell(item));
+            foreach (var html in cells)
             {
                 sb.Append("<td style=\"").Append(cell).Append("\">").Append(html).Append("</td>");
             }

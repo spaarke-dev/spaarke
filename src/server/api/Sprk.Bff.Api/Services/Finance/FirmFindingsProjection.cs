@@ -72,7 +72,7 @@ public enum FirmOutcomeDecision
 }
 
 /// <summary>
-/// The firm-visible outcome of one invoice or submission. <see cref="ApprovedTotal"/> is null for a state that has not been decided.
+/// The firm-visible outcome of one invoice or submission. <see cref="ApprovedTotal"/> is null for every state that has no approval: a submission, an invoice In Review, Rejected or Returned to firm.
 /// <see cref="Degraded"/> is true when a read did not complete: the outcome then carries the status only (fail closed).
 /// </summary>
 /// <param name="TrackingNumber">The tracking number the firm was given on submission.</param>
@@ -320,7 +320,7 @@ public sealed class FirmFindingsProjection
 
         // Rejected and Returned to Firm (EB-D-259, task 130f) show the In Review items by the same code below, with the decided kind and label and
         // the billed total. They carry no approved total and no invoice-level adjustment: those belong to Approved and later.
-        var decided = lifecycle is InvoiceLifecycleStatus.Approved or InvoiceLifecycleStatus.SentToAp or InvoiceLifecycleStatus.Paid;
+        var approvedOrLater = lifecycle is InvoiceLifecycleStatus.Approved or InvoiceLifecycleStatus.SentToAp or InvoiceLifecycleStatus.Paid;
         var statusOnly = lifecycle switch
         {
             InvoiceLifecycleStatus.InReview => new FirmOutcome(FirmOutcomeKind.InvoiceInReview, null, "In review", null, null, [], true),
@@ -334,7 +334,7 @@ public sealed class FirmFindingsProjection
         IReadOnlyList<FirmOutcomeItem> items;
         try
         {
-            items = await BuildItemsAsync(invoiceId, includeAdjustments: decided, ct).ConfigureAwait(false);
+            items = await BuildItemsAsync(invoiceId, includeAdjustments: approvedOrLater, ct).ConfigureAwait(false);
         }
         catch (Exception ex) when (IsFault(ex, ct))
         {
@@ -342,7 +342,7 @@ public sealed class FirmFindingsProjection
             return statusOnly;
         }
 
-        var approved = decided ? invoice.Approved : null;
+        var approved = approvedOrLater ? invoice.Approved : null;
         return lifecycle switch
         {
             InvoiceLifecycleStatus.InReview => new FirmOutcome(FirmOutcomeKind.InvoiceInReview, tracking, "In review", billed, null, items, false),
