@@ -78,7 +78,7 @@ jest.mock('./hooks', () => ({
   useComposeHeartbeatGate: () => undefined,
 }));
 
-// ── ComposeToolbar — avoid @spaarke/document-operations runtime auth ────────
+// ── ComposeToolbar — avoid useDocumentActions' runtime auth ────────────────
 jest.mock('./ComposeToolbar', () => ({
   ComposeToolbar: () => <div data-testid="compose-toolbar-stub" />,
 }));

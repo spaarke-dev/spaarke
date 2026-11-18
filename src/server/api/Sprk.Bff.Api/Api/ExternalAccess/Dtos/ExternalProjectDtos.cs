@@ -562,6 +562,13 @@ public sealed class ExternalEventDto
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public IReadOnlyList<int>? AllowedStatuses { get; set; }
 
+    /// <summary>R4 task 014c: whether the PATCH would admit a reassign (<c>assignedToContactId</c>) — <see cref="CanEdit"/>, AND the
+    /// event's current status is open work, AND the caller's role may read contacts: the PATCH's own predicates, so the SPA hides
+    /// Reassign instead of deriving it. The assignee is still re-checked against every parent's people on the PATCH.</summary>
+    [JsonPropertyName("canReassign")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? CanReassign { get; set; }
+
     /// <summary>The record the event is regarding (kind, id, name). Set by <c>GET /events/{id}</c> only.</summary>
     [JsonPropertyName("regarding")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
@@ -680,7 +687,7 @@ public sealed class UpdateExternalEventRequest
 {
     private string? _name, _dueDate, _description;
     private int? _priority, _status;
-    private Guid? _eventTypeId, _assignedTo;
+    private Guid? _eventTypeId;
 
     [JsonPropertyName("sprk_name")]
     public string? SprkName { get => _name; init { _name = value; NameSent = true; } }
@@ -704,10 +711,12 @@ public sealed class UpdateExternalEventRequest
     [JsonPropertyName("eventTypeId")]
     public Guid? EventTypeId { get => _eventTypeId; init { _eventTypeId = value; EventTypeIdSent = true; } }
 
-    /// <summary>Not accepted yet (the assignee write path is with the owner): any value is 400
-    /// <c>sdap.event.assignee_update_unsupported</c> and nothing is written.</summary>
+    /// <summary>R4 task 014c (owner option (a)): reassign the event as the internal reassign does — the contact, <c>statuscode</c>
+    /// Reassigned (an explicit <c>sprk_status</c> in the same PATCH wins), the reassigned date and reassigned-by = the caller's
+    /// contact. Open work only (400 <c>sdap.event.reassign_not_open</c>); the contact must have access to every parent (400
+    /// <c>sdap.event.assignee_not_allowed</c>). As internally, null means "no reassign" (there is no clear).</summary>
     [JsonPropertyName("assignedToContactId")]
-    public Guid? AssignedToContactId { get => _assignedTo; init { _assignedTo = value; AssigneeSent = true; } }
+    public Guid? AssignedToContactId { get; init; }
 
     [JsonIgnore] public bool NameSent { get; private set; }
     [JsonIgnore] public bool DueDateSent { get; private set; }
@@ -715,7 +724,6 @@ public sealed class UpdateExternalEventRequest
     [JsonIgnore] public bool DescriptionSent { get; private set; }
     [JsonIgnore] public bool StatusSent { get; private set; }
     [JsonIgnore] public bool EventTypeIdSent { get; private set; }
-    [JsonIgnore] public bool AssigneeSent { get; private set; }
 }
 
 // ---------------------------------------------------------------------------

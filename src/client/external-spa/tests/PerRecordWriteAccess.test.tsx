@@ -20,13 +20,18 @@ vi.mock('../src/auth/bff-client', async () => {
 
 import { EventsCalendar } from '../src/components/EventsCalendar';
 import { DocumentLibrary } from '../src/components/DocumentLibrary';
+import { EVENT_TYPES } from './eventFixtures';
 
 const PROJECT = 'p-036';
 
-/** Every list answers empty, with `canCreate` when given (absent = the BFF did not say). */
+/**
+ * Every list answers empty, with `canCreate` when given (absent = the BFF did not say). An events list also names the types
+ * the caller may create (task 015: Add event needs the right AND at least one creatable type); a documents list ignores them.
+ */
 function answerLists(canCreate?: boolean): void {
   bffApiCall.mockImplementation(async () => ({
     value: [],
+    creatableEventTypes: EVENT_TYPES,
     ...(canCreate === undefined ? {} : { canCreate }),
   }));
 }

@@ -55,6 +55,13 @@ type Read = (entity: string, id: string) => Record<string, unknown> | null | Pro
 /** Answers the module fetch (the one record read) with `read(entity, id)`; `null` = no row (the denied answer). */
 function installRead(read: Read): void {
   h.bffApiCall.mockImplementation(async (path: string, options?: RequestInit) => {
+    // Task 015: an Event record is read from `GET /events/{id}` (the BFF's own DTO), not the module fetch.
+    const eventById = /\/api\/v1\/external\/events\/([^/]+)$/.exec(path);
+    if (eventById) {
+      const row = await read('sprk_event', eventById[1]);
+      if (!row) throw new ApiError(404, '');
+      return row;
+    }
     if (!path.endsWith('/api/v1/external/api/dataverse/fetch')) throw new Error(`unexpected BFF call ${path}`);
     const body = JSON.parse(String(options?.body)) as { entityName: string; fetchXml: string };
     const id = /operator="eq" value="([^"]+)"/.exec(body.fetchXml)?.[1] ?? '';
@@ -72,7 +79,7 @@ const matterRow = (id: string, over: Record<string, unknown> = {}): Record<strin
   ...over,
 });
 
-/** A row for any of the six entities: its id column, a number and a name. */
+/** A row for any of the seven entities: its id column, a number and a name (an event's is the BFF's DTO shape). */
 function rowFor(entity: string, id: string): Record<string, unknown> {
   const detail = RECORD_DETAIL_ENTITIES[entity];
   const config = RECORD_TEMPLATES[entity];
@@ -163,7 +170,7 @@ afterEach(() => {
 // ---------------------------------------------------------------------------
 
 describe('RECORD_TEMPLATES', () => {
-  it('has exactly the six types, with the left, right, toolbar and section-action lists (FR-01; task 009)', () => {
+  it('has exactly the seven types, with the left, right, toolbar and section-action lists (FR-01; task 009)', () => {
     // Task 009: a create action sits in the header of its own section; the record header keeps Refresh, Copy link and
     // the type's own actions. Task 010: Submit invoice is in the Invoices section's header on a Matter and a Project; a
     // Work assignment has no Invoices section, so it stays in that type's header.
@@ -230,6 +237,14 @@ describe('RECORD_TEMPLATES', () => {
         left: ['information', 'preview'],
         right: [],
         toolbar: ['refresh', 'download', 'copyLink'],
+        sectionActions: {},
+      },
+      // Task 015 (FR-36): the Event record - Edit, Change status and Delete event are its own actions.
+      sprk_event: {
+        label: 'Event',
+        left: ['information'],
+        right: [],
+        toolbar: ['refresh', 'edit', 'changeStatus', 'copyLink', 'delete'],
         sectionActions: {},
       },
     });

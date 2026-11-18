@@ -6,6 +6,7 @@ using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+using Microsoft.Extensions.Time.Testing;
 using Microsoft.Xrm.Sdk;
 using Moq;
 using Sprk.Bff.Api.Services.Dataverse;
@@ -13,6 +14,7 @@ using Sprk.Bff.Api.Services.Jobs;
 using Sprk.Bff.Api.Services.Signals;
 using Sprk.Bff.Api.Telemetry;
 using Sprk.Bff.Api.Tests.Services.Communication; // CapturingLogger<T> / LogEntry (internal, same assembly)
+using Sprk.Bff.Api.Tests.TestInfrastructure; // ReleaseFaultingCache
 using Xunit;
 using static Sprk.Bff.Api.Tests.TestInfrastructure.OwnershipDirectory;
 
@@ -43,7 +45,9 @@ public sealed class GateDecisionRecordJobTests
 
         /// <param name="filedUnderMatter">True: the communication is filed under a matter (mocked resolver, Owned). False: it stands alone.</param>
         /// <param name="realResolver">The REAL ownership resolver over an in-memory directory (null: the mocked resolver).</param>
-        public Rig(bool filedUnderMatter = true, IRecordOwnershipResolver? realResolver = null)
+        /// <param name="cache">The cache under the REAL idempotency service (null: a plain in-memory cache).</param>
+        /// <param name="time">The idempotency service's clock, for the owner takeover age (null: the system clock).</param>
+        public Rig(bool filedUnderMatter = true, IRecordOwnershipResolver? realResolver = null, IDistributedCache? cache = null, TimeProvider? time = null)
         {
             Writer = new DecisionRecordWriterTests.Harness(realResolver: realResolver);
             if (filedUnderMatter)
@@ -56,7 +60,7 @@ public sealed class GateDecisionRecordJobTests
 
             Writer.Rows[("sprk_communicationrule", RuleId)] = new Entity("sprk_communicationrule", RuleId) { ["sprk_priority"] = 100 };
             Idempotency = new IdempotencyService(
-                new MemoryDistributedCache(Options.Create(new MemoryDistributedCacheOptions())), NullLogger<IdempotencyService>.Instance);
+                cache ?? new MemoryDistributedCache(Options.Create(new MemoryDistributedCacheOptions())), NullLogger<IdempotencyService>.Instance, time);
             Handler = new GateDecisionRecordJobHandler(Writer.Writer, Writer.Entities.Object, Idempotency, Log);
         }
 
@@ -70,8 +74,9 @@ public sealed class GateDecisionRecordJobTests
         reason ?? (authorize ? "rule-matched-confidence-met" : "rule-matched-confidence-below-threshold"),
         Confidence: 0.9, Threshold: 0.7, MatchedRuleId: rule ?? RuleId, PrivilegeFlagged: false, DirectFiledUnderId: null, DecidedOn: GateTime);
 
-    private static JobContract Job(GateDecisionRecordPayload payload, Guid? jobId = null, int attempt = 1) => new()
+    private static JobContract Job(GateDecisionRecordPayload payload, Guid? jobId = null, int attempt = 1, int deliveryCount = 1) => new()
     {
+        DeliveryCount = deliveryCount,
         JobId = jobId ?? Guid.NewGuid(),
         JobType = GateDecisionRecordEnqueuer.JobTypeName,
         SubjectId = payload.CommunicationId.ToString("D"),
@@ -174,9 +179,10 @@ public sealed class GateDecisionRecordJobTests
     }
 
     [Fact]
-    public async Task AJobWhileAnotherJobHoldsTheSameDecision_WritesNothing_AndCompletes_TheLockNarrowsTheRace()
+    public async Task AJobWhileAnotherJobHoldsTheSameDecision_WritesNothing_AndFails_AndItsRedeliveryAfterwardsFindsTheRecord()
     {
-        // The writer's lookup is durable but cannot see a create still in flight; the lock is what keeps a concurrent copy out.
+        // The writer's lookup is durable but cannot see a create still in flight; the lock is what keeps a concurrent copy out. The
+        // refused copy is NOT completed (a refusal proves nothing): it is retried, and once the first has written, it finds the record.
         var rig = new Rig();
         var createStarted = new TaskCompletionSource();
         var release = new TaskCompletionSource();
@@ -191,15 +197,124 @@ public sealed class GateDecisionRecordJobTests
 
         var first = rig.RunAsync(Payload(authorize: true));
         await createStarted.Task;
-        var second = await rig.RunAsync(Payload(authorize: true));
+        var secondJob = Job(Payload(authorize: true));
+        var second = await rig.Handler.ProcessAsync(secondJob, CancellationToken.None);
 
-        second.Status.Should().Be(JobStatus.Completed);
+        second.Status.Should().Be(JobStatus.Failed, "a refused lock is a retry, never a completion");
+        second.ErrorMessage.Should().Be(GateDecisionRecordJobHandler.LockRefusedError);
         rig.Writer.Created.Should().BeEmpty("the second job did not create: the first still holds the decision");
-        rig.Log.Entries.Should().Contain(e => e.EventId == GateDecisionRecordEvents.HandlerCompleted && e.Message.Contains("another job holds"));
+        rig.Log.Entries.Should().ContainSingle(e => e.EventId == GateDecisionRecordEvents.HandlerFailed).Which.Level.Should().Be(LogLevel.Warning);
+        rig.Log.Entries.Should().NotContain(e => e.EventId == GateDecisionRecordEvents.HandlerCompleted);
 
         release.SetResult();
         (await first).Status.Should().Be(JobStatus.Completed);
         rig.Writer.Created.Should().ContainSingle();
+
+        var redelivered = await rig.Handler.ProcessAsync(secondJob, CancellationToken.None);
+
+        redelivered.Status.Should().Be(JobStatus.Completed);
+        rig.Writer.Created.Should().ContainSingle("the redelivery found the first job's record and wrote nothing");
+        rig.Log.Entries.Should().Contain(e => e.EventId == GateDecisionRecordEvents.HandlerCompleted && e.Message.Contains("already recorded"));
+    }
+
+    [Fact]
+    public async Task ARedeliveryRefusedByItsOwnLeftoverLock_IsAFailure_WritesNothing_LogsAWarning_AndLeavesTheLockInPlace()
+    {
+        // The silent-data-loss path: attempt 1 fails, its lock release hits a cache fault (swallowed), and the broker redelivers the
+        // SAME job (same id = same lock owner) inside OwnerTakeoverAge. Before the fix the redelivery was refused and completed.
+        var cache = new ReleaseFaultingCache(new MemoryDistributedCache(Options.Create(new MemoryDistributedCacheOptions())));
+        var rig = new Rig(cache: cache, time: new FakeTimeProvider());
+        rig.Writer.Org.Setup(o => o.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>())).ThrowsAsync(new TimeoutException("dataverse"));
+        var job = Job(Payload());
+        cache.FailRemove = true;
+
+        var attempt1 = await rig.Handler.ProcessAsync(job, CancellationToken.None);
+        attempt1.Status.Should().Be(JobStatus.Failed);
+        cache.FailRemove = false;
+        var before = rig.Log.Entries.Count;
+        var lookupsBefore = rig.Writer.Lookups.Count;
+
+        var redelivered = await rig.Handler.ProcessAsync(job, CancellationToken.None);
+
+        redelivered.Status.Should().Be(JobStatus.Failed, "the lock is its own leftover but younger than the takeover age: not proof of a record");
+        redelivered.ErrorMessage.Should().Be(GateDecisionRecordJobHandler.LockRefusedError);
+        rig.Writer.Created.Should().BeEmpty();
+        rig.Writer.Lookups.Count.Should().Be(lookupsBefore, "the refused job never reaches the writer");
+        var entries = rig.Log.Entries.Skip(before).ToList();
+        var warning = entries.Should().ContainSingle().Subject;
+        warning.EventId.Should().Be(GateDecisionRecordEvents.HandlerFailed);
+        warning.Level.Should().Be(LogLevel.Warning);
+        warning.Message.Should().Contain(CommunicationId.ToString("D"));
+        (await rig.Idempotency.TryAcquireProcessingLockAsync(GateDecisionKey.Of(CommunicationId, true), "another-owner", TimeSpan.FromMinutes(1)))
+            .Should().BeFalse("the refused job did not release a lock it does not hold");
+    }
+
+    [Fact]
+    public async Task ARedeliveryOnceItsOwnLeftoverLockIsAtLeastTheTakeoverAgeOld_TakesTheLockOver_AndWritesExactlyOneRecord()
+    {
+        var cache = new ReleaseFaultingCache(new MemoryDistributedCache(Options.Create(new MemoryDistributedCacheOptions())));
+        var clock = new FakeTimeProvider();
+        var rig = new Rig(cache: cache, time: clock);
+        var creates = 0;
+        rig.Writer.Org.Setup(o => o.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
+            .Returns<Entity, CancellationToken>((entity, _) =>
+            {
+                if (++creates == 1) return Task.FromException<Guid>(new TimeoutException("dataverse"));
+                rig.Writer.Created.Add(entity);
+                return Task.FromResult(rig.Writer.NewId);
+            });
+        var job = Job(Payload());
+        cache.FailRemove = true;
+
+        (await rig.Handler.ProcessAsync(job, CancellationToken.None)).Status.Should().Be(JobStatus.Failed);
+        cache.FailRemove = false;
+
+        clock.Advance(IdempotencyService.OwnerTakeoverAge - TimeSpan.FromMilliseconds(1));
+        var tooSoon = await rig.Handler.ProcessAsync(job, CancellationToken.None);
+        tooSoon.Status.Should().Be(JobStatus.Failed, "one millisecond short of the takeover age");
+        rig.Writer.Created.Should().BeEmpty();
+
+        clock.Advance(TimeSpan.FromMilliseconds(1));
+        var takenOver = await rig.Handler.ProcessAsync(job, CancellationToken.None);
+
+        takenOver.Status.Should().Be(JobStatus.Completed);
+        rig.Writer.Created.Should().ContainSingle();
+    }
+
+    [Theory]
+    [InlineData(1, 1, false)]
+    [InlineData(1, 4, false)]
+    [InlineData(1, JobContract.MaxDeliveryCount, true)]
+    [InlineData(3, 1, true)] // attempts exhausted: the processor dead-letters on this delivery too
+    public async Task ARefusedLock_IsCountedAsAFailureAndLoggedAtErrorOnlyOnTheFinalDelivery(int attempt, int deliveryCount, bool isFinal)
+    {
+        var scope = Guid.NewGuid();
+        MetricScope.Value = scope;
+        var (listener, reasons) = ListenReasons(scope);
+        using var _ = listener;
+        var rig = new Rig();
+        (await rig.Idempotency.TryAcquireProcessingLockAsync(GateDecisionKey.Of(CommunicationId, true), "another-job", GateDecisionRecordJobHandler.LockDuration))
+            .Should().BeTrue();
+        var job = Job(Payload(), attempt: attempt, deliveryCount: deliveryCount);
+        job.IsFinalDelivery.Should().Be(isFinal);
+
+        var outcome = await rig.Handler.ProcessAsync(job, CancellationToken.None);
+
+        outcome.Status.Should().Be(JobStatus.Failed);
+        rig.Writer.Created.Should().BeEmpty();
+        if (isFinal)
+        {
+            rig.Log.Entries.Should().NotContain(e => e.Level == LogLevel.Warning, "the final delivery says it is dead-lettered, not that it will be redelivered");
+            rig.Log.Entries.Should().ContainSingle(e => e.Level == LogLevel.Error && e.EventId == GateDecisionRecordEvents.HandlerFailed)
+                .Which.Message.Should().Contain("dead-lettered");
+            reasons.Should().Equal(DecisionRecordRefusalReason.GateRecordFailed);
+        }
+        else
+        {
+            rig.Log.Entries.Count(e => e.Level == LogLevel.Warning).Should().Be(1);
+            rig.Log.Entries.Should().NotContain(e => e.Level >= LogLevel.Error);
+            reasons.Should().BeEmpty();
+        }
     }
 
     [Fact]

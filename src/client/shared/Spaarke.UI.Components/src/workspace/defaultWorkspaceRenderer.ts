@@ -53,7 +53,7 @@ let _default: WorkspaceRenderer | null = null;
  * ```ts
  * // In SpaarkeAi main.tsx (abridged) — register a WRAPPER, not bare LegalWorkspaceApp,
  * // so the host's section registry + launch context are applied:
- * import { LegalWorkspaceApp, createLegalWorkspaceSectionRegistry } from "@spaarke/legal-workspace";
+ * import { LegalWorkspaceApp, createLegalWorkspaceSectionRegistry } from "legal-workspace";
  * import { setDefaultWorkspaceRenderer, type WorkspaceRenderer } from "@spaarke/ui-components";
  *
  * const sections = createLegalWorkspaceSectionRegistry({});

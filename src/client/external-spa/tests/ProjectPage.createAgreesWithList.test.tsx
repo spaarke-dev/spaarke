@@ -54,6 +54,7 @@ vi.mock('../src/hooks/useExternalContext', () => ({
 }));
 
 import { ProjectPage } from '../src/pages/ProjectPage';
+import { EVENT_TYPES } from './eventFixtures';
 
 /** How every project list (documents, events) answers. */
 type ListAnswer = { canCreate: boolean | undefined } | 'pending' | 'failed';
@@ -67,6 +68,7 @@ function answerLists(answer: ListAnswer): void {
     if (answer === 'failed') return Promise.reject(new ApiError(500, 'Server error'));
     return Promise.resolve({
       value: [],
+      creatableEventTypes: EVENT_TYPES, // task 015: Add event needs the right AND a creatable type
       ...(answer.canCreate === undefined ? {} : { canCreate: answer.canCreate }),
     });
   });

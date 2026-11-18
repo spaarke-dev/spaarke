@@ -8,13 +8,16 @@
  * section only. Refresh (or Try again) remounts the list, which re-reads.
  *
  * Owner 2026-11-14 (task 012): "we only want Events (which allow for an event type of 'Task')". External users work only
- * with `sprk_event`; the list is ONE date-ordered list, and an event the BFF flags `isTask` carries a Task badge.
+ * with `sprk_event`; the list is ONE date-ordered list, and every event shows the name of its type (task 015).
  *
- * ADD EVENT (task 004, FR-03; tasks 009, 012). The list offers its one action through `offerAction('addEvent')`, the
+ * ADD EVENT (task 004, FR-03; tasks 009, 012, 015). The list offers its one action through `offerAction('addEvent')`, the
  * template hands it back as `headerActions` (the button in this card's header), and the list renders the one create dialog
- * (a `FormModal`) inside this section, so the dialog is a descendant of the record modal. The dialog has a Type choice:
- * Event (no type sent) or Task (`eventType: "task"`), the Task type offered only when the list's `canCreateTask` is true.
- * A create in flight holds the modal: the list reports busy while it posts.
+ * (a `FormModal`) inside this section, so the dialog is a descendant of the record modal. The dialog's Event Type choice is
+ * exactly the list's `creatableEventTypes`; Add event is offered only when the list's `canCreate` is true and at least one
+ * type is creatable. A create in flight holds the modal: the list reports busy while it posts.
+ *
+ * OPENING A ROW (task 015). The list gets this record's title (`recordTitle`), which names the Regarding value of an event
+ * opened from a row; the title of an event is a button that opens it as a child record.
  *
  * WHO MAY ADD (task 006, FR-06 / FR-07). No level is assumed: the list follows `createRightOf` (recordAccess.ts) - its
  * `canCreate` (task 002: every caller, every root), and for a project caller without `writeAccessPerRecord` the `/me`
@@ -38,6 +41,7 @@ const EVENTS_ROOTS: Readonly<Record<string, EventsRoot>> = {
 export const TasksEventsSection: React.FC<RecordSectionContext> = ({
   detail,
   recordId,
+  title,
   callerContext,
   caller,
   refreshSignal,
@@ -61,6 +65,7 @@ export const TasksEventsSection: React.FC<RecordSectionContext> = ({
         <EventsCalendar
           projectId={recordId}
           root={root}
+          recordTitle={title}
           accessLevel={level}
           writeAccessPerRecord={writeAccessPerRecord}
           caller={caller}

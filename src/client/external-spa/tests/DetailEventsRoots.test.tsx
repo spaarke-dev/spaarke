@@ -38,6 +38,7 @@ import { RecordTemplateModal } from '../src/components/record/RecordTemplateModa
 import { RECORD_TEMPLATES } from '../src/components/record/recordTemplates';
 import { getRootEvents, getEvents } from '../src/api/web-api-client';
 import type { CallerIdentity } from '../src/api/delete-own';
+import { EVENT_TYPES } from './eventFixtures';
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -427,7 +428,7 @@ describe.each([
       // Once /me has answered, exactly the caller's own rows offer Delete.
       await waitFor(() => expect(within(section).queryAllByRole('button', { name: /^Delete event / })).toHaveLength(1));
       expect(within(section).getByRole('button', { name: 'Delete event My hearing' })).toBeTruthy();
-      expect(within(section).queryByRole('button', { name: /Their|Unstamped/ })).toBeNull();
+      expect(within(section).queryByRole('button', { name: /^Delete event (Their|Unstamped)/ })).toBeNull();
 
       // The server decides: a 204 removes the event; the other rows stay.
       fireEvent.click(within(section).getByRole('button', { name: 'Delete event My hearing' }));
@@ -542,7 +543,7 @@ describe('root-aware EventsCalendar', () => {
       matter.unmount();
 
       // The same list, when the server says the caller may create on this work assignment: offered.
-      bffApiCall.mockImplementation(async () => ({ value: [], canCreate: true }));
+      bffApiCall.mockImplementation(async () => ({ value: [], canCreate: true, creatableEventTypes: EVENT_TYPES }));
       const wa = render(
         <FluentProvider theme={webLightTheme}>
           <EventsCalendar projectId={WORK_ASSIGNMENT} root="workassignments" caller={asContact} />
@@ -552,7 +553,7 @@ describe('root-aware EventsCalendar', () => {
       wa.unmount();
 
       // A project keeps its level rule (the project page's, unchanged): Collaborate creates whatever the list says.
-      bffApiCall.mockImplementation(async () => ({ value: [] }));
+      bffApiCall.mockImplementation(async () => ({ value: [], creatableEventTypes: EVENT_TYPES }));
       render(
         <FluentProvider theme={webLightTheme}>
           <EventsCalendar projectId={PROJECT} accessLevel={AccessLevel.Collaborate} caller={asContact} />

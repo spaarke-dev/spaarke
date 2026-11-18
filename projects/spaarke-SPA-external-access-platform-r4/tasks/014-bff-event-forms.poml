@@ -4,7 +4,7 @@
     <title>BFF: event types, richer create, event read/deep link, PATCH edit + status, assignable people (FR-35, FR-36, FR-37; owner retest round 3)</title>
     <phase>1 Record template and actions (post-E2E rework, round 3)</phase>
     <gate>(1) uac-r2's #2845 (PR #2847) merged to master — Infrastructure/ExternalAccess/** is held until then; (2) uac-r2 UAC review of the proposal (notes/event-forms-design.md §4) recorded BEFORE any BFF code</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>BFF code; new external WRITE route and new rights (auth-adjacent); new readable columns</rigor-reason>
     <model-tier>opus</model-tier>

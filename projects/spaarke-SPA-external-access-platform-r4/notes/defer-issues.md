@@ -275,3 +275,63 @@ answered AND `canCreate` is not false. The status toggle is excluded (no server 
 **Source.** App Insights `spe-insights-dev-67e2xz`, read-only queries shown to the owner first, 2026-11-15. The KQL is in #2845.
 
 **Fix shape.** Keep "live per request" (no cross-request TTL), but memoize the caller, grant set, deny list and lineage once per request, run the independent reads in parallel, and batch the per-candidate lookups. Add a test that counts Dataverse calls per request. Target: under 1 s.
+
+## D-18 — RequestAccessMemo.For races on a fresh HttpContext.Items (#2851)
+
+**Status.** Handed off → `unified-access-control-r2` (accepted 2026-11-16; fixed in #2845 round 2, branch `perf/2845-round2`). 014a keeps its local pre-create.
+
+**Where.** `Infrastructure/ExternalAccess/RequestAccessMemo.cs:38`. The lock on `context.Items` doesn't cover the lazy creation of `Items` itself.
+
+**Effect.** When concurrent compositions are the first to touch `Items` in a request, the dictionary can be corrupted (the read is treated as unknown, giving a 503) or the memo can be lost (the #2845 saving silently disappears). Task 014a's memo test reproduced it in 3 of 4 runs.
+
+**Fix shape.** Create the memo once, single-threaded, before any fan-out (in a filter or middleware, or at the evaluator's entry). Add a concurrency test on a fresh `DefaultHttpContext`. 014a works around it locally.
+
+## D-19 — Assignee picker omits workforce contacts with standing access (#2854)
+
+**Status.** Open, next round. Agreed with uac-r2 in its gate review of #2852 (K1, confirmed 2026-11-16).
+
+**Where.** `Infrastructure/ExternalAccess/RecordContactAccessService.cs` (the class remarks document the exclusion). The terms it leaves out are at `AccessibleRecordSetService.cs` ~2888-3017 (standing-grant / derived-member, ContactOnly plane only).
+
+**Effect.** A workforce contact-only user with standing access can see the record, but:
+- is not offered as an assignee;
+- gets `isMe` = false.
+
+This under-lists, which fails closed.
+
+**Why deferred.** The service can't tell which plane a contact signs in on. Including the terms for every contact would over-list CIAM sign-ins.
+
+**Fix shape (D-19).** A way to know a contact's sign-in plane (for example a workforce-bound marker). Then add the standing-grant / derived-member terms for those contacts only. Needs uac-r2's review.
+
+## D-20 — QueryAsync turns a malformed 2xx into an empty list (#2860)
+
+**Status.** Handed off → `unified-access-control-r2`, which proposed it and owns the follow-up (2026-11-16). Filed as an issue, not deferred R4 scope.
+
+**Where.** `Spaarke.Dataverse/DataverseWebApiClient.cs`, `QueryAsync<T>` (`result?.Value ?? new`). It has 87 callers.
+
+**Effect.** A 2xx response whose `value` is missing or null reads as "no rows". An access-relevant read can then give a believable wrong answer instead of an error.
+
+**R4 part.** 014a adds `QueryStrictAsync<T>` and moves only `ExternalGrantLifecycle.QueryActiveRowsForRootAsync` to it. The owner chose this option (A) on 2026-11-16.
+
+**Fix shape.** Audit the remaining callers. Move the access-relevant ones to the strict method, checking that each fails closed on a throw.
+
+## D-21 — External event create with a type answers 500: wrong-case event-type bind key (#2892)
+
+**Status.** Fixed in the task 016 fix PR (BFF). Found in the owner E2E, 2026-11-17 (matter root, type Task).
+
+**Where.** `Infrastructure/ExternalAccess/ExternalDataService.cs` `EventTypeBindKey`, introduced by task 008 (c9b9492c86).
+
+**Effect.** Every external event create that names a type wrote `sprk_eventtype_ref@odata.bind`. `@odata.bind` keys are the navigation property name and are case-sensitive; for `sprk_event` it is `sprk_EventType_Ref` (metadata-verified in 9b32c1c8ab, and the internal create already uses it). Dataverse refused the write, and the BFF answered 500 `InvalidOperationException`. The R4 form always sends a type, so every create failed.
+
+**Why the tests missed it.** The contract tests pinned the same wrong literal; nothing compared it with the metadata or with the internal create.
+
+**Fix.** The key is `sprk_EventType_Ref@odata.bind`; the three contract pins are corrected; `tests/integration/regression/Issue2892_ExternalEventTypeBindKeyTests.cs` pins the payload key (the internal create's key, `sprk_EventType_Ref`), with a must-not-fire pair for an untyped create.
+
+## D-22 — Signals assign-task writes the event-type bind key in the wrong case (#2893)
+
+**Status.** Open, filed for `spaarke-ontology-platform-r1` (their file; hand-off pending their acceptance). Not reproduced live.
+
+**Where.** `Services/Signals/Actions/DecisionActionExecutors.cs` ~1509; its test pin `tests/unit/domain/Signals/DecisionActionExecutorsTests.cs` ~1069.
+
+**Effect.** Same lowercase key as D-21, so an assign-task decision should fail at the Dataverse write and create no Task event.
+
+**Fix shape.** Correct the key and its pin; better, one shared constant on `EventTypeRef` used by all three writers.

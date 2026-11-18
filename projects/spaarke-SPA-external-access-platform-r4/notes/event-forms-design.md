@@ -43,7 +43,7 @@
 
 A new `sprk_event` record template (the seventh type).
 - It opens by clicking an Events row, as a **child record over the current record** (the task-013 `ChildRecordModal` pattern, one level, focus returns to the row).
-- It also opens from a deep link `?record=sprk_event:{id}` as a top-level record (Q-7, via the existing `RecordDeepLink`).
+- It also opens from a deep link `?record=event:{id}` as a top-level record (Q-7, via the existing `RecordDeepLink`).
 - **Header:** "Event" + title. Secondary line: type name, status badge, and "Your access".
 - **Information:** Event Type, Status, Due Date, Priority, Assigned To (name), Description, Created On, Created By (name), Regarding (record name, a link that opens the parent record).
 - **Toolbar** (hide, don't disable; each action only when the BFF says the caller may):

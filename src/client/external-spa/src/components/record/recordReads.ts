@@ -79,13 +79,46 @@ export type RecordState =
   | { status: 'notfound' }
   | { status: 'error'; message: string; retryable: boolean };
 
+/**
+ * A reader's "this record does not exist for the caller" (R4 task 015): the record state is `notfound`. A per-opening reader
+ * throws it when the row it looks for is no longer in the list it re-reads (an event deleted or filed away). An
+ * `ApiError` 404 means the same; this is for a reader that has no HTTP answer to map.
+ */
+export class RecordNotFoundError extends Error {}
+
+/** Reads one record by id. The entity's own (`RecordDetailEntity.read`) or one supplied for a single opening. */
+export type RecordReader = (id: string) => Promise<DetailRecord>;
+
+export interface UseRecordOptions {
+  /**
+   * A per-opening reader (R4 task 015): wins over the entity's `read` and the module fetch. A child record opened from a list
+   * row re-reads through the list it was opened from (a multi-parent event can be in a readable list and 404 on its own GET).
+   */
+  read?: RecordReader;
+  /**
+   * The record as the opener already has it: shown as ready on the first attempt with no read at all. Refresh (a later
+   * attempt) reads through the reader as usual.
+   */
+  seed?: DetailRecord;
+}
+
 /** Loads the record for `id`; a state is only ever shown for the id it was read for (no flash of the previous record). */
-export function useRecord(cfg: RecordDetailEntity | undefined, id: string | undefined, attempt: number): RecordState {
+export function useRecord(
+  cfg: RecordDetailEntity | undefined,
+  id: string | undefined,
+  attempt: number,
+  options: UseRecordOptions = {}
+): RecordState {
   const [loaded, setLoaded] = React.useState<{ key: string; state: RecordState } | null>(null);
   const key = `${cfg?.entity ?? ''}:${id ?? ''}:${attempt}`;
+  const { read, seed } = options;
+  // The reader and the seed are read through a ref: a new function identity from the opener must not re-fire the read.
+  const latest = React.useRef({ read, seed });
+  latest.current = { read, seed };
+  const seeded = seed !== undefined && attempt === 0;
 
   React.useEffect(() => {
-    if (!cfg || !id) return;
+    if (!cfg || !id || (latest.current.seed !== undefined && attempt === 0)) return;
     let cancelled = false;
     const done = (state: RecordState): void => {
       if (!cancelled) setLoaded({ key, state });
@@ -97,12 +130,20 @@ export function useRecord(cfg: RecordDetailEntity | undefined, id: string | unde
         cancelled = true;
       };
     }
-    readRecord(cfg, id).then(
+    const reader: RecordReader = latest.current.read ?? cfg.read ?? (recordId => readRecord(cfg, recordId));
+    // A reader may throw synchronously or reject; both are mapped the same way. It is called at once (no extra tick).
+    let pending: Promise<DetailRecord>;
+    try {
+      pending = reader(id);
+    } catch (err) {
+      pending = Promise.reject(err);
+    }
+    pending.then(
       record => done({ status: 'ready', record }),
       (err: unknown) => {
         if (err instanceof DeniedError || (err instanceof ApiError && err.statusCode === 403)) {
           done({ status: 'denied' });
-        } else if (err instanceof ApiError && err.statusCode === 404) {
+        } else if (err instanceof RecordNotFoundError || (err instanceof ApiError && err.statusCode === 404)) {
           done({ status: 'notfound' });
         } else {
           done({ status: 'error', message: 'This record could not be loaded just now.', retryable: true });
@@ -112,9 +153,10 @@ export function useRecord(cfg: RecordDetailEntity | undefined, id: string | unde
     return () => {
       cancelled = true;
     };
-  }, [cfg, id, key]);
+  }, [cfg, id, key, attempt]);
 
   if (!cfg || !id) return { status: 'notfound' };
+  if (seeded && seed) return { status: 'ready', record: seed };
   return loaded && loaded.key === key ? loaded.state : { status: 'loading' };
 }
 

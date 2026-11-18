@@ -2260,8 +2260,12 @@ public partial class RouteAuthorizationGuardTests
         new HandlerDecision("PATCH /api/v1/external/events/{id:guid}", "UpdateEvent", "RightsForRoot",
             new[] { "ExternalProjectDataEndpoints.CheckEventReadableAsync", "ExternalProjectDataEndpoints.RightsForDocumentParentAsync" },
             "Read on every parent plus the live-parent, visibility and invoice-link checks (CheckEventReadableAsync, "
-            + "ExternalProjectDataEndpoints.cs:3150), then the edit decision (EventEditDecisionAsync, :2898, :3155: Write on every "
-            + "parent; a systemuser also row Write) before the app-only patch (UpdateEventAsync, :3190)."),
+            + "ExternalProjectDataEndpoints.cs:3349), then the edit decision (EventEditDecisionAsync, :2949, :3354: Write on every "
+            + "parent; a systemuser also row Write) before any app-only read or write (G5). A reassign (R4 task 014c) then also "
+            + "needs a readable caller contact (:3372, ContactUnreadable is a 503), the Contact Read ceiling (AdmitsEventAssignAsync, "
+            + ":3381, before any assignable set is asked), open work on the current status (IsReassignable, :3399) and the assignee "
+            + "in EVERY parent's Known assignable set (RecordContactAccessService, :3432; Unknown is a 503) before the app-only patch "
+            + "(UpdateEventAsync, :3451) writes the internal reassign's columns (EventDueAssigneeWrite.AddReassignColumns)."),
         new HandlerDecision("GET /api/v1/external/projects/{id:guid}/assignable-people", "GetProjectAssignablePeople", "RightsForRoot", Array.Empty<string>(),
             "Delegates to ListAssignablePeopleForRoot: 403 unless RightsForRoot gives Read on the route project "
             + "(ExternalProjectDataEndpoints.cs:3217), then Create or Write on it (RightsForRootWriteAsync, :3220) before the "
