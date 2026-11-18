@@ -4,7 +4,7 @@
     <title>Repair pass report: core-pair findings on Signal and Decision Record, and rows the pass cannot finish (FR-25, FR-41; task 044(d))</title>
     <phase>5 W5 Records created outside the product</phase>
     <gate>052b and 052c on the work branch (merges b18d4fc394, cb86030700). Nothing here enables the pass on any environment.</gate>
-    <status>in-progress</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .cs in Sprk.Bff.Api (the repair job, run as the system principal); report-only on two append-only tables where a write would break D-204; new tests at KEEP paths.</rigor-reason>
     <model-tier>opus</model-tier>

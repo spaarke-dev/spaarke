@@ -141,6 +141,7 @@ public sealed partial class RecordRepairPassJobTests
     [InlineData("the organization, not stated")]
     [InlineData("the table, not stated")]
     [InlineData("the column, not stated")]
+    [InlineData("the type column, not stated")]
     public async Task Report_AuditingNotOn_AtTheOrganizationTheTableOrEitherPairColumn_IsAnAuditFault_NeverNoChanges(string off)
     {
         var row = _pass.CorePairRow("sprk_signal", withType: true, withId: true);
@@ -162,6 +163,9 @@ public sealed partial class RecordRepairPassJobTests
                 break;
             case "the column, not stated":
                 _pass.ColumnAuditOff["sprk_signal.sprk_corerecordid"] = null;
+                break;
+            case "the type column, not stated":
+                _pass.ColumnAuditOff["sprk_signal.sprk_corerecordtype"] = null;
                 break;
             default:
                 _pass.ColumnAuditOff["sprk_signal." + off] = false;

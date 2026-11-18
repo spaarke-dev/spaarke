@@ -273,3 +273,10 @@ DecisionRecord, Dataverse, Procedure, Finance; `!~Api.Office.`) 24678 passed, 16
   `RecordRepairPassJobTests.Report_*`, not `RecordRepairPassReportTests.*`.
 - `Spaarke.Dataverse` is extended by a field of an existing read projection (`ColumnMetadata.ColumnNumber`), not by a read method:
   the existing metadata read already returns the number.
+
+## Main-session record (2026-11-17)
+
+- Live read-only check on dev (operator `az` identity, GETs only; nothing written, no setting changed): an `audit` FetchXML filtered by `objecttypecode` = the logical name returns HTTP 400 (Int32 expected); by the numeric ObjectTypeCode it returns rows. `audit.operation` options 1 Create, 2 Update, 3 Delete, 4 Access, 5 Upsert, 115 Archive, 116 Retain, 117 RollbackRetain. `attributemask` is comma-separated column numbers. The pair columns carry column numbers on both tables. Org auditing is on. These facts drove fix round 1.
+- Opus adversarial pass on 1c72db09af..6eb53d821a: F2-1 (auditing off read as no change), K-a..K-e; fixed or recorded in round 1. Sonnet re-check of 6eb53d821a..86cde07a88: no F1/F2; one K test gap (the type column's "not stated" case) closed in the main session after the merge, must-fire shown (the case fails with that check relaxed to `== false`; file restored).
+- Merged into the work branch at 53d8d08242 (`task/fm-052d` 7a7a574665).
+- Still to do before enabling the pass on any environment: run the report's audit read once read-only on dev end to end (the query shape is confirmed; the job's own read is not yet exercised against Dataverse).
