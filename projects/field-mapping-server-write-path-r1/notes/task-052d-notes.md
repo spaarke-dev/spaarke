@@ -19,16 +19,18 @@ scope (D-204).
 
 ## Decision — the audit read
 
-**Query shape.** One `QueryExpression` on the `audit` table per core-pair table per run:
-`objecttypecode = {table}`, `operation = 2` (Update), `createdon` (the audit row's own time, i.e. when the change was made) in
+**Query shape (as corrected in fix round 1, below).** One `QueryExpression` on the `audit` table per core-pair table per run:
+`objecttypecode = {the table's numeric ObjectTypeCode, read from its metadata this run}`, `operation in (2, 5)` (Update, Upsert),
+`createdon` (the audit row's own time, i.e. when the change was made) in
 `[max(go-live, audit watermark − 15 min), run start − 2 min)`, after the last `auditid` read when a capped window continues,
-ordered by `auditid`, columns `auditid, createdon, objectid, userid, attributemask`. Create audits (operation 1) are not asked
-for: a create is not a change after create.
+ordered by `auditid`, columns `auditid, createdon, objectid, userid, attributemask, operation`. Create audits (operation 1) are
+not asked for: a create is not a change after create. (First written with the logical name in `objecttypecode`; Dataverse refuses
+that.)
 
 **How a pair change is decided.** `attributemask` lists the changed columns by their `ColumnNumber`. The two pair columns'
 numbers come from the table's column metadata (`IGenericEntityService.GetColumnMetadataAsync`, now carrying
 `ColumnMetadata.ColumnNumber`), read once per table per run through the pass's existing metadata cache
-(`RecordRepairPassContext`) and only when the window holds at least one update audit. A mask naming either number is a change;
+(`RecordRepairPassContext`) every run (fix round 1: with the audit settings, not only when the window holds an update audit). A mask naming either number is a change;
 a mask naming only other numbers is not; a mask that cannot be read is `core_pair_change_undecided`. Metadata without both
 numbers is a fault. `RetrieveAuditDetails` / `RetrieveRecordChangeHistory` were rejected: one request per audit row or per row,
 and both return old and new values, which the report must never hold or emit.
@@ -152,9 +154,8 @@ itself fires first). Restored: all pass.
 
 ## Known limits
 
-- **K1 — Not verified live.** The audit query (filter on `objecttypecode` by logical name, `operation`, ordering and paging by
-  `auditid`) and the `attributemask` decoding are written to the SDK's documented shape and tested over a double; nothing was run
-  against Dataverse (no live action in this task). Verify read-only on dev before enabling the pass.
+- **K1 — Superseded by fix round 1 (below).** The first version filtered `objecttypecode` by logical name, which Dataverse
+  refuses; the read-only live check of the query shape found it, and the query now filters by the numeric code.
 - **K2 — Every update of a pair column is reported, whoever made it.** The server never updates the pair after create (the BFF
   update paths hold it fixed), so any such audit is either an edit outside the server or a server defect; both are worth a line.
 - **K3 — Half-pair presence.** A half is "a lookup with an id" xor "text that is not blank". The server-side filter uses null /
@@ -168,7 +169,91 @@ itself fires first). Restored: all pass.
   the next run continues.
 - **K7 — The report is not part of an on-demand run** (by design, above); a window the scheduled report has passed is not re-read.
 
+## Review and fix round 1
+
+Findings, their class, and the outcome. Each rule below is enforced by a test shown to fail with the rule switched off.
+
+| # | Finding | Class | Outcome |
+|---|---|---|---|
+| F2a | The audit read filtered `objecttypecode` by the table's logical name. Live read-only check on dev (2026-11-17, main session; no write, no setting changed): a condition with the logical name fails with HTTP 400 "Expected type of attribute value: System.Int32"; with the numeric ObjectTypeCode (dev: `sprk_signal` 11003, `sprk_decisionrecord` 11002) it returns rows. So every audit read faulted on Dataverse; the report failed closed, so nothing was ever reported. | F (confirmed defect on a real path) | Fixed. The code is read at run time from the table's entity metadata (`IGenericEntityService.GetTableAuditMetadataAsync`, one `RetrieveEntityRequest` for the entity's own properties; `TableAuditMetadata.ObjectTypeCode`), kept for the run; a code the metadata does not state is an audit fault. Custom tables' codes differ per environment, so no number is in code. The test double refuses (throws) an audit query whose `objecttypecode` value is not an int and answers by code. |
+| F2b | The sweep never checked that auditing is on. With `isauditenabled` off for the organization, or `IsAuditEnabled` off for the table or either pair column, the history is empty; the sweep read zero rows, moved the audit watermark and reported a clean run (fail open). | F | Fixed. Every run, before the audit read (also when the window holds no audit rows), the report reads the organization's `isauditenabled` (app-only read of `organization`, once per run), the table's `IsAuditEnabled` and each pair column's `IsAuditEnabled` (`ColumnMetadata.IsAuditEnabled`, projected from the existing column metadata read). A flag that is off, or not stated, is an audit fault: one error line per table per run ("auditing is not on (...)", naming which setting), `reportFailures` counted, the run partial, the audit watermark not moved. The half-pair scan does not depend on auditing and still runs. |
+| K→F | Only operation 2 was asked for; an Upsert (5) that changed a pair column was missed. | K, fixed | Fixed. `operation in (2, 5)`; the mask decides. Rule for an Upsert audit that is the row's own creation: its audit time is **not after the row's `createdon`** (`audit time <= createdon`) → creation, not a change, not read, not reported (not even as undecided). An Update audit is a change whenever it happened. The row's `createdon` is already read for the forward-only check. |
+| H | The report's reads went straight through the job's `IGenericEntityService`. | hardening | Done. The report holds a `WriteRefusingEntityService` over it (`WriteRefusingEntityService`, Finance.Procedures; its write members throw before anything is sent), so "no write" is a property of the type, not of the code that happens to be written. The class's behaviour is unchanged; it gained one pass-through read member because `IGenericEntityService` gained one (below), and `ProcedureDryRunPlanningContractTests` classifies that member as a read. |
+
+**Surface added, and why (CLAUDE.md §11).** `IGenericEntityService.GetTableAuditMetadataAsync` and `TableAuditMetadata`
+(object type code, table audit flag), `ColumnMetadata.IsAuditEnabled`. (1) Existing: `GetColumnMetadataAsync` reads one
+`RetrieveEntityRequest` per table, per-column only; nothing exposes the table's own code or flag. (2) Extension: a field of the
+existing column projection for the column flag; the table-level facts are one entity-level read of the same request type (a
+sibling member, default body throws as `GetColumnMetadataAsync`'s does), because a per-column dictionary cannot carry them.
+(3) Cost of doing nothing: without the code no audit can be read on Dataverse, and without the flags an unrecorded history reads
+as "no change". The organization flag uses the existing `RetrieveMultipleAsync` on `organization` (already a listed non-access
+table in `AccessTableReaderScanTests`).
+
+**Live check (read-only, main session, 2026-11-17).** Dev facts used to shape the query and the tests (no number is
+hard-coded in the BFF): `audit.operation` options 1 Create, 2 Update, 3 Delete, 4 Access, 5 Upsert, 115 Archive, 116 Retain,
+117 RollbackRetain; `attributemask` values look like `80` or `51,53,59,56` (comma-separated ColumnNumbers, no braces; the parser
+already trims and skips empty entries, so a leading or trailing comma also reads); dev ColumnNumbers `sprk_signal`
+`sprk_corerecordid` 93, `sprk_corerecordtype` 94 (95 is `sprk_corerecordtypename`, AttributeOf `sprk_corerecordtype`),
+`sprk_decisionrecord` 61 and 62 (63 the name column); `organizations.isauditenabled` is true on dev.
+
+**Tests (fix round 1)**, in `RecordRepairPassReportTests.cs` unless noted:
+`Report_TheAuditRead_FiltersByEachTablesNumericObjectTypeCode_ReadFromItsMetadata`;
+`Report_ATableWhoseObjectTypeCodeIsNotStated_IsAnAuditFault_NeverNoChanges`;
+`Report_AuditingNotOn_AtTheOrganizationTheTableOrEitherPairColumn_IsAnAuditFault_NeverNoChanges` (7 cases: organization off,
+table off, type column off, id column off, and each of organization / table / column not stated);
+`Report_AuditingOff_IsAFault_EvenWhenTheWindowHoldsNoAuditRows`;
+`Report_TheOrganizationsAuditSettingThatCannotBeRead_IsAnAuditFault_NeverAuditingOn`;
+`Report_AnUpsertThatChangedAPairColumn_IsReported_AndAnUpsertThatCreatedTheRow_IsNot`;
+`Report_AnUpdateAuditAtTheRowsCreationTime_IsStillAChange_OnlyAnUpsertIsReadAsACreation`; the queries test now asserts the
+numeric code per table and `operation in (2, 5)`; `ColumnMetadataProjectionTests.AColumnsAuditSetting_*` and
+`ATablesObjectTypeCode_AndAuditSetting_*`; the contract test's read-member list gains the new member; the pass's metadata-read
+count test now expects the report's pair-column read of the two core-pair tables (audit settings are read every run).
+
+**Must-fire (fix round 1)** — each rule switched off once, the test project rebuilt, the affected tests shown failing, then
+restored with `git checkout -- <file>` (tree clean after each):
+
+| Rule switched off | Tests that failed |
+|---|---|
+| `objecttypecode` filtered by the name (a string) instead of the number | 32 of 132 (every audit read faults), incl. `Report_TheAuditRead_FiltersByEachTablesNumericObjectTypeCode_*` |
+| Organization audit flag ignored | the organization-off case, the organization-not-stated case, `Report_AuditingOff_IsAFault_EvenWhenTheWindowHoldsNoAuditRows` |
+| Table audit flag ignored | the table-off case, the table-not-stated case |
+| Type column's audit flag ignored | the type-column-off case |
+| Id column's audit flag ignored | the id-column-off case, the column-not-stated case |
+| Flags read as on when not stated (`== false` instead of `!= true`) | the three "not stated" cases |
+| A missing object type code read as 0 | `Report_ATableWhoseObjectTypeCodeIsNotStated_*` |
+| Organization setting read fault swallowed as "on" | `Report_TheOrganizationsAuditSettingThatCannotBeRead_*` |
+| `operation in (2)` only (Upsert not asked for) | `Report_AnUpsertThatChangedAPairColumn_*`, `Report_TheQueries_*` |
+| Upsert-at-creation rule off (an upsert audit not after `createdon` read as a change) | `Report_AnUpsertThatChangedAPairColumn_IsReported_AndAnUpsertThatCreatedTheRow_IsNot` |
+| `IsAuditEnabled` / table metadata not projected | `ColumnMetadataProjectionTests.AColumnsAuditSetting_*`, `ATablesObjectTypeCode_*` |
+
+Not separately must-fired: the `WriteRefusingEntityService` hardening (a write through the report cannot be written without
+changing the field's type; the existing no-write test still asserts every call that reaches the Dataverse double is a read, and
+`ProcedureDryRunPlanningContractTests` / `DryRunNoWriteGuardTests` guard the class itself).
+
+### Known limits added in fix round 1
+
+- **K-b — A row whose `createdon` is backdated before go-live or before the report's watermark is never reported.** A row created
+  with `overriddencreatedon` earlier than go-live is "created before go-live" by the forward-only rule; one backdated to before the
+  half-pair watermark falls behind that window and is never read. The repair pass's own window has the same property.
+- **K-c — The result JSON lives in the run history store**, which is per instance and lost on restart. The Warning log line is
+  the durable record of a finding (table, row id, finding code, audit time, changing user id).
+- **K-d — Rows no longer readable leave the run ok.** An update audit whose row cannot be read (for example deleted) is counted
+  (`corePairRowsUnread`) and logged, not reported, and does not make the run partial.
+- **K-e — NoLock reads may report an update that was later rolled back.** The reads are `NoLock`; a finding can be a false
+  positive, never a missed one.
+- **K-f — An Upsert audit stamped later than the row's own `createdon`** would be read as a change although it is the creation
+  (the rule is `audit time <= createdon`). The error is a false positive (a line to look at), never a missed change. Not
+  measured live: the creation audit's time against the row's `createdon` was not part of the live check.
+- **K-g — A change within the creation transaction by an Update audit** is reported (an Update audit is never the creation).
+- **K-h — The audit settings are read each run** (the organization once, the table's two flags and the pair columns' once per
+  table); the metadata reads of the pass's `metadataReads` now include the two core-pair tables' column reads every run.
+
 ## Gates
+
+Fix round 1 (re-run): solution build 0 warnings, 0 errors; ArchTests 2639/2639 (no exemption, no list change); Sprk.Bff.Api.Tests
+filtered (Repair, RecordOwnership, Scheduled, Job, Admin, RecordCreation, Contact, AssignCascade, Census, ColumnMetadata, Signal,
+DecisionRecord, Dataverse, Procedure, Finance; `!~Api.Office.`) 24678 passed, 16 skipped, 0 failed; `dotnet format whitespace
+--verify-no-changes` clean on every touched .cs. First-round gates, for the record:
 
 - `dotnet build Spaarke.sln`: 0 warnings, 0 errors.
 - Sprk.Bff.Api.Tests filtered (Repair, RecordOwnership, Scheduled, Job, Admin, RecordCreation, Contact, AssignCascade, Census,
