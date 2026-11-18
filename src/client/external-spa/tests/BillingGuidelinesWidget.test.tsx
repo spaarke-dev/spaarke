@@ -2,7 +2,7 @@
  * ebilling-r1 task 135 (FR-49, D-66): the Billing Guidelines widget over its REAL client (`billing-guidelines-client`) and the real
  * registry descriptor. Substituted: the network seam (`bffApiCall`, throwing `ApiError` as bff-client builds it).
  *
- *   GET /api/v1/external/ebilling/billing-guidelines[?coreRecordId=]  ->  { sets: [{ firmName, name, scope, version, effectiveFrom,
+ *   GET /api/v1/external/ebilling/billing-guidelines[?coreRecordId=]  ->  { sets: [{ firmId, firmName, name, scope, version, effectiveFrom,
  *   effectiveTo, rules: [{ name, descriptionAvailable, description, parameters, clauseQuote, sectionReference, inForceFrom }] }] }
  */
 import * as React from 'react';
@@ -21,6 +21,7 @@ import { ApiError } from '../src/types';
 import type { BillingGuidelineSet, BillingGuidelinesResponse } from '../src/api/billing-guidelines-client';
 import { getBillingGuidelines } from '../src/api/billing-guidelines-client';
 import {
+  BILLING_GUIDELINES_DISABLED_TEXT,
   BillingGuidelinesView,
   BillingGuidelinesWidgetBody,
   guidelineSetMeta,
@@ -30,12 +31,15 @@ import { WIDGET_DEFINITIONS, getWidgetDefinition } from '../src/registry/widgetR
 const WAIT = { timeout: 12000 };
 const PATH = '/api/v1/external/ebilling/billing-guidelines';
 const RECORD = '00000000-0000-4000-8000-000000000135';
+const ALPHA = '00000000-0000-4000-8000-0000000000a1';
+const BETA = '00000000-0000-4000-8000-0000000000b2';
 
 const problem = (status: number, extra: Record<string, unknown> = {}): string =>
   JSON.stringify({ status, title: 'refused', detail: 'server detail text that must not be shown', ...extra });
 
 function set(over: Partial<BillingGuidelineSet> = {}): BillingGuidelineSet {
   return {
+    firmId: ALPHA,
     firmName: 'Alpha LLP',
     name: 'Outside counsel guidelines',
     scope: 'Applies to all records',
@@ -146,15 +150,108 @@ describe('Billing Guidelines widget', () => {
     expect(screen.queryByRole('heading', { name: 'Alpha LLP' })).toBeNull();
   });
 
-  it('labels each firm when the caller has several', async () => {
-    h.bffApiCall.mockResolvedValue(answer(set(), set({ firmName: 'Beta Partners', name: 'Beta card' })));
+  it('EB-D-260 default: a caller in several firms sees every firm, each labelled, with the firm filter set to all firms', async () => {
+    h.bffApiCall.mockResolvedValue(answer(set(), set({ firmId: BETA, firmName: 'Beta Partners', name: 'Beta card' })));
 
     renderWidget();
 
     await screen.findAllByTestId('billing-guideline-firm', undefined, WAIT);
     expect(screen.getAllByTestId('billing-guideline-firm')).toHaveLength(2);
-    expect(screen.getByText('Alpha LLP')).toBeTruthy();
-    expect(screen.getByText('Beta Partners')).toBeTruthy();
+    expect(screen.getByRole('heading', { name: 'Alpha LLP' })).toBeTruthy();
+    expect(screen.getByRole('heading', { name: 'Beta Partners' })).toBeTruthy();
+    expect(screen.getAllByTestId('billing-guideline-set')).toHaveLength(2);
+    const filter = screen.getByTestId('billing-guidelines-firm-filter') as HTMLSelectElement;
+    expect(filter.value).toBe('all');
+    expect(Array.from(filter.options).map(o => o.textContent)).toEqual(['All firms', 'Alpha LLP', 'Beta Partners']);
+  });
+
+  it('EB-D-260 narrowing: choosing a firm shows only that firm, and choosing all firms shows every firm again (client-side)', async () => {
+    h.bffApiCall.mockResolvedValue(answer(set(), set({ firmId: BETA, firmName: 'Beta Partners', name: 'Beta card' })));
+
+    renderWidget();
+
+    const filter = (await screen.findByTestId('billing-guidelines-firm-filter', undefined, WAIT)) as HTMLSelectElement;
+    fireEvent.change(filter, { target: { value: BETA } });
+
+    await waitFor(() => expect(screen.getAllByTestId('billing-guideline-set')).toHaveLength(1), WAIT);
+    expect(screen.getByTestId('billing-guideline-set').textContent).toContain('Beta card');
+    expect(screen.queryByText('Outside counsel guidelines')).toBeNull();
+    expect(screen.queryByRole('heading', { name: 'Alpha LLP' })).toBeNull();
+
+    fireEvent.change(screen.getByTestId('billing-guidelines-firm-filter'), { target: { value: ALPHA } });
+    await waitFor(
+      () => expect(screen.getByTestId('billing-guideline-set').textContent).toContain('Outside counsel guidelines'),
+      WAIT
+    );
+    expect(screen.queryByText('Beta card')).toBeNull();
+
+    fireEvent.change(screen.getByTestId('billing-guidelines-firm-filter'), { target: { value: 'all' } });
+    await waitFor(() => expect(screen.getAllByTestId('billing-guideline-set')).toHaveLength(2), WAIT);
+    // The filter never asks the server for anything: one read in all.
+    expect(h.bffApiCall).toHaveBeenCalledTimes(1);
+  });
+
+  it('EB-D-260 single firm: no firm filter and no firm heading', async () => {
+    h.bffApiCall.mockResolvedValue(answer(set(), set({ name: 'Second set' })));
+
+    renderWidget();
+
+    await screen.findAllByTestId('billing-guideline-set', undefined, WAIT);
+    expect(screen.getAllByTestId('billing-guideline-set')).toHaveLength(2);
+    expect(screen.queryByTestId('billing-guidelines-firm-filter')).toBeNull();
+    expect(screen.queryByRole('heading', { name: 'Alpha LLP' })).toBeNull();
+  });
+
+  it('groups by firm id, not name: two firms with the same name stay two firms', async () => {
+    h.bffApiCall.mockResolvedValue(answer(set(), set({ firmId: BETA, name: 'Other card' })));
+
+    renderWidget();
+
+    await screen.findAllByTestId('billing-guideline-firm', undefined, WAIT);
+    expect(screen.getAllByTestId('billing-guideline-firm')).toHaveLength(2);
+    expect(screen.getByTestId('billing-guidelines-firm-filter')).toBeTruthy();
+  });
+
+  it('keeps two parameters with the same name (and two rules with the same name) as separate entries', async () => {
+    h.bffApiCall.mockResolvedValue(
+      answer(
+        set({
+          rules: [
+            {
+              name: 'Caps',
+              descriptionAvailable: true,
+              description: 'Two caps.',
+              parameters: [
+                { name: 'Cap', value: '8', unit: 'hours' },
+                { name: 'Cap', value: '8', unit: 'hours' },
+                { name: 'Cap', value: '40', unit: 'hours' },
+              ],
+              clauseQuote: null,
+              sectionReference: null,
+              inForceFrom: '2026-01-01',
+            },
+            {
+              name: 'Caps',
+              descriptionAvailable: true,
+              description: 'Another.',
+              parameters: [],
+              clauseQuote: null,
+              sectionReference: null,
+              inForceFrom: '2026-01-01',
+            },
+          ],
+        })
+      )
+    );
+    const errors = vi.spyOn(console, 'error');
+
+    renderWidget();
+
+    await screen.findAllByTestId('billing-guideline-rule', undefined, WAIT);
+    expect(screen.getAllByTestId('billing-guideline-rule')).toHaveLength(2);
+    expect(screen.getAllByTestId('billing-guideline-parameter')).toHaveLength(3);
+    // React reports a duplicate key on the console.
+    expect(errors.mock.calls.filter(c => String(c[0]).includes('same key'))).toEqual([]);
   });
 
   it('shows the marker for a rule that has no description and writes no description of its own', async () => {
@@ -192,21 +289,22 @@ describe('Billing Guidelines widget', () => {
 
     renderWidget();
 
-    expect(await screen.findByText('No billing guidelines', undefined, WAIT)).toBeTruthy();
+    expect(await screen.findByText('No published billing guidelines', undefined, WAIT)).toBeTruthy();
     expect(screen.getByText('No billing guidelines have been shared with you yet.')).toBeTruthy();
     expect(screen.queryByTestId('billing-guideline-set')).toBeNull();
   });
 
-  it('is hidden when the eBilling flag is off (503 ebilling.disabled): nothing is rendered, no message and no Retry', async () => {
+  it('when the eBilling flag is off (503 ebilling.disabled) the card body says so plainly: no error styling, no Retry, no server text', async () => {
     h.bffApiCall.mockRejectedValue(new ApiError(503, problem(503, { errorCode: 'ebilling.disabled' })));
 
-    const { container } = renderWidget();
+    renderWidget();
 
-    await waitFor(() => expect(h.bffApiCall).toHaveBeenCalled(), WAIT);
-    await waitFor(() => expect(screen.queryByText('Loading billing guidelines…')).toBeNull(), WAIT);
-    expect(container.querySelector('[data-testid="billing-guidelines"]')).toBeNull();
+    const body = await screen.findByTestId('billing-guidelines-disabled', undefined, WAIT);
+    expect(body.textContent).toBe(BILLING_GUIDELINES_DISABLED_TEXT);
+    expect(body.textContent).not.toContain('server detail text');
     expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull();
     expect(screen.queryByTestId('billing-guidelines-error')).toBeNull();
+    expect(screen.queryByTestId('billing-guideline-set')).toBeNull();
   });
 
   it('is not hidden for an outage 503: it says so and offers Retry, which reads again', async () => {

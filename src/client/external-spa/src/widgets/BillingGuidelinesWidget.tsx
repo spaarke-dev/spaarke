@@ -8,11 +8,14 @@
  *
  * STATES:
  *   - loading: a spinner.
- *   - ready, no sets: an empty state ("no billing guidelines have been shared with you").
- *   - ready: one heading per firm when the caller has several, then a section per set. A rule the BFF could not describe is listed
- *     with its name and clause and a marker line; the view never writes a description of its own.
- *   - 503 `ebilling.disabled` (the kill switch is off in this environment): the view is hidden. The body renders nothing, no message
- *     and no Retry, because the capability does not exist here (an outage is a different 503 and is shown, with Retry).
+ *   - ready, no sets: an empty state ("No published billing guidelines").
+ *   - ready: a section per set. A caller in several firms sees every firm's sets, each firm labelled with a heading, and a "Firm" filter
+ *     (default "All firms"; EB-D-260). The filter shows only when more than one firm is present and only narrows what is shown,
+ *     client-side over the response. Firms are grouped by firm id, not name. A rule the BFF could not describe is listed with its name
+ *     and clause and a marker line; the view never writes a description of its own.
+ *   - 503 `ebilling.disabled` (the kill switch is off in this environment): the card body says "Billing guidelines aren't available."
+ *     in one plain line, with no Retry and no error styling (an outage is a different 503 and is shown, with Retry). The card itself
+ *     stays in the library: the registry gates tabs on /me/entitlements (`isEntitledToWidgetId`), which does not carry this flag.
  *   - any other failure: a message by status (never the server's detail text); 503 and the generic failure offer Retry.
  *
  * `BillingGuidelinesView` takes an optional `coreRecordId` for the per-record view; the registered widget body shows the general view.
@@ -23,6 +26,8 @@ import * as React from 'react';
 import {
   Badge,
   Button,
+  Field,
+  Select,
   MessageBar,
   MessageBarBody,
   Spinner,
@@ -79,6 +84,10 @@ const useStyles = makeStyles({
     columnGap: tokens.spacingHorizontalS,
     rowGap: tokens.spacingVerticalXS,
     minWidth: 0,
+  },
+  filter: {
+    minWidth: 0,
+    maxWidth: '100%',
   },
   noMargin: {
     margin: 0,
@@ -172,6 +181,12 @@ export function guidelinesFailure(status: number | undefined): { message: string
   return { message: "Billing guidelines couldn't be loaded. Please try again.", retry: true };
 }
 
+/** The firm filter's value for "no narrowing" (the default). Not a GUID, so it can never be a firm's id. */
+const ALL_FIRMS = 'all';
+
+/** What the card body says when the eBilling kill switch is off for this environment. */
+export const BILLING_GUIDELINES_DISABLED_TEXT = "Billing guidelines aren't available.";
+
 type LoadState =
   | { phase: 'loading' }
   | { phase: 'ready'; response: BillingGuidelinesResponse }
@@ -198,8 +213,8 @@ const RuleItem: React.FC<{ rule: BillingGuidelineRule }> = ({ rule }) => {
       )}
       {rule.parameters.length > 0 && (
         <dl className={styles.parameters} aria-label={`${rule.name} parameters`}>
-          {rule.parameters.map(p => (
-            <div key={`${p.name}:${p.value}`} className={styles.parameter} data-testid="billing-guideline-parameter">
+          {rule.parameters.map((p, i) => (
+            <div key={`${i}:${p.name}`} className={styles.parameter} data-testid="billing-guideline-parameter">
               <dt className={styles.noMargin}>
                 <Text size={200} className={styles.meta}>
                   {p.name}
@@ -263,6 +278,7 @@ export const BillingGuidelinesView: React.FC<BillingGuidelinesViewProps> = ({ co
   const styles = useStyles();
   const [state, setState] = React.useState<LoadState>({ phase: 'loading' });
   const [attempt, setAttempt] = React.useState(0);
+  const [firmFilter, setFirmFilter] = React.useState<string>(ALL_FIRMS);
 
   React.useEffect(() => {
     let cancelled = false;
@@ -289,8 +305,14 @@ export const BillingGuidelinesView: React.FC<BillingGuidelinesViewProps> = ({ co
     };
   }, [coreRecordId, attempt]);
 
-  // The kill switch is off for this environment: the view is hidden, not shown as an outage.
-  if (state.phase === 'disabled') return null;
+  // The kill switch is off for this environment: the card body says so in one plain line (no outage styling, no Retry).
+  if (state.phase === 'disabled') {
+    return (
+      <div className={styles.root} data-testid="billing-guidelines-disabled">
+        <Text className={styles.meta}>{BILLING_GUIDELINES_DISABLED_TEXT}</Text>
+      </div>
+    );
+  }
 
   if (state.phase === 'loading') {
     return (
@@ -325,28 +347,54 @@ export const BillingGuidelinesView: React.FC<BillingGuidelinesViewProps> = ({ co
         <EmptyState
           size="compact"
           icon={<DocumentBulletListRegular />}
-          heading="No billing guidelines"
+          heading="No published billing guidelines"
           description="No billing guidelines have been shared with you yet."
         />
       </div>
     );
   }
 
-  // One heading per firm, in the order the server answered, only when there is more than one firm to tell apart.
-  const firms: { name: string; sets: BillingGuidelineSet[] }[] = [];
+  // Group by the firm's id (two firms can share a name), in the order the server answered. A heading and the firm filter appear only
+  // when there is more than one firm to tell apart (EB-D-260).
+  const firms: { id: string; name: string; sets: BillingGuidelineSet[] }[] = [];
   for (const set of sets) {
-    const group = firms.find(f => f.name === set.firmName);
+    const group = firms.find(f => f.id === set.firmId);
     if (group) group.sets.push(set);
-    else firms.push({ name: set.firmName, sets: [set] });
+    else firms.push({ id: set.firmId, name: set.firmName, sets: [set] });
   }
+
+  const several = firms.length > 1;
+  // The filter only narrows what is shown, client-side over the response; a choice that is no longer in the answer reads as "all firms".
+  const chosen = several && firms.some(f => f.id === firmFilter) ? firmFilter : ALL_FIRMS;
+  const shown = chosen === ALL_FIRMS ? firms : firms.filter(f => f.id === chosen);
 
   return (
     <div className={styles.root} data-testid="billing-guidelines">
-      {firms.map(group => (
-        <div key={group.name} className={styles.firm} data-testid="billing-guideline-firm">
-          {firms.length > 1 && <Title3 className={styles.wrap}>{group.name}</Title3>}
+      {several && (
+        <Field label="Firm" className={styles.filter}>
+          <Select
+            value={chosen}
+            onChange={(_, data) => setFirmFilter(data.value)}
+            data-testid="billing-guidelines-firm-filter"
+          >
+            <option value={ALL_FIRMS}>All firms</option>
+            {firms.map(f => (
+              <option key={f.id} value={f.id}>
+                {f.name}
+              </option>
+            ))}
+          </Select>
+        </Field>
+      )}
+      {shown.map(group => (
+        <div key={group.id} className={styles.firm} data-testid="billing-guideline-firm">
+          {several && (
+            <Title3 as="h3" className={styles.wrap}>
+              {group.name}
+            </Title3>
+          )}
           {group.sets.map((set, i) => (
-            <SetSection key={`${set.name}:${set.scope}:${i}`} set={set} />
+            <SetSection key={`${i}:${set.name}:${set.scope}`} set={set} />
           ))}
         </div>
       ))}

@@ -42,6 +42,8 @@ export interface BillingGuidelineRule {
 
 /** A set of rules under one name, for one firm. `scope` is a display label the BFF decides ("Applies to all records", ...). */
 export interface BillingGuidelineSet {
+  /** The caller's own firm this set is for (the same id /me lists in `firms`); the view groups and filters by it. */
+  firmId: string;
   firmName: string;
   name: string;
   scope: string;
