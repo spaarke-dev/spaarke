@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="197" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>Email composer opens in rich text everywhere; attachments get a button beside the Attachments heading instead of the toolbar paperclip</title>
+    <phase>12 Create-wizard lookups and composer (185 dev check fixes)</phase>
+    <gate>startable</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .tsx in the shared UI library and several hosts; behaviour change across every composer host.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Two located UI changes with a named reference pattern ("Link a record"); breadth across hosts, not design.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>185-fixes</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>No other open task touches EmailComposer or its hosts.</parallel-reason>
+    <deps>none</deps>
+    <tags>react, fluent-ui, frontend, testing</tags>
+    <estimated-effort>3-5 hours</estimated-effort>
+  </metadata>
+  <prompt>Owner requests from the 185 dev recheck (2026-11-18), both on the shared `EmailComposer`:
+(1) The composer opens in plain-text mode; it must open in rich text (HTML). Owner chose "every composer" (2026-11-18): every host, the Decision wizard's email step included.
+(2) Attaching files/documents lives only in the rich-text toolbar's paperclip (so plain-text mode has no way to attach). Move it to a button beside the "Attachments" section heading, styled and placed like the "Related to" section's "Link a record" button, and remove the paperclip from the toolbar.</prompt>
+  <role>SPAARKE frontend developer. Expert in React 18/19, Fluent UI v9 and the shared `@spaarke/ui-components` EmailComposer.</role>
+  <goal>Every composer host opens with the body in HTML (rich text) mode, showing the same text it showed before (a plain-text pre-fill is converted, line breaks kept, nothing double-escaped). The attach menu (same items and handlers as today's paperclip: local file, link documents, whatever the host's attachment sources give) is a button next to the Attachments heading in both rich and plain modes, and the toolbar no longer has a paperclip. Nothing a user sends loses content.</goal>
+  <context>
+    <background>
+- Root cause of (1): hosts pass `initialBodyFormat="PlainText"` or seed `bodyFormat: 'PlainText'`; the engine default is already HTML (`EmailComposer.reducer.ts` ~175). Known at origin/master (re-grep before editing): Console `ConversationPane.tsx` ~3630 (`SendEmailDialog`, Quick Start "Send Email" blank + "Send as email" chip seeded from a draft); `DecisionWizard/steps/EmailMessageFields.tsx` ~152 (and ~94 sends `toPlainText(state.body, state.bodyFormat)`); `DocumentEmailWizard.tsx` ~459, ~627; `SummarizeFilesWizard/SummarizeFilesDialog.tsx` ~466, ~479; `CreateWorkAssignmentWizard/WorkAssignmentWizardDialog.tsx` ~381, ~481; `CreateRecordWizard/CreateRecordWizard.tsx` ~567; `WizardFollowOns/steps/SendEmailFollowOnStep.tsx` ~155-158 (keeps PlainText when the text is unchanged) and ~199 (`plainTextToHtml`). Grep the whole `src/` (excluding built bundles) for `initialBodyFormat`, `bodyFormat: 'PlainText'` and `'PlainText'` for any host not listed.
+- Conversion: reuse the existing `plainTextToHtml` (find where it is defined; do not write a second one). A template or AI result keeps setting the format it returns (`EmailComposer.tsx` ~801, ~872): unchanged.
+- Decision wizard: its email body is sent through `toPlainText`. Trace where that body goes (the decision commit / server send). If the server path accepts HTML, send HTML with the format; if it requires plain text, keep the conversion on send and record it as a known limit (formatting is not kept in that one email). Never send raw HTML as plain text.
+- Plain-text bodies already in Dataverse being replied to or forwarded: reply/forward seeding is unchanged unless it passes PlainText for a NEW compose.
+- (2): the paperclip is built in `EmailComposer.tsx` (~408-420 `toolbarSlot`, ~541 local-file input). "Link a record" button: ~1481. Attachments section and `AttachmentList` in the same file. Keep the menu items, handlers, file input, validation and attachment-source defaults; move only the trigger. Hosts with no attachment sources and no upload handler show no button (as today they show no paperclip). The DecisionWizard passes `attachmentSources={[]}`.
+- Tests: `src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/__tests__/` (e.g. `relatedPrimary.test.tsx`, `uatR2Chrome.test.tsx`) and each host's existing tests; update assertions that pin PlainText or the paperclip in the toolbar; add tests in the acceptance criteria.
+    </background>
+    <relevant-files>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/EmailComposer.tsx</file>
+      <file role="modify">src/solutions/SpaarkeAi/src/components/conversation/ConversationPane.tsx</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/DecisionWizard/steps/EmailMessageFields.tsx</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/DocumentEmailWizard/DocumentEmailWizard.tsx</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/SummarizeFilesWizard/SummarizeFilesDialog.tsx</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/CreateWorkAssignmentWizard/WorkAssignmentWizardDialog.tsx</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/CreateRecordWizard/CreateRecordWizard.tsx</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/WizardFollowOns/steps/SendEmailFollowOnStep.tsx</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/subcomponents/BodyEditor.tsx</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="CLAUDE.md §11">No new component, hook or helper where an existing one serves (`plainTextToHtml`, the existing attach menu). Any new surface needs the three-question justification in the task notes.</constraint>
+    <constraint source="project">Only the default format and the attach trigger change. Template apply, AI draft, the format toggle, Related to, recipients, send payloads (other than the Decision wizard decision above) are unchanged; their existing tests pass unmodified except assertions that pinned PlainText defaults or the toolbar paperclip.</constraint>
+    <constraint source="project">PCF hosts that bundle the shared library (SemanticSearchControl, DocumentRelationshipViewer and any other that imports the composer) get a version bump and `npm run build:prod` only if their bundle changes; list them in the notes. No deploy in this task.</constraint>
+    <constraint source="CLAUDE.md project §6">Run `node scripts/quality/client-lint/client-lint.mjs check` (root npm install) before pushing; local ESLint alone is not the CI ratchet.</constraint>
+    <constraint source="ADR-021">Dark mode: the new button uses Fluent tokens like "Link a record".</constraint>
+    <constraint source="ADR-038">Tests for the stated contract and the acceptance edge cases; filtered jest runs only.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+    </files>
+  </knowledge>
+  <steps mode="directional">
+    <step order="1">Inventory every host that opens the composer in PlainText (grep, not just the list above); record it in the notes.</step>
+    <step order="2">Switch each to HTML, converting plain pre-fills with the existing helper; resolve the Decision wizard send path as stated.</step>
+    <step order="3">Move the attach trigger to a button beside the Attachments heading; remove the toolbar paperclip.</step>
+    <step order="4">Tests; filtered jest for the composer and each touched host; typecheck; client-lint ratchet; build the Console (`src/solutions/SpaarkeAi`) and any PCF whose bundle changes.</step>
+    <step order="5">Notes in notes/task-197-notes.md: inventory, decisions, known limits, PCF versions.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion testable="true">Test: Console Send Email opened blank shows the rich-text editor (toolbar visible, toggle shows rich mode).</criterion>
+    <criterion testable="true">Test: the "Send as email" seed with multi-line plain text opens in rich text with the same visible text and line breaks, and characters like `&lt;`, `&amp;` shown literally (no double escaping, no markup injected).</criterion>
+    <criterion testable="true">Test: each other host in the inventory opens in rich text with its pre-filled text intact.</criterion>
+    <criterion testable="true">Test: the Attachments heading has an attach button in rich mode AND in plain mode; it opens the same menu items as the old paperclip; choosing local file still runs validation and adds the item.</criterion>
+    <criterion testable="true">Test: the rich-text toolbar has no paperclip; a host with no attachment sources and no upload handler shows no attach button.</criterion>
+    <criterion testable="true">Decision wizard: the sent body is either HTML with format HTML, or plain text converted from the HTML (never raw HTML marked plain), with a test for whichever path the server requires.</criterion>
+    <criterion testable="true">Template apply and AI draft tests pass unmodified; typecheck clean; client-lint ratchet passes; Console builds.</criterion>
+  </acceptance-criteria>
+  <escalation>
+    <trigger>If a host's server send path cannot take HTML and the conversion would lose content the user typed, STOP and report.</trigger>
+    <trigger>If another open PR or worktree is changing EmailComposer.tsx's attachment area, STOP and report.</trigger>
+  </escalation>
+  <execution>
+    <protocol>Run through task-execute. Fresh worktree from origin/master; PR to master.</protocol>
+  </execution>
+</task>

@@ -57,3 +57,11 @@ The deploy log has the entry, the hashes and the D-126 clobber check (`notes/dep
 - **C1 (c) summary raw JSON twice:** pre-existing: `DocumentEmailWizard.tsx:818-835` concatenates every chunk and shows it verbatim; `/api/ai/analysis/execute` (`AnalysisEndpoints.cs:652-658`) sends the streamed tokens and then the final node text. S–M.
 - **C1 (d) "AI drafting is unavailable":** live dev BFF `f451e0874d` (master `ce6c241964` + mcp spike, deployed 2026-11-16 00:44Z; the older `5a9b687a0b` had the same defect) has `ModelContextProtocol.AspNetCore` 2.3.1 (needs `Microsoft.Extensions.AI.Abstractions` 10.11) with `Microsoft.Extensions.AI`/`.OpenAI` 10.3.0. App Insights 2026-11-16 03:03:35Z: `POST /api/communications/draft` 503, TypeLoadException `FunctionApprovalRequestContent`. Not ontology code; reported to uac-r2 (dev BFF owner) and mcp-r1 (their task 020 moves the family to 10.11.0) on 2026-11-16. uac-r2 confirmed: one TypeLoadException in 7 days; other IChatClient routes (briefing narrate, chat suggest, analysis execute) returned 200, so the break is narrower than all IChatClient. The next dev BFF build carries the full task-020 package set or drops MCP (uac-r2 + mcp-r1, owner chooses with the SHA).
 - **D1 Console Send Email:** gap no task picked up (186 did D-219 Q3 only): `ConversationPane.tsx:3597-3612` mounts `SendEmailDialog` without `onLookupRecipients`, `recordLookupCatalog`, `onLookupRecord` and `onAddRelationship`, which are already built at `:923-926`. S.
+
+## Recheck after 193-195, owner, 2026-11-18
+- **C1 Semantic Search → Email documents:** PASS (lookup above the wizard, Summary once, template finished text).
+- **C2 Document Relationship Viewer:** PASS.
+- **D1 Console Send Email:** PASS (recipients and Related to use the side pane). Two new owner requests, task **197**: the composer opens in plain text and must open in rich text in every host (owner scope "every composer"); the attach menu moves from the toolbar paperclip to a button beside the Attachments heading, like "Link a record".
+- **A7 rule wizard:** PASS.
+- Still open in 185: the A2/B5 Create Matter follow-on (needs the owner's F12 check during a repro) and the owner questions (invoice `lockedRecord`, section A requests, AI draft retry).
+
