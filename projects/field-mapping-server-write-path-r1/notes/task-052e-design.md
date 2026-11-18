@@ -215,7 +215,7 @@ FULL rigor, Opus. Files:
 ACs:
 1. The §3.1 entries (plus Q2's answer), each with its reason in code. Moves-nothing entries are never read per row.
 2. Re-owned: a matter, project, document, invoice or contact row with no unaccepted child.
-3. Negative: an event, analysis or contact row with a note child is not re-owned (`owner_assign_cascades`, counted), unless the owner approves Q2 for events and analyses.
+3. Negative: an event, analysis or contact row with a note child is not re-owned (`owner_assign_cascades`, counted). Owner Q2 (2026-11-18): no note relationship is accepted.
 4. Negative: an analysis row with an email activity is not re-owned (`owner_assign_cascades`, with the relationship named).
 5. Negative: a contact with a child contact is not re-owned.
 6. Negative: a failed, refused or depth-limited child read gives `owner_assign_cascade_unknown`, never "no children".
@@ -266,6 +266,8 @@ The live check on dev gains these cases:
 - **Q6.** Order of work: 052f, then 052g, then the pass can be considered for go-live on dev (§6). *Recommended: yes.*
 - **Q7.** The system path uses the reconciler's app-only walk, not the W7 reader, which reads as the caller. This is a deviation from FR-25's wording. *Recommended: accept, and amend FR-25's sentence.*
 - **Q8.** The cross-unit move of a non-root row hands nothing to the 194 engine (§3.3 step 4). The one residual, files of documents filed directly under that row, is UAC-r2's issue 2903 (U1). *Recommended: yes.*
+
+**Owner, decided 2026-11-18 in this session.** Q2: no (event and analysis notes are not accepted). Q1 and Q3–Q8: yes, as recommended. The owner states that Spaarke does not use the out-of-the-box Notes (`annotation`) or activities, so a row skipped under Q2 or Q5 is expected to be rare; it is still counted and reported. Dev held one note in total on 2026-11-18 (read-only count).
 
 **UAC-r2, answered 2026-11-18.** Option B is fine: no new family walk, no in-process call.
 
