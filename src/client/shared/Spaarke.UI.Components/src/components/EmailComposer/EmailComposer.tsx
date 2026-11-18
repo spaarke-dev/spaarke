@@ -110,7 +110,7 @@ import { InternalOnlySwitch } from './subcomponents/InternalOnlySwitch';
 import { ComposerActionBar } from './subcomponents/ComposerActionBar';
 import { ComposerSendButton } from './subcomponents/ComposerSendButton';
 
-// The Dataverse logical name for a governed Document — the paperclip's "Link documents"
+// The Dataverse logical name for a governed Document — the Attach menu's "Link documents"
 // picks this type and ATTACHES it, so it's intentionally excluded from the record-search
 // catalog (which inserts a body LINK for every other type). Owner UAT 2026-07-24.
 const DOCUMENT_LOGICAL_NAME = 'sprk_document';
@@ -405,7 +405,7 @@ const useStyles = makeStyles({
       color: tokens.colorNeutralForeground1,
     },
   },
-  // Trailing controls placed into the RichTextEditor toolbar slot (paperclip / search).
+  // Trailing controls placed into the RichTextEditor toolbar slot (record search / template / AI).
   // Kept visually grouped at the toolbar's trailing end.
   toolbarSlot: {
     display: 'flex',
@@ -538,8 +538,8 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
   // Imperative handle to the HTML body editor — used to insert a record link AT THE CURSOR
   // (owner UAT 2026-07-24) rather than appending to the end. Null in plain-text mode.
   const bodyEditorRef = React.useRef<RichTextEditorRef>(null);
-  // Local-file picker input (trigger lives in the RTF toolbar's paperclip menu, owner UAT
-  // 2026-07-24). Pick-time policy rejections surface here.
+  // Local-file picker input (trigger lives in the Attach menu beside the Attachments heading;
+  // owner UAT 2026-07-24, moved task 197). Pick-time policy rejections surface here.
   const fileInputRef = React.useRef<HTMLInputElement>(null);
   // Late-bound handle to handleAddAttachment (defined below) so the file-pick callback,
   // declared earlier, can invoke it without a temporal-dead-zone reference.
@@ -605,7 +605,7 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
     dispatch({ type: 'SET_FIELD', field: 'body', value: nextBody });
   }, []);
 
-  // Local-file pick (paperclip → "Add files"). CHAT-ATTACHMENT-POLICY gate BEFORE state entry;
+  // Local-file pick (Attach menu → "Add files"). CHAT-ATTACHMENT-POLICY gate BEFORE state entry;
   // rejected files are dropped and surfaced (never silently). Moved out of AttachmentList when
   // the add controls hoisted to the RTF toolbar (owner UAT 2026-07-24).
   const handleLocalFilesPicked = React.useCallback(
@@ -741,7 +741,7 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
   const canAddLocal = !state.readOnly && attachmentSources.some(s => s.kind === 'local');
   const canLinkDocument = !state.readOnly && !!props.onLookupRecord;
   // Record search excludes Document (owner UAT 2026-07-24): documents are attached via the
-  // paperclip's "Link documents"; every other catalog type inserts a body link.
+  // the Attach menu's "Link documents"; every other catalog type inserts a body link.
   const recordSearchCatalog = React.useMemo(
     () => (props.recordLookupCatalog ?? []).filter(t => t.logicalName !== DOCUMENT_LOGICAL_NAME),
     [props.recordLookupCatalog]
@@ -912,28 +912,36 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
     return () => window.clearTimeout(t);
   }, [aiMenuOpen]);
 
+  // Attach menu (owner dev recheck 2026-11-18, task 197): the trigger sits beside the
+  // "Attachments" heading — styled like the "Link a record" tile — in BOTH rich and plain-text
+  // modes (it used to be the RTF toolbar paperclip, so plain text could not attach). Same menu
+  // items and handlers as before; absent when the host can neither add local files nor link
+  // documents.
+  const attachMenu =
+    canAddLocal || canLinkDocument ? (
+      <Menu positioning="below-start">
+        <MenuTrigger disableButtonEnhancement>
+          <button type="button" className={styles.linkTile}>
+            <Attach20Regular />
+            <span>Attach</span>
+          </button>
+        </MenuTrigger>
+        <MenuPopover>
+          <MenuList>
+            {canAddLocal && <MenuItem onClick={() => fileInputRef.current?.click()}>Add files</MenuItem>}
+            {canLinkDocument && <MenuItem onClick={runDocumentLink}>Link documents</MenuItem>}
+          </MenuList>
+        </MenuPopover>
+      </Menu>
+    ) : undefined;
+
   const toolbarSlot =
-    canAddLocal || canLinkDocument || showRecordSearch || showTemplatePicker || showSparkle ? (
+    showRecordSearch || showTemplatePicker || showSparkle ? (
       <div className={styles.toolbarSlot}>
-        {(canAddLocal || canLinkDocument) && (
-          <Menu positioning="below-end">
-            <MenuTrigger disableButtonEnhancement>
-              <Tooltip content="Attach files or link a document" relationship="label">
-                <ToolbarButton icon={<Attach20Regular />} aria-label="Attach" />
-              </Tooltip>
-            </MenuTrigger>
-            <MenuPopover>
-              <MenuList>
-                {canAddLocal && <MenuItem onClick={() => fileInputRef.current?.click()}>Add files</MenuItem>}
-                {canLinkDocument && <MenuItem onClick={runDocumentLink}>Link documents</MenuItem>}
-              </MenuList>
-            </MenuPopover>
-          </Menu>
-        )}
         {showRecordSearch && (
-          // Grouped in the SAME toolbar section as the paperclip — no divider between them
-          // (owner UAT 2026-07-27). The section-leading divider is still supplied once by
-          // ToolbarPlugin, separating this whole group from the editor controls.
+          // Leads the trailing toolbar group. The section-leading divider is supplied once by
+          // ToolbarPlugin, separating this whole group from the editor controls. (The attach
+          // paperclip moved beside the Attachments heading — task 197.)
           <Menu positioning="below-end">
             <MenuTrigger disableButtonEnhancement>
               <Tooltip content="Insert a link to a record" relationship="label">
@@ -951,13 +959,13 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
             </MenuPopover>
           </Menu>
         )}
-        {/* "|" separator between the attach/record-link group and the template/AI group
+        {/* "|" separator between the record-link group and the template/AI group
             (owner UAT 2026-08-03 R5 item 3) — only when both groups have at least one tool. */}
-        {(showTemplatePicker || showSparkle) && (canAddLocal || canLinkDocument || showRecordSearch) && (
+        {(showTemplatePicker || showSparkle) && showRecordSearch && (
           <span className={styles.toolbarDivider} role="separator" aria-orientation="vertical" />
         )}
         {showTemplatePicker && (
-          // Apply an email template (Wave E). Grouped with the paperclip/search in the same
+          // Apply an email template (Wave E). Grouped with the record search in the same
           // toolbar section. Templates load on menu open; picking one fills subject + body.
           <Menu
             positioning="below-end"
@@ -1405,8 +1413,8 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
         )}
       </div>
 
-      {/* Hidden local-file input — triggered by the RTF toolbar's paperclip "Add files"
-          (owner UAT 2026-07-24). */}
+      {/* Hidden local-file input — triggered by the Attach menu's "Add files" beside the
+          Attachments heading (owner UAT 2026-07-24; moved from the RTF toolbar, task 197). */}
       <input
         ref={fileInputRef}
         type="file"
@@ -1416,14 +1424,15 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
         aria-label="Choose files from your computer"
       />
 
-      {/* Attachments — display-only collapsible list, DEFAULT COLLAPSED (owner UAT 2026-07-24);
-          the add/link controls now live in the RTF toolbar. */}
+      {/* Attachments — collapsible list, DEFAULT COLLAPSED (owner UAT 2026-07-24); the add/link
+          menu is the button beside the heading (task 197). */}
       <div className={styles.section} role="region" aria-label="Attachments">
         <AttachmentList
           items={state.attachments}
           onRemove={id => dispatch({ type: 'REMOVE_ATTACHMENT', id })}
           onToggleSelected={id => dispatch({ type: 'TOGGLE_ATTACHMENT_SELECTED', id })}
           onToggleLink={id => dispatch({ type: 'TOGGLE_ATTACHMENT_LINK', id })}
+          headerAction={attachMenu}
           resolvingIds={resolvingIds}
           readOnly={state.readOnly}
           errorMessage={[fieldErrors.attachments, uploadError, ...pickErrors].filter(Boolean).join(' ') || undefined}
