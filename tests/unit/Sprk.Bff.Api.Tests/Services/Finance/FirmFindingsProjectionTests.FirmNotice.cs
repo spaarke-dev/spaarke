@@ -121,11 +121,11 @@ public sealed partial class FirmFindingsProjectionTests
         html.Should().NotContain("Invoice adjustment");
     }
 
-    [Theory(DisplayName = "130f K4: the notice table of a Rejected or Returned invoice has no Approved column and no approved amount; In Review and Approved keep it")]
+    [Theory(DisplayName = "130f K4: the notice table of a Rejected or Returned invoice has no Approved column and no approved amount, and so does the preview of a Reject or Return while still In Review; Approved-with-adjustments keeps it")]
     [InlineData(InvoiceStatusCodes.Rejected, FirmNoticeKind.InvoiceRejected, false)]
     [InlineData(InvoiceStatusCodes.ReturnedToFirm, FirmNoticeKind.ReturnedToFirm, false)]
-    [InlineData(InvoiceStatusCodes.InReview, FirmNoticeKind.InvoiceRejected, true)]
-    [InlineData(InvoiceStatusCodes.InReview, FirmNoticeKind.ReturnedToFirm, true)]
+    [InlineData(InvoiceStatusCodes.InReview, FirmNoticeKind.InvoiceRejected, false)]
+    [InlineData(InvoiceStatusCodes.InReview, FirmNoticeKind.ReturnedToFirm, false)]
     [InlineData(InvoiceStatusCodes.Approved, FirmNoticeKind.ApprovedWithAdjustments, true)]
     public async Task Notice_TheApprovedColumn_IsShownOnlyWhenSomethingCouldBeApproved(int status, FirmNoticeKind kind, bool showsApproved)
     {

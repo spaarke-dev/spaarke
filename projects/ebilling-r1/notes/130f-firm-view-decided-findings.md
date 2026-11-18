@@ -50,7 +50,7 @@ Fail-before (old projection restored, new tests kept): 14 of the 179 `FirmFindin
 
 ## Notice table: no Approved column after a Reject or Return (coordinator decision, fix round 1)
 
-`FirmNoticeComposer.FindingsHtml` drops the Approved column (its heading and its cells) when the outcome kind is Rejected or ReturnedToFirm: nothing was approved on those invoices. Every label's wording is unchanged (EB-D-255); only one column is dropped. In Review, Approved, Sent to AP and Paid keep the column, including the reviewer's preview of a Reject or Return notice while the invoice is still In Review (the column follows the invoice's state, not the notice kind). No SPA code renders this table (no client file references the notice).
+`FirmNoticeComposer.FindingsHtml` drops the Approved column (its heading and its cells) when EITHER the notice kind is Reject or Return (`InvoiceRejected`, `ReturnedToFirm`) OR the outcome kind is Rejected or ReturnedToFirm: nothing is approved by a Reject or a Return. The reviewer's preview (composed while the invoice is still In Review) therefore matches what the firm receives after the transition (132 sends after it). Every label's wording is unchanged (EB-D-255); only one column is dropped. Every other notice and outcome (Approved with adjustments) keeps the column. `RenderHtml(outcome, prose, kind = null)` takes the notice kind as an optional third argument; the send path (132) must pass it, or a notice rendered with no kind falls back to the outcome kind alone. No SPA code renders this table (no client file references the notice).
 
 ## Fix round 1: leak tests seed the real places
 

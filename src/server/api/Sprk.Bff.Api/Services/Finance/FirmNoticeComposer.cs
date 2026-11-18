@@ -417,7 +417,7 @@ public sealed class FirmNoticeComposer
         var tracking = CleanTrackingNumber(outcome.TrackingNumber);
         var finalSubject = tracking.Length == 0 ? subject : $"{subject} ({tracking})";
         var draft = new FirmNoticeDraft(
-            kind, finalSubject, prose, RenderHtml(outcome, prose), source,
+            kind, finalSubject, prose, RenderHtml(outcome, prose, kind), source,
             source == FirmNoticeSource.Action ? ActionVersion : null, fallbackReason);
 
         _logger.LogInformation(
@@ -585,9 +585,10 @@ public sealed class FirmNoticeComposer
     /// <summary>
     /// Renders the notice from the firm outcome and the (possibly reviewer-edited) plain-text prose. Public so the send path (132) can render the
     /// reviewer's edited prose against the same data. The template is substituted in ONE pass, so a placeholder written inside the prose or a cell is
-    /// text, never expanded.
+    /// text, never expanded. The Approved column is left out when the notice is a Reject or a Return, or the invoice already is (130f): the reviewer's
+    /// preview matches what the firm receives. The send path passes <paramref name="kind"/>.
     /// </summary>
-    public static string RenderHtml(FirmOutcome outcome, string prose)
+    public static string RenderHtml(FirmOutcome outcome, string prose, FirmNoticeKind? kind = null)
     {
         ArgumentNullException.ThrowIfNull(outcome);
         var values = new Dictionary<string, string>(StringComparer.Ordinal)
@@ -595,7 +596,7 @@ public sealed class FirmNoticeComposer
             ["Greeting"] = Encode(FirmNoticeFallbackText.Greeting),
             ["Prose"] = ProseHtml(prose),
             ["Details"] = DetailsHtml(outcome),
-            ["Findings"] = FindingsHtml(outcome),
+            ["Findings"] = FindingsHtml(outcome, kind),
         };
 
         return Placeholder.Replace(Template.Value, m =>
@@ -639,7 +640,7 @@ public sealed class FirmNoticeComposer
             : "<p style=\"margin:0 0 16px;color:#242424;font-size:14px;line-height:1.6;\">" + string.Join("<br />", lines) + "</p>";
     }
 
-    private static string FindingsHtml(FirmOutcome outcome)
+    private static string FindingsHtml(FirmOutcome outcome, FirmNoticeKind? kind)
     {
         if (outcome.Items.Count == 0)
         {
@@ -650,8 +651,9 @@ public sealed class FirmNoticeComposer
         var sb = new StringBuilder();
         sb.Append("<h2 style=\"margin:8px 0 8px;color:#242424;font-size:16px;\">").Append(Encode(FirmNoticeFallbackText.FindingsHeading)).Append("</h2>");
         sb.Append("<table role=\"presentation\" cellspacing=\"0\" cellpadding=\"0\" border=\"0\" style=\"border-collapse:collapse;width:100%;\"><thead><tr>");
-        // 130f (EB-D-259, K4): nothing was approved on a Rejected or Returned invoice, so its table has no Approved column (same labels, one column fewer).
-        var showApproved = outcome.Kind is not (FirmOutcomeKind.Rejected or FirmOutcomeKind.ReturnedToFirm);
+        // 130f (EB-D-259, K4): nothing is approved by a Reject or a Return (the notice, or the invoice already), so the table has no Approved column (same labels, one column fewer).
+        var showApproved = outcome.Kind is not (FirmOutcomeKind.Rejected or FirmOutcomeKind.ReturnedToFirm)
+            && kind is not (FirmNoticeKind.InvoiceRejected or FirmNoticeKind.ReturnedToFirm);
         foreach (var heading in new[] { "Item", "Decision", "Billed", "Approved", "Reason", "Rule" }.Where(h => showApproved || h != "Approved"))
         {
             sb.Append("<th style=\"").Append(cell).Append("background-color:#f4f6f8;\">").Append(Encode(heading)).Append("</th>");
