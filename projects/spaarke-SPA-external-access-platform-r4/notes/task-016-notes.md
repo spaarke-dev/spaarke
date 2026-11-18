@@ -25,7 +25,7 @@ Use a Collaborate user and a View Only user on a matter, a project and a work as
 | 5 | Copy link → the link opens the event on its own; a user without access gets "no longer available" | |
 | 6 | Collaborate: Edit (type read-only) and Change status (any status) work and the list shows the new values | |
 | 7 | View Only: no Add event, Edit, Change status or Delete | |
-| 8 | uac-r2's post-deploy gate shows no new 5xx | |
+| 8 | uac-r2's post-deploy gate shows no new 5xx | ✅ uac-r2 2026-11-18: BFF `326781c50f`, 2026-11-17 22:03Z → 2026-11-18 22:44Z, 1,075 requests, 0 5xx; external 46 requests, 3 × 499 on notifications (client closed); retest routes 200/201 incl. matter events POST 201; no new exception type tied to an external route |
 
 ## Step 3 finding — typed event create answered 500 (D-21 #2892)
 - Owner E2E 2026-11-17, matter root, type Task: POST /matters/{id}/events → 500 InvalidOperationException. Cause: the external create bound the event type as `sprk_eventtype_ref@odata.bind`; the case-sensitive navigation property is `sprk_EventType_Ref` (task 008 regression). Every typed create failed.
