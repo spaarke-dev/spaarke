@@ -33,6 +33,7 @@ No Dataverse write, no push, no deploy was made. No App Service setting is added
 | `InvoiceAccepted` | None to the firm | Approvers get an in-app notification (below). |
 
 - **Edited prose is screened.** If `FirmNoticeProse.Check` refuses it, the decision still stands, no email is sent, the stable reason code is logged (never the text), and the template is NOT substituted.
+- **A degraded or unavailable outcome (130f).** Once 130f lands, a fault reading the lines of a Rejected or Returned invoice gives a Degraded status-only outcome, and the composer answers `Unavailable`. The handler composes BEFORE it writes the marker, so such a job sends nothing (never an empty or partial findings table), writes no marker, logs ids only, and returns a retryable `Failure` (`Poisoned` at the final delivery, so it is not dropped silently). A later delivery that reads fully sends once. The case is covered for the composed path (approved with adjustment) and the confirmed-notice path (Return, Reject); it does not depend on 130f being in the base, because the composer already maps `Degraded` and the projection's `Unavailable` kind to `Unavailable`.
 - **Approvers.** Each eligible approver with a linked user gets one `IActionSeam.CreateNotificationAsync` (category `invoice-review`, regarding the invoice, link to the Invoice Review page). No new `NotificationKind`, no spine outbox kind. The seam's own unread-duplicate skip applies. A failure for one approver does not stop the rest. A person with no user, and a person who is not eligible, get nothing.
 - **Missing billing contact.** The submitter alone is told, with an ids-only warning. Nobody with an address: no email, a warning, no marker.
 - **Kill switch.** `EbillingOptions.Enabled` is read per job through `IOptionsMonitor` (ADR-018). Off: the job succeeds and does nothing.
@@ -88,4 +89,12 @@ The existing column `sprk_invoicesubmission.sprk_firmnoticetext` (memo, 100000) 
 
 ## Gates
 
-Filled in at the final commit (see the task report): build, unit, ArchTests, publish delta, vulnerable-package check. Fail-before: three mutations of the production code, run against the new tests, all failed (see the report).
+| Gate | Result |
+|---|---|
+| `dotnet build src/server/api/Sprk.Bff.Api/ --warnaserror` | 0 warnings, 0 errors |
+| Filtered unit tests (EbillingNotification, FirmNotice, InvoiceRejectReturn, InvoiceApproval, ExternalNotificationFeed, InvoiceSubmission, Communication, plus EbillingFeedSource and FirmOutcome) | 5358 passed, 0 failed, 2 skipped (before this task's last test, 33 in the handler seam suite now pass) |
+| Filtered ArchTests (Route, Finance, Notification, Job, External, FirmNotice, FirmFindings) | 615 passed, 0 failed |
+| Vulnerable packages (`dotnet list package --vulnerable --include-transitive`) | none; no package added |
+| Publish size (compressed, Release, fresh `origin/master` build at `08161cfb0e` vs this branch at `c8f67d6b92`) | 40.44 MB vs 40.47 MB, delta +0.03 MB (no threshold reached) |
+
+Fail-before (the production code mutated, the new tests run, then restored): removing the Return/Reject confirmed-notice guard, skipping the marker check, and skipping the feed's per-invoice decision failed 6 tests together (two guard cases, redelivery, send-fault no-resend, and two feed denial cases). Turning the composer's `Unavailable` into a success failed the three degraded-outcome cases.

@@ -423,6 +423,49 @@ public sealed class EbillingNotificationJobHandlerSeamTests
         sent.Communication.Body.Should().Contain("We could not accept the hours on the research entry.").And.Contain("Research on the motion");
     }
 
+    [Theory(DisplayName = "132 (130f): a degraded or unavailable outcome sends NO email (never an empty or partial table), marks nothing sent, stays retryable, and a later delivery sends exactly once")]
+    [InlineData(EbillingNotificationEvent.ApprovedWithAdjustments, false)]
+    [InlineData(EbillingNotificationEvent.ReturnedToFirm, true)]
+    [InlineData(EbillingNotificationEvent.InvoiceRejected, true)]
+    public async Task ADegradedOutcome_SendsNothing_StaysRetryable_AndIsSentOnceWhenItRecovers(EbillingNotificationEvent evt, bool withNotice)
+    {
+        var rig = new Rig();
+        var kind = evt == EbillingNotificationEvent.ApprovedWithAdjustments ? FirmOutcomeKind.ApprovedWithAdjustments
+            : evt == EbillingNotificationEvent.ReturnedToFirm ? FirmOutcomeKind.ReturnedToFirm : FirmOutcomeKind.Rejected;
+        var healthy = rig.Outcome(kind, Reduced);
+        string? subject = withNotice ? "Please review your invoice" : null;
+        string? prose = withNotice ? "Hello,\n\nWe could not accept the hours on the research entry.\n\nThank you." : null;
+
+        // 1. The projection could not read the lines: a Degraded, status-only outcome. Then the projection's own Unavailable kind.
+        foreach (var broken in new[] { healthy with { Degraded = true, Items = [] }, healthy with { Kind = FirmOutcomeKind.Unavailable, Items = [] } })
+        {
+            rig.InvoiceOutcome = broken;
+            var failed = await rig.Handler().ProcessAsync(rig.InvoiceJob(evt, subject, prose), CancellationToken.None);
+
+            failed.Status.Should().Be(JobStatus.Failed, "not final: the job is retried");
+            rig.Channel.Sent.Should().BeEmpty("no email with an empty or partial findings table");
+            rig.Cache.Marked.Should().BeEmpty("the notice is not marked sent");
+        }
+
+        rig.Log.Lines.Should().NotContain(l => l.Contains("@") && l.Contains("eBilling notification"), "ADR-015: ids only, never an address");
+
+        // 2. The last delivery of a still-broken read is poisoned, not silently dropped, and still sends nothing.
+        rig.InvoiceOutcome = healthy with { Degraded = true, Items = [] };
+        var final = await rig.Handler().ProcessAsync(
+            rig.Job(evt, EbillingNotificationSubject.Invoice, rig.World.InvoiceId, subject, prose, attempt: 5, deliveryCount: JobContract.MaxDeliveryCount), CancellationToken.None);
+        final.Status.Should().Be(JobStatus.Poisoned);
+        rig.Channel.Sent.Should().BeEmpty();
+
+        // 3. The read recovers: the redelivery sends once, with the table, and a further redelivery sends nothing.
+        rig.InvoiceOutcome = healthy;
+        var retried = await rig.Handler().ProcessAsync(rig.InvoiceJob(evt, subject, prose), CancellationToken.None);
+        var again = await rig.Handler().ProcessAsync(rig.InvoiceJob(evt, subject, prose), CancellationToken.None);
+
+        retried.Status.Should().Be(JobStatus.Completed);
+        again.Status.Should().Be(JobStatus.Completed);
+        rig.Channel.Sent.Should().ContainSingle().Which.Communication.Body.Should().Contain("Research on the motion");
+    }
+
     [Fact(DisplayName = "132 uac-r2 N2: the reviewer's prose is encoded by RenderHtml (no markup survives) and a subject with line breaks is made header-safe")]
     public async Task ReviewerProseIsEncoded_AndTheSubjectIsHeaderSafe()
     {
