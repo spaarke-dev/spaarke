@@ -537,16 +537,32 @@ public sealed class FirmOutcomeScopeTests : IAsyncLifetime
 
     // ── Task 132: the invoice rule asked as a decision, for the notification feed ──
 
-    private Task<InvoiceFeedDecision> FeedDecision(Guid invoice, CallerPrincipal? caller = null, IReadOnlyList<Guid>? firms = null)
+    private int _feedHidingCalls;
+
+    private async Task<IReadOnlyDictionary<Guid, InvoiceFeedDecision>> FeedDecisions(IReadOnlyList<Guid> invoices, CallerPrincipal? caller = null, IReadOnlyList<Guid>? firms = null)
     {
-        ExternalInvoiceHiding hide = (_, ids, _) => Task.FromResult(_invoiceHidingFaults
-            ? InvoiceVisibilityResult.ReadFailed(ids)
-            : new InvoiceVisibilityResult(
-                ids, ids.Where(_hiddenInvoices.Contains).ToDictionary(id => id, _ => InvoiceHiddenReason.SourceHidden), faulted: false));
+        ExternalInvoiceHiding hide = (_, ids, _) =>
+        {
+            _feedHidingCalls++;
+            return Task.FromResult(_invoiceHidingFaults
+                ? InvoiceVisibilityResult.ReadFailed(ids)
+                : new InvoiceVisibilityResult(
+                    ids, ids.Where(_hiddenInvoices.Contains).ToDictionary(id => id, _ => InvoiceHiddenReason.SourceHidden), faulted: false));
+        };
         var filter = new FirmOutcomeAuthorizationFilter(
             FirmOutcomeSubject.Invoice, _participations, _data, _h.Build(), NullLogger<FirmOutcomeAuthorizationFilter>.Instance, hide, null);
-        return filter.DecideInvoiceForFeedAsync(caller ?? Contact(), firms ?? [FirmA], invoice, CancellationToken.None);
+
+        // The rows as the feed's candidate query reads them: the access rule's own scope columns, one row per invoice.
+        var rows = new List<(Guid Id, IReadOnlyDictionary<string, object?> Row)>();
+        foreach (var id in invoices)
+        {
+            rows.Add((id, await _data.GetInvoiceLookupsAsync(id, FirmOutcomeAuthorizationFilter.InvoiceScopeColumnNames, CancellationToken.None)));
+        }
+
+        return await filter.DecideInvoicesForFeedAsync(caller ?? Contact(), firms ?? [FirmA], rows, CancellationToken.None);
     }
+
+    private async Task<InvoiceFeedDecision> FeedDecision(Guid invoice) => (await FeedDecisions([invoice]))[invoice];
 
     [Fact(DisplayName = "132 feed decision (must-not-fire): an invoice of the caller's firm, readable core, not hidden, is Visible")]
     public async Task FeedDecision_OwnFirmsReadableInvoice_IsVisible() =>
@@ -560,14 +576,13 @@ public sealed class FirmOutcomeScopeTests : IAsyncLifetime
     public async Task FeedDecision_WithoutCoreAccess_IsDenied() =>
         (await FeedDecision(SeedInvoice(FirmA, OtherMatter))).Should().Be(InvoiceFeedDecision.Denied);
 
-    [Fact(DisplayName = "132 feed decision (must-fire): an invoice the (a') predicate hides, and one that does not exist, are Denied")]
-    public async Task FeedDecision_HiddenOrMissing_IsDenied()
+    [Fact(DisplayName = "132 feed decision (must-fire): an invoice the (a') predicate hides is Denied")]
+    public async Task FeedDecision_Hidden_IsDenied()
     {
         var hidden = SeedInvoice(FirmA);
         _hiddenInvoices.Add(hidden);
 
         (await FeedDecision(hidden)).Should().Be(InvoiceFeedDecision.Denied);
-        (await FeedDecision(Guid.NewGuid())).Should().Be(InvoiceFeedDecision.Denied);
     }
 
     [Fact(DisplayName = "132 feed decision (must-fire): a visibility decision that cannot be made is Unavailable, never Visible")]
@@ -577,6 +592,31 @@ public sealed class FirmOutcomeScopeTests : IAsyncLifetime
         _invoiceHidingFaults = true;
 
         (await FeedDecision(invoice)).Should().Be(InvoiceFeedDecision.Unavailable);
+    }
+
+    [Fact(DisplayName = "132 feed F3: a mixed batch is decided per invoice, with ONE hiding call and ONE secure-root flag read for the whole batch")]
+    public async Task FeedDecisions_MixedBatch_AreEachRight_WithOneHidingCall()
+    {
+        var visible = SeedInvoice(FirmA);
+        var otherFirm = SeedInvoice(FirmB);
+        var noCoreAccess = SeedInvoice(FirmA, OtherMatter);
+        var hidden = SeedInvoice(FirmA);
+        _hiddenInvoices.Add(hidden);
+        var secure1 = SeedInvoice(FirmA);
+        var secure2 = SeedInvoice(FirmA);
+        _data.Invoices[secure1]["sprk_project"] = SecureProject;
+        _data.Invoices[secure2]["sprk_project"] = SecureProject;
+
+        var answers = await FeedDecisions([visible, otherFirm, noCoreAccess, hidden, secure1, secure2]);
+
+        answers[visible].Should().Be(InvoiceFeedDecision.Visible);
+        answers[otherFirm].Should().Be(InvoiceFeedDecision.Denied);
+        answers[noCoreAccess].Should().Be(InvoiceFeedDecision.Denied);
+        answers[hidden].Should().Be(InvoiceFeedDecision.Denied);
+        answers[secure1].Should().Be(InvoiceFeedDecision.Denied, "an unreadable secure root denies, as on the route");
+        answers[secure2].Should().Be(InvoiceFeedDecision.Denied);
+        _feedHidingCalls.Should().Be(1, "one hiding decision for the whole batch, not one per invoice");
+        _data.FlagReads.Should().BeLessThanOrEqualTo(1, "the secure-root flag read is one call for the batch");
     }
 
     [Fact(DisplayName = "130b SEEDING PROOF (firm scope): another firm's invoice on a SHARED matter is 403 with no data, and nothing is projected")]

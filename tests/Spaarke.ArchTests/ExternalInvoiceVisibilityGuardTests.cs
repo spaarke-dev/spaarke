@@ -130,11 +130,12 @@ public class ExternalInvoiceVisibilityGuardTests
             + "filter's InvoiceDecided to the projection (fix round 2): false when the invoice did not exist at the filter, and then nothing of "
             + "that invoice is read (in progress: no billed total; Accepted: 503).",
         // ── the eBilling feed source (ebilling-r1 task 132, FR-39) ──
-        ["Sprk.Bff.Api.Api.ExternalAccess.EbillingFeedSource::-ctor"] =
-            "Reviewed 132. The DI constructor binds the app-only candidate read (the caller's own firms' invoice ids, status and change time; nothing "
-            + "is returned from it) and the per-invoice decision. ReadAsync returns an invoice only after FirmOutcomeAuthorizationFilter."
-            + "DecideInvoiceForFeedAsync cleared it: the outcome route's own invoice rule (firm, core-record Read, secure roots and ExternalInvoiceHiding), "
-            + "per invoice, fail closed. EbillingFeedSourceTests prove a Denied or undecidable invoice is never an item.",
+        ["Sprk.Bff.Api.Api.ExternalAccess.EbillingFeedSource::CandidateQuery"] =
+            "Reviewed 132 (review fix). Builds the app-only candidate query (the caller's own firms' invoices that the caller submitted or bills for: ids, "
+            + "status, change time, the audience columns and the access rule's scope columns); it reads nothing itself. ReadAsync re-checks the audience "
+            + "in memory, then returns an invoice only after FirmOutcomeAuthorizationFilter.DecideInvoicesForFeedAsync cleared the whole batch with the "
+            + "outcome route's own invoice rule (firm, core-record Read, secure roots and ExternalInvoiceHiding), fail closed. EbillingFeedSourceTests prove "
+            + "a Denied or undecidable invoice, and an invoice outside the audience, is never an item.",
         ["Sprk.Bff.Api.Api.ExternalAccess.FirmOutcomeAuthorizationFilter::.cctor"] =
             "Reviewed 130b fix rounds 5 and 6. Static column lists (the invoice's and the submission's own lookups, incl. the parents the "
             + "secure-roots rule takes in); reads nothing.",

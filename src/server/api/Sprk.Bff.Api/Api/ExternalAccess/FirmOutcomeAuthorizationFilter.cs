@@ -127,24 +127,35 @@ internal sealed class FirmOutcomeAuthorizationFilter : IEndpointFilter
         _hideSubmissions = hideSubmissions;
     }
 
+    /// <summary>The invoice columns the rule reads (<see cref="InvoiceScopeColumns"/>): a batch caller reads them in its own candidate query.</summary>
+    internal static IReadOnlyList<string> InvoiceScopeColumnNames => InvoiceScopeColumns;
+
     /// <summary>
-    /// The ONE invoice rule, asked as a decision rather than a route refusal (ebilling-r1 task 132: the notification feed re-checks each candidate
-    /// invoice with the same rule the outcome route applies, so the feed can never show what the route would refuse). Visible only when the invoice
-    /// passed every step (its firm is one of <paramref name="firms"/>, Read on its core record and its secure roots, and the (a') hiding decision);
-    /// Unavailable when a read or the decision faulted (retryable, fail closed); Denied otherwise, including an invoice that does not exist.
+    /// The ONE invoice rule, asked as a decision rather than a route refusal, over a BATCH of invoices (ebilling-r1 task 132: the notification feed
+    /// re-checks its candidate invoices with the same rule the outcome route applies, so the feed can never show what the route would refuse). The route
+    /// is this same code over a batch of one (<see cref="DecideInvoiceAsync"/>); nothing of the rule is copied. Each row is the invoice's
+    /// <see cref="InvoiceScopeColumnNames"/> lookups in the shape <c>ExternalDataService.GetInvoiceLookupsAsync</c> returns (a set lookup is its id, an
+    /// unset one is absent). The secure-root reads and the (a') hiding decision are each ONE call for the whole batch. Visible only when the invoice
+    /// passed every step (its firm is one of <paramref name="firms"/>, Read on its core record and its secure roots, and the hiding decision);
+    /// Unavailable when a read or the decision faulted (retryable, fail closed); Denied otherwise.
     /// </summary>
-    internal async Task<InvoiceFeedDecision> DecideInvoiceForFeedAsync(
-        CallerPrincipal principal, IReadOnlyList<Guid> firms, Guid invoiceId, CancellationToken ct)
+    internal async Task<IReadOnlyDictionary<Guid, InvoiceFeedDecision>> DecideInvoicesForFeedAsync(
+        CallerPrincipal principal, IReadOnlyList<Guid> firms,
+        IReadOnlyList<(Guid Id, IReadOnlyDictionary<string, object?> Row)> invoices, CancellationToken ct)
     {
-        var (denial, decided) = await DecideInvoiceAsync(principal, firms, invoiceId, ct).ConfigureAwait(false);
-        if (denial is null)
+        var decided = await DecideInvoiceRowsAsync(principal, firms, invoices, ct).ConfigureAwait(false);
+        var answers = new Dictionary<Guid, InvoiceFeedDecision>();
+        for (var i = 0; i < invoices.Count; i++)
         {
-            return decided ? InvoiceFeedDecision.Visible : InvoiceFeedDecision.Denied;
+            var (denial, passed) = decided[i];
+            answers[invoices[i].Id] = denial is null
+                ? (passed ? InvoiceFeedDecision.Visible : InvoiceFeedDecision.Denied)
+                : denial is IStatusCodeHttpResult { StatusCode: StatusCodes.Status503ServiceUnavailable }
+                    ? InvoiceFeedDecision.Unavailable
+                    : InvoiceFeedDecision.Denied;
         }
 
-        return denial is IStatusCodeHttpResult { StatusCode: StatusCodes.Status503ServiceUnavailable }
-            ? InvoiceFeedDecision.Unavailable
-            : InvoiceFeedDecision.Denied;
+        return answers;
     }
 
     public async ValueTask<object?> InvokeAsync(EndpointFilterInvocationContext context, EndpointFilterDelegate next)
@@ -251,27 +262,69 @@ internal sealed class FirmOutcomeAuthorizationFilter : IEndpointFilter
             return (FirmOutcomeErrors.Unavailable(), false);
         }
 
-        // The firm: a missing or malformed value names no firm, so it matches none of the caller's.
-        if (!invoice.TryGetValue("sprk_vendororg", out var firm) || firm is not Guid firmId || firmId == Guid.Empty || !firms.Contains(firmId))
+        return (await DecideInvoiceRowsAsync(principal, firms, [(invoiceId, invoice)], ct))[0];
+    }
+
+    /// <summary>
+    /// THE invoice rule over a batch of invoices (its rows already read), one answer per row in order: a refusal, or no refusal with
+    /// <c>InvoiceDecided</c> true. The route decides ONE invoice through this (<see cref="DecideInvoiceAsync"/>); the notification feed decides its
+    /// candidates through it in one go. The per-row steps (firm, core record) are in memory; the secure-root reads and the (a') hiding decision are
+    /// each one call for every row still standing.
+    /// </summary>
+    private async Task<(IResult? Denial, bool InvoiceDecided)[]> DecideInvoiceRowsAsync(
+        CallerPrincipal principal, IReadOnlyList<Guid> firms,
+        IReadOnlyList<(Guid Id, IReadOnlyDictionary<string, object?> Row)> invoices, CancellationToken ct)
+    {
+        var answers = new (IResult? Denial, bool InvoiceDecided)[invoices.Count];
+        var standing = new List<int>();
+        for (var i = 0; i < invoices.Count; i++)
         {
-            _logger.LogInformation("[EBILLING-FIRM-OUTCOME] Denied: the invoice's firm is not one of the caller's firms.");
-            return (FirmOutcomeErrors.Forbidden(), false);
+            var invoice = invoices[i].Row;
+
+            // The firm: a missing or malformed value names no firm, so it matches none of the caller's.
+            if (!invoice.TryGetValue("sprk_vendororg", out var firm) || firm is not Guid firmId || firmId == Guid.Empty || !firms.Contains(firmId))
+            {
+                _logger.LogInformation("[EBILLING-FIRM-OUTCOME] Denied: the invoice's firm is not one of the caller's firms.");
+                answers[i] = (FirmOutcomeErrors.Forbidden(), false);
+                continue;
+            }
+
+            // The core record: Read on the invoice's matter, project or work assignment (the union the invoices module and the invoice
+            // documents already apply). A value that is not a GUID grants nothing.
+            if (!HasReadableCore(principal, invoice, InvoiceCoreColumns))
+            {
+                _logger.LogInformation("[EBILLING-FIRM-OUTCOME] Denied: the caller cannot read the invoice's core record.");
+                answers[i] = (FirmOutcomeErrors.Forbidden(), false);
+                continue;
+            }
+
+            standing.Add(i);
         }
 
-        // The core record: Read on the invoice's matter, project or work assignment (the union the invoices module and the invoice
-        // documents already apply). A value that is not a GUID grants nothing.
-        if (!HasReadableCore(principal, invoice, InvoiceCoreColumns))
+        if (standing.Count == 0)
         {
-            _logger.LogInformation("[EBILLING-FIRM-OUTCOME] Denied: the caller cannot read the invoice's core record.");
-            return (FirmOutcomeErrors.Forbidden(), false);
+            return answers;
         }
 
         // The invoices module's other row rule, applied explicitly: Read on every SECURE root the invoice names (ExternalMultiRootRule, the
         // one the module registers through RequireReadOnSecureRoots). Before any projection read; the answer is the same 403.
-        var secure = await DecideSecureRootsAsync(principal, InvoiceTable, invoice, InvoiceCoreColumns, ct);
-        if (secure is not null)
+        var secure = await DecideSecureRootsAsync(principal, InvoiceTable, standing.Select(i => invoices[i].Row).ToList(), InvoiceCoreColumns, ct);
+        var visibleStanding = new List<int>();
+        for (var s = 0; s < standing.Count; s++)
         {
-            return (secure, false);
+            if (secure[s] is not null)
+            {
+                answers[standing[s]] = (secure[s], false);
+            }
+            else
+            {
+                visibleStanding.Add(standing[s]);
+            }
+        }
+
+        if (visibleStanding.Count == 0)
+        {
+            return answers;
         }
 
         // THE (a') decision every external invoice read applies: a hidden invoice is another firm's, refused and never projected. No
@@ -279,32 +332,49 @@ internal sealed class FirmOutcomeAuthorizationFilter : IEndpointFilter
         if (_hideInvoices is null)
         {
             _logger.LogError("[EBILLING-FIRM-OUTCOME] The invoice decision (ExternalInvoiceHiding) is not registered; denying (fail closed).");
-            return (FirmOutcomeErrors.Forbidden(), false);
+            foreach (var i in visibleStanding)
+            {
+                answers[i] = (FirmOutcomeErrors.Forbidden(), false);
+            }
+
+            return answers;
         }
 
+        var ids = visibleStanding.Select(i => invoices[i].Id).Distinct().ToList();
         InvoiceVisibilityResult decision;
         try
         {
-            decision = await _hideInvoices(principal, [invoiceId], ct).ConfigureAwait(false);
+            decision = await _hideInvoices(principal, ids, ct).ConfigureAwait(false);
         }
         catch (Exception ex) when (!ct.IsCancellationRequested)
         {
             _logger.LogWarning(ex, "[EBILLING-FIRM-OUTCOME] The invoice visibility decision faulted; answering 503.");
-            return (FirmOutcomeErrors.Unavailable(), false);
+            foreach (var i in visibleStanding)
+            {
+                answers[i] = (FirmOutcomeErrors.Unavailable(), false);
+            }
+
+            return answers;
         }
 
-        if (decision.Faulted)
+        foreach (var i in visibleStanding)
         {
-            return (FirmOutcomeErrors.Unavailable(), false);
+            if (decision.Faulted)
+            {
+                answers[i] = (FirmOutcomeErrors.Unavailable(), false);
+            }
+            else if (!decision.IsVisible(invoices[i].Id))
+            {
+                _logger.LogInformation("[EBILLING-FIRM-OUTCOME] Denied: the invoice is hidden from the caller ({Reasons}).", decision.HiddenSummary());
+                answers[i] = (FirmOutcomeErrors.Forbidden(), false);
+            }
+            else
+            {
+                answers[i] = (null, true);
+            }
         }
 
-        if (!decision.IsVisible(invoiceId))
-        {
-            _logger.LogInformation("[EBILLING-FIRM-OUTCOME] Denied: the invoice is hidden from the caller ({Reasons}).", decision.HiddenSummary());
-            return (FirmOutcomeErrors.Forbidden(), false);
-        }
-
-        return (null, true);
+        return answers;
     }
 
     /// <summary>
@@ -314,41 +384,49 @@ internal sealed class FirmOutcomeAuthorizationFilter : IEndpointFilter
     /// <see cref="ExternalMultiRootRule.ChildRowReadable"/>) over the row's core lookups (<paramref name="core"/>: project, matter, work
     /// assignment) and its parents' live roots. Null when the caller may see the record; the uniform 403 when it may not (nothing says which
     /// root); a retryable 503 when the answer rests on a read that failed (fail closed). Every record decided by a core goes through here,
-    /// so a submission that has no invoice yet is checked on its own row (fix round 6).
+    /// so a submission that has no invoice yet is checked on its own row (fix round 6). Over several rows the live-parent and flag reads are each
+    /// one call (the module grid does the same for a page); the answer is per row, in order.
     /// </summary>
-    private async Task<IResult?> DecideSecureRootsAsync(
-        CallerPrincipal principal, string table, IReadOnlyDictionary<string, object?> row, CoreColumns core, CancellationToken ct)
+    private async Task<IResult?[]> DecideSecureRootsAsync(
+        CallerPrincipal principal, string table, IReadOnlyList<IReadOnlyDictionary<string, object?>> rows, CoreColumns core, CancellationToken ct)
     {
+        var answers = new IResult?[rows.Count];
         try
         {
             static string? Link(IReadOnlyDictionary<string, object?> row, string column) =>
                 !row.TryGetValue(column, out var value) || value is null ? null : value is Guid id ? id.ToString() : value.ToString();
 
             var live = await _data.ReadLiveParentRootsAsync(
-                [ExternalMultiRootRule.LiveParentsOf(table, row)], ct);
-            var rule = ChildRowRoots.Of(
+                rows.Select(row => ExternalMultiRootRule.LiveParentsOf(table, row)).ToList(), ct);
+            var rules = rows.Select(row => ChildRowRoots.Of(
                 table, row,
                 ExternalMultiRootRule.Stamps(Link(row, core.Project), Link(row, core.Matter), Link(row, core.WorkAssignment)),
-                live);
-            var flags = await _data.ReadSecureRootFlagsAsync(principal, [(IEnumerable<(ExternalGrantRootType, string?)>)rule], ct);
-            if (ExternalMultiRootRule.ChildRowReadable(principal, flags, rule))
+                live)).ToList();
+            var flags = await _data.ReadSecureRootFlagsAsync(principal, rules.Select(r => (IEnumerable<(ExternalGrantRootType, string?)>)r).ToList(), ct);
+            for (var i = 0; i < rows.Count; i++)
             {
-                return null;
+                if (ExternalMultiRootRule.ChildRowReadable(principal, flags, rules[i]))
+                {
+                    continue;
+                }
+
+                if (live.Faulted || !flags.IsComplete)
+                {
+                    _logger.LogError("[EBILLING-FIRM-OUTCOME] SYSTEM FAILURE: the record's secure-root status could not be read; answering 503.");
+                    answers[i] = FirmOutcomeErrors.Unavailable();
+                    continue;
+                }
+
+                _logger.LogInformation("[EBILLING-FIRM-OUTCOME] Denied: the record names a root the caller cannot read.");
+                answers[i] = FirmOutcomeErrors.Forbidden();
             }
 
-            if (live.Faulted || !flags.IsComplete)
-            {
-                _logger.LogError("[EBILLING-FIRM-OUTCOME] SYSTEM FAILURE: the record's secure-root status could not be read; answering 503.");
-                return FirmOutcomeErrors.Unavailable();
-            }
-
-            _logger.LogInformation("[EBILLING-FIRM-OUTCOME] Denied: the record names a root the caller cannot read.");
-            return FirmOutcomeErrors.Forbidden();
+            return answers;
         }
         catch (Exception ex) when (!ct.IsCancellationRequested)
         {
             _logger.LogError(ex, "[EBILLING-FIRM-OUTCOME] SYSTEM FAILURE: the record's secure-root status could not be read; answering 503.");
-            return FirmOutcomeErrors.Unavailable();
+            return rows.Select(_ => (IResult?)FirmOutcomeErrors.Unavailable()).ToArray();
         }
     }
 
@@ -444,7 +522,7 @@ internal sealed class FirmOutcomeAuthorizationFilter : IEndpointFilter
             return (FirmOutcomeErrors.Forbidden(), false);
         }
 
-        var secure = await DecideSecureRootsAsync(principal, SubmissionTable, row, SubmissionCoreColumns, ct);
+        var secure = (await DecideSecureRootsAsync(principal, SubmissionTable, [row], SubmissionCoreColumns, ct))[0];
         if (secure is not null)
         {
             return (secure, false);
