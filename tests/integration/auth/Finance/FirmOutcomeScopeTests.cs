@@ -565,6 +565,117 @@ public sealed class FirmOutcomeScopeTests : IAsyncLifetime
 
     private async Task<InvoiceFeedDecision> FeedDecision(Guid invoice) => (await FeedDecisions([invoice]))[invoice];
 
+    // ── Task 132 round 4 (uac-r2 F2): the feed's PRODUCTION row conversion, end to end ──
+    //
+    // FeedDecisions above hands the filter rows already in the route's shape, and EbillingFeedSourceTests replaces the decision with a double, so
+    // neither drives the production chain: EbillingFeedSource.CandidateQuery's columns -> the SDK entity the store returns (ONLY those columns, lookups
+    // as EntityReference) -> ScopeRowOf (EntityReference -> Guid) -> FirmOutcomeAuthorizationFilter.DecideInvoicesForFeedAsync. Here the feed is built
+    // through its DI constructor, so its REAL decision runs over this rig, and the store projects the real query's ColumnSet as Dataverse does.
+
+    private static readonly Guid FeedLiveParent = Guid.Parse("13000000-0000-4000-8000-00000000dd01");
+    private static readonly DateTimeOffset FeedCutoff = new(2026, 10, 1, 0, 0, 0, TimeSpan.Zero);
+
+    /// <summary>The live-parent lookup columns of an invoice (the lookups whose parents' live roots join the secure-roots rule), one theory case each.</summary>
+    public static IEnumerable<object[]> InvoiceLiveParentColumns() =>
+        ExternalMultiRootRule.LiveParentLookupsOf("sprk_invoice").Select(l => new object[] { l.Column });
+
+    /// <summary>
+    /// A stored invoice as the SDK holds it (every lookup an <see cref="EntityReference"/>): the caller's own Rejected invoice of <see cref="FirmA"/>, filed
+    /// under the readable matter, whose ONLY secure root is <see cref="SecureProject"/>, reached through the live-parent lookup <paramref name="liveParentColumn"/>.
+    /// </summary>
+    private Entity StoredInvoiceUnderALiveParent(string liveParentColumn)
+    {
+        var lookup = ExternalMultiRootRule.LiveParentLookupsOf("sprk_invoice").Single(l => l.Column == liveParentColumn);
+        _data.LiveRoots[(lookup.Table, FeedLiveParent)] = [(ExternalGrantRootType.Project, SecureProject)];
+
+        return new Entity("sprk_invoice", Guid.NewGuid())
+        {
+            ["statuscode"] = new OptionSetValue(InvoiceStatusCodes.Rejected),
+            ["modifiedon"] = new DateTime(2026, 10, 10, 9, 0, 0, DateTimeKind.Utc),
+            ["sprk_name"] = "INV-1",
+            ["sprk_vendororg"] = new EntityReference("sprk_organization", FirmA),
+            ["sprk_submittedby"] = new EntityReference("contact", ContactId),
+            ["sprk_matter"] = new EntityReference("sprk_matter", SharedMatter),
+            [liveParentColumn] = new EntityReference(lookup.Table, FeedLiveParent),
+        };
+    }
+
+    /// <summary>The feed over this rig through its production constructor: its real firm read, candidate read, decision and projection.</summary>
+    private EbillingFeedSource ProductionFeed(IReadOnlyList<Entity> storedInvoices, List<QueryExpression>? candidateQueries = null)
+    {
+        var store = new Mock<IGenericEntityService>(MockBehavior.Strict);
+        store.Setup(e => e.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((QueryExpression query, CancellationToken _) =>
+            {
+                switch (query.EntityName)
+                {
+                    case "sprk_invoice":
+                        candidateQueries?.Add(query);
+
+                        // Dataverse returns only the requested columns: a column the query did not name is absent from the entity.
+                        return new EntityCollection(storedInvoices.Select(r => Requested(r, query.ColumnSet)).ToList());
+                    case "sprk_organization":
+                        return new EntityCollection(); // the caller is the submitter, not a billing contact
+                    default:
+                        throw new InvalidOperationException($"Unexpected read of {query.EntityName}");
+                }
+            });
+
+        ExternalInvoiceHiding hide = (_, ids, _) => Task.FromResult(new InvoiceVisibilityResult(ids, new Dictionary<Guid, InvoiceHiddenReason>(), faulted: false));
+        return new EbillingFeedSource(
+            store.Object, _participations, _data, _h.Build(), Projection(), _h.Monitor,
+            NullLogger<EbillingFeedSource>.Instance, NullLogger<FirmOutcomeAuthorizationFilter>.Instance, hide, null);
+    }
+
+    /// <summary>The caller of the portal: Read on the shared matter, and (when given) Read on the secure project too.</summary>
+    private static CallerPrincipal ContactReadingProject(Guid? project) => new()
+    {
+        Plane = CallerPrincipalPlane.CiamContact,
+        ContactId = ContactId,
+        ProjectAccess = project is { } id ? [new CallerProjectAccess { ProjectId = id, Rights = AccessRights.Read }] : Array.Empty<CallerProjectAccess>(),
+        MatterAccess = new Dictionary<Guid, AccessRights> { [SharedMatter] = AccessRights.Read },
+    };
+
+    [Theory(DisplayName = "132 round-4 F2 (must-fire): through the PRODUCTION feed, an invoice whose ONLY secure root is reached through a live-parent lookup the caller cannot read is Denied (not an item)")]
+    [MemberData(nameof(InvoiceLiveParentColumns))]
+    public async Task ProductionFeed_InvoiceUnderAnUnreadableSecureRootViaALiveParent_IsNotAnItem(string liveParentColumn)
+    {
+        var invoice = StoredInvoiceUnderALiveParent(liveParentColumn);
+        var feed = ProductionFeed([invoice]);
+
+        var result = await feed.ReadAsync(ContactReadingProject(null), FeedCutoff, CancellationToken.None);
+
+        result.Items.Should().BeEmpty("the secure project behind the live parent is not readable by the caller");
+        result.Truncated.Should().BeFalse("Denied is a settled decision, not an undecidable read");
+        _data.FlagReads.Should().Be(1, "the secure status of the live parent's root was asked, so the refusal came from the live-parent lookup, not from an earlier step");
+    }
+
+    [Theory(DisplayName = "132 round-4 F2 (must-not-fire twin): through the PRODUCTION feed, the same invoice is an item when the caller CAN read that secure root")]
+    [MemberData(nameof(InvoiceLiveParentColumns))]
+    public async Task ProductionFeed_SameInvoice_WhenTheCallerReadsTheSecureRoot_IsAnItem(string liveParentColumn)
+    {
+        var invoice = StoredInvoiceUnderALiveParent(liveParentColumn);
+        var feed = ProductionFeed([invoice]);
+
+        var result = await feed.ReadAsync(ContactReadingProject(SecureProject), FeedCutoff, CancellationToken.None);
+
+        result.Items.Select(i => i.InvoiceId).Should().Equal(invoice.Id);
+        result.Truncated.Should().BeFalse();
+    }
+
+    [Fact(DisplayName = "132 round-4 F2: the production candidate read names every scope column of the route's invoice rule (the live-parent lookups included), and the stored invoice is read through them")]
+    public async Task ProductionFeed_CandidateRead_NamesEveryScopeColumnOfTheRoutesRule()
+    {
+        var column = ExternalMultiRootRule.LiveParentLookupsOf("sprk_invoice")[0].Column;
+        var queries = new List<QueryExpression>();
+        var feed = ProductionFeed([StoredInvoiceUnderALiveParent(column)], queries);
+
+        await feed.ReadAsync(ContactReadingProject(SecureProject), FeedCutoff, CancellationToken.None);
+
+        queries.Should().ContainSingle();
+        queries[0].ColumnSet.Columns.Should().Contain(FirmOutcomeAuthorizationFilter.InvoiceScopeColumnNames);
+    }
+
     // ── Task 132 review round 2 (D-70): the same rule, asked for a firm-notice RECIPIENT, for one subject ──
 
     private async Task<InvoiceFeedDecision> NoticeDecision(FirmOutcomeSubject subject, Guid subjectId, CallerPrincipal? caller = null, IReadOnlyList<Guid>? firms = null)

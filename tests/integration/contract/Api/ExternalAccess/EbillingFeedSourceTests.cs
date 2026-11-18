@@ -634,4 +634,16 @@ public sealed class EbillingFeedSourceTests
         FirmOutcomeAuthorizationFilter.InvoiceScopeColumnNames.Should().OnlyContain(c => read.Contains(c), "the access rule's own columns ride on the candidate read");
         read.Should().NotContain("sprk_name", "the title is read by the feed's own title step, not by the candidate query");
     }
+
+    [Fact(DisplayName = "132 round-4 F2: the candidate columns contain every InvoiceScopeColumnNames entry of the route's rule, the live-parent lookups of an invoice among them")]
+    public void CandidateColumns_ContainEveryScopeColumnOfTheRoutesInvoiceRule()
+    {
+        var columns = EbillingFeedSource.CandidateColumns();
+
+        columns.Should().Contain(FirmOutcomeAuthorizationFilter.InvoiceScopeColumnNames);
+        var liveParents = ExternalMultiRootRule.LiveParentLookupsOf("sprk_invoice").Select(l => l.Column).ToList();
+        liveParents.Should().NotBeEmpty("an invoice has live-parent lookups; otherwise the next assertion proves nothing");
+        columns.Should().Contain(liveParents);
+        EbillingFeedSource.CandidateQuery(Me, [FirmA], [], Cutoff).ColumnSet.Columns.Should().Contain(columns);
+    }
 }
