@@ -206,6 +206,9 @@ To begin: `work on task 001`. Wave W0-1 (001, 002, 003) and W2-1 (040, 041) have
 | 130e-2 | ✅ [merged into work 58dcc56689; review + 2 fix rounds; server validator: Turkish i fold + default-ignorables refused (ontology-r1 PASS); ISS-033 filed] | Rule Review editor: firm description field with the "firms see this" notice | STANDARD | sonnet / high | none | 130e-1 |
 | 130 | ✅ [delivered by 130-0, 130-0b, 130a, 130b, 130c, 130d, 130e-1, 130e-2 (all merged; EB-D-202 In Review lines covered, notes/130-firm-findings-projection.md)] | Firm-visible findings projection (clause quotes, visibility filtering) | FULL | sonnet / high | none | 019, 049, 100, 083 |
 | 131 | ✅ [merged into work; dev seed (EB-D-256 approved) waits for a dev BFF containing 131] | Firm notice Action `INVOICE-FIRM-NOTICE@v1` with template fallback | STANDARD | sonnet / high | P5-B | 041, 130 |
+| 130f | 🟡 [wip] | Firm view: Rejected / Returned invoices show their line findings (EB-D-259) | FULL | sonnet / high | none | 130, 131 |
+| 130g | 🔲 [open; after 132] | Firm view: show the reviewer-confirmed notice prose as the firm-safe reason (EB-D-259) | STANDARD | sonnet / high | none | 130f, 132 |
+| 132ui | 🔲 [open; after 132] | Invoice Review notify step: see, edit and confirm the 131 notice before Reject / Return (EB-D-258) | FULL | sonnet / high | none | 132 |
 | 132 | 🔲 [open; amended by EB-D-254: the notice email carries the findings table, no attachment] | Notifications: email, SPA feed, approver in-app | STANDARD | sonnet / high | none | 131, 024, 103, 104 |
 | 133 | ⏭️ [withdrawn by EB-D-254 (owner option b): no PDF file in R1; on-screen report (134, printable) and the findings table in the notice email (131/132)] | Adjustment report PDF | STANDARD | sonnet / high | P5-B | 130, 028 |
 | 134 | 🔲 [open] | SPA invoice detail and on-screen report | STANDARD | sonnet / high | P5-B | 130 |
