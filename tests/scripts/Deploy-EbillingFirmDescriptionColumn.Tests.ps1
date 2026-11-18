@@ -213,7 +213,7 @@ Describe 'The script text: what only runs live' {
 
     It 'publishes sprk_policyversion only, never the tenant-wide publish' {
         $script:Text | Should -Match '<entities><entity>\$Table</entity></entities>'
-        $script:Text | Should -Not -Match 'PublishAllXml'
+        # The tenant-wide publish is banned repo-wide by the D-83 lint in Publish-SolutionComponents.Tests.ps1, which greps this script too.
     }
 
     It 'refuses to run without a mode, and keeps -Verify separate from -WhatIf and -Apply' {

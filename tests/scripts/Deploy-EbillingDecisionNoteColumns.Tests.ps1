@@ -269,7 +269,7 @@ Describe 'The script text: what only runs live' {
 
     It 'publishes through the two-table helper only, never the tenant-wide publish' {
         $script:Text | Should -Match 'ParameterXml = \(Get-PublishParameterXml \$ColumnSpecs\)'
-        $script:Text | Should -Not -Match 'PublishAllXml'
+        # The tenant-wide publish is banned repo-wide by the D-83 lint in Publish-SolutionComponents.Tests.ps1, which greps this script too.
     }
 
     It 'builds no request of its own (no Invoke-RestMethod, no headers)' {
