@@ -28,6 +28,9 @@ function App() {
         bffBaseUrl={b.bffBaseUrl}
         initialAssociation={b.initialAssociation}
         lockAssociation={b.lockAssociation}
+        // "Submit corrected invoice" on Invoice Review opens this page with `correctionInvoiceId` (task 095f-2e2b): the invoice to replace.
+        // Absent: the new-invoice wizard, exactly as before.
+        correctionInvoiceId={b.params.correctionInvoiceId}
       />
     </FluentProvider>
   );

@@ -47,6 +47,12 @@ public static class FromEmailSubmissionErrors
     /// accepted is answered as a replay) and before the communication is read or anything is saved, so a refusal writes nothing.
     /// </summary>
     public const string CorrectionNoteRequired = "ebilling.submission.correction_note_required";
+
+    /// <summary>
+    /// The detail of <see cref="CorrectionNoteRequired"/>, shared by every route that refuses a Correction with no note (from-email and,
+    /// task 095f-2e1, from-document), so the text has one source.
+    /// </summary>
+    public const string CorrectionNoteRequiredDetail = "A correction needs a note saying why the invoice is corrected.";
 }
 
 /// <summary>The <c>reason</c> values of 400 <see cref="FromEmailSubmissionErrors.MarksInvalid"/> (contract section 6).</summary>

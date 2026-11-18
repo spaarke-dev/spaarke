@@ -109,13 +109,27 @@ public sealed class InvoiceReviewDetailWritersGuardTests
     public void TheOverrideReleaseDerivesThroughOpenHolds()
     {
         var types = IlCallScan.WithNested(typeof(SubmissionOverrideService));
-        var key = $"{typeof(SubmissionOverrideService).FullName}::DecideLockedAsync";
+        var service = typeof(SubmissionOverrideService).FullName;
+        var key = $"{service}::DecideLockedAsync";
+        // 095f-2c re-check F2: the release retry (ReReadInvoiceForReleaseAsync) derives the detail again, so both the first attempt and the retry go
+        // through the ONE derivation ReasonsAfterReleaseAsync, which alone calls InvoiceOpenHolds.ReasonsAfterAsync: a second copy cannot drift.
+        const string Derivation = "ReasonsAfterReleaseAsync";
+        var retry = $"{service}::ReReadInvoiceForReleaseAsync";
 
         Assert.True(MethodsCallingReviewDetailOf(types).Contains(key),
             "The Override release writes the review detail, so it must derive it with InvoiceReviewDetail.ReviewDetailOf in DecideLockedAsync (D-205 writer 5).");
-        Assert.True(MethodsCallingOpenHolds(types).Contains(key),
+        Assert.True(MethodsCallingReviewDetailOf(types).Contains(retry),
+            "The release retry re-derives the review detail, so ReReadInvoiceForReleaseAsync must call InvoiceReviewDetail.ReviewDetailOf (D-205 writer 5).");
+        Assert.True(MethodsCallingOpenHolds(types).SetEquals([$"{service}::{Derivation}"]),
             "The Override release must derive the detail from the holds that remain through InvoiceOpenHolds.ReasonsAfterAsync (the one derivation approval "
-            + "agrees with), never from one hold alone: a label that is blank while approval refuses is the defect that derivation exists to prevent.");
+            + "agrees with), never from one hold alone: a label that is blank while approval refuses is the defect that derivation exists to prevent. "
+            + $"Only {Derivation} may call it (the first attempt and the retry both go through it); callers now: {string.Join(", ", MethodsCallingOpenHolds(types))}");
+        var derivationCallers = IlCallScan.MethodReferences(types)
+            .Where(r => r.Target.Name == Derivation && r.Target.DeclaringType == typeof(SubmissionOverrideService))
+            .Select(r => Key((IlCallScan.Outermost(r.Caller), IlCallScan.SourceMethodName(r.Caller, r.CallerMethod))))
+            .ToHashSet(StringComparer.Ordinal);
+        Assert.True(derivationCallers.Contains(key) && derivationCallers.Contains(retry),
+            $"Both DecideLockedAsync and ReReadInvoiceForReleaseAsync must derive through {Derivation}; callers now: {string.Join(", ", derivationCallers)}");
 
         // Controls: a method that calls ReasonsAfterAsync is seen; one that does not, is not.
         Assert.Contains(Key((typeof(OpenHoldsDeriverControlFixture), nameof(OpenHoldsDeriverControlFixture.Derive))),

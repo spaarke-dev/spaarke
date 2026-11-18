@@ -1836,37 +1836,56 @@ public class ExternalDataService
     }
 
     /// <summary>
-    /// The display names of the given project / matter / work-assignment records (their primary name columns, the same
-    /// ones the to-do regarding stamp reads), app-only and chunked. An entity outside those three yields an empty,
-    /// incomplete answer.
+    /// The display names of the given project / matter / work-assignment / invoice records (their primary name columns: for the
+    /// first three the same ones the to-do regarding stamp reads; an invoice's is its <c>sprk_name</c>, a column the external invoice
+    /// module already releases), app-only and chunked. An entity outside those four yields an empty, incomplete answer.
     /// </summary>
     public virtual async Task<RecordNamesRead> GetRecordNamesAsync(
         string entityLogicalName, IReadOnlyCollection<Guid> ids, CancellationToken ct = default)
     {
-        var binding = RootBindings.Values.FirstOrDefault(
-            b => string.Equals(b.EntityLogicalName, entityLogicalName, StringComparison.OrdinalIgnoreCase));
+        var binding = NameBindingFor(entityLogicalName);
         var idList = ids.Where(id => id != Guid.Empty).Distinct().Select(id => id.ToString("D")).ToList();
         if (binding is null)
             return new RecordNamesRead(new Dictionary<Guid, string?>(), Complete: idList.Count == 0);
         if (idList.Count == 0)
             return new RecordNamesRead(new Dictionary<Guid, string?>(), Complete: true);
 
-        var idColumn = binding.EntityLogicalName + "id";
+        var idColumn = binding.Value.EntityLogicalName + "id";
         var read = await GetByIdsAsync<Dictionary<string, JsonElement>>(
-            binding.EntitySet, idColumn, idList, $"{idColumn},{binding.DisplayNameAttribute}", $"{idColumn} asc", ct);
+            binding.Value.EntitySet, idColumn, idList, $"{idColumn},{binding.Value.DisplayNameAttribute}", $"{idColumn} asc", ct);
 
         var names = new Dictionary<Guid, string?>();
         foreach (var row in read.Rows)
         {
             if (GuidValue(row, idColumn) is { } id)
             {
-                names[id] = row.TryGetValue(binding.DisplayNameAttribute, out var value) && value.ValueKind == JsonValueKind.String
+                names[id] = row.TryGetValue(binding.Value.DisplayNameAttribute, out var value) && value.ValueKind == JsonValueKind.String
                     ? value.GetString()
                     : null;
             }
         }
 
         return new RecordNamesRead(names, Complete: !read.Truncated);
+    }
+
+    /// <summary>The invoice's name column, the title of an invoice item on the notification feed (<c>sprk_name</c>; in the external invoice module's ReadableColumns).</summary>
+    internal const string InvoiceNameColumn = "sprk_name";
+
+    /// <summary>How one entity's display name is read: its logical name, entity set and the name column.</summary>
+    private readonly record struct NameBinding(string EntityLogicalName, string EntitySet, string DisplayNameAttribute);
+
+    /// <summary>
+    /// The name binding of an entity the notification feed titles: the three A-9 roots (their <see cref="RootBindings"/>) and the invoice
+    /// (ebilling-r1 task 132: an eBilling item is titled by the invoice's own <c>sprk_name</c>). Null for any other entity.
+    /// </summary>
+    private static NameBinding? NameBindingFor(string entityLogicalName)
+    {
+        if (string.Equals("sprk_invoice", entityLogicalName, StringComparison.OrdinalIgnoreCase))
+            return new NameBinding("sprk_invoice", "sprk_invoices", InvoiceNameColumn);
+
+        var root = RootBindings.Values.FirstOrDefault(
+            b => string.Equals(b.EntityLogicalName, entityLogicalName, StringComparison.OrdinalIgnoreCase));
+        return root is null ? null : new NameBinding(root.EntityLogicalName, root.EntitySet, root.DisplayNameAttribute);
     }
 
     /// <summary>An app-only Dataverse read could not be completed (not a 404): the caller reports it as a 503.</summary>

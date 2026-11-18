@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
@@ -6,6 +7,7 @@ using Spaarke.Dataverse;
 using Sprk.Bff.Api.Services.Finance.Procedures;
 using Sprk.Bff.Api.Services.Finance.Submission;
 using Sprk.Bff.Api.Services.Signals;
+using Sprk.Bff.Api.Services.Signals.Billing;
 
 namespace Sprk.Bff.Api.Services.Finance;
 
@@ -70,7 +72,7 @@ public enum FirmOutcomeDecision
 }
 
 /// <summary>
-/// The firm-visible outcome of one invoice or submission. <see cref="ApprovedTotal"/> is null for a state that has not been decided.
+/// The firm-visible outcome of one invoice or submission. <see cref="ApprovedTotal"/> is null for every state that has no approval: a submission, an invoice In Review, Rejected or Returned to firm.
 /// <see cref="Degraded"/> is true when a read did not complete: the outcome then carries the status only (fail closed).
 /// </summary>
 /// <param name="TrackingNumber">The tracking number the firm was given on submission.</param>
@@ -146,8 +148,9 @@ public sealed record FirmOutcomeAdjustment(string Method, decimal? Value, decima
 
 /// <summary>
 /// The rule behind an item, shown ONLY as the policy's firm flag publishes it (130b fix round 2): the clause reader returned text for this
-/// version on this invoice (the rule set's visible-to-firms flag on AND the invoice's snapshot applied the version) and the rule is not an
-/// InternalStandard Procedure's. Otherwise (flag off, flag unreadable, no snapshot, an InternalStandard rule) there is no citation at all: no
+/// version on this invoice (the rule set's visible-to-firms flag on AND the invoice's snapshot applied the version; for a record rule set the
+/// record set's flag AND every base set's flag, and no base an InternalStandard Procedure's, <c>RuleSetClauseVisibility.VisibleToFirms</c>)
+/// and the rule is not an InternalStandard Procedure's. Otherwise (flag off, flag unreadable, no snapshot, an InternalStandard rule) there is no citation at all: no
 /// name, no label, no clause (D-66, D-79). No member is an id of a policy, version, rule set or Procedure. The firm reason is not a citation
 /// field: it is <see cref="FirmOutcomeItem.FirmReasons"/>, shown whatever the flag says.
 /// </summary>
@@ -168,7 +171,9 @@ public delegate Task<FirmClauseText> FirmClauseReader(Guid policyVersionId, Guid
 /// <para><b>What is shown.</b> A submission Received or Processing: status and billed total only. An invoice In Review: status, billed total,
 /// its reviewer-added lines and its decided lines (Reduced, Disallowed) with the reviewer's reason; no approved total and no invoice-level
 /// adjustment (EB-D-202). Approved, Sent to AP and Paid: the same items plus the invoice-level adjustments, and the approved total. Rejected
-/// and Returned to Firm: status and billed total. Pending, Flagged, Clean, Accepted, overridden and AI-observation findings never appear: an
+/// and Returned to Firm (EB-D-259, task 130f): the SAME items as In Review, built by the same code, with the decided kind and label and the billed
+/// total; no approved total and no invoice-level adjustment. The reviewer's reject or return reason and note are never read (that Decision Record
+/// has its own action code, which no item reads). Pending, Flagged, Clean, Accepted, overridden and AI-observation findings never appear: an
 /// item exists only because a line was decided, added or adjusted by a reviewer.</para>
 /// <para><b>Where each part comes from (all read app-only).</b> The line and its status: the invoice's lines
 /// (<see cref="InvoiceReviewReadService.LineQuery"/>). The reason: the <c>reduce-line</c>, <c>disallow-line</c> or <c>add-line</c> Decision Record
@@ -180,7 +185,9 @@ public delegate Task<FirmClauseText> FirmClauseReader(Guid policyVersionId, Guid
 /// scores and Signal messages are never read into the output.</para>
 /// <para><b>Visibility rule (130b fix round 2).</b> Rule citations on a firm's line are shown only as the policy's firm flag publishes them:
 /// a citation (rule name, label, version, section reference, quote) exists only when the clause reader returned text (the rule
-/// set's flag on, the version applied by the invoice's snapshot) AND the rule is not an InternalStandard Procedure's, whatever its flag. In
+/// set's flag on, the version applied by the invoice's snapshot; for a record rule set the record set's flag AND every base set's flag, and no
+/// base an InternalStandard Procedure's, <c>RuleSetClauseVisibility.VisibleToFirms</c>) AND the rule is not an InternalStandard Procedure's,
+/// whatever its flag. In
 /// every other case, including a fault reading the flag or the Procedure's type, the citation is omitted entirely; the line, the reviewer's
 /// reason and the firm reasons (<see cref="FirmOutcomeItem.FirmReasons"/>, which are not citation fields) stay. There is no member for a Procedure Library document, container, drive item or link, nor for any policy, version, rule set or
 /// Procedure id.</para>
@@ -297,9 +304,7 @@ public sealed class FirmFindingsProjection
         switch (lifecycle)
         {
             case InvoiceLifecycleStatus.Rejected:
-                return new FirmOutcome(FirmOutcomeKind.Rejected, tracking, "Rejected", billed, null, [], false);
             case InvoiceLifecycleStatus.ReturnedToFirm:
-                return new FirmOutcome(FirmOutcomeKind.ReturnedToFirm, tracking, "Returned to firm", billed, null, [], false);
             case InvoiceLifecycleStatus.InReview:
             case InvoiceLifecycleStatus.Approved:
             case InvoiceLifecycleStatus.SentToAp:
@@ -316,10 +321,14 @@ public sealed class FirmFindingsProjection
                 return Closed(tracking, ClosedLabel);
         }
 
-        var decided = lifecycle != InvoiceLifecycleStatus.InReview;
+        // Rejected and Returned to Firm (EB-D-259, task 130f) show the In Review items by the same code below, with the decided kind and label and
+        // the billed total. They carry no approved total and no invoice-level adjustment: those belong to Approved and later.
+        var approvedOrLater = lifecycle is InvoiceLifecycleStatus.Approved or InvoiceLifecycleStatus.SentToAp or InvoiceLifecycleStatus.Paid;
         var statusOnly = lifecycle switch
         {
             InvoiceLifecycleStatus.InReview => new FirmOutcome(FirmOutcomeKind.InvoiceInReview, null, "In review", null, null, [], true),
+            InvoiceLifecycleStatus.Rejected => new FirmOutcome(FirmOutcomeKind.Rejected, null, "Rejected", null, null, [], true),
+            InvoiceLifecycleStatus.ReturnedToFirm => new FirmOutcome(FirmOutcomeKind.ReturnedToFirm, null, "Returned to firm", null, null, [], true),
             InvoiceLifecycleStatus.Approved => new FirmOutcome(FirmOutcomeKind.Approved, null, "Approved", null, null, [], true),
             InvoiceLifecycleStatus.SentToAp => new FirmOutcome(FirmOutcomeKind.SentToAp, null, "Sent to accounts payable", null, null, [], true),
             _ => new FirmOutcome(FirmOutcomeKind.Paid, null, "Paid", null, null, [], true),
@@ -328,7 +337,7 @@ public sealed class FirmFindingsProjection
         IReadOnlyList<FirmOutcomeItem> items;
         try
         {
-            items = await BuildItemsAsync(invoiceId, includeAdjustments: decided, ct).ConfigureAwait(false);
+            items = await BuildItemsAsync(invoiceId, includeAdjustments: approvedOrLater, ct).ConfigureAwait(false);
         }
         catch (Exception ex) when (IsFault(ex, ct))
         {
@@ -336,10 +345,12 @@ public sealed class FirmFindingsProjection
             return statusOnly;
         }
 
-        var approved = decided ? invoice.Approved : null;
+        var approved = approvedOrLater ? invoice.Approved : null;
         return lifecycle switch
         {
             InvoiceLifecycleStatus.InReview => new FirmOutcome(FirmOutcomeKind.InvoiceInReview, tracking, "In review", billed, null, items, false),
+            InvoiceLifecycleStatus.Rejected => new FirmOutcome(FirmOutcomeKind.Rejected, tracking, "Rejected", billed, null, items, false),
+            InvoiceLifecycleStatus.ReturnedToFirm => new FirmOutcome(FirmOutcomeKind.ReturnedToFirm, tracking, "Returned to firm", billed, null, items, false),
             InvoiceLifecycleStatus.SentToAp => new FirmOutcome(FirmOutcomeKind.SentToAp, tracking, "Sent to accounts payable", billed, approved, items, false),
             InvoiceLifecycleStatus.Paid => new FirmOutcome(FirmOutcomeKind.Paid, tracking, "Paid", billed, approved, items, false),
             _ => new FirmOutcome(
@@ -643,7 +654,9 @@ public sealed class FirmFindingsProjection
     /// <summary>
     /// The versions a firm may see cited (130b fix round 2): the clause reader published text for them (the policy's firm flag on and the
     /// invoice's snapshot applied them) AND their rule set is not an InternalStandard Procedure's, whatever that set's flag says. A rule set with
-    /// no Procedure (a legacy or a record rule set) is decided by its flag alone. Fails closed: a rule set or Procedure that cannot be read, a
+    /// no Procedure of its own (a legacy rule set) is decided by the clause reader alone; a record rule set (it has no Procedure link) is decided
+    /// there too, by the record set's flag AND every base set's flag, and not by a base that is an InternalStandard Procedure's
+    /// (<c>RuleSetClauseVisibility.VisibleToFirms</c>, ISS-038). Fails closed: a rule set or Procedure that cannot be read, a
     /// Procedure with no type, or a fault reading either, cites nothing. Reads only the rule set's Procedure link and the Procedure's type,
     /// never a name.
     /// </summary>
@@ -865,8 +878,59 @@ public sealed class FirmFindingsProjection
 
     private static readonly string[] RejectionSignalColumns =
     [
-        "sprk_policyversion", "sprk_firmreason", "sprk_regardinginvoice", "sprk_regardinginvoiceline", "createdon",
+        "sprk_policyversion", "sprk_firmreason", "sprk_regardinginvoice", "sprk_regardinginvoiceline", "createdon", "sprk_evidencerefs",
     ];
+
+    /// <summary>
+    /// The reason codes a Signal's own <c>billing.reason</c> evidence lists (task 130e-1, uac-r2 K1/Q2): an allow-list parse of
+    /// <c>sprk_evidencerefs</c> that reads ONLY the <c>ref</c> of entries whose <c>kind</c> is exactly <see cref="BillingFindingSignalMapper.ReasonEvidenceKind"/>
+    /// (any other kind can carry values and is never read here). Empty for a missing, malformed or non-array value. The caller keeps a code only
+    /// when the closed catalogue (<see cref="BillingRuleCatalogue.IsRejectCapableReason"/>) knows it for the finding's type.
+    /// </summary>
+    internal static IReadOnlySet<string> ReasonCodesOf(string? evidenceJson)
+    {
+        var codes = new HashSet<string>(StringComparer.Ordinal);
+        if (string.IsNullOrWhiteSpace(evidenceJson))
+        {
+            return codes;
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(evidenceJson);
+            if (document.RootElement.ValueKind != JsonValueKind.Array)
+            {
+                return codes;
+            }
+
+            foreach (var entry in document.RootElement.EnumerateArray())
+            {
+                if (entry.ValueKind == JsonValueKind.Object
+                    && entry.TryGetProperty("kind", out var kind) && kind.ValueKind == JsonValueKind.String
+                    && string.Equals(kind.GetString(), BillingFindingSignalMapper.ReasonEvidenceKind, StringComparison.Ordinal)
+                    && entry.TryGetProperty("ref", out var code) && code.ValueKind == JsonValueKind.String
+                    && code.GetString() is { Length: > 0 } value)
+                {
+                    codes.Add(value);
+                }
+            }
+        }
+        catch (JsonException)
+        {
+            codes.Clear();
+        }
+
+        return codes;
+    }
+
+    /// <summary>
+    /// Task 130e-1 (uac-r2 K1): the override is taken only from a Signal whose own reason evidence names THIS finding's reason code, and only
+    /// when the closed catalogue knows that code for the finding's rule type. Any other Signal of the same version and line (another reason of a
+    /// merged rule) never gives this finding its text.
+    /// </summary>
+    private static bool NamesTheFindingsReason(Entity signal, FirmRejectionFindings.Finding finding) =>
+        BillingRuleCatalogue.IsRejectCapableReason(finding.RuleType, finding.ReasonCode)
+        && ReasonCodesOf(signal.GetAttributeValue<string>("sprk_evidencerefs")).Contains(finding.ReasonCode);
 
     /// <summary>
     /// A Rejected submission's outcome: the findings that rejected it, from the submission's OWN stored findings. A fault reading them, or
@@ -965,7 +1029,8 @@ public sealed class FirmFindingsProjection
                 ? null
                 : signals
                     .Where(s => s.GetAttributeValue<EntityReference>("sprk_policyversion")?.Id == version
-                        && s.GetAttributeValue<EntityReference>("sprk_regardinginvoiceline")?.Id == lineId)
+                        && s.GetAttributeValue<EntityReference>("sprk_regardinginvoiceline")?.Id == lineId
+                        && NamesTheFindingsReason(s, finding))
                     .OrderBy(s => s.GetAttributeValue<DateTime?>("createdon")).ThenBy(s => s.Id)
                     .Select(s => FirmRejectionFindings.ShownFirmReason(s.GetAttributeValue<string>("sprk_firmreason")))
                     .FirstOrDefault(r => r is not null);

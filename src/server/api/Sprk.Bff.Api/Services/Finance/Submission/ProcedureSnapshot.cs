@@ -340,6 +340,7 @@ internal static class ProcedureSnapshot
 
             var procedures = new HashSet<string>(StringComparer.Ordinal);
             var gaps = 0;
+            var recordRuleBases = new Dictionary<Guid, HashSet<Guid>>();
             foreach (var resolution in resolutions)
             {
                 if (resolution is not JsonObject entry)
@@ -349,9 +350,13 @@ internal static class ProcedureSnapshot
 
                 procedures.UnionWith(Ids(entry["procedures"], "procedureId"));
                 gaps += (entry["gaps"] as JsonArray)?.Count ?? 0;
+                CollectRecordRuleBases(entry["rules"], recordRuleBases);
             }
 
-            return new StoredProcedureSnapshot(number, applied, displaced, procedures.Count, gaps);
+            return new StoredProcedureSnapshot(number, applied, displaced, procedures.Count, gaps)
+            {
+                RecordRuleBaseVersionIds = recordRuleBases.ToDictionary(p => p.Key, p => (IReadOnlyList<Guid>)p.Value.Order().ToList()),
+            };
         }
         catch (Exception ex) when (ex is InvalidOperationException or FormatException or JsonException)
         {
@@ -393,6 +398,29 @@ internal static class ProcedureSnapshot
         ["gaps"] = snapshot.GapCount,
     };
 
+    /// <summary>
+    /// ISS-038: every record rule in force on a date, by its policy version, with the base rule version its slot names (<c>recordRule.basePolicyVersionId</c>).
+    /// A record rule whose slot cannot be read records <see cref="Guid.Empty"/>, so the firm clause read fails closed for that rule alone; the rest of the
+    /// snapshot still reads (this never turns a readable snapshot into "no snapshot").
+    /// </summary>
+    private static void CollectRecordRuleBases(JsonNode? rules, Dictionary<Guid, HashSet<Guid>> bases)
+    {
+        foreach (var rule in (rules as JsonArray ?? []).OfType<JsonObject>())
+        {
+            if (rule["recordRule"] is not JsonObject slot || !Guid.TryParse(Text(rule, "policyVersionId"), out var versionId))
+            {
+                continue;
+            }
+
+            if (!bases.TryGetValue(versionId, out var set))
+            {
+                bases[versionId] = set = [];
+            }
+
+            set.Add(Guid.TryParse(Text(slot, "basePolicyVersionId"), out var baseVersionId) ? baseVersionId : Guid.Empty);
+        }
+    }
+
     private static bool HasSubject(JsonNode? subjects) =>
         subjects is JsonObject s && (s["invoice"]?.GetValue<bool>() == true || (s["lines"] as JsonArray)?.Count > 0);
 
@@ -412,11 +440,18 @@ internal static class ProcedureSnapshot
 internal sealed record StoredProcedureSnapshot(
     int Version, IReadOnlyList<Guid> AppliedPolicyVersionIds, IReadOnlyList<Guid> DisplacedPolicyVersionIds, int ProcedureCount, int GapCount)
 {
+    /// <summary>
+    /// ISS-038: each record rule version the snapshot holds in force, with the base rule version(s) its slot named (one per distinct base across the
+    /// dates; <see cref="Guid.Empty"/> for a slot that could not be read). A record rule version absent here has no base on record: the firm clause
+    /// read treats it as not visible. Read by <c>RuleSetService.GetFirmClauseAsync</c> only.
+    /// </summary>
+    public IReadOnlyDictionary<Guid, IReadOnlyList<Guid>> RecordRuleBaseVersionIds { get; init; } = new Dictionary<Guid, IReadOnlyList<Guid>>();
+
     private bool PrintMembers(System.Text.StringBuilder builder)
     {
         builder.Append("Version = ").Append(Version).Append(", Applied = ").Append(AppliedPolicyVersionIds.Count)
             .Append(", Displaced = ").Append(DisplacedPolicyVersionIds.Count).Append(", Procedures = ").Append(ProcedureCount)
-            .Append(", Gaps = ").Append(GapCount);
+            .Append(", Gaps = ").Append(GapCount).Append(", RecordRules = ").Append(RecordRuleBaseVersionIds.Count);
         return true;
     }
 }

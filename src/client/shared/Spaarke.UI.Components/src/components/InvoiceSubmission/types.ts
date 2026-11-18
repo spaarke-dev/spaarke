@@ -65,6 +65,38 @@ export interface InvoiceSubmissionInput {
    * for everyone else. The server still checks it is one of the caller's own firms (403 otherwise).
    */
   firmId?: string;
+  /**
+   * Set only for a corrected invoice (ebilling-r1 095f-2e2b): the invoice this submission replaces and why. The host sends
+   * `mode=Correction`, `invoiceId` and `correctionNote`. Absent for a new invoice, which sends none of the three.
+   */
+  correction?: InvoiceSubmissionCorrectionInput;
+}
+
+/** The correction part of {@link InvoiceSubmissionInput}. */
+export interface InvoiceSubmissionCorrectionInput {
+  /** The invoice being replaced. */
+  invoiceId: string;
+  /** Why the invoice is corrected: required, already trimmed and non-empty. */
+  note: string;
+}
+
+/**
+ * The invoice a corrected submission replaces, as the host read it (the correction prefill of the BFF). The wizard prefills the firm
+ * invoice number from it, fixes the record and the firm to it, asks for the note, and hands `invoiceId` and the note to `submit`.
+ */
+export interface InvoiceCorrectionTarget {
+  /** The invoice being replaced. */
+  invoiceId: string;
+  /** Its firm invoice number: a correction keeps it (the server refuses another). */
+  firmInvoiceNumber: string;
+  /** Its one core record: the correction is for this record only. */
+  record: InvoiceCoreRecordOption;
+  /** Its firm: the correction keeps the firm (the server refuses another), so there is no firm step. */
+  firmId: string;
+  /** The firm's display name, for the summary. */
+  firmName?: string;
+  /** The tracking number of the invoice's own submission, when it has one. */
+  trackingNumber?: string | null;
 }
 
 /**
@@ -147,13 +179,16 @@ export class InvoiceSubmissionError extends Error {
   readonly errorCode?: string;
   /** The ProblemDetails `detail`: the server's own user-facing sentence. */
   readonly detail?: string;
+  /** The ProblemDetails `reason` extension: a 409 `correction_not_allowed` says why (`invoice_status`, `different_firm`, ...). */
+  readonly reason?: string;
 
-  constructor(init: { message?: string; statusCode?: number; errorCode?: string; detail?: string }) {
+  constructor(init: { message?: string; statusCode?: number; errorCode?: string; detail?: string; reason?: string }) {
     super(init.message ?? init.detail ?? 'The invoice submission request failed.');
     this.name = 'InvoiceSubmissionError';
     this.statusCode = init.statusCode;
     this.errorCode = init.errorCode;
     this.detail = init.detail;
+    if (init.reason !== undefined) this.reason = init.reason;
   }
 }
 
@@ -162,6 +197,19 @@ export const EBILLING_DISABLED_ERROR_CODE = 'ebilling.disabled';
 
 /** The `errorCode` of "the caller has several firms and none was named" (400). The wizard answers it by asking for the firms again. */
 export const FIRM_REQUIRED_ERROR_CODE = 'ebilling.submission.firm_required';
+
+/** The `errorCode` of a Correction with no note (400). The wizard holds Submit off without a note; this is the server's backstop. */
+export const CORRECTION_NOTE_REQUIRED_ERROR_CODE = 'ebilling.submission.correction_note_required';
+
+/** The `errorCode` of a Correction the intake refuses (409); the `reason` extension says why. Nothing was saved. */
+export const CORRECTION_NOT_ALLOWED_ERROR_CODE = 'ebilling.submission.correction_not_allowed';
+
+/**
+ * Client-side wording only (as `NO_FIRM_LINKED_ERROR_CODE` of the internal host): the server answers a Correction of an invoice the caller
+ * cannot write, or that does not exist, with one uniform 404 that carries no `errorCode`. The internal host gives that answer this code so
+ * the screen says what happened to the correction, not "that submission was not found".
+ */
+export const CORRECTION_UNAVAILABLE_ERROR_CODE = 'ebilling.submission.correction_unavailable';
 
 /** True for the 503 `ebilling.disabled` answer, and for nothing else (an outage 503 carries another code). */
 export function isEbillingDisabledError(err: unknown): boolean {

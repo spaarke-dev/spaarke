@@ -20,7 +20,6 @@ public sealed partial class SecureChildOwnershipAiToolTests
     {
         { "sprk_invoiceapproval", "sprk_invoice" },
         { "sprk_invoicesubmission", "sprk_invoice" },
-        { "sprk_invoicecorrection", "sprk_invoice" },
         { "sprk_externalidentifier", InvoiceFamilyCoreRecordGuard.ExternalIdentifierInvoiceColumn },
     };
 
@@ -118,8 +117,7 @@ public sealed partial class SecureChildOwnershipAiToolTests
 
     [Theory]
     [InlineData("sprk_invoiceapproval")]
-    [InlineData("sprk_invoicecorrection")]
-    public async Task UpdateRecordTool_AnApprovalOrCorrectionsInvoiceCleared_IsRefusedInvoiceCleared_AndNothingIsPatched(string table)
+    public async Task UpdateRecordTool_AnApprovalsInvoiceCleared_IsRefusedInvoiceCleared_AndNothingIsPatched(string table)
     {
         InvoiceChildUnderTheMatter(table, "sprk_invoice", storedInvoice: GuardInvoice);
 

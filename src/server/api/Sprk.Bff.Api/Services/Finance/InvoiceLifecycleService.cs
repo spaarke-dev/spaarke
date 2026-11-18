@@ -247,6 +247,19 @@ public interface IInvoiceLifecycleService
     Task<InvoiceTransitionResult> TransitionAsync(Guid invoiceId, InvoiceLifecycleStatus target, CancellationToken ct = default);
 
     /// <summary>
+    /// Task 095f-2a (EB-D-236, EB-D-240): <see cref="TransitionAsync(Guid, InvoiceLifecycleStatus, CancellationToken)"/> that also writes
+    /// <paramref name="decisionNote"/> to <see cref="InvoiceCorrectionNote.DecisionColumn"/> in the SAME conditional update as the status, so the
+    /// note lands with its decision or not at all: a version conflict, a refusal or an invoice already in <paramref name="target"/> writes neither.
+    /// </summary>
+    /// <param name="invoiceId">The invoice to move.</param>
+    /// <param name="target">The status to move it to.</param>
+    /// <param name="decisionNote">The decision note, already checked by the caller (<see cref="InvoiceCorrectionNote.Check"/>); null writes no
+    /// note column (the three-argument member passes null). A note, never an open column map: the lifecycle stays the owner of the status and
+    /// writes no other caller-chosen column.</param>
+    /// <param name="ct">The cancellation token.</param>
+    Task<InvoiceTransitionResult> TransitionAsync(Guid invoiceId, InvoiceLifecycleStatus target, string? decisionNote, CancellationToken ct = default);
+
+    /// <summary>
     /// Builds, without sending, the requests that create <paramref name="invoice"/> directly in <paramref name="initialStatus"/>: today one
     /// <c>CreateRequest</c> of a copy of the row with this service's <c>statecode</c> + <c>statuscode</c> pair added. The caller places the list,
     /// in order, in its transaction. Only <see cref="InvoiceLifecycleStatus.InReview"/>
@@ -468,7 +481,11 @@ public sealed class InvoiceLifecycleService : IInvoiceLifecycleService
     }
 
     /// <inheritdoc />
-    public async Task<InvoiceTransitionResult> TransitionAsync(Guid invoiceId, InvoiceLifecycleStatus target, CancellationToken ct = default)
+    public Task<InvoiceTransitionResult> TransitionAsync(Guid invoiceId, InvoiceLifecycleStatus target, CancellationToken ct = default) =>
+        TransitionAsync(invoiceId, target, decisionNote: null, ct);
+
+    /// <inheritdoc />
+    public async Task<InvoiceTransitionResult> TransitionAsync(Guid invoiceId, InvoiceLifecycleStatus target, string? decisionNote, CancellationToken ct = default)
     {
         // Validates the target is a defined status before any read.
         var targetStatusCode = InvoiceStatusCodes.StatusCodeOf(target);
@@ -527,6 +544,12 @@ public sealed class InvoiceLifecycleService : IInvoiceLifecycleService
             if (BlanksReviewDetail(target) && await WritesReviewDetailAsync(ct).ConfigureAwait(false))
             {
                 fields[InvoiceReviewDetail.Column] = null;
+            }
+
+            // 095f-2a (EB-D-240): the decision note in this same conditional write, so a refused or concurrent move writes no note. Never logged.
+            if (decisionNote is not null)
+            {
+                fields[InvoiceCorrectionNote.DecisionColumn] = decisionNote;
             }
 
             try

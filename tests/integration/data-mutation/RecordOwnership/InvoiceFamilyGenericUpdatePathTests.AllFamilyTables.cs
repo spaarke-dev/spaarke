@@ -19,8 +19,12 @@ public partial class InvoiceFamilyGenericUpdatePathTests
 {
     private static readonly Guid FamilyRow = Guid.Parse("02200000-0000-4000-8000-0000000000b2");
 
+    // ISS-028 (EB-D-248): sprk_invoicecorrection is no longer here (nor in the other family-table lists of this class and of the chat update and
+    // create seams). It is a writer-only table (RecordTableRule.CreatedOnlyByItsWriter), so every generic path refuses it whole, before this
+    // guard runs; WriterOnlyTablesUpdateRefusalTests and SecureChildOwnershipAiToolTests.WriterOnlyTableUpdate pin that refusal. The guard
+    // itself still lists the table (InvoiceFamilyCoreRecordGuardTests).
     private static readonly string[] WidenedTables =
-        ["sprk_invoiceapproval", "sprk_externalidentifier", "sprk_invoicecorrection", "sprk_invoicesubmission"];
+        ["sprk_invoiceapproval", "sprk_externalidentifier", "sprk_invoicesubmission"];
 
     /// <summary>
     /// The app-only world of one family row filed under <see cref="Matter"/> (plus any <paramref name="extra"/> stored lookups).

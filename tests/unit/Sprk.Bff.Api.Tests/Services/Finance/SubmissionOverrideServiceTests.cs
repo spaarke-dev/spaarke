@@ -50,6 +50,14 @@ public partial class SubmissionOverrideServiceTests
         public static readonly Guid Matter = Guid.Parse("10500000-0000-4000-8000-0000000000a1");
         public static readonly Guid Caller = Guid.Parse("10500000-0000-4000-8000-0000000000c1");
         public static readonly Guid CallerContact = Guid.Parse("10500000-0000-4000-8000-0000000000c2");
+
+        /// <summary>ISS-034 (iss034a): a billing admin who is NOT the stranded decision's decider (its decider is <see cref="Caller"/>).</summary>
+        public static readonly Guid Operator = Guid.Parse("10500000-0000-4000-8000-0000000000c3");
+        public static readonly Guid OperatorContact = Guid.Parse("10500000-0000-4000-8000-0000000000c4");
+
+        /// <summary>ISS-034 review round 1 (F1): a second billing admin, who completes a finish the first operator left interrupted.</summary>
+        public static readonly Guid SecondOperator = Guid.Parse("10500000-0000-4000-8000-0000000000c5");
+        public static readonly Guid SecondOperatorContact = Guid.Parse("10500000-0000-4000-8000-0000000000c6");
         public static readonly Guid InvoiceId = InvoiceSubmissionPersister.InvoiceIdFor(SubmissionId);
         public const string Token = "caller-token";
         public static readonly DateTime CreatedOn = new(2026, 10, 20, 8, 0, 0, DateTimeKind.Utc);
@@ -66,6 +74,9 @@ public partial class SubmissionOverrideServiceTests
         public List<BillingDecision> Recorded { get; } = [];
         public List<Dictionary<string, object>> Updates { get; } = [];
         public List<InvoiceLifecycleStatus> Transitions { get; } = [];
+
+        /// <summary>095f-2c: the decision note each lifecycle transition was asked to write with the status (null = none).</summary>
+        public List<string?> TransitionNotes { get; } = [];
         public List<SubmissionDecidedNotification> Notified { get; } = [];
         public List<string> LockKeys { get; } = [];
         public HashSet<string> HeldKeys { get; } = new(StringComparer.Ordinal);
@@ -100,6 +111,13 @@ public partial class SubmissionOverrideServiceTests
 
         /// <summary>Thrown by the lookup of a decision's writer-created Decision Record (the stored-set read), as the writer throws it.</summary>
         public Exception? FindFault { get; set; }
+
+        /// <summary>ISS-031: thrown by the lookup of ONE decision id only (the other verb's record, say), as the writer throws it; null = no fault.</summary>
+        public Func<Guid, Exception?> FindFaultFor { get; set; } = _ => null;
+
+        /// <summary>ISS-034 review round 1: awaited at the start of each lookup of a decision id (null = none), so a test can see whether two
+        /// lookups run together.</summary>
+        public Func<Guid, Task>? FindGate { get; set; }
         public List<string> SignalQueries { get; } = [];
         public int FindCalls { get; set; }
 
@@ -314,11 +332,13 @@ public partial class SubmissionOverrideServiceTests
                     return Task.CompletedTask;
                 });
 
-            Lifecycle.Setup(l => l.TransitionAsync(InvoiceId, It.IsAny<InvoiceLifecycleStatus>(), It.IsAny<CancellationToken>()))
-                .Returns((Guid _, InvoiceLifecycleStatus target, CancellationToken _) =>
+            // 095f-2c: a Return passes the decision note (the note, or the reason) to the lifecycle's four-argument overload.
+            Lifecycle.Setup(l => l.TransitionAsync(InvoiceId, It.IsAny<InvoiceLifecycleStatus>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+                .Returns((Guid _, InvoiceLifecycleStatus target, string? decisionNote, CancellationToken _) =>
                 {
                     Order.Add("transition");
                     Transitions.Add(target);
+                    TransitionNotes.Add(decisionNote);
                     if (TransitionFault is { } fault)
                     {
                         return Task.FromException<InvoiceTransitionResult>(fault);
@@ -367,7 +387,8 @@ public partial class SubmissionOverrideServiceTests
                     return Task.CompletedTask;
                 });
 
-            Records = DecisionRecordWriterTests.WithBillingLookups(new DecisionRecordWriterTests.Harness());
+            // ISS-034 review round 1 (F2): every create gets its own id, as in Dataverse, so a decision's record and an operator's are told apart.
+            Records = DecisionRecordWriterTests.WithDistinctCreateIds(DecisionRecordWriterTests.WithBillingLookups(new DecisionRecordWriterTests.Harness()));
             Records.Rows[("sprk_invoice", InvoiceId)] = new Entity("sprk_invoice", InvoiceId) { ["sprk_matter"] = new EntityReference("sprk_matter", Matter) };
             foreach (var version in (outcome.Evaluation?.Findings ?? []).Select(f => f.PolicyVersionId).Distinct())
             {
@@ -377,6 +398,11 @@ public partial class SubmissionOverrideServiceTests
             var identity = new Mock<IIdentityNormalizationService>();
             identity.Setup(i => i.ResolveAsync(Caller, It.IsAny<CancellationToken>()))
                 .ReturnsAsync(new PersonIdentity(Caller, ContactId: CallerContact));
+            // ISS-034 (iss034a): the operator who finishes another person's stranded decision has a linked contact too.
+            identity.Setup(i => i.ResolveAsync(Operator, It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new PersonIdentity(Operator, ContactId: OperatorContact));
+            identity.Setup(i => i.ResolveAsync(SecondOperator, It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new PersonIdentity(SecondOperator, ContactId: SecondOperatorContact));
             Recorder = new BillingDecisionRecorder(Records.Writer, identity.Object, NullLogger<BillingDecisionRecorder>.Instance);
 
             Probe.CallerSystemUserId = Caller;
@@ -396,12 +422,20 @@ public partial class SubmissionOverrideServiceTests
                 },
                 Recorder.Preflight,
                 CloseAsync,
-                (code, invoice, decisionId, ct) =>
+                async (code, invoice, decisionId, ct) =>
                 {
                     FindCalls++;
-                    return FindFault is { } fault
-                        ? Task.FromException<DecisionRecordWriter.BillingStoredResolvedSet?>(fault)
-                        : Recorder.FindStoredResolvedSetAsync(code, invoice, decisionId, ct);
+                    if (FindGate is { } gate)
+                    {
+                        await gate(decisionId);
+                    }
+
+                    if ((FindFault ?? FindFaultFor(decisionId)) is { } fault)
+                    {
+                        throw fault;
+                    }
+
+                    return await Recorder.FindStoredResolvedSetAsync(code, invoice, decisionId, ct);
                 },
                 Clock,
                 Queue.Submitter)
@@ -700,6 +734,10 @@ public partial class SubmissionOverrideServiceTests
 
         public List<FinanceEndpointsAuthorizationContractTests.PrivilegeCall> Calls { get; } = [];
         public Exception? PrivilegeFault { get; set; }
+
+        /// <summary>ISS-034 review round 1: a fault for ONE privilege question only (null = none), so a probe of one privilege can fault while
+        /// another is answered.</summary>
+        public Func<string, Exception?> PrivilegeFaultFor { get; set; } = _ => null;
         public Exception? IdentityFault { get; set; }
         public Guid? CallerSystemUserId { get; set; }
 
@@ -725,7 +763,7 @@ public partial class SubmissionOverrideServiceTests
         public override Task<bool> CallerHoldsPrivilegeAsync(string? callerBearerToken, string privilegeName, CancellationToken ct = default)
         {
             Calls.Add(new FinanceEndpointsAuthorizationContractTests.PrivilegeCall(privilegeName, !string.IsNullOrEmpty(callerBearerToken)));
-            return PrivilegeFault is { } fault
+            return (PrivilegeFault ?? PrivilegeFaultFor(privilegeName)) is { } fault
                 ? Task.FromException<bool>(fault)
                 : Task.FromResult(!string.IsNullOrEmpty(callerBearerToken) && _held.Contains(privilegeName));
         }
@@ -1343,8 +1381,7 @@ public partial class SubmissionOverrideServiceTests
 
         retried.Kind.Should().Be(BlockedDecisionKind.Decided);
         w.RecordCreates.Should().Be(1, "the retry found the first attempt's record instead of writing another");
-        w.Recorded.Should().HaveCount(2);
-        w.Recorded.Select(d => d.DecisionId).Distinct().Should().ContainSingle();
+        w.Recorded.Should().ContainSingle("095f-2c round 1: the retry finishes from the stored record and never asks the writer to record again");
         w.Status.Should().Be(InvoiceSubmissionStatus.Accepted);
     }
 
@@ -3030,8 +3067,8 @@ public partial class SubmissionOverrideServiceTests
         };
         w.Entities.Setup(e => e.RetrieveAsync("sprk_invoice", AnotherInvoiceId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
             .Returns((string _, Guid _, string[] columns, CancellationToken _) => Task.FromResult(World.Copy(invoiceB, columns)));
-        w.Lifecycle.Setup(l => l.TransitionAsync(AnotherInvoiceId, It.IsAny<InvoiceLifecycleStatus>(), It.IsAny<CancellationToken>()))
-            .Returns((Guid _, InvoiceLifecycleStatus target, CancellationToken _) =>
+        w.Lifecycle.Setup(l => l.TransitionAsync(AnotherInvoiceId, It.IsAny<InvoiceLifecycleStatus>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .Returns((Guid _, InvoiceLifecycleStatus target, string? _, CancellationToken _) =>
             {
                 w.Order.Add("transition");
                 w.Transitions.Add(target);
@@ -3233,7 +3270,7 @@ public partial class SubmissionOverrideServiceTests
             "the version read after the Signal set was stored (our own write moved it)");
         requests[1].Target.LogicalName.Should().Be("sprk_invoice");
         requests[1].Target.RowVersion.Should().Be(invoiceVersion.ToString(System.Globalization.CultureInfo.InvariantCulture));
-        requests[1].Target.Attributes.Keys.Should().Equal([InvoiceReviewDetail.Column], "only the detail: no status, no firm");
+        requests[1].Target.Attributes.Keys.Should().BeEquivalentTo([InvoiceReviewDetail.Column, InvoiceCorrectionNote.DecisionColumn], "the detail and (095f-2c) the decision note: no status, no firm");
         requests[1].Target.Contains(InvoiceReviewDetail.Column).Should().BeTrue("a blank is written explicitly, never skipped");
         requests[1].Target.GetAttributeValue<OptionSetValue>(InvoiceReviewDetail.Column).Should().BeNull();
         w.Updates.Should().ContainSingle("the one transaction carries the submission's state");
@@ -3446,15 +3483,15 @@ public partial class SubmissionOverrideServiceTests
         returned.ErrorCode.Should().Be(BlockedSubmissionErrors.AlreadyOverridden);
     }
 
-    [Fact(DisplayName = "114: where the review detail column does not exist yet, the release still happens - the submission alone, by the single conditional write (the holds are the stored state)")]
-    public async Task Release_WhenTheDetailColumnIsMissing_StillReleases_WithoutTheInvoiceWrite()
+    [Fact(DisplayName = "114: where the review detail column does not exist yet, the release still happens - without the review detail (the holds are the stored state); 095f-2c: the invoice's decision note is still in the transaction")]
+    public async Task Release_WhenTheDetailColumnIsMissing_StillReleases_WithoutTheReviewDetail()
     {
         var w = await World.CreateHeldAsync(InvoiceSubmissionChannel.Spa, detailColumnPresent: false);
 
         var result = await w.OverrideAsync();
 
         result.Kind.Should().Be(BlockedDecisionKind.Decided);
-        w.Transactions.Should().BeEmpty();
+        InvoiceWriteOf(w).Target.Attributes.Keys.Should().Equal([InvoiceCorrectionNote.DecisionColumn], "no review detail where its column does not exist");
         w.Updates.Should().ContainSingle();
         InvoiceProcedureHold.ReasonsOf(w.Submission).Should().BeEmpty();
     }
@@ -3822,7 +3859,9 @@ public partial class SubmissionOverrideServiceTests
 
         gap.Recorded.Single().Facts.Keys.Should().BeEquivalentTo(ordinary.Recorded.Single().Facts.Keys);
         ordinary.Recorded.Single().Values!.Keys.Should().BeEquivalentTo(["submissionId", "trackingNumber"]);
-        ordinary.Transactions.Should().BeEmpty("an override that lifts no Procedure hold writes only the submission, as before");
+        // 095f-2c: every override's release transaction also carries the invoice's decision note; with no hold lifted it carries no review detail.
+        var invoiceWrite = InvoiceWriteOf(ordinary);
+        invoiceWrite.Target.Attributes.Keys.Should().Equal([InvoiceCorrectionNote.DecisionColumn], "an override that lifts no Procedure hold writes no review detail");
         ordinary.Updates.Should().ContainSingle();
     }
 

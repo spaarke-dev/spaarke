@@ -4,8 +4,10 @@
 // Task 270 (H7b S27/S28). Pins H7b's codified column lists to the other sources of the same lists, so none can drift alone:
 //   - S27 SecureRecordSetupProcedure.InvoiceFamilyLinkColumns = scripts/common/InvoiceFamilyLockedColumns.psd1 (unified-access-
 //     control-r2 #2799's ONE list, which tests/Spaarke.ArchTests/InvoiceFamilyFieldLockGuardTests pins to the BFF's
-//     InvoiceFamilyLockedWrite.LockedColumns). The package does not carry this lock yet (SpaarkeMaster 1.3.1.0); when the
-//     release that does lands, add its package rows here the way the S28 rows below check theirs.
+//     InvoiceFamilyLockedWrite.LockedColumns). The package carries this lock from SpaarkeMaster 1.3.2.0 (#2859), and
+//     tests/Spaarke.ArchTests/InvoiceFamilyFieldLockSourceGuardTests (blocking) pins it to the same psd1, both ways, at
+//     exactly S27's pass condition: IsSecured=1, Readers 4/0/0, Writers 4/4/4, no other profile. So this file pins H7b's
+//     list to the psd1 only and does not repeat that package check (the S28 rows below have no such guard to rely on).
 //   - S28 SecureRecordSetupProcedure.MessageAccessColumns + DirectRecipientColumn = scripts/Set-ThreadFlagFieldSecurity.ps1
 //     $Targets (field-mapping task 054b), and the four packaged columns are what SpaarkeMaster ships: Entity.xml IsSecured=1,
 //     Other/FieldSecurityProfiles.xml Readers 4/0/0, Writers 4/4/4, no other profile. The direct recipient is NOT packaged

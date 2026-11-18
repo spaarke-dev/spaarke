@@ -44,6 +44,9 @@ public sealed record LineDecisionLine(Guid LineId, decimal? ApprovedAmount = nul
 /// correction rows (D-64). The single-line route writes none.</param>
 /// <param name="CallerBearerToken">The caller's own token, from the request: the rights to close the lines' Signals (AppendTo on the core
 /// record, Write on each line) are asked of Dataverse AS THE CALLER with it. Null answers every rights question "no".</param>
+/// <param name="Note">Task 095f-2d1 (EB-D-236): the optional note of an individual decision (single-line and multi-line routes only). One note goes on
+/// every line's own Decision Record, as <c>Values["note"]</c>, only when non-blank; it is checked by <see cref="InvoiceCorrectionNote.Check"/>
+/// beside the reason (<see cref="ShapeError"/>). Never written to an invoice column, and always null for Accept all Clean and the approval's bulk accept.</param>
 public sealed record LineDecisionCommand(
     Guid InvoiceId,
     Guid DecisionId,
@@ -52,7 +55,8 @@ public sealed record LineDecisionCommand(
     IReadOnlyList<LineDecisionLine> Lines,
     Guid DeciderSystemUserId,
     bool Bulk,
-    string? CallerBearerToken = null);
+    string? CallerBearerToken = null,
+    string? Note = null);
 
 /// <summary>Outcome class of a decision attempt. The endpoint maps each to one HTTP status and one stable code.</summary>
 public enum LineDecisionStatus
@@ -469,7 +473,8 @@ public sealed class InvoiceLineDecisionService
             .ToHashSet();
     }
 
-    /// <summary>The request-shape rules that need no data (400). Reduce / Disallow need a reason; only Reduce takes an amount.</summary>
+    /// <summary>The request-shape rules that need no data (400). Reduce / Disallow need a reason; only Reduce takes an amount; an optional note
+    /// (095f-2d1) is refused when too long or when it holds a control character other than newline, carriage return or tab.</summary>
     internal static LineDecisionResult? ShapeError(LineDecisionCommand command, bool acceptClean)
     {
         static LineDecisionResult Bad(string code, string detail) => new(LineDecisionStatus.InvalidRequest, code, detail);
@@ -511,6 +516,13 @@ public sealed class InvoiceLineDecisionService
             {
                 return Bad(LineDecisionCodes.ReasonTooLong, $"The reason is at most {ReasonMaxLength} characters.");
             }
+        }
+
+        // 095f-2d1 (design 1.1, 5.1): the note by the one shared rule, after the reason and before any lock or read; never truncated or stripped.
+        // The refusal never echoes the note. (Accept all Clean returned above: it carries no note.)
+        if (InvoiceCorrectionNote.DecisionRefusalOf(InvoiceCorrectionNote.Check(command.Note).Refusal) is { } noteRefusal)
+        {
+            return Bad(noteRefusal.Code, noteRefusal.Detail);
         }
 
         if (command.Action == LineDecisionAction.Reduce)
@@ -907,9 +919,23 @@ public sealed class InvoiceLineDecisionService
         LineDecisionCommand command, Proposal p, DateTimeOffset decidedOn, InvoiceSubmissionAfterSteps.ResolvedSignalSet signals)
     {
         // Values are built the same way on every attempt (same keys, decimals normalised by the hash): 074 K-5.
-        IReadOnlyDictionary<string, object?>? values = p.Status == InvoiceLineStatus.Reduced
-            ? new Dictionary<string, object?> { ["approvedAmount"] = p.Approved }
-            : null;
+        // 095f-2d1 (design 1.2): the note is a value only when one is given (checked and trimmed by ShapeError already; never a null-valued key,
+        // which would hash differently from no key), so a decision without a note hashes exactly as before. One note, every line's record.
+        var note = InvoiceCorrectionNote.Check(command.Note).Value;
+        Dictionary<string, object?>? values = null;
+        if (p.Status == InvoiceLineStatus.Reduced || note is not null)
+        {
+            values = [];
+            if (p.Status == InvoiceLineStatus.Reduced)
+            {
+                values["approvedAmount"] = p.Approved;
+            }
+
+            if (note is not null)
+            {
+                values["note"] = note;
+            }
+        }
 
         // Ids, codes and amounts only (ADR-015): no narrative, no extracted text.
         var facts = new Dictionary<string, object?>

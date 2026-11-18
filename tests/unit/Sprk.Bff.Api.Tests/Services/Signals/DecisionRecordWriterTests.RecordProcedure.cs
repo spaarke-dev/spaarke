@@ -37,7 +37,8 @@ public sealed partial class DecisionRecordWriterTests
     private static readonly string[] RecordProcedureCodes =
         ["assign-procedure", "pin-procedure", "unpin-procedure", "exclude-procedure", "exclude-rule", "change-rule", "remove-override"];
 
-    private static Harness RecordProcedureHarness() => WithBillingLookups(new Harness());
+    private static Harness RecordProcedureHarness(IReadOnlySet<DecisionRecordWriter.KeyedEntry>? derivedRecordIds = null) =>
+        WithBillingLookups(new Harness(derivedRecordIds: derivedRecordIds));
 
     /// <summary>The Values the 089 service builds for each code (design section 4.1): the declared parameter codes plus the undeclared ids.
     /// The override row id is always in Values (never in the key).</summary>
@@ -193,7 +194,7 @@ public sealed partial class DecisionRecordWriterTests
         var result = await h.Writer.WriteRecordProcedureDecisionAsync(RecordProcedure(subject: new DecisionRecordRef(table, id)));
 
         result.AlreadyRecorded.Should().BeFalse();
-        result.RecordId.Should().Be(h.NewId);
+        result.RecordId.Should().Be(DecisionRecordWriter.DecisionRecordIdOf(RecordProcedureDecisionKey.IdOf(table, id, RpDecision)), "084h-5: the derived record id");
         h.Created.Should().ContainSingle();
     }
 
@@ -258,6 +259,7 @@ public sealed partial class DecisionRecordWriterTests
 
         ex.Reason.Should().Be(DecisionRecordRefusalReason.ReviewInvalid);
         ex.Message.Should().Be(DecisionRecordWriter.RecordProcedureOtherContentRefusal);
+        ex.IsOtherContent.Should().BeTrue();
         h.Created.Should().ContainSingle();
     }
 

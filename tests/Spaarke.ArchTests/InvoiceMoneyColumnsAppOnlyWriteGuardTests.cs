@@ -76,6 +76,8 @@ public sealed class InvoiceMoneyColumnsAppOnlyWriteGuardTests
         typeof(Sprk.Bff.Api.Services.Finance.Procedures.ProcedureChangeBanner), // task 113: reads the review invoice's firm (sprk_vendororg) from the row the review already read, to resolve its Procedures app-only; writes nothing
         typeof(Sprk.Bff.Api.Api.ExternalAccess.FirmOutcomeAuthorizationFilter), // task 130b: reads the route invoice's firm (sprk_vendororg) app-only to compare it with the caller's firms; writes nothing
         typeof(Sprk.Bff.Api.Api.ExternalAccess.ExternalInvoiceSubmissionAuthorizationFilter), // task 093: the firm file gate reads the route invoice's firm (sprk_vendororg) app-only to compare it with the caller's firms; writes nothing
+        typeof(Sprk.Bff.Api.Api.ExternalAccess.EbillingFeedSource), // task 132: the SPA feed filters and re-checks candidate invoices by firm (sprk_vendororg) app-only; never renders it, writes nothing
+        typeof(Sprk.Bff.Api.Services.Finance.EbillingNotificationRecipients), // task 132: the notification job reads the subject's firm (sprk_vendororg) app-only to find its billing contacts; writes nothing
     ];
 
     /// <summary>Types that hold the names in a registration: the allow-list, the generic-writer refusal and the mapping protection.</summary>

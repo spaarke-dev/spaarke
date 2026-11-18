@@ -1970,7 +1970,7 @@ K1 (ontology): a D-96 re-file across core records withholds line Duplicates perm
 
 | Field | Value |
 |---|---|
-| **Status** | In Progress (fix d7f36ddd6d on work; PR to master next) |
+| **Status** | Done (2026-11-16). Fix #2846 (c88ed7105a) live on dev BFF f451e0874d; the dev index got task 152's fields; the sweep re-run indexed all 12 invoices (uac-r2: 12 "Indexed invoice" traces, 12 distinct invoices, no exceptions). #2844 closed |
 | **Urgency** | now |
 | **Filed** | 2026-11-15, by uac-r2 (its 30-minute gate on dev BFF aa7d6345f3) |
 | **Source** | `InvoiceIndexingJobHandler` faulted on dev at 18:51:58Z |
@@ -1992,7 +1992,17 @@ Task 094 (merged 2026-10-27) removed `sprk_document` from the invoice, but `Invo
 
 **After deploy**
 
-Re-index every `sprk_invoice` with modifiedon ≥ 2026-10-27 through the normal indexing job. This writes to the dev search index, so it needs the owner's go here. Report the count and the result to uac-r2.
+Re-index every `sprk_invoice` with modifiedon ≥ 2026-10-27 through the normal indexing job: `scripts/ebilling/Invoke-EbillingInvoiceReindexSweep.ps1 -Apply` (12 invoices on dev, dry run 2026-11-15). This writes to the dev search index, so it needs the owner's go here. Report the count and the result to uac-r2.
+
+Done 2026-11-16 on the owner's go. The first `-Apply` was refused 401 with nothing sent, because the account had no Service Bus data role. The owner granted "Azure Service Bus Data Sender" on the dev namespace, and the retry queued 12 with 0 failed (correlation id `ebilling-iss022-sweep-20261116T005512Z`). uac-r2 was told before and after.
+
+**Second fault (found 2026-11-16 by uac-r2's gate)**
+
+With `sprk_document` gone, all 12 sweep jobs failed with a 400 from AI Search: `coreRecordType` is not on the index. The live dev `spaarke-invoices-index` predates task 152, which added 14 fields, all additive. `Deploy-AllIndexes.ps1 -Environment dev -Indexes invoices-index -VerifyOnly` reports 7 required fields missing. The checked-in `infrastructure/ai-search/spaarke-invoices-index.json` matches `InvoiceIndexDocument` (31 fields each), which 152's document-vs-JSON test already enforces. The index deploy was task 153's step, but 152's BFF code reached dev through master before it. The first fault hid this one, so invoice indexing on dev has not worked since 152 reached dev.
+
+- Fix (needs the owner's go here; uac-r2 notified before and after): run `Deploy-AllIndexes.ps1 -Environment dev -Indexes invoices-index` (an in-place PUT, no recreate), then `-VerifyOnly`, then re-run the sweep.
+- Guard for live vs code: no offline test can see the live index. uac-r2's post-deploy gate now runs `-VerifyOnly` across all indexes; the stronger place, inside `Deploy-BffApi.ps1`, is ISS-023 / #2849.
+- Done 2026-11-16 ~01:16Z on the owner's go: the index PUT succeeded in place, `-VerifyOnly` passes, and the sweep re-run queued 12 with 0 failed (correlation `ebilling-iss022-sweep-20261116T011634Z`). uac-r2 confirmed all 12 ran clean: 12 handler traces for 12 distinct invoices, sum(itemCount) 12, no exceptions. The search dependency telemetry shows only 3 rows because it under-counts the SDK calls; the handler traces are the authoritative count.
 
 **Known limits**
 
@@ -2000,3 +2010,370 @@ Re-index every `sprk_invoice` with modifiedon ≥ 2026-10-27 through the normal 
 - K3: `documentId` is now always null. The index field and `InvoiceSearchDocument.DocumentId` could later be removed with a schema change.
 
 ---
+
+### ISS-023 — BFF deploy should verify live AI Search indexes match their checked-in definitions
+
+| Field | Value |
+|---|---|
+| **Status** | Open. Interim: uac-r2's post-deploy gate on dev runs `Deploy-AllIndexes.ps1 -VerifyOnly` (2026-11-16) |
+| **Urgency** | next-round |
+| **Filed** | 2026-11-16 |
+| **Source** | ISS-022's second fault: the dev invoice index lacked task 152's fields while the BFF wrote them |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2849 |
+
+**Description**
+
+A BFF deploy can ship code that writes index fields the live index doesn't have. Task 152's code reached dev through master, but its additive fields waited for task 153's index deploy, so every invoice index write failed with a 400. Repo-side consistency is already tested; the gap is between the repo and the live service, which no offline test can see.
+
+**Entry-points**
+
+- `scripts/Deploy-BffApi.ps1`
+- `scripts/ai-search/Deploy-AllIndexes.ps1 -Environment <env> -VerifyOnly` (read-only; exit 0 = pass, 6 = drift)
+
+**Suggested fix**: call `-VerifyOnly` from `Deploy-BffApi.ps1` before the swap, with must-fire and must-not-fire controls.
+
+**Estimated effort**: about half a day.
+**Blockers**: none.
+**Related**: ISS-022 / #2844; task 153.
+
+---
+
+### ISS-024 — Dev BFF selects `sprk_policyversion.sprk_rejectionreason`, which was never created on dev
+
+| Field | Value |
+|---|---|
+| **Status** | Done on dev 2026-11-16 (owner "Yes, add both"; uac-r2 and ontology-r1 notified before and after): column created (Memo 2000, not secured), a read naming it returns 200; #2858 closed. SpaarkeMaster source sync is task 079 (the guard's pending list holds it) |
+| **Urgency** | now |
+| **Filed** | 2026-11-16 |
+| **Source** | uac-r2's review of 130e-1 (the guard's pending entry said "Deployed"); confirmed by a read-only metadata GET (404) and the script's -WhatIf (would create 1) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2858 |
+
+**Description**: task 077 (2026-10-18) added the column to `RuleSetService.VersionColumns`, but `Deploy-EbillingRuleRejectionReasonSchema.ps1` was never applied to dev (077 notes :91). The dev BFF (master ce6c241964) selects it, so every `VersionColumns` read (Rule Review, accept/reject, publish, copy-forward, the Procedure-version publish plan and redraft) fails on dev. This is the #2844 class. **Impact so far (uac-r2, App Insights):** no /rulesets requests on dev in 7 days, so no user has hit it yet. The dev "drafting 503" is unrelated (a package mismatch in POST /api/communications/draft, fixed by uac-r2's pending deploy). uac-r2 closed its duplicate #2857 in favour of #2858.
+
+**Entry-points**: `RuleSetService.cs` (`VersionColumns`); `scripts/ebilling/Deploy-EbillingRuleRejectionReasonSchema.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com -WhatIf`.
+
+**Suggested fix**: apply the script on dev with the owner's go, then 079 syncs SpaarkeMaster. `PolicyVersionColumnsGuardTests` (130e-1) keeps it on the pending list until then.
+
+**Estimated effort**: minutes. **Blockers**: owner go. **Related**: ISS-022 / #2844, ISS-023 / #2849, task 130e-1.
+
+---
+
+### ISS-025 — Job pipeline redelivers failed jobs back to back; repair jobs dead-letter during short outages
+
+| Field | Value |
+|---|---|
+| **Status** | Open (job platform; filed by ebilling-r1, which found it) |
+| **Urgency** | next-round |
+| **Filed** | 2026-11-17 |
+| **Source** | Opus adversarial review of task 084h-3 (`RecordProcedureDecisionJob`), finding 6 |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2876 |
+
+**Description**: `ServiceBusJobProcessor` abandons a failed job's message with no delay, so all `JobContract.MaxDeliveryCount` deliveries happen within seconds. A repair job (084h-3's `RecordProcedureDecisionJob`, ontology's `GateDecisionRecordJob`) that fails because Dataverse or Redis is down for a minute or more uses up every delivery and is dead-lettered as `MaxRetriesExceeded`; the decision is then recorded only if someone replays it by hand, and no resubmit tool exists. #2848 covers the missing dead-letter alert.
+
+**Entry-points**: `src/server/api/Sprk.Bff.Api/Services/Jobs/ServiceBusJobProcessor.cs` (retry branch: `AbandonMessageAsync(args.Message, null, ...)`); `JobContract.MaxDeliveryCount`.
+
+**Suggested fix**: on a retryable failure, complete and re-send with `ScheduledEnqueueTime` on an exponential backoff (or defer); add an operator resubmit tool by job type; coordinate with #2848.
+
+**Estimated effort**: 1-2 days. **Blockers**: none. **Related**: #2848, ADR-004, task 084h-3.
+
+---
+
+### ISS-026 — RecordProcedures page has a `lint` script but no ESLint config, and is outside client-lint
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | next-round |
+| **Filed** | 2026-11-17 |
+| **Source** | Sonnet review of task 084h-4 (found in passing; pre-existing) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2877 |
+
+**Description**: `src/solutions/RecordProcedures/package.json` declares `"lint": "eslint src --ext .ts,.tsx"`, but the folder has no ESLint config, so `npm run lint` cannot run, and `.github/workflows/client-lint.yml` does not list the page. Hooks-rule and unused-code mistakes in this page (seven wizards, the Procedures grid) reach master unchecked; 084h-4's review could not run lint at all.
+
+**Entry-points**: `src/solutions/RecordProcedures/package.json:14`; `.github/workflows/client-lint.yml:30-34,64-68` (path lists); compare a listed page such as `src/solutions/Reporting/`.
+
+**Suggested fix**: add the page to client-lint's shared config (the way Reporting and LegalWorkspace are covered), fix what it reports, and drop or repoint the local `lint` script. CI workflow edits are a hot path: coordinate with the CI owner.
+
+**Estimated effort**: half a day (unknown finding count). **Blockers**: none. **Related**: task 084h-4.
+
+---
+
+### ISS-027 — RecordProcedures Reason boxes silently cut pasted text at 2,000 characters
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | next-round |
+| **Filed** | 2026-11-17 |
+| **Source** | Sonnet review of task 084h-4 (the Note box had the same flaw and was fixed in 084h-4's fix round; the Reason boxes are pre-existing) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2878 |
+
+**Description**: the Reason textareas set `maxLength={MAX_REASON_CHARS}`. A paste longer than 2,000 characters is truncated by the browser with no message, and the cut reason is saved as the Procedure change's reason; the user never learns part of it was lost.
+
+**Entry-points**: `src/solutions/RecordProcedures/src/components/wizards/AssignProcedureWizard.tsx:417`, `ProcedureWizard.tsx:213`, `RuleWizard.tsx:300`.
+
+**Suggested fix**: do what 084h-4 did for the Note box: remove `maxLength`, show a character counter, and let the existing validation hold Finish over the limit; test that a 2,600-character paste keeps all 2,600 characters and sends nothing.
+
+**Estimated effort**: 1-2 hours. **Blockers**: merge 084h-4 first (same files). **Related**: task 084h-4.
+
+---
+
+### ISS-028 — Correction rows are not marked writer-only in the record table rules
+
+| Field | Value |
+|---|---|
+| **Status** | Open (owner question: mark the table writer-only, or keep and guard) |
+| **Urgency** | next-round |
+| **Filed** | 2026-11-17 |
+| **Source** | Opus adversarial review of task 095f-2d2 (found in passing; pre-existing) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2879 |
+
+**Description**: `sprk_invoicecorrection`'s entry in `RecordTableRules` sets neither `CreatedOnlyByItsWriter` nor `GenericCreateOnlyRefused`, unlike `sprk_decisionrecord` and `sprk_signal`. The BFF's generic record create and update paths therefore accept this table, so a row (and, since 095f-2d2, its note) can be written outside `InvoiceCorrectionService`: a later update can change a note that EB-D-242 says the first writer keeps, and a generic create can add a row carrying a label, which pollutes the D-47/D-64 calibration data. The second part predates 095f-2d2.
+
+**Entry-points**: `src/server/api/Sprk.Bff.Api/Services/RecordCreation/RecordTableRules.cs` (the `sprk_invoicecorrection` rule, ~line 437; compare the `CreatedOnlyByItsWriter = true` rules ~489-515); `InvoiceCorrectionNote.cs` (`CorrectionRowColumn` doc).
+
+**Suggested fix**: set `CreatedOnlyByItsWriter = true` on the rule (check that no generic caller writes correction rows today), with a must-fire test on the create and update refusals; or, if a generic writer must stay, a writers guard like `InvoiceDecisionNoteWritersGuardTests`.
+
+**Estimated effort**: 2-4 hours. **Blockers**: owner choice. **Related**: task 095f-2d2, EB-D-242, D-64.
+
+---
+
+### ISS-029 — Line decision repeat with other content answers 503 "repeat to complete", which can never complete
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | next-round |
+| **Filed** | 2026-11-17 |
+| **Source** | Opus adversarial review of task 095f-2d1 (extends existing behaviour for a changed reason or amount) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2880 |
+
+**Description**: a line decision repeated with the same `decisionId` but another reason, amount or (since 095f-2d1) note is refused by the Decision Record writer as other content. The route answers 503 `ebilling.decision.incomplete` with `failedStep` `record` and the detail "Repeat the same decision ... to complete it", but repeating never succeeds. Each refused repeat:
+- rewrites the line's reviewed fields;
+- recalculates the invoice totals;
+- skips that line's Signal close;
+- counts a writer failure.
+
+In a multi-line call whose earlier lines were recorded, the remaining lines take the new content, so the lines disagree. The shipped InvoiceReview client cannot reach this today (it mints a new `decisionId` per submit and its Repeat resends the exact request), but any other client or a future change can.
+
+**Entry-points**: `src/server/api/Sprk.Bff.Api/Services/Finance/InvoiceLineDecisionService.cs` (the record loop, ~802-825, `Incomplete(..., "record", ...)`); `Api/Finance/InvoiceLineReviewEndpoints.cs` (route description); compare `ebilling.adjustment.id_reused`.
+
+**Suggested fix**: map the writer's other-content refusal on a repeat to 409 (e.g. `ebilling.decision.id_reused`), checked before the line rewrite so nothing is written; keep 503 only for retryable faults.
+
+**Estimated effort**: half a day. **Blockers**: none. **Related**: task 095f-2d1, 095f-2f (client).
+
+---
+
+### ISS-030 — A refused totals recalculation after an adjustment removal leaves the line deactivated and the totals stale
+
+| Field | Value |
+|---|---|
+| **Status** | Done (task iss030, merged 46bd83d459) |
+| **Urgency** | next-round |
+| **Filed** | 2026-11-17 |
+| **Source** | 095f-2b build and Opus review (found in passing; pre-existing) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2881 |
+
+**Description**: the add path undoes its new adjustment row when the totals recalculation is refused, but the remove path does not. If the recalculation after a removal is refused, the adjustment line stays deactivated, the invoice totals stay stale (they still include the removed adjustment), and no undo runs. Since 095f-2b the removal's Decision Record and note are also never written, because every repeat hits the same deterministic refusal. The trigger is narrow: removing an adjustment raises the total, so the negative-total check cannot fire; it needs lines changed outside the lock, or a dry run that disagrees with the stored rows.
+
+**Entry-points**: `src/server/api/Sprk.Bff.Api/Services/Finance/InvoiceAdjustmentService.cs` (remove path, ~1004-1007 at 22d4c29d36; compare the add path's undo).
+
+**Suggested fix**: on a refused recalculation after the deactivation, reactivate the row in the same pattern the add path uses to undo, and answer the refusal; test both paths.
+
+**Estimated effort**: 2-4 hours. **Blockers**: merge 095f-2b first (same file). **Related**: task 095f-2b.
+
+---
+### ISS-031 — A blocked Return can run after a stranded Override (and the reverse), leaving two conflicting decisions
+
+| Field | Value |
+|---|---|
+| **Status** | Done (task iss031, merged ececf32dbd) |
+| **Urgency** | next-round |
+| **Filed** | 2026-11-17 |
+| **Source** | 095f-2ui round-1 re-check (Opus; found in passing; pre-existing server behaviour) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2882 |
+
+**Description**: an Override writes its Decision Record and closes the open Signals as Acted before it releases the hold. If the release then fails (503 `ebilling.blocked.unavailable`, or 409 `ebilling.blocked.concurrent_change` after the retries), the invoice stays In Review and held. A Return sent now looks up a stored record only under its own decision id (`ReturnDecisionIdFor`), finds none, reads the open Signals (none are left, because the Override closed them) and goes ahead. The invoice ends up Returned to Firm while carrying an Override Decision Record and Signals closed by that Override. The reverse order (a stranded Return, then an Override) has the same gap. The 095f-2ui client now blocks the switch while it holds the page lock, but a reload, another tab or another reviewer still reaches it.
+
+**Entry-points**: `src/server/api/Sprk.Bff.Api/Services/Finance/SubmissionOverrideService.cs`: the stored-record lookup at ~916-920 (it checks only the calling verb's id); the decision ids `OverrideDecisionIdFor` / `ReturnDecisionIdFor` at ~430-433.
+
+**Suggested fix**: before deciding, look up the OTHER verb's stored record as well. If it exists, refuse with 409 (a new code, e.g. `ebilling.blocked.other_decision_pending`) and tell the caller to repeat that decision to finish it. Test both orders, plus a must-not-fire case where neither record exists.
+
+**Estimated effort**: 3-5 hours. **Blockers**: none. **Related**: tasks 095f-2c, 095f-2ui.
+
+---
+
+### ISS-032 — An invoice decision stranded after its transition cannot be finished from Invoice Review once the wizard is closed
+
+| Field | Value |
+|---|---|
+| **Status** | In Progress (task iss032 merged into work 0ec908c554; closes when on master) |
+| **Urgency** | next-round |
+| **Filed** | 2026-11-17 |
+| **Source** | 095f-2ui round-1 re-check (Opus; found in passing; pre-existing) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2883 |
+
+**Description**: reject, return and approve make the status transition before they write the Decision Record and the after-steps. If a later step fails (503 incomplete, `failedStep` `record` or later), the invoice already shows Rejected, Returned or Approved. The open wizard can repeat the request, but once it is closed (or the page reloads), the page treats the invoice as decided and the wizard reopens read-only ("View decision"). Nothing in the UI then sends the repeat that writes the record and the note. The server's repeat would finish it; only the client has lost the path. The state is not visible to the reviewer.
+
+**Entry-points**: `src/solutions/InvoiceReview/src/components/decision/DecideInvoiceAction.tsx` (`decided` and `decisionAccess`); `src/solutions/InvoiceReview/src/services/decisionModel.ts`; server: `InvoiceRejectReturnService.cs` (~539, transition before the record), `InvoiceApprovalService.cs`.
+
+**Suggested fix**: let the approval-state read report "decision incomplete" (status changed, but no Decision Record yet for the decision id the server derives). The page then offers "Finish decision", which sends the repeat. Alternatively, have a repair job finish stranded decisions. Decide the approach with the 095f-2c known limits.
+
+**Estimated effort**: 1 day (server signal + client affordance). **Blockers**: none. **Related**: tasks 095f-2a, 095f-2c, 095f-2ui.
+
+---
+### ISS-033 — RuleReview `assignmentPanelFirmPicker.test.ts` cannot start without a built shared library
+
+| Field | Value |
+|---|---|
+| **Status** | Open (owner: ontology-r1, ontology 187) |
+| **Urgency** | someday |
+| **Filed** | 2026-11-17 |
+| **Source** | 130e-2 build and review (found in passing; pre-existing since e9208abc5e) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2885 |
+
+**Description**: the test mocks `@spaarke/ui-components` with `jest.mock(...)` but without `{ virtual: true }`. Jest resolves the real module first, so in a fresh worktree, where the shared library has no `dist`, the suite fails to start with "Cannot find module". The other RuleReview suites run. CI or a developer with a fresh checkout sees a red suite that has nothing to do with their change.
+
+**Entry-points**: `src/solutions/RuleReview/src/__tests__/assignmentPanelFirmPicker.test.ts:15`.
+
+**Suggested fix**: pass `{ virtual: true }` to the mock, or map the module in the package's Jest config the way the other suites get their stub. Check that the suite starts in a fresh worktree.
+
+**Estimated effort**: under 1 hour. **Blockers**: none. **Related**: ontology 187 (#2754), task 130e-2.
+
+---
+### ISS-034 — No operator path for a blocked decision stranded by a decider who is gone
+
+| Field | Value |
+|---|---|
+| **Status** | In Progress (EB-D-244; iss034a and iss034b merged into work, d5934d6d51; closes when on master) |
+| **Urgency** | next-round |
+| **Filed** | 2026-11-17 |
+| **Source** | iss031 review (Opus): made reachable by the ISS-031 guard |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2888 |
+
+**Description**: suppose decider A's Override (or blocked Return) writes its Decision Record and then fails before it finishes, and A then leaves or loses the privilege. Today:
+- nobody else can finish it: the stored-decider rule from 095f-2c answers 409 `decision_conflict`;
+- since the ISS-031 guard, nobody can take the other verb either: 409 `other_decision_pending`;
+- invoice-level decisions are refused while the hold is on.
+
+The invoice stays held for good. Before ISS-031 the other verb was a wrong but working way out (it produced two conflicting decisions). Decision Records are append-only, and there is no admin route or script that finishes a stranded decision.
+
+**Entry-points**: `src/server/api/Sprk.Bff.Api/Services/Finance/SubmissionOverrideService.cs` (the stored-decider check after the other-verb guard); `notes/095f-2c-override-blocked-return-notes.md` (the decider rule).
+
+**Suggested fix (owner decides)**: (1) an admin "finish as operator" route that repeats the stranded decision from its stored record, with the operator recorded as a step; or (2) let any caller holding the same privilege finish another person's stranded decision from the stored text; or (3) an operator script. Option 1 keeps the audit trail clearest.
+
+**Estimated effort**: 1 day. **Blockers**: owner decision. **Related**: ISS-031, task 095f-2c.
+
+---
+
+### ISS-035 — Invoice upload joins a repeated firmInvoiceNumber or poNumber field with a comma
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | someday |
+| **Filed** | 2026-11-17 |
+| **Source** | 095f-2e2a review (Opus), found in passing |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2889 |
+
+**Description**: the shared multipart reader (`InvoiceSubmissionHttp.ReadSubmissionFormAsync`, used by the internal upload routes and the external SPA route) reads `firmInvoiceNumber` and `poNumber` with `form[...].ToString()`, so a field sent twice becomes `"A,B"` and is validated and stored as one value. The invoice then gets a tracking number from `"A,B"` and does not match a later resubmission or Correction of `A`. The 095f-2e2a Correction fields already refuse a repeated field.
+
+**Entry-points**: `src/server/api/Sprk.Bff.Api/Api/Finance/InvoiceSubmissionHttp.cs:66-67`; `InvoiceSubmissionCorrectionFields.ReadForm` in `InvoiceSubmissionEndpoints.cs` (the "sent at most once" rule to reuse).
+
+**Suggested fix**: refuse a repeated `firmInvoiceNumber` or `poNumber` with a field error. It touches the external route, so spa-r4 reviews it.
+
+**Estimated effort**: 2 hours. **Blockers**: none. **Related**: task 095f-2e2a.
+
+---
+
+### ISS-036 — Invoice Review: open decision form may be hidden from screen readers when the hold clears under it
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | next-round |
+| **Filed** | 2026-11-17 |
+| **Source** | 095f-2e2b test-flake investigation (finishAsOperator.test.tsx) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2891 |
+
+**Description**: when an open Override, blocked Return or Finish form stays open while a re-read clears the hold (iss034b round 1), its surface carries `aria-hidden="true"` in jsdom once the banner unmounts. If a browser does the same, a screen reader loses the form and its "saved in part: repeat it" message. Unconfirmed in a browser.
+
+**Entry-points**: `src/solutions/InvoiceReview/src/components/decision/BlockedBanner.tsx`; `src/solutions/InvoiceReview/src/__tests__/finishAsOperator.test.tsx` ("re-read shows the hold gone").
+
+**Suggested fix**: browser check on dev first; if it reproduces, keep the modal container mounted independently of the banner.
+
+**Estimated effort**: half a day. **Blockers**: Invoice Review deployed to dev. **Related**: iss034b, 095f-2e2b.
+
+---
+
+### ISS-038 — Firm clause visibility for record-scoped billing rules must also check the base rule set
+
+| Field | Value |
+|---|---|
+| **Status** | Done (PR 2902 merged to master e5da41db7a; ISS-039 is the write side) |
+| **Urgency** | now |
+| **Filed** | 2026-11-17 |
+| **Source** | Opus adversarial review of task 135 |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2896 |
+
+**Description**
+
+Per-record visibility uses both rule sets' flags (see uac-r2 thread). `RuleSetService.GetFirmClauseAsync` decides a record-scoped rule's firm clause from the record set's flag alone. It must also require the base rule's own set to be visible, through one shared helper that 135's per-record view also calls, with a source-scan guard. Without it a firm user can in some cases see clause text meant to stay internal (D-66, FR-28, EB-D-209). The fix goes to master on its own PR (it is live there); 135 waits for the helper.
+
+**Entry-points**
+
+- `src/server/api/Sprk.Bff.Api/Services/Finance/RuleSetService.cs` (`ReadFirmClauseAsync`)
+
+**Estimated effort**: half a day
+**Related**: ISS-039 (write side), task 135
+
+---
+
+### ISS-039 — Record-scoped billing rule sets: one per base rule set, flag copied from the base
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | next-round |
+| **Filed** | 2026-11-17 |
+| **Source** | uac-r2 review of ISS-038 |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2897 |
+
+**Description**
+
+Write side of ISS-038 (see uac-r2 thread). Record sets should be keyed (record, firm, base rule set) with the flag copied from the base set; not "most restrictive", which would retroactively hide rules already shown. Until then ISS-038's read helper is the enforcement point and existing data needs no repair.
+
+**Entry-points**
+
+- `src/server/api/Sprk.Bff.Api/Services/Finance/Procedures/ProcedureAssignmentService.cs` (record rule set creation)
+
+**Estimated effort**: 1-2 days
+**Blockers**: ISS-038
+
+---
+
+### ISS-040 — Rule set visibility: native write hardening
+
+| Field | Value |
+|---|---|
+| **Status** | In Progress (merged into work; applied to dev 2026-11-17, Verify PASS; release pending) |
+| **Urgency** | now |
+| **Filed** | 2026-11-17 |
+| **Source** | ISS-038 review; uac-r2 thread |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2901 |
+
+**Description**
+
+Every firm-visibility reader trusts `sprk_ruleset.sprk_visibletofirms`, so only the BFF paths that own it may change it (see uac-r2 thread). Field-secure the column: "Spaarke BFF-Managed Field Writers" (and System Administrator) read/create/update; "Spaarke BFF-Managed Field Readers" read only, so the form and the "Visible to Firms" view column still show it. Pinned by an ArchTest. The BFF writers (RuleSetService create and visibility update, ProcedureService type change, ProcedureAssignmentService record-set create) run as the app user, which is in the writers profile. A rule set created natively by anyone else keeps the default No.
+
+**Entry-points**
+
+- `src/dataverse/solutions/SpaarkeMaster/Entities/sprk_ruleset/Entity.xml` (`sprk_visibletofirms`)
+- `scripts/ebilling/Set-EbillingFindingsJsonFieldSecurity.ps1` (pattern)
+- `tests/Spaarke.ArchTests/FindingsJsonFieldSecuredGuardTests.cs` (pattern)
+
+**Suggested fix**: script + Entity.xml IsSecured 1 + guard; dev apply with the owner's typed OK and uac-r2 notices before and after.
+
+**Estimated effort**: half a day
+**Blockers**: none
+**Related**: ISS-038 (#2896)

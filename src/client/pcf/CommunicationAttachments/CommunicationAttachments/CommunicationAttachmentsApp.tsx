@@ -38,6 +38,8 @@ import {
 import { RichFilePreviewDialog } from '@spaarke/ui-components/dist/components/FilePreview/RichFilePreviewDialog';
 import { cleanGuid } from '@spaarke/ui-components/dist/services/PolymorphicResolverService';
 import { getXrm } from '@spaarke/ui-components/dist/utils/xrmContext';
+import { openInDesktopApp, OPEN_IN_DESKTOP_FAILED_MESSAGE } from '@spaarke/ui-components/dist/utils/openInDesktopApp';
+import { authenticatedFetch } from '@spaarke/auth';
 import { IInputs } from './generated/ManifestTypes';
 // Task 021: the Layer-1 attachments logic + the promoted AttachmentList
 // presentational core now live in `@spaarke/communication-components` — the
@@ -145,9 +147,8 @@ function normalizeBffBaseUrl(raw: string): string {
     .replace(/\/api$/i, '');
 }
 
-/** Open a URL in a new tab, preferring the desktop protocol URL when present. */
-function openExternal(desktopUrl: string | null, webUrl: string | null): void {
-  const url = desktopUrl || webUrl;
+/** Open a web URL in a new tab ("Open in desktop" uses the shared openInDesktopApp instead). */
+function openExternal(url: string | null): void {
   if (!url) return;
   // Shared cross-frame walker (task 081 / C-8).
   const xrm = getXrm('openUrl');
@@ -404,9 +405,29 @@ export const CommunicationAttachmentsApp: React.FC<ICommunicationAttachmentsAppP
           fetchPreviewUrl={() => apiService.getPreviewUrl(previewItem.documentId as string)}
           onOpenFile={mode => {
             void (async () => {
-              const links = await apiService.getOpenLinks(previewItem.documentId as string);
-              if (!links) return;
-              openExternal(mode === 'desktop' ? links.desktopUrl : null, links.webUrl);
+              const documentId = previewItem.documentId as string;
+              const links = await apiService.getOpenLinks(documentId);
+              if (mode !== 'desktop') {
+                openExternal(links?.webUrl ?? null);
+                return;
+              }
+              // Office files open in the Office app; anything else downloads through the BFF (shared
+              // behaviour, ISS-004) — not the SharePoint webUrl, which a read-only user cannot open.
+              try {
+                if (!links) throw new Error('The open-links request returned nothing.');
+                await openInDesktopApp({
+                  bffBaseUrl: resolvedApiBaseUrl,
+                  documentId,
+                  links,
+                  fetch: authenticatedFetch,
+                  fallbackFileName: previewItem.name || previewItem.documentName || undefined,
+                });
+              } catch (err) {
+                console.error('[CommunicationAttachments] Open in desktop failed:', err);
+                void getXrm('openErrorDialog')?.Navigation?.openErrorDialog?.({
+                  message: OPEN_IN_DESKTOP_FAILED_MESSAGE,
+                });
+              }
             })();
           }}
           onOpenRecord={() => openDocumentRecord(previewItem.documentId as string)}

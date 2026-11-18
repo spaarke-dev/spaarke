@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="iss028" project="ebilling-r1">
+  <metadata>
+    <title>ISS-028 (#2879): correction rows are written only by their writer (RecordTableRules CreatedOnlyByItsWriter)</title>
+    <phase>Defect fix (owner question (e), EB-D-248)</phase>
+    <gate>Branch from work/ebilling-r1 at the sha named in the agent brief.</gate>
+    <status>in-progress</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>BFF record write path (.cs), shared record-creation rules.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+    <parallel-safe>true</parallel-safe>
+    <deps>095f-2d2</deps>
+    <tags>bff-api, data-mutation, testing</tags>
+    <estimated-effort>2-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Fix ISS-028 (projects/ebilling-r1/notes/defer-issues.md) as EB-D-248 decides: in src/server/api/Sprk.Bff.Api/Services/RecordCreation/RecordTableRules.cs set CreatedOnlyByItsWriter = true on the sprk_invoicecorrection rule (~line 436), as the sprk_signal and sprk_decisionrecord rules do (~492-509). Find what that flag does in the generic create and update paths (Grep CreatedOnlyByItsWriter) and make sure InvoiceCorrectionService (and anything else that legitimately writes correction rows, such as InvoiceLineDecisionService) does not go through a generic path the flag refuses. Check every reference to sprk_invoicecorrection (including Services/Ai/Handlers/DataverseCreateRecordHandler.cs and the ownership, family and lineage code) and say for each whether it is affected.</prompt>
+
+  <goal>A correction row and its note can be created or changed only by the service that owns them; the generic record routes refuse both.</goal>
+
+  <constraints>
+    <constraint source="EB-D-248">Same mechanism as Decision Records and Signals; no new flag, no new guard type.</constraint>
+    <constraint source="ISS-028">Must-fire: the generic create and the generic update of sprk_invoicecorrection are refused (whatever code the existing flag gives). Must-not-fire: InvoiceCorrectionService's correct and confirm paths still write the row and its note.</constraint>
+    <constraint source="project">Only RecordTableRules.cs, any test that pinned the old rule (for example InvoiceFamilyGenericUpdatePathTests.AllFamilyTables), new tests, and notes/iss028-invoicecorrection-writer-only.md. If a legitimate writer goes through a generic path the flag refuses, stop and report it rather than widening the flag.</constraint>
+  </constraints>
+
+  <acceptance-criteria>
+    <criterion testable="true">New tests fail before the change and pass after: generic create and update refused; the correction service still writes.</criterion>
+    <criterion testable="true">Filtered RecordTable|RecordCreation|InvoiceFamily|InvoiceCorrection|ChatServerWritten|OwnedChild tests, the RecordTable|Invoice ArchTests and the --warnaserror build pass.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

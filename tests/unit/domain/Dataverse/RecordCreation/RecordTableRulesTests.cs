@@ -308,10 +308,10 @@ public class RecordTableRulesTests
     }
 
     [Fact]
-    public void CreatedOnlyByItsWriter_IsTheThreeOntologyWriterTablesOnly()
+    public void CreatedOnlyByItsWriter_IsTheThreeOntologyWriterTables_AndTheInvoiceCorrection()
     {
         RecordTableRules.All.Where(r => r.CreatedOnlyByItsWriter).Select(r => r.Table)
-            .Should().BeEquivalentTo("sprk_signal", "sprk_decisionrecord", "sprk_budgetrevision");
+            .Should().BeEquivalentTo("sprk_signal", "sprk_decisionrecord", "sprk_budgetrevision", "sprk_invoicecorrection");
     }
 
     [Fact]
@@ -321,7 +321,7 @@ public class RecordTableRulesTests
         // ebilling-r1 DEF-061: and a Procedure Version, which only ProcedureService creates (registered for its writer-only publish stamp).
         RecordTableRules.All.Where(r => r.GenericCreateOnlyRefused).Select(r => r.Table).Should().Equal("sprk_billingevent", "sprk_procedureversion");
         RecordTableRules.All.Where(r => r.GenericCreateRefused).Select(r => r.Table)
-            .Should().BeEquivalentTo("sprk_signal", "sprk_decisionrecord", "sprk_budgetrevision", "sprk_billingevent", "sprk_procedureversion");
+            .Should().BeEquivalentTo("sprk_signal", "sprk_decisionrecord", "sprk_budgetrevision", "sprk_invoicecorrection", "sprk_billingevent", "sprk_procedureversion");
 
         var line = RecordTableRules.Get("sprk_billingevent");
         line.CreatedOnlyByItsWriter.Should().BeFalse("the update and delete refusals read this flag alone");

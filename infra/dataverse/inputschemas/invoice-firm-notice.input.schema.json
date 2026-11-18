@@ -1,0 +1,39 @@
+{
+  "$comment": "Mirror of sprk_analysisaction.sprk_inputschema for invoice-firm-notice (ebilling-r1 task 131, FR-50, D-60). The Action is a Linear AI Consumer reached only through IInvoiceAi.DraftFirmNoticeAsync (the Binding carries no tool description, so it is never loop-projected); the schema documents the operand the facade sends as the '## Input' section ({ outcome, findings }) and is validated by CatalogInputSchemaContractTests like every other mirror. NO numeric property anywhere (FR-50): amounts, line references and clause quotes are inserted by the application, never sent. Property-level \"required\": true is FORBIDDEN (use the object-level required array). actionCode carries NO version suffix. The tenant id travels in the LinearRunContext, never in the operand. Deployed to the row by scripts/ebilling/Ensure-ActionRow.ps1.",
+  "actionCode": "invoice-firm-notice",
+  "environment": "spaarkedev1",
+  "inputSchema": {
+    "type": "object",
+    "required": ["outcome", "findings"],
+    "properties": {
+      "outcome": {
+        "type": "string",
+        "description": "What the notice explains.",
+        "enum": ["SubmissionRejected", "ReturnedToFirm", "InvoiceRejected", "ApprovedWithAdjustments"]
+      },
+      "findings": {
+        "type": "array",
+        "description": "A short summary of the findings (at most twenty distinct entries). Never carries an amount, a clause or a figure the application inserts.",
+        "items": {
+          "type": "object",
+          "required": ["ruleSetName", "ruleName", "consequence", "issue"],
+          "properties": {
+            "ruleSetName": {
+              "type": "string",
+              "description": "Always blank: the notice never names a rule set. The model is told to ignore it."
+            },
+            "ruleName": {
+              "type": "string",
+              "description": "The rule's name when the firm may be told it (the rule is published to firms); otherwise blank."
+            },
+            "consequence": {
+              "type": "string",
+              "description": "The kind of finding: Reduced, Disallowed, Added, Adjustment or RejectionFinding."
+            },
+            "issue": { "type": "string", "description": "One plain sentence with no amount or line number." }
+          }
+        }
+      }
+    }
+  }
+}

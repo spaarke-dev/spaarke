@@ -320,6 +320,85 @@ public sealed class InvoiceLineReviewEndpointsAuthorizationContractTests
         host.Entities.VerifyNoOtherCalls();
     }
 
+    // ── Task 095f-2d1 (EB-D-236): the optional line-decision note ──
+
+    public static IEnumerable<object[]> RefusedNotes() =>
+    [
+        ["single", "accept", new string('x', 2001), "ebilling.note_too_long"],
+        ["single", "reduce", new string('x', 2001), "ebilling.note_too_long"],
+        ["single", "disallow", "Please see\u0007 this", "ebilling.note_invalid_characters"],
+        ["multi", "accept", new string('x', 2001), "ebilling.note_too_long"],
+        ["multi", "reduce", "Escape \u001b[31m", "ebilling.note_invalid_characters"],
+        ["multi", "disallow", "Please see\u0007 this", "ebilling.note_invalid_characters"],
+    ];
+
+    private static object NoteBody(string route, string action, string? note) => route == "single"
+        ? new { decisionId = Guid.NewGuid(), action, reason = "Rate above the card", approvedAmount = action == "reduce" ? (decimal?)50m : null, note }
+        : new { decisionId = Guid.NewGuid(), action, reason = "Rate above the card", lines = new[] { new { lineId = LineId, approvedAmount = action == "reduce" ? (decimal?)50m : null } }, note };
+
+    [Theory(DisplayName = "095f-2d1: a line-decision note over 2000 characters or holding a control character is a coded 400 on the single-line and multi-line routes, before any read or write, never echoed")]
+    [MemberData(nameof(RefusedNotes))]
+    public async Task Decide_RefusedNote_Returns400_WithItsCode_BeforeAnyRead(string route, string action, string note, string code)
+    {
+        await using var host = await Host.StartAsync();
+        host.GrantAll();
+
+        var response = await host.SendAsync(Request("POST", route == "single" ? Single() : Multi, NoteBody(route, action, note)));
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        (await ErrorCode(response)).Should().Be(code);
+        (await response.Content.ReadAsStringAsync()).Should().NotContain("Please see").And.NotContain("xxxx", "the refusal never echoes the note");
+        host.Entities.VerifyNoOtherCalls();
+        host.Writes.Should().Be(0);
+    }
+
+    [Theory(DisplayName = "095f-2d1: a valid note (2000 characters; newline and tab) is accepted by both routes: it is not a 400 and the request reaches the invoice read (here: 409 not in review)")]
+    [InlineData("single", "accept", 2000)]
+    [InlineData("single", "reduce", 1)]
+    [InlineData("multi", "disallow", 2000)]
+    [InlineData("multi", "reduce", 1)]
+    public async Task Decide_ValidNote_IsAccepted_AndReachesTheRead(string route, string action, int length)
+    {
+        await using var host = await Host.StartAsync();
+        host.GrantAll();
+        host.Invoice = InvoiceRow(InvoiceStatusCodes.Approved);
+        var note = ("a\nb\tc\r\n" + new string('x', 2000))[..length];
+
+        var response = await host.SendAsync(Request("POST", route == "single" ? Single() : Multi, NoteBody(route, action, note)));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Conflict);
+        (await ErrorCode(response)).Should().Be("ebilling.invoice.not_in_review");
+        host.Writes.Should().Be(0);
+    }
+
+    [Fact(DisplayName = "095f-2d1: the request bodies bind a JSON 'note' (camelCase), and a body with none binds null")]
+    public void RequestBodies_BindTheNote()
+    {
+        var web = new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web);
+        var id = Guid.NewGuid();
+
+        var single = System.Text.Json.JsonSerializer.Deserialize<SingleLineDecisionRequest>($$"""{"decisionId":"{{id}}","action":"reduce","reason":"r","approvedAmount":5,"note":"n1"}""", web);
+        var multi = System.Text.Json.JsonSerializer.Deserialize<MultiLineDecisionRequest>($$"""{"decisionId":"{{id}}","action":"accept","lines":[{"lineId":"{{LineId}}"}],"note":"n2"}""", web);
+        var none = System.Text.Json.JsonSerializer.Deserialize<SingleLineDecisionRequest>($$"""{"decisionId":"{{id}}","action":"accept"}""", web);
+
+        single!.Note.Should().Be("n1");
+        multi!.Note.Should().Be("n2");
+        none!.Note.Should().BeNull();
+    }
+
+    [Fact(DisplayName = "095f-2d1 must-not-fire: Accept all Clean takes no note - a body that carries one (even a refusable one) is ignored, not refused")]
+    public async Task AcceptClean_IgnoresANote()
+    {
+        await using var host = await Host.StartAsync();
+        host.GrantAll();
+        host.Invoice = InvoiceRow(InvoiceStatusCodes.InReview);
+
+        var response = await host.SendAsync(Request("POST", Clean, new { decisionId = Guid.NewGuid(), note = "Please see\u0007 this" }));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        host.Writes.Should().Be(0);
+    }
+
     [Fact]
     public async Task Decide_AmountOutsideTheRange_Returns400()
     {

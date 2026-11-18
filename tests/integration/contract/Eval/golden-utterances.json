@@ -2472,6 +2472,26 @@
         "dispatchAssertPhase": "P3",
         "activatedBy": "ebilling-r1 task 075 (FR-27)"
       }
+    },
+    {
+      "caseId": "GU-146",
+      "family": "invoice-firm-notice",
+      "ucId": "UC-D-3",
+      "channel": "event",
+      "utterance": "a reviewer returns an invoice to the firm or rejects it in full, and the notice to the firm opens as a draft whose explanatory prose is written from the outcome and a summary of the findings, while every amount, line reference and clause quote is inserted from data (ebilling-r1 task 131, FR-50)",
+      "notes": "FR-P2-08 full-catalog coverage for the ConsumerTypes.InvoiceFirmNotice constant (added task 131). A Linear AI Consumer, same shape as GU-145 billing-rule-draft: invoked server-side by FirmNoticeComposer through IInvoiceAi.DraftFirmNoticeAsync (the invoice-firm-notice Action run through IActionRunner), never chat/loop-projected and never Click-dispatched (the Binding carries no tool description, surfaces or chips). Dedicated coverage (operand to prompt through the authored Action, no number in or out, output to DTO, prose checks and the template fallback) lives in tests/integration/seam/Finance/FirmNoticeActionSeamTests.cs and tests/unit/Sprk.Bff.Api.Tests/Services/Finance/FirmNoticeComposerTests.cs, and the Action mirror contract in tests/integration/contract/Catalog/InvoiceFirmNoticeActionContractTests.cs; this entry exists ONLY to satisfy P2LoopInjectionEvalSuiteTests.FullCatalog_EveryClosedCatalogConsumerType_HasAnEvalFamily's ConsumerTypes.All scan of this shared file.",
+      "context": { "surface": "finance-firm-notice" },
+      "expected": {
+        "outcomeClass": "dispatch",
+        "consumerType": "invoice-firm-notice",
+        "consumerCode": "default",
+        "catalogStatus": "existing"
+      },
+      "assertions": { "schemaConformance": null, "citationIntegrity": false },
+      "activation": {
+        "dispatchAssertPhase": "P3",
+        "activatedBy": "ebilling-r1 task 131 (FR-50)"
+      }
     }
   ]
 }

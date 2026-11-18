@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="095f-2s" project="ebilling-r1">
+  <metadata>
+    <title>Two additive note columns: sprk_invoice.sprk_decisionnote (internal decision note, EB-D-240) and sprk_invoicecorrection.sprk_note (EB-D-242); idempotent scripts and the deploy-order guard</title>
+    <phase>5 Partner surfaces — 095f part 2 (decision notes)</phase>
+    <gate>Branch from work/ebilling-r1 at the sha named in the agent brief. The dev apply runs only with the owner's OK typed in the ebilling-r1 session, with uac-r2 notices before and after.</gate>
+    <status>completed</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Schema scripts and a guard; no BFF behaviour.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>dataverse, testing</tags>
+    <estimated-effort>0.5 day</estimated-effort>
+  </metadata>
+
+  <prompt>Write scripts/ebilling/Deploy-EbillingDecisionNoteColumns.ps1 on EbillingSchema.psm1, copying Deploy-EbillingFirmDescriptionColumn.ps1 (130e-1): -WhatIf, -Apply, -Verify, -EnvironmentUrl, -SolutionUniqueName (default SpaarkeMaster). It creates sprk_invoice.sprk_decisionnote (SchemaName sprk_DecisionNote, label "Decision note", Memo, MaxLength 2000, not required, not field-secured) and sprk_invoicecorrection.sprk_note (sprk_Note, "Note", Memo 2000), publishing only those two tables. Pester 5.7.1 tests under tests/scripts/. Extend the deploy-order guard so a BFF selecting or writing either column fails the build until SpaarkeMaster has it or it is on a ratcheting pending list (as PolicyVersionColumnsGuardTests does for sprk_policyversion); add both to the pending list.</prompt>
+
+  <goal>Both columns can be created idempotently on any environment, verified, and no BFF can ship code that names them ahead of the schema.</goal>
+
+  <constraints>
+    <constraint source="project CLAUDE.md 6 (2026-11-15)">Every Web API call sends Consistency: Strong (route through EbillingSchema.psm1); ScriptMetadataStrongConsistencyGuardTests passes.</constraint>
+    <constraint source="EB-D-240">sprk_decisionnote is internal: no firm-facing reader, allow-list or SPA type may name it (a must-not-fire guard over Infrastructure/ExternalAccess/** and src/client/external-spa/**).</constraint>
+    <constraint source="project">No SpaarkeMaster edit (a deploy task syncs it). No live run by the agent. Never run python. Never --no-verify. No bare git stash. Pester on its declared version (5.7.1).</constraint>
+  </constraints>
+
+  <acceptance-criteria>
+    <criterion testable="true">Pester 5.7.1 green: -WhatIf makes no write; -Apply on an existing column is a no-op; -Verify asserts both columns, type Memo, length 2000, not secured.</criterion>
+    <criterion testable="true">The guard fails (must-fire) for a planted BFF select of a column that is neither in Entity.xml nor pending, and passes (must-not-fire) with both on the pending list.</criterion>
+    <criterion testable="true">The external must-not-fire guard fails on a planted sprk_decisionnote in the external allow-list.</criterion>
+    <criterion testable="true">ArchTests green.</criterion>
+  </acceptance-criteria>
+
+  <justification>
+    <existing>sprk_correctionnote (the firm's own correction text) and the correction row's existing columns.</existing>
+    <extension>The owner ruled the decision note must not share sprk_correctionnote (EB-D-240), and the correction row has no note column (EB-D-242).</extension>
+    <cost-of-doing-nothing>Decision notes would overwrite the firm's correction text, or correct/confirm notes would have nowhere to go.</cost-of-doing-nothing>
+  </justification>
+
+  <notes>
+    Built 2026-11-16 on task/ebilling-095f-2s. scripts/ebilling/Deploy-EbillingDecisionNoteColumns.ps1 (two tables, one entity-scoped PublishXml, -SolutionUniqueName default SpaarkeMaster, must contain both tables); tests/scripts/Deploy-EbillingDecisionNoteColumns.Tests.ps1 (Pester 5.7.1, 32 tests, runs the module's real Add-Column against mocks); tests/Spaarke.ArchTests/InvoiceNoteColumnsGuardTests.cs (deploy-order guard with a ratcheting PendingSchema for both columns, plus the EB-D-240 external must-not-fire guard).
+    NOT done, by design: no -Apply or -Verify against any environment (the dev apply needs the owner's go in the ebilling-r1 session, with uac-r2 notices before and after); no SpaarkeMaster edit (the deploy task that syncs the solution must also delete both PendingSchema entries).
+    rework: none task 095f-2s
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load the knowledge files first. Follow task-execute for rigor, checkpoints and quality gates.</protocol>
+  </execution>
+</task>

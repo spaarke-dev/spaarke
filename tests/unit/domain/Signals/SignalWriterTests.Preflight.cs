@@ -30,6 +30,11 @@ public partial class SignalWriterTests
         ["lane not an option value"] = new(r => r with { Lane = 0 }, SignalWriteRefusal.LaneInvalid, typeof(ArgumentException)),
         ["severity not an option value"] = new(r => r with { Severity = 999999999 }, SignalWriteRefusal.SeverityInvalid, typeof(ArgumentException)),
         ["episode 0"] = new(r => r with { Episode = 0 }, SignalWriteRefusal.EpisodeInvalid, typeof(ArgumentException)),
+        // 130e-1 (DEF-060 C3): a direct caller's firm reason that fails FirmDescriptionRules; the mapper and replay never send one.
+        ["firm reason over 200 runes"] = new(r => r with { FirmReason = new string('x', 201) }, SignalWriteRefusal.FirmReasonInvalid, typeof(ArgumentException)),
+        ["firm reason with a brace"] = new(r => r with { FirmReason = "Rate {{line.rate}} too high." }, SignalWriteRefusal.FirmReasonInvalid, typeof(ArgumentException)),
+        ["firm reason with markup"] = new(r => r with { FirmReason = "<b>Rate</b> too high." }, SignalWriteRefusal.FirmReasonInvalid, typeof(ArgumentException)),
+        ["firm reason with a bidi override"] = new(r => r with { FirmReason = "Rate\u202E too high." }, SignalWriteRefusal.FirmReasonInvalid, typeof(ArgumentException)),
         ["template blank"] = new(r => r with { MessageTemplate = "  " }, SignalWriteRefusal.TemplateMissing, typeof(ArgumentException)),
         ["template null"] = new(r => r with { MessageTemplate = null! }, SignalWriteRefusal.TemplateMissing, typeof(ArgumentNullException)),
         ["fact values null"] = new(r => r with { FactValues = null! }, SignalWriteRefusal.FactValuesMissing, typeof(ArgumentNullException)),

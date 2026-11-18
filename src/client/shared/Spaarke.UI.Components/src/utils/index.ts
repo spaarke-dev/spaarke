@@ -3,6 +3,7 @@ export * from './ensureNavigatorSidePane';
 export * from './guid';
 export * from './launchAssociation';
 export * from './logger';
+export * from './openInDesktopApp';
 export * from './lookupMatching';
 export * from './parseDataParams';
 export * from './quoteBody';

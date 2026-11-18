@@ -68,3 +68,75 @@ Not yet. #2839 (BFF) and #2840 (SPA) are merged to master. uac-r2 deploys the BF
 - [ ] A clean file opens in the browser.
 - [ ] An invoice of another firm cannot be opened. It looks the same as an invoice that doesn't exist.
 - [ ] Nothing in the portal still calls the old invoice-documents address (no "not found" error in the files section).
+
+## F. Decision notes (095f part 2): after the decision-note columns are applied (open question (c)), then a BFF and an Invoice Review page that carry 095f-2a..2ui
+
+Nothing here is testable until those deploys run. On an In Review invoice in Invoice Review:
+
+- [ ] Approve, Reject and Return each show an optional **Note** box with an n / 2000 counter. A note over 2000 shows a field error, and nothing is cut off silently.
+- [ ] Line decisions (accept, reduce, disallow), Correct value and Confirm as read each take a note. **Accept all Clean has no Note box.**
+- [ ] Add adjustment and Remove adjustment take a note.
+- [ ] On a blocked internal submission, Override and Return take a note.
+- [ ] A note with only spaces is treated as no note.
+- [ ] After a decision, the note appears on its Decision Record (and the reject/return note appears on the invoice's decision note). The firm does NOT see the note in the SPA.
+- [ ] Confirm a value that is already confirmed, with a note: the page says the note was not saved (instead of "Saved").
+
+## G. Finish a stranded decision as operator (ISS-034, iss034a + iss034b): after a BFF and an Invoice Review page that carry them
+
+Not yet deployed. You need a held invoice whose Override (or blocked Return) by person A was recorded but did not finish; sign in as a billing admin B.
+
+- [ ] B sees **Finish as operator** on the hold banner, naming A's pending Override or Return. A non-admin, and A themself, do not see it.
+- [ ] Finishing needs a reason (note optional). Afterwards the invoice is released (or returned) exactly as A recorded it, and the Decision Records show A's decision plus B's "finish" step.
+- [ ] If the page says the decision was saved in part, the form stays open with that message; repeating it finishes the close.
+
+## H. Submit a corrected invoice from Invoice Review (095f-2e2a server + 095f-2e2b client): after a BFF and the Create Invoice wizard / Invoice Review pages that carry them
+
+Not yet built end to end (2e2b in progress).
+
+- [ ] On an In Review invoice, **Submit corrected invoice** opens the Create Invoice wizard with the firm invoice number filled in and the record locked.
+- [ ] The wizard asks for a note; without one it refuses.
+- [ ] After upload, the new invoice gets the next tracking number (`number.2`), shows the note, and the old invoice becomes Superseded.
+- [ ] A double click on submit sends one correction only.
+
+## I. Correction rows are writer-only on dev (iss028, applied 2026-11-17)
+
+- [ ] As an ordinary user (Spaarke Core User), open an invoice that has a correction. Try to delete it from the model-driven app. **Expect** a refusal (no privilege on the correction rows). End invoices by status instead.
+- [ ] As the same user, open an invoice-correction row directly (Advanced Find or the table view). **Expect** read-only: no Save, Delete, Assign or Share.
+- [ ] In Invoice Review, correct a line value and confirm a line. **Expect** both to save, with the correction rows written as usual (the app writes them, not the user).
+
+## J. Finish a decision that did not finish (iss032): after a BFF and an Invoice Review page that carry it
+
+These states are hard to cause by hand; they need a fault during a decision. If you see one in normal use, test it then:
+- [ ] An invoice showing Rejected, Returned or Approved with the "This decision did not finish" banner: **Finish decision…** opens a form. Before the decision was recorded, it asks for the reason again and says why. After it was recorded, the reason is shown locked. Submitting finishes the decision, and the page then shows "View decision".
+- [ ] A decided invoice with no banner shows only "View decision" (nothing changed for complete decisions).
+
+## K. "Finished by" on the History tab (iss034d): after a BFF and an Invoice Review page that carry it
+
+- [ ] A blocked Override or Return that one person recorded and an operator finished (section G): its History entry shows **Finished by {operator}** under the decision.
+- [ ] A blocked decision its own decider finished, and any decision made before iss034c, shows no "Finished by" line.
+
+## L. Rule set "Visible to Firms" is set only by Spaarke (ISS-040): applied to dev 2026-11-17, ready to test
+
+- [ ] As an internal user, open a rule set in the model-driven app. The "Visible to Firms" value still shows on the form and in the view.
+- [ ] Try to change "Visible to Firms" directly on the form. **Expect** it to be read-only (only Spaarke changes it).
+- [ ] Create a rule set in the model-driven app. **Expect** the save to succeed with "Visible to Firms" = No.
+- [ ] In Rule Review, switch a rule set's visibility on and off. **Expect** it to work as before.
+
+## M. Notifications (task 132): after a dev BFF that carries it (work → master merge, your go)
+
+Firm emails come from the shared mailbox; the Invoice Review "notify" step (132ui) is not built yet, so Reject / Return emails only go when a reviewer-confirmed notice exists.
+- [ ] Submit an invoice that the checks reject. The submitter (and the firm's billing contact, if they can open that matter) gets one email with the findings table in the body.
+- [ ] Approve an invoice with an adjustment. The same two people get one email; approving with no adjustment sends none.
+- [ ] A billing contact who has no access to a secure matter gets no email for that matter's invoice.
+- [ ] In the external portal, the bell shows an item (with the invoice name) for your own Rejected / Returned / adjusted invoices only; another firm member who neither submitted nor is the billing contact sees none.
+- [ ] Approvers get one in-app notification "Invoice ready for your review" per invoice; non-approvers get none.
+- [ ] With eBilling switched off, the portal bell shows no billing items.
+- [ ] The "notice text" field is locked (applied to dev 2026-11-17, ready to test now). As a non-admin user, the submission form shows the field masked (\*\*\*\*\*) and you can't edit it. It disappears from the form once the SpaarkeMaster release with task 132's form change is imported.
+
+## N. Billing Guidelines in the external portal (task 135): after a dev BFF and external SPA that carry it (work → master merge, your go)
+
+Dev has no rule sets yet, so this needs a published Billing rule set first.
+- [ ] As a firm user, open the Billing Guidelines card. It lists the published billing rules in force for your firm(s), with rule set name, version, section and quoted clause text; never a document link.
+- [ ] A user linked to several firms sees all of them, and the firm filter narrows the list (EB-D-260).
+- [ ] A rule set with "Visible to Firms" off does not appear at all; neither does an Internal Standard Procedure's rule set.
+- [ ] With eBilling switched off, the card stays and shows "Billing guidelines aren't available." (no error styling, no Retry).

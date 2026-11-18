@@ -193,6 +193,9 @@ public sealed record ApprovalOpenLinesDto(int Pending, int Flagged)
 /// (082c-2, <see cref="InvoiceProcedureHold"/>).</param>
 /// <param name="BlockedSubmissionHeld">The FR-20 blocked-submission hold alone (<see cref="InvoiceBlockedHold"/>): Reject and Return are refused too
 /// (the submission's Override or Return is the way out). False for a Procedure-only hold, which refuses Approve only.</param>
+/// <param name="IncompleteDecision">ISS-032: a reject, return or approve that moved the invoice's status but whose Decision Record was never
+/// written (<see cref="InvoiceIncompleteDecisionDto"/>), reported only to the caller whose repeat finishes it; null otherwise, and null when
+/// the lookup faulted (never a guess).</param>
 public sealed record InvoiceApprovalStateDto(
     Guid InvoiceId,
     Guid? ApprovalId,
@@ -211,7 +214,20 @@ public sealed record InvoiceApprovalStateDto(
     Guid? DecisionRecordId,
     DateTime? EligibleResolvedOn,
     bool FirmNeeded = false,
-    bool BlockedSubmissionHeld = false);
+    bool BlockedSubmissionHeld = false,
+    InvoiceIncompleteDecisionDto? IncompleteDecision = null);
+
+/// <summary>
+/// ISS-032: a decision of the invoice stranded after its status transition, before it was complete (its Decision Record written AND the
+/// approval portion linked to it, the repeat's own definition). A read-only hint: the caller finishes it by repeating the same decision
+/// (approve, reject or return), under that route's own rules.
+/// </summary>
+/// <param name="Verb"><c>Approve</c>, <c>Reject</c> or <c>Return</c>.</param>
+/// <param name="FailedStep">Where it stopped: <c>portion</c> (no Decision Record; the approval portion's status was not moved yet),
+/// <c>record</c> (no Decision Record; the portion's status moved) or <c>link</c> (the Decision Record exists; a step after it did not
+/// finish: its Signals, the portion's link to it, or the portion's status). At <c>link</c> the repeat finishes from the stored record and
+/// ignores the request's reason and note.</param>
+public sealed record InvoiceIncompleteDecisionDto(string Verb, string? FailedStep);
 
 public sealed record ApprovalResult(
     ApprovalOutcome Outcome,
@@ -451,17 +467,25 @@ public sealed class InvoiceApprovalService
             }
         }
 
+        // ISS-032: the decision the invoice's status shows (Approved, Rejected, Returned to Firm) and the person the portion names as its decider.
+        // Only they finish an unrecorded one (the claimant's repeat, below); the hint is then asked for them alone.
+        var strandedKind = portion is null ? null : StrandedKindOf(InvoiceStatus(invoice));
+        var claimedBy = portion?.GetAttributeValue<EntityReference>(PortionDecidedBy)?.Id is { } c && c != Guid.Empty ? c : (Guid?)null;
+
         // EB-D-171: eligible only by the caller's own contact. Best effort here: a read fault shows "not eligible"; approve refuses it.
         var callerEligible = false;
-        if (set is not null && callerSystemUserId is { } user && user != Guid.Empty)
+        var claimant = false;
+        if ((set is not null || (strandedKind is not null && claimedBy is not null)) && callerSystemUserId is { } user && user != Guid.Empty)
         {
             var contact = await CallerContactAsync(invoiceId, user, ct).ConfigureAwait(false);
-            callerEligible = contact.Failure is null && set.ForContact(contact.ContactId) is not null;
+            callerEligible = set is not null && contact.Failure is null && set.ForContact(contact.ContactId) is not null;
+            claimant = strandedKind is not null && contact.Failure is null && contact.ContactId is { } own && own == claimedBy;
         }
 
-        // F4: canApprove also needs the decide right (Write on the invoice), asked as the caller; "could not answer" is no.
+        // F4: canApprove also needs the decide right (Write on the invoice), asked as the caller; "could not answer" is no. ISS-032: the claimant's
+        // repeat needs it too (the decide routes' filter), so it is asked for them as well; canApprove still needs eligibility.
         var canDecide = false;
-        if (callerEligible && caller is not null)
+        if ((callerEligible || claimant) && caller is not null)
         {
             try
             {
@@ -478,18 +502,107 @@ public sealed class InvoiceApprovalService
         var approveRecorded = portion is not null && StatusOf(portion) == PortionApproved && IsCountedStatus(InvoiceStatus(invoice))
             && (await InvoicesWithApproveRecordAsync(_entities, [invoiceId], _recorder.WriterUserIdAsync, ct).ConfigureAwait(false)).Contains(invoiceId);
 
+        // ISS-032: asked only for the claimant with the decide right; an approve's record read above (approveRecorded) is reused, not read again.
+        var incomplete = claimant && canDecide && portion is not null
+            ? await IncompleteDecisionAsync(invoiceId, portion, strandedKind!.Value, callerEligible, approveRecorded, ct).ConfigureAwait(false)
+            : null;
+
         return State(invoice, portion, lines, held, correctionsPending, set, eligibilityUnavailable: set is null, callerEligible, canDecide, resolvedOn, firmNeeded,
-            approveRecorded, blockedSubmissionHeld);
+            approveRecorded, blockedSubmissionHeld) with
+        { IncompleteDecision = incomplete };
+    }
+
+    /// <summary>ISS-032: the decision a status shows. Approve has no <see cref="InvoiceDecisionKind"/>; null is any status that is not a decision's target.</summary>
+    private enum StrandedKind
+    {
+        Approve,
+        Reject,
+        Return,
+    }
+
+    private static StrandedKind? StrandedKindOf(int? invoiceStatus) =>
+        invoiceStatus == InvoiceStatusCodes.Approved ? StrandedKind.Approve
+        : InvoiceRejectReturnService.KindOfInvoiceStatus(invoiceStatus) switch
+        {
+            InvoiceDecisionKind.Reject => StrandedKind.Reject,
+            InvoiceDecisionKind.Return => StrandedKind.Return,
+            _ => null,
+        };
+
+    /// <summary>
+    /// ISS-032: the hint that the decision the invoice's status shows is not complete, for the claimant who holds the decide right (checked by
+    /// the caller). "Complete" is the claimant's repeat's own definition: the portion has the decision's status AND names its record. Reject
+    /// and return by <see cref="InvoiceRejectReturnService.UnfinishedStepAsync"/>. Approve: <paramref name="approveRecorded"/> (the
+    /// writer-created approve record, the match completion uses, already read for the state when the portion is Approved) or, for a portion
+    /// still Pending, <see cref="WriterApproveRecordsAsync"/>. With the record, an unlinked portion (or one not yet Approved) is <c>link</c>;
+    /// the repeat finishes it without re-checking eligibility (<see cref="CheckCompletionAsync"/> runs only while no record exists), so neither
+    /// does the hint. Without it, the repeat re-checks eligibility before it writes the record, so <c>record</c> and <c>portion</c> are
+    /// hinted only to an eligible caller. A portion that records another decision is not this one's (none). A lookup fault gives no hint and
+    /// is logged (ids only). Read only.
+    /// </summary>
+    private async Task<InvoiceIncompleteDecisionDto?> IncompleteDecisionAsync(
+        Guid invoiceId, Entity portion, StrandedKind kind, bool callerEligible, bool approveRecorded, CancellationToken ct)
+    {
+        string? step;
+        try
+        {
+            step = kind == StrandedKind.Approve
+                ? await UnfinishedApproveStepAsync(invoiceId, portion, callerEligible, approveRecorded, ct).ConfigureAwait(false)
+                : await InvoiceRejectReturnService.UnfinishedStepAsync(
+                    _recorder, kind == StrandedKind.Reject ? InvoiceDecisionKind.Reject : InvoiceDecisionKind.Return, invoiceId, portion, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogWarning("Approval state of invoice {InvoiceId}: whether its {Verb} decision is recorded could not be read ({Fault}); no hint is given.",
+                invoiceId, kind, (ex as DecisionRecordRefusedException)?.Reason.ToString() ?? ex.GetType().Name);
+            return null;
+        }
+
+        return step is null ? null : new InvoiceIncompleteDecisionDto(kind.ToString(), step);
+    }
+
+    /// <summary>ISS-032: the approve half of <see cref="IncompleteDecisionAsync"/>. Throws on a lookup fault.</summary>
+    private async Task<string?> UnfinishedApproveStepAsync(Guid invoiceId, Entity portion, bool callerEligible, bool approveRecorded, CancellationToken ct)
+    {
+        // K1 (as reject and return): a portion that records another decision is not this approve's to finish.
+        var portionStatus = StatusOf(portion);
+        if (portionStatus is not (PortionPending or null) && portionStatus != PortionApproved)
+        {
+            return null;
+        }
+
+        // An Approved portion's record was read for the state (approveRecorded: the same match completion makes), so it is not read again (K3);
+        // a Pending portion's was not, so it is read here.
+        var recorded = portionStatus == PortionApproved
+            ? approveRecorded
+            : (await WriterApproveRecordsAsync(invoiceId, DecisionIdFor(portion.Id), ct).ConfigureAwait(false)).Count > 0;
+        if (recorded)
+        {
+            var linked = portion.GetAttributeValue<EntityReference>(PortionRecord)?.Id is { } link && link != Guid.Empty;
+            return portionStatus == PortionApproved && linked ? null : "link";
+        }
+
+        return !callerEligible ? null : portionStatus == PortionApproved ? "record" : "portion";
     }
 
     // ── POST approve ──
 
     /// <summary>Approves the invoice as the caller. See the class remarks for the order and the exactly-once rule.</summary>
-    public async Task<ApprovalResult> ApproveAsync(Guid invoiceId, Guid callerSystemUserId, string? callerBearerToken, CancellationToken ct)
+    /// <param name="note">Task 095f-2a (EB-D-236, design 5.3): the optional approval note; null, empty or whitespace-only means none, and the
+    /// approval then behaves (and its record hashes) exactly as before. Checked by <see cref="InvoiceCorrectionNote.Check"/> before any lock or
+    /// read. Given, it is the record's <c>Values["note"]</c> and the invoice's <see cref="InvoiceCorrectionNote.DecisionColumn"/>, written in the
+    /// transition's own conditional update; with none the column is left unchanged (EB-D-240). Never logged.</param>
+    public async Task<ApprovalResult> ApproveAsync(Guid invoiceId, Guid callerSystemUserId, string? note, string? callerBearerToken, CancellationToken ct)
     {
         if (invoiceId == Guid.Empty || callerSystemUserId == Guid.Empty)
         {
             return new ApprovalResult(ApprovalOutcome.InvalidRequest, LineDecisionCodes.InvalidRequest, "An invoice and a caller are required.");
+        }
+
+        var checkedNote = InvoiceCorrectionNote.Check(note);
+        if (InvoiceCorrectionNote.DecisionRefusalOf(checkedNote.Refusal) is { } noteRefusal)
+        {
+            return new ApprovalResult(ApprovalOutcome.InvalidRequest, noteRefusal.Code, noteRefusal.Detail);
         }
 
         var owner = Guid.NewGuid().ToString("N", CultureInfo.InvariantCulture);
@@ -510,7 +623,7 @@ public sealed class InvoiceApprovalService
 
             try
             {
-                return await ApproveHeldAsync(invoiceId, callerSystemUserId, callerBearerToken, ct).ConfigureAwait(false);
+                return await ApproveHeldAsync(invoiceId, callerSystemUserId, checkedNote.Value, callerBearerToken, ct).ConfigureAwait(false);
             }
             finally
             {
@@ -523,7 +636,7 @@ public sealed class InvoiceApprovalService
         }
     }
 
-    private async Task<ApprovalResult> ApproveHeldAsync(Guid invoiceId, Guid caller, string? callerBearerToken, CancellationToken ct)
+    private async Task<ApprovalResult> ApproveHeldAsync(Guid invoiceId, Guid caller, string? note, string? callerBearerToken, CancellationToken ct)
     {
         Entity? invoice;
         IReadOnlyList<Entity> portions;
@@ -559,7 +672,7 @@ public sealed class InvoiceApprovalService
         // ── Already approved (a second approve, or the claimant completing an interrupted one). ──
         if (portionStatus == PortionApproved || invoiceStatus == InvoiceStatusCodes.Approved)
         {
-            return await CompleteOrNoOpAsync(invoice, portion, caller, callerBearerToken, decisionId, ct).ConfigureAwait(false);
+            return await CompleteOrNoOpAsync(invoice, portion, caller, note, callerBearerToken, decisionId, ct).ConfigureAwait(false);
         }
 
         if (portionStatus is PortionRejected or PortionReturned)
@@ -679,7 +792,7 @@ public sealed class InvoiceApprovalService
         }
 
         var approvedAmount = totals.ApprovedTotal;
-        var decision = BuildDecision(decisionId, invoice, approvalId, caller, approvedAmount, decidedOn, signals.Set);
+        var decision = BuildDecision(decisionId, invoice, approvalId, caller, approvedAmount, note, decidedOn, signals.Set);
         try
         {
             _recorder.Preflight(decision);
@@ -712,11 +825,12 @@ public sealed class InvoiceApprovalService
             return Unavailable(invoiceId, "claim", ex);
         }
 
-        // ── 014: the only status writer. Only Transitioned records. ──
+        // ── 014: the only status writer. Only Transitioned records. 095f-2a (EB-D-240): a note goes to the decision note column in the same
+        //    conditional update; with none (null) the column is left unchanged. ──
         InvoiceTransitionResult transition;
         try
         {
-            transition = await _lifecycle.TransitionAsync(invoiceId, InvoiceLifecycleStatus.Approved, ct).ConfigureAwait(false);
+            transition = await _lifecycle.TransitionAsync(invoiceId, InvoiceLifecycleStatus.Approved, note, ct).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
@@ -765,21 +879,23 @@ public sealed class InvoiceApprovalService
     /// (<see cref="WriterApproveRecordsAsync"/>); the portion's link counts only when it names that record. While no such record exists, the
     /// claimant's completion re-runs the approval checks (<see cref="CheckCompletionAsync"/>) before it writes one.</remarks>
     private async Task<ApprovalResult> CompleteOrNoOpAsync(
-        Entity invoice, Entity portion, Guid caller, string? callerBearerToken, Guid decisionId, CancellationToken ct)
+        Entity invoice, Entity portion, Guid caller, string? note, string? callerBearerToken, Guid decisionId, CancellationToken ct)
     {
         var invoiceId = invoice.Id;
         var decidedBy = portion.GetAttributeValue<EntityReference>(PortionDecidedBy);
         var portionStatus = StatusOf(portion);
 
-        IReadOnlyList<Guid> recorded;
+        IReadOnlyList<(Guid Id, decimal? ApprovedAmount)> recordRows;
         try
         {
-            recorded = await WriterApproveRecordsAsync(invoiceId, decisionId, ct).ConfigureAwait(false);
+            recordRows = await WriterApproveRecordRowsAsync(invoiceId, decisionId, ct).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
             return Unavailable(invoiceId, "read", ex);
         }
+
+        var recorded = recordRows.Select(r => r.Id).ToList();
 
         // Task 165b-3 fix round (F1): the portion's status is a user-writable column. An invoice that is not Approved with no writer-created
         // approve record is not an approved one, whatever the portion says: refused, never answered as "already approved". Nothing is written.
@@ -867,10 +983,27 @@ public sealed class InvoiceApprovalService
         }
 
         var amount = portion.GetAttributeValue<Money>(PortionAmount)?.Value ?? 0m;
-        var decision = BuildDecision(decisionId, invoice, portion.Id, caller, amount, decidedOn, signals.Set);
+        var decision = BuildDecision(decisionId, invoice, portion.Id, caller, amount, note, decidedOn, signals.Set);
         _logger.LogInformation("Approve of invoice {InvoiceId}: completing the caller's interrupted approval.", invoiceId);
-        return await FinishAsync(invoiceId, portion.Id, decision, portionStatus, recordId, decidedBy!.Id, signals.Set, ct,
-            refuseAlreadyRecorded: recorded.Count == 0).ConfigureAwait(false);
+        // 095f-2a review F1 (K-1, design 2 Change 3, as reject and return): once the writer-created record exists it is finished as it is, even
+        // when the portion is not yet linked to it (the first call stopped at "signals" or "link"): its stored set is closed and the link written;
+        // RecordAsync is never asked again, so a repeat with an edited (or no) note completes, and the edited note is dropped. Before the record
+        // exists the record takes the repeat's note, while the decision note column keeps what the first call's transition wrote.
+        var existingRecord = recordId ?? (recorded.Count > 0 ? recorded[0] : null);
+
+        // Review round 2 F2: RecordAsync is not asked again once the record exists, so its hash (which covers approvedAmount) no longer refuses a
+        // changed portion amount. The stored amount is compared here instead; a mismatch (or an unreadable amount) is answered as the writer's
+        // refusal was (Incomplete at "record"), before anything is written, closed or linked. Ids only in the log, never the amounts.
+        if (existingRecord is { } held && recordRows.First(r => r.Id == held).ApprovedAmount != amount)
+        {
+            _logger.LogWarning("Approve of invoice {InvoiceId}: the portion's approved amount is not the one Decision Record {RecordId} holds; nothing was changed.",
+                invoiceId, held);
+            return Incomplete(invoiceId, decisionId, "record", nameof(DecisionRecordRefusalReason.ReviewInvalid));
+        }
+
+        // Review round 2 F1: the closes name the stored record's decider (signals.StoredDeciderUserId), never this caller; the caller only finishes it.
+        return await FinishAsync(invoiceId, portion.Id, decision, portionStatus, existingRecord, decidedBy!.Id,
+            signals.Set, ct, refuseAlreadyRecorded: recorded.Count == 0, storedDeciderUserId: signals.StoredDeciderUserId).ConfigureAwait(false);
     }
 
     /// <summary>After the transition: the portion as Approved (re-asserting the decider), the record, the Signals, the link. Each step is idempotent.
@@ -878,10 +1011,12 @@ public sealed class InvoiceApprovalService
     /// "already recorded" answer names a record that is not one under the completion's filter; it is refused, not linked or closed against.</summary>
     private async Task<ApprovalResult> FinishAsync(
         Guid invoiceId, Guid approvalId, BillingDecision decision, int? portionStatus, Guid? recordId, Guid deciderContactId,
-        InvoiceSubmissionAfterSteps.ResolvedSignalSet signals, CancellationToken ct, bool refuseAlreadyRecorded = false)
+        InvoiceSubmissionAfterSteps.ResolvedSignalSet signals, CancellationToken ct, bool refuseAlreadyRecorded = false, Guid? storedDeciderUserId = null)
     {
         var amount = decision.Facts["approvedAmount"] is decimal d ? d : 0m;
-        var decider = decision.Decider.SystemUserId ?? Guid.Empty;
+        // 095f-2a review round 2 F1 (#2507 K1, as reject and return): a repeat names the closes for the decider the stored record names, never
+        // for whoever repeats; a first attempt (no stored record) is the caller's own decision.
+        var decider = storedDeciderUserId ?? decision.Decider.SystemUserId ?? Guid.Empty;
         if (portionStatus != PortionApproved)
         {
             try
@@ -899,9 +1034,13 @@ public sealed class InvoiceApprovalService
         if (recordId is { } existing && existing != Guid.Empty)
         {
             var notClosed = await HumanDecisionSignalClose.CloseSetAsync(_closeActed, signals, existing, decider, _logger, ct).ConfigureAwait(false);
-            return notClosed > 0
-                ? Incomplete(invoiceId, decision.DecisionId, "signals", $"{notClosed} Signals not closed")
-                : Approved(invoiceId, decision.DecisionId, existing);
+            if (notClosed > 0)
+            {
+                return Incomplete(invoiceId, decision.DecisionId, "signals", $"{notClosed} Signals not closed");
+            }
+
+            // 095f-2a review F1: the record may exist without its link (a repeat that found it by its key): the link is written here, idempotently.
+            return await LinkAsync(invoiceId, approvalId, decision.DecisionId, existing, ct).ConfigureAwait(false);
         }
 
         BillingDecisionRecordResult recorded;
@@ -920,25 +1059,32 @@ public sealed class InvoiceApprovalService
         }
 
         // ── D-122: the stored set, closed as Acted by the record (a repeat: AlreadyClosedByThisRecord). A close that failed (a fault or a
-        //    change since the read) leaves the approve Incomplete at "signals" BEFORE the link, so the claimant's repeat comes back through
-        //    here: the record answers AlreadyRecorded (no second record) and the remaining closes run over the same stored set. ──
+        //    change since the read) leaves the approve Incomplete at "signals" BEFORE the link, so the claimant's repeat finds the record by
+        //    its key and finishes it in the existing-record branch above (no second record): the remaining closes run over the same stored set,
+        //    then the link (095f-2a review F1). ──
         var failedCloses = await HumanDecisionSignalClose.CloseSetAsync(_closeActed, signals, recorded.RecordId, decider, _logger, ct).ConfigureAwait(false);
         if (failedCloses > 0)
         {
             return Incomplete(invoiceId, decision.DecisionId, "signals", $"{failedCloses} Signals not closed");
         }
 
+        return await LinkAsync(invoiceId, approvalId, decision.DecisionId, recorded.RecordId, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>The portion to its Decision Record; the last step, so Approved is answered only once it is written. Idempotent.</summary>
+    private async Task<ApprovalResult> LinkAsync(Guid invoiceId, Guid approvalId, Guid decisionId, Guid recordId, CancellationToken ct)
+    {
         try
         {
             await _entities.UpdateAsync(EligibleApproverResolver.ApprovalEntity, approvalId,
-                new Dictionary<string, object> { [PortionRecord] = new EntityReference(InvoiceReviewReadService.DecisionRecordEntity, recorded.RecordId) }, ct).ConfigureAwait(false);
+                new Dictionary<string, object> { [PortionRecord] = new EntityReference(InvoiceReviewReadService.DecisionRecordEntity, recordId) }, ct).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
-            return Incomplete(invoiceId, decision.DecisionId, "link", ex.GetType().Name);
+            return Incomplete(invoiceId, decisionId, "link", ex.GetType().Name);
         }
 
-        return Approved(invoiceId, decision.DecisionId, recorded.RecordId);
+        return Approved(invoiceId, decisionId, recordId);
     }
 
     private ApprovalResult Approved(Guid invoiceId, Guid decisionId, Guid recordId)
@@ -1014,7 +1160,9 @@ public sealed class InvoiceApprovalService
 
     // ── EB-D-172: the invoice's Signals ──
 
-    private sealed record SignalRead(InvoiceSubmissionAfterSteps.ResolvedSignalSet Set, ApprovalResult? Failure);
+    /// <param name="StoredDeciderUserId">095f-2a review round 2 F1: the stored record's <c>sprk_confirmedby</c> when the set was read from it (as
+    /// reject and return carry it); null on a first attempt.</param>
+    private sealed record SignalRead(InvoiceSubmissionAfterSteps.ResolvedSignalSet Set, ApprovalResult? Failure, Guid? StoredDeciderUserId = null);
 
     /// <summary>The invoice-level Open or Acknowledged Signals created at or before <paramref name="decidedOnUtc"/>, ordered by id (the record's hash).</summary>
     private async Task<SignalRead> ReadInvoiceSignalsAsync(Guid invoiceId, DateTime decidedOnUtc, CancellationToken ct)
@@ -1059,7 +1207,8 @@ public sealed class InvoiceApprovalService
                 new InvoiceSubmissionAfterSteps.ResolvedSignalSet(
                     stored.SetReadAtUtc ?? DateTime.MinValue,
                     stored.Signals.Select(s => new InvoiceSubmissionAfterSteps.ResolvedSignal(s.SignalId, s.PolicyCode)).ToList()),
-                null);
+                null,
+                StoredDeciderUserId: stored.ConfirmedByUserId);
         }
 
         return await ReadInvoiceSignalsAsync(invoiceId, decidedOnUtc, ct).ConfigureAwait(false);
@@ -1388,7 +1537,12 @@ public sealed class InvoiceApprovalService
     /// record's key (<see cref="BillingDecisionKey.IdOf"/>). Read app-only. Whether an approval is complete is decided from these, never from
     /// the portion's columns. Throws on a read fault (the caller answers Unavailable).
     /// </summary>
-    private async Task<IReadOnlyList<Guid>> WriterApproveRecordsAsync(Guid invoiceId, Guid decisionId, CancellationToken ct)
+    private async Task<IReadOnlyList<Guid>> WriterApproveRecordsAsync(Guid invoiceId, Guid decisionId, CancellationToken ct) =>
+        (await WriterApproveRecordRowsAsync(invoiceId, decisionId, ct).ConfigureAwait(false)).Select(r => r.Id).ToList();
+
+    /// <summary><see cref="WriterApproveRecordsAsync"/> with each record's stored approved amount (<see cref="StoredApprovedAmount"/>; null
+    /// when unreadable), from the same read (095f-2a review round 2 F2).</summary>
+    private async Task<IReadOnlyList<(Guid Id, decimal? ApprovedAmount)>> WriterApproveRecordRowsAsync(Guid invoiceId, Guid decisionId, CancellationToken ct)
     {
         var writer = await _recorder.WriterUserIdAsync(ct).ConfigureAwait(false);
         // Task 165b-4: the same record read the spend readers and InvoicesWithApproveRecordAsync use (InvoiceApproveRecord), here for one invoice.
@@ -1398,8 +1552,44 @@ public sealed class InvoiceApprovalService
         var key = BillingDecisionKey.IdOf(InvoiceReviewReadService.InvoiceEntity, invoiceId, decisionId);
         return (await InvoiceReviewReadService.ReadPagedAsync(_entities, query, ct).ConfigureAwait(false))
             .Where(row => row.Id != Guid.Empty && InvoiceLineOrigin.ReviewIdOf(row) == key)
-            .Select(row => row.Id)
+            .Select(row => (row.Id, StoredApprovedAmount(row)))
             .ToList();
+    }
+
+    /// <summary>
+    /// 095f-2a review round 2 F2: the approved amount an approve record holds (<c>sprk_steps</c>: the taken <c>approve-invoice</c> step's
+    /// <c>values.approvedAmount</c>, which the record's hash covers). Null when it cannot be read; the caller then refuses (fail closed).
+    /// </summary>
+    private static decimal? StoredApprovedAmount(Entity row)
+    {
+        try
+        {
+            using var steps = System.Text.Json.JsonDocument.Parse(row.GetAttributeValue<string>(InvoiceLineOrigin.RecordSteps) ?? "{}");
+            if (steps.RootElement.ValueKind != System.Text.Json.JsonValueKind.Object
+                || !steps.RootElement.TryGetProperty("steps", out var list) || list.ValueKind != System.Text.Json.JsonValueKind.Array)
+            {
+                return null;
+            }
+
+            foreach (var step in list.EnumerateArray())
+            {
+                if (step.ValueKind == System.Text.Json.JsonValueKind.Object
+                    && step.TryGetProperty("code", out var code) && code.ValueKind == System.Text.Json.JsonValueKind.String && code.GetString() == ApproveActionCode
+                    && step.TryGetProperty("taken", out var taken) && taken.ValueKind == System.Text.Json.JsonValueKind.True
+                    && step.TryGetProperty("values", out var values) && values.ValueKind == System.Text.Json.JsonValueKind.Object
+                    && values.TryGetProperty("approvedAmount", out var amount) && amount.ValueKind == System.Text.Json.JsonValueKind.Number
+                    && amount.TryGetDecimal(out var stored))
+                {
+                    return stored;
+                }
+            }
+
+            return null;
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return null;
+        }
     }
 
     /// <summary>
@@ -1529,7 +1719,7 @@ public sealed class InvoiceApprovalService
     // ── Builders ──
 
     private static BillingDecision BuildDecision(
-        Guid decisionId, Entity invoice, Guid approvalId, Guid caller, decimal approvedAmount, DateTimeOffset decidedOn,
+        Guid decisionId, Entity invoice, Guid approvalId, Guid caller, decimal approvedAmount, string? note, DateTimeOffset decidedOn,
         InvoiceSubmissionAfterSteps.ResolvedSignalSet signals)
     {
         // Ids and amounts only (ADR-015). K3: the approved amount is in Values, so the record's hash covers what was approved (074 K-5: the
@@ -1547,6 +1737,14 @@ public sealed class InvoiceApprovalService
             facts[DecisionRecordWriter.BillingResolvedSetFact] = InvoiceLineDecisionService.SetFact(signals);
         }
 
+        // 095f-2a (design 1.2, 5.3): the catalog's optional "note", only when one is given; never a null-valued key, so an approve without a
+        // note hashes exactly as before.
+        var values = new Dictionary<string, object?> { ["approvedAmount"] = approvedAmount };
+        if (note is not null)
+        {
+            values["note"] = note;
+        }
+
         return new BillingDecision(
             decisionId,
             ApproveActionCode,
@@ -1554,7 +1752,7 @@ public sealed class InvoiceApprovalService
             BillingDecider.Human(caller, ApproverRole),
             facts,
             "Approved",
-            Values: new Dictionary<string, object?> { ["approvedAmount"] = approvedAmount },
+            Values: values,
             ResolvedSignalIds: signals.Signals.Count > 0 ? signals.Signals.Select(s => s.Id).ToList() : null,
             Written: [new DecisionRecordRef(InvoiceReviewReadService.InvoiceEntity, invoice.Id), new DecisionRecordRef(EligibleApproverResolver.ApprovalEntity, approvalId)],
             DecidedOn: decidedOn);

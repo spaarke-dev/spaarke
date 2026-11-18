@@ -4,7 +4,7 @@
     <title>Firm-visible findings projection (clause quotes, visibility filtering)</title>
     <phase>5 Firm feedback (WP5) — wave W5-1</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Decides what a CIAM (law firm) caller may see; a wrong filter leaks another firm's invoice, internal findings or clause text from an internal procedure (NFR-10, D-66). Security-class guard with a seeding proof.</rigor-reason>
     <model-tier>sonnet</model-tier>

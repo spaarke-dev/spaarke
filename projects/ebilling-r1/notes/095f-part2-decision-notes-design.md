@@ -541,3 +541,35 @@ Q1–Q5 stay open. Option B vs A (2b, 5.2) remains the owner's call; ontology-r1
 - `Writer:1555`, `:1429-1430`, `:1580-1591`, `Catalog:417`, `:451`, `Writer:1266`, `DecisionRecordWriterTests.Billing.cs:191` and `InvoiceRejectReturnService.cs:635-637` match the code.
 - `InvoiceRejectReturnService.cs:660-673` is three lines early at the start: the existing-record branch is `:663-672` (from `if (recordId is { } existing ...)` to its `LinkAsync` return; the first `RecordAsync` call is at `:678`). The substance holds; the doc cites `:663-672`.
 - The review names one exact-set test. A second test also pins the billing code list (`tests/unit/domain/Signals/DecisionActionCatalogTests.cs:348-354`), and the required-parameter theory (`:386-396`) gains rows. Both are listed in §3.
+
+## 15. Owner answers (2026-11-16, EB-D-240 to EB-D-243)
+
+These settle §10 Q1-Q5. This section overrides earlier sections where they differ.
+
+| Q | Answer | Effect on the design |
+|---|---|---|
+| 1 | With no note, the invoice-level column takes the decision's required reason (reject, return, override, adjustment). An approve with no note leaves it unchanged. | K-3 narrows to approve without a note. |
+| 2 | A separate internal column, **`sprk_invoice.sprk_decisionnote`** (EB-D-240, amending EB-D-236). | Every "invoice column" in §1.2-§1.4, §2-§5 and N4 now means `sprk_decisionnote`. `sprk_correctionnote` keeps its single writer (the submission persister) and its firm-authored meaning; §1.4's two-author problem is gone. The ArchTest becomes `InvoiceDecisionNoteWritersGuardTests` (allowed: lifecycle, release transaction, totals path), and a second must-fire control keeps `sprk_correctionnote`'s writer set to the persister alone. A new additive column script (`scripts/ebilling/`, Memo 2000, not required, `Consistency: Strong`) is applied on dev with the owner's go before any BFF that writes it deploys; SpaarkeMaster sync goes with a deploy task, and `sprk_decisionnote` is never added to any firm-facing reader or allow-list (must-not-fire test on the external invoice allow-list). |
+| 3 | **(A)**: adjustments get Decision Records (EB-D-241). | §3 option A as written; ontology-r1 reviews the exact-set amendment. |
+| 4 | **(B)**: the note goes on the correction row, `sprk_invoicecorrection.sprk_note` (EB-D-242). | §5.2 option B; a second additive column script. The note is not part of the row's derived id. |
+| 5 | The internal Correction path is needed in R1, but first investigate the least-work option consistent with the existing architecture (EB-D-243). | 095f-2e1 (server) proceeds. 095f-2e2 waits on the investigation and the owner's pick. Premise correction: the from-document route's only client, `emailInvoiceSubmission.ts`, is used by our CommunicationActions control and the email workspace, not the Word add-in (§6.2's "word-add-in-r1's task-118 body" is wrong; Q9 is moot). |
+
+## 16. Correction path investigation (2026-11-16, EB-D-243)
+
+**What exists (read from the code at 81968199e9):**
+- Correction is accepted by two routes only: from-email (`mode` + `invoiceId`, note required, `FromEmailSubmissionService.cs:229-233`) and from-document (`Mode` + `InvoiceId`, no note until 2e-1). The internal multipart route (`Api/Finance/InvoiceSubmissionEndpoints.cs:758`, `InvoiceSubmissionService.SubmitAsync` `:236`) and the external SPA route accept New only.
+- Eligibility is shared: `PrepareCorrectionAsync` (`InvoiceSubmissionService.cs:461`: the caller's Write on the target, else a uniform 404) and `CheckCorrectionAsync` (`:1691`: same firm, same single core record, target In Review, its own finished submission, same firm invoice number; refusals are 409 `CorrectionNotAllowed`). `SubmitExistingDocumentAsync` runs the check at `:631-637` and writes `sprk_resubmissionof`; `SubmissionCommitGate` re-checks at commit. `InvoiceSubmissionRequest.CorrectedInvoice` already exists (`InvoiceSubmissionContracts.cs:169`), and `BuildJob` already carries `correctionNote` (`:2232-2247`).
+- `GET /api/finance/invoices/{id}/correction-prefill` already returns the target's prefill.
+- The only client that sends Correction today is the Outlook pane (from-email). The Create Invoice wizard posts multipart (`internalInvoiceSubmission.ts:405-411`: file, number, PO) and has no Correction mode. Invoice Review has no "submit a corrected invoice" action (its "Correct an invoice value" edits values in place).
+
+**Options, least work first:**
+
+| Option | Server | Client | Reuses | Cost |
+|---|---|---|---|---|
+| **B′ (recommended)** Add Correction to the internal multipart route | The handler reads three more form fields (`mode`, `invoiceId`, `correctionNote`), calls the existing `PrepareCorrectionAsync`, sets `CorrectedInvoice`; the 4a check block moves into one private method that both `SubmitAsync` and `SubmitExistingDocumentAsync` call; the note goes to `BuildJob`. | A "Submit corrected invoice" action on Invoice Review (target known, In Review) opens the Create Invoice wizard with an optional `correction` prop: number prefilled from `correction-prefill`, record locked, required note box. | All eligibility, commit-gate, supersede and persister logic; the wizard's existing upload flow. | M. Touches the shared `InvoiceSubmissionWizard` (additive optional prop; spa-r4's four conditions in §13 apply). External route untouched. |
+| A Use from-document from the wizard | 2e-1 only. | The wizard must first create a `sprk_document` from the PDF, then call from-document: a two-step upload with an orphan-document failure mode. | Same server logic. | M-L client; new failure mode. |
+| D Outlook pane only | None. | None. | Everything. | Zero, but only for invoices that arrived by email; the owner said the path is needed. |
+
+From-email (option C) does not fit: it needs a communication record and a mailbox attachment.
+
+**Recommendation: B′.** It adds no new route or service, keeps one eligibility check for every channel, and keeps the wizard's single-call upload. The task (095f-2e2) is written after the owner picks.
