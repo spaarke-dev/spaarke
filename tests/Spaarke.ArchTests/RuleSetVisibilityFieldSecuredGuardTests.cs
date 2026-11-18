@@ -11,8 +11,9 @@ namespace Spaarke.ArchTests;
 /// <para><b>Why.</b> Every firm-visibility reader trusts the flag: it decides whether a rule set's clause quotes and section
 /// references are shown to firms. Only the BFF paths that own it change it, and the BFF writes through its application user, which
 /// is in the "Spaarke BFF-Managed Field Writers" profile. Secured, a native write by anyone else is refused, while every user keeps
-/// reading the value through the "Spaarke BFF-Managed Field Readers" profile. If the column lost field security (drift), any user
-/// with Write on a rule set could change what firms are shown. This guard covers the declaration; the permissions travel in
+/// reading the value through the "Spaarke BFF-Managed Field Readers" profile. If the column lost field security (drift), writes
+/// would no longer be limited to the BFF writers profile, although every firm-visibility reader trusts the flag.
+/// This guard covers the declaration; the permissions travel in
 /// <c>Other/FieldSecurityProfiles.xml</c> and are applied by <c>scripts/ebilling/Set-EbillingRuleSetVisibilityFieldSecurity.ps1</c>.</para>
 /// <para>An explicit <c>1</c> is required: a missing <c>IsSecured</c> element, an explicit <c>0</c>, or no declaration fails.</para>
 /// <para><b>Maintenance.</b> Do not unsecure the column. If it must change, first move the flag's writers (re-review every reader

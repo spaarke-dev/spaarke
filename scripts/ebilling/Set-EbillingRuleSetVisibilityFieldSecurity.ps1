@@ -20,8 +20,9 @@
 
     PRECONDITIONS (every mode; a write run refuses unless all pass):
       (p0) the column exists and can be secured for read, create and update;
-      (p1) the writer profile exists, exactly once, and is in -SolutionUniqueName; it has at least one enabled application user;
-           no team holds it;
+      (p1) the writer profile exists, exactly once, and is in -SolutionUniqueName; its members are exactly the -BffApplicationIds
+           application users: each is a member, and there is no other user (human or application) and no team (a team would make
+           every member a writer). A missing BFF member refuses the run before the column is secured, with nothing changed;
       (p2) the readers profile exists, exactly once, and is in -SolutionUniqueName;
       (p3) the readers profile is on EVERY business unit's default team (the ontology writer unit's default team excepted, as the
            other scripts do);
@@ -54,6 +55,11 @@
 .PARAMETER EnvironmentUrl
     Dataverse environment URL. Defaults to $env:DATAVERSE_URL, else the dev environment.
 
+.PARAMETER BffApplicationIds
+    Application (client) ids of the BFF's Dataverse application users, the ONLY members of the writer profile (dev:
+    5967251e-171c-46fe-a6c2-ef843c90309d and, while it is still an application user, 1e40baad-e065-4aea-a8d4-4b7ab273458c).
+    Per-customer input (D-13), never hard-coded. Mandatory in every mode, -Revert included.
+
 .PARAMETER SolutionUniqueName
     The unmanaged solution the profiles and sprk_ruleset travel in. Default SpaarkeMaster.
 
@@ -64,10 +70,10 @@
     Undo a run: un-secure the column, remove this script's permission rows, publish. Combine with -WhatIf for a dry run.
 
 .EXAMPLE
-    pwsh scripts/ebilling/Set-EbillingRuleSetVisibilityFieldSecurity.ps1 -WhatIf
-    pwsh scripts/ebilling/Set-EbillingRuleSetVisibilityFieldSecurity.ps1
-    pwsh scripts/ebilling/Set-EbillingRuleSetVisibilityFieldSecurity.ps1 -Verify
-    pwsh scripts/ebilling/Set-EbillingRuleSetVisibilityFieldSecurity.ps1 -Revert -WhatIf
+    pwsh scripts/ebilling/Set-EbillingRuleSetVisibilityFieldSecurity.ps1 -BffApplicationIds 5967251e-171c-46fe-a6c2-ef843c90309d,1e40baad-e065-4aea-a8d4-4b7ab273458c -WhatIf
+    pwsh scripts/ebilling/Set-EbillingRuleSetVisibilityFieldSecurity.ps1 -BffApplicationIds 5967251e-171c-46fe-a6c2-ef843c90309d,1e40baad-e065-4aea-a8d4-4b7ab273458c
+    pwsh scripts/ebilling/Set-EbillingRuleSetVisibilityFieldSecurity.ps1 -BffApplicationIds 5967251e-171c-46fe-a6c2-ef843c90309d,1e40baad-e065-4aea-a8d4-4b7ab273458c -Verify
+    pwsh scripts/ebilling/Set-EbillingRuleSetVisibilityFieldSecurity.ps1 -BffApplicationIds 5967251e-171c-46fe-a6c2-ef843c90309d,1e40baad-e065-4aea-a8d4-4b7ab273458c -Revert -WhatIf
 
 .NOTES
     Project: ebilling-r1, ISS-040 (#2901). Shape: scripts/ebilling/Set-EbillingFindingsJsonFieldSecurity.ps1 (modes,
@@ -81,6 +87,7 @@
 [CmdletBinding(SupportsShouldProcess = $true)]
 param(
     [string]$EnvironmentUrl = $(if ($env:DATAVERSE_URL) { $env:DATAVERSE_URL } else { 'https://spaarkedev1.crm.dynamics.com' }),
+    [Parameter(Mandatory)][string[]]$BffApplicationIds,
     [string]$SolutionUniqueName = 'SpaarkeMaster',
     [switch]$Verify,
     [switch]$Revert
@@ -88,6 +95,9 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $EnvironmentUrl = $EnvironmentUrl.TrimEnd('/')
+$BffApplicationIds = @($BffApplicationIds | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+if ($BffApplicationIds.Count -eq 0) { throw '-BffApplicationIds: at least one application id is required.' }
+foreach ($id in $BffApplicationIds) { if (-not [Guid]::TryParse($id, [ref][Guid]::Empty)) { throw "-BffApplicationIds: '$id' is not a GUID." } }
 $IsDryRun = [bool]$WhatIfPreference
 if ($IsDryRun -and $Verify) { throw '-WhatIf and -Verify are separate modes.' }
 if ($Revert -and $Verify) { throw '-Revert and -Verify are separate modes; run -Revert, then check IsSecured.' }
@@ -211,10 +221,26 @@ else {
     }
 }
 
+# (p1) the writer profile's members are exactly the -BffApplicationIds application users. This runs in the preconditions, before the
+# column is secured: a missing BFF member refuses the run with nothing changed.
+$bffUsers = @()
+foreach ($appId in $BffApplicationIds) {
+    $u = @((Invoke-DvGet "systemusers?`$select=systemuserid,fullname,isdisabled&`$filter=applicationid eq $appId").value) | Select-Object -First 1
+    if (-not $u) { Report 'FAIL' "(p1) no application user for appId $appId in this environment"; continue }
+    $bffUsers += $u
+}
 if ($writer) {
-    $appMembers = @($writer.systemuserprofiles_association | Where-Object { $_.applicationid -and -not $_.isdisabled })
-    if ($appMembers.Count -gt 0) { Report 'OK' "(p1) $WriterProfileName has an enabled application user (the BFF writes through it)" }
-    else { Report 'FAIL' "(p1) $WriterProfileName has no enabled application user - the BFF would be refused when it writes $Column once secured. Membership is maintained by Set-RecordCreatorPersonSchema.ps1, never here" }
+    $members = @($writer.systemuserprofiles_association)
+    $memberIds = @($members | ForEach-Object { $_.systemuserid.ToString().ToLowerInvariant() })
+    $allowed = @($bffUsers | ForEach-Object { $_.systemuserid.ToString().ToLowerInvariant() })
+    foreach ($u in $bffUsers) {
+        if ($memberIds -contains $u.systemuserid.ToString().ToLowerInvariant()) { Report 'OK' "(p1) BFF app user '$($u.fullname)' is a member of $WriterProfileName" }
+        else { Report 'FAIL' "(p1) BFF app user '$($u.fullname)' is NOT a member of $WriterProfileName - it would be refused when it writes $Column once secured (unless System Administrator). Membership is maintained by Set-RecordCreatorPersonSchema.ps1, never here" }
+    }
+    foreach ($m in $members | Where-Object { $_.systemuserid.ToString().ToLowerInvariant() -notin $allowed }) {
+        $kind = if ($m.applicationid) { "an application user (appId $($m.applicationid)) not in -BffApplicationIds" } else { 'a HUMAN user' }
+        Report 'FAIL' "(p1) $WriterProfileName member '$($m.fullname)' is $kind - it could change $Column"
+    }
     foreach ($tm in @($writer.teamprofiles_association)) { Report 'FAIL' "(p1) $WriterProfileName has TEAM '$($tm.name)' - every member could change $Column" }
 }
 
@@ -325,7 +351,7 @@ elseif ($attr.IsSecured) {
         catch { Write-MaskedRecovery "granting a missing profile permission on the already-secured column failed: $($_.Exception.Message)"; throw }
     }
 }
-elseif ($Verify) { Report 'MISSING' "$Table.$Column is NOT field-secured - any user with Write on a rule set can change what firms see" }
+elseif ($Verify) { Report 'MISSING' "$Table.$Column is NOT field-secured - NOT field-secured; writes are not limited to the BFF writers profile" }
 elseif ($IsDryRun) { Report 'WOULD' "secure $Table.$Column, then at once grant $ReaderProfileName (read) and $WriterProfileName (read, create, update)" }
 elseif ($specs.Count -lt 2) { Report 'FAIL' "$Table.$Column was not secured: a profile is missing" }
 elseif (-not $PSCmdlet.ShouldProcess("$Table.$Column", "Field-secure the column, then at once grant $ReaderProfileName read and $WriterProfileName read/create/update")) { Report 'FAIL' "$Table.$Column was not secured (declined at the confirmation)" }
