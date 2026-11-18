@@ -41,6 +41,14 @@ public static class FirmOutcomeAuthorizationFilterExtensions
         });
 }
 
+/// <summary>The answer of <see cref="FirmOutcomeAuthorizationFilter.DecideInvoiceForFeedAsync"/> (task 132).</summary>
+internal enum InvoiceFeedDecision
+{
+    Visible,
+    Denied,
+    Unavailable,
+}
+
 /// <summary>What the filter decided, for the handler that runs after it: the one id the caller may be told about.</summary>
 /// <param name="Subject">Whether <paramref name="SubjectId"/> is an invoice or a submission.</param>
 /// <param name="SubjectId">The invoice or submission, as READ server-side (never a request field beyond the route's own id, which was checked).</param>
@@ -117,6 +125,26 @@ internal sealed class FirmOutcomeAuthorizationFilter : IEndpointFilter
         _logger = logger;
         _hideInvoices = hideInvoices;
         _hideSubmissions = hideSubmissions;
+    }
+
+    /// <summary>
+    /// The ONE invoice rule, asked as a decision rather than a route refusal (ebilling-r1 task 132: the notification feed re-checks each candidate
+    /// invoice with the same rule the outcome route applies, so the feed can never show what the route would refuse). Visible only when the invoice
+    /// passed every step (its firm is one of <paramref name="firms"/>, Read on its core record and its secure roots, and the (a') hiding decision);
+    /// Unavailable when a read or the decision faulted (retryable, fail closed); Denied otherwise, including an invoice that does not exist.
+    /// </summary>
+    internal async Task<InvoiceFeedDecision> DecideInvoiceForFeedAsync(
+        CallerPrincipal principal, IReadOnlyList<Guid> firms, Guid invoiceId, CancellationToken ct)
+    {
+        var (denial, decided) = await DecideInvoiceAsync(principal, firms, invoiceId, ct).ConfigureAwait(false);
+        if (denial is null)
+        {
+            return decided ? InvoiceFeedDecision.Visible : InvoiceFeedDecision.Denied;
+        }
+
+        return denial is IStatusCodeHttpResult { StatusCode: StatusCodes.Status503ServiceUnavailable }
+            ? InvoiceFeedDecision.Unavailable
+            : InvoiceFeedDecision.Denied;
     }
 
     public async ValueTask<object?> InvokeAsync(EndpointFilterInvocationContext context, EndpointFilterDelegate next)

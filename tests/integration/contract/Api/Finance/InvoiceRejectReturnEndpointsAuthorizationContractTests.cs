@@ -9,6 +9,8 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Moq;
+using Sprk.Bff.Api.Services.Jobs;
 using Spaarke.Core.Auth;
 using Spaarke.Core.Auth.Rules;
 using Spaarke.Dataverse;
@@ -354,6 +356,73 @@ public sealed class InvoiceRejectReturnEndpointsAuthorizationContractTests
     }
 
     // =========================================================================================
+    // Task 132: the notification job (FR-39, EB-D-258)
+    // =========================================================================================
+
+    [Theory(DisplayName = "132 EB-D-258: a decision enqueues ONE notification job; it carries the reviewer-confirmed notice when the request had both parts, and none otherwise")]
+    [InlineData("reject", EbillingNotificationEvent.InvoiceRejected)]
+    [InlineData("return", EbillingNotificationEvent.ReturnedToFirm)]
+    public async Task Decided_EnqueuesOneJob_WithTheConfirmedNoticeWhenGiven(string route, EbillingNotificationEvent expected)
+    {
+        await using var host = await Host.StartAsync();
+        host.GrantAll();
+
+        var response = await host.SendAsync(route, body: "{\"reason\":\"Because\",\"noticeSubject\":\"Please correct\",\"noticeProse\":\"Please correct the hours.\"}");
+        var repeat = await host.SendAsync(route, body: "{\"reason\":\"Because\",\"noticeSubject\":\"Please correct\",\"noticeProse\":\"Please correct the hours.\"}");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        repeat.StatusCode.Should().Be(HttpStatusCode.OK, "alreadyDecided");
+        var job = host.Queued.Should().ContainSingle("a repeat of a decided invoice is a no-op and enqueues nothing").Subject;
+        job.IdempotencyKey.Should().Be(EbillingNotificationEnqueuer.IdempotencyKeyFor(expected, host.World.InvoiceId));
+        var payload = EbillingNotificationEnqueuer.ParsePayload(job.Payload)!;
+        payload.Event.Should().Be(expected);
+        payload.Subject.Should().Be(EbillingNotificationSubject.Invoice);
+        payload.NoticeSubject.Should().Be("Please correct");
+        payload.NoticeProse.Should().Be("Please correct the hours.");
+    }
+
+    [Theory(DisplayName = "132 EB-D-258: a decision WITHOUT the confirmed notice enqueues the job with none (the job then sends no firm email)")]
+    [MemberData(nameof(Routes))]
+    public async Task Decided_WithoutANotice_EnqueuesTheJobWithNone(string route)
+    {
+        await using var host = await Host.StartAsync();
+        host.GrantAll();
+
+        await host.SendAsync(route);
+
+        var payload = EbillingNotificationEnqueuer.ParsePayload(host.Queued.Should().ContainSingle().Subject.Payload)!;
+        payload.HasConfirmedNotice.Should().BeFalse();
+    }
+
+    [Theory(DisplayName = "132: a decision that is REFUSED (no right, not eligible, no reason) enqueues no job")]
+    [MemberData(nameof(Routes))]
+    public async Task Refused_EnqueuesNothing(string route)
+    {
+        await using var host = await Host.StartAsync();
+        var denied = await host.SendAsync(route);
+        host.GrantAll();
+        var noReason = await host.SendAsync(route, body: "{}");
+
+        denied.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        noReason.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        host.Queued.Should().BeEmpty();
+    }
+
+    [Theory(DisplayName = "132: a queue that is down never fails a decision that has been made")]
+    [MemberData(nameof(Routes))]
+    public async Task QueueDown_DoesNotFailTheDecision(string route)
+    {
+        await using var host = await Host.StartAsync();
+        host.GrantAll();
+        host.QueueFaults = true;
+
+        var response = await host.SendAsync(route);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        host.World.InvoiceStatus.Should().Be(route == "reject" ? InvoiceStatusCodes.Rejected : InvoiceStatusCodes.ReturnedToFirm);
+    }
+
+    // =========================================================================================
     // Host
     // =========================================================================================
 
@@ -370,6 +439,33 @@ public sealed class InvoiceRejectReturnEndpointsAuthorizationContractTests
 
         public StatedCaller StepZero { get; private set; } = null!;
         public ApprovalWorld World { get; } = new();
+
+        /// <summary>The notification jobs the routes queued (task 132).</summary>
+        public List<JobContract> Queued { get; } = [];
+
+        /// <summary>When set, the queue refuses every job (the decision must still stand).</summary>
+        public bool QueueFaults { get; set; }
+
+        public EbillingNotificationEnqueuer Enqueuer()
+        {
+            var queue = new Mock<JobSubmissionService>(
+                MockBehavior.Loose,
+                Microsoft.Extensions.Options.Options.Create(new ServiceBusOptions { QueueName = "sdap-jobs" }),
+                Mock.Of<ILogger<JobSubmissionService>>(),
+                new Mock<Azure.Messaging.ServiceBus.ServiceBusClient>().Object);
+            queue.Setup(q => q.SubmitJobAsync(It.IsAny<JobContract>(), It.IsAny<CancellationToken>()))
+                .Returns((JobContract job, CancellationToken _) =>
+                {
+                    if (QueueFaults)
+                    {
+                        return Task.FromException(new InvalidOperationException("service bus down"));
+                    }
+
+                    Queued.Add(job);
+                    return Task.CompletedTask;
+                });
+            return new EbillingNotificationEnqueuer(queue.Object, Microsoft.Extensions.Logging.Abstractions.NullLogger<EbillingNotificationEnqueuer>.Instance);
+        }
         public FinAuth.RecordingAccessDataSource Access { get; } = new();
         public FinAuth.RecordingPrivilegeProbe Probe { get; } = new();
 
@@ -398,6 +494,9 @@ public sealed class InvoiceRejectReturnEndpointsAuthorizationContractTests
 
             // The REAL reject / return service and everything under it, over the in-memory Dataverse.
             builder.Services.AddScoped(_ => host.World.RejectReturnService());
+
+            // Task 132: the REAL enqueuer over a recording queue, so a decision's notification job is observed (what it carries, and that a refusal enqueues none).
+            builder.Services.AddScoped(_ => host.Enqueuer());
 
             builder.WebHost.UseTestServer();
             host._app = builder.Build();

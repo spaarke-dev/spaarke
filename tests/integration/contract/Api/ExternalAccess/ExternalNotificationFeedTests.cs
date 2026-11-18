@@ -178,6 +178,70 @@ public class ExternalNotificationFeedTests
         _queries.Should().BeEmpty("no message is read without Read on sprk_communication");
     }
 
+    // ── eBilling items (ebilling-r1 task 132, FR-39, EB-D-258): the existing "message" item shape, no new kind ──
+
+    private static EbillingFeedSource BillingSource(Guid invoice, DateTimeOffset at, List<int>? reads = null) => new(
+        (_, _) => Task.FromResult(((IReadOnlyList<Guid>)[Guid.NewGuid()], false)),
+        (_, _, _) =>
+        {
+            reads?.Add(1);
+            return Task.FromResult<IReadOnlyList<Microsoft.Xrm.Sdk.Entity>>([new Microsoft.Xrm.Sdk.Entity("sprk_invoice", invoice)
+            {
+                ["statuscode"] = new Microsoft.Xrm.Sdk.OptionSetValue(659490003),
+                ["modifiedon"] = at.UtcDateTime,
+            }]);
+        },
+        (_, _, _, _) => Task.FromResult(InvoiceFeedDecision.Visible),
+        (_, _) => Task.FromResult<Sprk.Bff.Api.Services.Finance.FirmOutcome?>(null),
+        NullLogger<EbillingFeedSource>.Instance);
+
+    private Task<IResult> FeedWithBilling(CallerPrincipal caller, EbillingFeedSource? source, Func<string, bool>? canRead = null) =>
+        ExternalNotificationFeedEndpoints.GetFeedCoreAsync(
+            caller, Tenant, ProductionRegistry(), _data, ReadService(), _cache, Now, NullLogger.Instance, CancellationToken.None,
+            canRead, _invoiceHiding.Seam, source);
+
+    [Fact(DisplayName = "132 feed: an eBilling item is a 'message' item on the 'invoices' route with the fixed sender, titled by the invoice's name; the SPA contract is unchanged")]
+    public async Task EbillingItem_HasTheExistingMessageShape()
+    {
+        var invoice = Guid.NewGuid();
+        _data.Name(invoice, "INV-2026-001");
+
+        var feed = Body(await FeedWithBilling(Ciam(Guid.NewGuid()), BillingSource(invoice, Now.AddHours(-3))));
+
+        var item = feed.Value.Should().ContainSingle().Subject;
+        item.Kind.Should().Be("message");
+        item.Id.Should().Be(invoice.ToString("D"));
+        item.RecordType.Should().Be("invoices");
+        item.RecordId.Should().Be(invoice.ToString("D"));
+        item.SenderName.Should().Be("Billing");
+    }
+
+    [Fact(DisplayName = "132 feed: with no eBilling source registered, or when the ceiling cannot Read sprk_invoice, there is no eBilling item and the source is not read")]
+    public async Task EbillingItem_IsAbsent_WithoutASource_OrWithoutInvoiceRead()
+    {
+        var invoice = Guid.NewGuid();
+        _data.Name(invoice, "INV-2026-001");
+        var reads = new List<int>();
+
+        var noSource = Body(await FeedWithBilling(Ciam(Guid.NewGuid()), null));
+        var noRead = Body(await FeedWithBilling(Ciam(Guid.NewGuid()), BillingSource(invoice, Now.AddHours(-3), reads), table => table != "sprk_invoice"));
+
+        noSource.Value.Should().BeEmpty();
+        noRead.Value.Should().BeEmpty();
+        reads.Should().BeEmpty("a table the role cannot Read is not read");
+    }
+
+    [Fact(DisplayName = "132 feed: an eBilling item whose invoice no longer exists (a complete title read does not return it) is dropped")]
+    public async Task EbillingItem_ForAnInvoiceThatIsGone_IsDropped()
+    {
+        var invoice = Guid.NewGuid();
+        _data.Delete(invoice);
+
+        var feed = Body(await FeedWithBilling(Ciam(Guid.NewGuid()), BillingSource(invoice, Now.AddHours(-3))));
+
+        feed.Value.Should().BeEmpty();
+    }
+
     [Fact]
     public async Task Ceiling_WithoutProjectRead_DropsTheProjectsGrantAndMessages()
     {

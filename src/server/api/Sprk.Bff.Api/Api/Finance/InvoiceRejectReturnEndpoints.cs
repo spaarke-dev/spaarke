@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Mvc;
 using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Infrastructure.Auth;
 using Sprk.Bff.Api.Infrastructure.Errors;
@@ -76,15 +77,18 @@ public static class InvoiceRejectReturnEndpoints
     }
 
     private static Task<IResult> Reject(
-        Guid invoiceId, InvoiceDecisionRequest? body, InvoiceRejectReturnService service, HttpContext httpContext, CancellationToken ct) =>
-        DecideAsync(InvoiceDecisionKind.Reject, invoiceId, body, service, httpContext, ct);
+        Guid invoiceId, InvoiceDecisionRequest? body, InvoiceRejectReturnService service, HttpContext httpContext,
+        [FromServices] EbillingNotificationEnqueuer? notifications, CancellationToken ct) =>
+        DecideAsync(InvoiceDecisionKind.Reject, invoiceId, body, service, httpContext, notifications, ct);
 
     private static Task<IResult> Return(
-        Guid invoiceId, InvoiceDecisionRequest? body, InvoiceRejectReturnService service, HttpContext httpContext, CancellationToken ct) =>
-        DecideAsync(InvoiceDecisionKind.Return, invoiceId, body, service, httpContext, ct);
+        Guid invoiceId, InvoiceDecisionRequest? body, InvoiceRejectReturnService service, HttpContext httpContext,
+        [FromServices] EbillingNotificationEnqueuer? notifications, CancellationToken ct) =>
+        DecideAsync(InvoiceDecisionKind.Return, invoiceId, body, service, httpContext, notifications, ct);
 
     private static async Task<IResult> DecideAsync(
-        InvoiceDecisionKind kind, Guid invoiceId, InvoiceDecisionRequest? body, InvoiceRejectReturnService service, HttpContext httpContext, CancellationToken ct)
+        InvoiceDecisionKind kind, Guid invoiceId, InvoiceDecisionRequest? body, InvoiceRejectReturnService service, HttpContext httpContext,
+        EbillingNotificationEnqueuer? notifications, CancellationToken ct)
     {
         // The decider is the caller (never request input); an unproven identity is refused before anything is read or written.
         if (await PlaybookAuthorizationFilter.ResolveCallerSystemUserIdAsync(httpContext, ct) is not { } caller)
@@ -97,6 +101,15 @@ public static class InvoiceRejectReturnEndpoints
         var result = kind == InvoiceDecisionKind.Reject
             ? await service.RejectAsync(invoiceId, caller, body?.Reason, body?.Note, token, ct)
             : await service.ReturnAsync(invoiceId, caller, body?.Reason, body?.Note, token, ct);
+
+        if (result.Outcome == InvoiceDecisionOutcome.Decided)
+        {
+            // Task 132 (FR-39, EB-D-258): tell the firm, once the decision is committed. The reviewer-confirmed notice rides on the job; without it the
+            // job sends no email (feed and status only). Never fails the decision: the enqueuer logs and returns.
+            if (notifications is not null) await notifications.EnqueueAsync(
+                kind == InvoiceDecisionKind.Reject ? EbillingNotificationEvent.InvoiceRejected : EbillingNotificationEvent.ReturnedToFirm,
+                EbillingNotificationSubject.Invoice, invoiceId, body?.NoticeSubject, body?.NoticeProse, httpContext.TraceIdentifier);
+        }
 
         return result.Outcome is InvoiceDecisionOutcome.Decided or InvoiceDecisionOutcome.AlreadyDecided
             ? TypedResults.Ok(new InvoiceDecisionResponse(
@@ -130,8 +143,12 @@ public static class InvoiceRejectReturnEndpoints
 }
 
 /// <summary>The body of a reject or return: the reason, required (400 <c>ebilling.reason_required</c> without it), and (task 095f-2a,
-/// EB-D-236) an optional note of at most 2000 characters (400 <c>ebilling.note_too_long</c> / <c>ebilling.note_invalid_characters</c>).</summary>
-public sealed record InvoiceDecisionRequest(string? Reason, string? Note = null);
+/// EB-D-236) an optional note of at most 2000 characters (400 <c>ebilling.note_too_long</c> / <c>ebilling.note_invalid_characters</c>).
+/// <para>Task 132 (EB-D-258): <paramref name="NoticeSubject"/> and <paramref name="NoticeProse"/> are the OPTIONAL reviewer-confirmed firm notice
+/// (the subject and prose the reviewer saw and may have edited on the draft route). They are not validated here and are never trusted as the
+/// notice: the job re-composes through <see cref="FirmNoticeComposer"/> (data inserted by code) and screens the prose like model prose. Without
+/// both, no firm email is sent for this decision. They never change the decision, its status or its response.</para></summary>
+public sealed record InvoiceDecisionRequest(string? Reason, string? Note = null, string? NoticeSubject = null, string? NoticeProse = null);
 
 /// <summary>200 body: <c>decided</c> (this call decided) or <c>alreadyDecided</c> (a no-op), the invoice's outcome (<c>Rejected</c> or
 /// <c>Returned</c>), the decision and its Decision Record (null on a no-op that did not look it up).</summary>

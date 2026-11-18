@@ -96,10 +96,22 @@ public static class FinanceModule
         services.AddScoped<IInvoiceLifecycleService, InvoiceLifecycleService>();
 
         // Notification seam of the submission pipeline (ebilling-r1 task 049 part A, Processing Pipeline step 9): the processor reports every
-        // Accepted / Rejected submission here after its decision commits. The no-op is the default; task 132 replaces THIS registration with its
-        // job-enqueuing sink, so the interface is a real seam (a second implementation is planned), not a 1:1 convenience (ADR-010).
+        // Accepted / Rejected submission here after its decision commits. Task 132 replaced the no-op default with the job-enqueuing sink
+        // (NoOpEbillingNotificationSink stays as the seam's test double), so the interface is a real seam with two implementations (ADR-010).
         // Scoped like its callers (the pipeline's scoped processor). Unconditional (flag rule above): the processor always calls it.
-        services.AddScoped<IEbillingNotificationSink, NoOpEbillingNotificationSink>();
+        services.AddScoped<IEbillingNotificationSink, EbillingNotificationSink>();
+
+        // eBilling notifications (ebilling-r1 task 132, FR-39, FR-35, FR-50, ADR-004): the one enqueuer (103 approve, 104 reject / return, the sink above),
+        // the recipients reader and the job. Concrete (ADR-010: one implementation each), scoped (the recipients and the job hold scoped Dataverse
+        // services; the enqueuer holds the scoped JobSubmissionService's dependencies). Unconditional (flag rule above): the job reads EbillingOptions.Enabled
+        // itself (ADR-018) and the routes carry the kill switch.
+        services.AddScoped<EbillingNotificationEnqueuer>();
+        services.AddScoped<EbillingNotificationRecipients>();
+        services.AddScoped<IJobHandler, Sprk.Bff.Api.Services.Jobs.Handlers.EbillingNotificationJobHandler>();
+
+        // The external notification feed's eBilling source (task 132): derived from invoice status, each invoice re-checked by the outcome route's own
+        // rule. Scoped (it holds the scoped participation and data services). Unconditional; the feed route carries the module and ceiling checks.
+        services.AddScoped<Sprk.Bff.Api.Api.ExternalAccess.EbillingFeedSource>();
 
         // Submission outcome bell (ebilling-r1 task 095b): the job handler tells the submitter, in the model-driven app's bell, when a submission
         // reaches a final status (after it is committed; never fails or delays the outcome). Concrete (ADR-010: one implementation; no second

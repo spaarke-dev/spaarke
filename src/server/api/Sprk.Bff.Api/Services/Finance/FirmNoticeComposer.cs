@@ -32,7 +32,25 @@ public enum FirmNoticeSource
 
     /// <summary>The fixed wording of <see cref="FirmNoticeFallbackText"/>: the Action failed, is disabled, is not bound, produced prose that failed the checks, or the settings toggle is off.</summary>
     Template,
+
+    /// <summary>The reviewer confirmed (and possibly edited) the prose and subject before the decision (task 132, EB-D-258): <see cref="FirmNoticeComposer.ComposeConfirmedForInvoiceAsync"/>.</summary>
+    Reviewer,
 }
+
+/// <summary>What <see cref="FirmNoticeComposer.ComposeConfirmedForInvoiceAsync"/> could do (task 132). The prose screen is part of it, so a refusal is a status of its own.</summary>
+public enum ConfirmedFirmNoticeStatus
+{
+    Composed,
+    NotFound,
+    NotApplicable,
+    Unavailable,
+
+    /// <summary>The reviewer's subject or prose failed <see cref="FirmNoticeProse"/> (the same screen as model prose). Nothing is composed and the template is NOT substituted.</summary>
+    ProseRefused,
+}
+
+/// <summary>The result of composing a reviewer-confirmed notice: a draft when composed, else a status and (for <see cref="ConfirmedFirmNoticeStatus.ProseRefused"/>) the stable refusal code.</summary>
+public sealed record ConfirmedFirmNoticeResult(ConfirmedFirmNoticeStatus Status, FirmNoticeDraft? Draft, string? RefusalReason);
 
 /// <summary>What <see cref="FirmNoticeComposer"/> could do.</summary>
 public enum FirmNoticeStatus
@@ -387,6 +405,74 @@ public sealed class FirmNoticeComposer
     {
         var outcome = await _submissionOutcome(submissionId, invoiceDecided, ct).ConfigureAwait(false);
         return await ComposeAsync(FirmNoticeKind.SubmissionRejected, submissionId, outcome, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// The notice for a Return or Reject whose reviewer CONFIRMED (and may have edited) the subject and prose (ebilling-r1 task 132, EB-D-258, FR-50).
+    /// The data (totals, lines, clause quotes, the findings table, the tracking number in the subject) is still inserted by code from the projection:
+    /// only the prose and the subject's words are the reviewer's.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Subject.</b> The reviewer's subject gets the header safety of <see cref="CleanTrackingNumber"/> (control, format, private-use and
+    /// unassigned characters removed, every whitespace run one space), so it can never carry a line break. The tracking number is a figure, so the
+    /// draft route's " (tracking)" suffix is removed before the screen when it is the one code would write, and ALWAYS appended again by code: the
+    /// reviewer cannot change it and cannot be refused for it.</para>
+    /// <para><b>Screen.</b> The cleaned subject and the prose pass <see cref="FirmNoticeProse"/>, the screen model prose passes. A refusal is
+    /// <see cref="ConfirmedFirmNoticeStatus.ProseRefused"/>: the template is NOT used in its place (the caller decides; 132 sends nothing).</para>
+    /// <para><b>HTML.</b> Rendered only through <see cref="RenderHtml"/>, which encodes every value.</para>
+    /// </remarks>
+    /// <exception cref="ArgumentException"><paramref name="kind"/> is not <see cref="FirmNoticeKind.ReturnedToFirm"/> or <see cref="FirmNoticeKind.InvoiceRejected"/>.</exception>
+    /// <exception cref="OperationCanceledException">The request was cancelled.</exception>
+    public async Task<ConfirmedFirmNoticeResult> ComposeConfirmedForInvoiceAsync(
+        FirmNoticeKind kind, Guid invoiceId, string? subject, string? prose, CancellationToken ct)
+    {
+        if (kind is not (FirmNoticeKind.ReturnedToFirm or FirmNoticeKind.InvoiceRejected))
+        {
+            throw new ArgumentException("Only a Return or a Reject notice is confirmed by a reviewer.", nameof(kind));
+        }
+
+        var outcome = await _invoiceOutcome(invoiceId, ct).ConfigureAwait(false);
+        if (outcome is null)
+        {
+            _logger.LogInformation("Confirmed firm notice not composed | Kind {Kind}, Id {Id}, Status {Status}", kind, invoiceId, ConfirmedFirmNoticeStatus.NotFound);
+            return new ConfirmedFirmNoticeResult(ConfirmedFirmNoticeStatus.NotFound, null, null);
+        }
+
+        if (outcome.Degraded || outcome.Kind == FirmOutcomeKind.Unavailable)
+        {
+            _logger.LogWarning("Confirmed firm notice not composed | Kind {Kind}, Id {Id}, Status {Status}", kind, invoiceId, ConfirmedFirmNoticeStatus.Unavailable);
+            return new ConfirmedFirmNoticeResult(ConfirmedFirmNoticeStatus.Unavailable, null, null);
+        }
+
+        if (!Applies(kind, outcome.Kind))
+        {
+            _logger.LogInformation(
+                "Confirmed firm notice not composed | Kind {Kind}, Id {Id}, Status {Status}, OutcomeKind {OutcomeKind}",
+                kind, invoiceId, ConfirmedFirmNoticeStatus.NotApplicable, outcome.Kind);
+            return new ConfirmedFirmNoticeResult(ConfirmedFirmNoticeStatus.NotApplicable, null, null);
+        }
+
+        var tracking = CleanTrackingNumber(outcome.TrackingNumber);
+        var suffix = tracking.Length == 0 ? string.Empty : $" ({tracking})";
+        var cleaned = CleanTrackingNumber(subject);
+        var baseSubject = suffix.Length > 0 && cleaned.EndsWith(suffix, StringComparison.Ordinal)
+            ? cleaned[..^suffix.Length].TrimEnd()
+            : cleaned;
+
+        var refusal = FirmNoticeProse.Check(baseSubject, prose);
+        if (refusal is not null)
+        {
+            // Ids and the stable code only: never the text (ADR-015).
+            _logger.LogWarning("Confirmed firm notice prose refused | Kind {Kind}, Id {Id}, Reason {Reason}", kind, invoiceId, refusal);
+            return new ConfirmedFirmNoticeResult(ConfirmedFirmNoticeStatus.ProseRefused, null, refusal);
+        }
+
+        var finalProse = NormalizeProse(prose!);
+        var draft = new FirmNoticeDraft(
+            kind, baseSubject + suffix, finalProse, RenderHtml(outcome, finalProse), FirmNoticeSource.Reviewer, null, null);
+        _logger.LogInformation(
+            "Confirmed firm notice composed | Kind {Kind}, Id {Id}, Items {Items}", kind, invoiceId, outcome.Items.Count);
+        return new ConfirmedFirmNoticeResult(ConfirmedFirmNoticeStatus.Composed, draft, null);
     }
 
     private async Task<FirmNoticeResult> ComposeAsync(FirmNoticeKind kind, Guid id, FirmOutcome? outcome, CancellationToken ct)

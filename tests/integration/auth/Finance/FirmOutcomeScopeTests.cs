@@ -535,6 +535,50 @@ public sealed class FirmOutcomeScopeTests : IAsyncLifetime
     // Invoice: the closed set of refusals (every one the same 403, nothing projected)
     // ═══════════════════════════════════════════════════════════════════════════
 
+    // ── Task 132: the invoice rule asked as a decision, for the notification feed ──
+
+    private Task<InvoiceFeedDecision> FeedDecision(Guid invoice, CallerPrincipal? caller = null, IReadOnlyList<Guid>? firms = null)
+    {
+        ExternalInvoiceHiding hide = (_, ids, _) => Task.FromResult(_invoiceHidingFaults
+            ? InvoiceVisibilityResult.ReadFailed(ids)
+            : new InvoiceVisibilityResult(
+                ids, ids.Where(_hiddenInvoices.Contains).ToDictionary(id => id, _ => InvoiceHiddenReason.SourceHidden), faulted: false));
+        var filter = new FirmOutcomeAuthorizationFilter(
+            FirmOutcomeSubject.Invoice, _participations, _data, _h.Build(), NullLogger<FirmOutcomeAuthorizationFilter>.Instance, hide, null);
+        return filter.DecideInvoiceForFeedAsync(caller ?? Contact(), firms ?? [FirmA], invoice, CancellationToken.None);
+    }
+
+    [Fact(DisplayName = "132 feed decision (must-not-fire): an invoice of the caller's firm, readable core, not hidden, is Visible")]
+    public async Task FeedDecision_OwnFirmsReadableInvoice_IsVisible() =>
+        (await FeedDecision(SeedInvoice(FirmA))).Should().Be(InvoiceFeedDecision.Visible);
+
+    [Fact(DisplayName = "132 feed decision (must-fire): another firm's invoice on a SHARED matter is Denied")]
+    public async Task FeedDecision_AnotherFirmsInvoice_IsDenied() =>
+        (await FeedDecision(SeedInvoice(FirmB))).Should().Be(InvoiceFeedDecision.Denied);
+
+    [Fact(DisplayName = "132 feed decision (must-fire): a contact without access to the invoice's core record is Denied")]
+    public async Task FeedDecision_WithoutCoreAccess_IsDenied() =>
+        (await FeedDecision(SeedInvoice(FirmA, OtherMatter))).Should().Be(InvoiceFeedDecision.Denied);
+
+    [Fact(DisplayName = "132 feed decision (must-fire): an invoice the (a') predicate hides, and one that does not exist, are Denied")]
+    public async Task FeedDecision_HiddenOrMissing_IsDenied()
+    {
+        var hidden = SeedInvoice(FirmA);
+        _hiddenInvoices.Add(hidden);
+
+        (await FeedDecision(hidden)).Should().Be(InvoiceFeedDecision.Denied);
+        (await FeedDecision(Guid.NewGuid())).Should().Be(InvoiceFeedDecision.Denied);
+    }
+
+    [Fact(DisplayName = "132 feed decision (must-fire): a visibility decision that cannot be made is Unavailable, never Visible")]
+    public async Task FeedDecision_HidingThatFaults_IsUnavailable()
+    {
+        var invoice = SeedInvoice(FirmA);
+        _invoiceHidingFaults = true;
+
+        (await FeedDecision(invoice)).Should().Be(InvoiceFeedDecision.Unavailable);
+    }
+
     [Fact(DisplayName = "130b SEEDING PROOF (firm scope): another firm's invoice on a SHARED matter is 403 with no data, and nothing is projected")]
     public async Task Invoice_OfAnotherFirm_OnASharedMatter_Is403_AndNothingIsProjected()
     {

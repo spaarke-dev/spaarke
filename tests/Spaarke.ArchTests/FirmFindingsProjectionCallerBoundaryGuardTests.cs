@@ -30,6 +30,9 @@ public class FirmFindingsProjectionCallerBoundaryGuardTests
     private static readonly string[] AllowedReferrers =
     [
         typeof(FirmOutcomeEndpoints).FullName!,
+        // Task 132: the external notification feed's eBilling source. It reads the projection only for an invoice that the outcome route's own
+        // invoice rule (FirmOutcomeAuthorizationFilter.DecideInvoiceForFeedAsync) returned Visible, per invoice and fail closed.
+        typeof(EbillingFeedSource).FullName!,
         typeof(FinanceModule).FullName!,
         // Task 131: its only callers are the ebilling.invoice.decide-filtered draft route and 132's job, both using server-read ids; the composer itself
         // is held to that list by FirmNoticeComposerCallerBoundaryGuardTests.
