@@ -29,6 +29,7 @@ Every other TYPED type in `src/server` only reads these columns (ApExportService
 
 - User-side reads (covered by the Readers grant on every business unit's default team): `src/solutions/ApExport` (reads `sprk_approvedtotal`, `_sprk_vendororg_value` through `Xrm.WebApi` as the user), LegalWorkspace and SmartTodo select lists, the external SPA record detail.
 - The derived Threshold's evaluator (`SignalEvaluator`, DI singleton over `IGenericEntityService`) reads `sprk_totalamount` and `sprk_approvedtotal` org-wide. Its identity keeps read through the profile that covers it, so it still reads them. See finding F1.
+- Task 132 (added 2026-11-18, caught by the C1 guard on the master PR): `EbillingFeedSource` (SPA notification feed) and `EbillingNotificationRecipients` (notification job) read `sprk_vendororg` app-only, through `IGenericEntityService`, to filter and re-check invoices by firm and to find a firm's billing contacts. Neither writes any of the seven columns or renders the firm. Both are listed as Readers in `InvoiceMoneyColumnsAppOnlyWriteGuardTests`.
 
 ## 4. What changed
 

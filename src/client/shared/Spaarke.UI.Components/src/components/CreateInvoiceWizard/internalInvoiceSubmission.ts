@@ -360,7 +360,7 @@ export function readCorrectionPrefill(body: unknown): CorrectionPrefill | null {
 /** What a correction launch comes to: the invoice to replace, or the plain sentence saying why it cannot be corrected here. */
 export type CorrectionLaunch = { ok: true; target: InvoiceCorrectionTarget } | { ok: false; message: string };
 
-const ROUTE_TYPE_TO_KIND: Readonly<Record<string, InvoiceCoreRecordKind>> = {
+const ROUTE_TYPE_TO_KIND: Readonly<Partial<Record<string, InvoiceCoreRecordKind>>> = {
   Matter: 'matter',
   Project: 'project',
   WorkAssignment: 'workassignment',

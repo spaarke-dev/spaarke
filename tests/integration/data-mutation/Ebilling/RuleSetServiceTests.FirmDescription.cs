@@ -240,7 +240,7 @@ public sealed partial class RuleSetServiceTests
         row[RuleSetService.FirmDescriptionColumn] = FirmText;
         h.Row("sprk_policy", policy)["sprk_enabled"] = true; // a switched-off rule is never copied
 
-        var plan =await h.Service().PlanCopyForwardAsync(set, from, to, RecordOwnerResolution.Owned(TeamId), default);
+        var plan = await h.Service().PlanCopyForwardAsync(set, from, to, RecordOwnerResolution.Owned(TeamId), default);
 
         plan.Errors.Should().BeEmpty();
         var copy = plan.Creates.Should().ContainSingle().Which.Should().BeOfType<CreateRequest>().Subject.Target;

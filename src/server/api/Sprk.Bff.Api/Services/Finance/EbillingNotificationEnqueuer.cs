@@ -56,7 +56,7 @@ public sealed record EbillingNotificationPayload(
 }
 
 /// <summary>
-/// Enqueues the eBilling notification job once a decision is PERSISTED (task 132, ADR-004: one idempotent <c>IJobHandler</c> per (subject id, event kind)). Callers: the
+/// Enqueues the eBilling notification job once a decision is PERSISTED (task 132, ADR-004: one idempotent job per (subject id, event kind), run by the eBilling notification handler). Callers: the
 /// approve route (103), the reject and return routes (104) and the submission pipeline's notification seam
 /// (<see cref="Submission.EbillingNotificationSink"/>, 049 / 105).
 /// </summary>
