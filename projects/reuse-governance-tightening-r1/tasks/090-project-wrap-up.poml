@@ -4,7 +4,7 @@
     <title>Project wrap-up</title>
     <phase>6 Review and wrap-up</phase>
     <gate>blocked until all other tasks</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Project-close quality gates, cleanup and documentation (phase 6)</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -101,4 +101,5 @@
     <skill>.claude/skills/task-execute/SKILL.md</skill>
     <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist.</protocol>
   </execution>
+  <completion-notes>Completed 2026-11-17. PRs #2843 and #2873 squash-merged on the owner's word ("Proceed with merge and next steps"); the SpaarkeAi DEV deploy from #2843 succeeded; temp worktrees C:\wt040pr and C:\wt080pr removed with Remove-WorktreeSafe.ps1; master merged back into the branch (four project-note conflicts, branch side kept). Final gates: the remaining branch diff is docs and config only; its claims were checked against the code; Test-InstructionPaths new 0; no ADR applies. test-diet: 0 scaffolding, 1 ambiguous (kept), report notes/test-diet-report.md. repo-cleanup: four empty placeholder note folders removed; nothing to archive. All 8 graduation criteria verified and checked; README and plan show Complete; lessons in notes/lessons-learned.md (L1-L9). check-task-status-drift: no drift. Archived: Issue #2682 closed, board Status Completed, Closed Date 2026-11-17, Tasks Completed 19, AI spend $184.30 / 1,461 calls; .archived marker written; 0 agent copies to remove. Found in passing and fixed in scope: scripts/ai-cost/update-board-spend.py and backfill-tasks-planned.py asked gh project item-list for 500 items while the board has 576, so the newest projects were skipped with a misleading "register first" message; both now share list_board_items() with a 5000 limit that fails loudly when reached. Reported, not changed: .claude/skills/devops-project-start/SKILL.md:57 uses --limit 1000, which will hit the same wall later. rework: none task 090</completion-notes>
 </task>

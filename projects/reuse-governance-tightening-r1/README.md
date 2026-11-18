@@ -2,9 +2,9 @@
 
 > **Portfolio**: [Project #2682](https://github.com/spaarke-dev/spaarke/issues/2682) · [Board #2](https://github.com/users/spaarke-dev/projects/2) · Epic [#427](https://github.com/spaarke-dev/spaarke/issues/427) · label `reuse-governance-tightening-r1` — _registered 2026-11-11 (19 tasks planned)_
 
-> **Last Updated**: 2026-11-11
+> **Last Updated**: 2026-11-17
 >
-> **Status**: In Progress
+> **Status**: Complete
 
 ## Overview
 
@@ -24,10 +24,10 @@ This project tightens how Spaarke finds and reuses existing capabilities. It add
 
 | Metric | Value |
 |--------|-------|
-| **Phase** | Development |
-| **Progress** | see `tasks/TASK-INDEX.md` |
+| **Phase** | Complete |
+| **Progress** | 100% (19 of 19 tasks) |
 | **Target Date** | — |
-| **Completed Date** | — |
+| **Completed Date** | 2026-11-17 |
 | **Owner** | spaarke-dev |
 
 ## Problem Statement
@@ -42,14 +42,14 @@ Close each gap with the lightest mechanism that works: a ~30-row concept → com
 
 The project is considered **complete** when:
 
-- [ ] `.claude/patterns/CAPABILITY-INDEX.md` exists (~30 verified rows) and `Test-InstructionPaths.ps1` reports no new missing path for it
-- [ ] `task-create` 3.5.6, `code-review` 6.6 and root `CLAUDE.md` §11 cite the index
-- [ ] The reuse-scan dry-run result and go/no-go decision are recorded; if go, `/design-to-spec` and `project-pipeline` carry the scan
-- [ ] The weekly sweep runs at exit 0 and opens/closes exactly one `weekly/duplication-sweep` alert
-- [ ] `adversarial-reviewer.md` carries the F2 capability-duplication and F4 requirements-trace checks
-- [ ] All 9 grandfathered packages have an owner-approved decision; three actions executed, six filed with findings; `SharedPackageCensusTests` green
-- [ ] Learn MCP, knowledge-refresh watchdog and `CS0618` re-arm landed as separate PRs; a clean Release build of `Spaarke.sln` passes
-- [ ] The C# LSP trial result and owner decision are recorded
+- [x] `.claude/patterns/CAPABILITY-INDEX.md` exists (~30 verified rows) and `Test-InstructionPaths.ps1` reports no new missing path for it
+- [x] `task-create` 3.5.6, `code-review` 6.6 and root `CLAUDE.md` §11 cite the index
+- [x] The reuse-scan dry-run result and go/no-go decision are recorded; if go, `/design-to-spec` and `project-pipeline` carry the scan
+- [x] The weekly sweep runs at exit 0 and opens/closes exactly one `weekly/duplication-sweep` alert
+- [x] `adversarial-reviewer.md` carries the F2 capability-duplication and F4 requirements-trace checks
+- [x] All 9 grandfathered packages have an owner-approved decision; three actions executed, six filed with findings; `SharedPackageCensusTests` green
+- [x] Learn MCP, knowledge-refresh watchdog and `CS0618` re-arm landed as separate PRs; a clean Release build of `Spaarke.sln` passes
+- [x] The C# LSP trial result and owner decision are recorded
 
 ## Scope
 
@@ -111,6 +111,7 @@ Full list: `design.md` §11 and `notes/decisions.md`.
 | Date | Version | Change | Author |
 |------|---------|--------|--------|
 | 2026-11-11 | 1.0 | Initialized by `/project-pipeline` | Claude Code |
+| 2026-11-17 | 1.1 | Complete. Items 1–3 (#2751), item 4 (#2843), 5(a) Learn MCP (#2873), 5(c) watchdog (#2705), 5(e) `CS0618` (#2706) merged; 5(f) C# LSP trial: not adopted; 5(b) deferred by design. Wrap-up: `notes/test-diet-report.md`, `notes/lessons-learned.md` | Claude Code |
 
 ---
 

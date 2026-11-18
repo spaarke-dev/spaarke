@@ -69,8 +69,10 @@ import {
   type IDocumentEmailWizardItem,
 } from '@spaarke/ui-components/components/DocumentEmailWizard';
 import { createXrmEmailComposeHandlers } from '@spaarke/ui-components/components/EmailComposer';
+import { postSidePaneLookupToParent } from '@spaarke/ui-components/components/SprkModal/sidePaneFrameSignal';
 import type { IDataService } from '@spaarke/ui-components/types/serviceInterfaces';
 import { getXrm } from '@spaarke/ui-components/utils/xrmContext';
+import { openInDesktopApp, OPEN_IN_DESKTOP_FAILED_MESSAGE } from '@spaarke/ui-components/utils/openInDesktopApp';
 
 /** Inline SVG icon: table/grid view (matches Fluent 20px icon style) */
 const TableViewIcon: React.FC = () => (
@@ -372,40 +374,21 @@ export const App: React.FC<AppProps> = ({ params, isDark = false, apiBaseUrl }) 
           const res = await authenticatedFetch(
             `${apiBaseUrl}/api/documents/${encodeURIComponent(previewDocumentId)}/open-links`
           );
-          if (!res.ok) return;
           const links = await res.json();
-          // Desktop protocol available (Word, Excel, PowerPoint) — open in native app
-          if (links.desktopUrl) {
-            window.open(links.desktopUrl, '_self');
-            return;
-          }
-          // No desktop protocol — download via BFF /content endpoint and let OS open
-          // (e.g. Adobe Acrobat for PDFs). SPE webUrl requires SharePoint permissions
-          // users may not have, so we stream through the BFF.
-          try {
-            const contentUrl = `${apiBaseUrl}/api/documents/${encodeURIComponent(previewDocumentId)}/content`;
-            const response = await authenticatedFetch(contentUrl);
-            if (response.ok) {
-              const blob = await response.blob();
-              const objectUrl = URL.createObjectURL(blob);
-              const a = document.createElement('a');
-              a.href = objectUrl;
-              a.download = links.fileName ?? previewDocumentName ?? 'document';
-              document.body.appendChild(a);
-              a.click();
-              document.body.removeChild(a);
-              URL.revokeObjectURL(objectUrl);
-              return;
-            }
-          } catch (err) {
-            console.error('[FilePreview] Download failed, falling back:', err);
-          }
-          // Final fallback to webUrl
-          if (links.webUrl) {
-            window.open(links.webUrl, '_blank', 'noopener,noreferrer');
-          }
-        } catch {
-          console.error('[FilePreview] Failed to get open links:', previewDocumentId);
+          // Office files open in the Office app; anything else downloads through the BFF (shared
+          // behaviour, ISS-004). No SharePoint webUrl fallback: a read-only user on a secure record
+          // cannot open it.
+          await openInDesktopApp({
+            bffBaseUrl: apiBaseUrl,
+            documentId: previewDocumentId,
+            links,
+            fetch: authenticatedFetch,
+            fallbackFileName: previewDocumentName ?? undefined,
+          });
+        } catch (err) {
+          console.error('[FilePreview] Open file failed:', previewDocumentId, err);
+          // The preview dialog is modal, so an inline bar would be hidden behind it: use the platform dialog.
+          void getXrm('openErrorDialog')?.Navigation?.openErrorDialog?.({ message: OPEN_IN_DESKTOP_FAILED_MESSAGE });
         }
       })();
     },
@@ -843,6 +826,9 @@ export const App: React.FC<AppProps> = ({ params, isDark = false, apiBaseUrl }) 
         bffBaseUrl={apiBaseUrl}
         dataService={dataService}
         emailComposeHandlers={emailComposeHandlers}
+        // Task 194: the To/Cc/Bcc pane opens in the window above this page. Inside Semantic Search's Find Similar
+        // dialog that dialog must yield to it, so tell the parent while a lookup is open (ignored elsewhere).
+        onSidePaneLookupChange={postSidePaneLookupToParent}
       />
     </div>
   );

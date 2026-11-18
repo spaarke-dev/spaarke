@@ -41,7 +41,8 @@ public sealed class ExternalEventTypeCreateContractTests : IClassFixture<Externa
     private const string TypeNotAllowed = "sdap.event.type_not_allowed";
     private const string InsufficientRights = "sdap.access.deny.insufficient_rights";
     private const string DataverseUnavailable = "sdap.access.dataverse_unavailable";
-    private const string EventTypeBind = "sprk_eventtype_ref@odata.bind";
+    // The navigation property, case-sensitive (task 016 E2E fix): the lowercase attribute name is a Dataverse 400.
+    private const string EventTypeBind = "sprk_EventType_Ref@odata.bind";
 
     private readonly ExternalTodoScopeTestFixture _fixture;
 

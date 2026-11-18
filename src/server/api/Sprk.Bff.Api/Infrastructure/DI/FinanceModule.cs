@@ -169,6 +169,10 @@ public static class FinanceModule
             sp.GetRequiredService<FirmClauseReader>(),
             ct => sp.GetRequiredService<BillingDecisionRecorder>().WriterUserIdAsync(ct),
             sp.GetRequiredService<ILogger<FirmFindingsProjection>>()));
+        // Firm notice (ebilling-r1 task 131, FR-50, D-60): composes the notice from the projection above and the prose of IInvoiceAi.DraftFirmNoticeAsync
+        // (the Null peer when the AI kill switch is off: the composer then uses its fixed template, never a 500). Concrete (ADR-010), scoped: it holds the
+        // scoped projection. Unconditional (flag rule above); the draft route carries the kill switch. The public constructor is the DI one.
+        services.AddScoped<FirmNoticeComposer>();
         // Add line (ebilling-r1 task 164, EB-D-188): a reviewer-typed Fee or Expense line. Concrete (ADR-010), scoped: it holds the scoped CodeSetResolver,
         // IInvoiceResolutionService, BillingFactLoader and InvoiceComplianceEvaluator. Unconditional (flag rule above); the route carries the kill switch.
         services.AddScoped<InvoiceLineAddService>();

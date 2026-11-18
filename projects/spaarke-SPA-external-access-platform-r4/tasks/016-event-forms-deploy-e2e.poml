@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="016" project="spaarke-SPA-external-access-platform-r4">
+  <metadata>
+    <title>Event forms: BFF via uac-r2 + SPA dev deploy + owner E2E (FR-35, FR-36, FR-37)</title>
+    <phase>1 Record template and actions (post-E2E rework, round 3)</phase>
+    <gate>Owner go per exact BFF SHA (in uac-r2's session) and for the SPA deploy; a stated rollback for each</gate>
+    <status>in-progress</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Live deploy and E2E; no code</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Coordination and verification only</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Live environment</parallel-reason>
+    <deps>014, 015</deps>
+    <tags>deploy, integration-test</tags>
+    <estimated-effort>2-3 hours plus owner time</estimated-effort>
+  </metadata>
+
+  <prompt>Ship the Event forms to dev in the agreed order and have the owner retest.</prompt>
+  <goal>The dev BFF carries 014 and the dev SPA carries 015; the owner confirms create with type/priority/assignee/description, opening and deep-linking an event, edit, status change, and that a View Only user sees none of the write actions.</goal>
+
+  <constraints>
+    <constraint source="project CLAUDE.md §5">Never deploy the dev BFF directly: hand uac-r2 the master SHA; its owner gives the go per SHA. SPA deploy (`deploy-external-spa.yml`, dev, master) only after "BFF live".</constraint>
+    <constraint source="rollback">State the paired rollback before deploying: the new SPA needs the new BFF routes, so an SPA rollback is paired with a BFF rollback, as for task 021.</constraint>
+    <constraint source="NFR-04">No tokens, emails, UPNs or object ids in notes or messages.</constraint>
+  </constraints>
+
+  <steps mode="prescriptive">
+    <step order="1">Confirm 014 and 015 are merged; send uac-r2 the master SHA and the paired rollback.</step>
+    <step order="2">On "BFF live": dispatch the SPA deploy; verify the bundle (no Event/Task radio; the new routes referenced).</step>
+    <step order="3">Give the owner the retest list (acceptance criteria below, with a Collaborate user and a View Only user); record results in notes/task-016-notes.md.</step>
+    <step order="4">File any finding with /project-defer-issue-tracking or fix it in a follow-up task; update TASK-INDEX and this POML.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">Create: type required, options are the allowed types, due date required by type, priority/assignee/description saved and shown.</criterion>
+    <criterion testable="true">An event opens over the record and from its deep link; a non-reader gets the not-found state.</criterion>
+    <criterion testable="true">A Collaborate user can edit and change status (any status); a View Only user sees neither; the type cannot be edited.</criterion>
+    <criterion testable="true">Assigned To lists only people with access to the record.</criterion>
+    <criterion testable="true">uac-r2's post-deploy gate shows no new 5xx.</criterion>
+  </acceptance-criteria>
+
+  <notes></notes>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

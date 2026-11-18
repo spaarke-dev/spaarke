@@ -56,4 +56,12 @@ public class DataverseOptions
     /// </summary>
     [Required(ErrorMessage = "Dataverse:TenantId is required")]
     public string TenantId { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Optional (#2845 F1): the most app-only Dataverse reads the access evaluator keeps in flight at once, process-wide
+    /// (<c>DataverseConcurrencyGate</c>). Absent = 24, under half of Dataverse's ~52 concurrent requests per identity. The
+    /// gate reads <c>Dataverse:MaxConcurrentRequests</c> directly, so no app setting is required.
+    /// </summary>
+    [Range(1, 52, ErrorMessage = "Dataverse:MaxConcurrentRequests must be between 1 and 52")]
+    public int? MaxConcurrentRequests { get; set; }
 }

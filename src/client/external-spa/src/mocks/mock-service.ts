@@ -3,7 +3,15 @@
  * Intercepts bffApiCall requests and returns mock data from mock-data.ts.
  */
 
-import { MOCK_USER, MOCK_PROJECTS, MOCK_DOCUMENTS, MOCK_EVENTS, MOCK_CONTACTS, MOCK_ORGANIZATIONS } from './mock-data';
+import {
+  MOCK_USER,
+  MOCK_PROJECTS,
+  MOCK_DOCUMENTS,
+  MOCK_EVENTS,
+  MOCK_CONTACTS,
+  MOCK_ORGANIZATIONS,
+  MOCK_CREATABLE_EVENT_TYPES,
+} from './mock-data';
 import { ApiError } from '../types';
 
 /** The grants the mock user issued this session (task 140's contact-side Grant Access). */
@@ -97,11 +105,24 @@ export function getMockResponse<T>(path: string, options: RequestInit = {}): Pro
   // the mock has no matter or work assignment rows, so those answer an empty list)
   const eventsByRoot = path.match(/^\/api\/v1\/external\/(?:projects|matters|workassignments)\/([^/]+)\/events/);
   if (method === 'GET' && eventsByRoot) {
-    // `canCreateTask` is on the event lists only (R4 task 008).
+    // `creatableEventTypes` is on the event lists only (R4 task 014: the types the caller may create here).
     return delay({
       ...collection(MOCK_EVENTS[eventsByRoot[1]] ?? []),
       canCreate: true,
-      canCreateTask: true,
+      creatableEventTypes: MOCK_CREATABLE_EVENT_TYPES,
+    } as unknown as T);
+  }
+
+  // GET /api/v1/external/{projects|matters|workassignments}/:id/assignable-people (task 014: Assigned To of the event forms)
+  if (
+    method === 'GET' &&
+    /^\/api\/v1\/external\/(?:projects|matters|workassignments)\/[^/]+\/assignable-people/.test(path)
+  ) {
+    return delay({
+      value: [
+        { contactId: 'contact-mock-me', name: 'Jane Smith', isMe: true },
+        { contactId: 'contact-mock-other', name: 'Alex Rivera', isMe: false },
+      ],
     } as unknown as T);
   }
 
@@ -117,7 +138,7 @@ export function getMockResponse<T>(path: string, options: RequestInit = {}): Pro
     return delay(collection(MOCK_ORGANIZATIONS[orgsByProject[1]] ?? []) as unknown as T);
   }
 
-  // POST /api/v1/external/{projects|matters|workassignments}/:id/events (create event; `eventType: "task"` = a Task)
+  // POST /api/v1/external/{projects|matters|workassignments}/:id/events (create event; `eventTypeId` names its type)
   const createEvent = path.match(/^\/api\/v1\/external\/(?:projects|matters|workassignments)\/([^/]+)\/events$/);
   if (method === 'POST' && createEvent) {
     const body = options.body ? JSON.parse(options.body as string) : {};
@@ -128,7 +149,10 @@ export function getMockResponse<T>(path: string, options: RequestInit = {}): Pro
       sprk_status: body.sprk_status ?? 659490001, // Open (statuscode) — the BFF default
       _sprk_regardingproject_value: createEvent[1], // sprk_event's project lookup (it has no sprk_projectid)
       createdon: new Date().toISOString(),
-      isTask: body.eventType === 'task', // the BFF's flag (task 008); an untyped event is not a task
+      sprk_priority: body.sprk_priority ?? 100000001,
+      sprk_description: body.sprk_description ?? null,
+      eventTypeId: body.eventTypeId ?? null,
+      eventTypeName: MOCK_CREATABLE_EVENT_TYPES.find(t => t.id === body.eventTypeId)?.name ?? null,
     };
     return delay(newEvent as unknown as T, 600);
   }

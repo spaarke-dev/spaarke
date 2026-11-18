@@ -123,3 +123,21 @@ Also for the rework: the empty states still say "Use Add event in the toolbar" a
 - **Invoice name (EB-D-226).** Names now come from the firm record, as "{firm} - {number}".
 - **For the retest.** Once 095e reaches master and dev, expect the new invoice names in the SPA's invoice lists and detail views.
 - **SPA.** No change needed.
+
+## E2E results — retest round 3 (owner, 2026-11-15; BFF `aa7d6345f3`, SPA `c1eb6e4a8e`)
+
+| Check | Result |
+|---|---|
+| Events only (task 012): one list, Task badge, Add event | ✅ Pass. Create Event worked. |
+| Section collapse persists per user (task 013) | ✅ Pass |
+| Invoice and document rows open their record over the current one (task 013) | ✅ Pass. Preview does not load (expected: the Preview section is the P1 interim card; inline preview is task 022, FR-14). |
+| Invoice Files (task 021): file listed, Download, no Upload/Versions/Delete, empty state | ✅ Pass |
+| Invoice file auto-open in Acrobat → "Access denied" | Not a defect. The browser's auto-open launches Acrobat while the download is still being scanned or is held by Protected Mode; the same file opens from Downloads. |
+| Speed | Each external request takes 3–4 s on the server: about 35 repeated access-resolution Dataverse calls per request. Filed D-17 #2845; uac-r2 accepted it. |
+
+**New owner feedback → needs a spec decision (not a 018 defect):**
+- The Create Event dialog offers an Event/Task choice, not an **Event Type lookup** (`sprk_eventtype_ref`).
+- It is missing **Description** (`sprk_description`) and **Assigned To** (`sprk_assignedto`, a contact lookup) and other fields.
+- A created plain event has **no event type**. Per the 012 design, "Event" sends no type; only Task is sent.
+- There is no Event **details** form (no `sprk_event` record template), so status and the other fields cannot be seen.
+- Owner: "We need to spec out what this create form and details form needs."

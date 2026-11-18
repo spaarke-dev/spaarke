@@ -170,6 +170,42 @@ public class NoAccessListReaderTests
         result.DeniedRecordIds.Should().BeEquivalentTo(new[] { RecordA });
     }
 
+    [Theory]
+    [InlineData("{}")]
+    [InlineData("{\"value\":null}")]
+    [InlineData("{\"value\":{}}")]
+    public async Task GetDeniedRecordsAsync_A2xxBodyWithoutAValueArray_ReturnsDenyAllQueriedFailClosed(string body)
+    {
+        // #2845 review: a success status whose body carries no `value` array is not a Dataverse answer. It read as an empty
+        // page ("no denials") before; an unreadable deny answer must fail CLOSED, as the grant reader treats the same shape.
+        var sut = new BodyNoAccessListReader(body);
+
+        var candidates = new[]
+        {
+            new NoAccessCandidateRecord("sprk_matter", RecordA, new[] { OtherOrg }),
+            new NoAccessCandidateRecord("sprk_matter", RecordB, Array.Empty<Guid>()),
+        };
+
+        var result = await sut.GetDeniedRecordsAsync(Contact, Array.Empty<Guid>(), candidates, CancellationToken.None);
+
+        result.FailedClosed.Should().BeTrue($"a 2xx body {body} cannot prove 'not denied' (NFR-01)");
+        result.DeniedRecordIds.Should().BeEquivalentTo(new[] { RecordA, RecordB });
+    }
+
+    [Fact]
+    public async Task GetDeniedRecordsAsync_A2xxBodyWithAnEmptyValueArray_IsAConsideredZero()
+    {
+        var sut = new BodyNoAccessListReader("{\"value\":[]}");
+
+        var result = await sut.GetDeniedRecordsAsync(
+            Contact, Array.Empty<Guid>(),
+            new[] { new NoAccessCandidateRecord("sprk_matter", RecordA, new[] { OtherOrg }) },
+            CancellationToken.None);
+
+        result.FailedClosed.Should().BeFalse("an empty value array is Dataverse's answer: no entries");
+        result.DeniedRecordIds.Should().BeEmpty();
+    }
+
     // ── No false walls: a subject with no matching entries yields zero denials ──────────────────
 
     [Fact]
@@ -710,6 +746,17 @@ public class NoAccessListReaderTests
             var isOrgLoop = objectFilter.Contains("_sprk_objectorganization_value", StringComparison.Ordinal);
             return Task.FromResult<List<NoAccessEntryRow>?>(isOrgLoop ? _orgLoopRows ?? new() : _recordLoopRows ?? new());
         }
+    }
+
+    /// <summary>
+    /// #2845 review: every query answers a 2xx with <paramref name="body"/>, parsed by the REAL
+    /// <see cref="NoAccessListReader.ParseRows"/> — so only the HTTP exchange is substituted.
+    /// </summary>
+    private sealed class BodyNoAccessListReader(string body)
+        : NoAccessListReader(new HttpClient(), configuration: null!, credential: null!, logger: NullLogger<NoAccessListReader>.Instance)
+    {
+        internal override Task<List<NoAccessEntryRow>?> QueryChunkAsync(string subjectFilter, string objectFilter, CancellationToken ct)
+            => Task.FromResult(ParseRows(body, NullLogger.Instance));
     }
 
     /// <summary>

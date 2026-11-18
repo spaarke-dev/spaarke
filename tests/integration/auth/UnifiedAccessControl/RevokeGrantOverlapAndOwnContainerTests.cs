@@ -442,6 +442,12 @@ public class RevokeGrantOverlapAndOwnContainerTests
                     It.IsAny<int?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync((string _, string? filter, string? _, int? _, int? _, CancellationToken _) => Match(filter!));
 
+            // The grant core's root-row read (the remaining-grants overlap check) is strict (#2852).
+            mock.Setup(c => c.QueryStrictAsync<ExternalGrantRow>(
+                    GrantEntitySet, It.IsAny<string>(), It.IsAny<string>(),
+                    It.IsAny<int?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((string _, string? filter, string? _, int? _, int? _, CancellationToken _) => Match(filter!));
+
             mock.Setup(c => c.UpdateAsync(
                     GrantEntitySet, It.IsAny<Guid>(), It.IsAny<object>(), It.IsAny<CancellationToken>()))
                 .Returns((string _, Guid id, object _, CancellationToken _) =>

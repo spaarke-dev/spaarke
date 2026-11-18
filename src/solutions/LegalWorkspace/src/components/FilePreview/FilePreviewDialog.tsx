@@ -13,7 +13,7 @@ import * as React from 'react';
 import { SendEmailDialog, createXrmEmailComposeHandlers } from '@spaarke/ui-components';
 import { RichFilePreviewDialog } from '@spaarke/ui-components/components/FilePreview/RichFilePreviewDialog';
 import { getDocumentPreviewUrl, getDocumentOpenLinks } from '../../services/DocumentApiService';
-import { createXrmNavigationService, getXrm } from '@spaarke/ui-components';
+import { createXrmNavigationService, getXrm, openInDesktopApp, OPEN_IN_DESKTOP_FAILED_MESSAGE } from '@spaarke/ui-components';
 import { copyDocumentLink, setWorkspaceFlag } from './filePreviewService';
 import { searchUsersAsLookup } from '../CreateMatter/matterService';
 import { authenticatedFetch } from '../../services/authInit';
@@ -82,29 +82,21 @@ export const FilePreviewDialog: React.FC<IFilePreviewDialogProps> = ({
     [documentId]
   );
 
-  // Open File: desktop protocol for Office files; download via BFF for others.
+  // Open File: Office files open in the Office app; anything else downloads (shared behaviour, ISS-004).
   const handleOpenFile = React.useCallback(async () => {
-    const links = await getDocumentOpenLinks(documentId);
-    if (links?.desktopUrl) {
-      window.location.href = links.desktopUrl;
-      return;
-    }
     try {
-      const contentUrl = `${getBffBaseUrl()}/api/documents/${encodeURIComponent(documentId)}/content`;
-      const response = await authenticatedFetch(contentUrl);
-      if (response.ok) {
-        const blob = await response.blob();
-        const objectUrl = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = objectUrl;
-        a.download = links?.fileName ?? documentName ?? 'document';
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(objectUrl);
-      }
+      const links = await getDocumentOpenLinks(documentId);
+      await openInDesktopApp({
+        bffBaseUrl: getBffBaseUrl(),
+        documentId,
+        links: links ?? {},
+        fetch: authenticatedFetch,
+        fallbackFileName: documentName,
+      });
     } catch (err) {
-      console.error('[FilePreviewDialog] Download failed:', err);
+      console.error('[FilePreviewDialog] Open file failed:', err);
+      // The preview dialog is modal, so use the platform dialog (an inline bar would sit behind it).
+      void getXrm('openErrorDialog')?.Navigation?.openErrorDialog?.({ message: OPEN_IN_DESKTOP_FAILED_MESSAGE });
     }
   }, [documentId, documentName]);
 

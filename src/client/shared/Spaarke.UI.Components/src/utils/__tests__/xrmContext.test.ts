@@ -317,7 +317,7 @@ describe('xrmContext', () => {
       const full = (clientUrl = 'https://org.crm.dynamics.com') => ({
         source: 'full',
         WebApi: { retrieveMultipleRecords: jest.fn() },
-        Navigation: { navigateTo: jest.fn(), openForm: jest.fn(), openUrl: jest.fn() },
+        Navigation: { navigateTo: jest.fn(), openForm: jest.fn(), openUrl: jest.fn(), openErrorDialog: jest.fn() },
         Utility: {
           getGlobalContext: () => ({ getClientUrl: () => clientUrl }),
           lookupObjects: jest.fn(),
@@ -338,6 +338,7 @@ describe('xrmContext', () => {
         'navigation',
         'openForm',
         'openUrl',
+        'openErrorDialog',
         'utility',
         'clientUrl',
         'lookupObjects',

@@ -509,6 +509,12 @@ public partial class RouteAuthorizationGuardTests
             + "eBilling kill switch runs after it. Both additionally resolve the caller's eligibility LIVE from the invoice's core record inside "
             + "InvoiceRejectReturnService on every call (403 ebilling.approver.not_eligible, nothing written); the stored eligible-approver set "
             + "never grants. The decider and the decision id are derived server-side, never taken from the request."),
+        new GovernedFile("Api/Finance/FirmNoticeEndpoints.cs", Scope.RouteLevelGate,
+            "POST /api/finance/invoices/{invoiceId}/firm-notice/draft (ebilling-r1 task 131, FR-50, D-60) -- a reviewer previews the notice the firm "
+            + "will receive for a Return or a Reject. Step 0 on the group, then AddFinanceAuthorizationFilter as the caller on the invoice named in "
+            + "the path (ebilling.invoice.decide: Write, the same right as the Return and Reject routes), fail closed; the eBilling kill switch runs "
+            + "after it. Read-only: it projects the firm-visible outcome (FirmFindingsProjection) and drafts prose; it writes nothing, sends nothing "
+            + "and returns a draft only. The kind is the closed set ReturnedToFirm or InvoiceRejected, never a free value."),
         new GovernedFile("Api/Finance/ApExportEndpoints.cs", Scope.RouteLevelGate,
             "GET /api/finance/export-batches/candidates, POST /api/finance/export-batches and GET /api/finance/export-batches/{batchId} (ebilling-r1 "
             + "task 150, FR-41, EB-D-178, D-56) -- export a selection of Approved invoices to AP as one batch; plus, from task 151a (EB-D-181), "
@@ -606,7 +612,10 @@ public partial class RouteAuthorizationGuardTests
             "the aggregator's own routes: /me, /me/entitlements and the inline close-project (sweep S-39; task 166)."),
         new GovernedFile("Api/ExternalAccess/ExternalProjectDataEndpoints.cs", Scope.GroupGated,
             "the external data plane: every handler checks the caller principal's rights on the route record "
-            + "(HoldsReadOnProject / RightsForRoot) before any read — the Wave-3 reference implementation."),
+            + "(HoldsReadOnProject / RightsForRoot) before any read — the Wave-3 reference implementation. R4 task 014b adds "
+            + "GET and PATCH /events/{id} (CheckEventReadableAsync: Read on every parent, else the uniform 404; PATCH then "
+            + "EventEditDecisionAsync: Write on every parent, and for a systemuser Dataverse Write on the row) and GET "
+            + "/{projects|matters|workassignments}/{id}/assignable-people (RightsForRoot Read, then the event create or edit right)."),
         new GovernedFile("Api/ExternalAccess/ExternalModuleDataEndpoints.cs", Scope.GroupGated,
             "scoped module reads (Tier2ScopeFilterInjector, IsRecordAccessible) and schema/view passthrough, under the nested "
             + "/api/dataverse group of /api/v1/external."),
@@ -1258,10 +1267,13 @@ public partial class RouteAuthorizationGuardTests
     // on the group, then AddFinanceAuthorizationFilter in the fail-closed mode as the caller); .RequireEbillingEnabled is already in
     // NotAuthorizationForms.
     //
-    // 154 -> 155 (2026-11-17, ebilling-r1 task 135, FR-49). Net +1: Api/ExternalAccess/BillingGuidelinesEndpoints.cs ADDED -- GET
+    // 154 -> 155 (2026-11-17, ebilling-r1 task 131, FR-50). Net +1: Api/Finance/FirmNoticeEndpoints.cs ADDED -- POST
+    // /api/finance/invoices/{invoiceId}/firm-notice/draft. Classified by GovernedFiles (RouteLevelGate: step 0 on the group, then
+    // AddFinanceAuthorizationFilter as the caller on the invoice in the path); .RequireEbillingEnabled is already in NotAuthorizationForms.
+    // 155 -> 156 (2026-11-17, ebilling-r1 task 135, merged after 131, FR-49). Net +1: Api/ExternalAccess/BillingGuidelinesEndpoints.cs ADDED -- GET
     // /api/v1/external/ebilling/billing-guidelines on the external collaboration group. Classified by GovernedFiles (GroupGated:
     // AddBillingGuidelinesAuthorizationFilter, credited above); .RequireEbillingEnabled is already in NotAuthorizationForms.
-    private const int ExpectedEndpointFileCount = 155;
+    private const int ExpectedEndpointFileCount = 156;
 
     // =============================================================================================
     // THE CREDITED ALLOW-LIST — the only attachment forms Rule A credits as a per-resource decision
@@ -1807,7 +1819,8 @@ public partial class RouteAuthorizationGuardTests
     {
         new AdminOnlyGroup("Api/Admin/JobsEndpoints.cs", SystemAdminPolicy,
             "Background-job inspection, history, trigger and enable/disable: the scheduler is an operator control "
-            + "plane, behind SystemAdmin by owner decision Q6 (R3 task 020).",
+            + "plane, behind SystemAdmin by owner decision Q6 (R3 task 020). The record repair pass's on-demand run (fm task "
+            + "052c) is in the same group: 401/403/202 proven by tests/integration/auth/Admin/RecordRepairPassTriggerAuthTests.cs.",
             new[]
             {
                 "GET /api/admin/jobs",
@@ -1816,6 +1829,7 @@ public partial class RouteAuthorizationGuardTests
                 "GET /api/admin/jobs/{jobId}/history",
                 "POST /api/admin/jobs/{jobId}/enable",
                 "POST /api/admin/jobs/{jobId}/disable",
+                "POST /api/admin/jobs/record-repair-pass/runs",
             }),
         new AdminOnlyGroup("Api/Admin/MembershipAdminEndpoints.cs", SystemAdminPolicy,
             "Membership-field discovery audit and metadata-cache refresh: tenant-wide configuration diagnostics "
@@ -2266,6 +2280,36 @@ public partial class RouteAuthorizationGuardTests
             "Delegates to CreateEventForRoot: Read from RightsForRoot on the route work assignment "
             + "(ExternalProjectDataEndpoints.cs:2409), then Create through RightsForRootWriteAsync (:2416-2421, "
             + "Dataverse-confirmed for a Dataverse-decided caller) before the owner read and the write."),
+        // spaarke-SPA-external-access-platform-r4 task 014b (FR-35/FR-36): the event record read and edit, and the
+        // assignable-people lists. The record routes reach RightsForRoot through CheckEventReadableAsync ->
+        // RightsForDocumentParentAsync on EVERY parent the row is filed under (uniform 404 otherwise) before any read of the
+        // event's own fields (uac-r2 G5); the PATCH then requires Write on every parent (RightsForRootWriteAsync) and, for a
+        // systemuser, Dataverse Write on the event row (app-only impersonation, no OBO) before the app-only patch.
+        new HandlerDecision("GET /api/v1/external/events/{id:guid}", "GetEvent", "RightsForRoot",
+            new[] { "ExternalProjectDataEndpoints.CheckEventReadableAsync", "ExternalProjectDataEndpoints.RightsForDocumentParentAsync" },
+            "Read on every parent (CheckEventReadableAsync, ExternalProjectDataEndpoints.cs:3020-3051; uniform 404) before the "
+            + "row read (GetEventByIdAsync, :3094)."),
+        new HandlerDecision("PATCH /api/v1/external/events/{id:guid}", "UpdateEvent", "RightsForRoot",
+            new[] { "ExternalProjectDataEndpoints.CheckEventReadableAsync", "ExternalProjectDataEndpoints.RightsForDocumentParentAsync" },
+            "Read on every parent plus the live-parent, visibility and invoice-link checks (CheckEventReadableAsync, "
+            + "ExternalProjectDataEndpoints.cs:3349), then the edit decision (EventEditDecisionAsync, :2949, :3354: Write on every "
+            + "parent; a systemuser also row Write) before any app-only read or write (G5). A reassign (R4 task 014c) then also "
+            + "needs a readable caller contact (:3372, ContactUnreadable is a 503), the Contact Read ceiling (AdmitsEventAssignAsync, "
+            + ":3381, before any assignable set is asked), open work on the current status (IsReassignable, :3399) and the assignee "
+            + "in EVERY parent's Known assignable set (RecordContactAccessService, :3432; Unknown is a 503) before the app-only patch "
+            + "(UpdateEventAsync, :3451) writes the internal reassign's columns (EventDueAssigneeWrite.AddReassignColumns)."),
+        new HandlerDecision("GET /api/v1/external/projects/{id:guid}/assignable-people", "GetProjectAssignablePeople", "RightsForRoot", Array.Empty<string>(),
+            "Delegates to ListAssignablePeopleForRoot: 403 unless RightsForRoot gives Read on the route project "
+            + "(ExternalProjectDataEndpoints.cs:3217), then Create or Write on it (RightsForRootWriteAsync, :3220) before the "
+            + "contact-access read."),
+        new HandlerDecision("GET /api/v1/external/matters/{id:guid}/assignable-people", "GetMatterAssignablePeople", "RightsForRoot", Array.Empty<string>(),
+            "Delegates to ListAssignablePeopleForRoot: 403 unless RightsForRoot gives Read on the route matter "
+            + "(ExternalProjectDataEndpoints.cs:3217), then Create or Write on it (RightsForRootWriteAsync, :3220) before the "
+            + "contact-access read."),
+        new HandlerDecision("GET /api/v1/external/workassignments/{id:guid}/assignable-people", "GetWorkAssignmentAssignablePeople", "RightsForRoot", Array.Empty<string>(),
+            "Delegates to ListAssignablePeopleForRoot: 403 unless RightsForRoot gives Read on the route work assignment "
+            + "(ExternalProjectDataEndpoints.cs:3217), then Create or Write on it (RightsForRootWriteAsync, :3220) before the "
+            + "contact-access read."),
         new HandlerDecision("GET /api/v1/external/projects/{id:guid}/contacts", "GetContacts", "HoldsReadOnProject", Array.Empty<string>(),
             "Read on the route project (ExternalProjectDataEndpoints.cs:1612)."),
         new HandlerDecision("GET /api/v1/external/projects/{id:guid}/organizations", "GetOrganizations", "HoldsReadOnProject", Array.Empty<string>(),

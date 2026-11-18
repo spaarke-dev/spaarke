@@ -988,3 +988,7 @@ Rows not listed write other tables: thread rows (`ThreadResolver.cs:251`, `:1098
   - **`-Verify`:** exit 0, PASS, "PRECONDITION MET" for the `DirectMessage:*` settings.
   - Reported to unified-access-control-r2. Next in the binding order: their step 3 (Direct setup), then 054c Stamp.
   - Manual checks m1–m4 need a non-administrator sign-in; they are open, for UAT.
+- **2026-11-15, 054c Stamp, run on the owner's go (this session); UAC-r2 had no objection.** Dev BFF 5a9b687a0b, `DirectMessage:*` settings unset.
+  - **Dry run, `-Apply`, `-Verify`:** each exit 0. The precondition was all OK (five columns secured; the writers are exactly the two BFF application users), including after the #2799 field lock.
+  - Selection: 3 Direct messages with an empty recipient. Stamped: 0. All 3 are on the review list as `no_sentby` (no recorded sender): one is UAC-r2's task-161 gate (d) test row, two are untitled test rows from 2026-08. Owner and UAC-r2: leave them as they are, no sender is invented; Move keeps them with their owner (`no_valid_pair`).
+  - `-Verify`: PASS (no row would stamp; 3 on the review list). UAC-r2 told; their step 3 (Direct setup) is next and needs the owner's go in their session.

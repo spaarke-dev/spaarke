@@ -426,10 +426,9 @@ const CreateEventWizard: React.FC<ICreateEventWizardProps> = ({
         // regardingEntityName argument (ADR-024 applyResolverFields contract).
         const currentFormValues = mergeEventRegardingFromAssociation(formValuesRef.current, context.association);
 
-        // Task 020 (spec FR-12): pass authFetch/bffBaseUrl so EventService can
-        // drive the Field Mapping Framework engine (graceful no-op when the
-        // host omits either, or when there's no regarding association / no
-        // configured profile for the pair).
+        // Task 023 (spec FR-16): authFetch/bffBaseUrl are how EventService reaches the BFF child-records route; the
+        // create goes there (never Xrm.WebApi) and the server maps fields fill-only from the regarding association,
+        // which EventService names as the mapping source. A host that omits either cannot create (fails closed).
         const eventService = new EventService(dataService, authFetch, bffBaseUrl);
         const result = await eventService.createEvent(currentFormValues, context.association?.entityType);
         if (!result.success) {

@@ -11,7 +11,8 @@ namespace Sprk.Bff.Api.Tests.Integration.DataMutation.Signals;
 /// among them would read as empty for that identity: the approved total would silently fall back to the billed total, and the others
 /// would read as 0 or as "not blocked". So none may be secured. Ontology's answer is to guard the columns, NOT to add
 /// <c>sprk_approvedtotal</c> to <c>PolicyVersionValidator.AuthorableColumns</c> (an author must not be able to name it).
-/// <para><b>One reviewed exception (ebilling-r1 task 166, EB-D-200; owner + uac-r2 option D).</b> <c>sprk_invoice.sprk_totalamount</c> and
+/// <para><b>Reviewed exceptions (all in <c>DerivedBaseColumnSecurityExceptions</c>; the four invoice-family lookups were added by #2859, see that file).
+/// The first: ebilling-r1 task 166, EB-D-200; owner + uac-r2 option D.</b> <c>sprk_invoice.sprk_totalamount</c> and
 /// <c>sprk_invoice.sprk_approvedtotal</c> are field-secured on purpose: only the server writes them, and every user reads them. The evaluator
 /// (<c>SignalEvaluator</c>, DI singleton over the shared <c>IGenericEntityService</c>) reads both through the read grant of the profile that
 /// covers its identity. They are listed in <c>DerivedBaseColumnSecurityExceptions</c> (tests/integration/Shared, shared with the live guard) with

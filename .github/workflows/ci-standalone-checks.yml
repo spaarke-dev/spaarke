@@ -294,14 +294,6 @@ jobs:
         working-directory: src/client/shared/Spaarke.UI.Components
         run: npx tsc
 
-      - name: Install Spaarke.DocumentOperations deps
-        working-directory: src/client/shared/Spaarke.DocumentOperations
-        run: npm install --legacy-peer-deps --no-audit --no-fund
-
-      - name: Build Spaarke.DocumentOperations
-        working-directory: src/client/shared/Spaarke.DocumentOperations
-        run: npx tsc
-
       - name: Install Spaarke.Compose.Components deps
         working-directory: src/client/shared/Spaarke.Compose.Components
         run: npm install --legacy-peer-deps --no-audit --no-fund
@@ -357,14 +349,6 @@ jobs:
 
       - name: Build Spaarke.Auth
         working-directory: src/client/shared/Spaarke.Auth
-        run: npx tsc
-
-      - name: Install Spaarke.AI.Context deps
-        working-directory: src/client/shared/Spaarke.AI.Context
-        run: npm install --legacy-peer-deps --no-audit --no-fund
-
-      - name: Build Spaarke.AI.Context
-        working-directory: src/client/shared/Spaarke.AI.Context
         run: npx tsc
 
       - name: Install Spaarke.SdapClient deps

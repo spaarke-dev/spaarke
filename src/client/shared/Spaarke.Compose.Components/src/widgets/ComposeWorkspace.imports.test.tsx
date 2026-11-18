@@ -61,6 +61,10 @@ jest.mock('@spaarke/auth', () => ({
 
 // ── Xrm adapters (statically imported by ComposeWorkspace for FR-02 Search) ──
 jest.mock('@spaarke/ui-components', () => ({
+  // The real hook, from source: this factory replaces the whole module, and before task 033 the hook came unmocked
+  // from the retired document-operations package.
+  useDocumentActions: jest.requireActual('../../../Spaarke.UI.Components/src/hooks/useDocumentActions')
+    .useDocumentActions,
   // r8 task 052 (FR-C05) — ComposeWorkspace also mounts <ConfirmModal/> unconditionally for the
   // stale-target "apply anyway?" question (controlled via its own `open` prop, same pattern as
   // SprkModal/SendEmailDialog above). A no-op stub keeps this mock complete.
