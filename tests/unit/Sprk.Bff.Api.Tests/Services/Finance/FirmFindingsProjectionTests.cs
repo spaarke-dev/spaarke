@@ -725,18 +725,85 @@ public sealed partial class FirmFindingsProjectionTests
     [Theory]
     [InlineData(InvoiceStatusCodes.Rejected, FirmOutcomeKind.Rejected)]
     [InlineData(InvoiceStatusCodes.ReturnedToFirm, FirmOutcomeKind.ReturnedToFirm)]
-    public async Task RejectedOrReturned_ProjectStatusAndBilledTotalOnly_NoReasonIsRead(int status, FirmOutcomeKind kind)
+    public async Task RejectedOrReturned_ProjectTheSameItemsAsInReview_WithTheDecidedKindAndTheBilledTotal(int status, FirmOutcomeKind kind)
+    {
+        // 130f (EB-D-259): was RejectedOrReturned_ProjectStatusAndBilledTotalOnly_NoReasonIsRead (empty items). The decided invoice shows what
+        // it showed while In Review, from the same code path.
+        var inReview = await DecidedWorldProjection(InvoiceStatusCodes.InReview);
+        var outcome = await DecidedWorldProjection(status);
+
+        outcome.Kind.Should().Be(kind);
+        outcome.StatusLabel.Should().Be(kind == FirmOutcomeKind.Rejected ? "Rejected" : "Returned to firm");
+        outcome.TrackingNumber.Should().Be("TRK-1");
+        outcome.BilledTotal.Should().Be(1000m);
+        outcome.ApprovedTotal.Should().BeNull("approved totals belong to Approved and later, even when the column holds one");
+        outcome.Degraded.Should().BeFalse();
+        outcome.Items.Select(i => i.Decision).Should().Equal(FirmOutcomeDecision.Reduced, FirmOutcomeDecision.Disallowed, FirmOutcomeDecision.Added);
+        outcome.Items.Should().NotContain(i => i.Decision == FirmOutcomeDecision.Adjustment, "invoice-level adjustments are not shown before Approved");
+        outcome.Items.Should().BeEquivalentTo(inReview.Items, o => o.WithStrictOrdering(), "same lines, findings, values and clause decisions as In Review");
+        outcome.Items[0].Citations.Should().ContainSingle().Which.Label.Should().Be(FirmLabel, "the firm-safe clause decision is the one In Review makes");
+        outcome.Items[0].FirmReasons.Should().Equal("Your agreed rate is lower.");
+    }
+
+    private static async Task<FirmOutcome> DecidedWorldProjection(int status, Action<World>? seed = null)
     {
         var world = new World(status);
-        world.AddReducedWithCitation(1, "Reason.", VersionA, "Firm reason.");
+        world.AddReducedWithCitation(1, "Rate exceeds the agreed rate.", VersionA, "Your agreed rate is lower.", 100m, 60m);
+        var disallowed = world.AddLine(2, InvoiceLineStatus.Disallowed, 80m, 0m);
+        world.AddRecord("disallow-line", disallowed.Id, "Block billing.", InvoiceId);
+        var added = world.AddReviewerLine(Guid.Parse("20000000-0000-4000-8000-0000000000a1"));
+        world.AddRecord("add-line", added.Id, "Work the firm omitted.", InvoiceId);
+        world.AddAdjustment(5, "Volume discount.", VersionB);
+        world.Clause = v => v == VersionA ? FlagOnText : FirmClauseText.None;
+        seed?.Invoke(world);
+        return (await world.Projection().GetForInvoiceAsync(InvoiceId, CancellationToken.None))!;
+    }
 
-        var outcome = await world.Projection().GetForInvoiceAsync(InvoiceId, CancellationToken.None);
+    [Theory(DisplayName = "130f must-not-fire (EB-D-259): the reviewer's reject or return reason and note, and an override reason, are in the store and appear nowhere in the projection")]
+    [InlineData(InvoiceStatusCodes.Rejected, "reject-invoice")]
+    [InlineData(InvoiceStatusCodes.ReturnedToFirm, "return-to-firm")]
+    public async Task RejectedOrReturned_TheDecisionReasonNoteAndOverrideReason_NeverReachTheProjection(int status, string actionCode)
+    {
+        const string decisionReason = "SENT-DECISION-REASON";
+        const string decisionNote = "SENT-DECISION-NOTE";
+        const string overrideReason = "SENT-OVERRIDE-REASON";
+        Entity? decision = null;
+        var outcome = await DecidedWorldProjection(status, world =>
+        {
+            // The whole-invoice decision's record (reason and note) carries the INVOICE link only; an override record carries the line's.
+            decision = world.AddRecord(actionCode, null, decisionReason, InvoiceId);
+            decision["sprk_note"] = decisionNote;
+            world.AddRecord("override-submission", world.Lines[0].Id, overrideReason, InvoiceId);
+        });
 
-        outcome!.Kind.Should().Be(kind);
-        outcome.BilledTotal.Should().Be(1000m);
-        outcome.ApprovedTotal.Should().BeNull();
-        outcome.Items.Should().BeEmpty();
-        world.Reads("sprk_decisionrecord").Should().Be(0);
+        var json = JsonSerializer.Serialize(outcome);
+        json.Should().NotContain(decisionReason).And.NotContain(decisionNote).And.NotContain(overrideReason);
+        // Controls: the records really were in the store, and the line-level reasons the firm sees In Review really are in the output.
+        decision!["sprk_note"].Should().Be(decisionNote);
+        json.Should().Contain("Rate exceeds the agreed rate.").And.Contain("Block billing.");
+    }
+
+    [Theory(DisplayName = "130f (EB-D-209): with the rule set's firm flag off, a Rejected or Returned item shows the reason only: no clause, section or rule set name")]
+    [InlineData(InvoiceStatusCodes.Rejected)]
+    [InlineData(InvoiceStatusCodes.ReturnedToFirm)]
+    public async Task RejectedOrReturned_FlagOff_ShowsTheReasonOnly_NoClauseSectionOrRuleName(int status)
+    {
+        var outcome = await DecidedWorldProjection(status, world => world.Clause = _ => FirmClauseText.None);
+
+        outcome.Items.Should().NotBeEmpty().And.OnlyContain(i => i.Citations.Count == 0);
+        outcome.Items[0].Reason.Should().Be("Rate exceeds the agreed rate.");
+        outcome.Items[0].FirmReasons.Should().Equal("Your agreed rate is lower.");
+        JsonSerializer.Serialize(outcome).Should().NotContain("Travel time").And.NotContain(FirmLabel).And.NotContain(ClauseSection).And.NotContain(ClauseQuote);
+    }
+
+    [Theory(DisplayName = "130f: a fault reading the items of a Rejected or Returned invoice keeps the fail-safe outcome: the decided status only, Degraded")]
+    [InlineData(InvoiceStatusCodes.Rejected, FirmOutcomeKind.Rejected, "Rejected")]
+    [InlineData(InvoiceStatusCodes.ReturnedToFirm, FirmOutcomeKind.ReturnedToFirm, "Returned to firm")]
+    public async Task RejectedOrReturned_AFaultReadingTheItems_IsTheStatusOnly_Degraded(int status, FirmOutcomeKind kind, string label)
+    {
+        var outcome = await DecidedWorldProjection(status, world => world.FaultingEntities.Add("sprk_decisionrecord"));
+
+        outcome.Should().BeEquivalentTo(new FirmOutcome(kind, null, label, null, null, [], true));
     }
 
     [Theory]
