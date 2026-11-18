@@ -976,10 +976,22 @@ public record LookupNavigationMetadata
 /// <param name="ColumnNumber">The column's number in the table (<c>AttributeMetadata.ColumnNumber</c>), the number an update
 /// audit's <c>attributemask</c> lists for a changed column; <c>null</c> when not stated (field-mapping-server-write-path-r1
 /// task 052d: the repair pass's core-pair report decides from it whether an update changed a pair column).</param>
+/// <param name="IsAuditEnabled">Whether the column's changes are audited (<c>AttributeMetadata.IsAuditEnabled</c>); <c>null</c> when
+/// not stated, which a reader treats as "not audited" (fail closed): the core-pair report reads no change history of a column
+/// that is not audited and would otherwise report "no change".</param>
 public sealed record ColumnMetadata(
     string LogicalName, string? AttributeType, bool? IsValidForUpdate, bool? IsSecured, int? MaxLength,
     decimal? MinValue = null, decimal? MaxValue = null, IReadOnlyList<string>? Targets = null,
-    IReadOnlyList<int>? OptionValues = null, int? ColumnNumber = null);
+    IReadOnlyList<int>? OptionValues = null, int? ColumnNumber = null, bool? IsAuditEnabled = null);
+
+/// <summary>
+/// A table's audit facts as its metadata declares them (<see cref="IGenericEntityService.GetTableAuditMetadataAsync"/>). A
+/// <c>null</c> is a fact the metadata did not state; a reader treats it as unknown and fails closed.
+/// </summary>
+/// <param name="ObjectTypeCode">The table's numeric object type code, the value an <c>audit</c> row's <c>objecttypecode</c> is
+/// filtered by (a custom table's code differs per environment, so it is read, never written into code).</param>
+/// <param name="IsAuditEnabled">Whether auditing is on for the table itself.</param>
+public sealed record TableAuditMetadata(int? ObjectTypeCode, bool? IsAuditEnabled);
 
 /// <summary>
 /// A one-to-many relationship of a table along which an Assign (an <c>ownerid</c> write) cascades to the child rows

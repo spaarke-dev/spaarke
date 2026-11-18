@@ -548,7 +548,8 @@ public sealed partial class RecordRepairPassJobTests
         World.Writes.Should().HaveCount(3);
         World.ColumnMetadataReads.Count(t => t == "sprk_event").Should().Be(1);
         World.ColumnMetadataReads.Count(t => t == "sprk_matter").Should().Be(1);
-        PassWorld.Count(result, "metadataReads").Should().Be(2);
+        PassWorld.Count(result, "metadataReads").Should().Be(2 + RecordRepairCorePairReport.Tables.Count,
+            "the repair tables' two, and the report's pair-column read of each core-pair table (audit settings are checked every run)");
     }
 
     [Fact]
@@ -938,6 +939,8 @@ public sealed partial class RecordRepairPassJobTests
                 .Returns((QueryExpression query, CancellationToken _) => Task.FromResult(Scan(query)));
             entities.Setup(e => e.GetColumnMetadataAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
                 .Returns((string table, CancellationToken _) => Task.FromResult(ReportColumns(table)));
+            entities.Setup(e => e.GetTableAuditMetadataAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                .Returns((string table, CancellationToken _) => Task.FromResult(ReportTable(table)));
             EntityMocks.Add(entities);
 
             var collection = new ServiceCollection()
@@ -967,6 +970,7 @@ public sealed partial class RecordRepairPassJobTests
         private EntityCollection Scan(QueryExpression query)
         {
             if (query.EntityName == RecordRepairCorePairReport.AuditTable
+                || query.EntityName == RecordRepairCorePairReport.OrganizationTable
                 || RecordRepairCorePairReport.Tables.Contains(query.EntityName))
                 return ReportScan(query);
 

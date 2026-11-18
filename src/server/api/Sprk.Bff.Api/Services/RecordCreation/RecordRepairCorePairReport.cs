@@ -6,6 +6,7 @@ using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
 using Spaarke.Scheduling;
 using Sprk.Bff.Api.Services.Dataverse;
+using Sprk.Bff.Api.Services.Finance.Procedures;
 using Sprk.Bff.Api.Services.Jobs;
 
 namespace Sprk.Bff.Api.Services.RecordCreation;
@@ -14,19 +15,26 @@ namespace Sprk.Bff.Api.Services.RecordCreation;
 /// The repair pass's core-pair report (field-mapping-server-write-path-r1 task 052d; task 044(d); ontology D-204, D-210): for
 /// Signal and Decision Record rows created at or after go-live, it REPORTS each row that holds one half of the core pair only
 /// (<see cref="FindingHalf"/>) and each update of either pair column (<see cref="FindingChanged"/>), read from the column audit
-/// history. It writes nothing to either table, in any case: it sends only reads (<c>RetrieveMultiple</c> and column metadata).
+/// history. It writes nothing to either table, in any case: it sends only reads (<c>RetrieveMultiple</c> and metadata), and it
+/// reads through a <see cref="WriteRefusingEntityService"/>, so a write member throws before anything is sent.
 /// </summary>
 /// <remarks>
 /// <para><b>Half pair.</b> Per table, rows with <c>createdon</c> in [max(go-live, watermark − overlap), run start − settle time),
 /// filtered server-side to "type without id, or id without type", ordered by id, at most <see cref="MaxRowsPerScan"/> per run;
 /// each row is asked again in code (created at or after go-live; exactly one half present) before it is reported.</para>
-/// <para><b>Changed after create.</b> Per table, the <c>audit</c> rows of operation Update (<see cref="AuditOperationUpdate"/>)
-/// whose own <c>createdon</c> (the change time) is in [max(go-live, audit watermark − overlap), run start − settle time), ordered
-/// by <c>auditid</c>, at most <see cref="MaxAuditRowsPerScan"/> per run. An audit row changed a pair column when its
+/// <para><b>Changed after create.</b> Per table, the <c>audit</c> rows of the table's NUMERIC object type code (read from the
+/// table's metadata each run; Dataverse refuses the logical name) and operation Update (<see cref="AuditOperationUpdate"/>) or
+/// Upsert (<see cref="AuditOperationUpsert"/>) whose own <c>createdon</c> (the change time) is in [max(go-live, audit watermark −
+/// overlap), run start − settle time), ordered by <c>auditid</c>, at most <see cref="MaxAuditRowsPerScan"/> per run. An Upsert
+/// audit that is not after the row's own <c>createdon</c> is the row's creation, not a change. An audit row changed a pair column when its
 /// <c>attributemask</c> (the changed columns' <c>ColumnNumber</c>s) names either pair column's number, read from the table's
 /// column metadata once per run. A mask that cannot be read is reported <see cref="FindingChangeUndecided"/>, never "no change".
 /// The candidate rows' <c>createdon</c> is then read in batches (<see cref="RowReadChunk"/> ids per query): a row created before
 /// go-live is not reported; a row that is not returned (deleted) is counted and logged, not reported.</para>
+/// <para><b>Auditing must be on (every run, before the audit read).</b> The organization's <c>isauditenabled</c>, the table's
+/// <c>IsAuditEnabled</c> and both pair columns' <c>IsAuditEnabled</c> must each be on; a flag that is off or not stated is an
+/// audit fault (one error line per table per run, the run partial, the audit watermark not moved). A history that was never
+/// written reads as no rows, which would otherwise be taken as "no change" and the watermark moved past it.</para>
 /// <para><b>State.</b> Its own entry in the job's state store (<c>record-repair-pass:{table}:report:state</c>), never the
 /// repair state: two watermarks, two stopped-sweep cursors, and the keys of the rows and audit rows already handled whose time
 /// lies within the overlap, so a finding is reported once per window it falls in (the overlap re-reads it; the key skips it).
@@ -64,6 +72,14 @@ internal sealed class RecordRepairCorePairReport
     /// <summary>The <c>audit.operation</c> value of an update.</summary>
     internal const int AuditOperationUpdate = 2;
 
+    /// <summary>The <c>audit.operation</c> value of an upsert (an upsert that created the row is its creation, not a change).</summary>
+    internal const int AuditOperationUpsert = 5;
+
+    /// <summary>The platform's organization table, read for its <c>isauditenabled</c> flag.</summary>
+    internal const string OrganizationTable = "organization";
+
+    internal const string OrganizationAuditColumn = "isauditenabled";
+
     internal const string AuditTable = "audit";
 
     private const string HalfKeyPrefix = "h:";
@@ -73,7 +89,9 @@ internal sealed class RecordRepairCorePairReport
     private static readonly TimeSpan StateLifetime = TimeSpan.FromDays(30);
     private static readonly JsonSerializerOptions JsonOptions = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
 
-    private readonly IGenericEntityService _entities;
+    private readonly WriteRefusingEntityService _entities;
+    private readonly Dictionary<string, TableAuditMetadata> _tables = new(StringComparer.OrdinalIgnoreCase);
+    private bool? _organizationAudit;
     private readonly IIdempotencyService _claims;
     private readonly IDistributedCache _store;
     private readonly RecordRepairPassContext _pass;
@@ -84,7 +102,8 @@ internal sealed class RecordRepairCorePairReport
         IGenericEntityService entities, IIdempotencyService claims, IDistributedCache store, RecordRepairPassContext pass, ILogger logger,
         JobRunContext context)
     {
-        _entities = entities;
+        // "No write" is a property of the type: every write member of this service throws before anything is sent.
+        _entities = new WriteRefusingEntityService(entities);
         _claims = claims;
         _store = store;
         _pass = pass;
@@ -249,11 +268,33 @@ internal sealed class RecordRepairCorePairReport
     {
         var since = WindowStart(state.AuditWatermark, until);
         var windowEnd = state.AuditSweepUntil ?? until;
+
+        // Every run, before any history is read (also when there are no audit rows): auditing must be on, or an empty history
+        // would be read as "no change" and the watermark moved past a window that was never recorded.
+        var stage = "the audit settings could not be read";
+        AuditFacts facts;
+        try
+        {
+            facts = await AuditFactsAsync(table, what => stage = what, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            AuditFault(table, result, stage, ex);
+            return;
+        }
+
+        if (facts.Off.Count > 0)
+        {
+            AuditFault(table, result, "auditing is not on (" + string.Join("; ", facts.Off) + ")", ex: null);
+            return;
+        }
+
         List<Entity> audits;
         bool more;
         try
         {
-            var page = await _entities.RetrieveMultipleAsync(BuildAuditQuery(table, since, windowEnd, state.AuditSweepAfter, MaxAuditRowsPerScan), ct)
+            var page = await _entities.RetrieveMultipleAsync(
+                    BuildAuditQuery(facts.ObjectTypeCode, since, windowEnd, state.AuditSweepAfter, MaxAuditRowsPerScan), ct)
                 .ConfigureAwait(false);
             audits = page.Entities.Take(MaxAuditRowsPerScan).ToList();
             more = audits.Count > 0 && (page.MoreRecords || page.Entities.Count > MaxAuditRowsPerScan);
@@ -264,43 +305,29 @@ internal sealed class RecordRepairCorePairReport
             return;
         }
 
-        var candidates = new List<(string Key, Guid? RowId, DateTimeOffset AuditTime, Guid? ChangedBy, string Finding)>();
-        if (audits.Count > 0)
+        var candidates = new List<(string Key, Guid? RowId, DateTimeOffset AuditTime, Guid? ChangedBy, string Finding, int? Operation)>();
+        foreach (var audit in audits)
         {
-            // The pair columns' numbers, read once per run (the pass's metadata cache); without both, nothing can be decided.
-            (int Type, int Id) numbers;
-            try
+            result.AuditRowsRead++;
+            var auditId = audit.GetAttributeValue<Guid?>("auditid") is { } aid && aid != Guid.Empty ? aid : audit.Id;
+            var key = AuditKeyPrefix + auditId.ToString("N", CultureInfo.InvariantCulture);
+            var auditTime = RecordRepairPassContext.CreatedOnOf(audit);
+            if (auditTime is null)
             {
-                numbers = await PairColumnNumbersAsync(table, ct).ConfigureAwait(false);
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
-            {
-                AuditFault(table, result, "the pair columns' numbers could not be read", ex);
+                AuditFault(table, result, "an audit row carries no time", ex: null);
                 return;
             }
 
-            foreach (var audit in audits)
-            {
-                result.AuditRowsRead++;
-                var auditId = audit.GetAttributeValue<Guid?>("auditid") is { } aid && aid != Guid.Empty ? aid : audit.Id;
-                var key = AuditKeyPrefix + auditId.ToString("N", CultureInfo.InvariantCulture);
-                var auditTime = RecordRepairPassContext.CreatedOnOf(audit);
-                if (auditTime is null)
-                {
-                    AuditFault(table, result, "an audit row carries no time", ex: null);
-                    return;
-                }
+            if (state.Seen.ContainsKey(key))
+                continue; // already handled in this window's overlap
 
-                if (state.Seen.ContainsKey(key))
-                    continue; // already handled in this window's overlap
+            var finding = PairChangeOf(audit.GetAttributeValue<string>("attributemask"), facts.Numbers);
+            if (finding is null)
+                continue;
 
-                var finding = PairChangeOf(audit.GetAttributeValue<string>("attributemask"), numbers);
-                if (finding is null)
-                    continue;
-
-                candidates.Add((key, audit.GetAttributeValue<EntityReference>("objectid")?.Id is { } r && r != Guid.Empty ? r : null,
-                    auditTime.Value, audit.GetAttributeValue<EntityReference>("userid")?.Id, finding));
-            }
+            candidates.Add((key, audit.GetAttributeValue<EntityReference>("objectid")?.Id is { } r && r != Guid.Empty ? r : null,
+                auditTime.Value, audit.GetAttributeValue<EntityReference>("userid")?.Id, finding,
+                audit.GetAttributeValue<OptionSetValue>("operation")?.Value));
         }
 
         // Forward-only: the changed rows' createdon, read in batches; nothing is reported until every batch read.
@@ -334,6 +361,11 @@ internal sealed class RecordRepairCorePairReport
 
             if (created.Value < _pass.GoLive)
                 continue; // created before go-live: never reported
+
+            // An upsert that created the row is audited as an upsert whose mask names every column it set: not after the row's
+            // own createdon, it is the creation, not a change. (An update audit is a change whenever it happened.)
+            if (candidate.Operation == AuditOperationUpsert && candidate.AuditTime <= created.Value)
+                continue;
 
             Report(result, new Finding(table, rowId, candidate.Finding, candidate.AuditTime, candidate.ChangedBy));
         }
@@ -375,18 +407,21 @@ internal sealed class RecordRepairCorePairReport
         return changed ? FindingChanged : null;
     }
 
-    /// <summary>The update audit rows of one table whose change time is in [since, until), after an audit id, ordered by audit id.</summary>
-    internal static QueryExpression BuildAuditQuery(string table, DateTimeOffset since, DateTimeOffset until, Guid? after, int cap)
+    /// <summary>
+    /// The update and upsert audit rows of the table with the numeric <paramref name="objectTypeCode"/> (Dataverse refuses the
+    /// logical name there) whose change time is in [since, until), after an audit id, ordered by audit id.
+    /// </summary>
+    internal static QueryExpression BuildAuditQuery(int objectTypeCode, DateTimeOffset since, DateTimeOffset until, Guid? after, int cap)
     {
         var query = new QueryExpression(AuditTable)
         {
-            ColumnSet = new ColumnSet("auditid", RecordRepairPassContext.CreatedOnColumn, "objectid", "userid", "attributemask"),
+            ColumnSet = new ColumnSet("auditid", RecordRepairPassContext.CreatedOnColumn, "objectid", "userid", "attributemask", "operation"),
             NoLock = true,
             PageInfo = new PagingInfo { Count = cap, PageNumber = 1 },
         };
 
-        query.Criteria.AddCondition("objecttypecode", ConditionOperator.Equal, table);
-        query.Criteria.AddCondition("operation", ConditionOperator.Equal, AuditOperationUpdate);
+        query.Criteria.AddCondition("objecttypecode", ConditionOperator.Equal, objectTypeCode);
+        query.Criteria.AddCondition("operation", ConditionOperator.In, AuditOperationUpdate, AuditOperationUpsert);
         query.Criteria.AddCondition(RecordRepairPassContext.CreatedOnColumn, ConditionOperator.GreaterEqual, since.UtcDateTime);
         query.Criteria.AddCondition(RecordRepairPassContext.CreatedOnColumn, ConditionOperator.LessThan, until.UtcDateTime);
         if (after is { } continueAfter)
@@ -396,8 +431,36 @@ internal sealed class RecordRepairCorePairReport
         return query;
     }
 
-    private async Task<(int Type, int Id)> PairColumnNumbersAsync(string table, CancellationToken ct)
+    /// <summary>What the audit sweep needs to know about one table, and which audit settings are not on.</summary>
+    private sealed record AuditFacts(int ObjectTypeCode, (int Type, int Id) Numbers, IReadOnlyList<string> Off);
+
+    /// <summary>
+    /// The table's numeric object type code, the pair columns' numbers, and every audit setting that is not on (the organization,
+    /// the table, each pair column), read every run. A setting the metadata does not state counts as not on. A fault, a missing
+    /// code or a missing column number is thrown (<paramref name="stage"/> says which read it was).
+    /// </summary>
+    private async Task<AuditFacts> AuditFactsAsync(string table, Action<string> stage, CancellationToken ct)
     {
+        var off = new List<string>();
+
+        stage("the organization's audit setting could not be read");
+        if (!await OrganizationAuditEnabledAsync(ct).ConfigureAwait(false))
+            off.Add("the organization");
+
+        stage("the table's audit settings could not be read");
+        if (!_tables.TryGetValue(table, out var meta))
+        {
+            meta = await _entities.GetTableAuditMetadataAsync(table, ct).ConfigureAwait(false);
+            _tables[table] = meta;
+        }
+
+        if (meta.ObjectTypeCode is not { } code)
+            throw new InvalidOperationException($"The metadata of {table} does not state its object type code.");
+
+        if (meta.IsAuditEnabled != true)
+            off.Add("the table");
+
+        stage("the pair columns' numbers could not be read");
         if (!_pass.TryGetColumns(table, out var columns))
         {
             _pass.CountMetadataRead();
@@ -405,10 +468,31 @@ internal sealed class RecordRepairCorePairReport
             _pass.KeepColumns(table, columns);
         }
 
-        return columns.TryGetValue(RecordOwnershipContext.CoreRecordTypeColumn, out var type) && type.ColumnNumber is { } typeNumber
-               && columns.TryGetValue(RecordOwnershipContext.CoreRecordIdColumn, out var id) && id.ColumnNumber is { } idNumber
-            ? (typeNumber, idNumber)
-            : throw new InvalidOperationException($"The column metadata of {table} does not number both core pair columns.");
+        if (!(columns.TryGetValue(RecordOwnershipContext.CoreRecordTypeColumn, out var type) && type.ColumnNumber is { } typeNumber
+              && columns.TryGetValue(RecordOwnershipContext.CoreRecordIdColumn, out var id) && id.ColumnNumber is { } idNumber))
+        {
+            throw new InvalidOperationException($"The column metadata of {table} does not number both core pair columns.");
+        }
+
+        if (type.IsAuditEnabled != true)
+            off.Add(RecordOwnershipContext.CoreRecordTypeColumn);
+        if (id.IsAuditEnabled != true)
+            off.Add(RecordOwnershipContext.CoreRecordIdColumn);
+
+        return new AuditFacts(code, (typeNumber, idNumber), off);
+    }
+
+    /// <summary>Whether the organization's auditing is on (read once per run; a flag not stated is not on).</summary>
+    private async Task<bool> OrganizationAuditEnabledAsync(CancellationToken ct)
+    {
+        if (_organizationAudit is { } known)
+            return known;
+
+        var query = new QueryExpression(OrganizationTable) { ColumnSet = new ColumnSet(OrganizationAuditColumn), NoLock = true, TopCount = 1 };
+        var rows = await _entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
+        var on = rows.Entities.FirstOrDefault()?.GetAttributeValue<bool?>(OrganizationAuditColumn) == true;
+        _organizationAudit = on;
+        return on;
     }
 
     /// <summary>The <c>createdon</c> of each of <paramref name="ids"/> the read returns (a row it does not return is absent).</summary>

@@ -22,7 +22,8 @@ namespace Sprk.Bff.Api.Tests.Integration.DataMutation.RecordOwnership;
 public sealed partial class RecordRepairPassJobTests
 {
     private static readonly string[] ReadOnlyCalls =
-        [nameof(IGenericEntityService.GetCurrentIdentityIdAsync), nameof(IGenericEntityService.RetrieveMultipleAsync), nameof(IGenericEntityService.GetColumnMetadataAsync)];
+        [nameof(IGenericEntityService.GetCurrentIdentityIdAsync), nameof(IGenericEntityService.RetrieveMultipleAsync),
+            nameof(IGenericEntityService.GetColumnMetadataAsync), nameof(IGenericEntityService.GetTableAuditMetadataAsync)];
 
     // =====================================================================================
     // AC1: half pair
@@ -81,14 +82,171 @@ public sealed partial class RecordRepairPassJobTests
         half.PageInfo.Count.Should().Be(RecordRepairCorePairReport.MaxRowsPerScan);
 
         var audit = _pass.ReportQueries.First(q => q.EntityName == "audit");
-        audit.Criteria.Conditions.Should().ContainSingle(c => c.AttributeName == "objecttypecode").Which.Values.Single().Should().Be("sprk_signal");
-        audit.Criteria.Conditions.Should().ContainSingle(c => c.AttributeName == "operation")
-            .Which.Values.Single().Should().Be(RecordRepairCorePairReport.AuditOperationUpdate);
+        audit.Criteria.Conditions.Should().ContainSingle(c => c.AttributeName == "objecttypecode").Which.Values.Single()
+            .Should().Be(PassWorld.SignalTypeCode, "Dataverse filters an audit by the table's numeric object type code, read from its metadata");
+        audit.Criteria.Conditions.Should().ContainSingle(c => c.AttributeName == "operation").Which.Values
+            .Should().BeEquivalentTo(new object[] { RecordRepairCorePairReport.AuditOperationUpdate, RecordRepairCorePairReport.AuditOperationUpsert });
         audit.Criteria.Conditions.Should().ContainSingle(c => c.AttributeName == "createdon" && c.Operator == ConditionOperator.GreaterEqual)
             .Which.Values.Single().Should().Be(PassWorld.GoLive.UtcDateTime, "the audit window starts at go-live, whenever the row was created");
         audit.Criteria.Conditions.Should().ContainSingle(c => c.AttributeName == "createdon" && c.Operator == ConditionOperator.LessThan)
             .Which.Values.Single().Should().Be(until);
         audit.PageInfo.Count.Should().Be(RecordRepairCorePairReport.MaxAuditRowsPerScan);
+    }
+
+    // =====================================================================================
+    // Review fix round 1: the audit read as Dataverse takes it; auditing must be on; upserts
+    // =====================================================================================
+
+    [Fact]
+    public async Task Report_TheAuditRead_FiltersByEachTablesNumericObjectTypeCode_ReadFromItsMetadata()
+    {
+        // The double refuses (throws) an audit query whose objecttypecode value is not an int, as Dataverse does (HTTP 400).
+        var signal = _pass.CorePairRow("sprk_signal", withType: true, withId: true);
+        var record = _pass.CorePairRow("sprk_decisionrecord", withType: true, withId: true);
+        _pass.PairAudit("sprk_signal", signal, $",{PassWorld.TypeColumnNumber},");
+        _pass.PairAudit("sprk_decisionrecord", record, $",{PassWorld.IdColumnNumber},");
+
+        var result = await _pass.RunAsync();
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        PassWorld.Count(result, "corePairChanged").Should().Be(2, "each table's history is found by that table's own code");
+        _pass.ReportQueries.Where(q => q.EntityName == "audit")
+            .Select(q => q.Criteria.Conditions.Single(c => c.AttributeName == "objecttypecode").Values.Single())
+            .Should().Equal(PassWorld.SignalTypeCode, PassWorld.DecisionRecordTypeCode);
+        PassWorld.SignalTypeCode.Should().NotBe(PassWorld.DecisionRecordTypeCode);
+    }
+
+    [Fact]
+    public async Task Report_ATableWhoseObjectTypeCodeIsNotStated_IsAnAuditFault_NeverNoChanges()
+    {
+        _pass.NoObjectTypeCode = true;
+        var row = _pass.CorePairRow("sprk_signal", withType: true, withId: true);
+        _pass.PairAudit("sprk_signal", row, $",{PassWorld.TypeColumnNumber},");
+
+        var result = await _pass.RunAsync();
+
+        PassWorld.Status(result).Should().Be(RecordRepairPassJob.StatusPartial);
+        PassWorld.Count(result, "reportFailures").Should().Be(2, "one per table");
+        PassWorld.Count(result, "corePairChanged").Should().Be(0);
+        _pass.ReportQueries.Should().NotContain(q => q.EntityName == "audit", "no history is read without the code");
+        using var state = JsonDocument.Parse(_pass.ReportState("sprk_signal")!);
+        state.RootElement.GetProperty("auditWatermark").ValueKind.Should().Be(JsonValueKind.Null);
+    }
+
+    [Theory]
+    [InlineData("the organization")]
+    [InlineData("the table")]
+    [InlineData("sprk_corerecordtype")]
+    [InlineData("sprk_corerecordid")]
+    [InlineData("the organization, not stated")]
+    [InlineData("the table, not stated")]
+    [InlineData("the column, not stated")]
+    public async Task Report_AuditingNotOn_AtTheOrganizationTheTableOrEitherPairColumn_IsAnAuditFault_NeverNoChanges(string off)
+    {
+        var row = _pass.CorePairRow("sprk_signal", withType: true, withId: true);
+        _pass.PairAudit("sprk_signal", row, $",{PassWorld.TypeColumnNumber},");
+        var halfPair = _pass.CorePairRow("sprk_signal", withType: true, withId: false);
+        switch (off)
+        {
+            case "the organization":
+                _pass.OrganizationAudit = false;
+                break;
+            case "the organization, not stated":
+                _pass.OrganizationAudit = null;
+                break;
+            case "the table":
+                _pass.TableAuditOff["sprk_signal"] = false;
+                break;
+            case "the table, not stated":
+                _pass.TableAuditOff["sprk_signal"] = null;
+                break;
+            case "the column, not stated":
+                _pass.ColumnAuditOff["sprk_signal.sprk_corerecordid"] = null;
+                break;
+            default:
+                _pass.ColumnAuditOff["sprk_signal." + off] = false;
+                break;
+        }
+
+        var faulted = await _pass.RunAsync();
+
+        PassWorld.Status(faulted).Should().Be(RecordRepairPassJob.StatusPartial);
+        PassWorld.Count(faulted, "reportFailures").Should().Be(off.StartsWith("the organization", StringComparison.Ordinal) ? 2 : 1,
+            "an organization-wide flag faults each table once; the others fault the one table");
+        PassWorld.Count(faulted, "corePairChanged").Should().Be(0, "an unrecorded history is not 'no change'");
+        _pass.Log.Entries.Count(e => e.Level == LogLevel.Error && e.Message.Contains("auditing is not on"))
+            .Should().Be(off.StartsWith("the organization", StringComparison.Ordinal) ? 2 : 1, "logged once per table per run");
+        _pass.ReportQueries.Where(q => q.EntityName == "audit").Should().NotContain(
+            q => q.Criteria.Conditions.Any(c => c.Values.Contains(PassWorld.SignalTypeCode)), "no history of the table is read while auditing is off");
+        using (var state = JsonDocument.Parse(_pass.ReportState("sprk_signal")!))
+            state.RootElement.GetProperty("auditWatermark").ValueKind.Should().Be(JsonValueKind.Null, "the window is not passed");
+        PassWorld.Findings(faulted).Should().ContainSingle(f => f.Id == halfPair, "the half-pair scan does not depend on auditing");
+
+        _pass.OrganizationAudit = true;
+        _pass.TableAuditOff.Clear();
+        _pass.ColumnAuditOff.Clear();
+        _pass.Time.Advance(TimeSpan.FromMinutes(5));
+        var next = await _pass.RunAsync();
+
+        PassWorld.Count(next, "corePairChanged").Should().Be(1, "with auditing on again, the window is read from where it stood");
+        next.Success.Should().BeTrue(next.ErrorMessage);
+    }
+
+    [Fact]
+    public async Task Report_AuditingOff_IsAFault_EvenWhenTheWindowHoldsNoAuditRows()
+    {
+        _pass.OrganizationAudit = false;
+
+        var result = await _pass.RunAsync();
+
+        PassWorld.Status(result).Should().Be(RecordRepairPassJob.StatusPartial, "the check does not wait for an audit row to exist");
+        PassWorld.Count(result, "reportFailures").Should().Be(2);
+    }
+
+    [Fact]
+    public async Task Report_TheOrganizationsAuditSettingThatCannotBeRead_IsAnAuditFault_NeverAuditingOn()
+    {
+        _pass.OrganizationFault = new TimeoutException("Test: the read faulted.");
+        var row = _pass.CorePairRow("sprk_signal", withType: true, withId: true);
+        _pass.PairAudit("sprk_signal", row, $",{PassWorld.TypeColumnNumber},");
+
+        var result = await _pass.RunAsync();
+
+        PassWorld.Status(result).Should().Be(RecordRepairPassJob.StatusPartial);
+        PassWorld.Count(result, "reportFailures").Should().Be(2);
+        PassWorld.Count(result, "corePairChanged").Should().Be(0);
+        _pass.ReportQueries.Should().NotContain(q => q.EntityName == "audit");
+    }
+
+    [Fact]
+    public async Task Report_AnUpsertThatChangedAPairColumn_IsReported_AndAnUpsertThatCreatedTheRow_IsNot()
+    {
+        var created = PassWorld.Now.AddHours(-2);
+        var changed = _pass.CorePairRow("sprk_signal", withType: true, withId: true, createdOn: created);
+        var creation = _pass.CorePairRow("sprk_signal", withType: true, withId: true, createdOn: created);
+        var creationUndecided = _pass.CorePairRow("sprk_signal", withType: true, withId: true, createdOn: created);
+        _pass.PairAudit("sprk_signal", changed, $",{PassWorld.TypeColumnNumber},", at: created.AddMinutes(30), operation: 5);
+        _pass.PairAudit("sprk_signal", creation, $",{PassWorld.TypeColumnNumber},{PassWorld.IdColumnNumber},", at: created, operation: 5);
+        _pass.PairAudit("sprk_signal", creationUndecided, null, at: created.AddSeconds(-1), operation: 5);
+
+        var result = await _pass.RunAsync();
+
+        PassWorld.Findings(result).Should().ContainSingle().Which.Should().Be(
+            ("sprk_signal", changed, RecordRepairCorePairReport.FindingChanged, created.AddMinutes(30).ToString("O"), PassWorld.Editor.ToString("D")));
+        PassWorld.Count(result, "corePairUndecided").Should().Be(0, "an upsert that is the creation is not read at all");
+        PassWorld.Count(result, "reportAuditRowsRead").Should().Be(3, "the query asks for updates and upserts");
+    }
+
+    [Fact]
+    public async Task Report_AnUpdateAuditAtTheRowsCreationTime_IsStillAChange_OnlyAnUpsertIsReadAsACreation()
+    {
+        var created = PassWorld.Now.AddHours(-2);
+        var row = _pass.CorePairRow("sprk_signal", withType: true, withId: true, createdOn: created);
+        _pass.PairAudit("sprk_signal", row, $",{PassWorld.TypeColumnNumber},", at: created, operation: 2);
+
+        var result = await _pass.RunAsync();
+
+        PassWorld.Count(result, "corePairChanged").Should().Be(1);
     }
 
     // =====================================================================================
@@ -411,6 +569,36 @@ public sealed partial class RecordRepairPassJobTests
 
         public Exception? RowReadFault { get; set; }
 
+        /// <summary>The dev object type codes of the two tables (a custom table's code differs per environment).</summary>
+        public const int SignalTypeCode = 11003;
+        public const int DecisionRecordTypeCode = 11002;
+
+        public static int TypeCodeOf(string table) => table == "sprk_signal" ? SignalTypeCode : DecisionRecordTypeCode;
+
+        /// <summary>The organization's <c>isauditenabled</c>: on, off, or <c>null</c> (not stated).</summary>
+        public bool? OrganizationAudit { get; set; } = true;
+
+        public Exception? OrganizationFault { get; set; }
+
+        /// <summary>A table's audit flag when it is not on: <c>false</c> (off) or <c>null</c> (not stated). Absent = on.</summary>
+        public Dictionary<string, bool?> TableAuditOff { get; } = [];
+
+        /// <summary>A pair column's audit flag when it is not on, keyed <c>table.column</c>: <c>false</c> or <c>null</c>. Absent = on.</summary>
+        public Dictionary<string, bool?> ColumnAuditOff { get; } = [];
+
+        /// <summary>When set, the tables' metadata states no object type code.</summary>
+        public bool NoObjectTypeCode { get; set; }
+
+        private TableAuditMetadata ReportTable(string table)
+        {
+            if (MetadataFault is { } fault)
+                throw fault;
+
+            return new TableAuditMetadata(NoObjectTypeCode ? null : TypeCodeOf(table), TableAuditOff.TryGetValue(table, out var flag) ? flag : true);
+        }
+
+        private bool? ColumnAudit(string table, string column) => ColumnAuditOff.TryGetValue(table + "." + column, out var flag) ? flag : true;
+
         public string? ReportState(string table) => _cache.GetString(RecordRepairCorePairReport.StateKeyOf(table));
 
         /// <summary>A Signal or Decision Record row created by its writer, holding the pair halves asked for.</summary>
@@ -441,7 +629,7 @@ public sealed partial class RecordRepairPassJobTests
                 ["auditid"] = id,
                 ["createdon"] = (at ?? Now.AddMinutes(-30)).UtcDateTime,
                 ["objectid"] = new EntityReference(table, rowId),
-                ["objecttypecode"] = table,
+                ["objecttypecode"] = TypeCodeOf(table),
                 ["userid"] = new EntityReference("systemuser", Editor),
                 ["attributemask"] = mask,
                 ["operation"] = new OptionSetValue(operation),
@@ -465,16 +653,35 @@ public sealed partial class RecordRepairPassJobTests
 
             return new Dictionary<string, ColumnMetadata>(StringComparer.OrdinalIgnoreCase)
             {
-                ["sprk_corerecordtype"] = new("sprk_corerecordtype", "Lookup", true, false, null, ColumnNumber: TypeColumnNumber),
-                ["sprk_corerecordid"] = new("sprk_corerecordid", "String", true, false, 100, ColumnNumber: IdColumnNumber),
-                ["sprk_name"] = new("sprk_name", "String", true, false, 100, ColumnNumber: OtherColumnNumber),
+                ["sprk_corerecordtype"] = new("sprk_corerecordtype", "Lookup", true, false, null, ColumnNumber: TypeColumnNumber,
+                    IsAuditEnabled: ColumnAudit(table, "sprk_corerecordtype")),
+                ["sprk_corerecordid"] = new("sprk_corerecordid", "String", true, false, 100, ColumnNumber: IdColumnNumber,
+                    IsAuditEnabled: ColumnAudit(table, "sprk_corerecordid")),
+                ["sprk_name"] = new("sprk_name", "String", true, false, 100, ColumnNumber: OtherColumnNumber, IsAuditEnabled: true),
             };
         }
 
         private EntityCollection ReportScan(QueryExpression query)
         {
             ReportQueries.Add(query);
+            if (query.EntityName == RecordRepairCorePairReport.OrganizationTable)
+            {
+                if (OrganizationFault is { } organizationFault)
+                    throw organizationFault;
+
+                var organization = new Entity(RecordRepairCorePairReport.OrganizationTable, Guid.NewGuid());
+                if (OrganizationAudit is { } on)
+                    organization[RecordRepairCorePairReport.OrganizationAuditColumn] = on;
+                return new EntityCollection([organization]) { EntityName = query.EntityName };
+            }
+
             var isAudit = query.EntityName == RecordRepairCorePairReport.AuditTable;
+            if (isAudit && query.Criteria.Conditions.Single(c => c.AttributeName == "objecttypecode").Values[0] is not int)
+            {
+                // As Dataverse answers a logical name there: HTTP 400, the fault the report must never meet.
+                throw new InvalidOperationException("Test: HTTP 400, Expected type of attribute value: System.Int32 (objecttypecode).");
+            }
+
             var idColumn = isAudit ? "auditid" : query.EntityName + "id";
             var isRowRead = !isAudit && query.Criteria.Conditions.Any(c => c.Operator == ConditionOperator.In);
             if (isAudit && AuditFault is { } auditFault)
@@ -522,9 +729,12 @@ public sealed partial class RecordRepairPassJobTests
                 ConditionOperator.Equal => value switch
                 {
                     OptionSetValue option => option.Value == Convert.ToInt32(condition.Values[0], System.Globalization.CultureInfo.InvariantCulture),
+                    int number => number == Convert.ToInt32(condition.Values[0], System.Globalization.CultureInfo.InvariantCulture),
                     string text => text == (string)condition.Values[0],
                     _ => false,
                 },
+                ConditionOperator.In when condition.AttributeName == "operation" =>
+                    value is OptionSetValue option && condition.Values.Any(v => option.Value == Convert.ToInt32(v, System.Globalization.CultureInfo.InvariantCulture)),
                 ConditionOperator.GreaterThan when condition.AttributeName == idColumn => row.Id.CompareTo((Guid)condition.Values[0]) > 0,
                 ConditionOperator.In when condition.AttributeName == idColumn => condition.Values.Cast<Guid>().Contains(row.Id),
                 _ => throw new NotSupportedException($"Test: the report scan does not model {condition.AttributeName} {condition.Operator}."),
