@@ -22,15 +22,34 @@
 - **iss028 dev apply ✅** (EB-D-250/252). Verify passed; uac-r2's re-probe passed. Checklist section I.
 - Index hygiene: 095f, 165, 116 (on master via #2724) and 130 (delivered by 130-0..130e-2) are marked ✅.
 
-**Running:**
-- **135** (SPA Billing Guidelines): Sonnet implementer on `task/ebilling-135` from 29c0739f3a. Next: Opus review, then uac-r2 (firm scope) and spa-r4 (widget), then merge. OWNER QUESTION expected: for a contact in several firms, show all firms' sets, each labelled (the POML default)?
+**Running / in flight (2026-11-17 late night; work tip 9fc96c8bc6):**
+- **ISS-038 (#2896), LIVE on master + dev:** an Opus implementer on `fix/iss-038-firm-clause-base-set`, cut from origin/master 08161cfb0e (agent worktree agent-a6e1ebaaca792514a).
+  - Scope: one shared both-flags helper, a source-scan guard on `sprk_visibletofirms` readers, and must-fire tests through GetFirmClauseAsync and FirmFindingsProjection.
+  - The agent also writes, but does not run, the dev count query.
+  - Next: Opus review, then uac-r2 review (send the range). Then **open a PR to master and merge it (owner go EB-D-261)**.
+  - After that: run the count query read-only on dev and send the COUNT ONLY to uac-r2 privately. The owner tells uac-r2 when to deploy.
+  - Public wording only: "per-record visibility uses both rule sets' flags (see uac-r2 thread)". ISS-039 #2897 is the write side, next round.
+- **130f** (EB-D-259; Rejected/Returned show line items): `task/ebilling-130f`, 40b33ae74b → 98e709662f, with one more small commit pending.
+  - The pending commit drops the Approved column also when the notice kind is Reject/Return.
+  - Opus review done: no leak; F2 test seeding fixed.
+  - Next: a quick self re-check, uac-r2 review, then merge into work. No SPA change, so spa-r4 has nothing to review.
+- **132** (server half; EB-D-258): `task/ebilling-132` at 8e5ed0b963 (agent worktree agent-ab36d191b98d84154). **Opus review running.** Key check: the feed's K4 "firm-wide" scope against the POML's "submitter or billing contact only".
+  - Agent's owner questions, answered by me as coordinator:
+    - (1) keep the `message` kind;
+    - (2) 132ui covers both Return and Reject;
+    - (3) the feed follows the POML (submitter + billing contact). Fix it if the review confirms it is firm-wide.
+  - `sprk_firmnoticetext` is now JSON {v, source, kind, subject, prose, html, htmlOmitted}; 130g reads `prose`.
+- **135** (Billing Guidelines): fix round 1 done (9f54b8a705, 0f3988c106), including the EB-D-260 firm filter. **Held for ISS-038's helper:** after ISS-038 merges to master, merge master into work, then wire the per-record view to the helper (F1). Then a scoped re-check, uac-r2 + spa-r4 reviews, and merge.
+- Then: 132ui (Invoice Review notify step) and 130g (show confirmed prose), after 132.
 - Leftover scratch folders for a human to delete: `C:\wt131a`, `C:\wt131b`.
 
 **Decided today:**
 - **EB-D-254 (owner, option b): no PDF report in R1.** 133 is withdrawn. 132 sends the findings table in the 131 notice body. 134 prints cleanly; spa-r4's guidance is in the 134 POML: use record sections or action hosts, and scope the print stylesheet to the report. FR-40 is amended.
 
-**Blocked on the owner:**
-1. **131 finding 1 (asked, no answer yet):** after a Reject or Return, the notice and the SPA view show an empty findings table, because 130's projection gives decided invoices no items. Should a Rejected or Returned invoice show the same line findings as In Review, plus a firm-safe version of the reviewer's whole-invoice reason? This changes 130's projection, and uac-r2 reviews it. Recommended: yes.
+**Blocked on the owner:** nothing. Decided tonight:
+- EB-D-259: Rejected/Returned invoices show their findings (130f, 130g).
+- EB-D-260: guidelines show all firms, with a filter.
+- EB-D-261: ISS-038 PR plus merge after review; the owner instructs uac-r2 to deploy.
 
 **Master-merge obligation (from 131):** ConsumerTypes.All includes invoice-firm-notice. In every environment: BFF first, then seed (Ensure-ActionRow, then Seed-PlaybookConsumers), with the gap kept short. A row with no constant is a 503 on /healthz/catalog; a constant with no row is only Degraded. uac-r2 deploys dev from master, and it needs the owner's go naming the exact sha.
 
