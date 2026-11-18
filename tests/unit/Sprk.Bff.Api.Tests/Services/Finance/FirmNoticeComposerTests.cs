@@ -213,8 +213,10 @@ public sealed class FirmNoticeComposerTests
 
         var shown = Regex.Matches(VisibleText(draft.Html), @"\d[\d,]*\.\d{2}").Select(m => m.Value).ToList();
         var projected = new[] { "1,234.50", "800.00", "250.00", "0.00", "100.00", "55.55", "9,876.54" };
+        // 130f (K4): the notice is the default Return notice, which has no Approved column, so the two approved line amounts (800.00, 0.00) are not shown.
+        var shownAmounts = projected.Except(["800.00", "0.00"]).ToArray();
         shown.Should().BeSubsetOf(projected, "no figure appears that the projection did not give");
-        shown.Should().Contain(projected, "every projected amount is shown");
+        shown.Should().Contain(shownAmounts, "every projected billed amount is shown").And.NotContain(["800.00", "0.00"]);
         draft.Html.Should().Contain("Tracking number: TRK-1.2").And.Contain("Billed total: 9,876.54");
         draft.Html.Should().NotContain("Approved total", "an In Review invoice has no approved total");
         draft.Html.Should().Contain("2026-03-04").And.Contain("J. Smith").And.Contain("Research on the motion").And.Contain("Court filing fee");
@@ -753,10 +755,12 @@ public sealed class FirmNoticeComposerTests
 
         var draft = await rig.ComposeAsync();
 
-        foreach (var sentinel in new[] { "SENT-timekeeper", "SENT-description", "SENT-reason", "SENT-firmreason", "SENT-rule", "SENT-label", "SENT-section", "SENT-quote", "2026-05-06", "11.11", "22.22", "version 9" })
+        foreach (var sentinel in new[] { "SENT-timekeeper", "SENT-description", "SENT-reason", "SENT-firmreason", "SENT-rule", "SENT-label", "SENT-section", "SENT-quote", "2026-05-06", "11.11", "version 9" })
         {
             draft.Html.Should().Contain(sentinel);
         }
+
+        draft.Html.Should().NotContain("22.22", "130f (K4): the default Return notice has no Approved column, so the approved line amount is not shown");
 
         draft.Html.Should().NotContain("31000000-0000-4000-8000-0000000000aa", "no id of a line, record, rule set or Procedure is ever shown");
         // A hand-made outcome cannot carry an override reason or a Procedure name or id, so no assertion about them is made here; that proof runs through
