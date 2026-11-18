@@ -353,7 +353,7 @@
   },
   "src/client/shared/Spaarke.Communication.Components/src/logic/connections/ConnectionsWriteHandler.ts": {
     "@typescript-eslint/no-unnecessary-condition": {
-      "count": 3
+      "count": 2
     }
   },
   "src/client/shared/Spaarke.Communication.Components/src/logic/connections/provenance.ts": {
@@ -582,7 +582,7 @@
   },
   "src/client/shared/Spaarke.DailyBriefing.Components/src/hooks/useInlineTodoCreate.ts": {
     "@typescript-eslint/no-unnecessary-condition": {
-      "count": 2
+      "count": 1
     }
   },
   "src/client/shared/Spaarke.DailyBriefing.Components/src/services/briefingService.ts": {

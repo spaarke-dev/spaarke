@@ -167,7 +167,21 @@ jest.mock('@spaarke/ui-components/dist/services/TodoRegardingUpdateBuilder', () 
       navPropHint: 'document',
     },
   ];
-  return { TODO_REGARDING_CATALOG };
+  // Same behaviour as the shared helpers (TodoRegardingUpdateBuilder.resolveAllowedCatalog / findRegardingCatalogEntry,
+  // which have their own unit tests), bound to THIS suite's catalog.
+  const resolveAllowedCatalog = (raw: string | null | undefined) => {
+    if (!raw || !raw.trim()) return TODO_REGARDING_CATALOG;
+    const allowed = new Set(
+      raw
+        .split(',')
+        .map(s => s.trim().toLowerCase())
+        .filter(Boolean)
+    );
+    return TODO_REGARDING_CATALOG.filter(c => allowed.has(c.entityType.toLowerCase()));
+  };
+  const findRegardingCatalogEntry = (catalog: ReadonlyArray<{ entityType: string }>, entityType: string) =>
+    catalog.find(c => c.entityType === entityType);
+  return { TODO_REGARDING_CATALOG, resolveAllowedCatalog, findRegardingCatalogEntry };
 });
 
 jest.mock('@spaarke/ui-components/dist/services/PolymorphicResolverService', () => ({
@@ -188,6 +202,12 @@ jest.mock('@spaarke/ui-components/dist/services/PolymorphicResolverService', () 
   // its nav-prop name; with an empty nav-prop table (jest.setup's fetch returns
   // no relationships) the honest answer is "the host has no such column".
   findHostNavPropForLookup: () => undefined,
+  // Pattern D (#2803 / #2804): the handler calls the shared nav-prop discovery (and its cache). The real implementation
+  // runs here, against jest.setup's fetch (an empty nav-prop table) — the same answer the handler's old private copy got.
+  discoverNavProps: jest.requireActual('@spaarke/ui-components/dist/services/PolymorphicResolverService')
+    .discoverNavProps,
+  _resetNavPropCacheForTests: jest.requireActual('@spaarke/ui-components/dist/services/PolymorphicResolverService')
+    ._resetNavPropCacheForTests,
   // 045c: consumed by `applyRegardingSelection` on a SAVED host. The shared helper has its own unit tests and the
   // real-service suite (ResolverWriteHandler.test.ts) drives it end to end; with this suite's empty nav-prop table the
   // host carries no pair, so the honest answer is "add nothing".

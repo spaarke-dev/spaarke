@@ -24,6 +24,18 @@ jest.mock('@spaarke/ui-components', () => {
   return {
     __esModule: true,
     TODO_REGARDING_CATALOG: CATALOG,
+    // The handler no longer carries private copies of these — it calls the shared ones. Pass the REAL implementations
+    // through (from TS source) so the nav-prop discovery + its single shared cache, and the catalog lookup, are
+    // exercised for real rather than stubbed.
+    discoverNavProps: jest.requireActual(
+      '../../../shared/Spaarke.UI.Components/src/services/PolymorphicResolverService'
+    ).discoverNavProps,
+    _resetNavPropCacheForTests: jest.requireActual(
+      '../../../shared/Spaarke.UI.Components/src/services/PolymorphicResolverService'
+    )._resetNavPropCacheForTests,
+    findRegardingCatalogEntry: jest.requireActual(
+      '../../../shared/Spaarke.UI.Components/src/services/TodoRegardingUpdateBuilder'
+    ).findRegardingCatalogEntry,
     applyResolverFields: jest.fn().mockResolvedValue({ recordNumber: 'MTR-2025-0001', displayName: 'Acme v. Beta' }),
     // Real implementation (task 089 / ADR-044): the mock must match it, not just the
     // signature — `ConnectionsWriteHandler.ts` calls `cleanGuid(...).length === 36` to
@@ -43,7 +55,7 @@ jest.mock('@spaarke/ui-components', () => {
   };
 });
 
-import { applyResolverFields } from '@spaarke/ui-components';
+import { applyResolverFields, discoverNavProps } from '@spaarke/ui-components';
 import {
   applyRegardingSelection,
   advanceAssociationStatus,
@@ -351,5 +363,50 @@ describe('persistOverrideReason', () => {
     const res = await persistOverrideReason(ctx, '{bad', 'sprk_regardingmatter', 'x', '2026-07-15T00:00:00.000Z');
     expect(res.success).toBe(false);
     expect(ctx.webApi.updateRecord).not.toHaveBeenCalled();
+  });
+});
+
+// Pattern D (#2803 / #2804): the handler keeps no private nav-prop cache or catalog lookup of its own. It reads and fills
+// the SHARED cache, so the metadata query runs once per host entity however many writers ask for it.
+describe('shared nav-prop discovery (no private copy)', () => {
+  it('reuses the shared cache: a host discovered through the shared discoverNavProps is not queried again', async () => {
+    const sharedFetch = jest.fn().mockResolvedValue(NAV_PROPS_RESPONSE);
+    await discoverNavProps('sprk_communication', sharedFetch as unknown as typeof fetch);
+
+    const handlerFetch = jest.fn().mockResolvedValue(NAV_PROPS_RESPONSE);
+    await applyRegardingSelection(
+      mkCtx(),
+      { entityType: 'sprk_matter', recordId: 'mtr-1', recordName: 'Acme v. Beta' },
+      undefined,
+      handlerFetch as unknown as typeof fetch
+    );
+
+    expect(sharedFetch).toHaveBeenCalledTimes(1);
+    expect(handlerFetch).not.toHaveBeenCalled();
+  });
+
+  it('_resetNavPropCacheForTests clears the shared cache', async () => {
+    const first = jest.fn().mockResolvedValue(NAV_PROPS_RESPONSE);
+    await discoverNavProps('sprk_communication', first as unknown as typeof fetch);
+
+    _resetNavPropCacheForTests();
+
+    const second = jest.fn().mockResolvedValue(NAV_PROPS_RESPONSE);
+    await discoverNavProps('sprk_communication', second as unknown as typeof fetch);
+    expect(second).toHaveBeenCalledTimes(1);
+  });
+
+  it("an unknown entity type is refused with this handler's own error prefix", async () => {
+    const result = await applyRegardingSelection(
+      mkCtx(),
+      { entityType: 'sprk_nothing', recordId: 'x-1', recordName: 'X' },
+      undefined,
+      jest.fn() as unknown as typeof fetch
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.error).toBe(
+      '[CommunicationConnections] Unknown entity type "sprk_nothing". Allowed: sprk_matter, contact.'
+    );
   });
 });
