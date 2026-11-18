@@ -2305,3 +2305,49 @@ The invoice stays held for good. Before ISS-031 the other verb was a wrong but w
 **Estimated effort**: half a day. **Blockers**: Invoice Review deployed to dev. **Related**: iss034b, 095f-2e2b.
 
 ---
+
+### ISS-038 — Firm clause visibility for record-scoped billing rules must also check the base rule set
+
+| Field | Value |
+|---|---|
+| **Status** | In Progress |
+| **Urgency** | now |
+| **Filed** | 2026-11-17 |
+| **Source** | Opus adversarial review of task 135 |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2896 |
+
+**Description**
+
+Per-record visibility uses both rule sets' flags (see uac-r2 thread). `RuleSetService.GetFirmClauseAsync` decides a record-scoped rule's firm clause from the record set's flag alone. It must also require the base rule's own set to be visible, through one shared helper that 135's per-record view also calls, with a source-scan guard. Without it a firm user can in some cases see clause text meant to stay internal (D-66, FR-28, EB-D-209). The fix goes to master on its own PR (it is live there); 135 waits for the helper.
+
+**Entry-points**
+
+- `src/server/api/Sprk.Bff.Api/Services/Finance/RuleSetService.cs` (`ReadFirmClauseAsync`)
+
+**Estimated effort**: half a day
+**Related**: ISS-039 (write side), task 135
+
+---
+
+### ISS-039 — Record-scoped billing rule sets: one per base rule set, flag copied from the base
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | next-round |
+| **Filed** | 2026-11-17 |
+| **Source** | uac-r2 review of ISS-038 |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2897 |
+
+**Description**
+
+Write side of ISS-038 (see uac-r2 thread). Record sets should be keyed (record, firm, base rule set) with the flag copied from the base set; not "most restrictive", which would retroactively hide rules already shown. Until then ISS-038's read helper is the enforcement point and existing data needs no repair.
+
+**Entry-points**
+
+- `src/server/api/Sprk.Bff.Api/Services/Finance/Procedures/ProcedureAssignmentService.cs` (record rule set creation)
+
+**Estimated effort**: 1-2 days
+**Blockers**: ISS-038
+
+---
