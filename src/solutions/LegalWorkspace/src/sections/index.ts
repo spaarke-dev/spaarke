@@ -18,10 +18,7 @@ export { workAssignmentsRegistration } from "./workAssignments.registration";
 export { mattersRegistration } from "./matters.registration";
 export { dailyBriefingRegistration } from "./dailyBriefing/dailyBriefing.registration";
 export { calendarRegistration } from "./calendar.registration";
-export {
-  composeEditorRegistration,
-  ComposeWorkspacePlaceholder,
-} from "./composeEditor.registration";
+export { composeEditorRegistration } from "./composeEditor.registration";
 export { emailRegistration } from "./email.registration";
 export { analysisHubRegistration } from "./analysisHub.registration";
 export { worklistRegistration } from "./worklist.registration";

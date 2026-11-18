@@ -18,7 +18,6 @@
 import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import { tokens } from '@fluentui/react-components';
 import { DataverseService } from '../services/DataverseService';
-import { computeTodoScore } from '../utils/todoScoreUtils';
 import type { ITodo } from '../types/entities';
 import type { TodoColumn } from '../types/enums';
 import type { IKanbanColumn } from '@spaarke/ui-components';
@@ -155,7 +154,7 @@ function buildColumns(
 // ---------------------------------------------------------------------------
 
 export function useKanbanColumns(options: IUseKanbanColumnsOptions): IUseKanbanColumnsResult {
-  const { items, todayThreshold, tomorrowThreshold, webApi, userId } = options;
+  const { items, todayThreshold, tomorrowThreshold, webApi } = options;
 
   const [isRecalculating, setIsRecalculating] = useState(false);
 

@@ -291,7 +291,7 @@ Failure without it: renaming an `OutputWidgetType` value compiles and silently b
 
 | Field | Value |
 |---|---|
-| **Status** | Fixed on branch `fix/open-in-desktop-iss-004` (2026-11-17). Owner decision: Office files open in the Office app in the same tab; every other file downloads through `/content` (not the SharePoint webUrl, which a read-only user on a secure record cannot open). All surfaces use `openInDesktopApp` in `@spaarke/ui-components`. Closes when that PR merges. |
+| **Status** | Fixed by #2895 (merged 2026-11-18). Owner decision: Office files open in the Office app in the same tab; every other file downloads through `/content` (not the SharePoint webUrl, which a read-only user on a secure record cannot open). All surfaces use `openInDesktopApp` in `@spaarke/ui-components`. |
 | **Urgency** | next-round |
 | **Filed** | 2026-11-13 |
 | **Source** | Task 030 finding P-1; re-verified by grep in task 034 (three more call sites than the review listed) |

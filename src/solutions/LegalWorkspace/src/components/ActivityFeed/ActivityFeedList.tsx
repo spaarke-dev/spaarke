@@ -102,7 +102,7 @@ export interface IActivityFeedListProps {
   /** Whether more items are being loaded (shows bottom spinner) */
   isLoadingMore?: boolean;
   /** Passed to the scroll container so parents can scroll-to-top */
-  scrollContainerRef?: React.RefObject<HTMLDivElement>;
+  scrollContainerRef?: React.RefObject<HTMLDivElement | null>;
   /**
    * Called when the user clicks "AI Summary" on a feed item card.
    * The parent (ActivityFeed) opens the AI Summary dialog (task 013).
