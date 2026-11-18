@@ -3066,7 +3066,8 @@ public class RuleSetService
     /// set is not Published or Retired, when a Procedure rule set's Procedure cannot be named, when the rule set's visible-to-firms flag is off
     /// (the last step, <see cref="RuleSetClauseVisibility.ForFirm"/>), and on any read fault. For a record rule (ISS-038) the flag is
     /// <see cref="RuleSetClauseVisibility.VisibleToFirms"/>: the record set's AND the base rule's own rule set's, the base taken from the
-    /// snapshot's record-rule slot; no base on record, or one that cannot be read, is no text.</para>
+    /// snapshot's record-rule slot; no base on record, one that cannot be read, or one whose Procedure is an Internal Standard one (or whose
+    /// Procedure type cannot be read) is no text.</para>
     /// <para>The result names the clause with <see cref="FirmClauseText.FirmFacingName"/> only: the Procedure's firm-facing name (its name when
     /// that is blank), or the neutral record label for a record rule. Never the Procedure's name when a firm-facing name is set, an id or an
     /// override reason; nothing here logs one.</para>
@@ -3162,7 +3163,7 @@ public class RuleSetService
         if (RecordRuleSet.IsRecordScoped(set))
         {
             label = RecordRuleSet.Name;
-            baseRuleSets = await BaseRuleSetsOfRecordRuleAsync(snapshot, policyVersionId, ct);
+            baseRuleSets = await BaseRuleSetsOfRecordRuleAsync(snapshot, invoiceId, policyVersionId, ct);
         }
         else if (set.GetAttributeValue<EntityReference>(ProcedureColumn)?.Id is { } procedureId)
         {
@@ -3189,25 +3190,37 @@ public class RuleSetService
     /// ISS-038: the rule set of each base rule version the invoice's snapshot names for the record rule version <paramref name="recordVersionId"/>
     /// (its <c>recordRule.basePolicyVersionId</c>; one per distinct base across the dates). Each is read version, then Billing policy, then rule set;
     /// an entry is null when any of those cannot be read (or the slot itself could not be, <see cref="Guid.Empty"/>). Empty when the snapshot names no
-    /// base for it. Either way <see cref="RuleSetClauseVisibility.VisibleToFirms"/> then answers not visible.
+    /// base for it. Either way <see cref="RuleSetClauseVisibility.VisibleToFirms"/> then answers not visible, and one Information entry names the
+    /// invoice and the record rule version (ids only) so the hidden clause can be traced.
     /// </summary>
-    private async Task<IReadOnlyCollection<Entity?>> BaseRuleSetsOfRecordRuleAsync(StoredProcedureSnapshot snapshot, Guid recordVersionId, CancellationToken ct)
+    private async Task<IReadOnlyCollection<Entity?>> BaseRuleSetsOfRecordRuleAsync(
+        StoredProcedureSnapshot snapshot, Guid invoiceId, Guid recordVersionId, CancellationToken ct)
     {
-        if (!snapshot.RecordRuleBaseVersionIds.TryGetValue(recordVersionId, out var baseVersionIds))
+        var sets = new List<Entity?>();
+        if (snapshot.RecordRuleBaseVersionIds.TryGetValue(recordVersionId, out var baseVersionIds))
         {
-            return [];
+            foreach (var baseVersionId in baseVersionIds)
+            {
+                sets.Add(await RuleSetOfVersionAsync(baseVersionId, ct));
+            }
         }
 
-        var sets = new List<Entity?>();
-        foreach (var baseVersionId in baseVersionIds)
+        if (sets.Count == 0 || sets.Contains(null))
         {
-            sets.Add(await RuleSetOfVersionAsync(baseVersionId, ct));
+            _logger.LogInformation(
+                "A record rule's base rule set is not available for a firm clause (invoice {InvoiceId}, policy version {PolicyVersionId}); no clause is shown",
+                invoiceId, recordVersionId);
         }
 
         return sets;
     }
 
-    /// <summary>The Billing rule set (record-scoped or not) of the policy of <paramref name="policyVersionId"/>, or null when any step cannot be read.</summary>
+    /// <summary>
+    /// The Billing rule set (record-scoped or not) of the policy of <paramref name="policyVersionId"/>, or null when any step cannot be read, or
+    /// when the set's Procedure is an Internal Standard one or its type cannot be read: the same Internal Standard rule
+    /// <c>FirmFindingsProjection.CitableVersionsAsync</c> applies to a Procedure's rule set, applied to the base here because a record set has no
+    /// Procedure link of its own (see uac-r2 thread). A base set with no Procedure link (a legacy set) is returned as read.
+    /// </summary>
     private async Task<Entity?> RuleSetOfVersionAsync(Guid policyVersionId, CancellationToken ct)
     {
         if (policyVersionId == Guid.Empty)
@@ -3229,9 +3242,28 @@ public class RuleSetService
 
         var policy = (await _entities.RetrieveMultipleAsync(PolicyQuery("sprk_policyid", ConditionOperator.Equal, new object[] { policyId }), ct))
             .Entities.FirstOrDefault(r => r.Id == policyId && RuleDomains.IsBillingRow(r));
-        return policy?.GetAttributeValue<EntityReference>("sprk_ruleset")?.Id is { } ruleSetId
-            ? await LoadBillingRuleSetAsync(ruleSetId, ct)
-            : null;
+        if (policy?.GetAttributeValue<EntityReference>("sprk_ruleset")?.Id is not { } ruleSetId)
+        {
+            return null;
+        }
+
+        var set = await LoadBillingRuleSetAsync(ruleSetId, ct);
+        if (set?.GetAttributeValue<EntityReference>(ProcedureColumn)?.Id is { } procedureId)
+        {
+            var typeQuery = new QueryExpression(ProcedureEntity.Entity)
+            {
+                ColumnSet = new ColumnSet(ProcedureEntity.TypeColumn),
+                Criteria = { Conditions = { new ConditionExpression("sprk_procedureid", ConditionOperator.Equal, procedureId) } },
+                TopCount = 1,
+            };
+            var procedure = (await _entities.RetrieveMultipleAsync(typeQuery, ct)).Entities.FirstOrDefault(r => r.Id == procedureId);
+            if (procedure?.GetAttributeValue<OptionSetValue>(ProcedureEntity.TypeColumn)?.Value is not { } type || type == (int)ProcedureType.InternalStandard)
+            {
+                return null;
+            }
+        }
+
+        return set;
     }
 
     /// <summary>The Procedure's firm-facing name, or its name when that is blank; null when the Procedure cannot be read or has neither.</summary>
