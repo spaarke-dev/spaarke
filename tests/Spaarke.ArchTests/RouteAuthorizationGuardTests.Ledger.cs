@@ -1787,7 +1787,8 @@ public partial class RouteAuthorizationGuardTests
     {
         new AdminOnlyGroup("Api/Admin/JobsEndpoints.cs", SystemAdminPolicy,
             "Background-job inspection, history, trigger and enable/disable: the scheduler is an operator control "
-            + "plane, behind SystemAdmin by owner decision Q6 (R3 task 020).",
+            + "plane, behind SystemAdmin by owner decision Q6 (R3 task 020). The record repair pass's on-demand run (fm task "
+            + "052c) is in the same group: 401/403/202 proven by tests/integration/auth/Admin/RecordRepairPassTriggerAuthTests.cs.",
             new[]
             {
                 "GET /api/admin/jobs",
@@ -1796,6 +1797,7 @@ public partial class RouteAuthorizationGuardTests
                 "GET /api/admin/jobs/{jobId}/history",
                 "POST /api/admin/jobs/{jobId}/enable",
                 "POST /api/admin/jobs/{jobId}/disable",
+                "POST /api/admin/jobs/record-repair-pass/runs",
             }),
         new AdminOnlyGroup("Api/Admin/MembershipAdminEndpoints.cs", SystemAdminPolicy,
             "Membership-field discovery audit and metadata-cache refresh: tenant-wide configuration diagnostics "
