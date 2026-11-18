@@ -2351,3 +2351,29 @@ Write side of ISS-038 (see uac-r2 thread). Record sets should be keyed (record, 
 **Blockers**: ISS-038
 
 ---
+
+### ISS-040 — Rule set visibility: native write hardening
+
+| Field | Value |
+|---|---|
+| **Status** | In Progress |
+| **Urgency** | now |
+| **Filed** | 2026-11-17 |
+| **Source** | ISS-038 review; uac-r2 thread |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2901 |
+
+**Description**
+
+Every firm-visibility reader trusts `sprk_ruleset.sprk_visibletofirms`, so only the BFF paths that own it may change it (see uac-r2 thread). Field-secure the column: "Spaarke BFF-Managed Field Writers" (and System Administrator) read/create/update; "Spaarke BFF-Managed Field Readers" read only, so the form and the "Visible to Firms" view column still show it. Pinned by an ArchTest. The BFF writers (RuleSetService create and visibility update, ProcedureService type change, ProcedureAssignmentService record-set create) run as the app user, which is in the writers profile. A rule set created natively by anyone else keeps the default No.
+
+**Entry-points**
+
+- `src/dataverse/solutions/SpaarkeMaster/Entities/sprk_ruleset/Entity.xml` (`sprk_visibletofirms`)
+- `scripts/ebilling/Set-EbillingFindingsJsonFieldSecurity.ps1` (pattern)
+- `tests/Spaarke.ArchTests/FindingsJsonFieldSecuredGuardTests.cs` (pattern)
+
+**Suggested fix**: script + Entity.xml IsSecured 1 + guard; dev apply with the owner's typed OK and uac-r2 notices before and after.
+
+**Estimated effort**: half a day
+**Blockers**: none
+**Related**: ISS-038 (#2896)
