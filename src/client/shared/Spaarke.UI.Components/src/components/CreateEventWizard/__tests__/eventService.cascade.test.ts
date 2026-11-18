@@ -1,27 +1,21 @@
 /**
- * EventService — BU cascade integration tests (FR-WIZ-05 / INV-5)
+ * EventService — the BU cascade is gone (field-mapping-server-write-path-r1 task 023, FR-16)
  *
- * Scope: verify that `EventService.createEvent` populates
- *   - `sprk_searchindexname`
- * on the create payload, sourced from the current user's owning Business Unit
- * via `EntityCreationService.applyUserBuDefaults` + `resolveUserBuDefaults`,
- * with INV-5 preserved for explicit pre-seeded values — and that it writes NO
- * `sprk_containerid`.
- *
- * ⚠️ Task 076 (2026-09-03) deleted the `sprk_containerid` half of this cascade along with
- * `EntityCreationService.applyDefaultContainerId`. Every assertion that used to read a container
- * value off the payload was converted to assert its ABSENCE — a client does not choose where a
- * record's content is stored.
+ * Converted from the FR-WIZ-05 / INV-5 cascade tests, the way task 076 converted the container half and task 021
+ * converted the matter cascade test. The Event wizard used to write `sprk_searchindexname` (and bind
+ * `sprk_ai_search_index`) from the current user's owning Business Unit. Both index columns are the server's for
+ * `sprk_event` (`RecordTableRule.SearchIndexed`, FR-38/FR-40): a caller's value is dropped at step 2, so a client
+ * default is dead weight and a payload key the user did not enter. The same scenarios (full BU defaults, a null index
+ * name, a null container, no user, a failing BU read, no BU, the injected user id) now assert that NOTHING the cascade
+ * wrote ever reaches the create body, and that the BU is never read.
  *
  * Notes
- *   - We mock `window.Xrm.Utility.getGlobalContext().userSettings.userId` to provide
- *     the current user ID (matches the `_tryGetCurrentUserId` probe in eventService.ts).
- *   - We mock `IDataService` to capture the entity payload passed to `createRecord`.
- *   - We mock global `fetch` (used by `_discoverNavProps`) to keep tests offline.
+ *   - We stub `window.Xrm.Utility.getGlobalContext().userSettings.userId` so the old probe WOULD have found a user.
+ *   - We mock `IDataService` to capture the entity payload the BFF fake passes to `createRecord`.
+ *   - We mock global `fetch` (used by nav-prop discovery) to keep tests offline.
  *
- * @see spec.md FR-WIZ-05, FR-WIZ-08 (INV-5)
- * @see EntityCreationService.cascade.test.ts (lower-level cascade helper tests)
- * @see workAssignmentService.cascade.test.ts (sibling FR-WIZ-04 reference shape)
+ * @see spec.md FR-16, FR-38
+ * @see CreateMatterWizard/__tests__/matterService.cascade.test.ts (the same conversion for the matter)
  */
 
 // UAC-r2 task 147 r1: child creates go through the BFF; the fake answers its routes through the mock data service.
@@ -42,6 +36,7 @@ const NEW_EVENT_GUID = '33333333-3333-3333-3333-333333333333';
  * Build a mock IDataService whose retrieveRecord chains:
  *   systemuser(USER_GUID) → { _businessunitid_value: BU_GUID }
  *   businessunit(BU_GUID) → { sprk_containerid, sprk_searchindexname }
+ * Nothing in the wizard reads either any more; the chain is here so a regression that read them would find values.
  */
 function makeDataService(
   buFields: { sprk_containerid?: string | null; sprk_searchindexname?: string | null },
@@ -77,8 +72,8 @@ function makeDataService(
 }
 
 /**
- * Stub global Xrm so `_tryGetCurrentUserId()` returns the supplied userId.
- * `null` simulates "no Xrm context reachable" (BU cascade skipped).
+ * Stub global Xrm so a user id probe WOULD return the supplied userId.
+ * `null` simulates "no Xrm context reachable".
  */
 function stubXrmUser(userId: string | null) {
   (window as unknown as { Xrm: unknown }).Xrm = {
@@ -123,11 +118,22 @@ function makeForm(overrides?: Partial<ICreateEventFormState>): ICreateEventFormS
   };
 }
 
+/** The cascade's columns, in every shape it wrote them: the name, the lookup bind, the container. */
+function expectNoCascadeColumns(payload: Record<string, unknown>) {
+  const keys = Object.keys(payload);
+  expect(keys.filter(k => /container|searchindex|search_index|aisearchindex/i.test(k))).toEqual([]);
+}
+
+function expectBuNeverRead(dataService: IDataService) {
+  expect(dataService.retrieveRecord).not.toHaveBeenCalledWith('systemuser', expect.anything(), expect.anything());
+  expect(dataService.retrieveRecord).not.toHaveBeenCalledWith('businessunit', expect.anything(), expect.anything());
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
-describe('EventService — FR-WIZ-05 BU cascade', () => {
+describe('EventService — the BU cascade no longer writes the search index (task 023, FR-16)', () => {
   beforeEach(() => {
     stubFetchEmptyNavProps();
     stubXrmUser(USER_GUID);
@@ -138,8 +144,8 @@ describe('EventService — FR-WIZ-05 BU cascade', () => {
     jest.restoreAllMocks();
   });
 
-  // Converted by task 076: was "BU populates BOTH sprk_containerid and sprk_searchindexname".
-  it('cascade: BU populates sprk_searchindexname only — no sprk_containerid — on a clean payload', async () => {
+  // Converted: was "BU populates sprk_searchindexname only -- no sprk_containerid -- on a clean payload".
+  it('a BU with a container and an index name: neither reaches the payload (the server owns both)', async () => {
     const dataService = makeDataService({
       sprk_containerid: 'bu-container-abc',
       sprk_searchindexname: 'spaarke-knowledge-index-v2',
@@ -153,14 +159,14 @@ describe('EventService — FR-WIZ-05 BU cascade', () => {
 
     const payload = dataService._capturedPayloads['sprk_event']?.[0];
     expect(payload).toBeDefined();
-    expect(payload!).not.toHaveProperty('sprk_containerid');
-    expect(payload!['sprk_searchindexname']).toBe('spaarke-knowledge-index-v2');
+    expectNoCascadeColumns(payload!);
+    expect(JSON.stringify(payload)).not.toContain('spaarke-knowledge-index-v2');
+    expect(JSON.stringify(payload)).not.toContain('bu-container-abc');
+    expectBuNeverRead(dataService);
   });
 
-  it('cascade with regarding record: BU defaults applied alongside parent-record nav-prop binding', async () => {
-    // FR-WIZ-05 cascade must work whether or not the event is linked to a parent
-    // matter/project. This test exercises the regarding-record path to confirm
-    // the cascade block is not gated behind any other branch.
+  // Converted: was "cascade with regarding record: BU defaults applied alongside parent-record nav-prop binding".
+  it('with a regarding record: the parent binding is written, the BU defaults are not', async () => {
     const dataService = makeDataService({
       sprk_containerid: 'bu-container-abc',
       sprk_searchindexname: 'spaarke-knowledge-index-v2',
@@ -175,13 +181,14 @@ describe('EventService — FR-WIZ-05 BU cascade', () => {
     expect(result.success).toBe(true);
     const payload = dataService._capturedPayloads['sprk_event']?.[0];
     expect(payload).toBeDefined();
-    expect(payload!).not.toHaveProperty('sprk_containerid');
-    expect(payload!['sprk_searchindexname']).toBe('spaarke-knowledge-index-v2');
+    // The regarding key is still the user's/route's; the cascade columns are not.
+    expect(payload!['sprk_regardingrecordid']).toBe('matter-guid-1');
+    expectNoCascadeColumns(payload!);
+    expectBuNeverRead(dataService);
   });
 
-  // Converted by task 076: was "containerid still cascades, searchindexname left unset".
+  // Converted: was "NULL BU sprk_searchindexname ... neither cascade field is written".
   it('NULL BU sprk_searchindexname (Spaarke Dev 1 / Test 1 scenario): neither cascade field is written', async () => {
-    // Spaarke Dev 1 / Test 1 scenario per Phase A.5: BU exists but index name not configured.
     const dataService = makeDataService({
       sprk_containerid: 'bu-container-abc',
       sprk_searchindexname: null,
@@ -193,12 +200,12 @@ describe('EventService — FR-WIZ-05 BU cascade', () => {
     expect(result.success).toBe(true);
     const payload = dataService._capturedPayloads['sprk_event']?.[0];
     expect(payload).toBeDefined();
-    expect(payload!).not.toHaveProperty('sprk_containerid');
-    // BFF tenant-default chain takes over server-side; payload field left unset
-    expect('sprk_searchindexname' in payload!).toBe(false);
+    expectNoCascadeColumns(payload!);
+    expectBuNeverRead(dataService);
   });
 
-  it('NULL BU containerid: searchindexname still cascades, containerid left unset', async () => {
+  // Converted: was "NULL BU containerid: searchindexname still cascades, containerid left unset".
+  it('NULL BU containerid: the index name no longer cascades either', async () => {
     const dataService = makeDataService({
       sprk_containerid: null,
       sprk_searchindexname: 'spaarke-file-index',
@@ -210,18 +217,17 @@ describe('EventService — FR-WIZ-05 BU cascade', () => {
     expect(result.success).toBe(true);
     const payload = dataService._capturedPayloads['sprk_event']?.[0];
     expect(payload).toBeDefined();
-    expect('sprk_containerid' in payload!).toBe(false);
-    expect(payload!['sprk_searchindexname']).toBe('spaarke-file-index');
+    expectNoCascadeColumns(payload!);
+    expect(JSON.stringify(payload)).not.toContain('spaarke-file-index');
   });
 
-  it('graceful degradation: when current user ID is unavailable, BU cascade is skipped and createRecord still succeeds', async () => {
+  it('no current user (no Xrm context): createRecord still succeeds with no cascade field', async () => {
     stubXrmUser(null); // simulate no Xrm context
 
     const dataService = makeDataService({
       sprk_containerid: 'bu-container-abc',
       sprk_searchindexname: 'spaarke-knowledge-index-v2',
     });
-    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
 
     const service = new EventService(dataService, bffChildWriteFetch(dataService), FAKE_BFF_BASE_URL);
     const result = await service.createEvent(makeForm());
@@ -229,40 +235,34 @@ describe('EventService — FR-WIZ-05 BU cascade', () => {
     expect(result.success).toBe(true);
     const payload = dataService._capturedPayloads['sprk_event']?.[0];
     expect(payload).toBeDefined();
-    expect('sprk_containerid' in payload!).toBe(false);
-    expect('sprk_searchindexname' in payload!).toBe(false);
-    // BU lookup must not have been called.
-    expect(dataService.retrieveRecord).not.toHaveBeenCalledWith('businessunit', expect.any(String), expect.any(String));
-
-    warnSpy.mockRestore();
+    expectNoCascadeColumns(payload!);
+    expectBuNeverRead(dataService);
   });
 
-  it('graceful degradation: when BU resolve throws, createRecord still succeeds with neither cascade field set', async () => {
+  it('a BU read that WOULD throw is never attempted: createRecord succeeds and no warning is raised about it', async () => {
     const dataService = makeDataService({
       sprk_containerid: 'bu-container-abc',
       sprk_searchindexname: 'spaarke-knowledge-index-v2',
     });
-    // Force the BU lookup to throw on the second retrieveRecord call.
+    // Force the BU lookup to throw; with no cascade it is never reached.
     (dataService.retrieveRecord as jest.Mock).mockImplementation(async (entityType: string) => {
       if (entityType === 'systemuser') return { _businessunitid_value: BU_GUID };
       if (entityType === 'businessunit') throw new Error('Network down');
       throw new Error('unexpected');
     });
-    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
 
     const service = new EventService(dataService, bffChildWriteFetch(dataService), FAKE_BFF_BASE_URL);
     const result = await service.createEvent(makeForm());
 
     expect(result.success).toBe(true);
+    expect(result.warnings).toEqual([]);
     const payload = dataService._capturedPayloads['sprk_event']?.[0];
     expect(payload).toBeDefined();
-    expect('sprk_containerid' in payload!).toBe(false);
-    expect('sprk_searchindexname' in payload!).toBe(false);
-
-    warnSpy.mockRestore();
+    expectNoCascadeColumns(payload!);
+    expect(dataService.retrieveRecord).not.toHaveBeenCalled();
   });
 
-  it('user has no BU: cascade is a no-op; createRecord succeeds with neither cascade field set', async () => {
+  it('user has no BU: createRecord succeeds with no cascade field', async () => {
     const dataService = makeDataService(
       { sprk_containerid: 'unreachable', sprk_searchindexname: 'unreachable-index' },
       { userHasBu: false }
@@ -274,15 +274,11 @@ describe('EventService — FR-WIZ-05 BU cascade', () => {
     expect(result.success).toBe(true);
     const payload = dataService._capturedPayloads['sprk_event']?.[0];
     expect(payload).toBeDefined();
-    expect('sprk_containerid' in payload!).toBe(false);
-    expect('sprk_searchindexname' in payload!).toBe(false);
+    expectNoCascadeColumns(payload!);
   });
 
-  it('test-injection seam: explicit getCurrentUserId override is honored', async () => {
-    // Even without a global Xrm stub, the options.getCurrentUserId hook lets tests
-    // (or specialized hosts) inject a user id directly. This is the cleanest
-    // path for higher-level Code Page integration tests that don't want to
-    // stub window.Xrm.
+  // Converted: was "test-injection seam: explicit getCurrentUserId override is honored".
+  it('an injected getCurrentUserId is ignored: no BU read, no cascade field', async () => {
     clearXrm();
 
     const dataService = makeDataService({
@@ -298,7 +294,7 @@ describe('EventService — FR-WIZ-05 BU cascade', () => {
     expect(result.success).toBe(true);
     const payload = dataService._capturedPayloads['sprk_event']?.[0];
     expect(payload).toBeDefined();
-    expect(payload!).not.toHaveProperty('sprk_containerid');
-    expect(payload!['sprk_searchindexname']).toBe('spaarke-knowledge-index-v2');
+    expectNoCascadeColumns(payload!);
+    expectBuNeverRead(dataService);
   });
 });

@@ -397,6 +397,7 @@ public sealed class ExternalLookupAbsentColumnUnitTests
 
         rows.Should().ContainSingle().Which._sprk_subjectorganization_value.Should().BeNull();
         NoAccessListReader.ParseRows("{\"value\":[]}", NullLogger.Instance).Should().BeEmpty();
-        NoAccessListReader.ParseRows("{}", NullLogger.Instance).Should().BeEmpty();
+        // #2845 review: a body with no value array is not an empty page; it fails the chunk closed (null).
+        NoAccessListReader.ParseRows("{}", NullLogger.Instance).Should().BeNull();
     }
 }

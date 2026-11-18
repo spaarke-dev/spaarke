@@ -11,6 +11,7 @@
  * | Invoice          | Information, Files               | Messages                 | Refresh, Copy link                       | Messages: New message (Files is read-only)                |
  * | Service request  | Information, Documents           | Messages                 | Refresh, Copy link, Delete request       | Documents: Upload; Messages: New message                  |
  * | Document         | Information, Preview             | —                        | Refresh, Download, Copy link             | —                                                         |
+ * | Event (task 015) | Information                      | —                        | Refresh, Edit, Change status, Copy link, Delete | —                                                  |
  *
  * Submit invoice (task 010, owner 2026-11-12) sits in the Invoices section's header (`sectionActions.invoices`) and opens
  * as a modal over the record. A Work assignment has no Invoices section (`sprk_invoice` has no work-assignment lookup), so it
@@ -128,6 +129,24 @@ export const RECORD_TEMPLATES: Readonly<Record<string, RecordTemplateConfig>> = 
     right: [],
     toolbar: ['refresh', 'download', 'copyLink'],
   },
+  // R4 task 015 (FR-36, owner Q-5 to Q-7): an event opens from an Events row (a child record over the record it is listed on)
+  // and from `?record=event:{id}`. No number column: the title is "Event {name}". Edit and Change status are action hosts
+  // (`actions/EventEditAction.tsx`, `EventStatusAction.tsx`), each offered only on the BFF's own per-event answers; Delete is the
+  // event delete host (creator only).
+  sprk_event: {
+    entity: 'sprk_event',
+    label: 'Event',
+    titleNumberAttribute: null,
+    nameAttribute: 'sprk_name',
+    headerFacts: [
+      { attribute: 'sprk_eventtype', label: 'Type' },
+      { attribute: 'statuscode', label: 'Status' },
+      { attribute: 'sprk_duedate', label: 'Due date', kind: 'date' },
+    ],
+    left: ['information'],
+    right: [],
+    toolbar: ['refresh', 'edit', 'changeStatus', 'copyLink', 'delete'],
+  },
 };
 
 /** Every action id a config lists: its toolbar's, then its sections' (task 009). */
@@ -152,6 +171,8 @@ export const RECORD_ACTION_TEXT: Readonly<Record<RecordToolbarActionId, { label:
   delete: { label: 'Delete', tooltip: 'Delete request' },
   history: { label: 'History', tooltip: 'Version history' },
   send: { label: 'Send', tooltip: 'Send' },
+  edit: { label: 'Edit', tooltip: 'Edit event' },
+  changeStatus: { label: 'Change status', tooltip: 'Change status' },
 };
 
 /**

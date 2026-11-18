@@ -9,19 +9,32 @@
  * Project page's `DocumentLibrary`), and INSIDE a child record, so there is one child level only.
  */
 import * as React from 'react';
+import type { DetailRecord } from '../detail/RecordDetailFields';
 import type { RecordSectionId } from './recordTemplate.types';
+
+/**
+ * How a child record gets its data when the opener already has it (task 015: an event opened from a row of the Events list).
+ * `seed` is shown as the record at once with no read; `read` is how Refresh (and a re-read after a save) reads it again
+ * instead of the entity's own reader. Both are optional: a child with neither reads itself, as an invoice or a document does.
+ */
+export interface ChildRecordSource {
+  seed?: DetailRecord;
+  read?: (id: string) => Promise<DetailRecord>;
+}
 
 /**
  * Opens `recordId` of `entity` as a child record over the record being shown. `trigger` is the row control that was
  * activated (focus returns to it on close); `section` is the section to re-read on close. Leave it out when the child cannot
  * change what the parent section lists (a document record: its actions are Refresh, Download and Copy link), so the
- * parent's list keeps its state (a sorted grid is not remounted).
+ * parent's list keeps its state (a sorted grid is not remounted). `source` (task 015) hands the child the row it was opened
+ * from, so it needs no read of its own to appear.
  */
 export type OpenChildRecord = (
   entity: string,
   recordId: string,
   trigger: HTMLElement | null,
-  section?: RecordSectionId
+  section?: RecordSectionId,
+  source?: ChildRecordSource
 ) => void;
 
 export const ChildRecordContext = React.createContext<OpenChildRecord | null>(null);

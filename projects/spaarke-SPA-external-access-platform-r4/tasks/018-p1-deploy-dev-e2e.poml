@@ -4,7 +4,7 @@
     <title>P1 deploy (BFF via uac-r2, SPA to dev) + E2E + inherited first-E2E checks (FR-33, NFR-06)</title>
     <phase>1 Record template and actions</phase>
     <gate>after 002, 004, 005, 006, 007 merged to master; owner go per live change</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Deployment and E2E verification task (tags deploy, e2e-test); no code change expected</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -122,7 +122,7 @@
     <criterion testable="true">The deploy record exists with every check's evidence.</criterion>
   </acceptance-criteria>
 
-  <notes>Spec FR-33, NFR-06, Success Criteria 1, 2 and 9. Dev: BFF `spaarke-bff-dev`; SWA `swa-spaarke-external-spa-dev` (R3 host `green-dune-0c4f1221e.7.azurestaticapps.net`); workflow `.github/workflows/deploy-external-spa.yml`. The Teams package is not redeployed in P1 (task 058). If the dev BFF host changed since the last SPA build, the SPA must be rebuilt (project gotcha).</notes>
+  <notes>Completed 2026-11-15 after retest round 3 (BFF aa7d6345f3, SPA c1eb6e4a8e): Events only, section collapse, child records and invoice Files all pass. The Event create/details form gaps are new scope for a spec decision (see notes/task-018-notes.md); speed is D-17 #2845 (uac-r2). Spec FR-33, NFR-06, Success Criteria 1, 2 and 9. Dev: BFF `spaarke-bff-dev`; SWA `swa-spaarke-external-spa-dev` (R3 host `green-dune-0c4f1221e.7.azurestaticapps.net`); workflow `.github/workflows/deploy-external-spa.yml`. The Teams package is not redeployed in P1 (task 058). If the dev BFF host changed since the last SPA build, the SPA must be rebuilt (project gotcha).</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

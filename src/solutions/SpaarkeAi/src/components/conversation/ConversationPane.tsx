@@ -26,11 +26,12 @@ import {
 } from "@fluentui/react-components";
 import { ChatRegular, ChatAddRegular, DismissRegular, ArrowClockwiseRegular } from "@fluentui/react-icons";
 import { PaneHeader, SprkChat, createConsumerDispatcher, RichFilePreviewDialog, createXrmNavigationService, createXrmDataService, searchUsersAndContacts, launchSurface, resolveSurfaceLaunch, launchSummarizeFilesWizard, SendEmailDialog, createXrmEmailComposeHandlers } from "@spaarke/ui-components";
+import { getXrm, openInDesktopApp, OPEN_IN_DESKTOP_FAILED_MESSAGE } from "@spaarke/ui-components";
 import { WelcomeStartCards } from "./WelcomeStartCards";
 import { QuickStartModal } from "./QuickStartModal";
 import { MemoryDialog } from "./MemoryDialog";
 import { useAiSession, useDispatchPaneEvent, usePaneEvent, clearExecutionTraceBuffer } from "@spaarke/ai-widgets";
-import type { WorkspacePaneEvent } from "@spaarke/ai-widgets";
+import type { WorkspacePaneEvent, IChatSession } from "@spaarke/ai-widgets";
 // task 033 (FR-17 wizard→review auto-run bridge): the typed compose-seed shape the wizard hand-off
 // listener narrows `widget_load{widgetType:'compose'}` payloads to (composeSessionId / analysisId /
 // subDomain / autoRunReview — declared additively on the SAME seed every compose door already uses).
@@ -43,7 +44,6 @@ import type {
   ResolvedLookup,
   ConsumerChip,
 } from "@spaarke/ui-components";
-import type { IChatSession } from "@spaarke/ai-context";
 import { WelcomePanel } from "../WelcomePanel";
 // Compose three-pane coordination — ASSISTANT leg (task 104 / E2E-R5). Typed
 // receivers for Flow 2 (compose_selection_offer) + Flow 4 (compose_context_offer).
@@ -916,8 +916,9 @@ export function ConversationPane(): React.JSX.Element {
     (query: string) => searchUsersAndContacts(emailLookupDataService, query),
     [emailLookupDataService]
   );
-  // D-219 Q3 (task 186): the Send Email dialog shows the compose template picker and the AI-draft
-  // sparkle only when the host passes these handlers (EmailComposer hides both otherwise). The same
+  // D-219 Q3 (task 186) + Q1 (task 193): the Send Email dialog shows the compose template picker, the AI-draft
+  // sparkle, the side-pane To/Cc/Bcc buttons and the Related-to picker only when the host passes these handlers
+  // (EmailComposer hides each otherwise). The same
   // Xrm-backed factory the per-item cards (EmailPerItemCards) and EmailWorkspaceWidget use; one
   // instance for this pane's dialog.
   const emailComposeHandlers = React.useMemo(
@@ -1955,6 +1956,32 @@ export function ConversationPane(): React.JSX.Element {
       return null; // non-fatal — the modal shows its own "preview not available" fallback
     }
   }, [savedPreview?.documentId, bffBaseUrl, authenticatedFetch]);
+
+  // "Open file" / "Download" in that preview (ISS-004): the Office app for Word / Excel / PowerPoint, otherwise a
+  // download through the BFF — the same behaviour as every other surface. The dialog is modal, so a failure is
+  // shown with the platform error dialog (an inline bar would sit behind it).
+  const openSavedFileInDesktop = React.useCallback((): void => {
+    const docId = savedPreview?.documentId;
+    if (!docId || !bffBaseUrl) return;
+    void (async () => {
+      try {
+        const response = await authenticatedFetch(`${bffBaseUrl}/api/documents/${encodeURIComponent(docId)}/open-links`, {
+          method: "GET",
+        });
+        const links = (await response.json()) as { desktopUrl?: string | null; fileName?: string | null };
+        await openInDesktopApp({
+          bffBaseUrl,
+          documentId: docId,
+          links,
+          fetch: authenticatedFetch,
+          fallbackFileName: savedPreview.fileName ?? undefined,
+        });
+      } catch (err) {
+        console.error("[ConversationPane] Open in desktop failed:", err);
+        void getXrm("openErrorDialog")?.Navigation?.openErrorDialog?.({ message: OPEN_IN_DESKTOP_FAILED_MESSAGE });
+      }
+    })();
+  }, [savedPreview?.documentId, savedPreview?.fileName, bffBaseUrl, authenticatedFetch]);
 
   // FR-13 Step 1: publish `dispatchComposeAction` into the cross-pane Compose
   // action bridge so the inline AI toolbar (workspace pane, ComposeAiToolbar's
@@ -3607,6 +3634,10 @@ export function ConversationPane(): React.JSX.Element {
         onRenderEmailTemplate={emailComposeHandlers.onRenderEmailTemplate}
         onDraftWithAi={emailComposeHandlers.onDraftWithAi}
         onUploadLocalAttachment={emailComposeHandlers.onUploadLocalAttachment}
+        onLookupRecipients={emailComposeHandlers.onLookupRecipients}
+        recordLookupCatalog={emailComposeHandlers.recordLookupCatalog}
+        onLookupRecord={emailComposeHandlers.onLookupRecord}
+        onAddRelationship={emailComposeHandlers.onAddRelationship}
         onSent={() => setEmailSeed(null)}
       />
 
@@ -3629,7 +3660,7 @@ export function ConversationPane(): React.JSX.Element {
           documentName={savedPreview.fileName ?? "Document"}
           onClose={() => setPreviewOpen(false)}
           fetchPreviewUrl={fetchSavedPreviewUrl}
-          onOpenFile={() => undefined}
+          onOpenFile={openSavedFileInDesktop}
           onEmailDocument={() => undefined}
           onCopyLink={() => undefined}
           onOpenRecord={() => {

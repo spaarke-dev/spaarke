@@ -1,0 +1,103 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="195" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>Applying a Dataverse email template fills Subject and body with finished text (no XSL, no CDATA debris); Email documents Summary shows the summary once, not raw JSON</title>
+    <phase>12 Create-wizard lookups and composer (185 dev check fixes)</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Tags include bff-api; modifies .cs and .tsx code.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Two located defects with clear references (the template's own rendered columns or the Dataverse InstantiateTemplate action; summarizeService's existing result normaliser).</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>185-fixes</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches DocumentEmailWizard.tsx, which 194 also modifies. Run 194 and 195 one after the other; 193 is independent.</parallel-reason>
+    <deps>none</deps>
+    <tags>bff-api, api, frontend, react, testing</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+  <prompt>Owner 185 dev check C1 (2026-11-16; notes/task-185-notes.md): in Email documents, applying a Dataverse email template put raw XSL (`&lt;?xml version="1.0" ?&gt;&lt;xsl:stylesheet …`) in Subject and left `]]&gt;` debris in the body ("Dear ]]&gt;Valued Customer", a trailing `]]&gt;`); the email that was sent carried that debris. The Summary step showed the playbook's raw JSON (`{"tldr":…,"summary":…,"confidence":0.9}`), twice. Both predate the 178–188 work (other areas' code), but they are user-visible in every composer host this project wired, and a bad email went out. Owner approved the fix 2026-11-16 ("All three").</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. Expert in ASP.NET Core minimal APIs, Dataverse email templates, React and the @spaarke/ui-components EmailComposer and DocumentEmailWizard.</role>
+  <goal>(1) `POST /api/communications/template/render` returns a plain subject and an HTML body with every Dataverse placeholder resolved (from the regarding record when given, else the placeholder's fallback text, else empty), never XSL and never CDATA markers. (2) The DocumentEmailWizard Summary step shows the summary text (tldr and summary) once, parsed from the playbook output, and falls back to the raw text only when the output is not JSON.</goal>
+  <context>
+    <background>
+- Template render: CommunicationTemplateEndpoints.cs (`/api/communications/template/render`, ~line 50) → EmailTemplateService.cs (Services/Ai/Delivery). It reads the template's `subject` and `body` columns (~141), which on Dataverse are XSL stylesheets with CDATA sections, and only rewrites `{!x}` to `{{x}}` (~182-232). The template rows on dev also carry `subjectsafehtml` / `safehtml` (rendered HTML) with placeholders like `{!account:name;Valued Customer}` (entity:attribute;fallback). Fix options, in order of preference: Dataverse `InstantiateTemplate` (TemplateId, ObjectType, ObjectId) when a regarding record is given and the template's type matches it — called AS THE CALLER, exactly like the route's existing reads; otherwise render from `subjectsafehtml`/`safehtml`, substituting each placeholder from the regarding record if readable, else its fallback, else empty. Check what other callers of IEmailTemplateService / ComposeTemplateSource expect before changing the output shape; if Compose depends on the `{{x}}` tokens, keep that path and fix only the email render.
+- Client handler: createXrmEmailComposeHandlers.ts ~348-374 (`onRenderEmailTemplate`) calls the route; every composer host uses it (Console Send Email included — ConversationPane.tsx ~923-926), so the server fix covers them all. The owner reported the Console template "working"; check it against a template with placeholders.
+- Summary: DocumentEmailWizard.tsx ~818-835 appends every stream `chunk.content` and renders the concatenation verbatim (~900). The `/api/ai/analysis/execute` stream (AnalysisEndpoints.cs ~652-658) sends the streamed tokens and then the completed node text, both as `chunk` events — hence twice. Fix on the client only (other consumers read that stream): take the last complete JSON object and show `tldr` and `summary`, reusing summarizeService.ts `normalizeResult` (~137; export it or move it to a shared util — do not copy it). Do not change the BFF stream.
+- Line numbers are at origin/master `ce6c241964`; re-grep before editing.
+    </background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Ai/Delivery/EmailTemplateService.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/CommunicationTemplateEndpoints.cs</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/DocumentEmailWizard/DocumentEmailWizard.tsx</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/SummarizeFilesWizard/summarizeService.ts</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/createXrmEmailComposeHandlers.ts</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Ai/Delivery/ComposeTemplateSource.cs</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="CLAUDE.md §10">Every change this task makes to Sprk.Bff.Api follows .claude/constraints/bff-extensions.md. No new endpoint, DI registration or package. Measure the publish-size delta against a fresh master build and record it in the task notes.</constraint>
+    <constraint source="CLAUDE.md §11 / D-66">The fix extends EmailTemplateService; no new service, resolver class or interface. No new core code in Services/Ai beyond this existing class.</constraint>
+    <constraint source="ADR-028 / D-15">Template and regarding-record reads (and InstantiateTemplate, if used) run as the caller, the same as the route today. Never an app-only read for placeholder values.</constraint>
+    <constraint source="project">The route's authorization (CommunicationRecordAuthorizationFilter: Read on the regarding record; template readable by the caller) is unchanged. A placeholder whose value the caller cannot read renders its fallback or empty, never an error that leaks the value's existence.</constraint>
+    <constraint source="project">The render never fails the composer: if a template cannot be rendered, the route returns its existing refusal shape and the composer keeps the user's text.</constraint>
+    <constraint source="ADR-038">Tests cover the stated contract plus the edge cases named in the acceptance criteria; anything beyond needs a one-line justification in the task notes. No numeric test target. Never run the unfiltered Sprk.Bff.Api.Tests; filter on the touched classes.</constraint>
+    <constraint source="project">No deploy in this task. The BFF part reaches dev only through uac-r2's next dev BFF build (project CLAUDE.md §5); the client part through the next PCF/code-page deploy (owner go, D-126).</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/patterns/api/endpoint-filters.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>.claude/patterns/testing/mocking-patterns.md</file>
+      <file>.claude/adr/ADR-012-shared-component-library.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/patterns/ui/wizard-side-pane-lookup-and-email-compose.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/task-185-notes.md</file>
+    </files>
+  </knowledge>
+  <steps mode="directional">
+    <step order="1">Read the render route, EmailTemplateService and every caller of IEmailTemplateService/ComposeTemplateSource; read the dev template shape (subject/body XSL, subjectsafehtml/safehtml, placeholder syntax) from a test fixture or the docs, not a live write.</step>
+    <step order="2">Change the email render to produce finished subject and body as in the goal; keep any Compose-only token path unchanged.</step>
+    <step order="3">In DocumentEmailWizard, parse the summary stream with the shared normaliser and show tldr and summary once; fall back to the raw text for non-JSON output.</step>
+    <step order="4">Write the tests in the acceptance criteria; run them filtered, `dotnet build src/server/api/Sprk.Bff.Api/`, `dotnet test tests/Spaarke.ArchTests`, the touched client folders' suites, `npx tsc --noEmit -p .` and `node scripts/quality/client-lint/client-lint.mjs check`. Record the publish-size delta.</step>
+    <step order="5">Update tasks/TASK-INDEX.md status to `✅ [done]` AND this POML's status to completed; run `pwsh scripts/check-task-status-drift.ps1 -Project spaarke-ontology-platform-r1`. Record deviations in notes/task-195-notes.md.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion testable="true">BFF test: a template whose subject column is an XSL stylesheet renders a plain subject with no `&lt;?xml`, `xsl:` or `]]&gt;` text.</criterion>
+    <criterion testable="true">BFF test: a body placeholder `{!account:name;Valued Customer}` renders the regarding record's value when given and readable, else "Valued Customer"; a placeholder with no fallback and no value renders empty. No `]]&gt;` or `&lt;![CDATA[` remains in the body.</criterion>
+    <criterion testable="true">BFF test: when the caller cannot read the regarding record's attribute, the placeholder renders its fallback and the route still returns 200.</criterion>
+    <criterion testable="true">BFF test: an unrenderable template returns the route's existing refusal shape (no 500); authorization behaviour of the route is unchanged (existing filter tests pass).</criterion>
+    <criterion testable="true">Any existing Compose template behaviour is unchanged (existing ComposeTemplateSource / Compose tests pass).</criterion>
+    <criterion testable="true">Client test: a summary stream of token chunks followed by the same completed JSON shows the tldr and summary once, with no JSON braces or field names; a non-JSON stream shows its text once.</criterion>
+    <criterion testable="true">summarizeService keeps its behaviour (existing tests pass) after the normaliser is shared.</criterion>
+    <criterion testable="true">BFF build clean; ArchTests pass; publish-size delta recorded; tsc and the client-lint ratchet pass.</criterion>
+  </acceptance-criteria>
+  <escalation>
+    <trigger>If InstantiateTemplate cannot run as the caller, or the safehtml columns are absent for some template types, STOP and report the options before choosing.</trigger>
+    <trigger>If another consumer depends on the current `{{x}}` output of the email render, STOP and report.</trigger>
+  </escalation>
+  <ui-tests>
+    <test name="Template and summary">
+      <steps>
+        <step>Semantic Search → Email documents: check the Summary step; on Compose, apply a template with placeholders; send to yourself</step>
+        <step>Console → Send Email: apply the same template</step>
+      </steps>
+      <expected>Summary shows readable text once. Subject and body show finished text, no XSL or ]]&gt;; the received email matches.</expected>
+    </test>
+  </ui-tests>
+  <tools>
+    <tool name="dotnet">Build the BFF; filtered dotnet test on the touched classes; ArchTests</tool>
+    <tool name="npm">jest, tsc and ESLint in src/client/shared/Spaarke.UI.Components</tool>
+  </tools>
+  <completion>Done 2026-11-16: PR #2861 merged to master (04f5c943f9). Template render reads subjectsafehtml/safehtml with caller-formatted merge values (first non-empty field, fallback, empty); Summary step shows tldr+summary once via the shared normalizeResult; render-time setState fixed. Independent adversarial review (Opus) found 3 F (formatted values, multi-field join, stale parity test), all fixed in 3c697d68d6 and re-checked. Publish delta +1,727 bytes. Not deployed: BFF via uac-r2 next dev build; client via the next PCF/code-page deploy (owner go). Notes: notes/task-195-notes.md. rework: fix-round-2 task 195</completion>
+  <execution>
+    <protocol>Run through task-execute. Fresh worktree from origin/master; PR to master. Not in parallel with 194.</protocol>
+  </execution>
+</task>

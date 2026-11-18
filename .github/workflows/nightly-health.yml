@@ -1326,8 +1326,8 @@ jobs:
   # Weekly duplication sweep (reuse-governance-tightening-r1, spec FR-06, OQ-8).
   # Observation only: jscpd runs with exitCode 0 and continue-on-error, and the
   # decide step always succeeds, so duplication never fails this workflow.
-  # No baseline file: a cluster is NEW when either of its files appears in
-  # `git log --since=7.days`. It alerts only when a new cluster is at or above the
+  # No baseline file: a cluster is NEW when either of its files landed on master in
+  # the last 7 days (`git log --since=7.days --first-parent -m`). It alerts only when a new cluster is at or above the
   # floor (>= MIN_TOKENS tokens AND >= MIN_LINES lines) and its two files sit in
   # different top-level areas. Area = first 4 path segments under src/client/ and
   # src/server/ (src/client/pcf/MatterHeader, src/server/api/Sprk.Bff.Api), else the
@@ -1344,8 +1344,9 @@ jobs:
       contents: read
       issues: write
     steps:
-      # Full history, trees only: `git log --since=7.days --name-only` needs commits
-      # and trees, not old blobs.
+      # Full history, trees only: the 7-day `git log --first-parent -m --no-renames
+      # --name-only` needs commits and trees, not old blobs (--no-renames avoids
+      # rename detection, which would fetch blobs).
       - name: Checkout (history for the 7-day window)
         uses: actions/checkout@v6
         with:
@@ -1354,6 +1355,9 @@ jobs:
 
       - name: Run jscpd (pinned, exit 0)
         continue-on-error: true
+        # Below the job timeout, so a hung scan still reaches "Decide status",
+        # which reports a missing report as failing instead of posting nothing.
+        timeout-minutes: 10
         run: npx --yes jscpd@5.4.2 --config .jscpd.json
 
       - name: Decide status
@@ -1397,7 +1401,10 @@ jobs:
               END { if (!found) { if (dirhit!="") print dirhit; else if (foldhit!="") print foldhit } }' "$INDEX" 2>/dev/null | head -n 1
           }
 
-          git log --since=7.days --name-only --pretty=format: | sed '/^$/d' | sort -u > "$tmp/changed.txt"
+          # --first-parent -m: list what LANDED on master this week, with each merge
+          # commit diffed against its first parent. Without it, a branch whose own
+          # commits are older than 7 days and lands by merge commit is invisible.
+          git log --since=7.days --first-parent -m --no-renames --name-only --pretty=format: | sed '/^$/d' | sort -u > "$tmp/changed.txt"
           echo "Files changed in the last 7 days: $(wc -l < "$tmp/changed.txt")"
 
           if [ ! -s "$REPORT" ] || ! jq -e '.duplicates' "$REPORT" >/dev/null 2>&1; then

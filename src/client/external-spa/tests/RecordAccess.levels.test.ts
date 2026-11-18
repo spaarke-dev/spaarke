@@ -12,8 +12,10 @@ import { describe, expect, it } from 'vitest';
 import {
   ACCESS_LEVEL_LABELS,
   addEventRightOf,
-  createTaskRightOf,
   decidingLevelOf,
+  eventEditRightOf,
+  eventReassignRightOf,
+  eventStatusChoicesOf,
   readOnlyNoteOf,
   recordAccessFactsOf,
   recordLevelOf,
@@ -167,46 +169,60 @@ describe('yourAccessOf: nothing is inferred', () => {
   });
 });
 
-describe('createTaskRightOf: the Task type needs an explicit canCreateTask, on its own (task 012)', () => {
+describe('addEventRightOf: Add event needs the create right AND at least one creatable type (task 015)', () => {
+  const ONE = [{ id: 't-1', name: 'Task', requiresDueDate: true }];
   it.each([
-    // [loaded, list canCreateTask, level allows, expected]
-    [true, true, undefined, true],
-    [true, false, undefined, false],
-    [true, null, undefined, null],
-    [true, undefined, undefined, null],
-    [false, true, undefined, null],
-    // A level that decides (a level-decided project caller) must also allow; it never turns an unknown into a yes.
-    [true, true, true, true],
-    [true, true, false, false],
-    [true, false, true, false],
-    [true, undefined, true, null],
-  ] as const)(
-    'loaded %s, canCreateTask %s, level allows %s -> %s',
-    (loaded, listCanCreateTask, levelAllows, expected) => {
-      expect(createTaskRightOf({ loaded, listCanCreateTask, levelAllows })).toBe(expected);
-    }
-  );
+    // [create right, creatableEventTypes, expected]
+    [true, ONE, true], // must fire
+    [true, [], false], // the right without a type to pick: "no" (014 K3)
+    [true, null, null], // an older BFF sent no creatableEventTypes: unknown, never "any"
+    [true, undefined, null],
+    [false, ONE, false], // types never turn a "no" into a yes
+    [false, [], false],
+    [null, ONE, null], // the right is not known yet: still not known
+    [null, null, null],
+  ] as const)('create right %s and types %j -> %s', (eventRight, types, expected) => {
+    expect(addEventRightOf(eventRight, types)).toBe(expected);
+  });
 
-  it('does not go through the plain event right: a caller with Task and no Event still has Task', () => {
-    // The list said canCreate: false (the event right) and canCreateTask: true; the Task right is its own answer.
-    expect(createTaskRightOf({ loaded: true, listCanCreateTask: true })).toBe(true);
+  it('a creatableEventTypes that is not a list is not an answer', () => {
+    expect(addEventRightOf(true, 'task' as unknown as null)).toBeNull();
+    expect(addEventRightOf(true, { length: 1 } as unknown as null)).toBeNull();
   });
 });
 
-describe('addEventRightOf: Add event is offered when either type is allowed (task 012)', () => {
+describe('the per-event rights are the BFF answers, read strictly (task 015)', () => {
   it.each([
-    // [event right, task right, expected]
-    [true, true, true],
-    [true, false, true],
-    [true, null, true],
-    [false, true, true],
-    [null, true, true],
-    [false, false, false],
-    [false, null, false],
-    [null, false, null],
-    [null, null, null],
-  ] as const)('event right %s and task right %s -> %s', (eventRight, taskRight, expected) => {
-    expect(addEventRightOf(eventRight, taskRight)).toBe(expected);
+    [true, true],
+    [false, false],
+    [undefined, false],
+    [null, false],
+  ] as const)('canEdit %s -> Edit offered %s', (canEdit, expected) => {
+    expect(eventEditRightOf({ canEdit })).toBe(expected);
+  });
+  it('no event, no Edit', () => {
+    expect(eventEditRightOf(null)).toBe(false);
+    expect(eventEditRightOf(undefined)).toBe(false);
+  });
+
+  it('Change status offers exactly allowedStatuses, and only on an explicit canChangeStatus: true', () => {
+    expect(eventStatusChoicesOf({ canChangeStatus: true, allowedStatuses: [659490002, 659490004] })).toEqual([
+      659490002, 659490004,
+    ]);
+    // must-not-fire: not said, false, or no list of statuses
+    expect(eventStatusChoicesOf({ allowedStatuses: [659490002] })).toEqual([]);
+    expect(eventStatusChoicesOf({ canChangeStatus: false, allowedStatuses: [659490002] })).toEqual([]);
+    expect(eventStatusChoicesOf({ canChangeStatus: true })).toEqual([]);
+    expect(eventStatusChoicesOf({ canChangeStatus: true, allowedStatuses: [] })).toEqual([]);
+    expect(eventStatusChoicesOf(null)).toEqual([]);
+  });
+
+  it('Reassign needs canEdit AND canReassign, both explicit', () => {
+    expect(eventReassignRightOf({ canEdit: true, canReassign: true })).toBe(true);
+    expect(eventReassignRightOf({ canEdit: true, canReassign: false })).toBe(false);
+    expect(eventReassignRightOf({ canEdit: true })).toBe(false);
+    expect(eventReassignRightOf({ canEdit: false, canReassign: true })).toBe(false);
+    expect(eventReassignRightOf(undefined)).toBe(false);
   });
 });
 

@@ -148,8 +148,9 @@ public sealed record FirmOutcomeAdjustment(string Method, decimal? Value, decima
 
 /// <summary>
 /// The rule behind an item, shown ONLY as the policy's firm flag publishes it (130b fix round 2): the clause reader returned text for this
-/// version on this invoice (the rule set's visible-to-firms flag on AND the invoice's snapshot applied the version) and the rule is not an
-/// InternalStandard Procedure's. Otherwise (flag off, flag unreadable, no snapshot, an InternalStandard rule) there is no citation at all: no
+/// version on this invoice (the rule set's visible-to-firms flag on AND the invoice's snapshot applied the version; for a record rule set the
+/// record set's flag AND every base set's flag, and no base an InternalStandard Procedure's, <c>RuleSetClauseVisibility.VisibleToFirms</c>)
+/// and the rule is not an InternalStandard Procedure's. Otherwise (flag off, flag unreadable, no snapshot, an InternalStandard rule) there is no citation at all: no
 /// name, no label, no clause (D-66, D-79). No member is an id of a policy, version, rule set or Procedure. The firm reason is not a citation
 /// field: it is <see cref="FirmOutcomeItem.FirmReasons"/>, shown whatever the flag says.
 /// </summary>
@@ -184,7 +185,9 @@ public delegate Task<FirmClauseText> FirmClauseReader(Guid policyVersionId, Guid
 /// scores and Signal messages are never read into the output.</para>
 /// <para><b>Visibility rule (130b fix round 2).</b> Rule citations on a firm's line are shown only as the policy's firm flag publishes them:
 /// a citation (rule name, label, version, section reference, quote) exists only when the clause reader returned text (the rule
-/// set's flag on, the version applied by the invoice's snapshot) AND the rule is not an InternalStandard Procedure's, whatever its flag. In
+/// set's flag on, the version applied by the invoice's snapshot; for a record rule set the record set's flag AND every base set's flag, and no
+/// base an InternalStandard Procedure's, <c>RuleSetClauseVisibility.VisibleToFirms</c>) AND the rule is not an InternalStandard Procedure's,
+/// whatever its flag. In
 /// every other case, including a fault reading the flag or the Procedure's type, the citation is omitted entirely; the line, the reviewer's
 /// reason and the firm reasons (<see cref="FirmOutcomeItem.FirmReasons"/>, which are not citation fields) stay. There is no member for a Procedure Library document, container, drive item or link, nor for any policy, version, rule set or
 /// Procedure id.</para>
@@ -651,7 +654,9 @@ public sealed class FirmFindingsProjection
     /// <summary>
     /// The versions a firm may see cited (130b fix round 2): the clause reader published text for them (the policy's firm flag on and the
     /// invoice's snapshot applied them) AND their rule set is not an InternalStandard Procedure's, whatever that set's flag says. A rule set with
-    /// no Procedure (a legacy or a record rule set) is decided by its flag alone. Fails closed: a rule set or Procedure that cannot be read, a
+    /// no Procedure of its own (a legacy rule set) is decided by the clause reader alone; a record rule set (it has no Procedure link) is decided
+    /// there too, by the record set's flag AND every base set's flag, and not by a base that is an InternalStandard Procedure's
+    /// (<c>RuleSetClauseVisibility.VisibleToFirms</c>, ISS-038). Fails closed: a rule set or Procedure that cannot be read, a
     /// Procedure with no type, or a fault reading either, cites nothing. Reads only the rule set's Procedure link and the Procedure's type,
     /// never a name.
     /// </summary>

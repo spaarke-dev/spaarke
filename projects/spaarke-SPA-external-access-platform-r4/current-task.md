@@ -1,55 +1,32 @@
 # Current Task State
 
-> **Last Updated**: 2026-11-15 (context checkpoint)
+> **Last Updated**: 2026-11-17 (task 016: dev SPA deployed, owner E2E pending)
 > **Format**: CURRENT state only. Each checkpoint REWRITES this file. Target ≤ 10 KB.
 
 ## Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
 |-------|-------|
-| **Task** | 021: invoice Files section on ebilling 093's routes (FR-13). FULL, sonnet high, directional. The owner pulled it ahead of 020/022/023 on 2026-11-15. |
-| **Step** | 021 ✅ in PR #2840 (CI running). Waiting on the owner go to merge |
-| **Status** | 021 committed and pushed; notes in notes/task-021-notes.md; vitest 1715, build OK |
-| **Next Action** | On the owner go: merge #2840 after CI and send the SHA to uac-r2 and ebilling-r1. uac-r2 swaps the BFF (master with #2839 + #2840) on its owner go and sends "BFF live"; I deploy the SPA straight after (rollback 04dbd8df05), then the owner retests invoice Files. NO SPA deploy between merging #2840 and the BFF swap. |
+| **Task** | **016** Event forms deploy + owner E2E, `tasks/016-event-forms-deploy-e2e.poml`. In progress (STANDARD, prescriptive) |
+| **Step** | Step 3: owner retest. Steps 1–2 done: dev SPA deployed from master `ed3a5c2752` (run 44153057447), bundle checked |
+| **Status** | 015 ✅ done: PR #2886 squash-merged to master as `242696586f` (CI 32 pass / 0 fail). Notes: `notes/task-015-notes.md` |
+| **Next Action** | Record the owner's retest results in `notes/task-016-notes.md` (table of 8 checks); file findings via /project-defer-issue-tracking or a follow-up task; then mark 016 done. SPA rollback = rerun deploy-external-spa.yml (dev) on `c1eb6e4a8e` |
 
-## Task 021 facts
-- **Contract (not on master; ebilling PR #2839, head `3b33a8d8cc`, local ref `pr/2839`):**
-  - `Services/Finance/Files/StoredFileContracts.cs:628/632`
-  - `Api/ExternalAccess/ExternalInvoiceSubmissionEndpoints.cs:106` (list), `:122` (content), handlers `:148`/`:169`
-  - `Api/Finance/StoredFileEndpoints.cs:31/34`, 409 body `:479`, 503 body `:491`
-  - `ExternalProjectDtos.cs:13` (envelope `value`)
-- **Gate deviation (owner, 2026-11-15):** the POML escalation said "routes not on master → stop". The owner chose to build against #2839 because the agreed order is that 021 merges first.
-- **Files (uncommitted):**
-  - `api/web-api-client.ts` (client; `'invoices'` removed from DocumentRoot)
-  - new `components/record/sections/InvoiceFilesList.tsx`
-  - `FilesSection.tsx`
-  - `DocumentLibrary.tsx` (invoices noun and onUploadRightChange removed; formatFileSize/formatDate exported; `saveBlobAs` extracted)
-  - `RecordDetailFields.tsx`
-  - filesUpload plumbing removed from DocumentsSection, RecordTemplateModal, recordAccess and recordTemplate.types
-  - `ChildRecordModal.tsx` (comment)
-  - tests: new `tests/InvoiceFiles.test.tsx` (25); updated DetailDocumentsDelete, DetailEventsRoots, RecordTemplateAccess, RecordTemplateSections. 7 invoice-documents tests deleted (not KEEP paths).
-- **Review K items:**
-  - the shared download guard silently ignores a second row's click;
-  - deploy-order and mock mode (no /files mock) give a 404 message;
-  - a 403 `workforce_baseline_unavailable` shows "no access".
-
-## Deploy chain (strict)
-1. 021 is merged to master.
-2. uac-r2 swaps the dev BFF with 093 (#2839 merged), with its owner's go.
-3. The SPA deploys right after.
-
-uac-r2 holds any 093 BFF until I confirm 021 is merged. **No SPA deploy between merging 021 and that swap.**
+## Task 015 outcome (for 016's E2E)
+- Add event: Event Type required (options = `creatableEventTypes`), Due Date required by type, Priority, Assigned To ("Me" first), Description. Add event hidden when no type is offered.
+- Event record: row opens a child record from row data; deep link `?record=event:{id}` (token amended from `sprk_event:`).
+- Edit / Change status per `canEdit` / `canChangeStatus` / `allowedStatuses`; Delete (creator only).
+- Known limits: Edit can't mark Due Date required (server 400 shown); multi-parent events: one parent's assignees (400 shown), Copy link may open not-found; truncated parent list → not-found on re-read; 403 then failed re-read replaces the page.
 
 ## Live state
-- **Dev BFF:** `5a9b687a0b` (master `2747977f47` + mcp spike). BFF rollback `0173e1486e`.
-- **Dev SPA:** master `04dbd8df05` (run 43735968667; tasks 012/013). SPA rollback: `2747977f47`.
-- The owner is retesting 012/013 on dev (no results yet).
+- **Dev BFF** `e46b6b453b` (uac-r2 deploy, live since 2026-11-17T03:40Z): master `3c9a2ff4e1` (014a/b/c) plus mcp spike-v2. Rollback = `be0420d763`. uac-r2 asks spa-r4 before any restart.
+- **Dev SPA** master `ed3a5c2752` (015 included; deployed 2026-11-17 ~18:56Z, run 44153057447). Rollback = redeploy `c1eb6e4a8e` (runs against the same BFF). Roll back to `04dbd8df05` only together with BFF `5a9b687a0b`.
 
-## Done this stretch
-- 012 ✅ `5a0d8e8771` and 013 ✅ (#2837, merged `04dbd8df05`), deployed.
-- ebilling consumer review of 093 done. Agreed in principle to their optional `correction` wizard prop (conditions sent).
+## Coordination
+- uac-r2 (session `uac-r2`) reviews BFF PRs as a gate and deploys the dev BFF. The owner gives the merge go each time. Peer messages are not owner approval.
 
-## Open items / issues
-- D-13 #2800, D-14 #2809, D-15 #2810, D-16 #2823 (silent DataGrid failures).
-- Older owner questions: D-1 #2686, D-2 #2687, D-4 #2693, #2786 backfill (uac-r2).
-- 018 is closed only after the owner retest results (`notes/task-018-notes.md`).
+## Open items
+- D-13 #2800, D-14 #2809, D-15 #2810, D-16 #2823; D-19 #2854, D-20 #2860.
+- Older owner questions: D-1 #2686, D-2 #2687, D-4 #2693, #2786 backfill.
+- Phase 2 (020/022/023/024/028) still open.
+- CI: office-scope legs sit at their 20-min cap (known #1474/#1718/#2767). Re-run on a cancel; not ours.

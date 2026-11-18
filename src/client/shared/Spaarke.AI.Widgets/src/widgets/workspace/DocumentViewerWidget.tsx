@@ -59,8 +59,23 @@
  */
 
 import * as React from 'react';
-import { makeStyles, mergeClasses, tokens, Spinner, Text } from '@fluentui/react-components';
-import { RichFilePreview, type IRichFilePreviewProps } from '@spaarke/ui-components';
+import {
+  makeStyles,
+  mergeClasses,
+  tokens,
+  MessageBar,
+  MessageBarBody,
+  Spinner,
+  Text,
+} from '@fluentui/react-components';
+import {
+  RichFilePreview,
+  DEFAULT_RICH_FILE_PREVIEW_DISABLED_ACTIONS,
+  openInDesktopApp,
+  OPEN_IN_DESKTOP_FAILED_MESSAGE,
+  type DocumentRowAction,
+  type IRichFilePreviewProps,
+} from '@spaarke/ui-components';
 import type { WorkspaceWidgetProps } from '../../types/widget-types';
 import { AiSessionContext } from '../../providers/AiSessionProvider';
 
@@ -355,22 +370,63 @@ const DocumentViewerWidget: React.FC<WorkspaceWidgetProps<DocumentViewerWidgetDa
     };
   }, [stableDocumentId, bffBaseUrl, authenticatedFetch]);
 
-  const rendererProps = React.useMemo<IRichFilePreviewProps>(() => {
-    if (isValid) {
-      return mapPayloadToRendererProps(data, reFetchFromDocumentId);
-    }
-    // Narrowing failed — still re-derive from a stable documentId when one rode
-    // along on an off-contract payload (e.g. a restored persisted shape).
-    return {
-      documentName: 'Unknown file',
-      documentId: 'document-viewer:unknown',
-      fetchPreviewUrl: reFetchFromDocumentId ?? (async () => null),
-      onOpenFile: () => undefined,
-      onOpenRecord: () => undefined,
-      onEmailDocument: () => undefined,
-      onCopyLink: () => undefined,
+  // "Open file" / "Download" (ISS-004): the Office app for Word / Excel / PowerPoint, otherwise a download
+  // through the BFF — the same behaviour as every other surface. Needs the stable document id and the session's
+  // BFF base URL + authenticated fetch; without them the two menu actions are hidden below (no dead buttons).
+  const [openError, setOpenError] = React.useState<string | null>(null);
+  const fileNameForDownload = isValid ? data.filename : undefined;
+  const openFile = React.useMemo<(() => void) | null>(() => {
+    if (!stableDocumentId || !bffBaseUrl || !authenticatedFetch) return null;
+    return (): void => {
+      void (async () => {
+        setOpenError(null);
+        try {
+          const response = await authenticatedFetch(
+            `${bffBaseUrl}/api/documents/${encodeURIComponent(stableDocumentId)}/open-links`,
+            { method: 'GET' }
+          );
+          const links = (await response.json()) as { desktopUrl?: string | null; fileName?: string | null };
+          await openInDesktopApp({
+            bffBaseUrl,
+            documentId: stableDocumentId,
+            links,
+            fetch: authenticatedFetch,
+            fallbackFileName: fileNameForDownload,
+          });
+        } catch (err) {
+          console.error('[DocumentViewerWidget] Open in desktop failed:', err);
+          setOpenError(OPEN_IN_DESKTOP_FAILED_MESSAGE);
+        }
+      })();
     };
-  }, [isValid, data, reFetchFromDocumentId]);
+  }, [stableDocumentId, bffBaseUrl, authenticatedFetch, fileNameForDownload]);
+
+  const rendererProps = React.useMemo<IRichFilePreviewProps>(() => {
+    const base: IRichFilePreviewProps = isValid
+      ? mapPayloadToRendererProps(data, reFetchFromDocumentId)
+      : // Narrowing failed — still re-derive from a stable documentId when one rode
+        // along on an off-contract payload (e.g. a restored persisted shape).
+        {
+          documentName: 'Unknown file',
+          documentId: 'document-viewer:unknown',
+          fetchPreviewUrl: reFetchFromDocumentId ?? (async () => null),
+          onOpenFile: () => undefined,
+          onOpenRecord: () => undefined,
+          onEmailDocument: () => undefined,
+          onCopyLink: () => undefined,
+        };
+    if (openFile) return { ...base, onOpenFile: openFile };
+    // No way to open the file here: hide the actions that would need it. `disabledActions` replaces the
+    // renderer's default hide-set, so restate it (plus `findSimilar`, which the renderer auto-hides only
+    // when it owns the default set).
+    const hidden: DocumentRowAction[] = [
+      ...DEFAULT_RICH_FILE_PREVIEW_DISABLED_ACTIONS,
+      'findSimilar',
+      'openFile',
+      'download',
+    ];
+    return { ...base, disabledActions: hidden };
+  }, [isValid, data, reFetchFromDocumentId, openFile]);
 
   return (
     <div
@@ -387,7 +443,14 @@ const DocumentViewerWidget: React.FC<WorkspaceWidgetProps<DocumentViewerWidgetDa
           <Text>{error}</Text>
         </div>
       ) : (
-        <RichFilePreview {...rendererProps} />
+        <>
+          {openError && (
+            <MessageBar intent="error" role="alert" data-testid="document-viewer-open-error">
+              <MessageBarBody>{openError}</MessageBarBody>
+            </MessageBar>
+          )}
+          <RichFilePreview {...rendererProps} />
+        </>
       )}
     </div>
   );

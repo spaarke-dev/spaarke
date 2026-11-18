@@ -4,6 +4,17 @@
 
 The Spaarke platform provides an "Open in Desktop" feature that allows users to open SharePoint Embedded documents directly in Microsoft Office desktop applications (Word, Excel, PowerPoint). This feature uses Office protocol handlers (`ms-word:`, `ms-excel:`, `ms-powerpoint:`) to launch the desktop applications.
 
+### Files that are not Word, Excel or PowerPoint
+
+Every Spaarke surface behaves the same way (since 2026-11-17, ISS-004):
+
+| File | What "Open in Desktop" does |
+|---|---|
+| Word, Excel, PowerPoint | Opens the live file in the Office app, from the same browser tab. Changes save back to Spaarke. Needs the Trusted Sites setting below. |
+| Anything else (PDF, image, saved email…) | Downloads the file through Spaarke, and the browser hands it to the user's default app (one click in the download bar, or automatically when "Always open files of this type" is set). It is a copy: changes stay on the user's computer. |
+
+Other files are downloaded rather than opened in SharePoint, because a user who may read a secure record but not edit it has no SharePoint access to its file. The download is authorized against the Spaarke record, so it works for everyone who can see the document. A web page cannot tell whether the Office app is installed; without it, the browser shows its own message. Shared code: `openInDesktopApp` in `src/client/shared/Spaarke.UI.Components/src/utils/openInDesktopApp.ts`.
+
 ## Requirement
 
 For this feature to work, the SharePoint domain must be configured as a **Trusted Site** in Windows. Without this configuration, users will see the following error when clicking "Open in Desktop":

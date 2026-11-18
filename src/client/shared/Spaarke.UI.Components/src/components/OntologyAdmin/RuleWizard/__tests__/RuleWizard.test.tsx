@@ -91,6 +91,13 @@ async function fillBasics() {
   change('rule-wizard-lane', 'Decide');
 }
 
+/** Task 193: an Existence rule needs one test; this adds a record test on the chosen table. */
+function addRecordTest(field: string, value: string) {
+  click('rule-wizard-when-row-add');
+  change('rule-wizard-when-row-0-field', field);
+  change('rule-wizard-when-row-0-value', value);
+}
+
 async function fillCondition() {
   await find('rule-wizard-condition');
   change('rule-wizard-subject', 'zz_widget');
@@ -303,10 +310,33 @@ describe('RuleWizard - the condition is built only from the catalog', () => {
     expect(byId('rule-wizard-next')).toBeDisabled();
     expect(byId('rule-wizard-condition-summary')).toHaveTextContent('Choose what the rule is about.');
     change('rule-wizard-subject', 'zz_widget');
-    expect(byId('rule-wizard-next')).toBeEnabled();
+    expect(byId('rule-wizard-next')).toBeDisabled();
     click('rule-wizard-when-row-add');
     expect(byId('rule-wizard-next')).toBeDisabled();
     expect(byId('rule-wizard-condition-summary')).toHaveTextContent('Choose a column.');
+  });
+
+  it('task 193 (A7): a table with no test keeps Next shut and says to add one; one test opens it', () => {
+    change('rule-wizard-subject', 'zz_widget');
+    expect(byId('rule-wizard-next')).toBeDisabled();
+    expect(byId('rule-wizard-condition-summary')).toHaveTextContent(
+      'To continue: Add at least one test on the record or one related-record test.'
+    );
+    click('rule-wizard-when-row-add');
+    change('rule-wizard-when-row-0-field', 'zz_state');
+    change('rule-wizard-when-row-0-value', 'open');
+    expect(byId('rule-wizard-next')).toBeEnabled();
+    expect(maybe('rule-wizard-condition-summary')).toBeNull();
+  });
+
+  it('task 193 (A7): a related-record test alone also opens Next', () => {
+    change('rule-wizard-subject', 'zz_widget');
+    expect(byId('rule-wizard-next')).toBeDisabled();
+    click('rule-wizard-add-clause');
+    change('rule-wizard-clause-0-related', 'zz_note');
+    change('rule-wizard-clause-0-row-0-field', 'zz_kind');
+    change('rule-wizard-clause-0-row-0-value', 'x');
+    expect(byId('rule-wizard-next')).toBeEnabled();
   });
 });
 
@@ -335,6 +365,37 @@ describe('RuleWizard - a refusal is shown at the field and the step it concerns'
 
     change('rule-wizard-when-row-0-value', 'closed');
     await waitFor(() => expect(maybe('field-error-ruleBody')).toBeNull());
+  });
+
+  it('task 193 (A7): a root schema refusal is shown without the leading ": "; a message without it is unchanged', async () => {
+    const refusals = [
+      ': Required properties ["when"] are not present',
+      'The rule reads zz_secret, which a rule may not use.',
+    ];
+    const validate = jest.fn(async () => ({
+      ok: true as const,
+      data: validation({
+        valid: false,
+        errors: [{ field: 'ruleBody', message: refusals.shift() as string }],
+        reasonCode: REASON_COLUMN_NOT_AUTHORABLE,
+        templateEligibleFields: [],
+      }),
+    }));
+    setup({ service: makeAuthoringService({ validate }) });
+    await fillBasics();
+    await next('rule-wizard-condition');
+    await fillCondition();
+
+    click('rule-wizard-next');
+    const shown = await find('field-error-ruleBody');
+    expect(shown.textContent).toBe('Required properties ["when"] are not present');
+
+    change('rule-wizard-when-row-0-value', 'closed');
+    await waitFor(() => expect(maybe('field-error-ruleBody')).toBeNull());
+    click('rule-wizard-next');
+    expect((await find('field-error-ruleBody')).textContent).toBe(
+      'The rule reads zz_secret, which a rule may not use.'
+    );
   });
 
   it('validate (200): a reason code with no listed message still puts its own message on its field', async () => {
@@ -1045,6 +1106,7 @@ describe('RuleWizard - matter scope', () => {
       await fillCondition();
     } else {
       change('rule-wizard-subject', subject);
+      addRecordTest('zz_size', 'big');
     }
     await next('rule-wizard-wording');
     fillWording();
@@ -1314,6 +1376,7 @@ describe('RuleWizard - matter scope', () => {
     await find('rule-wizard-basics');
     await next('rule-wizard-condition');
     change('rule-wizard-subject', 'zz_gadget');
+    addRecordTest('zz_size', 'big');
     // Condition, Wording and Actions ask validate with the limit still set: the refusal is not theirs, so they can be left.
     await next('rule-wizard-wording');
     await next('rule-wizard-actions');

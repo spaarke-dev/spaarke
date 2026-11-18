@@ -57,6 +57,8 @@ export type RecordToolbarActionId = Extract<
   | 'delete'
   | 'history'
   | 'send'
+  | 'edit'
+  | 'changeStatus'
 >;
 
 /**
@@ -132,6 +134,11 @@ export interface RecordViewContext {
   onRecordDeleted: () => void;
   /** Ask one section of this record to re-read (the service request recall re-reads the Messages thread). */
   refreshSection: (section: RecordSectionId) => void;
+  /**
+   * Re-read THIS record (what the modal's Refresh does: the shown record stays on screen until the answer arrives, and every
+   * section re-reads). An action host calls it after a save (Edit, Change status: task 015) so the record shows the new values.
+   */
+  refreshRecord: () => void;
 }
 
 /** What a section renderer gets. */

@@ -35,7 +35,6 @@
   },
   "dependencies": {
     "@spaarke/auth": "file:../Spaarke.Auth",
-    "@spaarke/document-operations": "file:../Spaarke.DocumentOperations",
     "@spaarke/ai-widgets": "file:../Spaarke.AI.Widgets",
     "@spaarke/ui-components": "file:../Spaarke.UI.Components",
     "@tiptap/core": "^2.10.3",

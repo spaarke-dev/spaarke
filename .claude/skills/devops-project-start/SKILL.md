@@ -11,7 +11,7 @@ last-reviewed: 2026-06-23
 
 > **Category**: DevOps / Portfolio
 > **Tier**: Component, but **LOAD-BEARING** — the one canonical bridge from a Project Issue to a local worktree (D-13)
-> **Last Reviewed**: 2026-10-15
+> **Last Reviewed**: 2026-11-17 (Step 1 item-list limit raised to 5000); 2026-10-15
 
 ## Prerequisites
 
@@ -54,7 +54,7 @@ Idempotency: if `projects/{slug}-r1/` already exists AND `Worktree Path` field i
 
 ```bash
 gh issue view <#N> --json title,body,labels,number,url
-gh project item-list 2 --owner spaarke-dev --format json --limit 1000 --jq '.items[] | select(.content.number == <N>)'   # gh's built-in --jq (plain `jq` is not installed in Git Bash here); --limit is required: the default is 30 items and the board has 500+
+gh project item-list 2 --owner spaarke-dev --format json --limit 5000 --jq '.items[] | select(.content.number == <N>)'   # gh's built-in --jq (plain `jq` is not installed in Git Bash here); --limit is required: the default is 30 items and the board has 500+ (576 on 2026-11-17). An item past the limit is silently missing, so keep it well above the board size (same value as ITEM_LIST_LIMIT in scripts/ai-cost/update-board-spend.py)
 ```
 
 Extract from Issue:
