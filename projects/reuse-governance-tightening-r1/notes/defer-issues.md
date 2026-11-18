@@ -357,7 +357,7 @@ SemanticSearch reports 23 × TS6059 (`@spaarke/auth` source outside `rootDir`) a
 
 | Field | Value |
 |---|---|
-| **Status** | Open |
+| **Status** | Fixed on branch `fix/reuse-governance-followups` (2026-11-17): the six `paths` lines added with a keep-in-step comment. Closes when that PR merges. |
 | **Urgency** | next-round |
 | **Filed** | 2026-11-15 |
 | **Source** | Task 080 adversarial review, finding 5 (`notes/080-review.md`); pre-existing, not caused by this project |
@@ -384,7 +384,7 @@ SemanticSearch reports 23 × TS6059 (`@spaarke/auth` source outside `rootDir`) a
 
 | Field | Value |
 |---|---|
-| **Status** | Open |
+| **Status** | Fixed on branch `fix/reuse-governance-followups` (2026-11-17): both docs and both code comments now name `normalizeBffBaseUrl()`; the doc's code block shows the current body and its real file. Closes when that PR merges. |
 | **Urgency** | someday |
 | **Filed** | 2026-11-15 |
 | **Source** | Task 080 adversarial review, found in passing (same root cause as finding 4) |
@@ -435,7 +435,7 @@ Rename `ActionType` → `ExecutorType` and `SupportedActionTypes` → `Supported
 **Blockers**: none
 **Related**: `.claude/adr/ADR-043-ai-capability-execution-spine.md`; `.claude/patterns/CAPABILITY-INDEX.md` row 16
 
-**Resolution** (2026-11-15): the pattern file now names `ExecutorType` / `SupportedExecutorTypes` (verified at `INodeExecutor.cs:26,128` and `QueryDataverseNodeExecutor.cs:48`) and notes that `MapCanvasTypeToActionType` kept its name. Other mentions found by Grep, not changed here (named to the owner): current-tense `ActionType` enum in `docs/architecture/ai-architecture-actions-nodes-scopes.md:199`, `docs/architecture/ai-architecture-playbook-runtime.md:173`, `docs/guides/INSIGHTS-ENGINE-GUIDE.md:181`; ADR-037 and its INDEX rows record the name as it was when shipped (history, left as is).
+**Resolution** (2026-11-15): the pattern file now names `ExecutorType` / `SupportedExecutorTypes` (verified at `INodeExecutor.cs:26,128` and `QueryDataverseNodeExecutor.cs:48`) and notes that `MapCanvasTypeToActionType` kept its name. Other mentions found by Grep, not changed here (named to the owner): current-tense `ActionType` enum in `docs/architecture/ai-architecture-actions-nodes-scopes.md:199`, `docs/architecture/ai-architecture-playbook-runtime.md:173`, `docs/guides/INSIGHTS-ENGINE-GUIDE.md:181`; ADR-037 and its INDEX rows record the name as it was when shipped (history, left as is). 2026-11-17: the three docs now name `ExecutorType` for the C# enum (branch `fix/reuse-governance-followups`); Dataverse names such as `sprk_actiontype` and the dropped `sprk_ActionTypeId` FK are unchanged.
 
 ---
 
