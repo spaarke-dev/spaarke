@@ -84,6 +84,12 @@ public static class InvoiceRejectReturnCodes
     public const string DeciderUnresolved = LineDecisionCodes.DeciderUnresolved;
     public const string Busy = LineDecisionCodes.Busy;
 
+    /// <summary>
+    /// 400 (task 132): the reviewer-confirmed firm notice (subject and prose) fails the same screen model prose passes, or exceeds its caps. Nothing is
+    /// decided; the response names the screen's stable reason code (never the text), so the reviewer can fix the notice and decide again.
+    /// </summary>
+    public const string NoticeRefused = "ebilling.notice_refused";
+
     /// <summary>409: a blocked submission holds the invoice (D-101); Override or Return of the SUBMISSION (105) is the way out.</summary>
     public const string Held = "ebilling.invoice.held";
 
@@ -1146,6 +1152,35 @@ public sealed class InvoiceRejectReturnService
     }
 
     // ── Reads ──
+
+    /// <summary>
+    /// The invoice's tracking number, for the notice screen the route applies BEFORE it decides (task 132: the subject's code-written tracking suffix
+    /// is not the reviewer's words, so the screen needs to know it). Null when it cannot be read (the screen then allows for the suffix leniently); never throws.
+    /// </summary>
+    internal async Task<string?> ReadTrackingNumberAsync(Guid invoiceId, CancellationToken ct)
+    {
+        try
+        {
+            var query = new QueryExpression(InvoiceReviewReadService.InvoiceEntity)
+            {
+                ColumnSet = new ColumnSet(InvoiceReviewService.InvTrackingNumber),
+                Criteria = new FilterExpression(LogicalOperator.And),
+                TopCount = 1,
+            };
+            query.Criteria.AddCondition($"{InvoiceReviewReadService.InvoiceEntity}id", ConditionOperator.Equal, invoiceId);
+            var row = (await _entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false)).Entities.FirstOrDefault();
+            return row is null ? null : row.GetAttributeValue<string>(InvoiceReviewService.InvTrackingNumber) ?? string.Empty;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning("Invoice {InvoiceId}: the tracking number could not be read for the notice screen ({ExceptionType}).", invoiceId, ex.GetType().Name);
+            return null;
+        }
+    }
 
     private async Task<Entity?> ReadInvoiceAsync(Guid invoiceId, CancellationToken ct)
     {

@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Headers;
 using System.Text;
+using System.Text.Json;
 using System.Text.Json.Nodes;
 using FluentAssertions;
 using Microsoft.AspNetCore.Authentication;
@@ -392,6 +393,67 @@ public sealed class InvoiceRejectReturnEndpointsAuthorizationContractTests
 
         var payload = EbillingNotificationEnqueuer.ParsePayload(host.Queued.Should().ContainSingle().Subject.Payload)!;
         payload.HasConfirmedNotice.Should().BeFalse();
+    }
+
+    [Theory(DisplayName = "132 review F1 (must-fire): a confirmed notice the firm screen refuses is 400 ebilling.notice_refused with the reason code; NOTHING is decided, recorded or queued")]
+    [InlineData("reject", "We will pay 5000 by Friday.", "Please correct", "prose.digit")]
+    [InlineData("return", "Please see https://evil.test/pay now.", "Please correct", "prose.link")]
+    [InlineData("return", "Please correct the hours.", "Subject with a number 12", "digit")]
+    public async Task ARefusedNotice_Is400_AndNothingIsDecided(string route, string prose, string subject, string reasonFragment)
+    {
+        await using var host = await Host.StartAsync();
+        host.GrantAll();
+        var before = host.World.InvoiceStatus;
+        var body = JsonSerializer.Serialize(new { reason = "Because", noticeSubject = subject, noticeProse = prose });
+
+        var response = await host.SendAsync(route, body: body);
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        var text = await response.Content.ReadAsStringAsync();
+        JsonNode.Parse(text)!["errorCode"]?.GetValue<string>().Should().Be(InvoiceRejectReturnCodes.NoticeRefused);
+        text.Should().Contain(reasonFragment, "the reason code is named so the reviewer can fix the notice").And.NotContain(prose, "never the text back");
+        host.World.InvoiceStatus.Should().Be(before, "nothing is decided");
+        host.World.RecordsOf(ActionOf(route)).Should().BeEmpty("no Decision Record is written");
+        host.Queued.Should().BeEmpty("no notification job is queued");
+
+        // The control: the same invoice, decided again with a notice that passes, is decided as before (the refusal left nothing behind).
+        var good = await host.SendAsync(route, body: "{\"reason\":\"Because\",\"noticeSubject\":\"Please correct\",\"noticeProse\":\"Please correct the hours.\"}");
+        good.StatusCode.Should().Be(HttpStatusCode.OK);
+        host.World.InvoiceStatus.Should().Be(route == "reject" ? InvoiceStatusCodes.Rejected : InvoiceStatusCodes.ReturnedToFirm);
+        host.Queued.Should().ContainSingle();
+    }
+
+    [Theory(DisplayName = "132 review F1 (must-fire): a notice longer than the caps is 400 and nothing is decided; half a notice (only the prose) is screened too")]
+    [MemberData(nameof(Routes))]
+    public async Task ATooLongOrHalfNotice_Is400_AndNothingIsDecided(string route)
+    {
+        await using var host = await Host.StartAsync();
+        host.GrantAll();
+        var before = host.World.InvoiceStatus;
+        var tooLong = JsonSerializer.Serialize(new { reason = "Because", noticeSubject = "Please correct", noticeProse = new string('a', 20_000) });
+        var halfWithDigit = JsonSerializer.Serialize(new { reason = "Because", noticeProse = "Pay 5000 now." });
+
+        var long1 = await host.SendAsync(route, body: tooLong);
+        var half = await host.SendAsync(route, body: halfWithDigit);
+
+        long1.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        half.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        host.World.InvoiceStatus.Should().Be(before);
+        host.Queued.Should().BeEmpty();
+    }
+
+    [Theory(DisplayName = "132 review F1 (must-not-fire): the subject the draft route returned (with the code-written tracking suffix) passes the screen and is decided")]
+    [MemberData(nameof(Routes))]
+    public async Task TheDraftsOwnSubject_WithItsTrackingSuffix_IsDecided(string route)
+    {
+        await using var host = await Host.StartAsync();
+        host.World.Invoice["sprk_trackingnumber"] = "TRK-1.2";
+        host.GrantAll();
+
+        var response = await host.SendAsync(route, body: "{\"reason\":\"Because\",\"noticeSubject\":\"Please correct your invoice (TRK-1.2)\",\"noticeProse\":\"Please correct the hours.\"}");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, "the tracking number is code-written, not the reviewer's words, so its digit is not refused");
+        host.Queued.Should().ContainSingle();
     }
 
     [Theory(DisplayName = "132: a decision that is REFUSED (no right, not eligible, no reason) enqueues no job")]

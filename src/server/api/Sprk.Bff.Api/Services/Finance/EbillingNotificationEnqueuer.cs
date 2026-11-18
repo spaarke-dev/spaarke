@@ -78,7 +78,7 @@ public sealed class EbillingNotificationEnqueuer
     internal static readonly TimeSpan Timeout = TimeSpan.FromSeconds(15);
 
     /// <summary>The longest confirmed subject queued: the screen's cap for the words, plus room for the code-written tracking suffix.</summary>
-    internal const int MaxQueuedSubjectLength = FirmNoticeProse.MaxSubjectLength + 160;
+    internal const int MaxQueuedSubjectLength = FirmNoticeProse.MaxQueuedSubjectLength;
 
     private static readonly JsonSerializerOptions PayloadOptions = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
 

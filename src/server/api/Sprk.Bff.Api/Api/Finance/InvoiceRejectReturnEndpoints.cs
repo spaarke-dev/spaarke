@@ -18,7 +18,7 @@ namespace Sprk.Bff.Api.Api.Finance;
 /// The kill switch (<c>RequireEbillingEnabled</c>, ADR-018) follows the authorization filter and never replaces it.</para>
 /// <para><b>Nothing is trusted from the request but the reason and the note.</b> The decider is the caller's <c>systemuserid</c> resolved from the
 /// caller's own token; the decision id is derived from the approval portion, so every attempt by every approver is one decision.</para>
-/// <para><b>Status codes.</b> 200 decided or already decided (a repeat is a no-op, <c>alreadyDecided</c>); 400 <c>ebilling.reason_required</c> /
+/// <para><b>Status codes.</b> 200 decided or already decided (a repeat is a no-op, <c>alreadyDecided</c>); 400 <c>ebilling.notice_refused</c> (task 132, nothing decided) / <c>ebilling.reason_required</c> /
 /// <c>ebilling.reason_too_long</c> / <c>ebilling.note_too_long</c> / <c>ebilling.note_invalid_characters</c> (task 095f-2a); 401; 403 (route, not eligible, identity unproven, or no rights to close the invoice's Signals); 404
 /// uniform; 409 (not In Review, held, no or ambiguous approval portion, unknown or already-decided approval, approval changed or claimed by
 /// another approver, another decision in progress, transition refused, or <c>ebilling.blocked.other_decision_pending</c> while an Override of the
@@ -43,7 +43,7 @@ public static class InvoiceRejectReturnEndpoints
             .WithSummary("Reject an invoice (final; reason required)")
             .WithDescription(
                 "Any one eligible approver rejects the whole invoice. A reason is required (400 ebilling.reason_required). Only from In Review " +
-                "(409 otherwise). Moves the invoice to Rejected (Inactive), sets the approval and records one Decision Record naming the " +
+                "(409 otherwise). A reviewer-confirmed firm notice that fails the firm screen is refused (400 ebilling.notice_refused) before anything is decided. Moves the invoice to Rejected (Inactive), sets the approval and records one Decision Record naming the " +
                 "approver and the reason. A repeat is a no-op.")
             .Produces<InvoiceDecisionResponse>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status400BadRequest)
@@ -97,6 +97,22 @@ public static class InvoiceRejectReturnEndpoints
                 InvoiceRejectReturnCodes.DeciderUnresolved, "Your user could not be identified, so the decision was not recorded.", httpContext.TraceIdentifier);
         }
 
+        // Task 132 (EB-D-258): a reviewer-confirmed notice the firm screen refuses (or that is too long) would be dropped by the job with the decision
+        // already made and the reviewer told 200. So it is screened HERE, with the job's own code, BEFORE anything is decided: refused, the answer is a
+        // 400 with the stable reason code, and nothing is decided or queued. No notice (neither part) is not refused: feed and status only.
+        if (!string.IsNullOrWhiteSpace(body?.NoticeSubject) || !string.IsNullOrWhiteSpace(body?.NoticeProse))
+        {
+            var tracking = await service.ReadTrackingNumberAsync(invoiceId, ct);
+            var screen = FirmNoticeProse.ScreenConfirmed(
+                body?.NoticeSubject, body?.NoticeProse, tracking is null ? null : FirmNoticeProse.CleanText(tracking));
+            if (screen.Refusal is { } reason)
+            {
+                return InvoiceLineReviewEndpoints.Refused(
+                    StatusCodes.Status400BadRequest, InvoiceRejectReturnCodes.NoticeRefused,
+                    $"The notice to the firm was not accepted ({reason}). Nothing was decided. Edit the notice and try again.");
+            }
+        }
+
         var token = TokenHelper.ExtractBearerTokenOrNull(httpContext);
         var result = kind == InvoiceDecisionKind.Reject
             ? await service.RejectAsync(invoiceId, caller, body?.Reason, body?.Note, token, ct)
@@ -145,9 +161,10 @@ public static class InvoiceRejectReturnEndpoints
 /// <summary>The body of a reject or return: the reason, required (400 <c>ebilling.reason_required</c> without it), and (task 095f-2a,
 /// EB-D-236) an optional note of at most 2000 characters (400 <c>ebilling.note_too_long</c> / <c>ebilling.note_invalid_characters</c>).
 /// <para>Task 132 (EB-D-258): <paramref name="NoticeSubject"/> and <paramref name="NoticeProse"/> are the OPTIONAL reviewer-confirmed firm notice
-/// (the subject and prose the reviewer saw and may have edited on the draft route). They are not validated here and are never trusted as the
-/// notice: the job re-composes through <see cref="FirmNoticeComposer"/> (data inserted by code) and screens the prose like model prose. Without
-/// both, no firm email is sent for this decision. They never change the decision, its status or its response.</para></summary>
+/// (the subject and prose the reviewer saw and may have edited on the draft route). When either is given, both must pass the firm screen
+/// (<see cref="FirmNoticeProse.ScreenConfirmed"/>, the job's own code) BEFORE the decision, else 400 <c>ebilling.notice_refused</c> and nothing is
+/// decided. A passing notice is still never trusted as the notice: the job re-composes through <see cref="FirmNoticeComposer"/> (data inserted by
+/// code) and screens again. With neither, no firm email is sent for this decision. They never change a decision that is made.</para></summary>
 public sealed record InvoiceDecisionRequest(string? Reason, string? Note = null, string? NoticeSubject = null, string? NoticeProse = null);
 
 /// <summary>200 body: <c>decided</c> (this call decided) or <c>alreadyDecided</c> (a no-op), the invoice's outcome (<c>Rejected</c> or

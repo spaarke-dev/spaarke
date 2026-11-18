@@ -194,6 +194,76 @@ internal static class FirmNoticeProse
         return CheckText(subject, allowLineBreaks: false) ?? CheckText(body, allowLineBreaks: true);
     }
 
+    /// <summary>
+    /// Text as it is written into a subject or the details: control, format, private-use and unassigned characters removed and every whitespace character
+    /// (a line break in a subject header is a header-injection shape) made one space, collapsed, trimmed. Empty when nothing is left. The one definition:
+    /// <see cref="FirmNoticeComposer.CleanTrackingNumber"/> is this, so the routes can clean without referencing the composer (which has no caller check).
+    /// </summary>
+    internal static string CleanText(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return string.Empty;
+        }
+
+        var builder = new StringBuilder(text.Length);
+        foreach (var rune in text.EnumerateRunes())
+        {
+            var category = Rune.GetUnicodeCategory(rune);
+            if (Rune.IsWhiteSpace(rune))
+            {
+                builder.Append(' '); // a tab, a line break or a separator becomes one space, never a line break
+            }
+            else if (!Rune.IsControl(rune)
+                && category is not (UnicodeCategory.Format or UnicodeCategory.Surrogate or UnicodeCategory.PrivateUse or UnicodeCategory.OtherNotAssigned)
+                && rune != Rune.ReplacementChar)
+            {
+                builder.Append(rune.ToString());
+            }
+        }
+
+        return Regex.Replace(builder.ToString(), @" {2,}", " ", RegexOptions.CultureInvariant, TimeSpan.FromSeconds(1)).Trim();
+    }
+
+    /// <summary>The longest confirmed subject queued or screened: the screen's cap for the words, plus room for the code-written tracking suffix.</summary>
+    internal const int MaxQueuedSubjectLength = MaxSubjectLength + 160;
+
+    /// <summary>The words of a confirmed subject (the code-written tracking suffix removed) and the screen's refusal code, null when it passes.</summary>
+    internal readonly record struct ConfirmedScreen(string? Refusal, string BaseSubject);
+
+    /// <summary>
+    /// THE screen of a reviewer-confirmed notice (task 132, EB-D-258), applied in two places with this one code: by the reject and return routes BEFORE
+    /// they decide (a refused notice answers 400 and nothing is decided), and by <see cref="FirmNoticeComposer.ComposeConfirmedForInvoiceAsync"/> when
+    /// the job composes the email. The caps first (the subject as queued, the prose as screened), then the subject cleaned of line breaks and control
+    /// characters (<see cref="CleanText"/>) with the tracking suffix code writes removed, then <see cref="Check"/>.
+    /// </summary>
+    /// <param name="trackingNumber">
+    /// The invoice's cleaned tracking number: the exact suffix " (tracking)" is removed from the subject (an empty string means none). Null when the
+    /// number is not known: a trailing parenthetical group is removed instead (the route's pre-check; the job, which knows the number, decides exactly).
+    /// </param>
+    internal static ConfirmedScreen ScreenConfirmed(string? subject, string? prose, string? trackingNumber)
+    {
+        if ((subject?.Length ?? 0) > MaxQueuedSubjectLength || (prose?.Length ?? 0) > MaxProseLength)
+        {
+            return new ConfirmedScreen(FirmNoticeFallbackReasons.ProseTooLong, string.Empty);
+        }
+
+        var cleaned = CleanText(subject);
+        string baseSubject;
+        if (trackingNumber is null)
+        {
+            var open = cleaned.EndsWith(')') ? cleaned.LastIndexOf(" (", StringComparison.Ordinal) : -1;
+            baseSubject = open > 0 && cleaned.IndexOf(')', open) == cleaned.Length - 1 ? cleaned[..open].TrimEnd() : cleaned;
+        }
+        else
+        {
+            var suffix = trackingNumber.Length == 0 ? string.Empty : $" ({trackingNumber})";
+            baseSubject = suffix.Length > 0 && cleaned.EndsWith(suffix, StringComparison.Ordinal) ? cleaned[..^suffix.Length].TrimEnd() : cleaned;
+        }
+
+        return new ConfirmedScreen(Check(baseSubject, prose), baseSubject);
+    }
+
     /// <summary>True when the text carries a figure, a currency, an amount word or a numbered reference (used to screen a firm reason before the model sees it).</summary>
     internal static bool ContainsFigure(string text) => CheckText(text, allowLineBreaks: true) is not null;
 
@@ -454,12 +524,8 @@ public sealed class FirmNoticeComposer
 
         var tracking = CleanTrackingNumber(outcome.TrackingNumber);
         var suffix = tracking.Length == 0 ? string.Empty : $" ({tracking})";
-        var cleaned = CleanTrackingNumber(subject);
-        var baseSubject = suffix.Length > 0 && cleaned.EndsWith(suffix, StringComparison.Ordinal)
-            ? cleaned[..^suffix.Length].TrimEnd()
-            : cleaned;
-
-        var refusal = FirmNoticeProse.Check(baseSubject, prose);
+        // The route screened the same text with the same code before it decided; this is the exact check, with the invoice's own tracking number.
+        var (refusal, baseSubject) = FirmNoticeProse.ScreenConfirmed(subject, prose, tracking);
         if (refusal is not null)
         {
             // Ids and the stable code only: never the text (ADR-015).
@@ -516,31 +582,7 @@ public sealed class FirmNoticeComposer
     /// The tracking number as it is written into the subject and the details: control, format, private-use and unassigned characters
     /// removed and every whitespace character (a line break in a subject header is a header-injection shape) made one space, collapsed, trimmed. Empty when nothing is left.
     /// </summary>
-    internal static string CleanTrackingNumber(string? trackingNumber)
-    {
-        if (string.IsNullOrWhiteSpace(trackingNumber))
-        {
-            return string.Empty;
-        }
-
-        var builder = new StringBuilder(trackingNumber.Length);
-        foreach (var rune in trackingNumber.EnumerateRunes())
-        {
-            var category = Rune.GetUnicodeCategory(rune);
-            if (Rune.IsWhiteSpace(rune))
-            {
-                builder.Append(' '); // a tab, a line break or a separator becomes one space, never a line break
-            }
-            else if (!Rune.IsControl(rune)
-                && category is not (UnicodeCategory.Format or UnicodeCategory.Surrogate or UnicodeCategory.PrivateUse or UnicodeCategory.OtherNotAssigned)
-                && rune != Rune.ReplacementChar)
-            {
-                builder.Append(rune.ToString());
-            }
-        }
-
-        return Regex.Replace(builder.ToString(), @" {2,}", " ", RegexOptions.CultureInvariant, TimeSpan.FromSeconds(1)).Trim();
-    }
+    internal static string CleanTrackingNumber(string? trackingNumber) => FirmNoticeProse.CleanText(trackingNumber);
 
     /// <summary>Which projected states a notice kind may describe. A Return or Reject notice is shown before the decision (In Review) and after it.</summary>
     private static bool Applies(FirmNoticeKind kind, FirmOutcomeKind outcome) => kind switch
