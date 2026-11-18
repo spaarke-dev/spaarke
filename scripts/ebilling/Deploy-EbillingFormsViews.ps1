@@ -135,7 +135,7 @@ $Spec = [ordered]@{
             @{ Name = 'links'; Label = 'Resulting invoice and documents'; Cols = 'sprk_invoice', 'sprk_resubmissionof', 'sprk_document', 'sprk_reportdocument'
                 ReadOnly = 'sprk_invoice', 'sprk_document', 'sprk_resubmissionof' }
             @{ Name = 'regarding'; Label = 'Regarding'; Cols = 'sprk_regardingmatter', 'sprk_regardingproject', 'sprk_regardingworkassignment' }
-            @{ Name = 'findings'; Label = 'Firm notice'; Cols = 'sprk_firmnoticetext' }  # task 122 (#2235): sprk_findingsjson is BFF-only, never on a form
+            # sprk_findingsjson and sprk_firmnoticetext are BFF-only columns (task 122 #2235; task 132): field-secured, never on a form
         )
         View = 'sprk_trackingnumber', 'sprk_firminvoicenumber', 'sprk_vendororg', 'sprk_channel', 'sprk_processingstatus', 'sprk_receivedon', 'sprk_invoice', 'sprk_submitter'
     }
