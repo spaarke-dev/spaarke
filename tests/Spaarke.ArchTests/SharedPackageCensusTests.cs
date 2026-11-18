@@ -254,11 +254,12 @@ public class SharedPackageCensusTests
             "import {",
             "  A,",
             "} from '@spaarke/daily-briefing-components'",
+            "import '@spaarke/communication-components';",
         };
 
         var hits = BarrelImports(source, PatternDFeaturePackages);
 
-        Assert.Equal(new[] { 1, 2, 3, 4, 5, 8 }, hits.Select(h => h.Line).ToArray());
+        Assert.Equal(new[] { 1, 2, 3, 4, 5, 8, 9 }, hits.Select(h => h.Line).ToArray());
     }
 
     // =============================================================================================
@@ -565,14 +566,14 @@ public class SharedPackageCensusTests
 
     /// <summary>
     /// Lines that import one of <paramref name="packages"/> by its bare name (the barrel): <c>from '…'</c>,
-    /// <c>import('…')</c>, <c>require('…')</c>. A sub-path (<c>'pkg/logic/x'</c>) is not a barrel import.
+    /// <c>import '…'</c> (side effect), <c>import('…')</c>, <c>require('…')</c>. A sub-path (<c>'pkg/logic/x'</c>) is not a barrel import.
     /// Comment lines are skipped; a multi-line import is reported on its <c>from</c> line.
     /// </summary>
     private static List<(int Line, string Package)> BarrelImports(IReadOnlyList<string> lines, IReadOnlyList<string> packages)
     {
         var names = string.Join("|", packages.Select(Regex.Escape));
         var pattern = new Regex(
-            $@"(?:\bfrom\s*|\bimport\s*\(\s*|\brequire\s*\(\s*)(['""])(?<package>{names})\1",
+            $@"(?:\bfrom\s*|\bimport\s*\(\s*|\bimport\s+|\brequire\s*\(\s*)(['""])(?<package>{names})\1",
             RegexOptions.CultureInvariant);
 
         var hits = new List<(int, string)>();
