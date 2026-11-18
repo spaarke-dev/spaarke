@@ -1974,7 +1974,7 @@ export function ConversationPane(): React.JSX.Element {
           documentId: docId,
           links,
           fetch: authenticatedFetch,
-          fallbackFileName: savedPreview?.fileName ?? undefined,
+          fallbackFileName: savedPreview.fileName ?? undefined,
         });
       } catch (err) {
         console.error("[ConversationPane] Open in desktop failed:", err);

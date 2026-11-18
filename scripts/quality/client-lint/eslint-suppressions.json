@@ -1371,25 +1371,14 @@
       "count": 2
     }
   },
-  "src/solutions/LegalWorkspace/src/components/FilePreview/FilePreviewDialog.tsx": {
-    "@typescript-eslint/no-unnecessary-condition": {
-      "count": 2
-    },
-    "no-restricted-syntax": {
-      "count": 1
-    }
-  },
   "src/solutions/LegalWorkspace/src/components/FilePreview/filePreviewService.ts": {
     "@typescript-eslint/no-unnecessary-condition": {
       "count": 3
     }
   },
   "src/solutions/LegalWorkspace/src/components/RecordCards/DocumentCard.tsx": {
-    "@typescript-eslint/no-unnecessary-condition": {
-      "count": 1
-    },
     "no-restricted-syntax": {
-      "count": 2
+      "count": 1
     }
   },
   "src/solutions/LegalWorkspace/src/components/Shell/WorkspaceGrid.tsx": {
