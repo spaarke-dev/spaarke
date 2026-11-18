@@ -2356,7 +2356,7 @@ Write side of ISS-038 (see uac-r2 thread). Record sets should be keyed (record, 
 
 | Field | Value |
 |---|---|
-| **Status** | In Progress |
+| **Status** | In Progress (merged into work; dev apply and release pending) |
 | **Urgency** | now |
 | **Filed** | 2026-11-17 |
 | **Source** | ISS-038 review; uac-r2 thread |

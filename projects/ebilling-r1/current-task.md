@@ -58,6 +58,7 @@
   - add the five ISS028 entries to `scripts/provisioning/role-privilege-expectations/spaarkemaster-1.3.2.0.json` (Core User absent list);
   - amend the 1.3.2.0 release row: it removes privileges, needs a managed stage-and-upgrade, and dev rolls back with `-Restore -Gap ISS028`;
   - send uac-r2 the PR number.
+- **ISS-040 (#2901, merged into work; uac-r2 N1):** the Entity.xml IsSecured and the two FieldSecurityProfiles.xml rows for `sprk_ruleset.sprk_visibletofirms` ship in the same SpaarkeMaster release as the iss028 removals (1.3.2.0 or the next version); add them to that release's notes; tell uac-r2 so it informs provisioning-r1. Confirm the provisioning step associates the Readers profile with every business unit's default team (uac task-133 script; not found on this branch). Dev apply: owner's typed OK, `-BffApplicationIds` both dev BFF app ids, uac-r2 notices with `-Verify` output; a failed membership check stops it (never add members).
 - **external-spa lockfile:** may need a re-resolve after R4 015 (#2886).
 - **Before the merge:** the 5 CI shards, the publish-size delta against a fresh master build, and the owner's go.
 
