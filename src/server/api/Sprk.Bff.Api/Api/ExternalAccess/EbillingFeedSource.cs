@@ -322,12 +322,13 @@ internal sealed class EbillingFeedSource
                 continue;
             }
 
-            // An Approved invoice needs one projection read to know whether it is news. The reads are bounded per poll: at the bound the reading stops
-            // and the feed says truncated (never silent), so the cost of a poll does not grow with the number of visible Approved invoices.
+            // An Approved invoice needs one projection read to know whether it is news. The reads are bounded per poll: past the bound an Approved row is
+            // skipped and the feed says truncated (never silent), so the cost of a poll does not grow with the number of visible Approved invoices. The
+            // rows after it are still looked at: a Rejected or Returned invoice costs no projection read, so the bound never hides one.
             if (row.GetAttributeValue<OptionSetValue>("statuscode")?.Value == InvoiceStatusCodes.Approved && ++projectionReads > MaxProjectionReads)
             {
                 truncated = true;
-                break;
+                continue;
             }
 
             var news = await IsNewsAsync(row, ct).ConfigureAwait(false);

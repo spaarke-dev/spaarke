@@ -243,6 +243,29 @@ public sealed class EbillingFeedSourceTests
         result.Truncated.Should().BeTrue("the reading stopped at the bound, so the list may be incomplete");
     }
 
+    [Fact(DisplayName = "132 feed round-3 F1 (must-fire): past the projection-read cap a Returned invoice (no projection read) is STILL an item; the Approved ones past the cap are skipped and the feed says truncated")]
+    public async Task PastTheProjectionCap_AReturnedInvoiceIsStillAnItem()
+    {
+        var rig = new Rig();
+        for (var i = 0; i < EbillingFeedSource.MaxProjectionReads + 5; i++)
+        {
+            var id = Guid.NewGuid();
+            rig.Candidates.Add(Candidate(id, InvoiceStatusCodes.Approved, new DateTime(2026, 10, 20, 0, 0, 0, DateTimeKind.Utc).AddMinutes(-i)));
+            rig.Decisions[id] = InvoiceFeedDecision.Visible;
+            rig.Outcomes[id] = Outcome(FirmOutcomeKind.Approved); // newest first, none is news
+        }
+
+        var returned = Guid.NewGuid();
+        rig.Candidates.Add(Candidate(returned, InvoiceStatusCodes.ReturnedToFirm, new DateTime(2026, 10, 12, 0, 0, 0, DateTimeKind.Utc))); // older than every Approved row
+        rig.Decisions[returned] = InvoiceFeedDecision.Visible;
+
+        var result = await rig.Build().ReadAsync(Contact(), Cutoff, CancellationToken.None);
+
+        result.Items.Should().ContainSingle(i => i.InvoiceId == returned, "a Returned invoice costs no projection read, so the bound must not hide it");
+        rig.OutcomeReads.Should().HaveCount(EbillingFeedSource.MaxProjectionReads);
+        result.Truncated.Should().BeTrue("Approved rows past the bound were not looked at");
+    }
+
     [Fact(DisplayName = "132 feed review K4 (must-not-fire): Approved candidates within the cap are all read and the feed is not truncated by the bound")]
     public async Task ApprovedCandidatesWithinTheCap_AreAllRead_NotTruncated()
     {
