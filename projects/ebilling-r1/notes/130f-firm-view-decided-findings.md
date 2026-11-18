@@ -47,6 +47,7 @@ Fail-before (old projection restored, new tests kept): 14 of the 179 `FirmFindin
 - K3. The doc comments in the 130 note and earlier fix-round notes still describe "status and billed total" for these kinds; they are history and were not edited. The `FirmOutcome.ApprovedTotal` comment now says it is null for every state with no approval, Rejected and Returned included.
 - K4. After a decision, a fault reading the items gives the decided status only, `Degraded`: the SPA route answers 503 and the composer returns `Unavailable` (no notice). This fails closed, as In Review does. Before 130f a Rejected or Returned invoice read no items and so could not fault there; the surface is now the same as In Review's.
 - K5. A line left Pending or Flagged when the invoice is rejected or returned shows no item: an item exists only for a line a reviewer decided or added (FR-38). Same as In Review.
+- K6 (uac-r2 review note, not a finding). The external outcome JSON still carries each line's `ApprovedAmount` for Rejected and Returned items, while the notice table drops that column. It discloses nothing new (In Review shows the same per-line value, EB-D-202), but the API and the notice differ. Task 134 (SPA invoice detail) must not show a per-line approved amount for Rejected or Returned invoices; if the API should agree, null it for those kinds in the projection in 134 or 130g.
 
 ## Notice table: no Approved column after a Reject or Return (coordinator decision, fix round 1)
 

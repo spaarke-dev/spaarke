@@ -4,7 +4,7 @@
     <title>Firm view: a Rejected or Returned-to-firm invoice shows its line findings, as In Review does (EB-D-259)</title>
     <phase>5 Firm feedback (WP5); owner EB-D-259 (131 review finding 1)</phase>
     <gate>131 merged into work. Branch from work/ebilling-r1 at the sha named in the agent brief.</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Changes what external firm users see (130's firm-safe projection); tests modified.</rigor-reason>
     <model-tier>sonnet</model-tier>
