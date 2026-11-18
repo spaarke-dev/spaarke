@@ -29,7 +29,7 @@
 - **132** (`task/ebilling-132`, agent worktree agent-ab36d191b98d84154): rounds 1-3 done (tip b5c7d0223f; work merged in at 19fb32e29d + index fix 5f29918b6e). **uac-r2 PASS on logic, one F2 test-only** (drive the feed's production row conversion: SDK Entity candidate with a live-parent secure root → Denied, twin Visible, CandidateColumns ⊇ InvoiceScopeColumnNames). An implementer is adding it; send uac-r2 the test diff, then merge 132 into work. sprk_firmnoticetext field-security dev apply also needs the owner's typed OK + uac-r2 notices (script Set-EbillingFirmNoticeTextFieldSecurity.ps1). K16 (no enqueue on AlreadyDecided) accepted.
 - **135** (`task/ebilling-135`, agent worktree agent-a1b19c8fa25a869b7): work merged in (87651c946c), VisibleToFirms wired + Internal Standard sets excluded (4e2b3e85b4, 772ec5fa90), my K1 fail-closed f054d8a00e. Scoped re-check: no F. **Next: send to uac-r2 (firm-visible output) and spa-r4 (widget), then merge into work.**
 - Then: 132ui, 130g, 134. Agent slips this session: bare python run 3 times by agents (no effect); keep the no-python line in every brief.
-- Leftover scratch folders for a human to delete: `C:wt131a`, `C:wt131b`.
+- Leftover scratch folders for a human to delete: C:\wt131a and C:\wt131b.
 
 **Decided today:**
 - **EB-D-254 (owner, option b): no PDF report in R1.** 133 is withdrawn. 132 sends the findings table in the 131 notice body. 134 prints cleanly; spa-r4's guidance is in the 134 POML: use record sections or action hosts, and scope the print stylesheet to the report. FR-40 is amended.
