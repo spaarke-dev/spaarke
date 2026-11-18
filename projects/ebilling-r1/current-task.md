@@ -41,7 +41,9 @@
 
 **Master-merge obligation (from 131):** ConsumerTypes.All includes invoice-firm-notice. In every environment: BFF first, then seed (Ensure-ActionRow, then Seed-PlaybookConsumers), with the gap kept short. A row with no constant is a 503 on /healthz/catalog; a constant with no row is only Degraded. uac-r2 deploys dev from master, and it needs the owner's go naming the exact sha.
 
-**Master-merge obligations (owner go needed):**
+**2026-11-18: MASTER PR #2904 OPEN (owner's go: "2. Yes merge").** Head 8adb2dfa86. Master 38e67a2541 was merged in at 66bda9a9ba, clean. Local gates: 5 shards 52,395 passed / 0 failed; publish size 40.47 → 40.59 MB (+0.12); ArchTests filtered 80/80 plus the must-fire control. The iss028 expectations, the guard pending-list change and the 1.3.2.0 release row are done (8adb2dfa86). The external-spa lockfile is consistent (3.1.0), no re-resolve needed. uac-r2, ontology-r1 and spa-r4 have the PR number. NEXT: when CI is green, merge (merge commit, not squash: the 015 content check), then send uac-r2, word-add-in-r1 and provisioning-r1 the master SHA. Then uac-r2 deploys dev (the owner names the sha), and after that the 131 seed (EB-D-256) with uac-r2 notices. Local commits after 8adb2dfa86 are not pushed; push them after the merge so CI does not restart.
+
+**Master-merge obligations (owner go given 2026-11-18; all done in #2904):**
 - **iss028 PR:**
   - add the five ISS028 entries to `scripts/provisioning/role-privilege-expectations/spaarkemaster-1.3.2.0.json` (Core User absent list);
   - amend the 1.3.2.0 release row: it removes privileges, needs a managed stage-and-upgrade, and dev rolls back with `-Restore -Gap ISS028`;
