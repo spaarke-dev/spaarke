@@ -46,8 +46,12 @@ public sealed record FirmRecipients(IReadOnlyList<string> Addresses, bool Billin
 /// submitter who has since left the firm, and a billing contact who belongs to another firm, are not told. A contact whose <c>statecode</c> was not read is
 /// not active. The list is de-duplicated by address (case-insensitive), so a submitter who is also the billing contact is written to once. A missing
 /// billing contact is not an error: the submitter alone is told, and the caller logs the ids. Logs carry ids and codes only (ADR-015): never an address.
+/// <para><b>Row rule (D-70).</b> A recipient is also dropped unless the outcome route's own row rule is Visible for that contact on the notice's subject
+/// (<see cref="EbillingRecipientAccessRule"/>): a contact without Read on the invoice's core record or its secure roots, or for whom the invoice is hidden,
+/// is not told, and a decision that cannot be made drops the recipient (fail closed). The email follows the same rule as the route and the feed.</para>
+/// <para><b>Own submission.</b> The invoice's submission is always its OWN (<see cref="InvoiceBlockedHold.ReadOwnSubmissionAsync"/>); never the oldest one linked.</para>
 /// </remarks>
-public sealed class EbillingNotificationRecipients
+internal sealed class EbillingNotificationRecipients
 {
     internal const string OrganizationEntity = "sprk_organization";
     internal const string OrganizationBillingContact = "sprk_billingcontact";
@@ -58,13 +62,16 @@ public sealed class EbillingNotificationRecipients
 
     private readonly IGenericEntityService _entities;
     private readonly ExternalParticipationService _participations;
+    private readonly EbillingRecipientAccessRule _access;
     private readonly ILogger<EbillingNotificationRecipients> _logger;
 
     public EbillingNotificationRecipients(
-        IGenericEntityService entities, ExternalParticipationService participations, ILogger<EbillingNotificationRecipients> logger)
+        IGenericEntityService entities, ExternalParticipationService participations, EbillingRecipientAccessRule access,
+        ILogger<EbillingNotificationRecipients> logger)
     {
         _entities = entities ?? throw new ArgumentNullException(nameof(entities));
         _participations = participations ?? throw new ArgumentNullException(nameof(participations));
+        _access = access ?? throw new ArgumentNullException(nameof(access));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -76,7 +83,7 @@ public sealed class EbillingNotificationRecipients
             var submission = await FirstAsync(
                 InvoiceReviewReadService.SubmissionEntity, InvoiceReviewReadService.SubmissionEntity + "id", subjectId,
                 [InvoiceSubmissionPersister.SubmissionSubmitter, InvoiceSubmissionPersister.InvoiceVendorOrg,
-                    InvoiceSubmissionPersister.SubmissionInvoice, InvoiceSubmissionPersister.SubmissionStatus], null, ct).ConfigureAwait(false);
+                    InvoiceSubmissionPersister.SubmissionInvoice, InvoiceSubmissionPersister.SubmissionStatus], ct).ConfigureAwait(false);
             if (submission is null)
             {
                 return null;
@@ -94,16 +101,17 @@ public sealed class EbillingNotificationRecipients
         var invoice = await FirstAsync(
             InvoiceReviewReadService.InvoiceEntity, InvoiceReviewReadService.InvoiceEntity + "id", subjectId,
             ["statuscode", InvoiceSubmissionPersister.InvoiceVendorOrg, InvoiceSubmissionPersister.InvoiceSubmittedBy,
-                InvoiceReviewService.InvTrackingNumber, .. EligibleApproverResolver.CoreLookupColumns(InvoiceReviewReadService.InvoiceEntity)], null, ct).ConfigureAwait(false);
+                InvoiceReviewService.InvTrackingNumber, .. EligibleApproverResolver.CoreLookupColumns(InvoiceReviewReadService.InvoiceEntity)], ct).ConfigureAwait(false);
         if (invoice is null)
         {
             return null;
         }
 
-        // The submission that created the invoice (its stored link), for the submitter when the invoice names none and for the sent-text record.
-        var origin = await FirstAsync(
-            InvoiceReviewReadService.SubmissionEntity, InvoiceSubmissionPersister.SubmissionInvoice, subjectId,
-            [InvoiceSubmissionPersister.SubmissionSubmitter, InvoiceSubmissionPersister.SubmissionStatus], "createdon", ct).ConfigureAwait(false);
+        // The invoice's OWN submission, by the one own-submission rule (InvoiceBlockedHold.ReadOwnSubmissionAsync, task 165a): the submitter when the
+        // invoice names none, and the one place the sent text is stored. Another submission linked to the same invoice is never read here. When the own
+        // submission cannot be determined there is no submission row to take a submitter from and no store target (fail closed).
+        var origin = await InvoiceBlockedHold.ReadOwnSubmissionAsync(
+            _entities, subjectId, [InvoiceSubmissionPersister.SubmissionSubmitter, InvoiceSubmissionPersister.SubmissionStatus], ct).ConfigureAwait(false);
 
         var core = EligibleApproverResolver.SingleCoreOf(InvoiceReviewReadService.InvoiceEntity, invoice);
         return new EbillingNotificationFacts(
@@ -127,19 +135,19 @@ public sealed class EbillingNotificationRecipients
             return null;
         }
 
-        var row = await FirstAsync(OrganizationEntity, OrganizationEntity + "id", firm, [OrganizationName], null, ct).ConfigureAwait(false);
+        var row = await FirstAsync(OrganizationEntity, OrganizationEntity + "id", firm, [OrganizationName], ct).ConfigureAwait(false);
         return row?.GetAttributeValue<string>(OrganizationName);
     }
 
     /// <summary>The submitter's and the billing contact's usable addresses, de-duplicated. A read fault throws (the job retries).</summary>
-    public async Task<FirmRecipients> ResolveFirmRecipientsAsync(EbillingNotificationFacts facts, CancellationToken ct)
+    public async Task<FirmRecipients> ResolveFirmRecipientsAsync(EbillingNotificationFacts facts, EbillingNotificationSubject subject, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(facts);
 
         Guid? billing = null;
         if (facts.FirmId is { } firm && firm != Guid.Empty)
         {
-            var org = await FirstAsync(OrganizationEntity, OrganizationEntity + "id", firm, [OrganizationBillingContact], null, ct).ConfigureAwait(false);
+            var org = await FirstAsync(OrganizationEntity, OrganizationEntity + "id", firm, [OrganizationBillingContact], ct).ConfigureAwait(false);
             billing = org?.GetAttributeValue<EntityReference>(OrganizationBillingContact)?.Id;
         }
 
@@ -156,17 +164,27 @@ public sealed class EbillingNotificationRecipients
 
         // The firm is the notice's own: a contact who is not an ACTIVE member of it now (left the firm, belongs to another firm, or whose membership
         // is unreadable: the job retries) is not told. No firm on the record means nobody can be shown to belong to it.
+        // Then the route's own row rule for that contact on the notice's subject (D-70). No subject on record means nothing to decide: nobody is told.
+        var subjectId = subject == EbillingNotificationSubject.Invoice ? facts.InvoiceId : facts.SubmissionId;
         var members = new List<Guid>();
         foreach (var id in contactIds)
         {
-            if (await IsActiveMemberAsync(id, facts.FirmId, ct).ConfigureAwait(false))
+            var firms = await ActiveFirmsOfMemberAsync(id, facts.FirmId, ct).ConfigureAwait(false);
+            if (firms is null)
+            {
+                _logger.LogInformation(
+                    "eBilling notification recipient is not an active member of the firm and is not told | Contact {ContactId}, Firm {FirmId}", id, facts.FirmId);
+            }
+            else if (subjectId is { } subjectRecord && subjectRecord != Guid.Empty
+                && await _access.MayBeToldAsync(id, firms, subject, subjectRecord, ct).ConfigureAwait(false))
             {
                 members.Add(id);
             }
             else
             {
                 _logger.LogInformation(
-                    "eBilling notification recipient is not an active member of the firm and is not told | Contact {ContactId}, Firm {FirmId}", id, facts.FirmId);
+                    "eBilling notification recipient may not open the subject under the outcome route's row rule and is not told | Contact {ContactId}, Subject {SubjectId}",
+                    id, subjectId);
             }
         }
 
@@ -212,14 +230,14 @@ public sealed class EbillingNotificationRecipients
     }
 
     /// <summary>
-    /// True when <paramref name="contactId"/> is an Active contact holding an active (conferring) membership in <paramref name="firmId"/> now. A read that could
-    /// not be made throws (the job retries); it is never "not a member" and never a pass.
+    /// The contact's active firms when <paramref name="contactId"/> is an Active contact holding an active (conferring) membership in <paramref name="firmId"/>
+    /// now; null when it is not a member. A read that could not be made throws (the job retries); it is never "not a member" and never a pass.
     /// </summary>
-    private async Task<bool> IsActiveMemberAsync(Guid contactId, Guid? firmId, CancellationToken ct)
+    private async Task<IReadOnlyList<Guid>?> ActiveFirmsOfMemberAsync(Guid contactId, Guid? firmId, CancellationToken ct)
     {
         if (firmId is not { } firm || firm == Guid.Empty)
         {
-            return false;
+            return null;
         }
 
         var (firms, unreadable) = await ExternalInvoiceSubmissionAuthorizationFilter
@@ -229,7 +247,7 @@ public sealed class EbillingNotificationRecipients
             throw new InvalidOperationException("The firm membership of a recipient could not be read.");
         }
 
-        return firms.Contains(firm);
+        return firms.Contains(firm) ? firms : null;
     }
 
     /// <summary>One plain address with no whitespace, comma, semicolon or control character (a header-injection or a list is refused); null otherwise.</summary>
@@ -251,7 +269,7 @@ public sealed class EbillingNotificationRecipients
             : null;
     }
 
-    private async Task<Entity?> FirstAsync(string entity, string column, Guid value, string[] columns, string? orderBy, CancellationToken ct)
+    private async Task<Entity?> FirstAsync(string entity, string column, Guid value, string[] columns, CancellationToken ct)
     {
         var query = new QueryExpression(entity)
         {
@@ -260,11 +278,6 @@ public sealed class EbillingNotificationRecipients
             TopCount = 1,
         };
         query.Criteria.AddCondition(column, ConditionOperator.Equal, value);
-        if (orderBy is not null)
-        {
-            query.AddOrder(orderBy, OrderType.Ascending);
-        }
-
         return (await _entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false)).Entities.FirstOrDefault();
     }
 }

@@ -106,6 +106,7 @@ public static class FinanceModule
         // services; the enqueuer holds the scoped JobSubmissionService's dependencies). Unconditional (flag rule above): the job reads EbillingOptions.Enabled
         // itself (ADR-018) and the routes carry the kill switch.
         services.AddScoped<EbillingNotificationEnqueuer>();
+        services.AddScoped<Sprk.Bff.Api.Api.ExternalAccess.EbillingRecipientAccessRule>(); // the outcome route's row rule, asked for a recipient (D-70); concrete, no interface
         services.AddScoped<EbillingNotificationRecipients>();
         services.AddScoped<IJobHandler, Sprk.Bff.Api.Services.Jobs.Handlers.EbillingNotificationJobHandler>();
 

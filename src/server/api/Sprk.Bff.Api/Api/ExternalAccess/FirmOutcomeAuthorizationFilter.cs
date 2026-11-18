@@ -150,13 +150,33 @@ internal sealed class FirmOutcomeAuthorizationFilter : IEndpointFilter
             var (denial, passed) = decided[i];
             answers[invoices[i].Id] = denial is null
                 ? (passed ? InvoiceFeedDecision.Visible : InvoiceFeedDecision.Denied)
-                : denial is IStatusCodeHttpResult { StatusCode: StatusCodes.Status503ServiceUnavailable }
-                    ? InvoiceFeedDecision.Unavailable
-                    : InvoiceFeedDecision.Denied;
+                : FeedDecisionOf(denial);
         }
 
         return answers;
     }
+
+    /// <summary>
+    /// The route's OWN decision for this filter's subject (an invoice, or a submission), asked as a decision rather than a refusal (ebilling-r1 task 132,
+    /// D-70: a firm notice email goes only to a contact the outcome route would answer). The same code the route runs for one id, so nothing of the rule
+    /// is copied: the invoice rule (firm, Read on the core record, the secure roots, the (a') hiding decision), or the submission rule (and then its
+    /// derived invoice's). Visible only when the route would let the caller through (a submission whose invoice does not exist yet passes, as on the
+    /// route); Unavailable when a read or the decision could not be made; Denied otherwise.
+    /// </summary>
+    internal async Task<InvoiceFeedDecision> DecideSubjectForNoticeAsync(
+        CallerPrincipal principal, IReadOnlyList<Guid> firms, Guid subjectId, CancellationToken ct)
+    {
+        var (denial, _) = _subject == FirmOutcomeSubject.Invoice
+            ? await DecideInvoiceAsync(principal, firms, subjectId, ct).ConfigureAwait(false)
+            : await DecideSubmissionAsync(principal, firms, subjectId, ct).ConfigureAwait(false);
+        return denial is null ? InvoiceFeedDecision.Visible : FeedDecisionOf(denial);
+    }
+
+    /// <summary>A refusal as a feed decision: the retryable 503 is Unavailable (could not decide); every other refusal is Denied.</summary>
+    private static InvoiceFeedDecision FeedDecisionOf(IResult denial) =>
+        denial is IStatusCodeHttpResult { StatusCode: StatusCodes.Status503ServiceUnavailable }
+            ? InvoiceFeedDecision.Unavailable
+            : InvoiceFeedDecision.Denied;
 
     public async ValueTask<object?> InvokeAsync(EndpointFilterInvocationContext context, EndpointFilterDelegate next)
     {

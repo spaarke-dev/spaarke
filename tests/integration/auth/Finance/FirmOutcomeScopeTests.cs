@@ -564,6 +564,62 @@ public sealed class FirmOutcomeScopeTests : IAsyncLifetime
 
     private async Task<InvoiceFeedDecision> FeedDecision(Guid invoice) => (await FeedDecisions([invoice]))[invoice];
 
+    // ── Task 132 review round 2 (D-70): the same rule, asked for a firm-notice RECIPIENT, for one subject ──
+
+    private async Task<InvoiceFeedDecision> NoticeDecision(FirmOutcomeSubject subject, Guid subjectId, CallerPrincipal? caller = null, IReadOnlyList<Guid>? firms = null)
+    {
+        ExternalInvoiceHiding hide = (_, ids, _) => Task.FromResult(_invoiceHidingFaults
+            ? InvoiceVisibilityResult.ReadFailed(ids)
+            : new InvoiceVisibilityResult(
+                ids, ids.Where(_hiddenInvoices.Contains).ToDictionary(id => id, _ => InvoiceHiddenReason.SourceHidden), faulted: false));
+        ExternalInvoiceSubmissionHiding hideSubmissions = (_, submissions, _) =>
+        {
+            var ids = submissions.Select(x => x.SubmissionId).ToList();
+            return Task.FromResult(new InvoiceVisibilityResult(
+                ids, ids.Where(_hiddenSubmissions.Contains).ToDictionary(id => id, _ => InvoiceHiddenReason.SourceHidden), faulted: false));
+        };
+        var filter = new FirmOutcomeAuthorizationFilter(
+            subject, _participations, _data, _h.Build(), NullLogger<FirmOutcomeAuthorizationFilter>.Instance, hide, hideSubmissions);
+
+        return await filter.DecideSubjectForNoticeAsync(caller ?? Contact(), firms ?? [FirmA], subjectId, CancellationToken.None);
+    }
+
+    [Fact(DisplayName = "132 D-70 notice decision (must-not-fire): an invoice of the contact's firm, readable core, not hidden, is Visible")]
+    public async Task NoticeDecision_OwnFirmsReadableInvoice_IsVisible() =>
+        (await NoticeDecision(FirmOutcomeSubject.Invoice, SeedInvoice(FirmA))).Should().Be(InvoiceFeedDecision.Visible);
+
+    [Fact(DisplayName = "132 D-70 notice decision (must-fire): another firm's invoice, a contact WITHOUT Read on the core record, an unreadable secure root and a hidden invoice are Denied; an undecidable one is Unavailable")]
+    public async Task NoticeDecision_EachRefusalOfTheRoute_IsNotVisible()
+    {
+        (await NoticeDecision(FirmOutcomeSubject.Invoice, SeedInvoice(FirmB))).Should().Be(InvoiceFeedDecision.Denied);
+        (await NoticeDecision(FirmOutcomeSubject.Invoice, SeedInvoice(FirmA, OtherMatter))).Should().Be(InvoiceFeedDecision.Denied);
+        (await NoticeDecision(FirmOutcomeSubject.Invoice, SeedInvoice(FirmA), Contact(AccessRights.None))).Should().Be(InvoiceFeedDecision.Denied);
+
+        var secure = SeedInvoice(FirmA);
+        _data.Invoices[secure]["sprk_project"] = SecureProject;
+        (await NoticeDecision(FirmOutcomeSubject.Invoice, secure)).Should().Be(InvoiceFeedDecision.Denied, "an unreadable secure root denies, as on the route");
+
+        var hidden = SeedInvoice(FirmA);
+        _hiddenInvoices.Add(hidden);
+        (await NoticeDecision(FirmOutcomeSubject.Invoice, hidden)).Should().Be(InvoiceFeedDecision.Denied);
+
+        var undecidable = SeedInvoice(FirmA);
+        _invoiceHidingFaults = true;
+        (await NoticeDecision(FirmOutcomeSubject.Invoice, undecidable)).Should().Be(InvoiceFeedDecision.Unavailable, "a fault is never Visible");
+    }
+
+    [Fact(DisplayName = "132 D-70 notice decision: a missing invoice is Denied (the route's uniform refusal), never Visible")]
+    public async Task NoticeDecision_MissingInvoice_IsDenied() =>
+        (await NoticeDecision(FirmOutcomeSubject.Invoice, Guid.NewGuid())).Should().Be(InvoiceFeedDecision.Denied);
+
+    [Fact(DisplayName = "132 D-70 notice decision: a submission of the contact's firm is Visible; another firm's, and a contact with no Read on its core record, are Denied")]
+    public async Task NoticeDecision_Submission_IsTheRoutesSubmissionRule()
+    {
+        (await NoticeDecision(FirmOutcomeSubject.Submission, SeedSubmission(FirmA))).Should().Be(InvoiceFeedDecision.Visible);
+        (await NoticeDecision(FirmOutcomeSubject.Submission, SeedSubmission(FirmB))).Should().Be(InvoiceFeedDecision.Denied);
+        (await NoticeDecision(FirmOutcomeSubject.Submission, SeedSubmission(FirmA), Contact(AccessRights.None))).Should().Be(InvoiceFeedDecision.Denied);
+    }
+
     [Fact(DisplayName = "132 feed decision (must-not-fire): an invoice of the caller's firm, readable core, not hidden, is Visible")]
     public async Task FeedDecision_OwnFirmsReadableInvoice_IsVisible() =>
         (await FeedDecision(SeedInvoice(FirmA))).Should().Be(InvoiceFeedDecision.Visible);

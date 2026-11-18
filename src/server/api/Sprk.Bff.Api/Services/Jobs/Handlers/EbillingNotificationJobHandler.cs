@@ -45,7 +45,7 @@ namespace Sprk.Bff.Api.Services.Jobs.Handlers;
 /// (the appnotification writer), <see cref="EligibleApproverResolver"/> (103). <i>Extension</i> — none of them is a job that decides who is told and when;
 /// this is that composition. <i>Cost of doing nothing</i> — a firm hears nothing about a rejected, returned or adjusted invoice and no approver is told one is waiting (FR-39, FR-35).</para>
 /// </remarks>
-public class EbillingNotificationJobHandler : IJobHandler
+internal class EbillingNotificationJobHandler : IJobHandler
 {
     /// <summary>Job type constant: must match <see cref="EbillingNotificationEnqueuer.JobTypeName"/>.</summary>
     public const string JobTypeName = EbillingNotificationEnqueuer.JobTypeName;
@@ -203,7 +203,7 @@ public class EbillingNotificationJobHandler : IJobHandler
         }
 
         var draft = composed.Draft!;
-        var recipients = await _recipients.ResolveFirmRecipientsAsync(facts, ct).ConfigureAwait(false);
+        var recipients = await _recipients.ResolveFirmRecipientsAsync(facts, ExpectedSubject(evt), ct).ConfigureAwait(false);
         if (recipients.BillingContactMissing)
         {
             _logger.LogWarning(
@@ -380,6 +380,11 @@ public class EbillingNotificationJobHandler : IJobHandler
     {
         if (submissionId is not { } id || id == Guid.Empty)
         {
+            // The invoice's OWN submission could not be determined (none linked, or none that derives the invoice): nothing is written to any
+            // other submission. The email is out; the notice is simply not kept.
+            _logger.LogWarning(
+                "eBilling notification job {JobId}: the invoice's own submission could not be determined, so the sent notice is not stored | JobType {JobType}",
+                job.JobId, job.JobType);
             return;
         }
 
@@ -534,16 +539,26 @@ public class EbillingNotificationJobHandler : IJobHandler
     private const string GraphSendFailedCode = "GRAPH_SEND_FAILED";
 
     /// <summary>
-    /// True when a typed send failure is KNOWN to have happened before Graph accepted the message. The email channel marks its own failures
-    /// (<see cref="EmailChannelSender.SendOutcomeExtension"/>): <c>NotSent</c> is a settled refusal or a failure before the request left; <c>Unknown</c>
-    /// (a timeout, a transport fault, a 5xx, a 408) and a failure that carries no outcome are ambiguous, because the message may have been delivered.
-    /// Any other typed problem is one of the send path's own refusals (validation, sender, daily limit, record preparation), all before the channel send.
+    /// The typed codes of the send path's own refusals that are raised BEFORE the channel send (so the message provably did not go out): a request
+    /// that fails validation, an unapproved or unset sender, the daily send limit, and a regarding association that could not be derived while the
+    /// record is prepared. An ALLOW-LIST (review K4): a typed failure with any other code is not assumed to be pre-send.
+    /// </summary>
+    internal static readonly IReadOnlySet<string> PreSendRefusalCodes = new HashSet<string>(StringComparer.Ordinal)
+    {
+        "VALIDATION_ERROR", "INVALID_SENDER", "NO_DEFAULT_SENDER", "DAILY_SEND_LIMIT_REACHED", "CORE_ANCESTOR_DERIVATION_FAILED",
+    };
+
+    /// <summary>
+    /// True when a typed send failure is KNOWN to have happened before Graph accepted the message. Two kinds only: one of the send path's own
+    /// refusals before the channel (<see cref="PreSendRefusalCodes"/>, an allow-list), or Graph's own settled refusal (<c>GRAPH_SEND_FAILED</c> whose
+    /// <see cref="EmailChannelSender.SendOutcomeExtension"/> is <c>NotSent</c>). <c>Unknown</c> (a timeout, a transport fault, a 5xx, a 408), a failure
+    /// that carries no outcome and any code not listed are ambiguous, because the message may have been delivered: the notice is not sent again.
     /// </summary>
     internal static bool SendProvablyDidNotGoOut(SdapProblemException ex)
     {
         if (!string.Equals(ex.Code, GraphSendFailedCode, StringComparison.Ordinal))
         {
-            return true;
+            return PreSendRefusalCodes.Contains(ex.Code);
         }
 
         return ex.Extensions is not null

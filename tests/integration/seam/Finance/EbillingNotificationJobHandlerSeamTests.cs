@@ -8,6 +8,7 @@ using Microsoft.Extensions.Options;
 using Microsoft.Xrm.Sdk;
 using Moq;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Api.ExternalAccess;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.Exceptions;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
@@ -55,6 +56,7 @@ public sealed class EbillingNotificationJobHandlerSeamTests
         public readonly Guid BillingId = Guid.NewGuid();
         public readonly FakeIdempotency Cache = new();
         public readonly Memberships Members = new();
+        public readonly RecipientAccess Access;
         public readonly RecordingChannel Channel = new();
         public readonly Mock<IActionSeam> Actions = new();
         public readonly List<CreateNotificationRequest> Notified = [];
@@ -70,6 +72,7 @@ public sealed class EbillingNotificationJobHandlerSeamTests
 
         public Rig()
         {
+            Access = new RecipientAccess(Log.For<EbillingRecipientAccessRule>());
             // The firm: an organisation with a billing contact, a submitter, and the invoice and submission that name them.
             World.Put(new Entity("sprk_organization", FirmId) { ["sprk_organizationname"] = "Acme Law", ["sprk_billingcontact"] = new EntityReference("contact", BillingId) });
             World.Put(Mailable(SubmitterId, "Sam Submitter", SubmitterEmail));
@@ -122,7 +125,7 @@ public sealed class EbillingNotificationJobHandlerSeamTests
                 settings.Object, Mock.Of<IInvoiceAi>(MockBehavior.Strict), Log.For<FirmNoticeComposer>());
 
             var entities = World.Entities.Object;
-            var recipients = new EbillingNotificationRecipients(entities, Members, Log.For<EbillingNotificationRecipients>());
+            var recipients = new EbillingNotificationRecipients(entities, Members, Access, Log.For<EbillingNotificationRecipients>());
             return new EbillingNotificationJobHandler(
                 composer, recipients, Communication(), World.Resolver(), Actions.Object, Cache, entities,
                 Mock.Of<IOptionsMonitor<EbillingOptions>>(m => m.CurrentValue == Options), Log.For<EbillingNotificationJobHandler>())
@@ -655,7 +658,7 @@ public sealed class EbillingNotificationJobHandlerSeamTests
         var rig = new Rig();
         rig.SubmissionIs(InvoiceSubmissionStatus.Rejected);
         rig.SubmissionOutcome = rig.Outcome(FirmOutcomeKind.SubmissionRejected);
-        rig.SendFault = new SdapProblemException("DAILY_SEND_LIMIT", "Daily send limit reached", null, 429);
+        rig.SendFault = new SdapProblemException("DAILY_SEND_LIMIT_REACHED", "Daily send limit reached", null, 429);
 
         var first = await rig.Handler().ProcessAsync(rig.RejectedSubmissionJob(), CancellationToken.None);
 
@@ -694,6 +697,176 @@ public sealed class EbillingNotificationJobHandlerSeamTests
         var outcome = await rig.Handler().ProcessAsync(rig.RejectedSubmissionJob(), CancellationToken.None);
 
         outcome.Status.Should().Be(JobStatus.Poisoned);
+    }
+
+    // ── Review round 2, F1 (D-70): the email follows the outcome route's row rule ──
+
+    private const string ConfirmedSubject = "Please correct your invoice";
+    private const string ConfirmedProse = "Hello,\n\nPlease correct the hours.\n\nThank you.";
+
+    [Fact(DisplayName = "132 D-70 (must-fire): a billing contact WITHOUT Read on the secure core record gets no email; the submitter with access still does")]
+    public async Task ABillingContactWithoutAccess_IsNotTold_WhileTheSubmitterWithAccessIs()
+    {
+        var rig = new Rig();
+        rig.Access.Decisions[rig.BillingId] = InvoiceFeedDecision.Denied;
+        rig.InvoiceOutcome = rig.Outcome(FirmOutcomeKind.ReturnedToFirm, Reduced);
+
+        var outcome = await rig.Handler().ProcessAsync(
+            rig.InvoiceJob(EbillingNotificationEvent.ReturnedToFirm, ConfirmedSubject, ConfirmedProse), CancellationToken.None);
+
+        outcome.Status.Should().Be(JobStatus.Completed);
+        Recipients(rig.Channel.Sent.Should().ContainSingle().Subject).Should().Equal(SubmitterEmail);
+        rig.Access.Asked.Should().BeEquivalentTo(
+            new[] { (rig.SubmitterId, EbillingNotificationSubject.Invoice, rig.World.InvoiceId), (rig.BillingId, EbillingNotificationSubject.Invoice, rig.World.InvoiceId) },
+            "each recipient is asked the route's rule for THIS invoice");
+        rig.Log.Lines.Should().NotContain(l => l.Contains(SubmitterEmail) || l.Contains(BillingEmail), "ADR-015: ids only");
+    }
+
+    [Fact(DisplayName = "132 D-70 (must-fire): a decision that is Unavailable, and a principal that cannot be composed, each drop THAT recipient (fail closed); the other is still told")]
+    public async Task ADecisionThatCannotBeMade_DropsThatRecipient_FailClosed()
+    {
+        var unavailable = new Rig();
+        unavailable.Access.Decisions[unavailable.BillingId] = InvoiceFeedDecision.Unavailable;
+        unavailable.InvoiceOutcome = unavailable.Outcome(FirmOutcomeKind.ReturnedToFirm, Reduced);
+        await unavailable.Handler().ProcessAsync(
+            unavailable.InvoiceJob(EbillingNotificationEvent.ReturnedToFirm, ConfirmedSubject, ConfirmedProse), CancellationToken.None);
+        Recipients(unavailable.Channel.Sent.Should().ContainSingle().Subject).Should().Equal(SubmitterEmail);
+
+        var faulted = new Rig();
+        faulted.Access.ComposeFaults.Add(faulted.SubmitterId);
+        faulted.InvoiceOutcome = faulted.Outcome(FirmOutcomeKind.ReturnedToFirm, Reduced);
+        await faulted.Handler().ProcessAsync(
+            faulted.InvoiceJob(EbillingNotificationEvent.ReturnedToFirm, ConfirmedSubject, ConfirmedProse), CancellationToken.None);
+        Recipients(faulted.Channel.Sent.Should().ContainSingle().Subject).Should().Equal(BillingEmail);
+        faulted.Log.Lines.Should().Contain(l => l.Contains("could not be decided") && l.Contains(faulted.SubmitterId.ToString()) && l.Contains("InvalidOperationException"));
+    }
+
+    [Fact(DisplayName = "132 D-70 (must-fire): when the rule is not Visible for anyone nothing is sent, nothing is marked, and the job completes (the no-recipient path)")]
+    public async Task WhenNobodyMayOpenTheInvoice_NothingIsSent_AndNoMarkerIsWritten()
+    {
+        var rig = new Rig();
+        rig.Access.Decisions[rig.SubmitterId] = InvoiceFeedDecision.Denied;
+        rig.Access.ComposeFaults.Add(rig.BillingId);
+        rig.InvoiceOutcome = rig.Outcome(FirmOutcomeKind.ReturnedToFirm, Reduced);
+
+        var outcome = await rig.Handler().ProcessAsync(
+            rig.InvoiceJob(EbillingNotificationEvent.ReturnedToFirm, ConfirmedSubject, ConfirmedProse), CancellationToken.None);
+
+        outcome.Status.Should().Be(JobStatus.Completed);
+        rig.Channel.Sent.Should().BeEmpty();
+        rig.Cache.Marked.Should().BeEmpty();
+        rig.Log.Lines.Should().Contain(l => l.Contains("nobody has a usable address"));
+    }
+
+    [Fact(DisplayName = "132 D-70: a rejected submission is asked the route's SUBMISSION rule for the submission, not the invoice rule")]
+    public async Task ARejectedSubmission_IsAskedTheSubmissionRule()
+    {
+        var rig = new Rig();
+        rig.SubmissionIs(InvoiceSubmissionStatus.Rejected);
+        rig.SubmissionOutcome = rig.Outcome(FirmOutcomeKind.SubmissionRejected, Reduced);
+        rig.Access.Decisions[rig.BillingId] = InvoiceFeedDecision.Denied;
+
+        await rig.Handler().ProcessAsync(rig.RejectedSubmissionJob(), CancellationToken.None);
+
+        Recipients(rig.Channel.Sent.Should().ContainSingle().Subject).Should().Equal(SubmitterEmail);
+        rig.Access.Asked.Should().OnlyContain(a => a.Subject == EbillingNotificationSubject.Submission && a.SubjectId == rig.World.OwnSubmissionId);
+    }
+
+    // ── Review round 2, F2: the invoice's OWN submission only ──
+
+    private static Entity OlderLinkedSubmission(Rig rig, Guid submitter)
+    {
+        // A second submission linked to the same invoice, created EARLIER, whose id does not derive the invoice's: not its own.
+        var older = new Entity("sprk_invoicesubmission", Guid.NewGuid())
+        {
+            ["sprk_invoice"] = new EntityReference("sprk_invoice", rig.World.InvoiceId),
+            ["sprk_submitter"] = new EntityReference("contact", submitter),
+            ["sprk_vendororg"] = new EntityReference("sprk_organization", FirmId),
+            ["createdon"] = DateTime.UtcNow.AddDays(-30),
+        };
+        rig.World.Row("sprk_invoicesubmission", rig.World.OwnSubmissionId)["createdon"] = DateTime.UtcNow.AddDays(-1);
+        rig.World.Put(older);
+        return older;
+    }
+
+    [Fact(DisplayName = "132 review F2 (must-fire): the sent notice is stored on the invoice's OWN submission, never on an older submission linked to the same invoice")]
+    public async Task TheSentNotice_IsStoredOnTheOwnSubmission_NotAnOlderLinkedOne()
+    {
+        var rig = new Rig();
+        var older = OlderLinkedSubmission(rig, rig.SubmitterId);
+        rig.InvoiceOutcome = rig.Outcome(FirmOutcomeKind.ReturnedToFirm, Reduced);
+
+        await rig.Handler().ProcessAsync(
+            rig.InvoiceJob(EbillingNotificationEvent.ReturnedToFirm, ConfirmedSubject, ConfirmedProse), CancellationToken.None);
+
+        rig.Channel.Sent.Should().ContainSingle();
+        rig.World.Row("sprk_invoicesubmission", rig.World.OwnSubmissionId).GetAttributeValue<string>("sprk_firmnoticetext").Should().NotBeNullOrEmpty();
+        rig.World.Row("sprk_invoicesubmission", older.Id).Contains("sprk_firmnoticetext").Should().BeFalse("an older linked submission is not the invoice's own");
+    }
+
+    [Fact(DisplayName = "132 review F2 (must-fire): a submitter is never taken from an older submission linked to the same invoice; the invoice's own submission supplies it")]
+    public async Task TheSubmitter_IsNotTakenFromAnOlderLinkedSubmission()
+    {
+        var rig = new Rig();
+        var strangerId = Guid.NewGuid();
+        rig.World.Put(Rig.Mailable(strangerId, "Old Submitter", "old@firm.test"));
+        rig.Members.Firms[strangerId] = [FirmId];
+        OlderLinkedSubmission(rig, strangerId);
+        rig.World.Invoice.Attributes.Remove("sprk_submittedby"); // the invoice names no submitter: its own submission decides
+        rig.InvoiceOutcome = rig.Outcome(FirmOutcomeKind.ReturnedToFirm, Reduced);
+
+        await rig.Handler().ProcessAsync(
+            rig.InvoiceJob(EbillingNotificationEvent.ReturnedToFirm, ConfirmedSubject, ConfirmedProse), CancellationToken.None);
+
+        Recipients(rig.Channel.Sent.Should().ContainSingle().Subject).Should().BeEquivalentTo(SubmitterEmail, BillingEmail);
+    }
+
+    [Fact(DisplayName = "132 review F2 (fail closed): when the invoice's own submission cannot be determined there is no submitter from a submission row and the notice is stored nowhere")]
+    public async Task WithNoOwnSubmission_NoSubmitterIsTaken_AndTheNoticeIsNotStored()
+    {
+        var rig = new Rig();
+        var older = OlderLinkedSubmission(rig, rig.SubmitterId);
+        // The own submission no longer links the invoice: only the older (not-own) one does.
+        rig.World.Row("sprk_invoicesubmission", rig.World.OwnSubmissionId).Attributes.Remove("sprk_invoice");
+        rig.World.Invoice.Attributes.Remove("sprk_submittedby");
+        rig.InvoiceOutcome = rig.Outcome(FirmOutcomeKind.ReturnedToFirm, Reduced);
+
+        var outcome = await rig.Handler().ProcessAsync(
+            rig.InvoiceJob(EbillingNotificationEvent.ReturnedToFirm, ConfirmedSubject, ConfirmedProse), CancellationToken.None);
+
+        outcome.Status.Should().Be(JobStatus.Completed);
+        Recipients(rig.Channel.Sent.Should().ContainSingle().Subject).Should().Equal(BillingEmail);
+        rig.World.Row("sprk_invoicesubmission", older.Id).Contains("sprk_firmnoticetext").Should().BeFalse();
+        rig.World.Row("sprk_invoicesubmission", rig.World.OwnSubmissionId).Contains("sprk_firmnoticetext").Should().BeFalse();
+        rig.Log.Lines.Should().Contain(l => l.Contains("own submission could not be determined"));
+    }
+
+    // ── Review round 2, K4: only a KNOWN pre-send refusal clears the marker ──
+
+    [Theory(DisplayName = "132 review K4: the send path's own pre-channel refusal codes are the only typed failures treated as 'not sent'")]
+    [InlineData("VALIDATION_ERROR", true)]
+    [InlineData("INVALID_SENDER", true)]
+    [InlineData("NO_DEFAULT_SENDER", true)]
+    [InlineData("DAILY_SEND_LIMIT_REACHED", true)]
+    [InlineData("CORE_ANCESTOR_DERIVATION_FAILED", true)]
+    [InlineData("CHANNEL_SEND_FAILED", false)]
+    [InlineData("SOME_FUTURE_CODE", false)]
+    [InlineData("X", false)]
+    public void OnlyAKnownPreSendCode_ProvesTheSendDidNotGoOut(string code, bool expected) =>
+        EbillingNotificationJobHandler.SendProvablyDidNotGoOut(new SdapProblemException(code, "x", null, 500)).Should().Be(expected);
+
+    [Fact(DisplayName = "132 review K4 (must-fire): a typed failure with an UNLISTED code is ambiguous: Poisoned, the marker kept, not sent again")]
+    public async Task AnUnlistedTypedFailure_StaysPoisoned_AndKeepsTheMarker()
+    {
+        var rig = new Rig();
+        rig.SubmissionIs(InvoiceSubmissionStatus.Rejected);
+        rig.SubmissionOutcome = rig.Outcome(FirmOutcomeKind.SubmissionRejected);
+        rig.SendFault = new SdapProblemException("CHANNEL_SEND_FAILED", "Unexpected", null, 500);
+
+        var outcome = await rig.Handler().ProcessAsync(rig.RejectedSubmissionJob(), CancellationToken.None);
+
+        outcome.Status.Should().Be(JobStatus.Poisoned);
+        rig.Cache.Marked.Should().ContainSingle("the message may have gone: the marker stays");
     }
 
     [Fact(DisplayName = "132 ADR-018: with the eBilling kill switch off the job sends and notifies nothing")]
@@ -850,6 +1023,40 @@ public sealed class EbillingNotificationJobHandlerSeamTests
     }
 
     /// <summary>The firm memberships of the contacts (the real <c>ReadContactFirmsAsync</c> rule runs over this double of the two Dataverse reads).</summary>
+    /// <summary>
+    /// The row rule's seams, over the REAL <see cref="EbillingRecipientAccessRule.MayBeToldAsync"/> (its fault handling is what a fault test exercises):
+    /// the principal is composed trivially and the decision per contact is stated by the test (default Visible). What the real filter decides is tested
+    /// in <c>FirmOutcomeScopeTests</c> (<c>DecideSubjectForNoticeAsync</c>), over the route's own code.
+    /// </summary>
+    private sealed class RecipientAccess(ILogger<EbillingRecipientAccessRule> logger) : EbillingRecipientAccessRule(logger)
+    {
+        /// <summary>The decision for a contact, when it is not Visible.</summary>
+        public Dictionary<Guid, InvoiceFeedDecision> Decisions { get; } = [];
+
+        /// <summary>Contacts whose principal cannot be composed (the evaluator faulted).</summary>
+        public HashSet<Guid> ComposeFaults { get; } = [];
+
+        /// <summary>Every question asked: the contact, the subject kind and the subject id.</summary>
+        public List<(Guid Contact, EbillingNotificationSubject Subject, Guid SubjectId)> Asked { get; } = [];
+
+        internal override Task<CallerPrincipal> ComposePrincipalAsync(Guid contactId, CancellationToken ct) =>
+            ComposeFaults.Contains(contactId)
+                ? throw new InvalidOperationException("the accessible set could not be composed")
+                : Task.FromResult(new CallerPrincipal
+                {
+                    Plane = CallerPrincipalPlane.CiamContact,
+                    ContactId = contactId,
+                    ProjectAccess = [],
+                });
+
+        internal override Task<InvoiceFeedDecision> DecideAsync(
+            CallerPrincipal principal, IReadOnlyList<Guid> firms, EbillingNotificationSubject subject, Guid subjectId, CancellationToken ct)
+        {
+            Asked.Add((principal.ContactId, subject, subjectId));
+            return Task.FromResult(Decisions.TryGetValue(principal.ContactId, out var decision) ? decision : InvoiceFeedDecision.Visible);
+        }
+    }
+
     private sealed class Memberships : ExternalParticipationService
     {
         public Memberships()
