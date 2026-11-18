@@ -328,10 +328,6 @@ This under-lists, which fails closed.
 
 ## D-22 — Signals assign-task writes the event-type bind key in the wrong case (#2893)
 
-**Status.** Open, filed for `spaarke-ontology-platform-r1` (their file; hand-off pending their acceptance). Not reproduced live.
+**Status.** Closed, not a defect (2026-11-17, ontology-r1; checked against the source). The Signals executors write through the child-records core, which runs `DataverseWriteItemMapper.MapWebApiPayloadAsync`; it matches each `@odata.bind` key to metadata case-insensitively (~305-333) and sends the metadata navigation name. The external create (D-21) posts directly without that mapper, which is why only it failed.
 
-**Where.** `Services/Signals/Actions/DecisionActionExecutors.cs` ~1509; its test pin `tests/unit/domain/Signals/DecisionActionExecutorsTests.cs` ~1069.
-
-**Effect.** Same lowercase key as D-21, so an assign-task decision should fail at the Dataverse write and create no Task event.
-
-**Fix shape.** Correct the key and its pin; better, one shared constant on `EventTypeRef` used by all three writers.
+**Where.** `Services/Signals/Actions/DecisionActionExecutors.cs` ~1509 (lowercase keys, mapped before the write).
