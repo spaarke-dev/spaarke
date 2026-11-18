@@ -53,10 +53,12 @@ A caller who belongs to several firms sees every firm's sets, each labelled with
 - K3: one resolver read per firm (N firms = N reads); callers have few firms.
 - K4: the parameter table is closed; a new rule-body member needs a table row (ratchet test).
 - K5: the unit gate has no ui-test run (the brief excluded it): dark mode is by construction (Fluent v9 tokens only, no hex), 360 px is covered by a style-guard unit test, not a browser check.
+- N1 (spa-r4): on 503 `ebilling.disabled` the card stays in the widget library and shows "Billing guidelines aren't available." (deviation 7); it is not hidden.
+- N2 (spa-r4): the per-record view has no SPA caller; a record-page host is spa-r4's R4 surface, scheduled by them if the owner wants it (see K7).
 
 ## Tests
 
-- `tests/unit/Sprk.Bff.Api.Tests/Services/Finance/BillingGuidelinesServiceTests.cs` (25): shows, other firm, flag off or unset, Draft/Retired/not in force, assigned-only, parent label, record rule label, refusal marker, allow-list members (now with `FirmId`), several firms (EB-D-260), parameter table, parameter shaping, and the fix-round cases: a rule-level Exclude, a Procedure-level Exclude, a superseded version inside the chosen Procedure Version, another firm's Exclude or record set on a record viewed by firm F (each with a must-fire control), and the unnamed-firm label (blank, whitespace, the firm's own id in either case).
+- `tests/unit/Sprk.Bff.Api.Tests/Services/Finance/BillingGuidelinesServiceTests.cs` (27): shows, other firm, flag off or unset, Draft/Retired/not in force, assigned-only, parent label, record rule label, refusal marker, allow-list members (now with `FirmId`), several firms (EB-D-260), parameter table, parameter shaping, and the fix-round cases: a rule-level Exclude, a Procedure-level Exclude, a superseded version inside the chosen Procedure Version, another firm's Exclude or record set on a record viewed by firm F (each with a must-fire control), and the unnamed-firm label (blank, whitespace, the firm's own id in either case).
 - `tests/integration/auth/Finance/BillingGuidelinesScopeTests.cs` (16): 200, 401, 403 (workforce, systemuser, no firm: same body), 503 (memberships, compose fault), 503 `ebilling.disabled`, per-record 200 and the uniform 404, now including a record that exists but is unreadable (seeded with an assigned-only Procedure; the body equals the missing-record body and names neither rule).
 - `src/client/external-spa/tests/BillingGuidelinesWidget.test.tsx` (17): grouping, EB-D-260 default / narrowing / single firm, grouping by firm id, duplicate parameter and rule names (no duplicate-key warning), marker, empty ("No published billing guidelines"), plain message when disabled, outage with Retry, 403/404, 360 px, descriptor.
 - ArchTests ledgers: `RouteAuthorizationGuardTests.Ledger.cs` (GovernedFile, CreditedForm, file count 154 to 155), `AuthenticationSchemeCensusTests.cs` (pinned route), `ExternalInvoiceVisibilityGuardTests.cs` (NotInvoiceSurfaces: reads firm names and rules, no invoice-family row).
@@ -78,6 +80,8 @@ Fix round 1:
 | Published-only (Retired accepted again) | the Draft/Retired/not-in-force test |
 | the unnamed-firm label (the name passed through) | all 4 cases of the unnamed-firm theory |
 | old widget (grouped by name, index-less keys, no filter, old empty and disabled text) | 6 of 17 widget tests: EB-D-260 default, EB-D-260 narrowing, grouping by id, duplicate parameter keys, empty-state text, disabled message (the single-firm test passes before and after, as a control) |
+
+uac-r2 F2 test: the record rule's fail-closed `RecordRuleSet.IsRecordScoped(set)` branch is covered by `ARecordRule_WhoseSetDoesNotReadAsRecordScoped_IsNotShown` (set row read without its scope and core columns, flag on, base visible: not shown, clause absent) and its twin `ARecordRule_WhoseSetReadsAsRecordScoped_IsShown`; with the branch deleted the first fails (`response.Sets` not empty), the twin passes.
 
 The service's own firm filter is belt and braces beside the resolver's firm condition; neutralising it alone is not observable because the resolver already excludes another firm's Procedure (that exclusion is 082's, tested there). The same holds for the fix-round Exclude, superseded-version and other-firm tests: they assert 082's resolver behaviour through this view, so they carry must-fire controls (the same record seen as the own firm, or without the Exclude) instead of a fail-before. The fail-closed backstop (item 5) is a regression guard and is likewise not observable.
 

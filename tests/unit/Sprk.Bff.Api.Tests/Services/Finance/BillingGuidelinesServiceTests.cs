@@ -56,6 +56,33 @@ public sealed class BillingGuidelinesServiceTests
 
     private BaseSetRead _baseSetRead = BaseSetRead.World;
 
+    /// <summary>
+    /// uac-r2 F2: when set, the service's own batched rule-set read (by ids, with the scope and core-record columns) answers the world's rows
+    /// WITHOUT those columns, so a set the resolver took as a record set reads as a plain one there. The resolver's own query is untouched.
+    /// </summary>
+    private bool _setRowsReadWithoutScope;
+
+    private static bool IsServiceSetRead(QueryExpression query) =>
+        query.EntityName == RuleSet && query.ColumnSet.Columns.Contains(RecordRuleSet.ScopeColumn)
+        && query.Criteria.Conditions.Any(c => c.AttributeName == "sprk_rulesetid" && c.Operator == ConditionOperator.In);
+
+    private EntityCollection WithoutScope(EntityCollection answer)
+    {
+        var plain = new EntityCollection();
+        foreach (var row in answer.Entities)
+        {
+            var copy = new Entity(row.LogicalName, row.Id);
+            foreach (var attribute in row.Attributes.Where(a => a.Key != RecordRuleSet.ScopeColumn && !InvoiceFamilyCoreRecordGuard.FilingCoreTables.Contains(a.Key)))
+            {
+                copy[attribute.Key] = attribute.Value;
+            }
+
+            plain.Entities.Add(copy);
+        }
+
+        return plain;
+    }
+
     private static bool IsBaseSetRead(QueryExpression query) =>
         query.EntityName == RuleSet && query.TopCount == 1
         && query.Criteria.Conditions.Any(c => c.AttributeName == "sprk_rulesetid" && c.Operator == ConditionOperator.Equal);
@@ -69,6 +96,9 @@ public sealed class BillingGuidelinesServiceTests
             .Returns(() => _baseSetRead == BaseSetRead.Faults
                 ? Task.FromException<EntityCollection>(new TimeoutException("the base rule set read is down"))
                 : Task.FromResult(new EntityCollection()));
+        entitiesMock
+            .Setup(e => e.RetrieveMultipleAsync(It.Is<QueryExpression>(q => _setRowsReadWithoutScope && IsServiceSetRead(q)), It.IsAny<CancellationToken>()))
+            .Returns((QueryExpression q, CancellationToken _) => Task.FromResult(WithoutScope(_world.Answer(q))));
         var entities = entitiesMock.Object;
         _world.Add(SecureRootInheritance.RecordTypeRefEntity, MatterType, ("sprk_recordlogicalname", "sprk_matter"));
         _world.Add(Matter, M, ("sprk_name", MatterName));
@@ -537,6 +567,29 @@ public sealed class BillingGuidelinesServiceTests
 
         response.Sets.Should().BeEmpty();
         JsonSerializer.Serialize(response).Should().NotContain(RecordClause);
+    }
+
+    [Fact(DisplayName = "135 per record negative (uac-r2 F2): a record rule whose set row does not read as record-scoped (flag on, base visible) is not shown, nor its clause")]
+    public async Task ARecordRule_WhoseSetDoesNotReadAsRecordScoped_IsNotShown()
+    {
+        var baseRule = Simple("Guidelines", "Base set", ruleName: "Base rule", code: "BILL-BASE", visible: true);
+        ChangeRuleOnRecord(Matter, M, baseRule, RecordClause, recordSetVisible: true);
+        _setRowsReadWithoutScope = true;
+
+        var response = await OnMatter(Firm(F));
+
+        response.Sets.Should().BeEmpty();
+        JsonSerializer.Serialize(response).Should().NotContain(RecordClause).And.NotContain("Changed rule");
+    }
+
+    [Fact(DisplayName = "135 per record (uac-r2 F2 twin): the same record rule with its set row read as record-scoped is shown")]
+    public async Task ARecordRule_WhoseSetReadsAsRecordScoped_IsShown()
+    {
+        var baseRule = Simple("Guidelines", "Base set", ruleName: "Base rule", code: "BILL-BASE", visible: true);
+        ChangeRuleOnRecord(Matter, M, baseRule, RecordClause, recordSetVisible: true);
+        _setRowsReadWithoutScope = false;
+
+        JsonSerializer.Serialize(await OnMatter(Firm(F))).Should().Contain(RecordClause);
     }
 
     [Fact(DisplayName = "135 per record negative (ISS-038): a fault reading the base rule set fails the whole read (the route answers 503), never a list that includes the rule")]
