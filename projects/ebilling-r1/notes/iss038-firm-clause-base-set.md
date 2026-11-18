@@ -23,6 +23,8 @@ A record-scoped rule set holds every changed rule of one record (and firm). It i
   - at least one base rule set was found;
   - every base rule set was read, is not itself record-scoped, and has its flag on.
 - **Fails closed:** a missing slot, an unreadable slot (`Guid.Empty`), or a base version, policy or rule set that cannot be read means not visible.
+- **The base's Procedure type:** the base read (`RuleSetOfVersionAsync`) also reads the base rule set's Procedure type, the same Internal Standard rule `FirmFindingsProjection.CitableVersionsAsync` applies to a Procedure's rule set. A base whose Procedure is Internal Standard, or whose type cannot be read, counts as an unreadable base: not visible. A base with no Procedure link (a legacy set) is decided by its flag.
+- **Trace:** when the base is missing, unreadable or not usable, `ReadFirmClauseAsync` writes one Information entry carrying only the invoice id and the policy version id (structured parameters; no names, no clause text, no firm data).
 
 ## Base-rule source: the snapshot
 
@@ -85,6 +87,7 @@ All tests are in `Iss038_RecordRuleFirmClauseBaseSetTests`.
 - **Must-fire, firm clause.** Runs the real `ChangeRuleAsync` twice on one record and firm: first a rule whose base set is visible, then a rule whose base set is hidden. Both land in one record set, and the set's flag is on. `GetFirmClauseAsync` on the second rule returns nothing: no quote, no section reference and no label. The first rule still shows.
 - **Must-fire, projection.** The same data run through the real `FirmFindingsProjection` with the real clause reader. Only the first rule is cited, and the output JSON carries none of the second rule's clause text.
 - **Missing base.** The base version is gone, the base policy is gone, the base rule set is gone, or the snapshot has no slot. Each case shows nothing; a readable visible base is the control.
+- **Base Procedure type.** A base whose Procedure is Internal Standard shows nothing, in the clause reader and in the real projection output (no citation, no clause text, no rule set or Procedure name). A base whose Procedure type is missing, whose type read faults, or whose Procedure row is absent shows nothing (a Guideline base is the control). One Information entry names the invoice and the version ids only.
 - **Both sets visible.** The clause shows with the neutral label. With the record set hidden and the base visible, nothing shows.
 - **Non-record set.** Decided by its own flag, as before; only the version itself is read, with no base lookup.
 - **Helper and snapshot reader.** Truth table, fail-closed cases, and per-version base ids. A damaged slot reads as `Guid.Empty` and the snapshot still reads.
@@ -94,6 +97,10 @@ Test changes outside the new files:
 - `RuleSetServiceTests.GetFirmClause_ForARecordRule_CarriesTheNeutralLabel` now seeds a visible base and its slot. Without a base the clause now fails closed, which is the fix.
 - A new shared builder, `RuleSetServiceTests.FindingsWithRecordRules`, is used by the regression file.
 - `ProcedureAssignmentServiceTests.World`/`CapturingLogger` and `FirmFindingsProjectionTests.World`/`ListLogger` changed from `private` to `internal`, so the regression file can drive them.
+
+**Fail-before (base Procedure type):** with the base's Procedure check switched off, 5 of the 6 new cases fail (the Internal Standard and unreadable-type cases, the projection case, the fault case and the trace case); the Guideline control passes either way.
+
+**Fail-before (guard string literals):** with the guard's previous line-comment strip restored, the 7 new URL-string controls fail.
 
 **Tenant-style isolation:** no tenant-boundary test fits, because the defect is inside one record set of one firm. The per-rule isolation is what the must-fire test shows: two rules in the same set are decided by their own bases.
 
@@ -148,21 +155,24 @@ To list the sets instead of counting them, drop `aggregate="true"` and the `coun
 
 The inner joins skip record versions whose base version, policy or rule set no longer exists. The code now hides those as well (fail closed), so they are not exposure.
 
+The count is an upper bound: it does not filter the base policy's `statecode`, and it counts record rules that no invoice applied. It also does not check the base set's Procedure type, which the code now does. It says how many record sets to look at, not how many clauses a firm saw.
+
 ## Known limits (K)
 
 - **K1: a stale record-set flag can still hide a clause.** The record set's flag is still a copy of the first rule's base flag. If that first rule's base was hidden, a later rule whose base is visible stays hidden. This fails closed and is not a disclosure. Changing it would mean deciding by the base flags alone, which is a separate owner decision.
-- **K2: Internal Standard check for record rules.** `FirmFindingsProjection.CitableVersionsAsync` runs its Internal Standard check through the rule set's Procedure link, and a record set has none, so for record rules it relies on the clause reader. Exposure would need an Internal Standard Procedure's base set with its flag on. `ProcedureService` gives that type the flag off, and the visibility route refuses a Procedure's set, so the BFF cannot reach that state; only a direct data edit could. Reported as a follow-up rather than changed here, because changing it would move the Procedure-type decision into the clause reader.
+- **K2: Internal Standard check for record rules (closed).** A record set has no Procedure link, so `FirmFindingsProjection.CitableVersionsAsync` cannot apply its Internal Standard check to it. The base read now checks the base set's Procedure type: an Internal Standard base is not shown, and a base whose type cannot be read is not shown. See uac-r2 thread for background. Regression: `Iss038_RecordRuleFirmClauseBaseSetTests` (clause reader, projection output, fault, missing type, one Information trace entry).
 - **K3: what the guard does not see.**
   - It works per member, not per statement.
-  - It does not see block comments or column names built at run time.
+  - It ignores `//` inside regular, verbatim, interpolated and raw string literals (a URL string naming the column is reported), and keeps verbatim and raw string state across lines. It still does not see block comments, column names built at run time, or an allow-listed const alias.
+  - New callers of `Summarize` and `PublishedResult` are not seen as new readers: their "never record-scoped" reasoning rests on today's callers (`ListAsync` and `LoadRuleSetAsync`).
   - It does not see readers outside `src/server`. The RuleReview code page reads the flag only through the internal admin rule-set routes.
 - **K4: extra reads per record rule.** Each record rule's clause read now makes up to three extra reads per distinct base version (version, policy, rule set). There is normally one base, and the projection reads each version once per invoice.
 
 ## Gates
 
 - `dotnet build src/server/api/Sprk.Bff.Api/ --warnaserror`: 0 warnings, 0 errors.
-- Filtered unit tests (`RuleSet | FirmClause | FirmFindings | ProcedureAssignment | ProcedureResolver | ExternalInvoice`): 1811 passed, 0 failed.
-- Filtered ArchTests (`Finance | FirmFindings | RuleSet | RuleSetVisibleToFirmsReaderGuard`): 58 passed, 0 failed.
+- Filtered unit tests (`RuleSet | FirmClause | FirmFindings | ProcedureAssignment | ProcedureResolver | ExternalInvoice | Iss038`): 1817 passed, 0 failed (after the base Procedure type check).
+- Filtered ArchTests (`Finance | FirmFindings | RuleSet | RuleSetVisibleToFirmsReader`): 66 passed, 0 failed; the guard alone 21 passed.
 - Adjacent filters run as well:
   - ArchTests `Procedure | Snapshot | Findings | Billing | CurrentVersion | RecordScope | Census`: 293 passed.
   - Unit `ProcedureSnapshot | ProcedureChangeBanner | InvoiceSubmission`: 1542 passed.
