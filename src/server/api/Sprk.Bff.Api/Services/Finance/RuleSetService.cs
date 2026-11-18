@@ -180,6 +180,37 @@ public static class RuleSetClauseVisibility
         return quote is null && location is null ? FirmClauseText.None : new FirmClauseText(quote, location, NullIfBlank(firmFacingName));
     }
 
+    /// <summary>
+    /// ISS-038 (uac-r2): THE one reading of a rule set's <c>sprk_visibletofirms</c> flag for a firm-visibility decision; its answer feeds
+    /// <see cref="ForFirm"/>. A rule set that is not record-scoped answers by its own flag, as before. A record-scoped set
+    /// (<see cref="RecordRuleSet.IsRecordScoped"/>) is shared by every changed rule of one record (and firm), and takes its flag from the first rule
+    /// changed there, so its flag alone says nothing about a later rule: per-record visibility uses both rule sets' flags. The record rule is visible
+    /// only when the record set's flag is on AND every <paramref name="baseRuleSets"/> entry (the rule set of each base rule version the record rule's
+    /// slot named) is a readable rule set that is not itself record-scoped with its flag on.
+    /// <para>Fails closed: a missing flag is off; for a record-scoped set, no base rule set at all, or a null entry (a base version, policy or rule
+    /// set that could not be read), is not visible.</para>
+    /// </summary>
+    /// <param name="ruleSet">The rule set that holds the rule version the firm would be shown.</param>
+    /// <param name="baseRuleSets">For a record-scoped <paramref name="ruleSet"/>: the base rule's rule set per base version (null where unreadable).
+    /// Ignored for any other set.</param>
+    internal static bool VisibleToFirms(Entity ruleSet, IReadOnlyCollection<Entity?> baseRuleSets)
+    {
+        ArgumentNullException.ThrowIfNull(ruleSet);
+        ArgumentNullException.ThrowIfNull(baseRuleSets);
+        if (ruleSet.GetAttributeValue<bool?>("sprk_visibletofirms") != true)
+        {
+            return false;
+        }
+
+        if (!RecordRuleSet.IsRecordScoped(ruleSet))
+        {
+            return true;
+        }
+
+        return baseRuleSets.Count > 0 && baseRuleSets.All(baseSet =>
+            baseSet is not null && !RecordRuleSet.IsRecordScoped(baseSet) && baseSet.GetAttributeValue<bool?>("sprk_visibletofirms") == true);
+    }
+
     private static string? NullIfBlank(string? text) => string.IsNullOrWhiteSpace(text) ? null : text;
 }
 
@@ -3033,7 +3064,9 @@ public class RuleSetService
     /// before the snapshot existed, a snapshot a patch dropped, an unknown snapshot version, a damaged one), when the snapshot does not list
     /// the version as applied (displaced, excluded or absent), when the version, its billing policy or its rule set cannot be read, when the rule
     /// set is not Published or Retired, when a Procedure rule set's Procedure cannot be named, when the rule set's visible-to-firms flag is off
-    /// (the last step, <see cref="RuleSetClauseVisibility.ForFirm"/>), and on any read fault.</para>
+    /// (the last step, <see cref="RuleSetClauseVisibility.ForFirm"/>), and on any read fault. For a record rule (ISS-038) the flag is
+    /// <see cref="RuleSetClauseVisibility.VisibleToFirms"/>: the record set's AND the base rule's own rule set's, the base taken from the
+    /// snapshot's record-rule slot; no base on record, or one that cannot be read, is no text.</para>
     /// <para>The result names the clause with <see cref="FirmClauseText.FirmFacingName"/> only: the Procedure's firm-facing name (its name when
     /// that is blank), or the neutral record label for a record rule. Never the Procedure's name when a firm-facing name is set, an id or an
     /// override reason; nothing here logs one.</para>
@@ -3122,10 +3155,14 @@ public class RuleSetService
         }
 
         // (4) The label: neutral for a record rule, else the Procedure's firm-facing name; a legacy set has no Procedure and no label.
+        // ISS-038: a record rule also brings the rule set of each base rule version its snapshot slot named (the invoice's own basis, not a re-read
+        // of the override rows), for the visibility decision below.
         string? label;
+        IReadOnlyCollection<Entity?> baseRuleSets = [];
         if (RecordRuleSet.IsRecordScoped(set))
         {
             label = RecordRuleSet.Name;
+            baseRuleSets = await BaseRuleSetsOfRecordRuleAsync(snapshot, policyVersionId, ct);
         }
         else if (set.GetAttributeValue<EntityReference>(ProcedureColumn)?.Id is { } procedureId)
         {
@@ -3140,12 +3177,61 @@ public class RuleSetService
             label = null;
         }
 
-        // (5) The visible-to-firms flag decides last.
+        // (5) The visible-to-firms flag decides last: the set's own, and for a record rule its base rule's set's as well (ISS-038).
         return RuleSetClauseVisibility.ForFirm(
-            set.GetAttributeValue<bool>("sprk_visibletofirms"),
+            RuleSetClauseVisibility.VisibleToFirms(set, baseRuleSets),
             version.GetAttributeValue<string>("sprk_clausereference"),
             version.GetAttributeValue<string>("sprk_clauselocation"),
             label);
+    }
+
+    /// <summary>
+    /// ISS-038: the rule set of each base rule version the invoice's snapshot names for the record rule version <paramref name="recordVersionId"/>
+    /// (its <c>recordRule.basePolicyVersionId</c>; one per distinct base across the dates). Each is read version, then Billing policy, then rule set;
+    /// an entry is null when any of those cannot be read (or the slot itself could not be, <see cref="Guid.Empty"/>). Empty when the snapshot names no
+    /// base for it. Either way <see cref="RuleSetClauseVisibility.VisibleToFirms"/> then answers not visible.
+    /// </summary>
+    private async Task<IReadOnlyCollection<Entity?>> BaseRuleSetsOfRecordRuleAsync(StoredProcedureSnapshot snapshot, Guid recordVersionId, CancellationToken ct)
+    {
+        if (!snapshot.RecordRuleBaseVersionIds.TryGetValue(recordVersionId, out var baseVersionIds))
+        {
+            return [];
+        }
+
+        var sets = new List<Entity?>();
+        foreach (var baseVersionId in baseVersionIds)
+        {
+            sets.Add(await RuleSetOfVersionAsync(baseVersionId, ct));
+        }
+
+        return sets;
+    }
+
+    /// <summary>The Billing rule set (record-scoped or not) of the policy of <paramref name="policyVersionId"/>, or null when any step cannot be read.</summary>
+    private async Task<Entity?> RuleSetOfVersionAsync(Guid policyVersionId, CancellationToken ct)
+    {
+        if (policyVersionId == Guid.Empty)
+        {
+            return null;
+        }
+
+        var versionQuery = new QueryExpression(VersionEntity)
+        {
+            ColumnSet = new ColumnSet("sprk_policy"),
+            Criteria = { Conditions = { new ConditionExpression("sprk_policyversionid", ConditionOperator.Equal, policyVersionId) } },
+            TopCount = 1,
+        };
+        var version = (await _entities.RetrieveMultipleAsync(versionQuery, ct)).Entities.FirstOrDefault(r => r.Id == policyVersionId);
+        if (version?.GetAttributeValue<EntityReference>("sprk_policy")?.Id is not { } policyId)
+        {
+            return null;
+        }
+
+        var policy = (await _entities.RetrieveMultipleAsync(PolicyQuery("sprk_policyid", ConditionOperator.Equal, new object[] { policyId }), ct))
+            .Entities.FirstOrDefault(r => r.Id == policyId && RuleDomains.IsBillingRow(r));
+        return policy?.GetAttributeValue<EntityReference>("sprk_ruleset")?.Id is { } ruleSetId
+            ? await LoadBillingRuleSetAsync(ruleSetId, ct)
+            : null;
     }
 
     /// <summary>The Procedure's firm-facing name, or its name when that is blank; null when the Procedure cannot be read or has neither.</summary>
