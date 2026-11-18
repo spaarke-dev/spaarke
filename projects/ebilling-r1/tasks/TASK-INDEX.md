@@ -213,7 +213,7 @@ To begin: `work on task 001`. Wave W0-1 (001, 002, 003) and W2-1 (040, 041) have
 | 132 | ✅ [server half merged into work 42382e6d9f; Opus review + second access review + 4 fix rounds; uac-r2 PASS; firmnoticetext field-security dev apply waits for the owner's OK; K16 accepted] | Notifications: email, SPA feed, approver in-app | STANDARD | sonnet / high | none | 131, 024, 103, 104 |
 | 133 | ⏭️ [withdrawn by EB-D-254 (owner option b): no PDF file in R1; on-screen report (134, printable) and the findings table in the notice email (131/132)] | Adjustment report PDF | STANDARD | sonnet / high | P5-B | 130, 028 |
 | 134 | 🔲 [open] | SPA invoice detail and on-screen report | STANDARD | sonnet / high | P5-B | 130 |
-| 135 | 🔲 [open] | SPA Billing Guidelines view | STANDARD | sonnet / high | P5-B | 076, 130 |
+| 135 | ✅ [merged; uac-r2 PASS incl. F2 fail-closed test, spa-r4 PASS; BillingGuidelines 57/0] | SPA Billing Guidelines view | STANDARD | sonnet / high | P5-B | 076, 130 |
 | 136 | 🔲 [open] | Deploy WP5 to dev | STANDARD | sonnet / high | none (deploy) | 130, 131, 132, 133, 134, 135, 112 |
 
 ### Phase 6 — Export and index (WP6)

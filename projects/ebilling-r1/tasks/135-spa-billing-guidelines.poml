@@ -4,7 +4,7 @@
     <title>SPA Billing Guidelines view</title>
     <phase>5 Firm feedback (WP5) — wave W5-2</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>One read endpoint reusing 130's firm-scope check and 076's visibility helper, plus one SPA widget; the visibility rules are a closed set with negative tests.</rigor-reason>
     <model-tier>sonnet</model-tier>

@@ -132,3 +132,11 @@ Firm emails come from the shared mailbox; the Invoice Review "notify" step (132u
 - [ ] Approvers get one in-app notification "Invoice ready for your review" per invoice; non-approvers get none.
 - [ ] With eBilling switched off, the portal bell shows no billing items.
 - [ ] The submission form no longer shows the "notice text" field (after the field-security apply, which needs your OK).
+
+## N. Billing Guidelines in the external portal (task 135): after a dev BFF and external SPA that carry it (work → master merge, your go)
+
+Dev has no rule sets yet, so this needs a published Billing rule set first.
+- [ ] As a firm user, open the Billing Guidelines card. It lists the published billing rules in force for your firm(s), with rule set name, version, section and quoted clause text; never a document link.
+- [ ] A user linked to several firms sees all of them, and the firm filter narrows the list (EB-D-260).
+- [ ] A rule set with "Visible to Firms" off does not appear at all; neither does an Internal Standard Procedure's rule set.
+- [ ] With eBilling switched off, the card stays and shows "Billing guidelines aren't available." (no error styling, no Retry).
