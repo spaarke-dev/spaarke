@@ -156,3 +156,29 @@ Between the BFF deploy and the seed, `/healthz/catalog` reports Degraded (a cons
 - Unit filter (`FirmNotice|ConsumerType|RoutingConsumer|FirmFindings|InvoiceAi|GoldenUtterance|P2LoopInjection|CatalogInputSchema|PlaybookConsumer`): 508 passed, 0 failed.
 - `FirmNotice|FirmFindings`: 317 passed. Seam (`FirmNoticeActionSeamTests`): 9 passed.
 - ArchTests (`Finance|Firm|Boundary|Route|Consumer|Ai`): 508 passed, 0 failed. The pre-existing "082c-2 C16 ... InvoiceAdjustmentService::IsOtherContent" failure the coordinator named did not appear in this run (it is not mine and was not touched).
+
+## Review round 2 (scoped re-check of a30f4a5c73)
+
+| Item | Change |
+|---|---|
+| F1 | A combining mark inside a word ("th" + U+0301 + "ree") was left in place by NFKC and split the word past the screen. `CheckText` now runs the link, amount-word and numbered-reference checks over three views: the raw text, the NFKC fold with the ideographic and full-width full stops read as dots, and that text after NFKD with every Mn and Me rune removed (so an accent on a precomposed letter goes too, "sévén" is "seven"). Must-fire rows: "th́ree lines" (two cases), a mark inside "hundred", accented "seven", a mark inside a domain. |
+| Hardening: links | Label characters are `\p{L}\p{N}`, not ASCII, so a Cyrillic domain is caught. U+3002, U+FF0E and U+FF61 are read as dots. Rows for each. |
+| Hardening: number words | Added zero, tens, the plural tens ("twenties" to "nineties"), the ordinals eleventh to nineteenth, the tens ordinals ("twentieth" to "ninetieth"), and hundredth, thousandth, millionth, billionth (plurals of hundred, thousand, million and dozen were already in). Rows for each. |
+| Must-not-fire | `OrdinaryProseWithNoNumberWord_StillPasses_...` passes ordinary notice prose, accented Latin text, a Cyrillic word that is not a domain, "e.g." and a stray mark on an ordinary word, so a broader list cannot silently refuse everything. |
+| K2 (prompt) | The Action's number constraint now tells the model to avoid ordinals, half, quarter, double, twice, dozen, hundred, thousand and other number words, and web addresses and domain names, because such text is refused and replaced by the fixed template. The Action's own examples still pass `FirmNoticeProse.Check` (contract test). |
+| Nit | `.ProducesProblem(429)` added to the draft route (the other rate-limited routes declare it). |
+
+Unchanged on purpose: the approved fallback wording (EB-D-255) and the post-decision empty-table behaviour (pending owner decision).
+
+### Remaining limits (K1)
+
+- **Homoglyphs:** a number word written with look-alike letters from another script (for example a Cyrillic "e" in "three") is not folded by NFKC/NFKD and is not caught.
+- **Other numeral systems:** number words in other languages and CJK numeral characters used as words are not in the list (CJK digit characters in the Nd/Nl/No categories are refused, but the plain ideographs for "two" and "ten" are letters).
+- **Spelled-out web addresses:** "dot com" written as words, "example dot com", is not caught.
+- **Hosts without a dot:** "localhost" and other single-label hosts are not caught.
+- Phrasings outside the list ("a couple of", "a handful") are not caught.
+- Every limit above is the second wall only; the first wall (no number in the model's input, no numeric property in its output) still holds, and the figures in the notice are the projection's.
+
+### Fail-before (round 2)
+
+Composer reverted to the round-1 version (`a30f4a5c73`), tests rebuilt and run (`FirmNotice|FirmFindings`): **16 failed / 323 passed** of 339. The failures are the new rows: the mark-split "three" (two), the mark in "hundred", accented "seven", the mark in a domain, the Cyrillic domain, the three dot variants, zero, tens, the twenties, the eleventh, twentieth, ninetieth, hundredth and thousandth. Restored: **0 failed / 339 passed**.

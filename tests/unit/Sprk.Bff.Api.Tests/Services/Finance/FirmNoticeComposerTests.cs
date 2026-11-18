@@ -352,6 +352,33 @@ public sealed class FirmNoticeComposerTests
         ["Invoice returned", "Visit acme-billing.co.uk for details.", FirmNoticeFallbackReasons.ProseLink],
         ["Invoice returned", "See evilsite.xyz.", FirmNoticeFallbackReasons.ProseLink],
         ["Invoice returned", "Go to billing.example.firm for help.", FirmNoticeFallbackReasons.ProseLink],
+
+        // Review round 2 (F1): a combining mark inside a word leaves NFKC as it was; the marks are removed before the word checks.
+        ["Invoice returned", "Th́ree lines were reduced.", FirmNoticeFallbackReasons.ProseAmountWord],
+        ["Invoice returned", "th́ree lines were reduced.", FirmNoticeFallbackReasons.ProseAmountWord],
+        ["Invoice returned", "A charge of one huńdred was reduced.", FirmNoticeFallbackReasons.ProseAmountWord],
+        ["Invoice returned", "Reduced by sévén.", FirmNoticeFallbackReasons.ProseAmountWord], // accents on precomposed letters
+        ["Invoice returned", "Visit exaḿple.com for details.", FirmNoticeFallbackReasons.ProseLink],
+
+        // Review round 2 (hardening): domains in any script and with ideographic dots.
+        ["Invoice returned", "Visit пример.рф for details.", FirmNoticeFallbackReasons.ProseLink], // a Cyrillic domain
+        ["Invoice returned", "Visit example。com for details.", FirmNoticeFallbackReasons.ProseLink], // ideographic full stop
+        ["Invoice returned", "Visit example．com for details.", FirmNoticeFallbackReasons.ProseLink], // full-width full stop
+        ["Invoice returned", "Visit example｡com for details.", FirmNoticeFallbackReasons.ProseLink], // halfwidth ideographic full stop
+
+        // Review round 2 (hardening): zero, tens, plurals and the longer ordinals.
+        ["Invoice returned", "Zero lines were allowed.", FirmNoticeFallbackReasons.ProseAmountWord],
+        ["Invoice returned", "Tens of fees were reduced.", FirmNoticeFallbackReasons.ProseAmountWord],
+        ["Invoice returned", "Hundreds of fees were reduced.", FirmNoticeFallbackReasons.ProseAmountWord],
+        ["Invoice returned", "Thousands of fees were reduced.", FirmNoticeFallbackReasons.ProseAmountWord],
+        ["Invoice returned", "Millions of fees were reduced.", FirmNoticeFallbackReasons.ProseAmountWord],
+        ["Invoice returned", "Dozens of fees were reduced.", FirmNoticeFallbackReasons.ProseAmountWord],
+        ["Invoice returned", "Charges from the twenties were reduced.", FirmNoticeFallbackReasons.ProseAmountWord],
+        ["Invoice returned", "The eleventh entry was reduced.", FirmNoticeFallbackReasons.ProseAmountWord],
+        ["Invoice returned", "The twentieth entry was reduced.", FirmNoticeFallbackReasons.ProseAmountWord],
+        ["Invoice returned", "The ninetieth entry was reduced.", FirmNoticeFallbackReasons.ProseAmountWord],
+        ["Invoice returned", "The hundredth entry was reduced.", FirmNoticeFallbackReasons.ProseAmountWord],
+        ["Invoice returned", "The thousandth entry was reduced.", FirmNoticeFallbackReasons.ProseAmountWord],
     ];
 
     [Theory]
@@ -383,6 +410,23 @@ public sealed class FirmNoticeComposerTests
         FirmNoticeProse.Check("Invoice returned", "Your invoice was \uD800 returned.").Should().Be(FirmNoticeFallbackReasons.ProseControlCharacter);
         FirmNoticeProse.Check("Invoice \uDC00 returned", "Your invoice was returned.").Should().Be(FirmNoticeFallbackReasons.ProseControlCharacter);
         FirmNoticeProse.Check("Invoice returned", "Your invoice was returned.").Should().BeNull("the control: clean text passes");
+    }
+
+    [Fact]
+    public void OrdinaryProseWithNoNumberWord_StillPasses_SoABroaderListCannotSilentlyRefuseEverything()
+    {
+        // Must-not-fire control for the screen: the wording the Action is told to write, with accents, another script and ordinary punctuation.
+        foreach (var body in new[]
+        {
+            "Your invoice has been returned to you for correction. Some billed lines were reduced and some were not allowed under the billing guidelines that apply to your firm.\n\nA corrected invoice can be submitted when you are ready.",
+            "We reviewed the invoice against the agreed rates. The adjustments are listed in the table below, with the reason for each one.",
+            "Café résumé naïve. The invoice, e.g. the revised one, was rejected; please review the table.",
+            "Привет, the invoice was returned.",
+            "Th́e invoice was returned.", // a stray mark on an ordinary word is not a figure
+        })
+        {
+            FirmNoticeProse.Check("Invoice returned for correction", body).Should().BeNull($"'{body[..Math.Min(30, body.Length)]}' is ordinary prose");
+        }
     }
 
     [Fact]

@@ -144,10 +144,12 @@ internal static class FirmNoticeProse
     // refused by NumberedReference). A false positive only sends the notice to the fixed template.
     private static readonly Regex AmountWords = new(
         @"\b(dollars?|cents?|euros?|pounds?\s+sterling|per\s?cent|percent|percentage|usd|eur|gbp"
-        + @"|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen"
-        + @"|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety"
+        + @"|zero|two|three|four|five|six|seven|eight|nine|tens?|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen"
+        + @"|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|(twent|thirt|fort|fift|sixt|sevent|eight|ninet)ies"
         + @"|hundreds?|thousands?|millions?|billions?|dozens?|half|halves|quarters?|twice|double|triple"
-        + @"|first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth)\b",
+        + @"|(hundred|thousand|million|billion)ths?"
+        + @"|first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth|eleventh|twelfth|thirteenth|fourteenth|fifteenth|sixteenth|seventeenth|eighteenth|nineteenth"
+        + @"|(twent|thirt|fort|fift|sixt|sevent|eight|ninet)ieth)\b",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, TimeSpan.FromSeconds(1));
 
     private static readonly Regex NumberedReference = new(
@@ -155,7 +157,7 @@ internal static class FirmNoticeProse
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, TimeSpan.FromSeconds(1));
 
     private static readonly Regex Link = new(
-        @"(https?:|ftp:|www\.|@|\b[a-z0-9][a-z0-9-]*(\.[a-z0-9][a-z0-9-]*)*\.[a-z]{2,24}\b)", // any bare domain shape: label.label with a 2-24 letter TLD
+        @"(https?:|ftp:|www\.|@|\b[\p{L}\p{N}][\p{L}\p{N}-]*(\.[\p{L}\p{N}][\p{L}\p{N}-]*)*\.\p{L}{2,24}\b)", // any bare domain shape, any script: label.label with a 2-24 letter TLD
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, TimeSpan.FromSeconds(1));
 
     /// <summary>The reason code of the first check the text fails, or null when it passes. Never throws.</summary>
@@ -208,14 +210,45 @@ internal static class FirmNoticeProse
             }
         }
 
-        if (MatchesSafely(Link, folded) || MatchesSafely(Link, text))
+        // Three views of what a reader sees: the raw text; the NFKC fold with the ideographic and full-width full stops read as dots; and that with
+        // every combining mark removed (NFKD first, so an accent on a precomposed letter goes too). A mark inside a word ("th" + U+0301 + "ree")
+        // leaves NFKC as it was and would otherwise split a number word or a domain past the regexes.
+        string dotted;
+        string stripped;
+        try
+        {
+            dotted = folded.Replace('。', '.').Replace('．', '.').Replace('｡', '.');
+            stripped = StripMarks(dotted.Normalize(NormalizationForm.FormKD));
+        }
+        catch (ArgumentException)
+        {
+            return FirmNoticeFallbackReasons.ProseControlCharacter;
+        }
+
+        if (MatchesSafely(Link, text) || MatchesSafely(Link, dotted) || MatchesSafely(Link, stripped))
         {
             return FirmNoticeFallbackReasons.ProseLink;
         }
 
-        return MatchesSafely(AmountWords, folded) || MatchesSafely(NumberedReference, folded)
+        return MatchesSafely(AmountWords, dotted) || MatchesSafely(NumberedReference, dotted)
+            || MatchesSafely(AmountWords, stripped) || MatchesSafely(NumberedReference, stripped)
             ? FirmNoticeFallbackReasons.ProseAmountWord
             : null;
+    }
+
+    /// <summary>The text without its nonspacing and enclosing marks (Mn, Me).</summary>
+    private static string StripMarks(string text)
+    {
+        var builder = new StringBuilder(text.Length);
+        foreach (var rune in text.EnumerateRunes())
+        {
+            if (Rune.GetUnicodeCategory(rune) is not (UnicodeCategory.NonSpacingMark or UnicodeCategory.EnclosingMark))
+            {
+                builder.Append(rune.ToString());
+            }
+        }
+
+        return builder.ToString();
     }
 
     private static string? ScanRunes(string text, bool allowLineBreaks)
