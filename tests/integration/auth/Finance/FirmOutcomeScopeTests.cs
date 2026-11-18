@@ -23,6 +23,7 @@ using Sprk.Bff.Api.Api.ExternalAccess;
 using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Api.Finance;
 using Sprk.Bff.Api.Configuration;
+using Sprk.Bff.Api.Infrastructure.DI;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Services.Finance;
 using Sprk.Bff.Api.Services.Dataverse.Privileges;
@@ -618,6 +619,86 @@ public sealed class FirmOutcomeScopeTests : IAsyncLifetime
         (await NoticeDecision(FirmOutcomeSubject.Submission, SeedSubmission(FirmA))).Should().Be(InvoiceFeedDecision.Visible);
         (await NoticeDecision(FirmOutcomeSubject.Submission, SeedSubmission(FirmB))).Should().Be(InvoiceFeedDecision.Denied);
         (await NoticeDecision(FirmOutcomeSubject.Submission, SeedSubmission(FirmA), Contact(AccessRights.None))).Should().Be(InvoiceFeedDecision.Denied);
+    }
+
+    // ── Task 132 review round 3 (F2): the PRODUCTION composition of the recipient rule ──
+
+    private static readonly Guid ContactWithoutGrant = Guid.Parse("13000000-0000-4000-8000-0000000000e2");
+
+    private static AccessibleRecordSet GrantSet(string entity, params Guid[] readable) => new()
+    {
+        PrincipalKind = WorkforcePrincipalKind.ContactOnly,
+        EntityType = entity,
+        Rights = readable.ToDictionary(id => id, _ => AccessRights.Read),
+        Sources = new AccessibleRecordSetSources(false, true, false),
+    };
+
+    /// <summary>The portal's grant composition: <see cref="ContactId"/> holds Read on the shared matter; <see cref="ContactWithoutGrant"/> holds nothing.</summary>
+    private static Mock<IAccessibleRecordSetService> PortalGrants()
+    {
+        var sets = new Mock<IAccessibleRecordSetService>(MockBehavior.Strict);
+        foreach (var entity in new[] { AccessibleRecordSetService.ProjectEntity, AccessibleRecordSetService.MatterEntity, AccessibleRecordSetService.WorkAssignmentEntity })
+        {
+            sets.Setup(x => x.ComposeForCiamContactAsync(ContactId, entity, It.IsAny<CancellationToken>()))
+                .ReturnsAsync(GrantSet(entity, entity == AccessibleRecordSetService.MatterEntity ? [SharedMatter] : []));
+            sets.Setup(x => x.ComposeForCiamContactAsync(ContactWithoutGrant, entity, It.IsAny<CancellationToken>()))
+                .ReturnsAsync(GrantSet(entity));
+        }
+
+        return sets;
+    }
+
+    private ExternalInvoiceHiding HidingOfThisRig() => (_, ids, _) => Task.FromResult(
+        new InvoiceVisibilityResult(
+            ids, ids.Where(_hiddenInvoices.Contains).ToDictionary(id => id, _ => InvoiceHiddenReason.SourceHidden), faulted: false));
+
+    private ExternalInvoiceSubmissionHiding SubmissionHidingOfThisRig() => (_, submissions, _) =>
+    {
+        var ids = submissions.Select(x => x.SubmissionId).ToList();
+        return Task.FromResult(new InvoiceVisibilityResult(
+            ids, ids.Where(_hiddenSubmissions.Contains).ToDictionary(id => id, _ => InvoiceHiddenReason.SourceHidden), faulted: false));
+    };
+
+    [Fact(DisplayName = "132 D-70 production wiring (must-fire): the REAL recipient rule (real principal composition, real route filter) tells a contact who holds Read on the invoice's matter and does NOT tell one who holds none")]
+    public async Task TheRealRecipientRule_TellsTheContactWithRead_AndNotTheOneWithout()
+    {
+        var invoice = SeedInvoice(FirmA);
+        var rule = new EbillingRecipientAccessRule(
+            PortalGrants().Object, _participations, _data, _h.Build(),
+            NullLogger<EbillingRecipientAccessRule>.Instance, NullLogger<FirmOutcomeAuthorizationFilter>.Instance,
+            HidingOfThisRig(), SubmissionHidingOfThisRig());
+
+        (await rule.MayBeToldAsync(ContactId, [FirmA], EbillingNotificationSubject.Invoice, invoice, CancellationToken.None))
+            .Should().Be(RecipientAccessDecision.Told);
+        (await rule.MayBeToldAsync(ContactWithoutGrant, [FirmA], EbillingNotificationSubject.Invoice, invoice, CancellationToken.None))
+            .Should().Be(RecipientAccessDecision.Denied, "a contact without Read on the invoice's matter cannot open it in the portal, so it is not emailed about it");
+    }
+
+    [Fact(DisplayName = "132 D-70 production wiring: AddFinanceModule's registration builds the rule from the container, with the container's hiding seams, and it decides (a hidden invoice is Denied, a visible one Told)")]
+    public async Task TheRecipientRule_ResolvedFromTheContainer_DecidesThroughTheContainersSeams()
+    {
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddFinanceModule(new ConfigurationBuilder().AddInMemoryCollection().Build());
+        // What the rule depends on, as AddExternalAccess and the identity modules provide it in production (substituted at Dataverse only).
+        services.AddSingleton(PortalGrants().Object);
+        services.AddSingleton<ExternalParticipationService>(_participations);
+        services.AddSingleton<ExternalDataService>(_data);
+        services.AddSingleton(_h.Build());
+        services.AddScoped(_ => HidingOfThisRig());
+        services.AddScoped(_ => SubmissionHidingOfThisRig());
+        var visible = SeedInvoice(FirmA);
+        var hidden = SeedInvoice(FirmA);
+        _hiddenInvoices.Add(hidden);
+
+        using var provider = services.BuildServiceProvider();
+        using var scope = provider.CreateScope();
+        var rule = scope.ServiceProvider.GetRequiredService<EbillingRecipientAccessRule>();
+
+        (await rule.MayBeToldAsync(ContactId, [FirmA], EbillingNotificationSubject.Invoice, visible, CancellationToken.None))
+            .Should().Be(RecipientAccessDecision.Told);
+        (await rule.MayBeToldAsync(ContactId, [FirmA], EbillingNotificationSubject.Invoice, hidden, CancellationToken.None))
+            .Should().Be(RecipientAccessDecision.Denied, "the rule must have been given the container's invoice hiding seam");
     }
 
     [Fact(DisplayName = "132 feed decision (must-not-fire): an invoice of the caller's firm, readable core, not hidden, is Visible")]
