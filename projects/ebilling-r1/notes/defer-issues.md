@@ -2310,7 +2310,7 @@ The invoice stays held for good. Before ISS-031 the other verb was a wrong but w
 
 | Field | Value |
 |---|---|
-| **Status** | In Progress |
+| **Status** | In Progress (PR 2902 to master, auto-merge on required checks) |
 | **Urgency** | now |
 | **Filed** | 2026-11-17 |
 | **Source** | Opus adversarial review of task 135 |
