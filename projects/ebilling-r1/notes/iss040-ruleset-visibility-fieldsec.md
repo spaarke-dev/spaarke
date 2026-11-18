@@ -78,3 +78,14 @@ are ignored. It is a separate file from `FindingsJsonFieldSecuredGuardTests`; co
   column if a grant fails.
 
 Rollback: `-Revert` (un-secures, removes the two permission rows, publishes), then revert the source files by a commit.
+
+## Dev apply (2026-11-17)
+
+Owner's typed OK in session `ebilling-r1` ("Yes, apply ISS-040"); unified-access-control-r2 notified before and after. Script at work tip `e789837d32`, `-BffApplicationIds` the two dev BFF app ids.
+
+- `-WhatIf`: every precondition OK (p0 to p5); p6 = 0 rule sets visible to firms (dev holds no rule sets yet). Nothing written.
+- Plain run: column secured, Readers 4/0/0 and Writers 4/4/4 granted, masked window 29.9 s, Readers description appended, no other writer profile, `sprk_ruleset` published. PASS, exit 0.
+- `-Verify`: PASS, exit 0. Both BFF app users still members of the writers profile; the readers profile still on all 6 default teams.
+- Read-back: `RetrievePrincipalAttributePrivileges` for each BFF app user gives CanRead/CanCreate/CanUpdate = 4 on the column; a `sprk_rulesets` query selecting the column succeeds (0 rows).
+
+Still open: the SpaarkeMaster release carrying the Entity.xml and FieldSecurityProfiles.xml changes (current-task "master merge" obligations), and the owner's hand checks in checklist section L.
