@@ -388,9 +388,9 @@ internal sealed class RecordProcedureRig
     /// <summary>A Procedure with one version [from, open) and one rule <paramref name="code"/> published under it.</summary>
     public (Guid Procedure, Guid Version, Guid Rule, Guid RuleVersion) Simple(
         string code, ProcedureAppliesTo appliesTo = ProcedureAppliesTo.AllRecords, Guid? firm = null, DateOnly? from = null,
-        RuleType type = RuleType.ApprovedRate, string? body = null, int? consequence = null)
+        RuleType type = RuleType.ApprovedRate, string? body = null, int? consequence = null, ProcedureType? procedureType = null)
     {
-        var procedure = AddProcedure("Procedure " + code, appliesTo, firm);
+        var procedure = AddProcedure("Procedure " + code, appliesTo, firm, type: procedureType);
         var version = AddVersion(procedure, 1, from ?? Jan1, null);
         var rule = AddProcedureRule(procedure, code);
         var ruleVersion = AddRuleVersion(rule, version, from ?? Jan1, type: type, body: body, consequence: consequence);

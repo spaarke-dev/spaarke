@@ -177,7 +177,7 @@ public static class RuleSetClauseVisibility
     /// </summary>
     public static FirmClauseText ForFirm(bool? ruleSetVisibleToFirms, string? clauseQuote, string? clauseLocation, string? firmFacingName = null)
     {
-        if (ruleSetVisibleToFirms != true)
+        if (!IsVisibleToFirms(ruleSetVisibleToFirms))
         {
             return FirmClauseText.None;
         }
@@ -186,6 +186,12 @@ public static class RuleSetClauseVisibility
         var location = NullIfBlank(clauseLocation);
         return quote is null && location is null ? FirmClauseText.None : new FirmClauseText(quote, location, NullIfBlank(firmFacingName));
     }
+
+    /// <summary>
+    /// The ONE decision whether a rule set is shown to firms at all (ebilling-r1 task 135): its flag is on. A missing flag is off. <see cref="ForFirm"/>
+    /// asks it, and so does <see cref="VisibleToFirms"/>, which the Billing Guidelines view asks to decide whether a rule is listed, so the two cannot disagree.
+    /// </summary>
+    public static bool IsVisibleToFirms(bool? ruleSetVisibleToFirms) => ruleSetVisibleToFirms == true;
 
     /// <summary>
     /// ISS-038 (uac-r2): THE one reading of a rule set's <c>sprk_visibletofirms</c> flag for a firm-visibility decision; its answer feeds
@@ -204,7 +210,7 @@ public static class RuleSetClauseVisibility
     {
         ArgumentNullException.ThrowIfNull(ruleSet);
         ArgumentNullException.ThrowIfNull(baseRuleSets);
-        if (ruleSet.GetAttributeValue<bool?>("sprk_visibletofirms") != true)
+        if (!IsVisibleToFirms(ruleSet.GetAttributeValue<bool?>("sprk_visibletofirms")))
         {
             return false;
         }
@@ -215,7 +221,7 @@ public static class RuleSetClauseVisibility
         }
 
         return baseRuleSets.Count > 0 && baseRuleSets.All(baseSet =>
-            baseSet is not null && !RecordRuleSet.IsRecordScoped(baseSet) && baseSet.GetAttributeValue<bool?>("sprk_visibletofirms") == true);
+            baseSet is not null && !RecordRuleSet.IsRecordScoped(baseSet) && IsVisibleToFirms(baseSet.GetAttributeValue<bool?>("sprk_visibletofirms")));
     }
 
     private static string? NullIfBlank(string? text) => string.IsNullOrWhiteSpace(text) ? null : text;
@@ -255,7 +261,9 @@ public sealed class RuleSetOutcome<T> where T : class
     internal static RuleSetOutcome<T> Invalid(string errorCode, IReadOnlyList<RuleSetError> errors) =>
         new()
         {
-            Kind = RuleSetOutcomeKind.Invalid, ErrorCode = errorCode, Errors = errors,
+            Kind = RuleSetOutcomeKind.Invalid,
+            ErrorCode = errorCode,
+            Errors = errors,
             StatusCode = errors.Any(e => e.Field == RuleSetService.FirmDescriptionField)
                 ? StatusCodes.Status422UnprocessableEntity
                 : StatusCodes.Status400BadRequest,
@@ -3287,9 +3295,10 @@ public class RuleSetService
     /// The Billing rule set (record-scoped or not) of the policy of <paramref name="policyVersionId"/>, or null when any step cannot be read, or
     /// when the set's Procedure is an Internal Standard one or its type cannot be read: the same Internal Standard rule
     /// <c>FirmFindingsProjection.CitableVersionsAsync</c> applies to a Procedure's rule set, applied to the base here because a record set has no
-    /// Procedure link of its own (see uac-r2 thread). A base set with no Procedure link (a legacy set) is returned as read.
+    /// Procedure link of its own (see uac-r2 thread). A base set with no Procedure link (a legacy set) is returned as read. Internal: the Billing
+    /// Guidelines view (task 135) reads a record rule's base set live through it, so the Internal Standard check has one home.
     /// </summary>
-    private async Task<Entity?> RuleSetOfVersionAsync(Guid policyVersionId, CancellationToken ct)
+    internal async Task<Entity?> RuleSetOfVersionAsync(Guid policyVersionId, CancellationToken ct)
     {
         if (policyVersionId == Guid.Empty)
         {
@@ -3344,14 +3353,7 @@ public class RuleSetService
             TopCount = 1,
         };
         var procedure = (await _entities.RetrieveMultipleAsync(query, ct)).Entities.FirstOrDefault(r => r.Id == procedureId);
-        if (procedure is null)
-        {
-            return null;
-        }
-
-        var firmFacing = procedure.GetAttributeValue<string>(ProcedureEntity.FirmFacingNameColumn);
-        var name = string.IsNullOrWhiteSpace(firmFacing) ? procedure.GetAttributeValue<string>(ProcedureEntity.NameColumn) : firmFacing;
-        return string.IsNullOrWhiteSpace(name) ? null : name.Trim();
+        return ProcedureEntity.FirmFacingLabelOf(procedure);
     }
 
     // ───────────────────────────────────────────────────────────────────────────────────────────────

@@ -141,6 +141,7 @@ public static class FinanceModule
         // resolver. Unconditional (flag rule above); the routes carry the kill switch.
         services.AddScoped<ProcedureAssignmentService>();
         services.AddScoped<RecordProcedureReadService>(); // ebilling-r1 task 084: the caller-read lists of a record's Procedures and rules in force
+        services.AddScoped<BillingGuidelinesService>(); // ebilling-r1 task 135 (FR-49): the SPA Billing Guidelines read; the route carries the kill switch
 
         // Rule drafting job (ebilling-r1 task 075, FR-27): ADR-004 IJobHandler, the same shape as the other Finance handlers. Reads the rule
         // set's source document, asks IInvoiceAi.DraftRulesAsync (which has its Null peer, so AI-off is a clear Poisoned outcome, not a

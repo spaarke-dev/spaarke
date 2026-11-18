@@ -193,7 +193,7 @@ public static class RecordRuleSet
     /// <summary>The name every record-scoped set carries (the set is found by its derived id, never by name).</summary>
     internal const string Name = "Billing instructions for this record";
 
-    private const string ScopeColumn = "sprk_scope";
+    internal const string ScopeColumn = "sprk_scope";
     private const string FirmColumn = "sprk_firm";
     private const string ProcedureColumn = "sprk_procedure";
 

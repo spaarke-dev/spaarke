@@ -75,6 +75,22 @@ public static class ProcedureEntity
         || (hasPublishStamp && status != VersionStatusDraft)
         || (status == VersionStatusRetired && hasPublishedRules);
 
+    /// <summary>
+    /// The ONE definition of a Procedure's firm-facing label (ebilling-r1 tasks 083, 135): its firm-facing name, or its name when that is blank;
+    /// null when the row is missing or has neither. Asked by <c>RuleSetService.GetFirmClauseAsync</c> and the Billing Guidelines view.
+    /// </summary>
+    internal static string? FirmFacingLabelOf(Entity? procedure)
+    {
+        if (procedure is null)
+        {
+            return null;
+        }
+
+        var firmFacing = procedure.GetAttributeValue<string>(FirmFacingNameColumn);
+        var name = string.IsNullOrWhiteSpace(firmFacing) ? procedure.GetAttributeValue<string>(NameColumn) : firmFacing;
+        return string.IsNullOrWhiteSpace(name) ? null : name.Trim();
+    }
+
     // sprk_storedfile (088)
     public const string StoredFileProcedureVersionColumn = "sprk_procedureversion";
     public const string StoredFilePurposeColumn = "sprk_purpose";

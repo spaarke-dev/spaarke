@@ -657,6 +657,14 @@ public partial class RouteAuthorizationGuardTests
             + "never a pass. The handlers read the FirmFindingsProjection only for the id the filter admitted (a handler that finds no "
             + "admitted subject answers 403, :55-75; the submission handler passes the filter's InvoiceDecided to the projection, :75); a "
             + "Degraded or Unavailable outcome is a 503."),
+        new GovernedFile("Api/ExternalAccess/BillingGuidelinesEndpoints.cs", Scope.GroupGated,
+            "GET /api/v1/external/ebilling/billing-guidelines (ebilling-r1 task 135, FR-49, D-66, NFR-10) on the COLLABORATION group, the chain "
+            + "attaching AddBillingGuidelinesAuthorizationFilter BEFORE RequireEbillingEnabled. The filter admits a CIAM contact only (a "
+            + "workforce principal and a systemuser are the same stable 403 before any read) with at least one active firm (the one firm "
+            + "read 044/051/130 use; an unreadable read is 503, never 'no firm' and never a pass); an optional coreRecordId must be a record "
+            + "the contact can READ from the evaluator's post-veto set, a malformed, missing or unreadable id being the same 404. The handler "
+            + "projects only the firms and the record the filter decided (a handler reached without that decision answers 403). The route "
+            + "is declared exempt from the workforce ceiling (its own filter refuses every workforce principal first)."),
         new GovernedFile("Api/ExternalAccess/ExternalRegistrationEndpoints.cs", Scope.RouteLevelGate,
             "POST /api/v1/external/registration (spaarke-SPA-external-access-platform-r3 task 047, ADR-028 A9) on its OWN "
             + "group: RequireAuthorization(ExternalCollaboration) WITHOUT CallerPrincipalAuthorizationFilter (the caller is "
@@ -1262,7 +1270,10 @@ public partial class RouteAuthorizationGuardTests
     // 154 -> 155 (2026-11-17, ebilling-r1 task 131, FR-50). Net +1: Api/Finance/FirmNoticeEndpoints.cs ADDED -- POST
     // /api/finance/invoices/{invoiceId}/firm-notice/draft. Classified by GovernedFiles (RouteLevelGate: step 0 on the group, then
     // AddFinanceAuthorizationFilter as the caller on the invoice in the path); .RequireEbillingEnabled is already in NotAuthorizationForms.
-    private const int ExpectedEndpointFileCount = 155;
+    // 155 -> 156 (2026-11-17, ebilling-r1 task 135, merged after 131, FR-49). Net +1: Api/ExternalAccess/BillingGuidelinesEndpoints.cs ADDED -- GET
+    // /api/v1/external/ebilling/billing-guidelines on the external collaboration group. Classified by GovernedFiles (GroupGated:
+    // AddBillingGuidelinesAuthorizationFilter, credited above); .RequireEbillingEnabled is already in NotAuthorizationForms.
+    private const int ExpectedEndpointFileCount = 156;
 
     // =============================================================================================
     // THE CREDITED ALLOW-LIST — the only attachment forms Rule A credits as a per-resource decision
@@ -1432,6 +1443,13 @@ public partial class RouteAuthorizationGuardTests
             + "invoice's vendor firm among the caller's firms (an internal systemuser exempt), Read through its parents from the record gate "
             + "with the secure-roots rule and the (a') predicate, and the visible file set (DecideInvoiceFilesAsync); every refusal the "
             + "uniform 404, every fault 503."),
+        new CreditedForm("AddBillingGuidelinesAuthorizationFilter", "Api/ExternalAccess/BillingGuidelinesEndpoints.cs",
+            "ebilling-r1 task 135: the caller principal must be a CIAM contact and not a systemuser (BillingGuidelinesEndpoints.cs:173; a "
+            + "workforce principal, a systemuser and a missing principal :166 are the same stable 403, before any read); the caller must have "
+            + "at least one ACTIVE firm by the shared firm read (:182; an unreadable or faulting read is a retryable 503, never 'no firm' and "
+            + "never a pass; a decided empty set is the 403, :200); a coreRecordId must be a record on which the evaluator's post-veto set "
+            + "for the contact holds Read (:232; a malformed, missing or unreadable id is the same 404; a composition fault is a 503). The "
+            + "decision (firms and record) is the only scope the handler reads (:44)."),
         new CreditedForm("AddFirmOutcomeAuthorizationFilter", "Api/ExternalAccess/FirmOutcomeAuthorizationFilter.cs",
             "ebilling-r1 task 130b: a systemuser is refused (FirmOutcomeAuthorizationFilter.cs:135); the invoice's (or submission's) firm "
             + "must be among the caller contact's ACTIVE firms (:227, :379; an unreadable or faulting firm read is a retryable 503, never "
