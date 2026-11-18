@@ -3,7 +3,7 @@
   <metadata>
     <title>Repair pass: Assign-cascade allow-list and per-row child check (replaces the per-table refusal; FR-25 amended 2026-11-18)</title>
     <phase>5 W5 Records created outside the product</phase>
-    <gate>052e approved (owner 2026-11-18: Q1, Q3–Q8 yes; Q2 no). Nothing here enables the pass on any environment (`RecordRepair:Pass:GoLive` stays unset).</gate>
+    <gate>052e approved (owner 2026-11-18: Q1–Q8 yes; Q2 yes = event and analysis notes move). Nothing here enables the pass on any environment (`RecordRepair:Pass:GoLive` stays unset).</gate>
     <status>pending</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .cs in Sprk.Bff.Api: the repair job writes owners as the system principal, and an Assign moves child rows with it. A wrong "no children" answer moves rows nobody chose to move. Security fails closed.</rigor-reason>
