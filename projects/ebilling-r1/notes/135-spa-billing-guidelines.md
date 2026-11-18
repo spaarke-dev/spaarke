@@ -83,7 +83,7 @@ Fix round 1:
 
 uac-r2 F2 test: the record rule's fail-closed `RecordRuleSet.IsRecordScoped(set)` branch is covered by `ARecordRule_WhoseSetDoesNotReadAsRecordScoped_IsNotShown` (set row read without its scope and core columns, flag on, base visible: not shown, clause absent) and its twin `ARecordRule_WhoseSetReadsAsRecordScoped_IsShown`; with the branch deleted the first fails (`response.Sets` not empty), the twin passes.
 
-The service's own firm filter is belt and braces beside the resolver's firm condition; neutralising it alone is not observable because the resolver already excludes another firm's Procedure (that exclusion is 082's, tested there). The same holds for the fix-round Exclude, superseded-version and other-firm tests: they assert 082's resolver behaviour through this view, so they carry must-fire controls (the same record seen as the own firm, or without the Exclude) instead of a fail-before. The fail-closed backstop (item 5) is a regression guard and is likewise not observable.
+The service's own firm filter is belt and braces beside the resolver's firm condition; neutralising it alone is not observable because the resolver already excludes another firm's Procedure (that exclusion is 082's, tested there). The same holds for the fix-round Exclude, superseded-version and other-firm tests: they assert 082's resolver behaviour through this view, so they carry must-fire controls (the same record seen as the own firm, or without the Exclude) instead of a fail-before. The fail-closed backstop (item 5) is a regression guard and is likewise not observable, except its record-rule branch (a set row that does not read as record-scoped), which uac-r2 F2 drives with a must-fire test and its twin.
 
 ## Gates
 
