@@ -48,7 +48,8 @@ public static class BillingGuidelinesEndpoints
 
         try
         {
-            // The ONE firm-name read (/me uses it): only the caller's own ids are asked; a firm that is inactive or unnamed is not listed.
+            // The ONE firm-name read (/me uses it): only the caller's own ids are asked; an inactive firm is not listed, and a firm with a blank name is
+            // labelled by the service (never by its id).
             var named = await InvoiceSubmissionService.ReadActiveFirmNamesAsync(entities, logger, scope.Firms, ct);
             if (named is null)
             {
@@ -61,8 +62,9 @@ public static class BillingGuidelinesEndpoints
         }
         catch (Exception ex) when (!ct.IsCancellationRequested)
         {
-            // Information and above carry the exception type only: a resolver fault message names row and record ids (K2: never shown).
-            logger.LogError("[EBILLING-GUIDELINES] The guidelines could not be read ({ExceptionType}); answering 503.", ex.GetType().Name);
+            // The exception object is logged (operator logs only, as RecordProcedureReadService does): a resolver fault names the rows it could
+            // not read. The response body stays generic and never carries it.
+            logger.LogError(ex, "[EBILLING-GUIDELINES] The guidelines could not be read (record {RecordId}, {FirmCount} firm(s)); answering 503.", scope.Core?.Id, scope.Firms.Count);
             return BillingGuidelinesErrors.Unavailable();
         }
     }
@@ -188,7 +190,7 @@ internal sealed class BillingGuidelinesAuthorizationFilter : IEndpointFilter
         }
         catch (Exception ex) when (!ct.IsCancellationRequested)
         {
-            _logger.LogError("[EBILLING-GUIDELINES] SYSTEM FAILURE: the caller's firms could not be read ({ExceptionType}); answering 503.", ex.GetType().Name);
+            _logger.LogError(ex, "[EBILLING-GUIDELINES] SYSTEM FAILURE: the caller's firms could not be read (contact {ContactId}); answering 503.", principal.ContactId);
             return BillingGuidelinesErrors.Unavailable();
         }
 
@@ -235,7 +237,7 @@ internal sealed class BillingGuidelinesAuthorizationFilter : IEndpointFilter
         }
         catch (Exception ex) when (!ct.IsCancellationRequested)
         {
-            _logger.LogError("[EBILLING-GUIDELINES] SYSTEM FAILURE: the caller's accessible records could not be composed ({ExceptionType}); answering 503.", ex.GetType().Name);
+            _logger.LogError(ex, "[EBILLING-GUIDELINES] SYSTEM FAILURE: the caller's accessible records could not be composed (contact {ContactId}, record {RecordId}); answering 503.", contactId, recordId);
             return (null, BillingGuidelinesErrors.Unavailable());
         }
 

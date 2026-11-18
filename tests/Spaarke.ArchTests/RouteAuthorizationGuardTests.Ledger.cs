@@ -1432,11 +1432,11 @@ public partial class RouteAuthorizationGuardTests
             + "with the secure-roots rule and the (a') predicate, and the visible file set (DecideInvoiceFilesAsync); every refusal the "
             + "uniform 404, every fault 503."),
         new CreditedForm("AddBillingGuidelinesAuthorizationFilter", "Api/ExternalAccess/BillingGuidelinesEndpoints.cs",
-            "ebilling-r1 task 135: the caller principal must be a CIAM contact and not a systemuser (BillingGuidelinesEndpoints.cs:171; a "
-            + "workforce principal, a systemuser and a missing principal :164 are the same stable 403, before any read); the caller must have "
-            + "at least one ACTIVE firm by the shared firm read (:180; an unreadable or faulting read is a retryable 503, never 'no firm' and "
-            + "never a pass; a decided empty set is the 403, :195); a coreRecordId must be a record on which the evaluator's post-veto set "
-            + "for the contact holds Read (:230; a malformed, missing or unreadable id is the same 404; a composition fault is a 503). The "
+            "ebilling-r1 task 135: the caller principal must be a CIAM contact and not a systemuser (BillingGuidelinesEndpoints.cs:173; a "
+            + "workforce principal, a systemuser and a missing principal :166 are the same stable 403, before any read); the caller must have "
+            + "at least one ACTIVE firm by the shared firm read (:182; an unreadable or faulting read is a retryable 503, never 'no firm' and "
+            + "never a pass; a decided empty set is the 403, :200); a coreRecordId must be a record on which the evaluator's post-veto set "
+            + "for the contact holds Read (:232; a malformed, missing or unreadable id is the same 404; a composition fault is a 503). The "
             + "decision (firms and record) is the only scope the handler reads (:44)."),
         new CreditedForm("AddFirmOutcomeAuthorizationFilter", "Api/ExternalAccess/FirmOutcomeAuthorizationFilter.cs",
             "ebilling-r1 task 130b: a systemuser is refused (FirmOutcomeAuthorizationFilter.cs:135); the invoice's (or submission's) firm "

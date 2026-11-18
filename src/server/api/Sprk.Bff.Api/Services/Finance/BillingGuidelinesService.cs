@@ -28,7 +28,7 @@ using Sprk.Bff.Api.Services.Signals.Billing;
 
 namespace Sprk.Bff.Api.Services.Finance;
 
-/// <summary>One of the caller's firms: its id (never sent out) and the name its sets are labelled with.</summary>
+/// <summary>One of the caller's own firms: its id and the name its sets are labelled with (a blank name reads as <see cref="BillingGuidelinesService.UnnamedFirm"/>).</summary>
 public sealed record CallerFirm(Guid FirmId, string Name);
 
 /// <summary>The Billing Guidelines view: the sets in force today, by firm.</summary>
@@ -40,7 +40,7 @@ public sealed record BillingGuidelinesResponse(IReadOnlyList<BillingGuidelineSet
 /// <see cref="BillingGuidelinesService"/>. Dates are the Procedure version's (null for a record group).
 /// </summary>
 public sealed record BillingGuidelineSet(
-    string FirmName, string Name, string Scope, int? Version, DateOnly? EffectiveFrom, DateOnly? EffectiveTo, IReadOnlyList<BillingGuidelineRule> Rules);
+    Guid FirmId, string FirmName, string Name, string Scope, int? Version, DateOnly? EffectiveFrom, DateOnly? EffectiveTo, IReadOnlyList<BillingGuidelineRule> Rules);
 
 /// <summary>
 /// One rule. A rule the describer refused has <paramref name="DescriptionAvailable"/> false, no description and no parameters: the name and the
@@ -63,6 +63,9 @@ public sealed class BillingGuidelinesService
     public const string ScopeFirm = "Applies to your firm";
     public const string ScopeThisRecord = "Set for this record";
     public const string ScopeParentRecord = "From the parent record";
+
+    /// <summary>The label of a firm that has no name. The firm-name read answers the firm's id when the name is blank; an id is never a label.</summary>
+    public const string UnnamedFirm = "Your firm";
 
     /// <summary>The label of a Procedure rule whose policy has no name (a closed fallback; never a code).</summary>
     public const string UnnamedRule = "Billing rule";
@@ -105,15 +108,21 @@ public sealed class BillingGuidelinesService
         return new BillingGuidelinesResponse(sets);
     }
 
+    /// <summary>The firm's name, or <see cref="UnnamedFirm"/> when it is blank or is the firm's own id (what the shared name read returns for a blank name).</summary>
+    internal static string FirmLabel(CallerFirm firm) =>
+        string.IsNullOrWhiteSpace(firm.Name) || (Guid.TryParse(firm.Name.Trim(), out var named) && named == firm.FirmId) ? UnnamedFirm : firm.Name;
+
     private async Task<IReadOnlyList<BillingGuidelineSet>> ProjectAsync(CallerFirm firm, ProcedureRows rows, ProcedureRulesOnDate onDate, CancellationToken ct)
     {
-        // Belt and braces beside the resolver's own firm condition (O-20): a rule of another firm's Procedure, or of another firm's record
-        // set, is never shown, whatever the resolver returned.
+        // A regression guard BEHIND the resolver's own firm condition (O-20), which is what keeps another firm's rows out. A rule whose
+        // Procedure or rule set the resolver's own rows do not list, or that belongs to another firm, is dropped (fail closed): whatever
+        // the resolver returned, nothing of another firm is shown and nothing unexplained is shown.
         var procedureById = rows.Procedures.ToDictionary(p => p.Id);
         var setById = rows.Sets.GroupBy(s => s.Id).ToDictionary(g => g.Key, g => g.First());
         var rules = onDate.Rules.Where(r =>
-                (r.RecordRule is not null || procedureById.GetValueOrDefault(r.Procedure.ProcedureId) is not { } p || p.FirmId is null || p.FirmId == firm.FirmId)
-                && (setById.GetValueOrDefault(r.Version.RuleSetId) is not { } s || s.FirmId is null || s.FirmId == firm.FirmId))
+                (r.RecordRule is not null
+                    || (procedureById.TryGetValue(r.Procedure.ProcedureId, out var p) && (p.FirmId is null || p.FirmId == firm.FirmId)))
+                && setById.TryGetValue(r.Version.RuleSetId, out var s) && (s.FirmId is null || s.FirmId == firm.FirmId))
             .ToList();
         if (rules.Count == 0)
         {
@@ -129,9 +138,9 @@ public sealed class BillingGuidelinesService
         var groups = new Dictionary<string, (string Name, string Scope, int? Version, DateOnly? From, DateOnly? To, List<BillingGuidelineRule> Rules)>(StringComparer.Ordinal);
         foreach (var rule in rules.OrderBy(r => r.Version.PolicyName, StringComparer.Ordinal).ThenBy(r => r.Version.PolicyId))
         {
-            // A Draft or any other state of the set is not shown (083: Published, or Retired for a version that judged earlier).
+            // Only a Published set is shown (the view lists what is in force today: a Retired or Draft set is not).
             if (!setRows.TryGetValue(rule.Version.RuleSetId, out var set)
-                || set.GetAttributeValue<OptionSetValue>("statuscode")?.Value is not (RuleSetService.RuleSetPublished or RuleSetService.RuleSetRetired)
+                || set.GetAttributeValue<OptionSetValue>("statuscode")?.Value != RuleSetService.RuleSetPublished
                 || !RuleSetClauseVisibility.IsVisibleToFirms(set.GetAttributeValue<bool?>(VisibleColumn)))
             {
                 continue;
@@ -181,7 +190,7 @@ public sealed class BillingGuidelinesService
         }
 
         return groups.Values
-            .Select(g => new BillingGuidelineSet(firm.Name, g.Name, g.Scope, g.Version, g.From, g.To, g.Rules))
+            .Select(g => new BillingGuidelineSet(firm.FirmId, FirmLabel(firm), g.Name, g.Scope, g.Version, g.From, g.To, g.Rules))
             .OrderBy(s => s.Name, StringComparer.Ordinal).ThenBy(s => s.Scope, StringComparer.Ordinal)
             .ToList();
     }

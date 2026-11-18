@@ -173,6 +173,53 @@ public sealed class BillingGuidelinesServiceTests
         return id;
     }
 
+    /// <summary>A Procedure-level Exclude on a record (the Procedure does not apply there, for every firm or for <paramref name="firm"/> only).</summary>
+    private void ExcludeProcedure(string table, Guid record, Guid procedure, Guid? firm = null)
+    {
+        var columns = new List<(string, object)>
+        {
+            (ProcedureAssignmentEntity.ProcedureColumn, Ref(ProcedureEntity.Entity, procedure)),
+            (ProcedureAssignmentEntity.ModeColumn, Option(ProcedureAssignmentEntity.ModeExcluded)),
+            ("statecode", Option(0)), (table, Ref(table, record)), ("createdon", new DateTime(2026, 2, 1, 8, 0, 0, DateTimeKind.Utc)),
+            (ProcedureAssignmentEntity.ReasonColumn, ReasonSecret),
+        };
+        if (firm is { } f) columns.Add((ProcedureAssignmentEntity.FirmColumn, Ref("sprk_organization", f)));
+        _world.Add(ProcedureAssignmentEntity.Entity, Guid.NewGuid(), columns.ToArray());
+    }
+
+    /// <summary>A rule-level Exclude on a record (that one rule does not apply there, for every firm or for <paramref name="firm"/> only).</summary>
+    private void ExcludeRule(string table, Guid record, Guid policy, Guid? firm = null, DateTime? at = null)
+    {
+        var columns = new List<(string, object)>
+        {
+            (ProcedureAssignmentEntity.ExcludedPolicyColumn, Ref(Policy, policy)),
+            (ProcedureAssignmentEntity.ModeColumn, Option(ProcedureAssignmentEntity.ModeExcluded)),
+            ("statecode", Option(0)), (table, Ref(table, record)), ("createdon", at ?? new DateTime(2026, 2, 1, 8, 0, 0, DateTimeKind.Utc)),
+            (ProcedureAssignmentEntity.ReasonColumn, ReasonSecret),
+        };
+        if (firm is { } f) columns.Add((ProcedureAssignmentEntity.FirmColumn, Ref("sprk_organization", f)));
+        _world.Add(ProcedureAssignmentEntity.Entity, Guid.NewGuid(), columns.ToArray());
+    }
+
+    /// <summary>A record rule changing <paramref name="baseRule"/> on a record, for every firm or for <paramref name="firm"/> only (its own rule set, shown to firms).</summary>
+    private void ChangeRuleOnRecord(string table, Guid record, (Guid Procedure, Guid Version, Guid Rule, Guid RuleVersion) baseRule, string quote, Guid? firm = null)
+    {
+        var at = new DateTime(2026, 2, 1, 8, 0, 0, DateTimeKind.Utc);
+        ExcludeRule(table, record, baseRule.Rule, firm, at);
+        var set = ProcedureAssignmentService.RecordRuleSetIdFor(table, record, firm);
+        var setColumns = new List<(string, object)>
+        {
+            ("sprk_scope", Option(firm is null ? RecordRuleSet.ScopeRecord : RecordRuleSet.ScopeFirmRecord)),
+            (RuleDomains.PolicyDomainColumn, Option(RuleDomains.PolicyDomainBilling)), ("statecode", Option(0)), (table, Ref(table, record)),
+            ("sprk_visibletofirms", true), ("statuscode", Option(RuleSetService.RuleSetPublished)),
+        };
+        if (firm is { } f) setColumns.Add(("sprk_firm", Ref("sprk_organization", f)));
+        _world.Add(RuleSet, set, setColumns.ToArray());
+        var recordRule = ProcedureAssignmentService.RecordRulePolicyIdFor(set, baseRule.Rule);
+        AddRule(set, "BRR-1", "Changed rule", recordRule);
+        AddRuleVersion(recordRule, null, """{"type":"ApprovedRate","tolerancePercent":2}""", quote, "Section 9", basedOn: baseRule.RuleVersion, created: at);
+    }
+
     private static CallerFirm Firm(Guid id, string name = "Alpha LLP") => new(id, name);
 
     private async Task<(BillingGuidelinesResponse Response, string Json)> General(params CallerFirm[] firms)
@@ -259,6 +306,9 @@ public sealed class BillingGuidelinesServiceTests
         var future = AddProcedure("D3", "Future FUTURE-VERSION", ProcedureAppliesTo.AllRecords);
         AddRuleVersion(AddRule(_setOf[future], "BILL-D3", "Future"), AddVersion(future, 1, Jul1, null), ApprovedRateBody, from: Jul1);
 
+        var retiredSet = AddProcedure("D6", "Retired set RETIRED-SET", ProcedureAppliesTo.AllRecords, ruleSetStatus: RuleSetService.RuleSetRetired);
+        AddRuleVersion(AddRule(_setOf[retiredSet], "BILL-D6", "Retired set rule"), AddVersion(retiredSet, 1, Jan1, null), ApprovedRateBody);
+
         var ended = AddProcedure("D4", "Ended ENDED-VERSION", ProcedureAppliesTo.AllRecords);
         AddRuleVersion(AddRule(_setOf[ended], "BILL-D4", "Ended"), AddVersion(ended, 1, Jan1, new DateOnly(2026, 3, 1)), ApprovedRateBody);
 
@@ -268,7 +318,7 @@ public sealed class BillingGuidelinesServiceTests
         var (response, json) = await General(Firm(F));
 
         response.Sets.Select(s => s.Name).Should().Equal("Live set");
-        json.Should().NotContain("DRAFT-").And.NotContain("FUTURE-").And.NotContain("ENDED-").And.NotContain("RETIRED-");
+        json.Should().NotContain("DRAFT-").And.NotContain("RETIRED-SET").And.NotContain("FUTURE-").And.NotContain("ENDED-").And.NotContain("RETIRED-");
     }
 
     [Fact(DisplayName = "135 negative: a Procedure assigned to a record, or on a parent, is not in the general view (no record, no assignment)")]
@@ -323,6 +373,73 @@ public sealed class BillingGuidelinesServiceTests
         json.Should().NotContain("BRR").And.NotContain(recordRule.ToString()).And.NotContain(MatterName).And.NotContain(ReasonSecret);
     }
 
+    // ── What a record's own rows take away (resolver rows, read through the service) ──
+
+    private Task<BillingGuidelinesResponse> OnMatter(params CallerFirm[] firms) =>
+        _service.GetAsync(firms, new CoreRecordReference(CoreRecordKind.Matter, M), CancellationToken.None);
+
+    [Fact(DisplayName = "135 negative: a rule-level Exclude on the record removes that rule from the record's view (and only that rule)")]
+    public async Task ARuleLevelExclude_RemovesTheRule()
+    {
+        var procedure = Simple("Guidelines", "Guidelines set", ruleName: "Rule KEEP", code: "BILL-KEEP");
+        var dropped = AddRule(_setOf[procedure.Procedure], "BILL-DROP", "Rule DROPPED");
+        AddRuleVersion(dropped, procedure.Version, ApprovedRateBody, "Dropped clause DROPPED-CLAUSE");
+        ExcludeRule(Matter, M, dropped);
+
+        var onRecord = JsonSerializer.Serialize(await OnMatter(Firm(F)));
+        var general = JsonSerializer.Serialize((await General(Firm(F))).Response);
+
+        onRecord.Should().Contain("Rule KEEP").And.NotContain("Rule DROPPED").And.NotContain("DROPPED-CLAUSE").And.NotContain(ReasonSecret);
+        general.Should().Contain("Rule DROPPED", "the control: without the Exclude the rule is shown");
+    }
+
+    [Fact(DisplayName = "135 negative: a Procedure-level Exclude on the record removes the whole Procedure from the record's view")]
+    public async Task AProcedureLevelExclude_RemovesTheProcedure()
+    {
+        Simple("Kept", "Kept set", code: "BILL-KEPT");
+        var excluded = Simple("Excluded", "Excluded set EXCLUDED-SET", code: "BILL-EX").Procedure;
+        ExcludeProcedure(Matter, M, excluded);
+
+        var onRecord = await OnMatter(Firm(F));
+        var general = await General(Firm(F));
+
+        onRecord.Sets.Select(s => s.Name).Should().Equal("Kept set");
+        JsonSerializer.Serialize(onRecord).Should().NotContain("EXCLUDED-SET").And.NotContain(ReasonSecret);
+        general.Response.Sets.Select(s => s.Name).Should().Contain("Excluded set EXCLUDED-SET", "the control: without the Exclude it is shown");
+    }
+
+    [Fact(DisplayName = "135 negative: a rule version superseded inside the chosen Procedure Version, and one not yet in force, never appear")]
+    public async Task ASupersededVersion_NeverAppears()
+    {
+        var procedure = AddProcedure("Guidelines", "Versioned set", ProcedureAppliesTo.AllRecords);
+        var procedureVersion = AddVersion(procedure, 1, Jan1, null);
+        var rule = AddRule(_setOf[procedure], "BILL-VER", "Versioned rule");
+        AddRuleVersion(rule, procedureVersion, """{"type":"ApprovedRate","tolerancePercent":5}""", "OLD-CLAUSE", from: Jan1);
+        var march = new DateOnly(2026, 3, 1);
+        AddRuleVersion(rule, procedureVersion, """{"type":"ApprovedRate","tolerancePercent":7}""", "NEW-CLAUSE", from: march);
+        AddRuleVersion(rule, procedureVersion, """{"type":"ApprovedRate","tolerancePercent":9}""", "FUTURE-CLAUSE", from: Jul1);
+
+        var (response, json) = await General(Firm(F));
+
+        var shown = response.Sets.Single().Rules.Should().ContainSingle().Subject;
+        shown.ClauseQuote.Should().Be("NEW-CLAUSE");
+        shown.Parameters.Single().Value.Should().Be("7");
+        json.Should().NotContain("OLD-CLAUSE").And.NotContain("FUTURE-CLAUSE");
+    }
+
+    [Fact(DisplayName = "135 negative: another firm's record rule set and Exclude on the same record never appear for this firm (and do for their own)")]
+    public async Task AnotherFirmsRecordRows_NeverAppear()
+    {
+        var baseRule = Simple("Guidelines", "Base set", ruleName: "Base rule", code: "BILL-BASE");
+        ChangeRuleOnRecord(Matter, M, baseRule, "G-ONLY-CLAUSE", firm: G);
+
+        var asF = JsonSerializer.Serialize(await OnMatter(Firm(F)));
+        var asG = JsonSerializer.Serialize(await OnMatter(Firm(G, "Beta Partners")));
+
+        asF.Should().Contain("Base rule").And.NotContain("G-ONLY-CLAUSE").And.NotContain(ReasonSecret, "firm G's Exclude does not remove the rule for firm F");
+        asG.Should().Contain("G-ONLY-CLAUSE", "the control: the record rule shows for its own firm");
+    }
+
     // ── The describer's refusal ──
 
     [Fact(DisplayName = "135 FR-24: a rule the describer refuses is listed with its name and clause and a marker, with no description, no parameters and no refusal text")]
@@ -357,7 +474,7 @@ public sealed class BillingGuidelinesServiceTests
         var members = new[] { typeof(BillingGuidelinesResponse), typeof(BillingGuidelineSet), typeof(BillingGuidelineRule), typeof(BillingGuidelineParameter) }
             .SelectMany(t => t.GetProperties().Select(p => p.Name)).ToList();
         members.Should().BeEquivalentTo(
-            "Sets", "FirmName", "Name", "Scope", "Version", "EffectiveFrom", "EffectiveTo", "Rules",
+            "Sets", "FirmId", "FirmName", "Name", "Scope", "Version", "EffectiveFrom", "EffectiveTo", "Rules",
             "Name", "DescriptionAvailable", "Description", "Parameters", "ClauseQuote", "SectionReference", "InForceFrom",
             "Name", "Value", "Unit");
         json.Should().NotContain(InternalName).And.NotContain(ReasonSecret).And.NotContain(assigned.ToString()).And.NotContain(assigned.ToString("N"))
@@ -367,7 +484,23 @@ public sealed class BillingGuidelinesServiceTests
 
     // ── Several firms ──
 
-    [Fact(DisplayName = "135 owner question: a caller of several firms sees each firm's sets, each labelled with its firm and no other firm's")]
+    [Theory(DisplayName = "135: a firm with a blank name, or whose 'name' is its own id, is labelled neutrally and its id is never the label")]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData("13500000-0000-4000-8000-0000000000f1")]
+    [InlineData("13500000-0000-4000-8000-0000000000F1")]
+    public async Task AnUnnamedFirm_GetsTheNeutralLabel(string name)
+    {
+        Simple("Default", "Default guidelines");
+
+        var (response, json) = await General(Firm(F, name));
+
+        response.Sets.Single().FirmName.Should().Be(BillingGuidelinesService.UnnamedFirm);
+        response.Sets.Single().FirmId.Should().Be(F);
+        json.Should().NotContain("\"firmName\":\"13500000");
+    }
+
+    [Fact(DisplayName = "135 EB-D-260: a caller of several firms sees each firm's sets, each labelled with its firm and no other firm's")]
     public async Task SeveralFirms_EachSetIsLabelledWithItsFirm()
     {
         Simple("Default", "Default guidelines");

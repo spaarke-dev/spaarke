@@ -376,6 +376,10 @@ public sealed class BillingGuidelinesScopeTests : IAsyncLifetime
     public async Task AnUnreadableOrMissingRecord_IsTheSame404(string kind)
     {
         SeedProcedure("RATE-ALL", null, visible: true);
+        // The unreadable record EXISTS and has rules of its own: its 404 is proven apart from "missing" (the same body), and none of its
+        // rules leak into the answer.
+        _rig.World.Add(RecordProcedureRig.Matter, Unreadable, ("sprk_mattername", "Hidden matter"));
+        _rig.Assign(RecordProcedureRig.Matter, Unreadable, SeedProcedure("RATE-HIDDEN", null, visible: true, ProcedureAppliesTo.AssignedRecordsOnly));
         var reference = await ReadAsync(await GetAsync($"{Route}?coreRecordId={Guid.NewGuid()}"));
         var id = kind switch
         {
@@ -392,7 +396,7 @@ public sealed class BillingGuidelinesScopeTests : IAsyncLifetime
         response.StatusCode.Should().Be(HttpStatusCode.NotFound);
         answer.Code.Should().Be(NotFound);
         answer.Body.Should().Be(reference.Body);
-        answer.Body.Should().NotContain("RATE-ALL");
+        answer.Body.Should().NotContain("RATE-ALL").And.NotContain("RATE-HIDDEN");
         _rig.World.Queries.Should().NotContain(q => q.EntityName == "sprk_ruleset" || q.EntityName == ProcedureEntity.Entity);
     }
 
