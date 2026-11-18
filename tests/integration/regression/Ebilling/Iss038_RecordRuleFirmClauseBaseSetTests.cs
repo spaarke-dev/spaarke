@@ -1,6 +1,9 @@
 using System.Text.Json;
 using FluentAssertions;
+using Microsoft.Extensions.Logging;
 using Microsoft.Xrm.Sdk;
+using Microsoft.Xrm.Sdk.Query;
+using Moq;
 using Sprk.Bff.Api.Services.Finance;
 using Sprk.Bff.Api.Services.Finance.Procedures;
 using Sprk.Bff.Api.Services.Finance.Submission;
@@ -223,6 +226,126 @@ public sealed class Iss038_RecordRuleFirmClauseBaseSetTests
         (await rules.GetFirmClauseAsync(on, invoice, default)).Should().Be(new FirmClauseText(VisibleQuote, VisibleSection, null));
         h.Queries.Count(q => q.EntityName == "sprk_policyversion").Should().Be(1, "only the version itself is read: no base lookup");
         (await rules.GetFirmClauseAsync(off, invoice, default)).Should().Be(FirmClauseText.None);
+    }
+
+    // ── The base set's Procedure type ──
+
+    private const string BaseSetName = "INTERNAL-BASE-SET-NAME";
+    private const string BaseProcedureName = "INTERNAL-BASE-PROCEDURE-NAME";
+
+    /// <summary>A visible base rule set that belongs to a Procedure of <paramref name="procedureType"/> (no type column when null); its version.</summary>
+    private static Guid BaseVersionOfProcedure(RuleSetServiceTests.Harness h, int? procedureType)
+    {
+        var procedure = h.Procedure(BaseProcedureName);
+        if (procedureType is { } type)
+        {
+            h.Row("sprk_procedure", procedure)["sprk_proceduretype"] = new OptionSetValue(type);
+        }
+
+        var set = h.RuleSet(RuleSetService.RuleSetPublished, visible: true, procedure: procedure);
+        h.Row("sprk_ruleset", set)["sprk_name"] = BaseSetName;
+        return h.Rule(set, "BASE-" + Guid.NewGuid().ToString("N")[..6], ProposalState.Accepted, current: true).Version;
+    }
+
+    private static void ShouldCarryNothingOfTheBase(string text)
+    {
+        text.Should().NotContain(InternalQuote).And.NotContain(InternalSection).And.NotContain(RecordLabel)
+            .And.NotContain(BaseSetName).And.NotContain(BaseProcedureName);
+    }
+
+    [Theory(DisplayName = "ISS-038 must-fire: a record rule whose base rule set belongs to an Internal Standard Procedure, or to one whose type is not readable, shows no clause")]
+    [InlineData((int)ProcedureType.InternalStandard, false)]
+    [InlineData(null, false)]
+    [InlineData((int)ProcedureType.Guideline, true)]
+    public async Task GetFirmClause_RecordRuleWhoseBaseBelongsToAProcedure_NeedsAReadableTypeThatIsNotInternalStandard(int? baseProcedureType, bool shown)
+    {
+        var (h, recordSet) = RecordSetWorld();
+        var record = RecordVersion(h, recordSet);
+        var baseVersion = BaseVersionOfProcedure(h, baseProcedureType);
+        var invoice = h.Invoice(RuleSetServiceTests.FindingsWithRecordRules([(record, baseVersion)]));
+
+        var clause = await h.Service().GetFirmClauseAsync(record, invoice, default);
+
+        if (shown)
+        {
+            clause.Should().Be(new FirmClauseText(InternalQuote, InternalSection, RecordLabel), "the control: a readable base type that is not Internal Standard");
+        }
+        else
+        {
+            ShouldCarryNothingOf(clause);
+        }
+    }
+
+    [Fact(DisplayName = "ISS-038 must-fire: a record rule whose base rule set belongs to an Internal Standard Procedure is not cited in the firm outcome")]
+    public async Task FirmFindingsProjection_RecordRuleWhoseBaseIsInternalStandard_CitesNothing()
+    {
+        var (h, recordSet) = RecordSetWorld();
+        var record = RecordVersion(h, recordSet);
+        var baseVersion = BaseVersionOfProcedure(h, (int)ProcedureType.InternalStandard);
+        var world = new FirmFindingsProjectionTests.World();
+        var invoiceId = world.Invoices.Single().Id;
+        h.Seed(new Entity("sprk_invoice", invoiceId) { ["sprk_vendororg"] = new EntityReference("sprk_organization", Guid.NewGuid()) });
+        h.AddSubmission(invoiceId, ProjectionSubmissionId, RuleSetServiceTests.FindingsWithRecordRules([(record, baseVersion)]));
+        var rules = h.Service();
+
+        world.Versions.Add(h.Row("sprk_policyversion", record));
+        world.Policies.Add(h.Row("sprk_policy", h.Row("sprk_policyversion", record).GetAttributeValue<EntityReference>("sprk_policy").Id));
+        world.RuleSets.Add(h.Row("sprk_ruleset", recordSet));
+        world.Clause = version => rules.GetFirmClauseAsync(version, invoiceId, default).GetAwaiter().GetResult();
+        world.AddReducedWithCitation(1, "Rate reduced.", record, "Firm reason one.");
+
+        var outcome = await world.Projection().GetForInvoiceAsync(invoiceId, CancellationToken.None);
+
+        outcome!.Items.Should().ContainSingle().Which.Citations.Should().BeEmpty("no clause, no section, no rule name or label reaches the firm");
+        ShouldCarryNothingOfTheBase(JsonSerializer.Serialize(outcome));
+        world.ClauseCalls.Should().BeEquivalentTo(new[] { record });
+    }
+
+    [Fact(DisplayName = "ISS-038 must-fire: a record rule shows no clause when the read of its base Procedure's type faults, and the log carries only the invoice and version ids")]
+    public async Task GetFirmClause_WhenTheBaseProcedureTypeReadFaults_ShowsNothing()
+    {
+        var (h, recordSet) = RecordSetWorld();
+        var record = RecordVersion(h, recordSet);
+        var baseVersion = BaseVersionOfProcedure(h, (int)ProcedureType.Guideline);
+        var invoice = h.Invoice(RuleSetServiceTests.FindingsWithRecordRules([(record, baseVersion)]));
+        var rules = h.Service();
+        (await rules.GetFirmClauseAsync(record, invoice, default)).Quote.Should().Be(InternalQuote, "the control: without the fault it shows");
+        h.Logs.Clear();
+        h.Entities.Setup(e => e.RetrieveMultipleAsync(It.Is<QueryExpression>(q => q.EntityName == "sprk_procedure"), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("Dataverse fault on " + BaseProcedureName));
+
+        var clause = await rules.GetFirmClauseAsync(record, invoice, default);
+
+        ShouldCarryNothingOf(clause);
+        h.Logs.Where(l => l.Level >= LogLevel.Information).Should().OnlyContain(l => l.Exception == null);
+        h.Logs.Should().OnlyContain(l => !l.Message.Contains(BaseProcedureName) && !l.Message.Contains(BaseSetName));
+    }
+
+    [Fact(DisplayName = "ISS-038: a record rule whose base cannot be used is logged once at Information with the invoice and version ids only")]
+    public async Task GetFirmClause_RecordRuleWithNoUsableBase_LogsOneInformationEntryWithIdsOnly()
+    {
+        var (h, recordSet) = RecordSetWorld();
+        var noSlot = RecordVersion(h, recordSet);
+        var internalBase = RecordVersion(h, recordSet);
+        var internalStandardBase = BaseVersionOfProcedure(h, (int)ProcedureType.InternalStandard);
+        var usable = RecordVersion(h, recordSet);
+        var visibleBase = BaseVersion(h, visible: true);
+        var invoice = h.Invoice(RuleSetServiceTests.FindingsWithRecordRules([(internalBase, internalStandardBase), (usable, visibleBase)], noSlot));
+        var rules = h.Service();
+        h.Logs.Clear();
+
+        (await rules.GetFirmClauseAsync(usable, invoice, default)).Quote.Should().Be(InternalQuote, "the control: a usable base logs nothing");
+        h.Logs.Should().BeEmpty();
+
+        ShouldCarryNothingOf(await rules.GetFirmClauseAsync(noSlot, invoice, default));
+        var entry = h.Logs.Should().ContainSingle().Which;
+        entry.Level.Should().Be(LogLevel.Information);
+        entry.Message.Should().Contain(invoice.ToString("D")).And.Contain(noSlot.ToString("D"));
+        entry.Message.Should().NotContain(InternalQuote).And.NotContain(InternalSection).And.NotContain(BaseSetName);
+        h.Logs.Clear();
+
+        ShouldCarryNothingOf(await rules.GetFirmClauseAsync(internalBase, invoice, default));
+        h.Logs.Should().ContainSingle().Which.Level.Should().Be(LogLevel.Information);
     }
 
     // ── The helper and the snapshot reader ──
