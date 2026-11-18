@@ -188,7 +188,8 @@ public static class InvoiceApprovalEndpoints
     }
 
     private static async Task<IResult> Approve(
-        Guid invoiceId, InvoiceApprovalRequest? body, InvoiceApprovalService service, HttpContext httpContext, CancellationToken ct)
+        Guid invoiceId, InvoiceApprovalRequest? body, InvoiceApprovalService service, HttpContext httpContext,
+        [FromServices] EbillingNotificationEnqueuer? notifications, CancellationToken ct)
     {
         if (await PlaybookAuthorizationFilter.ResolveCallerSystemUserIdAsync(httpContext, ct) is not { } caller)
         {
@@ -197,6 +198,14 @@ public static class InvoiceApprovalEndpoints
         }
 
         var result = await service.ApproveAsync(invoiceId, caller, body?.Note, TokenHelper.ExtractBearerTokenOrNull(httpContext), ct);
+        if (result.Outcome == ApprovalOutcome.Approved)
+        {
+            // Task 132 (FR-39, FR-50): enqueued on EVERY approval, once it is committed. Whether it carries an adjustment is decided once, by the
+            // notice composer over the 130 projection: without one the job sends no email. Never fails the approval (the enqueuer logs and returns).
+            if (notifications is not null) await notifications.EnqueueAsync(
+                EbillingNotificationEvent.ApprovedWithAdjustments, EbillingNotificationSubject.Invoice, invoiceId, correlationId: httpContext.TraceIdentifier);
+        }
+
         if (result.Outcome is ApprovalOutcome.Approved or ApprovalOutcome.AlreadyApproved)
         {
             // The current state, best effort: the approval already succeeded or was a no-op, so a failed read never turns it into an error.

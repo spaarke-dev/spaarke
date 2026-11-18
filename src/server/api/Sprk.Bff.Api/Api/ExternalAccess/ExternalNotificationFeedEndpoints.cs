@@ -84,6 +84,7 @@ public static class ExternalNotificationFeedEndpoints
         ExternalMessageEndpoints.Roots.Values.ToDictionary(r => r.EntityLogicalName, r => r.Segment, StringComparer.OrdinalIgnoreCase);
 
     private const string ServiceRequestEntity = "sprk_servicerequest";
+    private const string EbillingInvoiceEntity = "sprk_invoice";
 
     /// <summary>
     /// Registers the feed routes on the shared external collaboration group. The group's policy and
@@ -133,6 +134,7 @@ public static class ExternalNotificationFeedEndpoints
         ITenantCache cache,
         IDataversePrivilegeChecker privileges,
         [Microsoft.AspNetCore.Mvc.FromServices] ExternalInvoiceHiding? hideInvoices,
+        [Microsoft.AspNetCore.Mvc.FromServices] EbillingFeedSource? ebilling,
         ILogger<Program> logger,
         CancellationToken ct)
     {
@@ -149,7 +151,7 @@ public static class ExternalNotificationFeedEndpoints
         var now = (httpContext.RequestServices.GetService<TimeProvider>() ?? TimeProvider.System).GetUtcNow();
         return await GetFeedCoreAsync(
             principal, MembershipEndpoints.ExtractTenantId(httpContext.User), registry, dataService, threadReadService,
-            cache, now, logger, ct, table => WorkforceRoleCeilingGate.CanRead(ceiling, table), hideInvoices).ConfigureAwait(false);
+            cache, now, logger, ct, table => WorkforceRoleCeilingGate.CanRead(ceiling, table), hideInvoices, ebilling).ConfigureAwait(false);
     }
 
     private static Task<IResult> MarkSeenAsync(
@@ -265,7 +267,8 @@ public static class ExternalNotificationFeedEndpoints
         ILogger logger,
         CancellationToken ct,
         Func<string, bool>? canReadTable = null,
-        ExternalInvoiceHiding? hideInvoices = null)
+        ExternalInvoiceHiding? hideInvoices = null,
+        EbillingFeedSource? ebilling = null)
     {
         canReadTable ??= static _ => true;
 
@@ -389,6 +392,17 @@ public static class ExternalNotificationFeedEndpoints
                         ExternalNotificationDto.KindMessage, m.Message.MessageId, m.EntityType, m.RecordId, createdOn,
                         m.Message.SentByName));
                 }
+            }
+
+            // (c) eBilling (ebilling-r1 task 132, FR-39): the caller's firms' invoices that were rejected, returned or approved with an adjustment,
+            //     each re-checked by the outcome route's own invoice rule (fail closed, per invoice). Reported in the existing "message" item shape with a
+            //     fixed sender label, so the SPA's contract is unchanged. A ceiling that cannot Read sprk_invoice reads none; no source registered means none.
+            if (ebilling is not null && canReadTable(EbillingInvoiceEntity))
+            {
+                var billing = await ebilling.ReadAsync(principal, cutoff, ct).ConfigureAwait(false);
+                truncated |= billing.Truncated;
+                items.AddRange(billing.Items.Select(b => new FeedItem(
+                    ExternalNotificationDto.KindMessage, b.InvoiceId, EbillingInvoiceEntity, b.InvoiceId, b.OccurredOn, EbillingFeedSource.SenderLabel)));
             }
 
             // Titles. A complete read that does not return a record means the record is gone: its item is dropped.

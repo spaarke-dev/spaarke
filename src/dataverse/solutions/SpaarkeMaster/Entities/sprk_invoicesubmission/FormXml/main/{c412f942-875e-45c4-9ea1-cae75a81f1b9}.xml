@@ -177,21 +177,6 @@
                     </row>
                   </rows>
                 </section>
-                <section name="section_findings" id="{72E2770C-0400-B48D-9558-760372C11A72}" IsUserDefined="1" showlabel="true" showbar="false" columns="11" celllabelposition="Top" labelwidth="115" celllabelalignment="Left" layout="varwidth">
-                  <labels>
-                    <label description="Firm notice" languagecode="1033" />
-                  </labels>
-                  <rows>
-                    <row>
-                      <cell id="{1F7F6E0A-D39B-A786-637B-9360674523BB}" colspan="2" rowspan="3">
-                        <labels>
-                          <label description="Firm Notice Text" languagecode="1033" />
-                        </labels>
-                        <control id="sprk_firmnoticetext" classid="{E0DECE4B-6FC8-4A8F-A065-082708572369}" datafieldname="sprk_firmnoticetext" />
-                      </cell>
-                    </row>
-                  </rows>
-                </section>
               </sections>
             </column>
           </columns>

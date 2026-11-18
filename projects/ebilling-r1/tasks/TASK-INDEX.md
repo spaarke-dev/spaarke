@@ -210,7 +210,7 @@ To begin: `work on task 001`. Wave W0-1 (001, 002, 003) and W2-1 (040, 041) have
 | 130f | ✅ | Firm view: Rejected / Returned invoices show their line findings (EB-D-259) | FULL | sonnet / high | none | 130, 131 |
 | 130g | 🔲 [open; after 132] | Firm view: show the reviewer-confirmed notice prose as the firm-safe reason (EB-D-259) | STANDARD | sonnet / high | none | 130f, 132 |
 | 132ui | 🔲 [open; after 132] | Invoice Review notify step: see, edit and confirm the 131 notice before Reject / Return (EB-D-258) | FULL | sonnet / high | none | 132 |
-| 132 | 🔲 [open; amended by EB-D-254: the notice email carries the findings table, no attachment] | Notifications: email, SPA feed, approver in-app | STANDARD | sonnet / high | none | 131, 024, 103, 104 |
+| 132 | 🟡 [server half on task/ebilling-132; review + fix round 1; second access review and uac-r2 pending; amended by EB-D-254, EB-D-258 (notify step is 132ui), EB-D-259] | Notifications: email, SPA feed, approver in-app | STANDARD | sonnet / high | none | 131, 024, 103, 104 |
 | 133 | ⏭️ [withdrawn by EB-D-254 (owner option b): no PDF file in R1; on-screen report (134, printable) and the findings table in the notice email (131/132)] | Adjustment report PDF | STANDARD | sonnet / high | P5-B | 130, 028 |
 | 134 | 🔲 [open] | SPA invoice detail and on-screen report | STANDARD | sonnet / high | P5-B | 130 |
 | 135 | 🔲 [open] | SPA Billing Guidelines view | STANDARD | sonnet / high | P5-B | 076, 130 |

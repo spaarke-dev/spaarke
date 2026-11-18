@@ -27,6 +27,9 @@ public class FirmNoticeComposerCallerBoundaryGuardTests
     private static readonly string[] AllowedReferrers =
     [
         typeof(FirmNoticeEndpoints).FullName!,
+        // Task 132: the notification job. Its ids come from the job payload, which only the server-side enqueuers write (103 approve, 104 reject and
+        // return behind ebilling.invoice.decide, the submission pipeline's sink); it composes nothing but through the composer's checks.
+        typeof(Sprk.Bff.Api.Services.Jobs.Handlers.EbillingNotificationJobHandler).FullName!,
         typeof(FinanceModule).FullName!,
     ];
 

@@ -28,17 +28,23 @@ public sealed class EbillingNotificationSinkTests
     // ADR-038 B3 note: a gating-contract test, not a bare "resolves" test: it fails if the registration is wrapped in a feature flag
     // (the 014 / flag-rule precedent in InvoiceLifecycleServiceTests), because the processor calls the seam on every decision.
     [Fact]
-    public void Sink_IsNotBehindAnyFeatureGate_AndDefaultsToTheNoOp()
+    public void Sink_IsNotBehindAnyFeatureGate_AndIsTheJobEnqueuingSink()
     {
         var configuration = new ConfigurationBuilder().AddInMemoryCollection().Build();
         var services = new ServiceCollection();
         services.AddLogging();
+        // The enqueuing sink holds the job queue (JobProcessingModule registers the real one); a loose double stands in, nothing is enqueued here.
+        services.AddSingleton(new Mock<Sprk.Bff.Api.Services.Jobs.JobSubmissionService>(
+            MockBehavior.Loose,
+            Microsoft.Extensions.Options.Options.Create(new Sprk.Bff.Api.Configuration.ServiceBusOptions { QueueName = "sdap-jobs" }),
+            Mock.Of<ILogger<Sprk.Bff.Api.Services.Jobs.JobSubmissionService>>(),
+            new Mock<Azure.Messaging.ServiceBus.ServiceBusClient>().Object).Object);
         services.AddFinanceModule(configuration);
 
         using var provider = services.BuildServiceProvider();
         using var scope = provider.CreateScope();
 
-        scope.ServiceProvider.GetRequiredService<IEbillingNotificationSink>().Should().BeOfType<NoOpEbillingNotificationSink>();
+        scope.ServiceProvider.GetRequiredService<IEbillingNotificationSink>().Should().BeOfType<EbillingNotificationSink>("task 132 replaced the no-op default");
     }
 
     [Fact]

@@ -382,6 +382,51 @@ public sealed class InvoiceApprovalEndpointsAuthorizationContractTests
     private static async Task<string?> ReasonCode(HttpResponseMessage response) =>
         JsonNode.Parse(await response.Content.ReadAsStringAsync())!["reasonCode"]?.GetValue<string>();
 
+    [Fact(DisplayName = "132: an approval enqueues ONE ApprovedWithAdjustments job (the composer decides whether there is anything to tell); a repeat enqueues none")]
+    public async Task Approve_EnqueuesOneNotificationJob_AndARepeatNone()
+    {
+        await using var host = await Host.StartAsync();
+        host.GrantAll();
+        host.World.AddLine(InvoiceLineStatus.Accepted);
+
+        var first = await host.SendAsync("POST", "approve");
+        var second = await host.SendAsync("POST", "approve");
+
+        first.StatusCode.Should().Be(HttpStatusCode.OK);
+        second.StatusCode.Should().Be(HttpStatusCode.OK);
+        var job = host.Queued.Should().ContainSingle().Subject;
+        job.IdempotencyKey.Should().Be(EbillingNotificationEnqueuer.IdempotencyKeyFor(EbillingNotificationEvent.ApprovedWithAdjustments, host.World.InvoiceId));
+        EbillingNotificationEnqueuer.ParsePayload(job.Payload)!.HasConfirmedNotice.Should().BeFalse();
+    }
+
+    [Fact(DisplayName = "132: a queue that is down does not fail the approval")]
+    public async Task Approve_QueueDown_StillApproves()
+    {
+        await using var host = await Host.StartAsync();
+        host.GrantAll();
+        host.World.AddLine(InvoiceLineStatus.Accepted);
+        host.QueueFaults = true;
+
+        var response = await host.SendAsync("POST", "approve");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        host.Queued.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "132: a refused approval (no right, lines still open) enqueues no job")]
+    public async Task Approve_Refused_EnqueuesNothing()
+    {
+        await using var host = await Host.StartAsync();
+        var denied = await host.SendAsync("POST", "approve");
+        host.GrantAll();
+        host.World.AddLine(InvoiceLineStatus.Pending);
+        var open = await host.SendAsync("POST", "approve");
+
+        denied.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        open.StatusCode.Should().NotBe(HttpStatusCode.OK);
+        host.Queued.Should().BeEmpty();
+    }
+
     private sealed class Host : IAsyncDisposable
     {
         private WebApplication _app = null!;
@@ -389,6 +434,30 @@ public sealed class InvoiceApprovalEndpointsAuthorizationContractTests
 
         public StatedCaller StepZero { get; private set; } = null!;
         public ApprovalWorld World { get; } = new();
+
+        /// <summary>The notification jobs the route queued (task 132).</summary>
+        public List<Sprk.Bff.Api.Services.Jobs.JobContract> Queued { get; } = [];
+
+        /// <summary>When set, the queue refuses every job (the approval must still stand).</summary>
+        public bool QueueFaults { get; set; }
+
+        public EbillingNotificationEnqueuer Enqueuer()
+        {
+            var queue = new Moq.Mock<Sprk.Bff.Api.Services.Jobs.JobSubmissionService>(
+                Moq.MockBehavior.Loose,
+                Microsoft.Extensions.Options.Options.Create(new ServiceBusOptions { QueueName = "sdap-jobs" }),
+                Moq.Mock.Of<ILogger<Sprk.Bff.Api.Services.Jobs.JobSubmissionService>>(),
+                new Moq.Mock<Azure.Messaging.ServiceBus.ServiceBusClient>().Object);
+            queue.Setup(q => q.SubmitJobAsync(Moq.It.IsAny<Sprk.Bff.Api.Services.Jobs.JobContract>(), Moq.It.IsAny<CancellationToken>()))
+                .Returns((Sprk.Bff.Api.Services.Jobs.JobContract job, CancellationToken _) =>
+                {
+                    if (QueueFaults) { return Task.FromException(new InvalidOperationException("service bus down")); }
+
+                    Queued.Add(job);
+                    return Task.CompletedTask;
+                });
+            return new EbillingNotificationEnqueuer(queue.Object, Microsoft.Extensions.Logging.Abstractions.NullLogger<EbillingNotificationEnqueuer>.Instance);
+        }
         public FinAuth.RecordingAccessDataSource Access { get; } = new();
         public FinAuth.RecordingPrivilegeProbe Probe { get; } = new();
 
@@ -419,6 +488,9 @@ public sealed class InvoiceApprovalEndpointsAuthorizationContractTests
             // F4: canApprove asks the decide right through the REAL authorization stack, as the caller.
             builder.Services.AddScoped(sp => host.World.Service(InvoiceApprovalService.DecideCheck(
                 sp.GetRequiredService<AuthorizationService>(), Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance)));
+
+            // Task 132: the REAL enqueuer over a recording queue, so the approval's notification job is observed.
+            builder.Services.AddScoped(_ => host.Enqueuer());
 
             builder.WebHost.UseTestServer();
             host._app = builder.Build();
