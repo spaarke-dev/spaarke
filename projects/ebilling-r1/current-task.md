@@ -12,6 +12,10 @@
 ### Active (2026-11-17, night)
 
 **Merged into work and pushed today (latest first):**
+- **131 ✅** 35657bb81c. Firm notice Action, plus the Opus review and 2 fix rounds (prose screen: runes, NFKC/NFKD, marks, number words, any-script domains; rate limit; real negative test on 130's rig). ontology-r1 PASS (catalog), uac-r2 PASS (firm boundary; N2 added to the 132 POML). The fallback wording is approved (EB-D-255). **Dev seed (EB-D-256, approved) waits for a dev BFF containing 131**, which needs master. /healthz/catalog shows Degraded between that deploy and the seed (expected; uac-r2 told).
+- **Guard d99b16120b:** FindingsJsonFieldSecuredGuardTests pins `sprk_findingsjson` IsSecured (uac-r2, iss034d K5).
+- **iss034d ✅** 5976a9e491. History tab "Finished by" (EB-D-257). Opus: no F; fix round 1 (also hidden when completer = the record's decider). uac-r2 accepted K5. Checklist section K.
+- **ISS-037 ✅** 2e763ad6c8. ArchTest C16 fixed: the other-content refusal is typed (`DecisionRecordRefusedException.IsOtherContent`); ontology-r1 PASS.
 - **iss032 ✅** 0ec908c554. Finish a reject/return/approve stranded after its transition. Covers both cases: the record is missing, or the record exists but is unlinked. Opus F4 fixed in round 1; the Sonnet re-check found no F. ISS-032 is In Progress until master. Checklist section J.
 - **iss034c ✅** ee94c7d4ea. The stamp records the completer (EB-D-253). AC5, the History-tab "Finished by", is deferred: OWNER QUESTION (about half a day).
 - **084h-5 ✅** e3eae27ef6, squashed (uac-r2's condition: a removed notes paragraph stays out of public history). EB-D-251 option B. ontology-r1 PASS; uac-r2 closed EB-D-247.
@@ -19,20 +23,16 @@
 - Index hygiene: 095f, 165, 116 (on master via #2724) and 130 (delivered by 130-0..130e-2) are marked ✅.
 
 **Running:**
-- **131** (firm notice Action) is built on `task/ebilling-131` at e5b74e4c77 (local; agent worktree agent-a143823240477d7d8).
-  - Gates: 127 new tests; unit filter 484/0; ArchTests filter 419/0; build clean; publish delta +0.012 MB.
-  - **Opus adversarial review running.** Focus: FR-50 prose screen, D-66 flag off, "post-decision draft has an empty findings table" (with EB-D-254 the email body is the firm's only record), and /healthz going Unhealthy until the Binding is seeded.
-  - Next: fix rounds, scoped re-check, merge `--no-ff`, mark the POML, TASK-INDEX and notes, remove the worktree, push.
-  - Leftover scratch folders for a human to delete: `C:\wt131a`, `C:\wt131b`.
+- **135** (SPA Billing Guidelines): Sonnet implementer on `task/ebilling-135` from 29c0739f3a. Next: Opus review, then uac-r2 (firm scope) and spa-r4 (widget), then merge. OWNER QUESTION expected: for a contact in several firms, show all firms' sets, each labelled (the POML default)?
+- Leftover scratch folders for a human to delete: `C:\wt131a`, `C:\wt131b`.
 
 **Decided today:**
 - **EB-D-254 (owner, option b): no PDF report in R1.** 133 is withdrawn. 132 sends the findings table in the 131 notice body. 134 prints cleanly; spa-r4's guidance is in the 134 POML: use record sections or action hosts, and scope the print stylesheet to the report. FR-40 is amended.
 
 **Blocked on the owner:**
-1. **131:** OK to seed the Action and Binding on dev (live write; uac-r2 notices). Approve the fallback wording: four subject and paragraph pairs plus the fixed labels, verbatim in notes/131-firm-notice-action.md.
-2. **iss034c:** show "Finished by" on the History tab in R1? About half a day.
+1. **131 finding 1 (asked, no answer yet):** after a Reject or Return, the notice and the SPA view show an empty findings table, because 130's projection gives decided invoices no items. Should a Rejected or Returned invoice show the same line findings as In Review, plus a firm-safe version of the reviewer's whole-invoice reason? This changes 130's projection, and uac-r2 reviews it. Recommended: yes.
 
-**Master-merge obligation (new, from 131):** ConsumerTypes.All now includes invoice-firm-notice. Seed the Binding row in every environment before or with any BFF deploy that contains 131, or /healthz goes Unhealthy there. uac-r2 deploys dev from master.
+**Master-merge obligation (from 131):** ConsumerTypes.All includes invoice-firm-notice. In every environment: BFF first, then seed (Ensure-ActionRow, then Seed-PlaybookConsumers), with the gap kept short. A row with no constant is a 503 on /healthz/catalog; a constant with no row is only Degraded. uac-r2 deploys dev from master, and it needs the owner's go naming the exact sha.
 
 **Master-merge obligations (owner go needed):**
 - **iss028 PR:**
@@ -42,7 +42,7 @@
 - **external-spa lockfile:** may need a re-resolve after R4 015 (#2886).
 - **Before the merge:** the 5 CI shards, the publish-size delta against a fresh master build, and the owner's go.
 
-**Next candidates after 131:** 134 and 135 (SPA; coordinate with spa-r4), 132 (needs 131 and 133), 117 (FULL opus), ISS-036 (a11y, small).
+**Next candidates:** 134 (SPA; waits on the finding-1 answer for what Rejected/Returned shows), 132 (131 done; uac-r2 reviews it separately, N2), 117 (FULL opus, p-safe false), ISS-036 (a11y, small).
 
 - **095f-2b ✅ merged a3ef7e1c93** (fix 64c3e9ecbb: server-derived namespaced decision ids, neutral lookup 503; ontology-r1 PASS on catalog, exact-set amendment and fix; known limit ISS-030 / #2881).
 - **095f-2ui ✅ merged d3a61cc426** (review + 3 fix rounds + tweak). Page-level locks keep a partly saved decision exact on repeat; drafts survive 409s. Known limits are in its notes (locks are memory only; the Override/Return switch guard is client-only, see ISS-031 #2882). ISS-032 #2883 covers a decision stranded after its transition. Checklist section F added.
