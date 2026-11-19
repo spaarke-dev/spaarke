@@ -122,7 +122,7 @@ These states are hard to cause by hand; they need a fault during a decision. If 
 - [ ] Create a rule set in the model-driven app. **Expect** the save to succeed with "Visible to Firms" = No.
 - [ ] In Rule Review, switch a rule set's visibility on and off. **Expect** it to work as before.
 
-## M. Notifications (task 132): after a dev BFF that carries it (work → master merge, your go)
+## M. Notifications (task 132): ready to test on dev (BFF 5ae2804884 live ~02:01Z 2026-11-19; firm notice Action seeded ~02:05Z)
 
 Firm emails come from the shared mailbox; the Invoice Review "notify" step (132ui) is not built yet, so Reject / Return emails only go when a reviewer-confirmed notice exists.
 - [ ] Submit an invoice that the checks reject. The submitter (and the firm's billing contact, if they can open that matter) gets one email with the findings table in the body.
@@ -133,7 +133,7 @@ Firm emails come from the shared mailbox; the Invoice Review "notify" step (132u
 - [ ] With eBilling switched off, the portal bell shows no billing items.
 - [ ] The "notice text" field is locked (applied to dev 2026-11-17, ready to test now). As a non-admin user, the submission form shows the field masked (\*\*\*\*\*) and you can't edit it. It disappears from the form once the SpaarkeMaster release with task 132's form change is imported.
 
-## N. Billing Guidelines in the external portal (task 135): after a dev BFF and external SPA that carry it (work → master merge, your go)
+## N. Billing Guidelines in the external portal (task 135): the dev BFF carries it (5ae2804884); test after spa-r4 deploys the external SPA
 
 Dev has no rule sets yet, so this needs a published Billing rule set first.
 - [ ] As a firm user, open the Billing Guidelines card. It lists the published billing rules in force for your firm(s), with rule set name, version, section and quoted clause text; never a document link.

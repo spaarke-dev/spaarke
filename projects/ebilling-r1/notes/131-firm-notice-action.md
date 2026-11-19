@@ -119,6 +119,15 @@ Well under the +5 MB per-task line. The absolute zip size (about 40.4 MB with PD
 
 Between the BFF deploy and the seed, `/healthz/catalog` reports Degraded (a constant with no row). With no row the composer still works: it falls back to the template with `ai.invoice.binding_missing`.
 
+### Dev seed run (2026-11-19, EB-D-256; uac-r2 notices before and after)
+
+- Run against dev BFF 5ae2804884, which contains master fe51619cfc. uac-r2 reported it live at about 02:01Z.
+- **`Ensure-ActionRow`:** created `sprk_analysisaction` invoice-firm-notice (9525aead-bde3-f111-84e9-7ced8dda31f8, Active, Standard tier). The mirror then patched the system prompt (4,025 chars) and the output schema (1,731 chars).
+- **`Seed-PlaybookConsumers`:** upserted the single row invoice-firm-notice|default|* from a one-row copy of the mirror (`-MirrorFile`, the same method as 053). The row is 7d231bb0-bde3-f111-84eb-00224829aef9, enabled, priority 500, with `sprk_action` pointing to the Action above. Result: Upserted=1, Failed=0.
+- **Not seeded:** billing-rule-draft. It has no approval yet, and its constant stays forward-declared, which is Degraded only.
+- **`-DiffOnly` afterwards:** 5 differences, none of them invoice-firm-notice. One is billing-rule-draft missing in the environment. The other four are other projects' rows missing from the mirror.
+- **`/healthz/catalog`** is still 503 Unhealthy, and `/healthz` is 200. The cause is two other projects' Binding rows with no ConsumerTypes constant: create-project and create-todo. That pre-existing drift is tracked in #1987 and #1325, and this seed did not cause it. Removing this constant-without-row only removed a Degraded finding.
+
 ## Known limits
 
 - The prose screen is heuristic. Digits (any script, outside the BMP too), currency, links and a closed list of number and amount words (after NFKC folding; see Review round 1) are refused; a figure phrased outside that list (for example "a couple of") is not caught. The first wall (nothing numeric reaches the model) is the main guarantee.
