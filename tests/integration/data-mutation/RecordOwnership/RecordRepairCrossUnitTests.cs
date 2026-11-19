@@ -1,11 +1,13 @@
 using FluentAssertions;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Moq;
 using Spaarke.Dataverse;
+using Spaarke.Scheduling;
 using Sprk.Bff.Api.Services.Access;
 using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.RecordCreation;
@@ -57,6 +59,87 @@ public sealed partial class RecordRepairModeTests
         _world.IsolationReads.Should().Equal([("sprk_event", id)], "AC4b: the guard asked the shared isolation read once");
         _world.Directory.Row("sprk_event", id).GetAttributeValue<EntityReference>("owningbusinessunit").Id
             .Should().Be(Directory.ChildBu);
+        _world.OwnerReReads.Should().Equal([("sprk_event", id)], "review round 1: one read-back after the confirmed owner write");
+    }
+
+    // =====================================================================================
+    // Review round 1, finding 1: the read-back after an owner write (design 052e §3.3.2 / §3.4)
+    // =====================================================================================
+
+    [Fact]
+    public async Task AC1_AConfirmedMove_IsReportedWithTheUnitTheReadBackShowed()
+    {
+        var id = _world.EventUnderTheMatter(clientName: "Acme", practiceArea: "Tax", priority: "Urgent",
+            owner: new EntityReference("systemuser", PersonInGeneral), owningUnit: Directory.GeneralBu, indexed: true);
+        var settledIn = Guid.NewGuid();
+        _world.AfterWrite = () => _world.Directory.Write("sprk_event", id,
+            new Dictionary<string, object?> { ["owningbusinessunit"] = new EntityReference("businessunit", settledIn) });
+
+        var outcome = await _world.RepairAsync("sprk_event", id);
+
+        outcome.Status.Should().Be(RecordRepairStatus.Repaired);
+        outcome.MovedBusinessUnit.Should().NotBeNull();
+        outcome.MovedBusinessUnit!.FromUnit.Should().Be(Directory.GeneralBu);
+        outcome.MovedBusinessUnit.ToUnit.Should().Be(settledIn, "the unit the read showed, not the one planned");
+        _world.OwnerReReads.Should().ContainSingle();
+        _world.Log.Entries.Should().ContainSingle(e => e.Message.Contains("re-owned across business units")
+            && e.Message.Contains(settledIn.ToString()) && !e.Message.Contains("not read back"));
+    }
+
+    [Fact]
+    public async Task AC1_AMoveWhoseReadBackShowsAnotherOwner_IsNotReported_AndTheDifferenceIsLogged()
+    {
+        var id = _world.EventUnderTheMatter(clientName: "Acme", practiceArea: "Tax", priority: "Urgent",
+            owner: new EntityReference("systemuser", PersonInGeneral), owningUnit: Directory.GeneralBu, indexed: true);
+        _world.AfterWrite = () => _world.Directory.Write("sprk_event", id,
+            new Dictionary<string, object?> { ["ownerid"] = new EntityReference("systemuser", RepairWorld.PersonInChild) });
+
+        var outcome = await _world.RepairAsync("sprk_event", id);
+
+        outcome.Status.Should().Be(RecordRepairStatus.Repaired, "the write itself was confirmed");
+        outcome.MovedBusinessUnit.Should().BeNull("another writer changed the owner after ours");
+        _world.OwnerReReads.Should().ContainSingle();
+        _world.Log.Entries.Should().NotContain(e => e.Message.Contains("re-owned across business units"));
+        _world.Log.Entries.Should().ContainSingle(e => e.Message.Contains("another writer changed it") && e.Message.Contains(id.ToString()));
+    }
+
+    [Fact]
+    public async Task AC1_AMoveWhoseReadBackFaults_IsReportedAsPlanned_AndTheLineSaysItWasNotReadBack()
+    {
+        var id = _world.EventUnderTheMatter(clientName: "Acme", practiceArea: "Tax", priority: "Urgent",
+            owner: new EntityReference("systemuser", PersonInGeneral), owningUnit: Directory.GeneralBu, indexed: true);
+        _world.OwnerReReadFault = new TimeoutException("Test: the read-back timed out.");
+
+        var outcome = await _world.RepairAsync("sprk_event", id);
+
+        outcome.Status.Should().Be(RecordRepairStatus.Repaired);
+        outcome.MovedBusinessUnit.Should().Be(new RecordRepairBusinessUnitMove(
+            Directory.GeneralBu, Directory.ChildBu, new EntityReference("sprk_matter", RepairWorld.Matter)));
+        _world.OwnerReReads.Should().ContainSingle("read once, never again");
+        _world.Log.Entries.Should().ContainSingle(e => e.Message.Contains("re-owned across business units")
+            && e.Message.Contains("not read back"));
+    }
+
+    [Fact]
+    public async Task AC1_AWriteThatFaultedButLanded_IsStillWriteFailed_AndTheMoveIsReported()
+    {
+        var id = _world.EventUnderTheMatter(clientName: "Acme", practiceArea: "Tax", priority: "Urgent",
+            owner: new EntityReference("systemuser", PersonInGeneral), owningUnit: Directory.GeneralBu, indexed: true);
+        _world.WriteFault = new TimeoutException("Test: the update timed out after it landed.");
+        _world.WriteFaultAfterLanding = true;
+
+        var outcome = await _world.RepairAsync("sprk_event", id);
+
+        outcome.Status.Should().Be(RecordRepairStatus.Failed);
+        outcome.ReasonCode.Should().Be(RecordRepairReason.WriteFailed);
+        outcome.NeedsRetry.Should().BeTrue("a failed write is asked again, as before");
+        outcome.MovedBusinessUnit.Should().Be(new RecordRepairBusinessUnitMove(
+            Directory.GeneralBu, Directory.ChildBu, new EntityReference("sprk_matter", RepairWorld.Matter)));
+        _world.UpdateCalls.Should().Be(1, "never written again");
+        _world.OwnerReReads.Should().ContainSingle("read once, never looped");
+        _world.Evictions.Should().ContainSingle();
+        _world.Log.Entries.Should().ContainSingle(e => e.Message.Contains("re-owned across business units")
+            && e.Message.Contains("landed despite the fault"));
     }
 
     [Fact]
@@ -96,6 +179,50 @@ public sealed partial class RecordRepairModeTests
     }
 
     [Fact]
+    public async Task AC1_AToDoHoldingAStaleStamp_ReportsTheRootThePlanReplacesItWith()
+    {
+        // Review round 1: the root is the row as it ENDS (AsTheRowEnds): the plan's value replaces the held one.
+        var id = _world.ToDoMissingItsStampUnderAnInvoiceOfTheMatter(
+            Directory.GeneralBu, heldStamp: new EntityReference("sprk_matter", RepairWorld.StaleMatter));
+
+        var outcome = await _world.RepairAsync("sprk_todo", id);
+
+        var write = _world.Writes.Should().ContainSingle().Subject;
+        write.Fields.Should().NotContainKey("sprk_regardingmatter", "the write is fill-only: a held stamp is the reconciliation job's");
+        write.Fields["ownerid"].Should().Be(new EntityReference("team", Directory.ChildTeam),
+            "the owner was asked over the row as it ends (the plan's matter), not over the stale one");
+        outcome.MovedBusinessUnit.Should().NotBeNull();
+        outcome.MovedBusinessUnit!.FamilyRoot.Should().Be(new EntityReference("sprk_matter", RepairWorld.Matter),
+            "the reported root is the plan's matter, not the stale one the row held");
+    }
+
+    [Fact]
+    public void FamilyRootOf_TakesThePlansValueWhenThePlanNamesTheColumn_AndTheHeldValueOtherwise()
+    {
+        var firstColumn = CoreAncestorResolver.CoreAncestorLookups[0].LookupAttribute;
+        var secondColumn = CoreAncestorResolver.CoreAncestorLookups[1].LookupAttribute;
+        var held = new EntityReference("sprk_matter", Guid.NewGuid());
+        var planned = new EntityReference("sprk_matter", Guid.NewGuid());
+        var other = new EntityReference("sprk_project", Guid.NewGuid());
+
+        var row = new Entity("sprk_todo", Guid.NewGuid()) { [firstColumn] = held };
+        RecordCreationService.FamilyRootOf(row, null).Should().Be(held, "no plan: the held value");
+        RecordCreationService.FamilyRootOf(row, new Dictionary<string, object>()).Should().Be(held, "a plan that does not name it");
+        RecordCreationService.FamilyRootOf(row, new Dictionary<string, object> { [firstColumn] = planned })
+            .Should().Be(planned, "the plan replaces the held value");
+
+        // A planned clear: that column gives no root, so the next column is asked (the plan's, else the held).
+        var cleared = new Dictionary<string, object> { [firstColumn] = DBNull.Value };
+        RecordCreationService.FamilyRootOf(row, cleared).Should().BeNull("the held value is cleared and no other column names one");
+        row[secondColumn] = other;
+        RecordCreationService.FamilyRootOf(row, cleared).Should().Be(other, "the next column in the lookup order");
+
+        // The first column in lookup order wins, whether it is held or planned.
+        RecordCreationService.FamilyRootOf(new Entity("sprk_todo", Guid.NewGuid()) { [secondColumn] = other },
+            new Dictionary<string, object> { [firstColumn] = planned }).Should().Be(planned);
+    }
+
+    [Fact]
     public async Task AC1_ASameUnitReOwn_IsWritten_WithNoMoveReported()
     {
         var id = _world.EventUnderTheMatter(clientName: "Acme", practiceArea: "Tax", priority: "Urgent", indexed: true);
@@ -104,6 +231,7 @@ public sealed partial class RecordRepairModeTests
 
         _world.Writes.Should().ContainSingle().Which.Fields["ownerid"].Should().Be(new EntityReference("team", Directory.ChildTeam));
         outcome.MovedBusinessUnit.Should().BeNull("the person and the matter's team sit in the same unit");
+        _world.OwnerReReads.Should().BeEmpty("review round 1: a same-unit owner write plans no move, so it adds no read-back");
         _world.Log.Entries.Should().NotContain(e => e.Message.Contains("re-owned across business units"));
     }
 
@@ -142,8 +270,9 @@ public sealed partial class RecordRepairModeTests
     }
 
     [Fact]
-    public async Task AC1_AMoveWhoseWriteFails_IsNotReported()
+    public async Task AC1_AMoveWhoseWriteFaultsAndDidNotLand_IsNotReported()
     {
+        // Review round 1: a fault is ambiguous, so the owner is read once; it still shows the person, so nothing moved.
         var id = _world.EventUnderTheMatter(clientName: "Acme", practiceArea: "Tax", priority: "Urgent",
             owner: new EntityReference("systemuser", PersonInGeneral), owningUnit: Directory.GeneralBu, indexed: true);
         _world.WriteFault = new TimeoutException("Test: the update timed out.");
@@ -151,7 +280,29 @@ public sealed partial class RecordRepairModeTests
         var outcome = await _world.RepairAsync("sprk_event", id);
 
         outcome.ReasonCode.Should().Be(RecordRepairReason.WriteFailed);
-        outcome.MovedBusinessUnit.Should().BeNull("a move is reported only after a confirmed write");
+        outcome.MovedBusinessUnit.Should().BeNull("the planned team does not own the row");
+        _world.OwnerReReads.Should().ContainSingle("the one read after the ambiguous fault");
+        _world.UpdateCalls.Should().Be(1);
+        _world.Log.Entries.Should().NotContain(e => e.Message.Contains("re-owned across business units"));
+    }
+
+    [Fact]
+    public async Task AC1_AWriteFaultWhoseReadBackAlsoFaults_IsLoggedAndIgnored_StillWriteFailed()
+    {
+        var id = _world.EventUnderTheMatter(clientName: "Acme", practiceArea: "Tax", priority: "Urgent",
+            owner: new EntityReference("systemuser", PersonInGeneral), owningUnit: Directory.GeneralBu, indexed: true);
+        _world.WriteFault = new TimeoutException("Test: the update timed out.");
+        _world.WriteFaultAfterLanding = true;
+        _world.OwnerReReadFault = new TimeoutException("Test: the read-back timed out.");
+
+        var outcome = await _world.RepairAsync("sprk_event", id);
+
+        outcome.Status.Should().Be(RecordRepairStatus.Failed);
+        outcome.ReasonCode.Should().Be(RecordRepairReason.WriteFailed);
+        outcome.MovedBusinessUnit.Should().BeNull("unread: nothing is reported for a write that faulted");
+        _world.OwnerReReads.Should().ContainSingle();
+        _world.UpdateCalls.Should().Be(1);
+        _world.Log.Entries.Should().Contain(e => e.Message.Contains("could not be read back"));
         _world.Log.Entries.Should().NotContain(e => e.Message.Contains("re-owned across business units"));
     }
 
@@ -160,7 +311,7 @@ public sealed partial class RecordRepairModeTests
     // =====================================================================================
 
     [Fact]
-    public async Task AC2_APersonOwnedOrdinaryWorkAssignmentUnderAMatterInAnotherUnit_GetsExactlyOneUpdate_AndNoOtherCall()
+    public async Task AC2_APersonOwnedOrdinaryWorkAssignmentUnderAMatterInAnotherUnit_GetsExactlyOneUpdateAndOneReadBack_AndNoOtherWrite()
     {
         var id = _world.RowOf("sprk_workassignment", Directory.GeneralBu, new Dictionary<string, object>
         {
@@ -182,6 +333,7 @@ public sealed partial class RecordRepairModeTests
         // Repair's only write is the one conditional update; nothing else wrote anywhere (no family mover, no hand-off).
         var serviceCalls = _world.ServiceEntityMocks.SelectMany(m => m.Invocations).Select(i => i.Method.Name).ToList();
         serviceCalls.Count(n => n == nameof(IGenericEntityService.UpdateIfRowVersionMatchesAsync)).Should().Be(1);
+        _world.OwnerReReads.Should().Equal([("sprk_workassignment", id)], "the one read-back after the confirmed cross-unit write");
         serviceCalls.Should().OnlyContain(n => n == nameof(IGenericEntityService.UpdateIfRowVersionMatchesAsync)
             || n == nameof(IGenericEntityService.RetrieveMultipleAsync) || n == nameof(IGenericEntityService.RetrieveAsync)
             || n == nameof(IGenericEntityService.GetColumnMetadataAsync) || n == nameof(IGenericEntityService.GetAssignCascadesAsync)
@@ -335,6 +487,7 @@ public sealed partial class RecordRepairModeTests
         IsolationReadFaultsTwice,
         ReconcilerNotResolvable,
         ConfigurationNotResolvable,
+        ReconcilerFactoryThrows,
     }
 
     [Theory]
@@ -346,6 +499,7 @@ public sealed partial class RecordRepairModeTests
     [InlineData(IsolationFault.IsolationReadFaultsTwice)]
     [InlineData(IsolationFault.ReconcilerNotResolvable)]
     [InlineData(IsolationFault.ConfigurationNotResolvable)]
+    [InlineData(IsolationFault.ReconcilerFactoryThrows)]
     public async Task AC4a_WhenIsolationCannotBeTold_TheOwnerIsKept_NeverWritten_AndAskedAgain(IsolationFault fault)
     {
         var id = _world.EventUnderTheMatter(clientName: "Acme", practiceArea: "Tax", priority: "Urgent",
@@ -376,6 +530,10 @@ public sealed partial class RecordRepairModeTests
                 break;
             case IsolationFault.ConfigurationNotResolvable:
                 _world.ConfigurationRegistered = false;
+                break;
+            case IsolationFault.ReconcilerFactoryThrows:
+                // Review round 1: resolving the shared read itself faults (not merely "not registered").
+                _world.ReconcilerFactoryFault = new InvalidOperationException("Test: the reconciler could not be built.");
                 break;
         }
 
@@ -473,6 +631,11 @@ public sealed partial class RecordRepairModeTests
             .Should().Be(renamed ? null : RecordRepairReason.OwnerLeftToSecurePass);
         Field(renamedNamed, RecordRepairPart.Owner, "ownerid").ReasonCode
             .Should().Be(renamed ? RecordRepairReason.OwnerLeftToSecurePass : null);
+
+        // Review round 1: the by-name test needs the team's NAME, so the guard's one team read per row asks for it with the unit.
+        _world.TeamReads.Should().HaveCount(2, "one team read per row")
+            .And.OnlyContain(r => r.Columns.Contains("businessunitid") && r.Columns.Contains("name"),
+                "without `name` the restricted-content team could not be told by its configured name");
     }
 
     // =====================================================================================
@@ -498,6 +661,10 @@ public sealed partial class RecordRepairModeTests
             ? RecordRepairReason.OwnerIsolationUnknown
             : RecordRepairReason.OwnerLeftToSecurePass);
         _world.Writes.SelectMany(w => w.Fields.Keys).Should().NotContain("ownerid", "no Assign, so no note moves with it");
+        // Reading recorded here (owner decision, review round 1): "skipped whole" is the owner and the note untouched. The row's
+        // I-1 stamp write is still allowed (the guard keeps only the owner); no write names the owner or targets a note.
+        _world.Writes.Select(w => w.Table).Should().NotContain("annotation", "no write targets a note");
+        _world.Directory.Assignments.Should().BeEmpty("no Assign was sent");
         _world.AssignCascadeReads.Should().BeEmpty("the cascade check runs only when an owner is in the patch");
         _world.CascadeChildQueries.Should().BeEmpty("the note is never read");
         _world.RoleQueries.Should().BeEmpty();
@@ -629,6 +796,38 @@ public sealed partial class RecordRepairPassJobTests
     }
 
     [Fact]
+    public async Task AC1_AWriteThatFaultedButLanded_IsCountedAsFailed_AndAsAMove()
+    {
+        // Review round 1: the count follows the outcome's move, whatever its status.
+        _pass.NativeCrossUnitEvent();
+        World.WriteFault = new TimeoutException("Test: the update timed out after it landed.");
+        World.WriteFaultAfterLanding = true;
+
+        var result = await _pass.RunAsync();
+
+        PassWorld.Count(result, "failed").Should().Be(1);
+        PassWorld.Count(result, "repaired").Should().Be(0);
+        PassWorld.Count(result, "ownerMovedBusinessUnit").Should().Be(1);
+        World.Writes.Should().ContainSingle("never written again");
+    }
+
+    [Fact]
+    public async Task AC3_ARowAbandonedWhileIsolationCouldNotBeTold_IsLoggedWithThatReason()
+    {
+        // Review round 1: an abandoned row names why. Its reason lives on the owner field (owner_isolation_unknown), not on the outcome.
+        var id = _pass.NativeCrossUnitEvent();
+        World.IsolationReadFaults = int.MaxValue;
+
+        JobRunResult last = await _pass.RunAsync();
+        for (var run = 2; run <= RecordRepairPassJob.MaxAttempts; run++)
+            last = await _pass.RunAsync();
+
+        PassWorld.Count(last, "abandoned").Should().Be(1);
+        _pass.Log.Entries.Should().ContainSingle(e => e.Level == LogLevel.Error && e.Message.Contains("no longer asked")
+            && e.Message.Contains(id.ToString()) && e.Message.Contains(RecordRepairReason.OwnerIsolationUnknown));
+    }
+
+    [Fact]
     public async Task AC3_TheRunCountsRowsLeftToTheSecurePass_AndTheUndecidedOnesAreAlsoCountedAndAskedAgain()
     {
         _pass.Native("sprk_event", World.UnderTheSecureMatter("sprk_event", Directory.ChildBu));
@@ -691,6 +890,9 @@ internal sealed partial class RepairWorld
     /// <summary>Whether the host registers <see cref="SecureChildReconciler"/> (default: yes).</summary>
     public bool ReconcilerRegistered { get; set; } = true;
 
+    /// <summary>When set, building the reconciler (its DI factory) throws it: resolving the shared isolation read itself faults.</summary>
+    public Exception? ReconcilerFactoryFault { get; set; }
+
     /// <summary>When set, the guard's read of the Secure Record unit (by name) throws it.</summary>
     public Exception? SecureUnitReadFault { get; set; }
 
@@ -743,18 +945,24 @@ internal sealed partial class RepairWorld
 
     /// <summary>A to-do in <paramref name="owningUnit"/>, owned by the person in the general unit, filed under
     /// <see cref="OrdinaryInvoice"/> of the ordinary matter, and missing its I-1 stamp (the plan adds it).</summary>
-    public Guid ToDoMissingItsStampUnderAnInvoiceOfTheMatter(Guid owningUnit)
+    public Guid ToDoMissingItsStampUnderAnInvoiceOfTheMatter(Guid owningUnit, EntityReference? heldStamp = null)
     {
         Directory.WithRecord("sprk_invoice", OrdinaryInvoice, Directory.ChildBu, owningTeam: Directory.ChildTeam,
             extra: new Dictionary<string, object> { ["sprk_matter"] = new EntityReference("sprk_matter", Matter) });
         _stamps.Row("sprk_matter", Matter)
             .Row("sprk_invoice", OrdinaryInvoice, [("sprk_matter", "sprk_matter", Matter)]);
-        return RowOf("sprk_todo", owningUnit, new Dictionary<string, object>
+        var columns = new Dictionary<string, object>
         {
             ["ownerid"] = new EntityReference("systemuser", Directory.CallerUserId),
             ["sprk_regardinginvoice"] = new EntityReference("sprk_invoice", OrdinaryInvoice),
-        });
+        };
+        if (heldStamp is not null)
+            columns["sprk_regardingmatter"] = heldStamp; // review round 1: a stale I-1 stamp the plan replaces
+        return RowOf("sprk_todo", owningUnit, columns);
     }
+
+    /// <summary>A matter the stale stamp names (never the invoice's matter).</summary>
+    public static readonly Guid StaleMatter = Guid.Parse("a0160000-0000-4000-8000-0000000005c2");
 
     private IServiceCollection WithTheIsolationRead(IServiceCollection services)
     {
@@ -762,7 +970,12 @@ internal sealed partial class RepairWorld
         if (ConfigurationRegistered)
             services.AddSingleton<IConfiguration>(configuration);
         if (ReconcilerRegistered)
-            services.AddScoped(_ => Reconciler(configuration));
+        {
+            services.AddScoped(_ => ReconcilerFactoryFault is { } fault
+                ? throw fault
+                : Reconciler(configuration));
+        }
+
         return services;
     }
 

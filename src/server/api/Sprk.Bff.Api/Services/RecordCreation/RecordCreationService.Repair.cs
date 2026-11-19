@@ -250,6 +250,7 @@ internal sealed partial class RecordCreationService
         }
 
         var ownerWritten = patch.ContainsKey(OwnerColumn);
+        var plannedOwner = ownerWritten ? patch[OwnerColumn] as EntityReference : null;
         try
         {
             await _entities.UpdateIfRowVersionMatchesAsync(table, id, version, patch, ct).ConfigureAwait(false);
@@ -272,7 +273,22 @@ internal sealed partial class RecordCreationService
                 string.Join(", ", patch.Keys.Order(StringComparer.Ordinal)));
             if (ownerWritten)
                 await EvictOwnerChangeAsync(table, id).ConfigureAwait(false);
-            return Outcome(RecordRepairStatus.Failed, RecordRepairReason.WriteFailed);
+
+            // Task 052g review round 1 (design 052e §3.3.2, "a read-back"): the fault is ambiguous, so when a move was planned the
+            // row's owner is read ONCE. When the planned team now owns it the write landed despite the fault: the move is
+            // reported (the status stays WriteFailed). A read fault is logged and ignored; nothing is written again.
+            RecordRepairBusinessUnitMove? landed = null;
+            if (owner.MovedBusinessUnit is { } plannedMove && plannedOwner is not null)
+            {
+                var (readBack, readUnit) = await ReadBackOwnerAsync(table, id, plannedOwner.Id, ct).ConfigureAwait(false);
+                if (readBack == OwnerReadBack.Landed)
+                {
+                    landed = plannedMove with { ToUnit = readUnit ?? plannedMove.ToUnit };
+                    LogMovedBusinessUnit(table, id, landed, " (the write landed despite the fault)");
+                }
+            }
+
+            return Outcome(RecordRepairStatus.Failed, RecordRepairReason.WriteFailed) with { MovedBusinessUnit = landed };
         }
         catch (OperationCanceledException)
         {
@@ -289,13 +305,19 @@ internal sealed partial class RecordCreationService
 
         // Task 052g (design 052e §3.3.2): a confirmed owner write that moved the row to another business unit is logged once, with
         // ids only, and carried to the outcome (counted by the pass). An owner the cascade check took out of the patch moved nothing.
-        var moved = ownerWritten ? owner.MovedBusinessUnit : null;
-        if (moved is not null)
+        // Review round 1: a planned move is read back ONCE (the owner and its unit, app-only). It is reported when the planned team
+        // owns the row, with the unit the read showed; a different owner means another writer changed it after our write (logged,
+        // no move reported); a read that faults reports the planned move and says so (over-reporting is the safe side here).
+        // Only a planned move is read: a same-unit owner write adds no read.
+        RecordRepairBusinessUnitMove? moved = null;
+        if (ownerWritten && owner.MovedBusinessUnit is { } planned && plannedOwner is not null)
         {
-            _logger.LogInformation(
-                "[RECORD-REPAIR] {Table} {Id} re-owned across business units from {FromUnit} to {ToUnit} (family root {RootTable} {RootId})",
-                table, id, moved.FromUnit, moved.ToUnit, moved.FamilyRoot?.LogicalName ?? "-",
-                moved.FamilyRoot is { } root ? root.Id.ToString("D") : "-");
+            var (readBack, readUnit) = await ReadBackOwnerAsync(table, id, plannedOwner.Id, ct).ConfigureAwait(false);
+            if (readBack != OwnerReadBack.Different)
+            {
+                moved = planned with { ToUnit = readUnit ?? planned.ToUnit };
+                LogMovedBusinessUnit(table, id, moved, readBack == OwnerReadBack.Unread ? " (not read back: the read faulted)" : string.Empty);
+            }
         }
 
         // Task 052f (design 052e §3.2, the race): a child added along an unaccepted relationship between the check and the write
@@ -368,9 +390,30 @@ internal sealed partial class RecordCreationService
         if (decided.IsSecureOwner)
             return Left("the answer is the Secure Record owner team");
 
-        using var scope = _scopes.CreateScope();
-        var configuration = scope.ServiceProvider.GetService<IConfiguration>();
-        var children = scope.ServiceProvider.GetService<SecureChildReconciler>();
+        // Review round 1: building the shared read can itself fault (the scope, or a factory that throws); that is "cannot be told".
+        IServiceScope scope;
+        IConfiguration? configuration;
+        SecureChildReconciler? children;
+        try
+        {
+            scope = _scopes.CreateScope();
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            return Unknown("the shared isolation read could not be built", ex);
+        }
+
+        using var scopeLifetime = scope;
+        try
+        {
+            configuration = scope.ServiceProvider.GetService<IConfiguration>();
+            children = scope.ServiceProvider.GetService<SecureChildReconciler>();
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            return Unknown("the shared isolation read could not be built", ex);
+        }
+
         if (configuration is null || children is null)
             return Unknown("the shared isolation read is not available in this host");
 
@@ -435,25 +478,20 @@ internal sealed partial class RecordCreationService
     private const string TeamNameColumn = "name";
 
     /// <summary>
-    /// Task 052g (design 052e §3.3.2): the family root a cross-unit move is reported with — the first I-1 stamp column
-    /// (<see cref="CoreAncestorResolver.CoreAncestorLookups"/>, in its order) the row holds, else the first the stamp plan adds;
-    /// <c>null</c> when neither names one.
+    /// Task 052g (design 052e §3.3.2): the family root a cross-unit move is reported with — the row as it ENDS
+    /// (<see cref="AsTheRowEnds"/>'s precedence): for each I-1 stamp column in <see cref="CoreAncestorResolver.CoreAncestorLookups"/>
+    /// order, the stamp plan's value when the plan names the column (a planned clear gives no root: the next column is asked),
+    /// otherwise the value the row holds; <c>null</c> when no column names one.
     /// </summary>
-    private static EntityReference? FamilyRootOf(Entity row, IReadOnlyDictionary<string, object>? stampPlan)
+    internal static EntityReference? FamilyRootOf(Entity row, IReadOnlyDictionary<string, object>? stampPlan)
     {
         foreach (var (_, column) in CoreAncestorResolver.CoreAncestorLookups)
         {
-            if (row.GetAttributeValue<EntityReference>(column) is { } held && held.Id != Guid.Empty)
-                return held;
-        }
-
-        if (stampPlan is null)
-            return null;
-
-        foreach (var (_, column) in CoreAncestorResolver.CoreAncestorLookups)
-        {
-            if (stampPlan.TryGetValue(column, out var planned) && planned is EntityReference added && added.Id != Guid.Empty)
-                return added;
+            var root = stampPlan is not null && stampPlan.TryGetValue(column, out var planned)
+                ? planned as EntityReference
+                : row.GetAttributeValue<EntityReference>(column);
+            if (root is not null && root.Id != Guid.Empty)
+                return root;
         }
 
         return null;
@@ -468,9 +506,7 @@ internal sealed partial class RecordCreationService
     {
         try
         {
-            var now = await _entities.RetrieveAsync(table, id, [OwnerColumn, OwningBusinessUnitColumn], ct).ConfigureAwait(false);
-            var owner = now?.GetAttributeValue<EntityReference>(OwnerColumn);
-            var unit = now?.GetAttributeValue<EntityReference>(OwningBusinessUnitColumn);
+            var (owner, unit) = await ReadOwnerAsync(table, id, ct).ConfigureAwait(false);
             _logger.LogInformation(
                 "[RECORD-REPAIR] {Table} {Id} after the conflict: owner {OwnerTable} {OwnerId} in business unit {Unit}{Settled}; " +
                 "not written again", table, id, owner?.LogicalName ?? "-", owner is { } o ? o.Id.ToString("D") : "-",
@@ -482,6 +518,61 @@ internal sealed partial class RecordCreationService
             _logger.LogWarning(ex, "[RECORD-REPAIR] {Table} {Id} after the conflict: its owner could not be read again; ignored", table, id);
         }
     }
+
+    /// <summary>Task 052g review round 1: the one app-only read of a row's owner and owning business unit (a fault propagates;
+    /// each caller decides what a fault means).</summary>
+    private async Task<(EntityReference? Owner, EntityReference? Unit)> ReadOwnerAsync(string table, Guid id, CancellationToken ct)
+    {
+        var now = await _entities.RetrieveAsync(table, id, [OwnerColumn, OwningBusinessUnitColumn], ct).ConfigureAwait(false);
+        return (now?.GetAttributeValue<EntityReference>(OwnerColumn), now?.GetAttributeValue<EntityReference>(OwningBusinessUnitColumn));
+    }
+
+    /// <summary>What the read after an owner write found (<see cref="ReadBackOwnerAsync"/>).</summary>
+    private enum OwnerReadBack
+    {
+        /// <summary>The planned team owns the row.</summary>
+        Landed,
+
+        /// <summary>Another principal owns the row: the planned write did not land, or another writer changed it since.</summary>
+        Different,
+
+        /// <summary>The read faulted (logged, ignored).</summary>
+        Unread,
+    }
+
+    /// <summary>
+    /// Task 052g review round 1 (design 052e §3.3.2 / §3.4, "a read-back"): after an owner write, or an ambiguous fault on one,
+    /// the row's owner and unit are read ONCE, app-only. Never writes, never loops; a fault is logged and ignored. Only the
+    /// caller's own cancellation propagates. <c>Unit</c> is the unit the read showed when the planned team owns the row.
+    /// </summary>
+    private async Task<(OwnerReadBack Result, Guid? Unit)> ReadBackOwnerAsync(
+        string table, Guid id, Guid plannedTeam, CancellationToken ct)
+    {
+        try
+        {
+            var (owner, unit) = await ReadOwnerAsync(table, id, ct).ConfigureAwait(false);
+            if (owner is { LogicalName: "team" } team && team.Id == plannedTeam)
+                return (OwnerReadBack.Landed, unit is { } u && u.Id != Guid.Empty ? u.Id : null);
+
+            _logger.LogInformation(
+                "[RECORD-REPAIR] {Table} {Id} after the owner write: owner {OwnerTable} {OwnerId} is not the team Repair wrote " +
+                "(another writer changed it, or the write did not land); no move is reported", table, id,
+                owner?.LogicalName ?? "-", owner is { } o ? o.Id.ToString("D") : "-");
+            return (OwnerReadBack.Different, null);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogWarning(ex, "[RECORD-REPAIR] {Table} {Id} after the owner write: its owner could not be read back; ignored", table, id);
+            return (OwnerReadBack.Unread, null);
+        }
+    }
+
+    /// <summary>Task 052g (design 052e §3.3.2): the one cross-unit move line, ids only.</summary>
+    private void LogMovedBusinessUnit(string table, Guid id, RecordRepairBusinessUnitMove moved, string note) =>
+        _logger.LogInformation(
+            "[RECORD-REPAIR] {Table} {Id} re-owned across business units from {FromUnit} to {ToUnit} (family root {RootTable} {RootId}){Note}",
+            table, id, moved.FromUnit, moved.ToUnit, moved.FamilyRoot?.LogicalName ?? "-",
+            moved.FamilyRoot is { } root ? root.Id.ToString("D") : "-", note);
 
     // ── Task 052f: the Assign-cascade allow-list and the per-row child check (design 052e §3.1, §3.2) ────────────────────
 
