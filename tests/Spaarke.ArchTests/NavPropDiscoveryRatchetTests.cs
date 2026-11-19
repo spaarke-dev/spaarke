@@ -19,7 +19,7 @@ namespace Spaarke.ArchTests;
 /// <c>discoverNavProps</c> instead). A baseline file that no longer contains it also fails (the baseline is stale: delete
 /// the entry), so the list can only shrink. The baseline holds the copies that exist today and were filed as follow-up,
 /// each with the reason it was not folded in with the three that were (<c>ConnectionsWriteHandler</c>,
-/// <c>ResolverWriteHandler</c>, <c>useInlineTodoCreate</c>).</para>
+/// <c>ResolverWriteHandler</c>, <c>useInlineTodoCreate</c>; <c>discoverTodoNavProps</c> now delegates too).</para>
 ///
 /// <para><b>Scope.</b> Every <c>.ts</c> / <c>.tsx</c> / <c>.js</c> file under <c>src/client</c> and <c>src/solutions</c>,
 /// excluding tests, mocks, declaration files, installed packages and build output, and the committed PCF solution
@@ -46,16 +46,14 @@ public sealed class NavPropDiscoveryRatchetTests
     /// </summary>
     private static readonly IReadOnlyDictionary<string, string> Baseline = new Dictionary<string, string>(StringComparer.Ordinal)
     {
-        ["src/client/shared/Spaarke.UI.Components/src/services/TodoRegardingUpdateBuilder.ts"] =
-            "discoverTodoNavProps: sprk_todo-only copy with its own cache; filed as follow-up (ADR-012 reuse)",
         ["src/client/shared/Spaarke.UI.Components/src/components/CreateProjectWizard/CreateProjectWizard.tsx"] =
-            "org-URL-prefixed project metadata query inside the wizard; filed as follow-up (ADR-012 reuse)",
+            "org-URL-prefixed project metadata query inside the wizard; filed as follow-up #2909 (ADR-012 reuse)",
         ["src/client/webresources/js/sprk_secure_child_ribbon.js"] =
-            "plain-JS ribbon web resource, cannot import the TS package; filed as follow-up (ADR-012 reuse)",
+            "plain-JS ribbon web resource, cannot import the TS package; filed as follow-up #2909 (ADR-012 reuse)",
         ["src/solutions/LegalWorkspace/src/components/CreateMatter/matterService.ts"] =
-            "matter wizard's column-keyed map-form copy; filed as follow-up (ADR-012 reuse)",
+            "matter wizard's column-keyed map-form copy; filed as follow-up #2909 (ADR-012 reuse)",
         ["src/solutions/Notepad/src/hooks/discoverMemoNavProps.ts"] =
-            "Notepad memo-host copy; filed as follow-up (ADR-012 reuse)",
+            "Notepad memo-host copy; filed as follow-up #2909 (ADR-012 reuse)",
     };
 
     private static readonly string[] ExcludedSegments =

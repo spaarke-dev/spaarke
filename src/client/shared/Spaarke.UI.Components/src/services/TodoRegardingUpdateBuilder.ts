@@ -26,7 +26,9 @@
 
 import {
   buildRegardingSelectionPayload,
+  discoverNavProps,
   findHostNavPropForLookup,
+  _resetNavPropCacheForTests,
   CORE_ANCESTOR_LOOKUPS,
   type INavPropEntry,
   type IPolymorphicWebApi,
@@ -216,7 +218,7 @@ export type ITodoRegardingUpdate = Record<string, string | number | boolean | nu
  * @param webApi          — IPolymorphicWebApi (Xrm.WebApi-compatible) for
  *                          `sprk_recordtype_ref` lookup inside applyResolverFields.
  * @param navProps        — Nav-prop entries discovered for `sprk_todo` via the
- *                          ManyToOneRelationships metadata endpoint.
+ *                          shared `discoverNavProps` (`discoverTodoNavProps`).
  * @param target          — The chosen entity type (one of TODO_REGARDING_CATALOG).
  * @param recordId        — GUID of the selected parent record (with or without braces).
  * @param recordName      — Display name of the selected parent record.
@@ -347,61 +349,21 @@ export function buildTodoRegardingClear(navProps: INavPropEntry[]): ITodoRegardi
 // ---------------------------------------------------------------------------
 
 /**
- * Discover ManyToOne navigation properties for `sprk_todo`.
- *
- * Mirrors the `_discoverNavProps` pattern used by WorkAssignmentService and
- * EventService — kept inline here so SmartTodo doesn't have to import a
- * wizard service. Result is cached per logical name for the lifetime of the
- * page.
+ * Discover ManyToOne navigation properties for `sprk_todo` — the shared
+ * {@link discoverNavProps} (one metadata query and one cache for every writer
+ * of `sprk_todo` on the page). Kept as a named export for existing callers.
  *
  * @internal — exported for tests; the typical caller is `buildTodoRegardingUpdate`.
  */
-const _navPropCache: Record<string, INavPropEntry[]> = {};
-
-export async function discoverTodoNavProps(fetchImpl: typeof fetch = globalThis.fetch): Promise<INavPropEntry[]> {
-  const cacheKey = 'sprk_todo';
-  if (_navPropCache[cacheKey]) {
-    return _navPropCache[cacheKey];
-  }
-
-  try {
-    const url =
-      `/api/data/v9.0/EntityDefinitions(LogicalName='${cacheKey}')/ManyToOneRelationships` +
-      `?$select=ReferencingAttribute,ReferencingEntityNavigationPropertyName,ReferencedEntity`;
-
-    const resp = await fetchImpl(url, { credentials: 'include' });
-    if (!resp.ok) {
-      console.warn(`[TodoRegardingUpdateBuilder] Nav-prop discovery failed for ${cacheKey}: HTTP ${resp.status}`);
-      return [];
-    }
-
-    const json = (await resp.json()) as {
-      value?: Array<{
-        ReferencingAttribute: string;
-        ReferencingEntityNavigationPropertyName: string;
-        ReferencedEntity: string;
-      }>;
-    };
-
-    const entries: INavPropEntry[] = (json.value ?? []).map(r => ({
-      columnName: r.ReferencingAttribute,
-      navPropName: r.ReferencingEntityNavigationPropertyName,
-      referencedEntity: r.ReferencedEntity,
-    }));
-
-    _navPropCache[cacheKey] = entries;
-    return entries;
-  } catch (err) {
-    console.warn(`[TodoRegardingUpdateBuilder] Nav-prop discovery error for ${cacheKey}:`, err);
-    return [];
-  }
+export function discoverTodoNavProps(fetchImpl: typeof fetch = globalThis.fetch): Promise<INavPropEntry[]> {
+  return discoverNavProps('sprk_todo', fetchImpl);
 }
 
 /**
- * Reset the nav-prop cache. Used by tests to ensure isolation.
+ * Reset the shared nav-prop cache entry for `sprk_todo`. Used by tests to ensure isolation.
  *
  * @internal
  */
 export function _resetTodoNavPropCacheForTests(): void {
-  delete _navPropCache['sprk_todo'];
+  _resetNavPropCacheForTests('sprk_todo');
 }

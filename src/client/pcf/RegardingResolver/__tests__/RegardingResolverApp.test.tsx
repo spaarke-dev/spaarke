@@ -103,86 +103,11 @@ const mockBuildRegardingSelectionPayload = jest.fn(
   }
 );
 
-jest.mock('@spaarke/ui-components/dist/services/TodoRegardingUpdateBuilder', () => {
-  const TODO_REGARDING_CATALOG = [
-    {
-      entityType: 'sprk_matter',
-      entitySet: 'sprk_matters',
-      lookupAttribute: 'sprk_regardingmatter',
-      navPropHint: 'matter',
-    },
-    {
-      entityType: 'sprk_project',
-      entitySet: 'sprk_projects',
-      lookupAttribute: 'sprk_regardingproject',
-      navPropHint: 'project',
-    },
-    {
-      entityType: 'sprk_event',
-      entitySet: 'sprk_events',
-      lookupAttribute: 'sprk_regardingevent',
-      navPropHint: 'event',
-    },
-    {
-      entityType: 'sprk_communication',
-      entitySet: 'sprk_communications',
-      lookupAttribute: 'sprk_regardingcommunication',
-      navPropHint: 'communication',
-    },
-    {
-      entityType: 'sprk_workassignment',
-      entitySet: 'sprk_workassignments',
-      lookupAttribute: 'sprk_regardingworkassignment',
-      navPropHint: 'workassignment',
-    },
-    {
-      entityType: 'sprk_invoice',
-      entitySet: 'sprk_invoices',
-      lookupAttribute: 'sprk_regardinginvoice',
-      navPropHint: 'invoice',
-    },
-    {
-      entityType: 'sprk_budget',
-      entitySet: 'sprk_budgets',
-      lookupAttribute: 'sprk_regardingbudget',
-      navPropHint: 'budget',
-    },
-    {
-      entityType: 'sprk_analysis',
-      entitySet: 'sprk_analyses',
-      lookupAttribute: 'sprk_regardinganalysis',
-      navPropHint: 'analysis',
-    },
-    {
-      entityType: 'sprk_organization',
-      entitySet: 'sprk_organizations',
-      lookupAttribute: 'sprk_regardingorganization',
-      navPropHint: 'organization',
-    },
-    { entityType: 'contact', entitySet: 'contacts', lookupAttribute: 'sprk_regardingcontact', navPropHint: 'contact' },
-    {
-      entityType: 'sprk_document',
-      entitySet: 'sprk_documents',
-      lookupAttribute: 'sprk_regardingdocument',
-      navPropHint: 'document',
-    },
-  ];
-  // Same behaviour as the shared helpers (TodoRegardingUpdateBuilder.resolveAllowedCatalog / findRegardingCatalogEntry,
-  // which have their own unit tests), bound to THIS suite's catalog.
-  const resolveAllowedCatalog = (raw: string | null | undefined) => {
-    if (!raw || !raw.trim()) return TODO_REGARDING_CATALOG;
-    const allowed = new Set(
-      raw
-        .split(',')
-        .map(s => s.trim().toLowerCase())
-        .filter(Boolean)
-    );
-    return TODO_REGARDING_CATALOG.filter(c => allowed.has(c.entityType.toLowerCase()));
-  };
-  const findRegardingCatalogEntry = (catalog: ReadonlyArray<{ entityType: string }>, entityType: string) =>
-    catalog.find(c => c.entityType === entityType);
-  return { TODO_REGARDING_CATALOG, resolveAllowedCatalog, findRegardingCatalogEntry };
-});
+// The REAL catalog and allow-list helpers (resolveAllowedCatalog / findRegardingCatalogEntry): this suite asserts the
+// App's behaviour against the shared parser, so a change there is seen here (no re-implementation in the mock).
+jest.mock('@spaarke/ui-components/dist/services/TodoRegardingUpdateBuilder', () =>
+  jest.requireActual('@spaarke/ui-components/dist/services/TodoRegardingUpdateBuilder')
+);
 
 jest.mock('@spaarke/ui-components/dist/services/PolymorphicResolverService', () => ({
   applyResolverFields: mockApplyResolverFields,
@@ -527,7 +452,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
   // FR-A1-03 — Toolbar-icon menu populated from catalog
   // ---------------------------------------------------------------------------
 
-  test('FR-A1-03 — PolymorphicPicker receives full 11-entity catalog', () => {
+  test('FR-A1-03 — PolymorphicPicker receives the full shared catalog (12 entities, the real TODO_REGARDING_CATALOG)', () => {
     const { context } = buildContext();
     renderWithProvider(
       <RegardingResolverApp
@@ -538,11 +463,11 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
       />
     );
 
-    expect(screen.getByTestId('polymorphic-picker-mock-catalog-count')).toHaveTextContent('11');
-    // Confirm the picker mock was called with a catalog prop of length 11.
+    expect(screen.getByTestId('polymorphic-picker-mock-catalog-count')).toHaveTextContent('12');
+    // Confirm the picker mock was called with the whole shared catalog (12 entries).
     const lastCallProps = mockPolymorphicPicker.mock.calls[mockPolymorphicPicker.mock.calls.length - 1][0];
     expect(Array.isArray(lastCallProps.catalog)).toBe(true);
-    expect(lastCallProps.catalog).toHaveLength(11);
+    expect(lastCallProps.catalog).toHaveLength(12);
   });
 
   test('FR-A1-03 — regardingTargets manifest input filters the catalog', () => {

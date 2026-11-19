@@ -1176,11 +1176,6 @@
       "count": 1
     }
   },
-  "src/client/shared/Spaarke.UI.Components/src/services/TodoRegardingUpdateBuilder.ts": {
-    "@typescript-eslint/no-unnecessary-condition": {
-      "count": 1
-    }
-  },
   "src/client/shared/Spaarke.UI.Components/src/services/ViewService.ts": {
     "@typescript-eslint/no-unnecessary-condition": {
       "count": 1
