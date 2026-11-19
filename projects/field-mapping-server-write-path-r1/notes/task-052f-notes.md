@@ -25,6 +25,16 @@ of every row of that table: no matter, project, event, document, invoice, analys
 | The metadata record carries the referencing column from the same metadata read | `Spaarke.Dataverse/Models.cs` `AssignCascadeRelationship.ReferencingAttribute` (optional 4th member, default `null`); `DataverseServiceClientImpl.AssignCascadesOf` |
 | Removed: the once-per-pass table-level refusal log (`RecordRepairPassContext.FirstAssignCascadeRefusal`): the refusal is per row now and is logged per row | `RecordRepairPassContext.cs` |
 
+### Fix round (one commit on top of `b695480cf9`)
+
+| Item | Rule | Where (`RecordCreationService.Repair.cs` unless named) |
+|---|---|---|
+| A | `sprk_event->annotation` and `sprk_analysis->annotation` stay on the allow-list, reason: "Assign carries every note on the row; Repair re-owns the row only when every note on it is the row owner's." They are accepted with a per-row check: one app-only `top 1` read on `annotation` where `objectid` is the row and the note's owner is not the row's current owner (the owner Repair read for the row, not the target). Owner id and type are both compared: for a user owner, `owninguser ne X or owninguser null`; for a team owner, the same on `owningteam`. A hit → `owner_assign_cascades` (counted per table; the log line names the relationship and "note owned by another principal"), no write. A fault, refusal, no answer, or an owner that is not a readable user or team → `owner_assign_cascade_unknown`. Contact notes stay never-accepted (any note keeps a contact). | `AcceptedOnlyWithTheOwnersNotes` :359, `AssignCascadeChildReadKind` (records), `ChildReadsOf` :427, `ReadAssignCascadeChildAsync` :761 |
+| A (race) | After the owner write, the note read is asked again for notes on the row whose `createdon` is at or after the check's start and whose `createdby` is not the previous owner → `owner_assign_cascade_raced` (table and id), counted. | `AssignCascadeRaceAsync` :691, `ReadAssignCascadeChildAsync` :761 |
+| B | Read depth, a tri-state kept for the pass (`RecordRepairReadDepth`: Confirmed / NotConfirmed / Faulted). Asked only when a row needs a per-row child read: one app-only read of the app identity (`GetCurrentIdentityIdAsync`) in `systemuserroles` joined to `role` on role template id `627090ff-40a3-4053-8790-584edc5be201` (System Administrator, matched by template, never by name), through `RetrieveMultipleAsync`. A row → Confirmed. None → NotConfirmed. The identity or the roles cannot be read, or no answer → Faulted. Only a row confirms. NotConfirmed and Faulted hold every row that needs a per-row read (contact, analysis, event, any table with an unaccepted relationship) as `owner_assign_cascade_unknown` with no child read; rows needing no per-row read are unaffected. One error line per pass states the rule ("per-row child checks need organization-level Read; held"); for Faulted it carries the exception. | :528, `ReadDepthAsync` :628, `ReadOrganizationReadDepthAsync` :638; `RecordRepairPassContext.ReadDepthAsync` :133, `RecordRepairReadDepth` :145 |
+| C | A child read that faults is recorded and the next read is still made. After the loop: any child or other-owner note found → `owner_assign_cascades`; otherwise any fault, or any relationship that cannot be read → `owner_assign_cascade_unknown`. | `AssignCascadeCheckAsync` :536–618 |
+| D | The race re-read asks for up to `RaceReadTopCount` = 50 children per read (the check stays `top 1`). Each raced child is logged with its table and id; each read that found any logs the count and a `truncated` flag (a full page or `MoreRecords`). | :414, :743 |
+
 **Not changed.** The cross-unit skip `owner_moves_business_unit` (052g). The single owner write site (`UpdateIfRowVersionMatchesAsync`, :255) and the owner-write census. No UAC-r2 file. The pass tables and exclusions.
 
 ## The query seam (why the extension)
@@ -60,6 +70,8 @@ of truth. A relationship whose metadata does not state it is unknown, never skip
 Script: scratchpad `mustfire.sh` (switch-off by `sed`/`perl` on a copy, the files restored from the copy after each round;
 never `git stash`). Filter: `RecordRepairPassJobTests|AssignCascadeProjection`.
 
+First round (test names as of `b695480cf9`):
+
 | Round | Rule switched off | Failed (of 153) | Tests that fired (examples) |
 |---|---|---|---|
 | M1 | Allow-list: `IsAcceptedAssignCascade` accepts nothing | 9 | `AC2_ARowWithOnlyAcceptedCascades_*` (×3), `AC3_AnEventWithANote_*`, `AC3_AnAnalysisWithANote_*`, `AC2_AContactWithNoUnacceptedChild_*`, `AC1_TheChildReads_*`, `AC1_AC10_*`, `AC2_AnInvoice*` |
@@ -74,6 +86,23 @@ never `git stash`). Filter: `RecordRepairPassJobTests|AssignCascadeProjection`.
 | M9 | No per-table count | 1 | `TheRunCountsRowsKeptForAnUnacceptedChild_PerTable` |
 | M0 | Restored | 0 | 153 passed |
 
+Fix round: script `mustfire2.sh` (same method; it also refuses a round whose mutation did not apply).
+
+| Round | Rule switched off | Failed (of 176) | Tests that fired (examples) |
+|---|---|---|---|
+| A1 | Accepted note relationships skipped (no per-row note read) | 16 | `AC3_AnEventWithANoteOwnedByAnotherPrincipal_*` (user, team), `AC3_AnAnalysisWithANoteOwnedByAnotherPrincipal_*` (user, team), `AC3_ANoteReadThatFails_*` (×4), `AC3_AnAcceptedNoteRelationship_*` (×2), `AC3_AnEventWhoseNotesAreAllTheOwners_*`, `AC3_AnAnalysisWhoseNotesAreAllTheOwners_*`, `AC9_ANoteAddedByAnotherPrincipal*`, `B_NotConfirmedOrFaulted_*` (×3: the event no longer needs a read) |
+| A2 | The note owner check without its `null` branch (a team's note not seen as another owner's) | 3 | `AC3_AnEventWithANoteOwnedByAnotherPrincipal_*(a team)`, `AC3_AnAnalysisWithANoteOwnedByAnotherPrincipal_*(a team)`, `AC3_AnEventWhoseNotesAreAllTheOwners_*` (filter shape) |
+| A3 | The note race without its creator filter | 1 | `AC9_ANoteAddedByAnotherPrincipalAfterTheCheck_IsRaced_ANoteByThePreviousOwnerIsNot` |
+| A4 | The note race without its `createdon` filter | 2 | `AC9_ANoteAddedByAnotherPrincipal*`, `AC3_AnEventWhoseNotesAreAllTheOwners_*` (no raced notes) |
+| B1 | No depth guard | 7 | `B_NotConfirmedOrFaulted_*` (×3), `B_Faulted_*` (×2), `B_Confirmed_*`, `B_TheDepthIsReadOncePerPass_*` |
+| B2 | A faulted depth read returns Confirmed | 4 | `B_NotConfirmedOrFaulted_*` (roles, identity), `B_Faulted_*` (roles, identity) |
+| B3 | Depth asked per row, not kept for the pass | 7 | `B_TheDepthIsReadOncePerPass_*`, `B_Confirmed_*`, `B_Faulted_*` (×2), `B_NotConfirmedOrFaulted_*` (×3) (the first attempt's mutation did not compile and was rerun) |
+| B4 | The role matched without its template id | 31 | `B_Confirmed_*`, every per-row read test (the world confirms only the template read) |
+| C1 | A fault or unreadable relationship wins over a child found | 3 | `AC6_AContactWithAnEmail_IsAnAnswer_EvenWhenAnotherReadFaults` (×2), `AC6_AChildFoundAfterAReadThatFaulted_IsAnAnswer` |
+| D1 | The race re-read at `top 1` | 4 | `AC9_TwoChildrenAddedAfterTheCheck_*`, `AC9_ARaceReReadThatFillsItsPage_*`, `AC9_ANoteAddedByAnotherPrincipal*`, `AC2_AContactWithNoUnacceptedChild_*` |
+| D2 | No truncation flag | 1 | `AC9_ARaceReReadThatFillsItsPage_IsLoggedAsTruncated` |
+| M0 | Restored | 0 | 176 passed |
+
 ## Known limits
 
 - **K1 — the race is not undone.** A child added along an unaccepted relationship between the check (before the mapping reads)
@@ -83,24 +112,35 @@ never `git stash`). Filter: `RecordRepairPassJobTests|AssignCascadeProjection`.
 - **K2 — skipped rows are not revisited by the window.** A row kept as `owner_assign_cascades` is an answer, not a fault: it is
   not in the retry set, and the `createdon` window has passed it, so removing its child later does not bring it back. The 052c
   on-demand run over its window retries it.
-- **K3 — depth.** An app-only read sees only what the BFF app user's Read depth reaches; a read limited by depth returns fewer
-  rows without an error, and the code cannot tell that from "no children". Held by design §6 item 5 (organization-level Read on
-  `activitypointer`, `annotation`, `contact`, and each per-row table, checked before enable). A read Dataverse refuses for a
-  missing privilege is unknown (tested). See "Open point" below.
+- **K3 — depth (enforced by fix-round item B).** The per-row check requires organization-level Read on each table it reads; a
+  pass without it holds those rows. The pass confirms it once, as the app identity holding the System Administrator role
+  directly (matched by role template id); NotConfirmed and Faulted hold every row that needs a per-row read as
+  `owner_assign_cascade_unknown`. A read Dataverse refuses for a missing privilege is unknown (tested). Design §6 item 5 (the
+  pre-enable check of organization-level Read on each table read) still applies.
 - **K4 — a refused per-row table blocks its rows.** If an environment refuses the read of any table the check reads for a
   contact (for example `mailboxtrackingfolder` or `syncerror`), every contact there is unknown, retried, and abandoned after 12
   attempts (listed in the 052d report). Fail closed; part of the §6 item 5 check.
 - **K5 — invoices.** In this build every invoice-family write is held by the invoice-family guard (`InvoiceFamilyUpdateRefusalAsync`,
   design §3.6), so an invoice's owner is not written whatever the cascade check says. The check refuses nothing and reads
   nothing for an invoice (only `->team`, accepted).
+- **K6 — the read depth is confirmed by a directly held role only.** Organization-level Read counts as confirmed only when the
+  app identity holds the System Administrator role directly (`systemuserroles`). A role held only through a team reads as
+  NotConfirmed, and the rows that need a per-row read are held (fail closed).
+- **K7 — the note race counts by creation.** The note race re-read counts a note as raced when its `createdon` is at or after the
+  BFF's clock reading when the check began and its `createdby` is not the previous owner. A note change between the check and
+  the write that does not meet both is not counted; such a row is covered by the pre-enable check of design §6 and the
+  on-demand run (052c).
+- **K8 — `ActivityTables` is a hand-kept list.** An activity type not on it is not folded into the `activitypointer` read: it is
+  read per row on its own table along its own referencing column, like any child the allow-list does not hold (a child keeps
+  the row; a fault is unknown). It still fails closed.
+- **K9 — onward cascades.** An accepted child may itself cascade an Assign to its own children. That is the pre-enable check of
+  design §6 item 4; Repair does not read onward.
+- **K10 — an empty page with more records.** A child read whose page is empty but marked `MoreRecords = true` reads as none.
+  Dataverse does not return that shape for a `top` read; noted for completeness.
 
-## Open point (needs a decision; not designed around)
+## Open point — resolved
 
-AC6's "depth-limited read" cannot be detected from the read's result. Two options: (a) keep design §6 item 5 as the control
-(the pre-enable check that the app user holds organization-level Read on each table read); (b) add an app-only privilege-depth
-read per table per pass (a new `IGenericEntityService` read: the table's Read privilege from its metadata, and the identity's
-depth for it), failing closed to unknown when it is not organization-level. (b) is a design addition with platform behaviour to
-confirm (roles held through teams, administrator roles), so it is not in this task.
+The depth-limited read (AC6) is now enforced in code (fix-round item B, owner decision "code check"); see K3 and K6.
 
 ## Tests
 
@@ -114,14 +154,14 @@ test), `RecordRepairModeTests.cs` (the world answers child reads), `tests/unit/d
 |---|---|
 | AC1 | `AC1_TheAllowList_HoldsExactlyTheDesignEntries_EachWithItsReason`, `AC1_AC10_NoNeverAcceptedRelationship_IsOnTheAllowList_AndTheNeverListsHoldTheDesignEntries`, `AC1_TheChildReads_SkipEveryAcceptedRelationship_AndFoldEveryActivityIntoOneActivityPointerRead`, `AC2_ARowWithOnlyAcceptedCascades_IsReOwned_WithNoChildRead` |
 | AC2 | `AC2_ARowWithOnlyAcceptedCascades_IsReOwned_WithNoChildRead` (matter, project, document), `AC2_AContactWithNoUnacceptedChild_IsReOwned_AfterOneTopOneReadPerUnacceptedRelationship`, `AC2_AnInvoiceWithOnlyAcceptedCascades_IsNotRefusedForThem` (K5), `AC2_TheMetadataIsReadOncePerTablePerPass_TheChildrenOncePerRow` |
-| AC3 | `AC3_AnEventWithANote_IsReOwned_AndTheNoteRelationshipIsNeverRead`, `AC3_AnAnalysisWithANote_IsReOwned_AndTheNoteRelationshipIsNeverRead` (the move itself is Dataverse's; checked live before enable, design §6) |
+| AC3 (owner's notes only) | must-not-fire: `AC3_AnEventWhoseNotesAreAllTheOwners_IsReOwned_AfterOneNoteReadForAnotherOwner`, `AC3_AnAnalysisWhoseNotesAreAllTheOwners_IsReOwned`; must-fire: `AC3_AnEventWithANoteOwnedByAnotherPrincipal_IsNotReOwned_AndIsCounted` (another user, a team), `AC3_AnAnalysisWithANoteOwnedByAnotherPrincipal_IsNotReOwned` (another user, a team); fault: `AC3_ANoteReadThatFails_IsUnknown_NeverNoOtherOwnersNote` (timeout, privilege refused, HTTP refused, no answer); pure: `AC3_AnAcceptedNoteRelationship_IsReadPerRow_ForANoteOfAnotherOwner` (event, analysis); race: `AC9_ANoteAddedByAnotherPrincipalAfterTheCheck_IsRaced_ANoteByThePreviousOwnerIsNot`. The move itself is Dataverse's; checked live before enable (design §6) |
 | AC3a | `AC3a_AContactWithANote_IsNotReOwned_AndIsCounted` |
 | AC4 | `AC4_AnAnalysisWithAnEmail_IsNotReOwned_WithTheRelationshipNamed` |
 | AC5 | `AC5_AContactWithAChildContact_IsNotReOwned` |
-| AC6 | `AC6_AChildReadThatFails_IsUnknown_NeverNoChildren` (timeout, privilege refused, HTTP refused, no answer), `AC6_ARelationshipWithoutItsReferencingColumn_IsUnknown_NeverNoChildren`, `AC6_ARelationshipThatDoesNotStateItsReferencingColumn_IsUnreadable_NeverSkipped`; depth: K3 / open point |
+| AC6 | `AC6_AChildReadThatFails_IsUnknown_NeverNoChildren` (timeout, privilege refused, HTTP refused, no answer), `AC6_ARelationshipWithoutItsReferencingColumn_IsUnknown_NeverNoChildren`, `AC6_ARelationshipThatDoesNotStateItsReferencingColumn_IsUnreadable_NeverSkipped`; a child found wins over a fault (item C): `AC6_AContactWithAnEmail_IsAnAnswer_EvenWhenAnotherReadFaults` (fault after, fault between), `AC6_AChildFoundAfterAReadThatFaulted_IsAnAnswer`; depth (item B, K3): `B_Confirmed_ThePerRowReadsAreMade_TheNoteReadIncluded`, `B_NotConfirmedOrFaulted_HoldsEveryRowThatNeedsAPerRowRead_OthersProceed` (not held, roles read faults, identity read faults), `B_Faulted_LogsTheRuleOnceWithTheFault_AndIsNeverConfirmed` (roles, identity), `B_TheDepthIsReadOncePerPass_HoweverManyRowsNeedIt` |
 | AC7 | `AC7_ARowStillUnknownAfterItsAttempts_IsAbandoned_AndListedInTheReport` |
 | AC8 | `AC8_ARelationshipWithAnUnstatedAssignValue_IsReadAndRefusesARowWithAChild`, `ARowWithAnUnacceptedChild_StillGetsItsMapping_WithoutTheOwner`, `AssignCascadeProjectionTests.ARelationshipWhoseAssignCascadeIsNotStated_IsListed_FailClosed` |
-| AC9 | `AC9_AChildAddedAfterTheCheck_IsLoggedWithItsTableAndId_AndCounted`, `AC9_TheRaceReRead_ReturnsTheRacedChild_AndNothingWhenNoneWasAdded`, `AC9_ARaceReReadThatFails_IsReportedAsUnchecked_AndCounted` |
+| AC9 | `AC9_AChildAddedAfterTheCheck_IsLoggedWithItsTableAndId_AndCounted`, `AC9_TheRaceReRead_ReturnsTheRacedChild_AndNothingWhenNoneWasAdded`, `AC9_ARaceReReadThatFails_IsReportedAsUnchecked_AndCounted`; item D: `AC9_TwoChildrenAddedAfterTheCheck_AreEachLoggedWithTheirTableAndId_AndCounted`, `AC9_ARaceReReadThatFillsItsPage_IsLoggedAsTruncated`, and the race reads' `top 50` in `AC2_AContactWithNoUnacceptedChild_*` |
 | AC10 | `AC10_ARowWithANeverAcceptedChild_IsNotReOwned_AndNoWriteReachesTheChild` (task, child contact, Signal, Decision Record, Budget Revision), `AC10_ANeverAcceptedRelationship_IsNotAccepted`, `AC1_AC10_...` |
 | Per-table count | `TheRunCountsRowsKeptForAnUnacceptedChild_PerTable` |
 
@@ -129,6 +169,18 @@ ArchTest: `AccessTableReaderScanTests.NotAccessTables` gains `activitypointer` w
 `*Table` constant under `Services/RecordCreation`; 052d's `audit` entry is the precedent). It decides no access.
 
 ## Results
+
+Fix round:
+
+- `Spaarke.sln` (verify-suites): 0 warnings, 0 errors. `dotnet build src/server/api/Sprk.Bff.Api/`: 0 warnings, 0 errors.
+- Repair and projection filter (`RecordRepair|AssignCascadeProjection`, `Api.Office` excluded): 396 passed, 0 failed. Must-fire
+  filter: 176 passed after restore.
+- ArchTests: 2714 passed, 0 failed (the new `systemuserroles` / `role` table constants needed no scan entry).
+- `verify-suites.sh` filtered suites: 9500 passed, 0 failed, 7 skipped (of 9507). The run reported its result line, then the
+  host was ended by the shell's 40-minute limit as it shut down ("Test host process crashed"); no test failed.
+- `dotnet format whitespace --verify-no-changes`: clean on `Services/RecordCreation` and the changed test files.
+
+First round:
 
 - `dotnet build src/server/api/Sprk.Bff.Api/`: 0 warnings, 0 errors. `Spaarke.sln` (verify-suites): 0 warnings, 0 errors.
 - Task 052f tests: 52 passed (new, rewritten and the projection test). Repair and projection filter

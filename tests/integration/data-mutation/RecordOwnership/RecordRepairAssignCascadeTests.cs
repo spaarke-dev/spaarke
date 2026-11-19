@@ -14,7 +14,9 @@ namespace Sprk.Bff.Api.Tests.Integration.DataMutation.RecordOwnership;
 /// <summary>
 /// field-mapping-server-write-path-r1 task 052f (spec FR-25 as amended; design 052e §3.1, §3.2; owner 2026-11-18 Q2, Q5; UAC-r2
 /// U2, U4): the Assign-cascade allow-list and the per-row child check. A row is kept with its owner only when it has a child along
-/// a relationship the allow-list does not accept; an accepted relationship is never read per row; every activity relationship is
+/// a relationship the allow-list does not accept, or (an event's or an analysis's accepted notes) a note owned by another
+/// principal; any other accepted relationship is never read per row; the per-row reads need organization-level Read confirmed
+/// once per pass; every activity relationship is
 /// one <c>activitypointer</c> read; a failed or refused child read is unknown (retried), never "no children"; a child added between
 /// the check and the write is logged and counted. Same harness as <see cref="RecordRepairPassJobTests"/>: the real job and Repair
 /// mode over a doubled Dataverse boundary (<see cref="RepairWorld"/>'s cascade children).
@@ -127,7 +129,14 @@ public sealed partial class RecordRepairPassJobTests
     {
         RecordCreationService.AcceptedAssignCascades.Keys.Should().BeEquivalentTo(DesignAllowList);
         RecordCreationService.AcceptedAssignCascades.Should().OnlyContain(e => e.Value.Length > 20, "each entry says why");
-        RecordCreationService.AcceptedAssignCascades.Should().OnlyContain(e => e.Value.Contains("Never read per row"));
+        RecordCreationService.AcceptedOnlyWithTheOwnersNotes.Should().BeEquivalentTo(["sprk_event->annotation", "sprk_analysis->annotation"]);
+        RecordCreationService.AcceptedAssignCascades
+            .Where(e => !RecordCreationService.AcceptedOnlyWithTheOwnersNotes.Contains(e.Key))
+            .Should().OnlyContain(e => e.Value.Contains("Never read per row"));
+        RecordCreationService.AcceptedAssignCascades
+            .Where(e => RecordCreationService.AcceptedOnlyWithTheOwnersNotes.Contains(e.Key))
+            .Should().OnlyContain(e => e.Value
+                == "Assign carries every note on the row; Repair re-owns the row only when every note on it is the row owner's.");
     }
 
     [Fact]
@@ -180,6 +189,28 @@ public sealed partial class RecordRepairPassJobTests
         });
         reads.Single(r => r.Table == "activitypointer").Relationships.Should().BeEquivalentTo(
             ["Contact_Emails", "Contact_Tasks", "Contact_Appointments", "Contact_Faxes", "Contact_Letters", "Contact_Phonecalls"]);
+        reads.Should().OnlyContain(r => r.Kind == AssignCascadeChildReadKind.AnyChild, "a contact's notes are never accepted");
+    }
+
+    [Theory]
+    [InlineData("sprk_event", "sprk_event_Annotations")]
+    [InlineData("sprk_analysis", "sprk_analysis_Annotations")]
+    public void AC3_AnAcceptedNoteRelationship_IsReadPerRow_ForANoteOfAnotherOwner(string table, string schema)
+    {
+        var inventory = table == "sprk_event" ? EventInventory : AnalysisInventory;
+        var cascades = inventory.Select(r => new AssignCascadeRelationship(r.Schema, r.Child, "Cascade", r.Column));
+
+        var (reads, unreadable) = RecordCreationService.ChildReadsOf(table, cascades);
+
+        unreadable.Should().BeEmpty();
+        var note = reads.Should().ContainSingle(r => r.Table == "annotation").Which;
+        note.Column.Should().Be("objectid");
+        note.Kind.Should().Be(AssignCascadeChildReadKind.NoteOfAnotherOwner);
+        note.Relationships.Should().Equal(schema);
+        reads.Select(r => r.Table).Should().NotContain(
+            ["team", "sharepointdocument", "sharepointdocumentlocation", "sprk_analysischatmessage", "sprk_analysisemailmetadata",
+                "sprk_analysisworkingversion"],
+            "the team, document, location and analysis content are never read");
     }
 
     [Fact]
@@ -249,7 +280,9 @@ public sealed partial class RecordRepairPassJobTests
             "one read per unaccepted (table, column); the accepted team, external identity, document and location are never read");
         ChildTablesNamed(World).Skip(unaccepted.Length).Should().BeEquivalentTo(unaccepted,
             "each is read once more after the owner write (the race)");
-        World.CascadeChildQueries.Should().OnlyContain(q => q.TopCount == 1);
+        World.CascadeChildQueries.Take(unaccepted.Length).Should().OnlyContain(q => q.TopCount == 1, "the check reads top 1");
+        World.CascadeChildQueries.Skip(unaccepted.Length).Should().OnlyContain(q => q.TopCount == RecordCreationService.RaceReadTopCount,
+            "the race re-read asks for more, to name each child that moved");
         World.CascadeChildQueries.Should().OnlyContain(q => q.Criteria.Conditions.Single().Values.Single().Equals(id));
     }
 
@@ -270,38 +303,110 @@ public sealed partial class RecordRepairPassJobTests
     }
 
     // =====================================================================================
-    // AC3 (must fire, owner Q2): an event and an analysis with a note are re-owned; the note is never read per row
+    // AC3 (owner "owner's notes only"): an event or an analysis is re-owned only when every note on it is the row owner's
     // =====================================================================================
 
+    private static readonly EntityReference RowOwner = new("systemuser", RepairWorld.PersonInChild);
+
+    private Guid EventWithNotes() =>
+        World.EventUnderTheMatter(clientName: null, practiceArea: null, priority: null, indexed: true);
+
     [Fact]
-    public async Task AC3_AnEventWithANote_IsReOwned_AndTheNoteRelationshipIsNeverRead()
+    public async Task AC3_AnEventWhoseNotesAreAllTheOwners_IsReOwned_AfterOneNoteReadForAnotherOwner()
     {
         Inventory("sprk_event", EventInventory);
-        var id = World.EventUnderTheMatter(clientName: null, practiceArea: null, priority: null, indexed: true);
-        World.AddCascadeChild("annotation", "objectid", id);
+        var id = EventWithNotes();
+        World.AddNote(id, RowOwner);
+        World.AddNote(id, RowOwner, createdBy: Directory.CallerUserId);
 
         var outcome = await World.RepairAsync("sprk_event", id);
 
         outcome.Status.Should().Be(RecordRepairStatus.Repaired);
         World.Writes.Should().ContainSingle().Which.Fields["ownerid"]
-            .Should().Be(new EntityReference("team", Directory.ChildTeam), "the owner write is issued; Dataverse moves the note with it");
-        World.CascadeChildQueries.Should().BeEmpty("sprk_event->annotation is accepted (owner Q2)");
+            .Should().Be(new EntityReference("team", Directory.ChildTeam), "the owner write is issued; Dataverse moves the notes with it");
+        ChildTablesNamed(World).Should().Equal(["annotation", "annotation"], "the note check, then the race re-read");
+        var check = World.CascadeChildQueries[0];
+        check.TopCount.Should().Be(1);
+        check.Criteria.Filters.Should().ContainSingle().Which.Conditions.Select(c => (c.AttributeName, c.Operator))
+            .Should().BeEquivalentTo(new[] { ("owninguser", ConditionOperator.NotEqual), ("owninguser", ConditionOperator.Null) },
+                "compared with the row's current owner, a user: by owning user (id and type)");
         outcome.Fields.Should().NotContain(f => f.ReasonCode == RecordRepairReason.OwnerAssignCascades);
+        outcome.RacedChildren.Should().BeEmpty("both notes were there before the check began");
     }
 
     [Fact]
-    public async Task AC3_AnAnalysisWithANote_IsReOwned_AndTheNoteRelationshipIsNeverRead()
+    public async Task AC3_AnAnalysisWhoseNotesAreAllTheOwners_IsReOwned()
     {
         Inventory("sprk_analysis", AnalysisInventory);
         var id = AnalysisUnderTheMatter();
-        World.AddCascadeChild("annotation", "objectid", id);
+        World.AddNote(id, RowOwner);
 
         var outcome = await World.RepairAsync("sprk_analysis", id);
 
         outcome.Status.Should().Be(RecordRepairStatus.Repaired);
         World.Writes.Should().ContainSingle().Which.Fields.Should().ContainKey("ownerid");
-        ChildTablesNamed(World).Should().Equal(["activitypointer", "activitypointer"],
-            "the note and the analysis content are accepted; only the activities are read (the check, then again after the write)");
+        ChildTablesNamed(World).Should().Equal(["activitypointer", "annotation", "activitypointer", "annotation"],
+            "the activities and the note check (the check, then again after the write); the analysis content is never read");
+    }
+
+    public static TheoryData<string> OtherNoteOwners => new() { "another user", "a team" };
+
+    private static EntityReference OtherNoteOwner(string who) => who == "a team"
+        ? new EntityReference("team", Directory.ChildTeam)
+        : new EntityReference("systemuser", Directory.CallerUserId);
+
+    [Theory]
+    [MemberData(nameof(OtherNoteOwners))]
+    public async Task AC3_AnEventWithANoteOwnedByAnotherPrincipal_IsNotReOwned_AndIsCounted(string who)
+    {
+        Inventory("sprk_event", EventInventory);
+        var id = _pass.NativeEvent();
+        World.AddNote(id, RowOwner);
+        World.AddNote(id, OtherNoteOwner(who));
+
+        var result = await _pass.RunAsync();
+
+        World.Writes.Should().NotContain(w => w.Id == id && w.Fields.ContainsKey("ownerid"), "the Assign would carry that note");
+        PassWorld.Count(result, "ownerAssignCascades").Should().Be(1);
+        PassWorld.Count(result, "pendingRetry").Should().Be(0, "an answer, not a fault");
+        using var json = JsonDocument.Parse(result.ResultJson!);
+        json.RootElement.GetProperty("ownerAssignCascadesByTable").GetProperty("sprk_event").GetInt32().Should().Be(1);
+        World.Log.Entries.Should().ContainSingle(e => e.Message.Contains("sprk_event_Annotations")
+                                                      && e.Message.Contains("note owned by another principal")
+                                                      && e.Message.Contains(id.ToString()));
+    }
+
+    [Theory]
+    [MemberData(nameof(OtherNoteOwners))]
+    public async Task AC3_AnAnalysisWithANoteOwnedByAnotherPrincipal_IsNotReOwned(string who)
+    {
+        Inventory("sprk_analysis", AnalysisInventory);
+        var id = AnalysisUnderTheMatter();
+        World.AddNote(id, OtherNoteOwner(who));
+
+        var outcome = await World.RepairAsync("sprk_analysis", id);
+
+        outcome.Fields.Should().ContainSingle(f => f.Part == RecordRepairPart.Owner)
+            .Which.ReasonCode.Should().Be(RecordRepairReason.OwnerAssignCascades);
+        outcome.NeedsRetry.Should().BeFalse();
+        World.Writes.Should().NotContain(w => w.Fields.ContainsKey("ownerid"));
+    }
+
+    [Theory]
+    [MemberData(nameof(ChildReadFailures))]
+    public async Task AC3_ANoteReadThatFails_IsUnknown_NeverNoOtherOwnersNote(string how)
+    {
+        Inventory("sprk_event", EventInventory);
+        var id = EventWithNotes();
+        World.AddNote(id, RowOwner);
+        ChildReadFails("annotation", how);
+
+        var outcome = await World.RepairAsync("sprk_event", id);
+
+        outcome.Fields.Should().ContainSingle(f => f.Part == RecordRepairPart.Owner)
+            .Which.ReasonCode.Should().Be(RecordRepairReason.OwnerAssignCascadeUnknown);
+        outcome.NeedsRetry.Should().BeTrue();
+        World.Writes.Should().NotContain(w => w.Fields.ContainsKey("ownerid"));
     }
 
     [Fact]
@@ -507,6 +612,229 @@ public sealed partial class RecordRepairPassJobTests
         World.Log.Entries.Should().Contain(e => e.Level == LogLevel.Error && e.Message.Contains("could not be read again"));
     }
 
+    [Fact]
+    public async Task AC9_TwoChildrenAddedAfterTheCheck_AreEachLoggedWithTheirTableAndId_AndCounted()
+    {
+        Inventory("contact", ContactInventory);
+        var id = _pass.NativeContact();
+        var (email, task) = (Guid.Empty, Guid.Empty);
+        World.BeforeWrite = () =>
+        {
+            email = World.AddCascadeChild("activitypointer", "regardingobjectid", id, activityType: "email");
+            task = World.AddCascadeChild("activitypointer", "regardingobjectid", id, activityType: "task");
+        };
+
+        var result = await _pass.RunAsync();
+
+        PassWorld.Count(result, "ownerAssignCascadeRaced").Should().Be(2);
+        World.Log.Entries.Should().ContainSingle(e => e.Message.Contains(RecordRepairReason.OwnerAssignCascadeRaced)
+                                                      && e.Message.Contains("email") && e.Message.Contains(email.ToString()));
+        World.Log.Entries.Should().ContainSingle(e => e.Message.Contains(RecordRepairReason.OwnerAssignCascadeRaced)
+                                                      && e.Message.Contains("task") && e.Message.Contains(task.ToString()));
+        World.Log.Entries.Should().ContainSingle(e => e.Message.Contains("2 child(ren) found again")
+                                                      && e.Message.Contains("truncated: False"));
+    }
+
+    [Fact]
+    public async Task AC9_ARaceReReadThatFillsItsPage_IsLoggedAsTruncated()
+    {
+        Inventory("contact", ContactInventory);
+        var id = _pass.NativeContact();
+        World.BeforeWrite = () =>
+        {
+            for (var i = 0; i <= RecordCreationService.RaceReadTopCount; i++)
+                World.AddCascadeChild("contact", "parentcustomerid", id);
+        };
+
+        var outcome = await World.RepairAsync("contact", id, _pass.Context());
+
+        outcome.RacedChildren.Should().HaveCount(RecordCreationService.RaceReadTopCount);
+        World.Log.Entries.Should().ContainSingle(e => e.Message.Contains($"{RecordCreationService.RaceReadTopCount} child(ren) found again")
+                                                      && e.Message.Contains("truncated: True"));
+    }
+
+    [Fact]
+    public async Task AC9_ANoteAddedByAnotherPrincipalAfterTheCheck_IsRaced_ANoteByThePreviousOwnerIsNot()
+    {
+        Inventory("sprk_event", EventInventory);
+        var id = EventWithNotes();
+        World.AddNote(id, RowOwner);
+        var raced = Guid.Empty;
+        World.BeforeWrite = () =>
+        {
+            raced = World.AddNote(id, OtherNoteOwner("another user"), createdOn: DateTime.UtcNow.AddMinutes(1));
+            World.AddNote(id, RowOwner, createdOn: DateTime.UtcNow.AddMinutes(1));
+        };
+
+        var outcome = await World.RepairAsync("sprk_event", id);
+
+        outcome.Status.Should().Be(RecordRepairStatus.Repaired);
+        outcome.RacedChildren.Should().ContainSingle().Which.Should().Match<RecordRepairRacedChild>(
+            c => c.Table == "annotation" && c.Id == raced);
+        var race = World.CascadeChildQueries[^1];
+        race.TopCount.Should().Be(RecordCreationService.RaceReadTopCount);
+        race.Criteria.Conditions.Select(c => (c.AttributeName, c.Operator)).Should().Contain(("createdon", ConditionOperator.GreaterEqual));
+        World.Log.Entries.Should().ContainSingle(e => e.Message.Contains(RecordRepairReason.OwnerAssignCascadeRaced)
+                                                      && e.Message.Contains("annotation") && e.Message.Contains(raced.ToString()));
+    }
+
+    // =====================================================================================
+    // Fix round (C): a child found is an answer, whatever another read gave
+    // =====================================================================================
+
+    [Theory]
+    [InlineData("syncerror", "the read after the one that found the email faults")]
+    [InlineData("actioncard", "a read between faults")]
+    public async Task AC6_AContactWithAnEmail_IsAnAnswer_EvenWhenAnotherReadFaults(string faulting, string because)
+    {
+        Inventory("contact", ContactInventory);
+        var id = _pass.NativeContact();
+        World.AddCascadeChild("activitypointer", "regardingobjectid", id, activityType: "email");
+        World.CascadeChildFaults[faulting] = new TimeoutException("Test: the read timed out.");
+
+        var outcome = await World.RepairAsync("contact", id, _pass.Context());
+
+        outcome.Fields.Should().ContainSingle(f => f.Part == RecordRepairPart.Owner)
+            .Which.ReasonCode.Should().Be(RecordRepairReason.OwnerAssignCascades, because);
+        outcome.NeedsRetry.Should().BeFalse("an answer: the email keeps the row whatever the other read gave");
+        ChildTablesNamed(World).Should().Contain(faulting, "every read is still made after one finds a child or faults");
+    }
+
+    [Fact]
+    public async Task AC6_AChildFoundAfterAReadThatFaulted_IsAnAnswer()
+    {
+        Inventory("contact", ContactInventory);
+        var id = _pass.NativeContact();
+        World.CascadeChildFaults["activitypointer"] = new TimeoutException("Test: the first read timed out.");
+        World.AddCascadeChild("syncerror", "regardingobjectid", id);
+
+        var outcome = await World.RepairAsync("contact", id, _pass.Context());
+
+        outcome.Fields.Should().ContainSingle(f => f.Part == RecordRepairPart.Owner)
+            .Which.ReasonCode.Should().Be(RecordRepairReason.OwnerAssignCascades);
+    }
+
+    // =====================================================================================
+    // Fix round (B): the per-row child reads need organization-level Read, confirmed once per pass (tri-state)
+    // =====================================================================================
+
+    private const string DepthRule = "per-row child checks need organization-level Read; held";
+
+    [Fact]
+    public async Task B_Confirmed_ThePerRowReadsAreMade_TheNoteReadIncluded()
+    {
+        Inventory("contact", ContactInventory);
+        Inventory("sprk_event", EventInventory);
+        var contact = _pass.NativeContact();
+        var anEvent = _pass.NativeEvent();
+        World.AddNote(anEvent, RowOwner);
+        var pass = _pass.Context();
+
+        var contactOutcome = await World.RepairAsync("contact", contact, pass);
+        var eventOutcome = await World.RepairAsync("sprk_event", anEvent, pass);
+
+        contactOutcome.Status.Should().Be(RecordRepairStatus.Repaired);
+        eventOutcome.Status.Should().Be(RecordRepairStatus.Repaired);
+        ChildTablesNamed(World).Should().Contain(["activitypointer", "annotation"]);
+        World.RoleQueries.Should().ContainSingle("asked once for the pass");
+        World.Log.Entries.Should().NotContain(e => e.Message.Contains(DepthRule));
+    }
+
+    public static TheoryData<string> DepthNotConfirmed => new() { "not held", "roles read faults", "identity read faults" };
+
+    private void DepthIs(string how)
+    {
+        switch (how)
+        {
+            case "not held":
+                World.HoldsSystemAdministrator = false;
+                break;
+            case "roles read faults":
+                World.RoleReadFault = new TimeoutException("Test: the roles read timed out.");
+                break;
+            default:
+                World.IdentityFault = new TimeoutException("Test: the identity read timed out.");
+                break;
+        }
+    }
+
+    [Theory]
+    [MemberData(nameof(DepthNotConfirmed))]
+    public async Task B_NotConfirmedOrFaulted_HoldsEveryRowThatNeedsAPerRowRead_OthersProceed(string how)
+    {
+        Inventory("contact", ContactInventory);
+        Inventory("sprk_event", EventInventory);
+        Inventory("sprk_analysis", AnalysisInventory);
+        Inventory("sprk_matter", MatterInventory);
+        DepthIs(how);
+        var contact = _pass.NativeContact();
+        var anEvent = _pass.NativeEvent();
+        World.AddNote(anEvent, RowOwner);
+        var analysis = _pass.Native("sprk_analysis", AnalysisUnderTheMatter());
+        var matter = _pass.Native("sprk_matter", UnfiledRowOf("sprk_matter"));
+        var pass = _pass.Context();
+
+        var held = new[]
+        {
+            await World.RepairAsync("contact", contact, pass),
+            await World.RepairAsync("sprk_event", anEvent, pass),
+            await World.RepairAsync("sprk_analysis", analysis, pass),
+        };
+        var matterOutcome = await World.RepairAsync("sprk_matter", matter, pass);
+
+        held.Should().OnlyContain(o => o.Fields.Single(f => f.Part == RecordRepairPart.Owner).ReasonCode
+                                       == RecordRepairReason.OwnerAssignCascadeUnknown);
+        held.Should().OnlyContain(o => o.NeedsRetry);
+        World.Writes.Should().NotContain(w => w.Id != matter && w.Fields.ContainsKey("ownerid"));
+        World.CascadeChildQueries.Should().BeEmpty("no per-row child read is made without confirmed organization-level Read");
+        matterOutcome.Status.Should().Be(RecordRepairStatus.Repaired, "a row that needs no per-row read is unaffected");
+        World.Writes.Should().Contain(w => w.Id == matter && w.Fields.ContainsKey("ownerid"));
+        World.Log.Entries.Should().ContainSingle(e => e.Level == LogLevel.Error && e.Message.Contains(DepthRule),
+            "one error line per pass states the rule");
+    }
+
+    [Theory]
+    [InlineData("roles read faults")]
+    [InlineData("identity read faults")]
+    public async Task B_Faulted_LogsTheRuleOnceWithTheFault_AndIsNeverConfirmed(string how)
+    {
+        Inventory("contact", ContactInventory);
+        DepthIs(how);
+        var pass = _pass.Context();
+        var first = _pass.NativeContact();
+        var second = _pass.NativeContact();
+
+        await World.RepairAsync("contact", first, pass);
+        var later = await World.RepairAsync("contact", second, pass);
+
+        later.Fields.Single(f => f.Part == RecordRepairPart.Owner).ReasonCode.Should().Be(RecordRepairReason.OwnerAssignCascadeUnknown);
+        World.Log.Entries.Should().ContainSingle(e => e.Level == LogLevel.Error && e.Message.Contains(DepthRule)
+                                                      && e.Exception is TimeoutException);
+        World.CascadeChildQueries.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task B_TheDepthIsReadOncePerPass_HoweverManyRowsNeedIt()
+    {
+        Inventory("contact", ContactInventory);
+        Inventory("sprk_event", EventInventory);
+        _pass.NativeContact();
+        _pass.NativeContact();
+        _pass.NativeEvent();
+
+        var result = await _pass.RunAsync();
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        PassWorld.Count(result, "repaired").Should().Be(3, "each row's per-row reads were made");
+        World.RoleQueries.Should().ContainSingle("the read depth is asked once for the pass, not per row");
+    }
+
+    private sealed partial class PassWorld
+    {
+        /// <summary>Gives <paramref name="table"/> <paramref name="id"/> the creation stamps of a native row inside the pass.</summary>
+        public Guid Native(string table, Guid id) => Seed(table, id, createdOn: null, createdBy: null, withoutCreatedOn: false);
+    }
+
     // =====================================================================================
     // AC10 (negative): no write reaches an activity, a child contact, a Signal, a Decision Record or a Budget Revision
     // =====================================================================================
@@ -566,6 +894,9 @@ internal sealed partial class RepairWorld
     /// <summary>The children per (child table, referencing column): the parent id, the child id and, for an activity, its type.</summary>
     public List<(string Table, string Column, Guid Parent, Guid Child, string? ActivityType)> CascadeChildren { get; } = [];
 
+    /// <summary>A child's other columns (a note's owning user or team, its creator and when it was created), by child id.</summary>
+    public Dictionary<Guid, Dictionary<string, object>> CascadeChildColumnValues { get; } = [];
+
     /// <summary>The (table, column) pairs this world answers as a child read (registered by <see cref="CascadesTo"/>).</summary>
     public HashSet<(string Table, string Column)> CascadeChildColumns { get; } = [];
 
@@ -577,6 +908,23 @@ internal sealed partial class RepairWorld
 
     /// <summary>Every child read Repair sent, in order.</summary>
     public List<QueryExpression> CascadeChildQueries { get; } = [];
+
+    // ── Fix round (B): the app identity and its roles ──────────────────────────────────────────────────────────────
+
+    /// <summary>The app identity's <c>systemuser</c> id.</summary>
+    public static readonly Guid AppIdentity = Guid.Parse("a0160000-0000-4000-8000-0000000000a1");
+
+    /// <summary>Whether the app identity holds the System Administrator role directly (the default: yes).</summary>
+    public bool HoldsSystemAdministrator { get; set; } = true;
+
+    /// <summary>The fault the read of the app identity's roles throws.</summary>
+    public Exception? RoleReadFault { get; set; }
+
+    /// <summary>The fault the read of the app identity throws.</summary>
+    public Exception? IdentityFault { get; set; }
+
+    /// <summary>Every read of the app identity's roles Repair sent.</summary>
+    public List<QueryExpression> RoleQueries { get; } = [];
 
     /// <summary>
     /// Adds a relationship of <paramref name="table"/> that cascades on Assign to <paramref name="child"/> on
@@ -601,10 +949,62 @@ internal sealed partial class RepairWorld
         return id;
     }
 
-    /// <summary>The answer to a child read, or <c>null</c> when <paramref name="query"/> is not one (the directory answers it).</summary>
+    /// <summary>A note on <paramref name="parent"/> owned by <paramref name="owner"/> (a user or a team), created by
+    /// <paramref name="createdBy"/> (default: the owner when a user, else the person in the child unit) a day ago unless
+    /// <paramref name="createdOn"/> is given.</summary>
+    public Guid AddNote(Guid parent, EntityReference owner, Guid? createdBy = null, DateTime? createdOn = null)
+    {
+        var id = AddCascadeChild("annotation", "objectid", parent);
+        var columns = new Dictionary<string, object>
+        {
+            [owner.LogicalName == "team" ? "owningteam" : "owninguser"] = owner,
+            ["createdby"] = new EntityReference("systemuser",
+                createdBy ?? (owner.LogicalName == "systemuser" ? owner.Id : PersonInChild)),
+            ["createdon"] = createdOn ?? DateTime.UtcNow.AddDays(-1),
+        };
+        CascadeChildColumnValues[id] = columns;
+        return id;
+    }
+
+    /// <summary>The app identity, as <see cref="IGenericEntityService.GetCurrentIdentityIdAsync"/> answers it.</summary>
+    private Task<Guid> AppIdentityAnswer() =>
+        IdentityFault is { } fault ? Task.FromException<Guid>(fault) : Task.FromResult(AppIdentity);
+
+    /// <summary>The answer to a read of the app identity's roles, or <c>null</c> when <paramref name="query"/> is not one. Only
+    /// the read Repair is meant to make is answered: the identity's <c>systemuserroles</c> joined to <c>role</c> on the System
+    /// Administrator template id.</summary>
+    private Task<EntityCollection>? RoleAnswer(QueryExpression query)
+    {
+        if (query.EntityName != "systemuserroles")
+            return null;
+
+        RoleQueries.Add(query);
+        if (RoleReadFault is { } fault)
+            return Task.FromException<EntityCollection>(fault);
+
+        var forTheIdentity = query.Criteria.Conditions.Any(c => c.AttributeName == "systemuserid"
+                                                                && c.Operator == ConditionOperator.Equal
+                                                                && c.Values.Single() is Guid who && who == AppIdentity);
+        var byTemplate = query.LinkEntities.Any(l => l.LinkToEntityName == "role"
+                                                     && l.LinkCriteria.Conditions.Any(c => c.AttributeName == "roletemplateid"
+                                                         && c.Operator == ConditionOperator.Equal
+                                                         && c.Values.Single() is Guid template
+                                                         && template == RecordCreationService.SystemAdministratorRoleTemplateId));
+        var rows = forTheIdentity && byTemplate && HoldsSystemAdministrator
+            ? new List<Entity> { new("systemuserroles", Guid.NewGuid()) }
+            : [];
+        return Task.FromResult(new EntityCollection(rows));
+    }
+
+    /// <summary>The columns a child read may filter on besides its parent column (a note read's owner, creator and time).</summary>
+    private static readonly HashSet<string> ChildFilterColumns = ["owninguser", "owningteam", "createdby", "createdon"];
+
+    /// <summary>The answer to a child read, or <c>null</c> when <paramref name="query"/> is not one (the directory answers it).
+    /// A child read's first condition is its parent column; any other condition or filter is on
+    /// <see cref="ChildFilterColumns"/>, and is applied to the child's <see cref="CascadeChildColumnValues"/>.</summary>
     private Task<EntityCollection>? CascadeChildAnswer(QueryExpression query)
     {
-        if (query.Criteria.Conditions.Count != 1)
+        if (query.Criteria.Conditions.Count == 0)
             return null;
 
         var condition = query.Criteria.Conditions[0];
@@ -615,15 +1015,25 @@ internal sealed partial class RepairWorld
             return null;
         }
 
+        var rest = new FilterExpression(LogicalOperator.And);
+        foreach (var other in query.Criteria.Conditions.Skip(1))
+            rest.Conditions.Add(other);
+        foreach (var filter in query.Criteria.Filters)
+            rest.Filters.Add(filter);
+        if (!OnlyOn(rest))
+            return null;
+
         CascadeChildQueries.Add(query);
         if (CascadeChildFaults.TryGetValue(query.EntityName, out var fault))
             return Task.FromException<EntityCollection>(fault);
+
         if (CascadeChildNoAnswer.Contains(query.EntityName))
             return Task.FromResult<EntityCollection>(null!);
 
         var parent = (Guid)condition.Values.Single();
         var rows = CascadeChildren
             .Where(c => c.Table == query.EntityName && c.Column == condition.AttributeName && c.Parent == parent)
+            .Where(c => Matches(rest, CascadeChildColumnValues.GetValueOrDefault(c.Child) ?? []))
             .Select(c =>
             {
                 var row = new Entity(c.Table, c.Child);
@@ -634,5 +1044,33 @@ internal sealed partial class RepairWorld
         if (query.TopCount is { } top)
             rows = rows.Take(top);
         return Task.FromResult(new EntityCollection(rows.ToList()));
+    }
+
+    private static bool OnlyOn(FilterExpression filter) =>
+        filter.Conditions.All(c => ChildFilterColumns.Contains(c.AttributeName)) && filter.Filters.All(OnlyOn);
+
+    /// <summary>Dataverse's reading of a filter over one row: <c>ne</c> never matches an empty column (<c>null</c> does).</summary>
+    private static bool Matches(FilterExpression filter, IReadOnlyDictionary<string, object> columns)
+    {
+        var results = filter.Conditions.Select(c => Matches(c, columns)).Concat(filter.Filters.Select(f => Matches(f, columns)));
+        return filter.FilterOperator == LogicalOperator.Or ? results.Any(r => r) : results.All(r => r);
+    }
+
+    private static bool Matches(ConditionExpression condition, IReadOnlyDictionary<string, object> columns)
+    {
+        var value = columns.GetValueOrDefault(condition.AttributeName) switch
+        {
+            EntityReference reference => reference.Id,
+            var other => other,
+        };
+        return condition.Operator switch
+        {
+            ConditionOperator.Null => value is null,
+            ConditionOperator.NotNull => value is not null,
+            ConditionOperator.Equal => value is not null && value.Equals(condition.Values.Single()),
+            ConditionOperator.NotEqual => value is not null && !value.Equals(condition.Values.Single()),
+            ConditionOperator.GreaterEqual => value is DateTime when && when >= (DateTime)condition.Values.Single(),
+            _ => throw new NotSupportedException($"Test: a child read filters with {condition.Operator}."),
+        };
     }
 }
