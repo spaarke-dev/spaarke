@@ -705,9 +705,48 @@ describe('message step opens in rich text and commits plain text (task 197)', ()
 
     const review = await recordAfterInquiry(service);
     const body = review.actions.find(a => a.code === 'send-budget-inquiry')?.values?.body as string;
-    expect(body).toBe('Why the overage?\n\nReply by Friday & oblige');
+    // Task 197 fix round 1: the link's address is kept after its text, since the commit route sends plain text only.
+    expect(body).toBe('Why the overage?\n\nReply by Friday (https://x.example) & oblige');
     expect(body).not.toMatch(/<|&amp;|&lt;/);
   }, 30000);
+
+  it('a link, a numbered list and a bullet list keep their address and markers, with a blank line at every block boundary', async () => {
+    mockComposerProps.length = 0;
+    mockComposerStates.length = 0;
+    const { service } = setup(planWith(inquiryWithDefaults()));
+    await toInquiry();
+
+    editRichBody(
+      '<p>Intro</p><ol><li>Pay</li><li>File</li></ol><p>See <a href="https://portal/x">the invoice</a> or ' +
+        '<a href="https://portal/y">https://portal/y</a></p><ul><li>One</li><li>Two</li></ul><h2>Done</h2>'
+    );
+
+    const review = await recordAfterInquiry(service);
+    expect(review.actions.find(a => a.code === 'send-budget-inquiry')?.values?.body).toBe(
+      'Intro\n\n1. Pay\n2. File\n\nSee the invoice (https://portal/x) or https://portal/y\n\n\u2022 One\n\u2022 Two\n\nDone'
+    );
+  }, 30000);
+
+  it('a link that is not http(s) or mailto keeps its text only', async () => {
+    mockComposerProps.length = 0;
+    mockComposerStates.length = 0;
+    const { service } = setup(planWith(inquiryWithDefaults()));
+    await toInquiry();
+
+    editRichBody('<p><a href="javascript:alert(1)">click</a> <a href="ftp://h/f">file</a></p>');
+
+    const review = await recordAfterInquiry(service);
+    expect(review.actions.find(a => a.code === 'send-budget-inquiry')?.values?.body).toBe('click file');
+  }, 30000);
+
+  it('the step tells the user the email is sent as plain text', async () => {
+    setup(planWith(inquiryWithDefaults()));
+    const step = await toInquiry();
+
+    expect(within(step).getByTestId('plain-text-note')).toHaveTextContent(
+      'This email is sent as plain text, so formatting such as bold is not kept.'
+    );
+  });
 
   it('text that looks like markup is committed as the characters typed, never as markup', async () => {
     mockComposerProps.length = 0;

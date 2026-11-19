@@ -16,8 +16,9 @@
  *   (`plainTextToHtml`). The commit route sends the body as plain text (`BodyFormat.PlainText` in `DecisionActionExecutors` and
  *   `BudgetInquiryExecutor`, which also appends plain link lines), so the body is committed as plain text: a body whose visible
  *   text the user has not changed keeps the step's own value (line breaks and all), and an edited one is converted back from rich
- *   text (paragraphs become blank-line-separated blocks). Formatting (bold, links, lists) and a link's target are therefore not
- *   kept in this one email: a known limit, never raw HTML sent as plain text.
+ *   text (`richTextToPlainText`: blocks become blank-line-separated, a link becomes `text (address)`, list items keep their
+ *   bullet or number). Formatting such as bold is not kept in this one email, and the step says so: a known limit, never raw
+ *   HTML sent as plain text.
  * - Cc and Bcc: an action that declares `cc` and `bcc` parameters (send-budget-inquiry, task 190, D-222) commits them like To
  *   (addresses joined with "; ") and the commit route sends them; the composer is their only editor. An action that does not declare
  *   them (send-reminder) keeps the warning: when the user adds any, the step says they will not be sent.
@@ -29,7 +30,7 @@ import * as React from 'react';
 import { MessageBar, MessageBarBody, makeStyles, tokens } from '@fluentui/react-components';
 import { EmailComposer } from '../../EmailComposer/EmailComposer';
 import { EMAIL_RE } from '../../EmailComposer/EmailComposer.reducer';
-import { isUnchangedPlainBody, plainTextToHtml, toPlainText } from '../../EmailComposer/composeOnlyText';
+import { isUnchangedPlainBody, plainTextToHtml, richTextToPlainText } from '../../EmailComposer/composeOnlyText';
 import type { EmailComposerState, IRecipient } from '../../EmailComposer/EmailComposer.types';
 import type { AuthenticatedFetchFn } from '../../../services/EntityCreationService';
 import { fieldValue, withValue } from '../decisionDraft';
@@ -63,13 +64,13 @@ const joinAddresses = (recipients: IRecipient[]): string =>
 
 /**
  * The body as the commit route takes it: plain text. A rich-text body whose visible text is the step's own plain-text value
- * (the editor re-serialising its paragraphs is not an edit) keeps that value; an edited one is converted back, with a blank
- * line between paragraphs, the inverse of `plainTextToHtml`.
+ * (the editor re-serialising its paragraphs is not an edit) keeps that value; an edited one is converted back keeping what the
+ * user can see (`richTextToPlainText`): a link's address in brackets after its text, list markers, a blank line between blocks.
  */
 function committedBody(state: Pick<EmailComposerState, 'body' | 'bodyFormat'>, current: string): string {
   if (state.bodyFormat !== 'HTML') return state.body;
   if (isUnchangedPlainBody(current, state.body)) return current;
-  return toPlainText(state.body.replace(/<\/p>\s*(?=<p[\s>])/gi, '</p><br>'), 'HTML');
+  return richTextToPlainText(state.body);
 }
 
 const useStyles = makeStyles({
@@ -172,6 +173,9 @@ export const EmailMessageFields: React.FC<{ scope: StepScope; action: DecisionAc
         onStateChange={onStateChange}
         onLookupRecipients={onLookupRecipients}
       />
+      <MessageBar intent="info" data-testid="plain-text-note">
+        <MessageBarBody>This email is sent as plain text, so formatting such as bold is not kept.</MessageBarBody>
+      </MessageBar>
       {noAddressFor ? (
         <MessageBar intent="warning" data-testid="no-email">
           <MessageBarBody>{noAddressFor} has no email address that could be read; type one in To.</MessageBarBody>

@@ -102,6 +102,7 @@ import type {
 import type { RichTextEditorRef } from '../RichTextEditor';
 import type { InlineAiAction } from '../InlineAiToolbar';
 
+import { isSafeHref } from './composeOnlyText';
 import { RecipientField } from './subcomponents/RecipientField';
 import { BodyEditor } from './subcomponents/BodyEditor';
 import { AttachmentList } from './subcomponents/AttachmentList';
@@ -228,16 +229,6 @@ function defaultAttachmentSources(
   return wizardContext
     ? [{ kind: 'wizard' }, { kind: 'related' }, { kind: 'local' }, { kind: 'spe' }]
     : [{ kind: 'local' }, { kind: 'related' }, { kind: 'spe' }];
-}
-
-/**
- * Blocks script-executing schemes (`javascript:`/`data:`/`vbscript:`) before an
- * (untrusted) `recordLink.url` is rendered into an `<a href>`. This is the
- * shared send engine — a caller could build the url from record-derived data.
- * Everything else (http(s), app-relative, mailto) is allowed.
- */
-function isSafeHref(url: string): boolean {
-  return !/^\s*(javascript|data|vbscript):/i.test(url);
 }
 
 /** Escape a plain string for safe interpolation into HTML (record-link label/href). */
