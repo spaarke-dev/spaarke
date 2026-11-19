@@ -94,3 +94,17 @@ Left as is: `BodyEditor` keeps its own `htmlToPlainText` for the rich → plain 
 [spaarke-dev/spaarke#2910](https://github.com/spaarke-dev/spaarke/pull/2910) to master, with auto-merge (squash) under D-115. Deploy needs the owner's go, given on 2026-11-18 ("Deploy"):
 - the Console auto-deploys from master;
 - the three PCFs are deployed per `/pcf-deploy` (owner, 2026-11-18) from a fresh master worktree with `Import-SolutionScoped.ps1`.
+
+## Merge and deploy (2026-11-18)
+
+- #2910 merged to master as `0fdb6edacb` (01:14Z 2026-11-19).
+- **Console:** `deploy-spaarke-ai.yml` succeeded for `0fdb6edacb`, and again for `bf5a1975ea` and `2963d1565b`, both of which contain it.
+- **PCFs**, per `/pcf-deploy`, from a fresh detached worktree of master `2963d1565b` (`C:\wt197d`):
+  - shared libraries built in order (Auth, SdapClient, UI.Components; Communication.Components installed);
+  - `Invoke-PcfBuildProd.ps1` reported `[build] Succeeded` for each control;
+  - bundle sizes: CommunicationActions 853,297, TrackingFieldTrio 1,116,259, SemanticSearchControl 1,129,793 bytes (each within 4 KB of the previous committed bundle); each contains `headerAction`;
+  - packed with `pack.ps1` from inside `Solution/`;
+  - imported with `Import-SolutionScoped.ps1` to spaarkedev1 (scoped publish of the control web resources only; no tenant-wide publish).
+- **Verified in Dataverse:** CommunicationActionsSolution 1.3.23, TrackingFieldTrioSolution 1.0.65, SpaarkeSemanticSearch 1.1.89; the newest import job for each is at progress 100.
+- Rebuilt bundles committed in [#2914](https://github.com/spaarke-dev/spaarke/pull/2914) (auto-merge, squash). The manifests needed no change; their version bumps came with #2910.
+- Not yet checked in a browser: the owner checks it with the 185 recheck.

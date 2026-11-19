@@ -4,7 +4,7 @@
     <title>Email composer opens in rich text everywhere; attachments get a button beside the Attachments heading instead of the toolbar paperclip</title>
     <phase>12 Create-wizard lookups and composer (185 dev check fixes)</phase>
     <gate>startable</gate>
-    <status>in-progress</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .tsx in the shared UI library and several hosts; behaviour change across every composer host.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -80,6 +80,7 @@
     <trigger>If a host's server send path cannot take HTML and the conversion would lose content the user typed, STOP and report.</trigger>
     <trigger>If another open PR or worktree is changing EmailComposer.tsx's attachment area, STOP and report.</trigger>
   </escalation>
+  <completion>Done 2026-11-18: PR #2910 merged to master (0fdb6edacb) after independent Opus review FAIL, fix round 1, main-session re-check. Console auto-deployed to dev (deploy-spaarke-ai.yml on 0fdb6edacb, then 2963d1565b which contains it). PCFs deployed to spaarkedev1 per /pcf-deploy from fresh master 2963d1565b: CommunicationActions 1.3.23, TrackingFieldTrio 1.0.65, SemanticSearchControl 1.1.89 (solution versions match, importjob progress 100, scoped publish). Rebuilt bundles: PR #2914 (auto-merge). Known limit: Decision wizard email is plain text, inline formatting not kept. Not browser-checked; owner hand check pending with the 185 recheck. Notes: notes/task-197-notes.md. rework: fix-round-1 task 197</completion>
   <execution>
     <protocol>Run through task-execute. Fresh worktree from origin/master; PR to master.</protocol>
   </execution>
