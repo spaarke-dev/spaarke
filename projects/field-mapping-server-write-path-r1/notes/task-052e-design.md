@@ -294,6 +294,7 @@ The live check on dev gains these cases:
 7. The values of UAC-r2's `OrdinaryMovesWritesEnabled` and the recent-changes emergency stop on that environment are known. While either stops writes, the families of repaired roots wait, and the run report says so.
 8. UAC-r2's answers to U1–U4 (recorded in §5, 2026-11-18), and their review of the 052g guard diff.
 8a. `SecureRecord:BusinessUnitName` on that environment resolves to exactly one business unit (read-only check). The 052g guard reads an unresolvable name as "this environment has no Secure Record unit", the same reading as the ownership resolver and the secure pass, so a wrong name would let Repair write an owner on a row in the real Secure Record unit, or give a row a team there (added 2026-11-19 from the 052g review).
+8b. The secure-child backfill (`scripts/Invoke-SecureChildBackfill.ps1`) has been run in report mode on that environment, and it lists every row the 052d audit read or a dry run reports as `owner_left_to_secure_pass`. A row Repair leaves that the secure pass does not list is a gap: stop and send it to UAC-r2. Reason: the secure pass's full sweep writes only when its own writes switch is on, so an old person-owned child of a secure root is isolated by the sweep or the backfill, not within minutes (UAC-r2 condition on the 052g review, 2026-11-19).
 9. The owner's go for `RecordRepair:Pass:GoLive`, given in this session.
 
 ## 7. Review record

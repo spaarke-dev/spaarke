@@ -238,3 +238,19 @@ then throws), `ReconcilerFactoryFault` (building the reconciler throws), and an 
 | Filtered suites (`verify-suites.sh`) | 9610 passed, 0 failed, 7 skipped (the existing `OfficeEndpointsContractTests` skips), 26 m 54 s |
 | `RecordRepair` filter | 456 / 456 passed (446 before this round, plus 10 new) |
 | `dotnet format whitespace --verify-no-changes` | clean on `Services/RecordCreation/` and `tests/integration/data-mutation/RecordOwnership/` |
+
+## Fix-diff re-check and UAC-r2 review (2026-11-19)
+
+Scoped Sonnet re-check of the review-round-1 diff: no F-class finding. UAC-r2 reviewed the source diff `0b668f03a4..b5d32ba139`: PASS, no F-class finding. Q1 (the row's current unit is checked), Q2 (restricted-content team by configured name or the resolver's substitution), Q5 (= K9) and the 042b to-do change (left to the secure pass) were confirmed. K1, K4, K7 (check (g) kept as defence in depth) and K8 were accepted.
+
+### Known limits added
+
+- **K11 — cancellation during the read-back.** When the caller's token is cancelled during the read after a confirmed owner write, the cancellation propagates and that row's outcome is not counted in the cancelled run. The write has landed; the next run finds the owner settled.
+- **K12 — another writer between our write and the read-back.** When the read shows a different owner, our cross-unit move is not reported or counted (logged). It under-reports on purpose: the line names only moves the read confirms.
+- **K13 — a write that faulted but landed skips the race re-read.** 052f's race re-read runs only after a confirmed write; a landed-despite-fault write is reported as a move but its raced children are not listed. The failure path never ran the race read; on retry the row is team-owned and kept.
+- **K14 — a document moved to the Direct message owner team.** A person-owned document whose primary parent is a Direct-thread communication gets the Direct message owner team (the resolver's answer, the same as Create), across units when that team's configured unit differs. Intended (UAC-r2). Until the share job's Direct pass reads it from its recent-changes listing (about two minutes), the participants' shares are not yet on it: access narrows in that window, nothing widens.
+
+### Pre-enable conditions (design §6)
+
+- 8a: `SecureRecord:BusinessUnitName` resolves to exactly one unit.
+- 8b: the secure-child backfill in report mode lists every row Repair reports as `owner_left_to_secure_pass`; any row it does not list is a gap to stop on (UAC-r2 condition).
