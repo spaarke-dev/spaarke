@@ -85,15 +85,24 @@ const useStyles = makeStyles({
     alignItems: 'center',
     gap: tokens.spacingHorizontalS,
   },
-  // Clickable toggle (label + chevron). +4px vertical padding over the base section
-  // header (owner UAT 2026-07-24).
+  // Clickable header row (label + chevron). +4px vertical padding over the base section
+  // header (owner UAT 2026-07-24). Without an attach button the row spans the width, label left
+  // and chevron at the right edge (the layout before task 197).
   header: {
-    display: 'inline-flex',
+    display: 'flex',
     alignItems: 'center',
-    gap: tokens.spacingHorizontalXS,
+    justifyContent: 'space-between',
+    gap: tokens.spacingHorizontalS,
     cursor: 'pointer',
     paddingTop: tokens.spacingVerticalXS,
     paddingBottom: tokens.spacingVerticalXS,
+  },
+  // With an attach button beside the heading, the toggle shrinks to its content so the chevron
+  // sits next to the label (task 197).
+  headerBesideAction: {
+    display: 'inline-flex',
+    justifyContent: 'flex-start',
+    gap: tokens.spacingHorizontalXS,
   },
   // Standard Segoe UI 14px semibold, neutral foreground 1 (UI-DESIGN-STANDARDS section-header;
   // owner UAT 2026-07-24). Token-only so both themes resolve (ADR-021).
@@ -184,27 +193,35 @@ export const AttachmentList: React.FC<IAttachmentListProps> = ({
   const overSize = totalBytes > ATTACHMENT_MAX_TOTAL_BYTES;
   const nearSize = !overSize && totalBytes > ATTACHMENT_WARN_TOTAL_BYTES;
 
+  const toggle = (
+    <div
+      className={mergeClasses(styles.header, headerAction ? styles.headerBesideAction : undefined)}
+      role="button"
+      tabIndex={0}
+      aria-expanded={!collapsed}
+      onClick={() => setCollapsed(c => !c)}
+      onKeyDown={e => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          setCollapsed(c => !c);
+        }
+      }}
+    >
+      <Text className={styles.label}>Attachments{items.length > 0 ? ` (${items.length})` : ''}</Text>
+      {collapsed ? <ChevronDown20Regular /> : <ChevronUp20Regular />}
+    </div>
+  );
+
   return (
     <div className={styles.wrapper} role="region" aria-label="Attachments">
-      <div className={styles.headerRow}>
-        <div
-          className={styles.header}
-          role="button"
-          tabIndex={0}
-          aria-expanded={!collapsed}
-          onClick={() => setCollapsed(c => !c)}
-          onKeyDown={e => {
-            if (e.key === 'Enter' || e.key === ' ') {
-              e.preventDefault();
-              setCollapsed(c => !c);
-            }
-          }}
-        >
-          <Text className={styles.label}>Attachments{items.length > 0 ? ` (${items.length})` : ''}</Text>
-          {collapsed ? <ChevronDown20Regular /> : <ChevronUp20Regular />}
+      {headerAction ? (
+        <div className={styles.headerRow}>
+          {toggle}
+          {headerAction}
         </div>
-        {headerAction}
-      </div>
+      ) : (
+        toggle
+      )}
 
       {!collapsed && (
         <>
