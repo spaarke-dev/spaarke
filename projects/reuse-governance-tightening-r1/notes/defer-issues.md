@@ -392,7 +392,7 @@ The companion PR folds three private copies of the ManyToOne nav-prop metadata q
 
 | Field | Value |
 |---|---|
-| **Status** | Fixed on branch `fix/open-in-desktop-iss-004` (2026-11-17). Owner decision: Office files open in the Office app in the same tab; every other file downloads through `/content` (not the SharePoint webUrl, which a read-only user on a secure record cannot open). All surfaces use `openInDesktopApp` in `@spaarke/ui-components`. Closes when that PR merges. |
+| **Status** | Fixed by #2895 (merged 2026-11-18). Owner decision: Office files open in the Office app in the same tab; every other file downloads through `/content` (not the SharePoint webUrl, which a read-only user on a secure record cannot open). All surfaces use `openInDesktopApp` in `@spaarke/ui-components`. |
 | **Urgency** | next-round |
 | **Filed** | 2026-11-13 |
 | **Source** | Task 030 finding P-1; re-verified by grep in task 034 (three more call sites than the review listed) |
@@ -426,7 +426,7 @@ The Office add-ins differ on purpose and are out of scope. Failure: the same cli
 
 | Field | Value |
 |---|---|
-| **Status** | Open |
+| **Status** | Fixed by #2905 (open 2026-11-18). Both projects type-check clean; LegalWorkspace pins 44 shared-lib `noUnusedLocals` findings in `tsc-baseline.json` (ratchet). Gated in each `build` script and in `ci-standalone-checks.yml` `client-typecheck`. |
 | **Urgency** | next-round |
 | **Filed** | 2026-11-13 |
 | **Source** | Found in passing, tasks 032 and 033 (`notes/032-legal-workspace.md`, `notes/033-document-operations.md`) |

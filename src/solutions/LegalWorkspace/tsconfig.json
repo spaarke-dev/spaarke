@@ -26,11 +26,20 @@
       "@spaarke/events-components/*": ["../../client/shared/Spaarke.Events.Components/src/*"],
       "@spaarke/communication-components": ["../../client/shared/Spaarke.Communication.Components/src/index.ts"],
       "@spaarke/communication-components/*": ["../../client/shared/Spaarke.Communication.Components/src/*"],
-      "@azure/msal-browser": ["./node_modules/@azure/msal-browser"],
-      "@fluentui/react-components": ["./node_modules/@fluentui/react-components"],
-      "@fluentui/react-icons": ["./node_modules/@fluentui/react-icons"]
+      "@spaarke/ai-widgets": ["../../client/shared/Spaarke.AI.Widgets/src/index.ts"],
+      "@spaarke/ai-widgets/*": ["../../client/shared/Spaarke.AI.Widgets/src/*"],
+      "@spaarke/ai-outputs": ["../../client/shared/Spaarke.AI.Outputs/src/index.ts"],
+      "@spaarke/ai-outputs/*": ["../../client/shared/Spaarke.AI.Outputs/src/*"],
+      "@spaarke/daily-briefing-components": ["../../client/shared/Spaarke.DailyBriefing.Components/src/index.ts"],
+      "@spaarke/daily-briefing-components/*": ["../../client/shared/Spaarke.DailyBriefing.Components/src/*"],
+      "@spaarke/compose-components": ["../../client/shared/Spaarke.Compose.Components/src/index.ts"],
+      "@spaarke/compose-components/*": ["../../client/shared/Spaarke.Compose.Components/src/*"],
+      "@spaarke/sdap-client": ["../../client/shared/Spaarke.SdapClient/src/index.ts"],
+      "@spaarke/sdap-client/*": ["../../client/shared/Spaarke.SdapClient/src/*"],
+      "*": ["./node_modules/@types/*", "./node_modules/*"]
     },
-    "typeRoots": ["./node_modules/@types"]
+    "typeRoots": ["./node_modules/@types"],
+    "types": ["node", "jest", "powerapps-component-framework"]
   },
   "include": ["src"],
   "references": [{ "path": "./tsconfig.node.json" }]

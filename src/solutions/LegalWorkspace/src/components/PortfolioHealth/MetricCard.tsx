@@ -4,8 +4,6 @@ import {
   shorthands,
   tokens,
   Text,
-  Card,
-  CardHeader,
   Skeleton,
   SkeletonItem,
 } from "@fluentui/react-components";
