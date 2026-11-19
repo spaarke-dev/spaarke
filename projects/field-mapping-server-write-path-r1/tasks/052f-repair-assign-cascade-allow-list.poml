@@ -4,7 +4,7 @@
     <title>Repair pass: Assign-cascade allow-list and per-row child check (replaces the per-table refusal; FR-25 amended 2026-11-18)</title>
     <phase>5 W5 Records created outside the product</phase>
     <gate>052e approved (owner 2026-11-18: Q1–Q8 yes; Q2 yes = event and analysis notes move). Nothing here enables the pass on any environment (`RecordRepair:Pass:GoLive` stays unset).</gate>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .cs in Sprk.Bff.Api: the repair job writes owners as the system principal, and an Assign moves child rows with it. A wrong "no children" answer moves rows nobody chose to move. Security fails closed.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -85,7 +85,8 @@
     <cost-of-doing-nothing>With the empty allow-list every row of seven pass tables is refused, so the repair pass cannot give a natively created matter, project, event, document, invoice, analysis or contact its standard owner (FR-25 acceptance).</cost-of-doing-nothing>
   </justification>
 
-  <notes>Created 2026-11-18 from design §4 after the owner approved 052e. Same day, after the first implementation (b695480cf9) and its Opus adversarial review: the live note cascade is Cascade All (every note moves), so the owner kept Q2's intent with a per-row note-owner check (AC3b) and chose a code check on the app identity's read depth (AC6a); UAC-r2 agreed and set the tri-state shape. Review findings 3 (continue after a read fault once a child is found) and 4 (race re-read lists every raced child) fixed in the same round.</notes>
+  <notes>Created 2026-11-18 from design §4 after the owner approved 052e. Same day, after the first implementation (b695480cf9) and its Opus adversarial review: the live note cascade is Cascade All (every note moves), so the owner kept Q2's intent with a per-row note-owner check (AC3b) and chose a code check on the app identity's read depth (AC6a); UAC-r2 agreed and set the tri-state shape. Review findings 3 (continue after a read fault once a child is found) and 4 (race re-read lists every raced child) fixed in the same round. Completed 2026-11-18: merged to the work branch at c80ae18907 (task/fm-052f b695480cf9, 42b02a7756, 0e005619b0). Scoped Sonnet re-check of the fix diff: no fail-open path; its F2 (team-owner and unreadable-owner branches untested) fixed in 0e005619b0 with must-fire rounds. UAC-r2 PASS (N1, N2 recorded as known limits; N3 pre-enable item confirmed read-only on dev). Both new query shapes (note-owner filter, role join) accepted by dev read-only. AC1–AC11, AC3a, AC3b, AC6a met; AC2 for invoices is held by the invoice-family guard (K5). Details and K1–K10: `notes/task-052f-notes.md`. No live write, no setting; `RecordRepair:Pass:GoLive` stays unset; 052g's isolation guard must land before go-live.
+rework: fix-round-2 task 052f</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

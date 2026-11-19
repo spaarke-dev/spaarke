@@ -160,6 +160,8 @@ All dated 2026-10-19 unless noted; rationale in design.md §7 and spec "Owner Cl
 - 2026-11-09 — Shell calls time out under agent load: prefer Grep/Read, use timeouts ≥ 300 s and background runs; `timeout 400 git commit`. lint-staged backs up into the shared stash and drops it itself: never pop or drop a stash. Use `gh --jq`, not `jq`. Never print a token.
 - 2026-11-09 — In Git Bash, `git sparse-checkout set --no-cone /path/` gets its leading `/` rewritten to `C:/Program Files/Git/...`; prefix with `MSYS_NO_PATHCONV=1`. A sparse worktree also needs `scripts/quality/`, the archive-prefix baseline in `tests/Spaarke.ArchTests/`, `package.json` and `.lintstagedrc.mjs` for the pre-commit hook to pass.
 - 2026-11-09 — Web API `@odata.bind` keys use the navigation property name. The regarding pair's type lookup is `sprk_RegardingRecordType` on every pair table except `sprk_invoice` (lower case): use `OwnedChildWrite.RegardingRecordTypeNavigationPropertyOf(table)`, guarded by `PairTypeBindSpellingGuardTests`.
+- 2026-11-18 — `Spaarke.ArchTests` is not built by `dotnet build Spaarke.sln`; `dotnet test tests/Spaarke.ArchTests --no-build` after a sln build runs a stale copy (8 false failures seen). Run it without `--no-build`.
+- 2026-11-18 — Every live Assign cascade from a pass table is `Cascade` (Cascade All): it moves every child row whoever owns it. "UserOwned" in metadata listings is the child table's ownership type, not the cascade type.
 - 2026-10-19 — A user-owned row stays readable by Deep (Parent:Child) readers in the owner's BU and its ancestors. The
   harm of OOB Assign is the BU move and User-depth tables (e.g. `sprk_communication`), not "only the owner sees it".
 
