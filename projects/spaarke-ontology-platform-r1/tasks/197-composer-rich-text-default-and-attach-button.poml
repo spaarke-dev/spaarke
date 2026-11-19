@@ -4,7 +4,7 @@
     <title>Email composer opens in rich text everywhere; attachments get a button beside the Attachments heading instead of the toolbar paperclip</title>
     <phase>12 Create-wizard lookups and composer (185 dev check fixes)</phase>
     <gate>startable</gate>
-    <status>pending</status>
+    <status>in-progress</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .tsx in the shared UI library and several hosts; behaviour change across every composer host.</rigor-reason>
     <model-tier>sonnet</model-tier>
