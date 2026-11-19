@@ -10,7 +10,9 @@ using Sprk.Bff.Api.Services.Ai.Membership;
 using Sprk.Bff.Api.Services.Communication;
 using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Dataverse.FieldMapping;
+using RestrictedContentOwnerTeam = Sprk.Bff.Api.Infrastructure.Dataverse.RestrictedContentOwnerTeam;
 using SearchIndexColumns = Sprk.Bff.Api.Services.Ai.SearchIndexNameResolver;
+using SecureRecordOwnerTeam = Sprk.Bff.Api.Infrastructure.Dataverse.SecureRecordOwnerTeam;
 
 namespace Sprk.Bff.Api.Services.RecordCreation;
 
@@ -256,6 +258,11 @@ internal sealed partial class RecordCreationService
         {
             // Nothing was written: the row moved after it was read. Not retried (NFR-03) — the next pass reads it afresh.
             _logger.LogInformation(ex, "[RECORD-REPAIR] {Table} {Id} changed after it was read; nothing was written", table, id);
+
+            // Task 052g (design 052e §3.4, UAC-r2 U3): a 412 on an owner write means another writer may have settled the row.
+            // Its owner is read once, for the log; nothing is written again and nothing loops.
+            if (ownerWritten)
+                await LogOwnerAfterConflictAsync(table, id, ct).ConfigureAwait(false);
             return Outcome(RecordRepairStatus.RowChanged, RecordRepairReason.RowChanged);
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
@@ -280,15 +287,200 @@ internal sealed partial class RecordCreationService
         _logger.LogInformation("[RECORD-REPAIR] {Table} {Id} repaired ({Columns})", table, id,
             string.Join(", ", patch.Keys.Order(StringComparer.Ordinal)));
 
+        // Task 052g (design 052e §3.3.2): a confirmed owner write that moved the row to another business unit is logged once, with
+        // ids only, and carried to the outcome (counted by the pass). An owner the cascade check took out of the patch moved nothing.
+        var moved = ownerWritten ? owner.MovedBusinessUnit : null;
+        if (moved is not null)
+        {
+            _logger.LogInformation(
+                "[RECORD-REPAIR] {Table} {Id} re-owned across business units from {FromUnit} to {ToUnit} (family root {RootTable} {RootId})",
+                table, id, moved.FromUnit, moved.ToUnit, moved.FamilyRoot?.LogicalName ?? "-",
+                moved.FamilyRoot is { } root ? root.Id.ToString("D") : "-");
+        }
+
         // Task 052f (design 052e §3.2, the race): a child added along an unaccepted relationship between the check and the write
         // moved with the Assign. Asked again after a confirmed owner write; a hit is logged and counted, never undone (K1).
         if (ownerWritten && cascadeCheck.Reads is { Count: > 0 })
         {
             var (raced, raceUnchecked) = await AssignCascadeRaceAsync(table, id, cascadeCheck, ct).ConfigureAwait(false);
-            return Outcome(RecordRepairStatus.Repaired, null) with { RacedChildren = raced, RaceUnchecked = raceUnchecked };
+            return Outcome(RecordRepairStatus.Repaired, null) with
+            {
+                RacedChildren = raced,
+                RaceUnchecked = raceUnchecked,
+                MovedBusinessUnit = moved,
+            };
         }
 
-        return Outcome(RecordRepairStatus.Repaired, null);
+        return Outcome(RecordRepairStatus.Repaired, null) with { MovedBusinessUnit = moved };
+    }
+
+    // ── Task 052g: Repair leaves isolated rows to the secure pass (design 052e §3.3.1, shape set by UAC-r2) ─────────────────
+
+    /// <summary>What <see cref="IsolatedRowGuardAsync"/> decided: why the owner is kept
+    /// (<see cref="RecordRepairReason.OwnerLeftToSecurePass"/> or <see cref="RecordRepairReason.OwnerIsolationUnknown"/>), or
+    /// <c>null</c> with the answer team's business unit.</summary>
+    private readonly record struct IsolatedRowGuard(string? KeptBecause, Guid TeamUnit);
+
+    /// <summary>
+    /// Task 052g (design 052e §3.3.1): Repair leaves isolated rows to the secure pass. Asked on the one path that would write
+    /// <paramref name="decided"/>'s team as the owner of a person-owned row, before the business-unit decision. The owner is kept
+    /// as <see cref="RecordRepairReason.OwnerLeftToSecurePass"/> (an answer) when, in this order:
+    /// <list type="number">
+    /// <item>the answer is the Secure Record owner team (<see cref="RecordOwnerResolution.IsSecureOwner"/>);</item>
+    /// <item>the row's owning business unit is the Secure Record unit (the configured <c>SecureRecord:BusinessUnitName</c>,
+    /// <see cref="SecureRecordOwnerTeam.ResolveSecureBusinessUnitAsync"/>);</item>
+    /// <item>the answer team's business unit is the Secure Record unit (any team there, not only the named one);</item>
+    /// <item>the answer is the restricted-content owner team (the resolver substituted it,
+    /// <see cref="RecordOwnerResolution.InPlaceOfDefaultTeamId"/>, or its name is the configured
+    /// <see cref="RestrictedContentOwnerTeam.OwnerTeamName"/>);</item>
+    /// <item>the row is owned by the Secure Record owner team, through the shared isolation read
+    /// (<see cref="RefileIsolationRead.BeforeWriteAsync"/> over <see cref="SecureChildReconciler.IsSecureTeamOwnedAsync"/>).</item>
+    /// </list>
+    /// It fails closed: when the shared read's services cannot be resolved, which unit is the Secure Record unit cannot be read
+    /// or told, the row's unit is unread, the answer team cannot be read or names no unit, or the isolation read faults, the owner
+    /// is kept as <see cref="RecordRepairReason.OwnerIsolationUnknown"/> (a fault: asked again). Only the caller's own
+    /// cancellation propagates. No team id is named here.
+    /// </summary>
+    /// <remarks>
+    /// A row whose CURRENT owner is a team (the Secure Record owner team or a restricted-content owner team) needs no check here:
+    /// Repair re-owns only a systemuser-owned row and keeps a team-owned one earlier (<see cref="RecordRepairReason.OwnerTeamOwned"/>),
+    /// and the write is conditioned on the version read (If-Match), so a row re-owned meanwhile is not written.
+    /// </remarks>
+    private async Task<IsolatedRowGuard> IsolatedRowGuardAsync(
+        string table, Entity row, Guid? rowUnit, RecordOwnerResolution decided, CancellationToken ct)
+    {
+        IsolatedRowGuard Left(string condition)
+        {
+            _logger.LogInformation(
+                "[RECORD-REPAIR] the owner of {Table} {Id} was not changed ({Reason}): Repair leaves isolated rows to the secure pass ({Condition})",
+                table, row.Id, RecordRepairReason.OwnerLeftToSecurePass, condition);
+            return new IsolatedRowGuard(RecordRepairReason.OwnerLeftToSecurePass, Guid.Empty);
+        }
+
+        IsolatedRowGuard Unknown(string condition, Exception? fault = null)
+        {
+            _logger.LogWarning(fault,
+                "[RECORD-REPAIR] the owner of {Table} {Id} was not changed ({Reason}): whether the row is isolated could not be told " +
+                "({Condition}); it is asked again", table, row.Id, RecordRepairReason.OwnerIsolationUnknown, condition);
+            return new IsolatedRowGuard(RecordRepairReason.OwnerIsolationUnknown, Guid.Empty);
+        }
+
+        if (decided.IsSecureOwner)
+            return Left("the answer is the Secure Record owner team");
+
+        using var scope = _scopes.CreateScope();
+        var configuration = scope.ServiceProvider.GetService<IConfiguration>();
+        var children = scope.ServiceProvider.GetService<SecureChildReconciler>();
+        if (configuration is null || children is null)
+            return Unknown("the shared isolation read is not available in this host");
+
+        Guid? secureUnit;
+        try
+        {
+            var (unitId, ambiguous) = await SecureRecordOwnerTeam.ResolveSecureBusinessUnitAsync(_entities, configuration, ct, _logger)
+                .ConfigureAwait(false);
+            if (ambiguous)
+                return Unknown("which business unit is the Secure Record unit cannot be told");
+            secureUnit = unitId; // null: this environment has no Secure Record unit
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            return Unknown("the Secure Record unit could not be read", ex);
+        }
+
+        if (rowUnit is not { } currentUnit)
+            return Unknown("the row's owning business unit could not be read");
+        if (currentUnit == secureUnit)
+            return Left("the row's owning business unit is the Secure Record unit");
+
+        // One app-only read of the answer team: its business unit (the Secure Record unit test, and the move) and its name.
+        Entity? team;
+        try
+        {
+            team = await _entities.RetrieveAsync("team", decided.OwningTeamId!.Value, [TeamBusinessUnitColumn, TeamNameColumn], ct)
+                .ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            return Unknown("the answer team could not be read", ex);
+        }
+
+        if (team?.GetAttributeValue<EntityReference>(TeamBusinessUnitColumn) is not { } teamUnit || teamUnit.Id == Guid.Empty)
+            return Unknown("the answer team reported no business unit");
+        if (teamUnit.Id == secureUnit)
+            return Left("the answer team is in the Secure Record unit");
+
+        if (decided.InPlaceOfDefaultTeamId is not null
+            || string.Equals(team.GetAttributeValue<string>(TeamNameColumn)?.Trim(), RestrictedContentOwnerTeam.OwnerTeamName(configuration),
+                StringComparison.OrdinalIgnoreCase))
+        {
+            return Left("the answer is the restricted-content owner team");
+        }
+
+        try
+        {
+            var isolated = await RefileIsolationRead.BeforeWriteAsync(children, table, row.Id, ct).ConfigureAwait(false);
+            if (await isolated().ConfigureAwait(false))
+                return Left("the row is owned by the Secure Record owner team");
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            return Unknown("the shared isolation read faulted", ex);
+        }
+
+        return new IsolatedRowGuard(null, teamUnit.Id);
+    }
+
+    private const string TeamBusinessUnitColumn = "businessunitid";
+    private const string TeamNameColumn = "name";
+
+    /// <summary>
+    /// Task 052g (design 052e §3.3.2): the family root a cross-unit move is reported with — the first I-1 stamp column
+    /// (<see cref="CoreAncestorResolver.CoreAncestorLookups"/>, in its order) the row holds, else the first the stamp plan adds;
+    /// <c>null</c> when neither names one.
+    /// </summary>
+    private static EntityReference? FamilyRootOf(Entity row, IReadOnlyDictionary<string, object>? stampPlan)
+    {
+        foreach (var (_, column) in CoreAncestorResolver.CoreAncestorLookups)
+        {
+            if (row.GetAttributeValue<EntityReference>(column) is { } held && held.Id != Guid.Empty)
+                return held;
+        }
+
+        if (stampPlan is null)
+            return null;
+
+        foreach (var (_, column) in CoreAncestorResolver.CoreAncestorLookups)
+        {
+            if (stampPlan.TryGetValue(column, out var planned) && planned is EntityReference added && added.Id != Guid.Empty)
+                return added;
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Task 052g (design 052e §3.4): after a 412 on an owner write, the row's owner and business unit are read once, app-only, and
+    /// logged (another writer settled the owner when it is now a team). Never writes, never retries; a fault is logged and
+    /// ignored. Only the caller's own cancellation propagates.
+    /// </summary>
+    private async Task LogOwnerAfterConflictAsync(string table, Guid id, CancellationToken ct)
+    {
+        try
+        {
+            var now = await _entities.RetrieveAsync(table, id, [OwnerColumn, OwningBusinessUnitColumn], ct).ConfigureAwait(false);
+            var owner = now?.GetAttributeValue<EntityReference>(OwnerColumn);
+            var unit = now?.GetAttributeValue<EntityReference>(OwningBusinessUnitColumn);
+            _logger.LogInformation(
+                "[RECORD-REPAIR] {Table} {Id} after the conflict: owner {OwnerTable} {OwnerId} in business unit {Unit}{Settled}; " +
+                "not written again", table, id, owner?.LogicalName ?? "-", owner is { } o ? o.Id.ToString("D") : "-",
+                unit is { } u ? u.Id.ToString("D") : "-",
+                owner is { LogicalName: "team" } ? " (another writer settled the owner)" : string.Empty);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogWarning(ex, "[RECORD-REPAIR] {Table} {Id} after the conflict: its owner could not be read again; ignored", table, id);
+        }
     }
 
     // ── Task 052f: the Assign-cascade allow-list and the per-row child check (design 052e §3.1, §3.2) ────────────────────
@@ -1503,6 +1695,10 @@ internal enum AssignCascadeChildReadKind
 /// relationships it was found along.</summary>
 internal sealed record RecordRepairRacedChild(string Table, Guid Id, IReadOnlyList<string> Relationships);
 
+/// <summary>Task 052g (design 052e §3.3.2): a confirmed owner write that moved a row from <paramref name="FromUnit"/> to
+/// <paramref name="ToUnit"/>, with the family root its I-1 stamp names (<c>null</c> when none).</summary>
+internal sealed record RecordRepairBusinessUnitMove(Guid FromUnit, Guid ToUnit, EntityReference? FamilyRoot);
+
 /// <summary>A reported field's outcome.</summary>
 internal enum RecordRepairFieldState
 {
@@ -1565,6 +1761,10 @@ internal sealed record RecordRepairOutcome
     /// ruled out for that relationship.</summary>
     public bool RaceUnchecked { get; init; }
 
+    /// <summary>Task 052g (design 052e §3.3.2): the business-unit move a confirmed owner write made (from the row's unit to the
+    /// answer team's), with the family root; <c>null</c> when no owner was written or it stayed in its unit.</summary>
+    public RecordRepairBusinessUnitMove? MovedBusinessUnit { get; init; }
+
     /// <summary>Whether the one update was written.</summary>
     public bool Wrote => Status == RecordRepairStatus.Repaired;
 
@@ -1595,6 +1795,8 @@ internal sealed record RecordRepairOutcome
         RecordRepairReason.MappingSourceUnreadable,
         // Review F1-a / 052f: whether an owner write would move a child along an unaccepted relationship could not be told.
         RecordRepairReason.OwnerAssignCascadeUnknown,
+        // Task 052g: whether the row or its answer is isolated could not be told (fail closed: never written, asked again).
+        RecordRepairReason.OwnerIsolationUnknown,
     };
 
     internal static RecordRepairOutcome Row(string table, Guid id, RecordRepairStatus status, string reason) =>
@@ -1705,8 +1907,16 @@ internal static class RecordRepairReason
     /// row is asked again (a fault, not an answer: <see cref="RecordRepairOutcome.TransientReasons"/>).</summary>
     internal const string MappingFilingUnavailable = "record_repair.mapping_filing_unavailable";
 
-    /// <summary>Task 016 escalation trigger 2: the owner would move the row to another business unit (fail closed).</summary>
-    internal const string OwnerMovesBusinessUnit = "record_repair.owner_moves_business_unit";
+    /// <summary>Task 052g (design 052e §3.3.1): Repair leaves isolated rows to the secure pass — the answer is the Secure Record
+    /// owner team, a team in the Secure Record unit or a restricted-content owner team, the row sits in the Secure Record unit, or
+    /// the row is owned by the Secure Record owner team. The owner is kept. An answer, not a fault: the row is not asked again.</summary>
+    internal const string OwnerLeftToSecurePass = "record_repair.owner_left_to_secure_pass";
+
+    /// <summary>Task 052g (design 052e §3.3.1, fail closed): whether the row or its answer is isolated could not be told — the
+    /// shared isolation read faulted or is not available, the Secure Record unit is unread or ambiguous, the row's unit is unread,
+    /// or the answer team is unread or names no unit. The owner is kept and the row is asked again (a fault,
+    /// <see cref="RecordRepairOutcome.TransientReasons"/>).</summary>
+    internal const string OwnerIsolationUnknown = "record_repair.owner_isolation_unknown";
 
     /// <summary>Task 052b (review F1-a) / 052f: the row has a child along a one-to-many relationship that cascades on Assign to
     /// a child table the allow-list does not accept (<see cref="RecordCreationService.AcceptedAssignCascades"/>), so an owner
