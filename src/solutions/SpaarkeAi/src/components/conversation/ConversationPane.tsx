@@ -25,7 +25,7 @@ import {
   MessageBarActions,
 } from "@fluentui/react-components";
 import { ChatRegular, ChatAddRegular, DismissRegular, ArrowClockwiseRegular } from "@fluentui/react-icons";
-import { PaneHeader, SprkChat, createConsumerDispatcher, RichFilePreviewDialog, createXrmNavigationService, createXrmDataService, searchUsersAndContacts, launchSurface, resolveSurfaceLaunch, launchSummarizeFilesWizard, SendEmailDialog, createXrmEmailComposeHandlers } from "@spaarke/ui-components";
+import { PaneHeader, SprkChat, createConsumerDispatcher, RichFilePreviewDialog, createXrmNavigationService, createXrmDataService, searchUsersAndContacts, launchSurface, resolveSurfaceLaunch, launchSummarizeFilesWizard, SendEmailDialog, createXrmEmailComposeHandlers, plainTextToHtml } from "@spaarke/ui-components";
 import { getXrm, openInDesktopApp, OPEN_IN_DESKTOP_FAILED_MESSAGE } from "@spaarke/ui-components";
 import { WelcomeStartCards } from "./WelcomeStartCards";
 import { QuickStartModal } from "./QuickStartModal";
@@ -1849,7 +1849,10 @@ export function ConversationPane(): React.JSX.Element {
           setEmailSeed({
             initialSubject:
               draft && typeof draft.subject === "string" ? draft.subject : undefined,
-            initialBody: draft && typeof draft.body === "string" ? draft.body : undefined,
+            // The drafted correspondence is plain text; the composer opens in rich text (task 197),
+            // so seed the one shared plain-text -> HTML conversion (line breaks kept, escaped once).
+            initialBody:
+              draft && typeof draft.body === "string" ? plainTextToHtml(draft.body) : undefined,
             initialTo: draft ? toDisplayList(draft.recipients_suggestion) : undefined,
           });
           return;
@@ -3626,7 +3629,7 @@ export function ConversationPane(): React.JSX.Element {
         initialTo={emailSeed?.initialTo}
         initialSubject={emailSeed?.initialSubject}
         initialBody={emailSeed?.initialBody}
-        initialBodyFormat="PlainText"
+        initialBodyFormat="HTML"
         onSearchRecipients={handleSearchRecipients}
         authenticatedFetch={authenticatedFetch}
         bffBaseUrl={bffBaseUrl}

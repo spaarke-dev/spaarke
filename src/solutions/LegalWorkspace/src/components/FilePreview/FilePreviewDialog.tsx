@@ -10,7 +10,7 @@
  */
 
 import * as React from 'react';
-import { SendEmailDialog, createXrmEmailComposeHandlers } from '@spaarke/ui-components';
+import { SendEmailDialog, createXrmEmailComposeHandlers, plainTextToHtml } from '@spaarke/ui-components';
 import { RichFilePreviewDialog } from '@spaarke/ui-components/components/FilePreview/RichFilePreviewDialog';
 import { getDocumentPreviewUrl, getDocumentOpenLinks } from '../../services/DocumentApiService';
 import { createXrmNavigationService, getXrm, openInDesktopApp, OPEN_IN_DESKTOP_FAILED_MESSAGE } from '@spaarke/ui-components';
@@ -170,8 +170,8 @@ export const FilePreviewDialog: React.FC<IFilePreviewDialogProps> = ({
         open={emailDialogOpen}
         onClose={() => setEmailDialogOpen(false)}
         initialSubject={buildEmailSubject(documentName)}
-        initialBody={buildEmailBody(documentName, fileSummary)}
-        initialBodyFormat="PlainText"
+        initialBody={plainTextToHtml(buildEmailBody(documentName, fileSummary))}
+        initialBodyFormat="HTML"
         associations={[{ entityType: 'sprk_document', entityId: documentId }]}
         onSearchRecipients={handleSearchUsers}
         authenticatedFetch={authenticatedFetch}

@@ -1,9 +1,10 @@
 /**
  * AttachmentList.tsx
  *
- * Display-only, collapsible "Attachments" section (owner UAT 2026-07-24). The ADD / LINK
- * controls now live in the RichTextEditor toolbar (paperclip menu) — this component only
- * RENDERS the current attachments + the cap summary. It is DEFAULT COLLAPSED; the header
+ * Collapsible "Attachments" section (owner UAT 2026-07-24). The ADD / LINK controls are a
+ * button beside the heading (`headerAction`, supplied by EmailComposer — task 197; it was the
+ * RichTextEditor toolbar paperclip before) — this component only RENDERS the current
+ * attachments + the cap summary and places that button. It is DEFAULT COLLAPSED; the header
  * shows a live count so the collapsed state still communicates that files are attached.
  *
  * Rows: locally-picked FILES show no Attach/Link toggles; Document-backed items (a
@@ -57,6 +58,12 @@ export interface IAttachmentListProps {
   errorMessage?: string;
   /** Start expanded instead of the default collapsed. */
   defaultExpanded?: boolean;
+  /**
+   * Control placed beside the "Attachments" heading, on the same row as the "Related to"
+   * section's "Link a record" button (task 197). Rendered in both rich and plain-text modes and
+   * regardless of collapsed state; omitted by hosts that can neither add nor link attachments.
+   */
+  headerAction?: React.ReactNode;
 }
 
 // ---------------------------------------------------------------------------
@@ -69,8 +76,18 @@ const useStyles = makeStyles({
     flexDirection: 'column',
     gap: tokens.spacingVerticalXS,
   },
+  // Heading row: the collapse toggle (label + chevron) with the attach button beside it,
+  // mirroring the "Related to" row (task 197).
+  headerRow: {
+    display: 'flex',
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalS,
+  },
   // Clickable header row (label + chevron). +4px vertical padding over the base section
-  // header (owner UAT 2026-07-24).
+  // header (owner UAT 2026-07-24). Without an attach button the row spans the width, label left
+  // and chevron at the right edge (the layout before task 197).
   header: {
     display: 'flex',
     alignItems: 'center',
@@ -79,6 +96,13 @@ const useStyles = makeStyles({
     cursor: 'pointer',
     paddingTop: tokens.spacingVerticalXS,
     paddingBottom: tokens.spacingVerticalXS,
+  },
+  // With an attach button beside the heading, the toggle shrinks to its content so the chevron
+  // sits next to the label (task 197).
+  headerBesideAction: {
+    display: 'inline-flex',
+    justifyContent: 'flex-start',
+    gap: tokens.spacingHorizontalXS,
   },
   // Standard Segoe UI 14px semibold, neutral foreground 1 (UI-DESIGN-STANDARDS section-header;
   // owner UAT 2026-07-24). Token-only so both themes resolve (ADR-021).
@@ -154,6 +178,7 @@ export const AttachmentList: React.FC<IAttachmentListProps> = ({
   readOnly,
   errorMessage,
   defaultExpanded = false,
+  headerAction,
 }) => {
   const styles = useStyles();
   const [collapsed, setCollapsed] = React.useState(!defaultExpanded);
@@ -168,24 +193,35 @@ export const AttachmentList: React.FC<IAttachmentListProps> = ({
   const overSize = totalBytes > ATTACHMENT_MAX_TOTAL_BYTES;
   const nearSize = !overSize && totalBytes > ATTACHMENT_WARN_TOTAL_BYTES;
 
+  const toggle = (
+    <div
+      className={mergeClasses(styles.header, headerAction ? styles.headerBesideAction : undefined)}
+      role="button"
+      tabIndex={0}
+      aria-expanded={!collapsed}
+      onClick={() => setCollapsed(c => !c)}
+      onKeyDown={e => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          setCollapsed(c => !c);
+        }
+      }}
+    >
+      <Text className={styles.label}>Attachments{items.length > 0 ? ` (${items.length})` : ''}</Text>
+      {collapsed ? <ChevronDown20Regular /> : <ChevronUp20Regular />}
+    </div>
+  );
+
   return (
     <div className={styles.wrapper} role="region" aria-label="Attachments">
-      <div
-        className={styles.header}
-        role="button"
-        tabIndex={0}
-        aria-expanded={!collapsed}
-        onClick={() => setCollapsed(c => !c)}
-        onKeyDown={e => {
-          if (e.key === 'Enter' || e.key === ' ') {
-            e.preventDefault();
-            setCollapsed(c => !c);
-          }
-        }}
-      >
-        <Text className={styles.label}>Attachments{items.length > 0 ? ` (${items.length})` : ''}</Text>
-        {collapsed ? <ChevronDown20Regular /> : <ChevronUp20Regular />}
-      </div>
+      {headerAction ? (
+        <div className={styles.headerRow}>
+          {toggle}
+          {headerAction}
+        </div>
+      ) : (
+        toggle
+      )}
 
       {!collapsed && (
         <>
