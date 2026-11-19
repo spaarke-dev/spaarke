@@ -293,6 +293,7 @@ The live check on dev gains these cases:
 6. `organization.sharetopreviousowneronassign` has been read on that environment (`false` on dev).
 7. The values of UAC-r2's `OrdinaryMovesWritesEnabled` and the recent-changes emergency stop on that environment are known. While either stops writes, the families of repaired roots wait, and the run report says so.
 8. UAC-r2's answers to U1–U4 (recorded in §5, 2026-11-18), and their review of the 052g guard diff.
+8a. `SecureRecord:BusinessUnitName` on that environment resolves to exactly one business unit (read-only check). The 052g guard reads an unresolvable name as "this environment has no Secure Record unit", the same reading as the ownership resolver and the secure pass, so a wrong name would let Repair write an owner on a row in the real Secure Record unit, or give a row a team there (added 2026-11-19 from the 052g review).
 9. The owner's go for `RecordRepair:Pass:GoLive`, given in this session.
 
 ## 7. Review record
