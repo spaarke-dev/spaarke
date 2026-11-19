@@ -4,7 +4,7 @@
     <title>Repair pass: cross-unit re-own and the isolated-row guard (replaces `owner_moves_business_unit`; FR-25 amended 2026-11-18)</title>
     <phase>5 W5 Records created outside the product</phase>
     <gate>052e approved (owner 2026-11-18) and 052f merged to the work branch. Nothing here enables the pass on any environment (`RecordRepair:Pass:GoLive` stays unset).</gate>
-    <status>in-progress</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies the single Repair owner write site in Sprk.Bff.Api, run as the system principal: a mistake moves a row, and the rows filed under it, to another business unit or into or out of isolation. Security fails closed.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -80,7 +80,7 @@
     <cost-of-doing-nothing>Every natively created row whose family sits in another business unit keeps its creator's owner forever, so the owner's binding FR-25 outcome (every family member on the family's owner, 2026-11-02) cannot be met; removing the skip without the guard would let Repair write into or out of isolation.</cost-of-doing-nothing>
   </justification>
 
-  <notes>Created 2026-11-18 from design §4 after the owner approved 052e. Security tag: two adversarial passes; UAC-r2 reviews the guard diff.</notes>
+  <notes>Created 2026-11-18 from design §4 after the owner approved 052e. Security tag: two adversarial passes; UAC-r2 reviews the guard diff. Completed 2026-11-19: merged to the work branch at 8f8905209a (task/fm-052g 4e0c8d256d, 59d9c1d18e, bc29b3c0b4) and b5d32ba139 (review round 1, task/fm-052g-r2 5707daf258, cd8193cf21, 17b80a694c). Two adversarial passes (Opus, Fable): no fail-open path. Fixed in round 1: a read-back after an owner write (design §3.3.2), the family root follows the row as it ends, the guard builds its shared read inside the fail-closed path, an abandoned row logs its reason, the team read columns are pinned. Scoped Sonnet re-check of the fix diff: no F-class finding. UAC-r2 PASS on 0b668f03a4..b5d32ba139 (Q1–Q6 answered; conditions recorded as design §6 items 8a and 8b and K14; build-later line on issue 2362). Merged-tree gates: sln 0 warnings; ArchTests 2714/2714, built fresh; filtered suites 9610 passed, 0 failed, 7 skipped; publish delta +13,296 bytes vs master 4d4834dc51 (40.6 MB); no vulnerable packages. Details and K1–K14: `notes/task-052g-notes.md`. No live write, no setting; `RecordRepair:Pass:GoLive` stays unset.</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>
