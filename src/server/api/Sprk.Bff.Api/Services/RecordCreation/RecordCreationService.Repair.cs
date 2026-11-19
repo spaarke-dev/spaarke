@@ -474,9 +474,10 @@ internal sealed partial class RecordCreationService
     /// (fail closed: a fault, retried, never "no children").</item>
     /// </list>
     /// No refusal: the reads made, when the check began and the owner it compared against, to be asked again after the write
-    /// (<see cref="AssignCascadeRaceAsync"/>).
+    /// (<see cref="AssignCascadeRaceAsync"/>). Internal for the tests: Repair re-owns only a user-owned row, so the note check's
+    /// team-owner and unreadable-owner branches are asked directly there.
     /// </summary>
-    private async Task<AssignCascadeCheck> AssignCascadeCheckAsync(
+    internal async Task<AssignCascadeCheck> AssignCascadeCheckAsync(
         string table, Guid id, EntityReference? currentOwner, RecordRepairPassContext? pass, CancellationToken ct)
     {
         IReadOnlyList<AssignCascadeRelationship> cascades;
@@ -793,7 +794,7 @@ internal sealed partial class RecordCreationService
 
     /// <summary>Task 052f: the cascade check's answer — a refusal reason, or none and the child reads it made, when the check
     /// began and the owner the row had (both asked again by the race).</summary>
-    private readonly record struct AssignCascadeCheck(
+    internal readonly record struct AssignCascadeCheck(
         string? Refusal, IReadOnlyList<AssignCascadeChildRead>? Reads, DateTime CheckBegan = default,
         EntityReference? PreviousOwner = null)
     {

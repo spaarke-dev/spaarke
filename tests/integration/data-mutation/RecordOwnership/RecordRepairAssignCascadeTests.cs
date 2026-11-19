@@ -740,7 +740,10 @@ public sealed partial class RecordRepairPassJobTests
         World.Log.Entries.Should().NotContain(e => e.Message.Contains(DepthRule));
     }
 
-    public static TheoryData<string> DepthNotConfirmed => new() { "not held", "roles read faults", "identity read faults" };
+    public static TheoryData<string> DepthNotConfirmed => new()
+    {
+        "not held", "roles read faults", "identity read faults", "roles read gives no answer", "identity is empty",
+    };
 
     private void DepthIs(string how)
     {
@@ -751,6 +754,12 @@ public sealed partial class RecordRepairPassJobTests
                 break;
             case "roles read faults":
                 World.RoleReadFault = new TimeoutException("Test: the roles read timed out.");
+                break;
+            case "roles read gives no answer":
+                World.RoleReadNoAnswer = true;
+                break;
+            case "identity is empty":
+                World.IdentityAnswered = Guid.Empty;
                 break;
             default:
                 World.IdentityFault = new TimeoutException("Test: the identity read timed out.");
@@ -811,6 +820,82 @@ public sealed partial class RecordRepairPassJobTests
         World.Log.Entries.Should().ContainSingle(e => e.Level == LogLevel.Error && e.Message.Contains(DepthRule)
                                                       && e.Exception is TimeoutException);
         World.CascadeChildQueries.Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData("roles read gives no answer", "returned no answer", 1)]
+    [InlineData("identity is empty", "could not be read", 0)]
+    public async Task B_ARolesReadWithNoAnswer_OrAnEmptyIdentity_IsFaulted_NeverConfirmed(string how, string logged, int roleReads)
+    {
+        Inventory("contact", ContactInventory);
+        DepthIs(how);
+        var id = _pass.NativeContact();
+
+        var outcome = await World.RepairAsync("contact", id, _pass.Context());
+
+        outcome.Fields.Single(f => f.Part == RecordRepairPart.Owner).ReasonCode.Should().Be(RecordRepairReason.OwnerAssignCascadeUnknown);
+        World.Writes.Should().NotContain(w => w.Fields.ContainsKey("ownerid"));
+        World.CascadeChildQueries.Should().BeEmpty();
+        World.RoleQueries.Should().HaveCount(roleReads, "an empty identity is not asked about");
+        World.Log.Entries.Should().ContainSingle(e => e.Level == LogLevel.Error && e.Message.Contains(DepthRule)
+                                                      && e.Message.Contains(logged) && !e.Message.Contains("does not hold"),
+            "Faulted, not NotConfirmed");
+    }
+
+    // =====================================================================================
+    // F2: the note check's owner branches Repair does not reach (it re-owns only a user-owned row), asked directly
+    // =====================================================================================
+
+    [Theory]
+    [InlineData("sprk_event")]
+    [InlineData("sprk_analysis")]
+    public async Task AC3_ATeamOwnedRow_TheNoteCheckFiltersOnOwningTeam_AUserOwnedNoteKeepsIt_TheTeamsOwnNoteLetsItThrough(string table)
+    {
+        Inventory(table, table == "sprk_event" ? EventInventory : AnalysisInventory);
+        var team = new EntityReference("team", Directory.ChildTeam);
+        var teamsOnly = Guid.NewGuid();
+        var withAUsersNote = Guid.NewGuid();
+        World.AddNote(teamsOnly, team);
+        World.AddNote(withAUsersNote, team);
+        World.AddNote(withAUsersNote, RowOwner);
+
+        var through = await World.AssignCascadeCheckAsync(table, teamsOnly, team);
+        var kept = await World.AssignCascadeCheckAsync(table, withAUsersNote, team);
+
+        through.Refusal.Should().BeNull("every note on the row is the owning team's");
+        kept.Refusal.Should().Be(RecordRepairReason.OwnerAssignCascades, "a user's note would move with the Assign");
+        var noteChecks = World.CascadeChildQueries.Where(q => q.EntityName == "annotation").ToList();
+        noteChecks.Should().HaveCount(2).And.OnlyContain(q => q.TopCount == 1);
+        noteChecks.Should().OnlyContain(q => q.Criteria.Filters.Single().FilterOperator == LogicalOperator.Or);
+        noteChecks.SelectMany(q => q.Criteria.Filters.Single().Conditions).Select(c => (c.AttributeName, c.Operator)).Distinct()
+            .Should().BeEquivalentTo(new[] { ("owningteam", ConditionOperator.NotEqual), ("owningteam", ConditionOperator.Null) },
+                "a team owner is compared by owning team, id and type, never by owning user");
+        World.Log.Entries.Should().ContainSingle(e => e.Message.Contains("note owned by another principal")
+                                                      && e.Message.Contains(withAUsersNote.ToString()));
+        World.Writes.Should().BeEmpty("the check writes nothing");
+    }
+
+    public static TheoryData<string> UnreadableOwners => new() { "none", "empty id", "not a user or a team" };
+
+    [Theory]
+    [MemberData(nameof(UnreadableOwners))]
+    public async Task AC3_TheNoteCheck_WithNoReadableUserOrTeamOwner_IsUnknown_AndReadsNoNote(string how)
+    {
+        Inventory("sprk_event", EventInventory);
+        var id = Guid.NewGuid();
+        World.AddNote(id, RowOwner);
+        EntityReference? owner = how switch
+        {
+            "none" => null,
+            "empty id" => new EntityReference("systemuser", Guid.Empty),
+            _ => new EntityReference("businessunit", Directory.ChildBu),
+        };
+
+        var check = await World.AssignCascadeCheckAsync("sprk_event", id, owner);
+
+        check.Refusal.Should().Be(RecordRepairReason.OwnerAssignCascadeUnknown, "whose notes are the owner's cannot be told");
+        World.CascadeChildQueries.Should().BeEmpty("no note read is made against an owner it cannot compare with");
+        World.Writes.Should().BeEmpty();
     }
 
     [Fact]
@@ -926,6 +1011,17 @@ internal sealed partial class RepairWorld
     /// <summary>Every read of the app identity's roles Repair sent.</summary>
     public List<QueryExpression> RoleQueries { get; } = [];
 
+    /// <summary>When set, the read of the app identity's roles comes back with no answer.</summary>
+    public bool RoleReadNoAnswer { get; set; }
+
+    /// <summary>When set, the identity the read of the app identity answers (instead of <see cref="AppIdentity"/>).</summary>
+    public Guid? IdentityAnswered { get; set; }
+
+    /// <summary>Repair's Assign-cascade check of <paramref name="table"/> <paramref name="id"/>, asked directly against
+    /// <paramref name="owner"/> (for the owner branches Repair itself does not reach: it re-owns only a user-owned row).</summary>
+    public Task<RecordCreationService.AssignCascadeCheck> AssignCascadeCheckAsync(string table, Guid id, EntityReference? owner) =>
+        Service().AssignCascadeCheckAsync(table, id, owner, pass: null, CancellationToken.None);
+
     /// <summary>
     /// Adds a relationship of <paramref name="table"/> that cascades on Assign to <paramref name="child"/> on
     /// <paramref name="column"/>, and lets the world answer a read of it (an activity on <c>regardingobjectid</c> is read on
@@ -968,7 +1064,7 @@ internal sealed partial class RepairWorld
 
     /// <summary>The app identity, as <see cref="IGenericEntityService.GetCurrentIdentityIdAsync"/> answers it.</summary>
     private Task<Guid> AppIdentityAnswer() =>
-        IdentityFault is { } fault ? Task.FromException<Guid>(fault) : Task.FromResult(AppIdentity);
+        IdentityFault is { } fault ? Task.FromException<Guid>(fault) : Task.FromResult(IdentityAnswered ?? AppIdentity);
 
     /// <summary>The answer to a read of the app identity's roles, or <c>null</c> when <paramref name="query"/> is not one. Only
     /// the read Repair is meant to make is answered: the identity's <c>systemuserroles</c> joined to <c>role</c> on the System
@@ -981,6 +1077,8 @@ internal sealed partial class RepairWorld
         RoleQueries.Add(query);
         if (RoleReadFault is { } fault)
             return Task.FromException<EntityCollection>(fault);
+        if (RoleReadNoAnswer)
+            return Task.FromResult<EntityCollection>(null!);
 
         var forTheIdentity = query.Criteria.Conditions.Any(c => c.AttributeName == "systemuserid"
                                                                 && c.Operator == ConditionOperator.Equal

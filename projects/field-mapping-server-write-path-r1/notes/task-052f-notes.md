@@ -123,13 +123,18 @@ Fix round: script `mustfire2.sh` (same method; it also refuses a round whose mut
 - **K5 — invoices.** In this build every invoice-family write is held by the invoice-family guard (`InvoiceFamilyUpdateRefusalAsync`,
   design §3.6), so an invoice's owner is not written whatever the cascade check says. The check refuses nothing and reads
   nothing for an invoice (only `->team`, accepted).
-- **K6 — the read depth is confirmed by a directly held role only.** Organization-level Read counts as confirmed only when the
-  app identity holds the System Administrator role directly (`systemuserroles`). A role held only through a team reads as
-  NotConfirmed, and the rows that need a per-row read are held (fail closed).
-- **K7 — the note race counts by creation.** The note race re-read counts a note as raced when its `createdon` is at or after the
-  BFF's clock reading when the check began and its `createdby` is not the previous owner. A note change between the check and
-  the write that does not meet both is not counted; such a row is covered by the pre-enable check of design §6 and the
-  on-demand run (052c).
+- **K6 — the read depth is confirmed by a directly held role.** The pass confirms organization-level Read when the app identity
+  holds the System Administrator role directly (`systemuserroles`); otherwise the rows that need a per-row read are held (fail
+  closed).
+- **K7 — the note race counts by creation.** The race counts a note whose `createdon` is at or after the check start and whose
+  `createdby` is not the previous owner (N2).
+- **N1 — the note check compares against the owner read with the row.** The note check compares each note's owner with the
+  owner Repair read with the row. An owner change between that read and the check is the same detection-only class as K1.
+- **N2 — the note race is detection only.** The race counts a note created at or after the check start by a principal other
+  than the previous owner; when the previous owner is a team, every new note counts (log only). Clock skew near the boundary is
+  accepted (detection only).
+
+Pre-enable item (§6.5): the BFF app user holds the System Administrator role directly; confirmed read-only on dev 2026-11-18.
 - **K8 — `ActivityTables` is a hand-kept list.** An activity type not on it is not folded into the `activitypointer` read: it is
   read per row on its own table along its own referencing column, like any child the allow-list does not hold (a child keeps
   the row; a fault is unknown). It still fails closed.
@@ -169,6 +174,15 @@ ArchTest: `AccessTableReaderScanTests.NotAccessTables` gains `activitypointer` w
 `*Table` constant under `Services/RecordCreation`; 052d's `audit` entry is the precedent). It decides no access.
 
 ## Results
+
+Final fix (re-check F2): `AssignCascadeCheckAsync` and `AssignCascadeCheck` are internal so the tests can ask the note check's
+owner branches directly — Repair re-owns only a user-owned row, so a team owner or an unreadable owner never reaches the check
+through Repair. Tests: `AC3_ATeamOwnedRow_TheNoteCheckFiltersOnOwningTeam_AUserOwnedNoteKeepsIt_TheTeamsOwnNoteLetsItThrough`
+(event, analysis), `AC3_TheNoteCheck_WithNoReadableUserOrTeamOwner_IsUnknown_AndReadsNoNote` (none, empty id, not a user or a
+team), `B_ARolesReadWithNoAnswer_OrAnEmptyIdentity_IsFaulted_NeverConfirmed` (both), and the two cases added to
+`B_NotConfirmedOrFaulted_*`. Must-fire (`mustfire4.sh`, of 185): team branch forced to `owninguser` → 2 failed (the team-owned row test, event and
+analysis); the unreadable-owner guard off → 3; a roles read with no answer returning Confirmed → 2; the empty-identity check
+dropped → 1; restored → 185 passed. Repair filter 405 passed; BFF build 0 warnings; format clean.
 
 Fix round:
 
