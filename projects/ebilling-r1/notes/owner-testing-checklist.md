@@ -1,15 +1,15 @@
 # eBilling R1 — owner testing checklist
 
-Updated 2026-11-13. Each section says when it can be tested. Report anything odd to the `ebilling-r1` session with the record and the time.
+Updated 2026-11-19. Each section says when it can be tested. Report anything odd to the `ebilling-r1` session with the record and the time.
 
-## A. Testable on dev now (if word-add-in-r1 has deployed the pane from PRs #2789 / #2793)
+## A. Testable on dev now (pane from #2789 / #2793, plus #2913 live 2026-11-18)
 
 In Outlook, open an invoice email, then the Spaarke pane's Invoice tab.
 
-- [ ] With no firm linked to the record, the tab asks for a firm before you can submit.
+- [x] With no firm linked to the record, the Firm field is a law-firm search. Pick a firm and it is added to the record, then used for the submission. (Passed, owner, 2026-11-18. #2913 removed the old "Check again" and separate add button.)
 - [ ] The banner shows the firm's name.
 - [ ] "Open in Spaarke" opens the record.
-- [ ] Add a firm to the record in Spaarke, then click "Check again" in the pane. The pane picks it up without a reload.
+- [ ] Submit a Correction with a note. The new invoice shows the saved note (Correction Note field).
 
 ## B. After task 112 deploys 084 to dev (Procedures on a matter, project or work assignment)
 
