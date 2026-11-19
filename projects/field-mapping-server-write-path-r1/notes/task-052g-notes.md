@@ -228,3 +228,13 @@ then throws), `ReconcilerFactoryFault` (building the reconciler throws), and an 
   method reviewed too.
 - **Read-back is one read, never a loop.** A fault there reports the planned move (the safe side for a follow-up log line); a
   different owner reports none. The move count is a log and a pass count, not an access decision.
+
+### Gate results, review round 1
+
+| Check | Result |
+|---|---|
+| `verify-suites.sh`: solution build | 0 warnings, 0 errors |
+| ArchTests, built fresh | 2714 / 2714 passed (no diff under `tests/Spaarke.ArchTests/`; `RepairOwnerAsync` still makes 1 Routed owner write) |
+| Filtered suites (`verify-suites.sh`) | 9610 passed, 0 failed, 7 skipped (the existing `OfficeEndpointsContractTests` skips), 26 m 54 s |
+| `RecordRepair` filter | 456 / 456 passed (446 before this round, plus 10 new) |
+| `dotnet format whitespace --verify-no-changes` | clean on `Services/RecordCreation/` and `tests/integration/data-mutation/RecordOwnership/` |
