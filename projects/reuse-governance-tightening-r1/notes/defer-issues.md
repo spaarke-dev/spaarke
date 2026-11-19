@@ -287,6 +287,107 @@ Failure without it: renaming an `OutputWidgetType` value compiles and silently b
 
 ---
 
+### DEF-007 — SmartTodo code page keeps a divergent fork of the `SmartToDo` component
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | someday |
+| **Filed** | 2026-11-18 |
+| **Source** | DEF-002 execution (#2802, PR #2906): the "delete it if it is a copy" check |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2907 |
+
+**Description**
+
+DEF-002 said to delete the SmartTodo code page's `SmartToDo.tsx` if it was a copy of the package's. It is not a copy. The code page's version is 1,101 lines and the package's is 754; the diff is 585 lines added and 238 removed. The code page's version also has about ten features the package's lacks:
+- multi-select (`selectedIds`, `onToggleSelect`);
+- search;
+- `orientation`;
+- `hideHeader`;
+- `onSettingsOpenerReady`;
+- a regarding filter.
+
+LegalWorkspace uses the package component through an 89-line shim. That leaves two implementations of one feature. A fix made in one does not reach the other, so the standalone Smart To Do page and the workspace section behave differently for the same user and data.
+
+**Entry-points**
+
+- `src/solutions/SmartTodo/src/components/SmartToDo.tsx`
+- `src/client/shared/Spaarke.SmartTodo.Components/src/components/SmartToDo/SmartToDo.tsx`
+- `git diff --no-index --stat src/solutions/SmartTodo/src/components/SmartToDo.tsx src/client/shared/Spaarke.SmartTodo.Components/src/components/SmartToDo/SmartToDo.tsx`
+
+**Suggested fix**: move the code page's extra features into the package component as optional props, then make the code page a thin host, as LegalWorkspace already is.
+
+**Estimated effort**: 1–2 days (feature work in the package and a regression pass on both hosts)
+**Blockers**: none
+**Related**: DEF-002, ADR-012 2026-11-18 amendment
+
+---
+
+### DEF-008 — `CommunicationPage` is reachable from the secure-child ribbon, not dead (P-12 rescoped)
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | next-round |
+| **Filed** | 2026-11-18 |
+| **Source** | DEF-003 execution (#2803, PR #2906): the "delete only if nothing imports or deploys it" check |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2908 |
+
+**Description**
+
+P-12 called `src/client/code-pages/CommunicationPage` a dead prototype. It is not, so it was not deleted:
+- The secure-child ribbon's "New Message" command opens web resource `sprk_communicationpage`, and only this folder builds it.
+- Ontology task 188 changed it in #2812.
+
+It is also not deployed on DEV, so the command has no page to open there. Its `provenance.ts` has drifted from the package's: the package's copy has the `RecordNameMatch` provenance and the code page's has none. Either the command is live and needs a current, deployed page, or it is dead and both the ribbon command and the page should go.
+
+**Entry-points**
+
+- `src/client/webresources/js/sprk_secure_child_ribbon.js:346`
+- `src/dataverse/solutions/SpaarkeMaster/WebResources/sprk_/scripts/secure_child_ribbon.js:346`
+- `src/client/code-pages/CommunicationPage/src/components/provenance.ts`
+- `src/client/shared/Spaarke.Communication.Components/src/logic/connections/provenance.ts`
+
+**Suggested fix**: the owner decides whether "New Message" on secure-child records stays.
+- If it stays: point it at the package's compose surface, or rebuild the page on the package and deploy it.
+- If it goes: remove the ribbon command and the folder together.
+
+**Estimated effort**: 2–4 hours once decided
+**Blockers**: owner decision on the ribbon command
+**Related**: DEF-003, #2812
+
+---
+
+### DEF-009 — Four nav-prop discovery copies remain after #2803/#2804
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | next-round |
+| **Filed** | 2026-11-18 |
+| **Source** | DEF-003/DEF-004 execution (#2803, #2804): the brief limited the de-duplication to the Pattern D packages |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2909 |
+
+**Description**
+
+The companion PR folds three private copies of the ManyToOne nav-prop metadata query into the shared `discoverNavProps` in `@spaarke/ui-components`. It also adds the ArchTest ratchet `NavPropDiscoveryRatchetTests`. Four copies outside those packages are left (`discoverTodoNavProps` was folded in too), and they sit in the ratchet's baseline, plus one generated SpaarkeMaster copy the scan does not cover. The shared function now lowercases the entity name and warns on an empty result; none of these copies does either. A wrong-case entity name therefore makes these paths bind no navigation property, and their record writes then fail without a warning.
+
+**Entry-points**
+
+- `src/solutions/LegalWorkspace/src/components/CreateMatter/matterService.ts:94`
+- `src/solutions/Notepad/src/hooks/discoverMemoNavProps.ts:88`
+- `src/client/shared/Spaarke.UI.Components/src/components/CreateProjectWizard/CreateProjectWizard.tsx:103`
+- `src/client/webresources/js/sprk_secure_child_ribbon.js:225`, plus `src/dataverse/solutions/SpaarkeMaster/WebResources/sprk_/scripts/secure_child_ribbon.js` (not scanned)
+- `dotnet test tests/Spaarke.ArchTests --filter NavPropDiscoveryRatchetTests`
+
+**Suggested fix**: replace each copy with `discoverNavProps` and remove its baseline entry; the ratchet fails on a stale entry. The ribbon script has no module system, so it may need to stay as a copy with a recorded reason.
+
+**Estimated effort**: half a day
+**Blockers**: the companion de-duplication PR merges first
+**Related**: DEF-003, DEF-004
+
+---
+
 ### ISS-004 — Open-in-desktop is implemented on nine surfaces with different behaviour (P-1)
 
 | Field | Value |
