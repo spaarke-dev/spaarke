@@ -358,7 +358,7 @@ It is also not deployed on DEV, so the command has no page to open there. Its `p
 
 ---
 
-### DEF-009 — Five nav-prop discovery copies remain after #2803/#2804
+### DEF-009 — Four nav-prop discovery copies remain after #2803/#2804
 
 | Field | Value |
 |---|---|
@@ -370,13 +370,12 @@ It is also not deployed on DEV, so the command has no page to open there. Its `p
 
 **Description**
 
-The companion PR folds three private copies of the ManyToOne nav-prop metadata query into the shared `discoverNavProps` in `@spaarke/ui-components`. It also adds the ArchTest ratchet `NavPropDiscoveryRatchetTests`. Five copies outside those packages are left, and they sit in the ratchet's baseline, plus one generated SpaarkeMaster copy the scan does not cover. The shared function now lowercases the entity name and warns on an empty result; none of these copies does either. A wrong-case entity name therefore makes these paths bind no navigation property, and their record writes then fail without a warning.
+The companion PR folds three private copies of the ManyToOne nav-prop metadata query into the shared `discoverNavProps` in `@spaarke/ui-components`. It also adds the ArchTest ratchet `NavPropDiscoveryRatchetTests`. Four copies outside those packages are left (`discoverTodoNavProps` was folded in too), and they sit in the ratchet's baseline, plus one generated SpaarkeMaster copy the scan does not cover. The shared function now lowercases the entity name and warns on an empty result; none of these copies does either. A wrong-case entity name therefore makes these paths bind no navigation property, and their record writes then fail without a warning.
 
 **Entry-points**
 
 - `src/solutions/LegalWorkspace/src/components/CreateMatter/matterService.ts:94`
 - `src/solutions/Notepad/src/hooks/discoverMemoNavProps.ts:88`
-- `src/client/shared/Spaarke.UI.Components/src/services/TodoRegardingUpdateBuilder.ts` (`discoverTodoNavProps`)
 - `src/client/shared/Spaarke.UI.Components/src/components/CreateProjectWizard/CreateProjectWizard.tsx:103`
 - `src/client/webresources/js/sprk_secure_child_ribbon.js:225`, plus `src/dataverse/solutions/SpaarkeMaster/WebResources/sprk_/scripts/secure_child_ribbon.js` (not scanned)
 - `dotnet test tests/Spaarke.ArchTests --filter NavPropDiscoveryRatchetTests`
