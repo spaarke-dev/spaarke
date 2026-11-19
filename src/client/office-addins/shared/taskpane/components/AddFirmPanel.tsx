@@ -367,7 +367,8 @@ export const AddFirmPanel: React.FC<AddFirmPanelProps> = ({
     <div
       className={asFirmField ? styles.field : styles.panel}
       role="group"
-      aria-label={asFirmField ? 'Firm' : 'Add a firm to this record'}
+      // As the Firm field the field's own label names it; a group label too would be read twice.
+      aria-label={asFirmField ? undefined : 'Add a firm to this record'}
       data-testid="add-firm-panel"
       data-as-firm-field={asFirmField ? 'true' : undefined}
     >
