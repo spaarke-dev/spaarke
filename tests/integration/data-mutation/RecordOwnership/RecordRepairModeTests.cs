@@ -1410,6 +1410,13 @@ internal sealed partial class RepairWorld
     /// <summary>When set, the repair's update is recorded and then throws it (not applied).</summary>
     public Exception? WriteFault { get; set; }
 
+    /// <summary>Task 052g review round 1: with <see cref="WriteFault"/>, the update LANDS on the row and then throws (the ambiguous
+    /// fault: it may have landed).</summary>
+    public bool WriteFaultAfterLanding { get; set; }
+
+    /// <summary>Task 052g review round 1: runs once, just after the update landed on the row (another writer's change after ours).</summary>
+    public Action? AfterWrite { get; set; }
+
     /// <summary>When set, every owner decision asked of the resolver throws it.</summary>
     public Exception? ResolverFault { get; set; }
 
@@ -1896,14 +1903,23 @@ internal sealed partial class RepairWorld
                 var applied = current == version;
                 // Task 052a review F3: Dataverse refuses the whole update when one value is not the CLR type its column takes.
                 var mistyped = MistypedColumns(table, fields);
-                Writes.Add((table, id, version, new Dictionary<string, object>(fields), applied && WriteFault is null && mistyped.Count == 0));
+                var landsThenFaults = WriteFault is not null && WriteFaultAfterLanding && applied && mistyped.Count == 0;
+                Writes.Add((table, id, version, new Dictionary<string, object>(fields),
+                    applied && (WriteFault is null || landsThenFaults) && mistyped.Count == 0));
                 if (WriteFault is { } fault)
+                {
+                    if (landsThenFaults)
+                        Directory.Write(table, id, fields.ToDictionary(f => f.Key, f => (object?)f.Value));
                     throw fault;
+                }
+
                 if (mistyped.Count > 0)
                     throw new InvalidOperationException($"Test: {table} {id}: the SDK refuses {string.Join("; ", mistyped)}.");
                 if (!applied)
                     throw new DBConcurrencyException($"Test: {table} {id} is at version {current}, not {version}.");
                 Directory.Write(table, id, fields.ToDictionary(f => f.Key, f => (object?)f.Value));
+                AfterWrite?.Invoke();
+                AfterWrite = null;
                 return Task.CompletedTask;
             });
         entities

@@ -869,7 +869,9 @@ public sealed class RecordRepairPassJob : IScheduledJob
 
         // Task 052g (design 052e §3.3): a confirmed re-own across business units, and the rows Repair left to the secure pass
         // (an answer, or undecided: counted in both, the undecided ones also on their own).
-        if (outcome.Wrote && outcome.MovedBusinessUnit is not null)
+        // Review round 1: counted from the outcome's move whatever its status — a write that faulted but was read back as landed
+        // is WriteFailed and still moved the row (Repair sets the move only for a confirmed or read-back landing).
+        if (outcome.MovedBusinessUnit is not null)
         {
             counts.OwnerMovedBusinessUnit++;
         }
@@ -885,7 +887,12 @@ public sealed class RecordRepairPassJob : IScheduledJob
         }
     }
 
-    private static string? ReasonOf(RecordRepairOutcome outcome) => outcome.ReasonCode ?? outcome.OwnerRefusal?.Code;
+    /// <summary>The reason an outcome is logged with: its own code, else the owner refusal's, else (review round 1) the first
+    /// field reason that is a fault the row is asked again for, so an abandoned row names why (for example
+    /// <c>owner_isolation_unknown</c>, <c>owner_assign_cascade_unknown</c>).</summary>
+    private static string? ReasonOf(RecordRepairOutcome outcome) =>
+        outcome.ReasonCode ?? outcome.OwnerRefusal?.Code
+        ?? outcome.Fields.Select(f => f.ReasonCode).FirstOrDefault(r => r is not null && RecordRepairOutcome.TransientReasons.Contains(r));
 
     /// <summary>
     /// Review F2-b: what one more ask of a row counts toward <see cref="MaxAttempts"/> — 1 for a fault, 0 for a contact that waits
