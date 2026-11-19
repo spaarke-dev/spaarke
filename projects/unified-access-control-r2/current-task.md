@@ -16,7 +16,7 @@
 | **Dev SPA** | master `2963d1565b`, deployed by spa-r4 02:05:53Z (no SPA-relevant diff vs fe51619cfc; spa-r4 now asks before deploying a different SHA). |
 | **Master** | `4d4834dc51` (after fe51619cfc only #2913 word-add-in client change: no remove/revoke path; no BFF change). |
 | **Agents running** | None. |
-| **Next action** | Wait for field-mapping-r1's **052g** (isolation guard + note-move path) diff and review it; it must land before `RecordRepair:Pass:GoLive` is ever set. Nothing else is in flight. |
+| **Next action** | **052g review PASS sent 2026-11-19** (fm-r1 range `0b668f03a4..b5d32ba139`, not pushed). Answers: Q1–Q5 yes; Q6 yes with a pre-enable condition: before GoLive, run the secure-child backfill in report mode and confirm it lists every row Repair reports as `ownerLeftToSecurePass`; `SecureChild:Reconciliation:WritesEnabled` is unset on dev, so old rows wait for the sweep. fm takes it to master on the owner's go in its session; it reaches dev only on the owner's SHA go here. Nothing else in flight. |
 
 ## Open work (mine)
 - **#2845 latency (round 2 live since e46b6b453b):** samples from signed-in external traffic after 5ae2804884: notifications n=11 p50 2,707 ms / p90 4,092 ms; `/api/external/me` p50 1,114 ms; matter events p50 1,038 ms; ≈31 Dataverse calls per external request. **Not met (target p50 < 1 s); keep #2845 open.** Next look: the notifications route (highest p50) and the per-request Dataverse call count. Recheck at the next gate that has SPA external traffic (billing-guidelines routes too). Tools: scratchpad `lat-now.ps1 <t0>`, `lat-seq.ps1 '<route>'`.
