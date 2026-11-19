@@ -5,16 +5,12 @@
  * so the step converts it with the shared `plainTextToHtml` and passes `initialBodyFormat="HTML"`: same text, line breaks
  * kept, `<` and `&` in a file or record name escaped once.
  *
- * NOTE - DocumentUploadWizard's jest config is node-only and matches `*.test.ts` (see jest.config.js), so this DOM test is
- * authored against the standard jest + @testing-library/react API like LegalWorkspace's `FilePreviewDialog.emailHandlers`
- * test, and runs under a jsdom config (task 197 ran it under a throwaway one).
+ * Runs under this package's node jest config (CI: `client-tests.yml`, job `test`, package
+ * `src/solutions/DocumentUploadWizard`): the step is rendered with `react-dom/server`, so no DOM is needed, and the
+ * composer is a stub that records the props it was given. Moved from a never-run jsdom form in task 197 fix round 1.
  */
 import * as React from 'react';
-import { act } from 'react';
-import { createRoot } from 'react-dom/client';
-
-// React's act() needs this flag outside a test renderer.
-(globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+import { renderToStaticMarkup } from 'react-dom/server';
 
 const composerProps: { current: Record<string, unknown> | null } = { current: null };
 
@@ -26,9 +22,7 @@ jest.mock('@spaarke/ui-components/components/EmailComposer', () => ({
   createXrmEmailComposeHandlers: () => ({}),
   describeSendFailure: () => ({ title: 'x', message: 'x' }),
   // The real helper (React-free, no Xrm), not a stub, so the test sees the real conversion.
-  plainTextToHtml: jest.requireActual(
-    '../../../../client/shared/Spaarke.UI.Components/src/components/EmailComposer/composeOnlyText'
-  ).plainTextToHtml,
+  plainTextToHtml: jest.requireActual('@spaarke/ui-components/components/EmailComposer/composeOnlyText').plainTextToHtml,
 }));
 jest.mock('@spaarke/ui-components/utils/xrmContext', () => ({ getXrm: jest.fn(() => undefined) }));
 
@@ -43,19 +37,16 @@ describe('DocumentEmailStep opens the email in rich text (task 197)', () => {
   });
 
   it('passes the plain-text default as HTML with the HTML format: text and line breaks kept, names escaped once', () => {
-    const host = document.createElement('div');
-    act(() => {
-      createRoot(host).render(
-        <DocumentEmailStep
-          uploadedFileNames={['Fees <draft>.docx', 'A & B.pdf']}
-          parentEntityName="Acme & Sons"
-          parentEntityType="sprk_matter"
-          parentEntityId="m-1"
-          authenticatedFetch={authenticatedFetch as never}
-          bffBaseUrl="https://bff.example.com"
-        />
-      );
-    });
+    renderToStaticMarkup(
+      <DocumentEmailStep
+        uploadedFileNames={['Fees <draft>.docx', 'A & B.pdf']}
+        parentEntityName="Acme & Sons"
+        parentEntityType="sprk_matter"
+        parentEntityId="m-1"
+        authenticatedFetch={authenticatedFetch as never}
+        bffBaseUrl="https://bff.example.com"
+      />
+    );
 
     expect(composerProps.current?.initialBodyFormat).toBe('HTML');
     const body = composerProps.current?.initialBody as string;

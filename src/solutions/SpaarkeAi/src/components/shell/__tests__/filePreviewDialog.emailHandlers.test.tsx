@@ -7,11 +7,12 @@
  * FilePreviewDialog rendered `<SendEmailDialog>` without them. This pins that the adapter forwards
  * the handlers built by `createXrmEmailComposeHandlers({ authenticatedFetch, bffBaseUrl })`.
  *
- * NOTE — LegalWorkspace has no jest runner wired yet (see widthPreferenceGuard.test.ts, same
- * convention): this file is authored against the standard jest + @testing-library/react API so it
- * runs unchanged once a runner is added. It was run in task 186 under a throwaway jest config.
+ * NOTE — LegalWorkspace has no jest runner of its own, so this test lives in the SpaarkeAi suite
+ * (the Console embeds LegalWorkspace and CI runs that suite: `client-tests.yml`, job `test`, package
+ * `src/solutions/SpaarkeAi`), mocking LegalWorkspace's services by relative path like
+ * `workspaceGrid.launchSites.test.tsx`. Moved here in task 197 fix round 1 (it was never run in CI).
  *
- * @see ../FilePreviewDialog.tsx — unit under test
+ * @see LegalWorkspace/src/components/FilePreview/FilePreviewDialog.tsx — unit under test
  */
 
 import * as React from 'react';
@@ -41,27 +42,26 @@ jest.mock('@spaarke/ui-components', () => ({
   createXrmNavigationService: jest.fn(() => ({ openRecord: jest.fn(), openRecordModal: jest.fn() })),
   getXrm: jest.fn(() => undefined),
   // Task 197: the real helper (React-free, no Xrm), not a stub, so the test sees the real conversion.
-  plainTextToHtml: jest.requireActual(
-    '../../../../../../client/shared/Spaarke.UI.Components/src/components/EmailComposer/composeOnlyText'
-  ).plainTextToHtml,
+  plainTextToHtml: jest.requireActual('@spaarke/ui-components/components/EmailComposer/composeOnlyText')
+    .plainTextToHtml,
 }));
 jest.mock('@spaarke/ui-components/components/FilePreview/RichFilePreviewDialog', () => ({
   RichFilePreviewDialog: () => <div data-testid="rich-file-preview-stub" />,
 }));
-jest.mock('../../../services/DocumentApiService', () => ({
+jest.mock('../../../../../LegalWorkspace/src/services/DocumentApiService', () => ({
   getDocumentPreviewUrl: jest.fn(),
   getDocumentOpenLinks: jest.fn(),
 }));
-jest.mock('../filePreviewService', () => ({
+jest.mock('../../../../../LegalWorkspace/src/components/FilePreview/filePreviewService', () => ({
   copyDocumentLink: jest.fn(),
   setWorkspaceFlag: jest.fn(),
 }));
-jest.mock('../../CreateMatter/matterService', () => ({ searchUsersAsLookup: jest.fn() }));
-jest.mock('../../../services/authInit', () => ({ authenticatedFetch: authenticatedFetchMock }));
-jest.mock('../../../config/runtimeConfig', () => ({ getBffBaseUrl: () => 'https://test-bff.example.com' }));
+jest.mock('../../../../../LegalWorkspace/src/components/CreateMatter/matterService', () => ({ searchUsersAsLookup: jest.fn() }));
+jest.mock('../../../../../LegalWorkspace/src/services/authInit', () => ({ authenticatedFetch: authenticatedFetchMock }));
+jest.mock('../../../../../LegalWorkspace/src/config/runtimeConfig', () => ({ getBffBaseUrl: () => 'https://test-bff.example.com' }));
 
 // Import AFTER the mocks.
-import { FilePreviewDialog } from '../FilePreviewDialog';
+import { FilePreviewDialog } from '../../../../../LegalWorkspace/src/components/FilePreview/FilePreviewDialog';
 
 describe('FilePreviewDialog — email dialog compose handlers (task 186, D-219 Q3)', () => {
   beforeEach(() => {
