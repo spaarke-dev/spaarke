@@ -4,7 +4,7 @@
     <title>Repair pass: cross-unit re-own and the isolated-row guard (replaces `owner_moves_business_unit`; FR-25 amended 2026-11-18)</title>
     <phase>5 W5 Records created outside the product</phase>
     <gate>052e approved (owner 2026-11-18) and 052f merged to the work branch. Nothing here enables the pass on any environment (`RecordRepair:Pass:GoLive` stays unset).</gate>
-    <status>pending</status>
+    <status>in-progress</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies the single Repair owner write site in Sprk.Bff.Api, run as the system principal: a mistake moves a row, and the rows filed under it, to another business unit or into or out of isolation. Security fails closed.</rigor-reason>
     <model-tier>opus</model-tier>
