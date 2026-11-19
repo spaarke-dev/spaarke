@@ -176,14 +176,23 @@ internal sealed partial class RecordCreationService
         var ownerParents = new List<RecordOwnershipParent>();
         var owner = await RepairOwnerAsync(table, rule, row, patch, report, ownerParents, stamp, ct).ConfigureAwait(false);
 
-        // Task 052b (review F1-a): an owner write is an Assign, which Dataverse cascades to child rows. Not written for a table
-        // with a relationship that cascades on Assign; the mapping and the stamp are still repaired.
-        if (patch.ContainsKey(OwnerColumn)
-            && await AssignCascadeRefusalAsync(table, id, pass, ct).ConfigureAwait(false) is { } cascades)
+        // Task 052b (review F1-a) / 052f: an owner write is an Assign, which Dataverse cascades to child rows. Not written for a
+        // row that has a child along a relationship the allow-list does not accept, or whose children cannot be told; the mapping
+        // and the stamp are still repaired. The child reads are kept, to be asked again after the write (the race, K1).
+        IReadOnlyList<AssignCascadeChildRead> cascadeReads = [];
+        if (patch.ContainsKey(OwnerColumn))
         {
-            patch.Remove(OwnerColumn);
-            report.RemoveAll(f => f.Part == RecordRepairPart.Owner);
-            report.Add(RecordRepairField.Skipped(RecordRepairPart.Owner, OwnerColumn, cascades));
+            var cascadeCheck = await AssignCascadeCheckAsync(table, id, pass, ct).ConfigureAwait(false);
+            if (cascadeCheck.Refusal is { } cascades)
+            {
+                patch.Remove(OwnerColumn);
+                report.RemoveAll(f => f.Part == RecordRepairPart.Owner);
+                report.Add(RecordRepairField.Skipped(RecordRepairPart.Owner, OwnerColumn, cascades));
+            }
+            else
+            {
+                cascadeReads = cascadeCheck.Reads;
+            }
         }
 
         if (owner.MappingBlocked is { } blocked)
@@ -272,31 +281,176 @@ internal sealed partial class RecordCreationService
 
         _logger.LogInformation("[RECORD-REPAIR] {Table} {Id} repaired ({Columns})", table, id,
             string.Join(", ", patch.Keys.Order(StringComparer.Ordinal)));
+
+        // Task 052f (design 052e §3.2, the race): a child added along an unaccepted relationship between the check and the write
+        // moved with the Assign. Asked again after a confirmed owner write; a hit is logged and counted, never undone (K1).
+        if (ownerWritten && cascadeReads.Count > 0)
+        {
+            var (raced, raceUnchecked) = await AssignCascadeRaceAsync(table, id, cascadeReads, ct).ConfigureAwait(false);
+            return Outcome(RecordRepairStatus.Repaired, null) with { RacedChildren = raced, RaceUnchecked = raceUnchecked };
+        }
+
         return Outcome(RecordRepairStatus.Repaired, null);
     }
 
-    /// <summary>
-    /// Task 052b (review F1-a): the one-to-many relationships an owner write may cascade along — parent table to child table,
-    /// each with the reason it is safe. EMPTY: no cascade is accepted until one is reasoned here, so Repair re-owns no row of a
-    /// table whose live metadata shows a relationship that cascades on Assign (the <c>-AcceptedAssignCascade</c> list of
-    /// <c>scripts/Migrate-DirectMessagesToOwnerTeam.ps1</c>, which also starts empty). Key: <c>"{table}->{child table}"</c>.
-    /// </summary>
-    internal static readonly IReadOnlyDictionary<string, string> AcceptedAssignCascades =
-        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+    // ── Task 052f: the Assign-cascade allow-list and the per-row child check (design 052e §3.1, §3.2) ────────────────────
+
+    private const string MovesNothingTeam =
+        "Moves nothing: a team has no owner columns, so an Assign cannot re-own it. Never read per row.";
+
+    private const string MovesNothingSharePointDocument =
+        "Moves nothing: a SharePoint document is not stored in Dataverse (its rows are the files SharePoint lists under a "
+        + "document location, AssignCascadeChildOwners), and its read is refused while that integration is off. Never read per row.";
+
+    private const string MovesNothingExternalIdentity =
+        "Moves nothing: an external identity has no owner columns (organization-owned). Never read per row.";
+
+    private const string FollowsDocumentLocation =
+        "Follows the record: the record's own SharePoint document location, which the owner accepted to follow the record's "
+        + "owner (UAC-r2 round 4 item 3). Never read per row.";
+
+    private const string FollowsAnalysisContent =
+        "Follows the record: the analysis's own content, parental by design (sprk_analysis.xml). Never read per row.";
+
+    private const string FollowsOwnersNotes =
+        "Follows the record (owner Q2, 2026-11-18): the notes the record's owner owns move with it to the new owner team (a "
+        + "UserOwned cascade); notes owned by someone else keep their owner. Never read per row.";
 
     /// <summary>
-    /// Task 052b (review F1-a): why <paramref name="table"/>'s owner must not be written — a relationship that cascades on
-    /// Assign to a child the allow-list does not accept (<see cref="RecordRepairReason.OwnerAssignCascades"/>), or relationship
-    /// metadata that could not be read (<see cref="RecordRepairReason.OwnerAssignCascadeUnknown"/>, fail closed) — or <c>null</c>.
-    /// Read app-only, once per pass when a pass is given: a successful read is kept, and a failed one is kept as unknown (still a
-    /// fault, so the rows are asked again next run, which reads afresh). A refusal, and a failed read, is logged once per pass.
+    /// Task 052b (review F1-a) / 052f (design 052e §3.1, owner 2026-11-18): the one-to-many relationships an owner write may
+    /// cascade along, parent table to child table, each with the reason in its value. Key: <c>"{table}->{child table}"</c>. Exactly
+    /// the design's "moves nothing" and "follows the record" entries; an accepted relationship is never read per row. A
+    /// relationship on <see cref="NeverAcceptedAssignCascadeChildren"/> or <see cref="NeverAcceptedAssignCascades"/> is refused
+    /// even if it is added here (<see cref="IsAcceptedAssignCascade"/>).
     /// </summary>
-    private async Task<string?> AssignCascadeRefusalAsync(string table, Guid id, RecordRepairPassContext? pass, CancellationToken ct)
+    internal static readonly IReadOnlyDictionary<string, string> AcceptedAssignCascades =
+        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            // Moves nothing.
+            ["sprk_matter->team"] = MovesNothingTeam,
+            ["sprk_project->team"] = MovesNothingTeam,
+            ["sprk_event->team"] = MovesNothingTeam,
+            ["sprk_document->team"] = MovesNothingTeam,
+            ["sprk_invoice->team"] = MovesNothingTeam,
+            ["contact->team"] = MovesNothingTeam,
+            ["contact->adx_externalidentity"] = MovesNothingExternalIdentity,
+            ["sprk_matter->sharepointdocument"] = MovesNothingSharePointDocument,
+            ["sprk_project->sharepointdocument"] = MovesNothingSharePointDocument,
+            ["sprk_event->sharepointdocument"] = MovesNothingSharePointDocument,
+            ["contact->sharepointdocument"] = MovesNothingSharePointDocument,
+
+            // Follows the record.
+            ["sprk_matter->sharepointdocumentlocation"] = FollowsDocumentLocation,
+            ["sprk_project->sharepointdocumentlocation"] = FollowsDocumentLocation,
+            ["sprk_event->sharepointdocumentlocation"] = FollowsDocumentLocation,
+            ["contact->sharepointdocumentlocation"] = FollowsDocumentLocation,
+            ["sprk_analysis->sprk_analysischatmessage"] = FollowsAnalysisContent,
+            ["sprk_analysis->sprk_analysisemailmetadata"] = FollowsAnalysisContent,
+            ["sprk_analysis->sprk_analysisworkingversion"] = FollowsAnalysisContent,
+            ["sprk_event->annotation"] = FollowsOwnersNotes,
+            ["sprk_analysis->annotation"] = FollowsOwnersNotes,
+        };
+
+    /// <summary>
+    /// Task 052f (design 052e §3.1, owner Q5): the activity tables. Their rows change hands only through their person or the
+    /// product, so no relationship to one is ever accepted; a row's activity children are read in ONE <c>activitypointer</c>
+    /// read on <c>regardingobjectid</c>, which covers every activity type. An activity table missing here is still read, on its
+    /// own table.
+    /// </summary>
+    internal static readonly IReadOnlySet<string> ActivityTables = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+    {
+        ActivityPointerTable, "appointment", "chat", "email", "fax", "letter", "phonecall", "recurringappointmentmaster",
+        "socialactivity", "task", "adx_inviteredemption", "adx_portalcomment", "serviceappointment", "campaignactivity",
+        "campaignresponse", "bulkoperation",
+    };
+
+    /// <summary>
+    /// Task 052f (design 052e §3.1 "never accepted", D-204): child tables no Repair owner write may move, from any table —
+    /// every activity table, actioncard, socialprofile, mailboxtrackingfolder and syncerror, and the tables written only by
+    /// their own writer (<c>sprk_signal</c>, <c>sprk_decisionrecord</c>, <c>sprk_budgetrevision</c>). Listed so that an allow-list
+    /// entry cannot be added for one by habit: <see cref="IsAcceptedAssignCascade"/> refuses it.
+    /// </summary>
+    internal static readonly IReadOnlySet<string> NeverAcceptedAssignCascadeChildren =
+        new HashSet<string>(
+            ActivityTables.Concat(
+            [
+                "actioncard", "socialprofile", "mailboxtrackingfolder", "syncerror",
+                "sprk_signal", "sprk_decisionrecord", "sprk_budgetrevision",
+            ]),
+            StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Task 052f (design 052e §3.1, UAC-r2 U4, owner Q5): parent-to-child relationships never accepted. A child contact is a
+    /// customer in its own right; a contact's notes stay where they are.
+    /// </summary>
+    internal static readonly IReadOnlySet<string> NeverAcceptedAssignCascades =
+        new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "contact->contact", "contact->annotation" };
+
+    /// <summary>Task 052f: whether an owner write of a <paramref name="table"/> row may cascade to <paramref name="child"/>
+    /// rows without reading them: on the allow-list and not on either never-accepted list.</summary>
+    internal static bool IsAcceptedAssignCascade(string table, string child) =>
+        !NeverAcceptedAssignCascadeChildren.Contains(child)
+        && !NeverAcceptedAssignCascades.Contains($"{table}->{child}")
+        && AcceptedAssignCascades.ContainsKey($"{table}->{child}");
+
+    private const string ActivityPointerTable = "activitypointer";
+    private const string RegardingObjectColumn = "regardingobjectid";
+    private const string ActivityTypeColumn = "activitytypecode";
+
+    /// <summary>
+    /// Task 052f: the per-row child reads for <paramref name="table"/>'s Assign cascades — one per (child table, referencing
+    /// column) the allow-list does not accept, every activity relationship on <c>regardingobjectid</c> folded into one
+    /// <c>activitypointer</c> read — and the relationships that cannot be read (no child table or no referencing column stated:
+    /// unknown, never "no children"). Every listed relationship counts as cascading, an unstated Assign value included. Pure.
+    /// </summary>
+    internal static (IReadOnlyList<AssignCascadeChildRead> Reads, IReadOnlyList<AssignCascadeRelationship> Unreadable) ChildReadsOf(
+        string table, IEnumerable<AssignCascadeRelationship> cascades)
+    {
+        var unreadable = new List<AssignCascadeRelationship>();
+        var reads = new SortedDictionary<(string Table, string Column), SortedSet<string>>();
+        foreach (var cascade in cascades)
+        {
+            var child = cascade.ReferencingEntity?.Trim().ToLowerInvariant() ?? string.Empty;
+            if (child.Length > 0 && IsAcceptedAssignCascade(table, child))
+                continue;
+
+            var column = cascade.ReferencingAttribute?.Trim().ToLowerInvariant() ?? string.Empty;
+            if (child.Length == 0 || column.Length == 0)
+            {
+                unreadable.Add(cascade);
+                continue;
+            }
+
+            var key = ActivityTables.Contains(child) && column == RegardingObjectColumn
+                ? (ActivityPointerTable, RegardingObjectColumn)
+                : (child, column);
+            if (!reads.TryGetValue(key, out var names))
+                reads[key] = names = new SortedSet<string>(StringComparer.Ordinal);
+            names.Add(string.IsNullOrWhiteSpace(cascade.SchemaName) ? $"(unnamed) -> {child}" : cascade.SchemaName);
+        }
+
+        return (reads.Select(r => new AssignCascadeChildRead(r.Key.Table, r.Key.Column, r.Value.ToArray())).ToArray(), unreadable);
+    }
+
+    /// <summary>
+    /// Task 052b (review F1-a) / 052f (design 052e §3.2): whether <paramref name="table"/> <paramref name="id"/>'s owner may be
+    /// written. The table's Assign cascades are read app-only, once per pass when a pass is given (a successful read is kept; a
+    /// failed one is kept as unknown, logged once). Then, for each relationship the allow-list does not accept, one app-only
+    /// <c>top 1</c> read of this row's children on its referencing column. Refusal:
+    /// <list type="bullet">
+    /// <item><see cref="RecordRepairReason.OwnerAssignCascades"/> — the row has such a child (an answer; logged with the
+    /// relationship schema names);</item>
+    /// <item><see cref="RecordRepairReason.OwnerAssignCascadeUnknown"/> — the metadata, or a child read, failed or was refused,
+    /// or a relationship cannot be read (fail closed: a fault, retried, never "no children").</item>
+    /// </list>
+    /// No refusal: the reads made, to be asked again after the write (<see cref="AssignCascadeRaceAsync"/>).
+    /// </summary>
+    private async Task<AssignCascadeCheck> AssignCascadeCheckAsync(string table, Guid id, RecordRepairPassContext? pass, CancellationToken ct)
     {
         IReadOnlyList<AssignCascadeRelationship> cascades;
         if (pass is not null && pass.AssignCascadesUnknown(table))
         {
-            return RecordRepairReason.OwnerAssignCascadeUnknown;
+            return AssignCascadeCheck.Refused(RecordRepairReason.OwnerAssignCascadeUnknown);
         }
 
         if (pass is not null && pass.TryGetAssignCascades(table, out var kept))
@@ -322,27 +476,145 @@ internal sealed partial class RecordCreationService
                         table, table, id);
                 }
 
-                return RecordRepairReason.OwnerAssignCascadeUnknown;
+                return AssignCascadeCheck.Refused(RecordRepairReason.OwnerAssignCascadeUnknown);
             }
 
             pass?.KeepAssignCascades(table, cascades);
         }
 
-        var refused = cascades
-            .Where(c => !AcceptedAssignCascades.ContainsKey($"{table}->{c.ReferencingEntity}"))
-            .ToArray();
-        if (refused.Length == 0)
-            return null;
-
-        if (pass is null || pass.FirstAssignCascadeRefusal(table))
+        var (reads, unreadable) = ChildReadsOf(table, cascades);
+        if (unreadable.Count > 0)
         {
             _logger.LogWarning(
-                "[RECORD-REPAIR] {Table} rows are not re-owned: an owner write is an Assign, and it cascades along {Relationships} " +
-                "(not on the accepted list); the mapping and the stamp are still repaired", table,
-                string.Join(", ", refused.Select(c => $"{c.SchemaName} -> {c.ReferencingEntity} ({c.Assign ?? "unstated"})")));
+                "[RECORD-REPAIR] {Table} {Id}: the relationship metadata does not say which table or column holds the children along " +
+                "{Relationships}, so whether the row has any cannot be told; its owner is not written and the row is asked again",
+                table, id, string.Join(", ", unreadable.Select(c => $"{c.SchemaName} -> {c.ReferencingEntity} ({c.Assign ?? "unstated"})")));
+            return AssignCascadeCheck.Refused(RecordRepairReason.OwnerAssignCascadeUnknown);
         }
 
-        return RecordRepairReason.OwnerAssignCascades;
+        var found = new List<AssignCascadeChildRead>();
+        foreach (var read in reads)
+        {
+            EntityCollection? children;
+            try
+            {
+                children = await ReadAssignCascadeChildAsync(read, id, ct).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                // Failed or refused: unknown, never "no children" (fail closed).
+                _logger.LogWarning(ex,
+                    "[RECORD-REPAIR] {Table} {Id}: its children along {Relationships} ({ChildTable}.{Column}) could not be read; its " +
+                    "owner is not written and the row is asked again", table, id, string.Join(", ", read.Relationships), read.Table,
+                    read.Column);
+                return AssignCascadeCheck.Refused(RecordRepairReason.OwnerAssignCascadeUnknown);
+            }
+
+            if (children?.Entities is not { } rows)
+            {
+                _logger.LogWarning(
+                    "[RECORD-REPAIR] {Table} {Id}: the read of its children along {Relationships} ({ChildTable}.{Column}) returned no " +
+                    "answer; its owner is not written and the row is asked again", table, id, string.Join(", ", read.Relationships),
+                    read.Table, read.Column);
+                return AssignCascadeCheck.Refused(RecordRepairReason.OwnerAssignCascadeUnknown);
+            }
+
+            if (rows.Count > 0)
+                found.Add(read);
+        }
+
+        if (found.Count > 0)
+        {
+            _logger.LogInformation(
+                "[RECORD-REPAIR] {Table} {Id} is not re-owned ({Reason}): an owner write is an Assign, and the row has a child along " +
+                "{Relationships} (not on the accepted list); the mapping and the stamp are still repaired", table, id,
+                RecordRepairReason.OwnerAssignCascades, string.Join(", ", found.SelectMany(f => f.Relationships)));
+            return AssignCascadeCheck.Refused(RecordRepairReason.OwnerAssignCascades);
+        }
+
+        return new AssignCascadeCheck(null, reads);
+    }
+
+    /// <summary>
+    /// Task 052f (design 052e §3.2, the race; UAC-r2 U2): after a confirmed owner write, each child read the check made is asked
+    /// again. The check found no child along any of them, so a child found now was added after the check began and moved with
+    /// the Assign: logged with its table and id (<see cref="RecordRepairReason.OwnerAssignCascadeRaced"/>) and counted. Never
+    /// undone here (known limit K1). A read that fails is logged and reported as unchecked.
+    /// </summary>
+    private async Task<(IReadOnlyList<RecordRepairRacedChild> Raced, bool Unchecked)> AssignCascadeRaceAsync(
+        string table, Guid id, IReadOnlyList<AssignCascadeChildRead> reads, CancellationToken ct)
+    {
+        var raced = new List<RecordRepairRacedChild>();
+        var notChecked = false;
+        foreach (var read in reads)
+        {
+            EntityCollection? children;
+            try
+            {
+                children = await ReadAssignCascadeChildAsync(read, id, ct).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                notChecked = true;
+                _logger.LogError(ex,
+                    "[RECORD-REPAIR] {Table} {Id} was re-owned, and its children along {Relationships} ({ChildTable}.{Column}) could " +
+                    "not be read again, so a child added since the check cannot be ruled out", table, id,
+                    string.Join(", ", read.Relationships), read.Table, read.Column);
+                continue;
+            }
+
+            if (children?.Entities is not { } rows)
+            {
+                notChecked = true;
+                _logger.LogError(
+                    "[RECORD-REPAIR] {Table} {Id} was re-owned, and the read again of its children along {Relationships} " +
+                    "({ChildTable}.{Column}) returned no answer", table, id, string.Join(", ", read.Relationships), read.Table,
+                    read.Column);
+                continue;
+            }
+
+            foreach (var child in rows)
+            {
+                var childTable = read.Table == ActivityPointerTable
+                    && child.Attributes.TryGetValue(ActivityTypeColumn, out var type) && type is string { Length: > 0 } activity
+                        ? activity
+                        : read.Table;
+                raced.Add(new RecordRepairRacedChild(childTable, child.Id, read.Relationships));
+                _logger.LogWarning(
+                    "[RECORD-REPAIR] {Table} {Id} ({Reason}): {ChildTable} {ChildId} was added along {Relationships} after the cascade " +
+                    "check, and moved with the owner write; it is not moved back", table, id, RecordRepairReason.OwnerAssignCascadeRaced,
+                    childTable, child.Id, string.Join(", ", read.Relationships));
+            }
+        }
+
+        return (raced, notChecked);
+    }
+
+    /// <summary>Task 052f: one app-only <c>top 1</c> read of <paramref name="id"/>'s children along <paramref name="read"/>.</summary>
+    private Task<EntityCollection> ReadAssignCascadeChildAsync(AssignCascadeChildRead read, Guid id, CancellationToken ct)
+    {
+        var query = new QueryExpression(read.Table)
+        {
+            ColumnSet = read.Table == ActivityPointerTable ? new ColumnSet(ActivityTypeColumn) : new ColumnSet(false),
+            TopCount = 1,
+            NoLock = false,
+        };
+        query.Criteria.AddCondition(read.Column, ConditionOperator.Equal, id);
+        return _entities.RetrieveMultipleAsync(query, ct);
+    }
+
+    /// <summary>Task 052f: the cascade check's answer — a refusal reason, or none and the child reads it made.</summary>
+    private readonly record struct AssignCascadeCheck(string? Refusal, IReadOnlyList<AssignCascadeChildRead> Reads)
+    {
+        public static AssignCascadeCheck Refused(string reason) => new(reason, []);
     }
 
     /// <summary>The row, read committed with every column (the reparent's whole-row read); <c>null</c> when it does not exist.</summary>
@@ -1023,6 +1295,17 @@ internal enum RecordRepairPart
     CoreAncestorStamp,
 }
 
+/// <summary>
+/// Task 052f: one per-row child read of the Assign-cascade check — the child table and its referencing column read with
+/// <c>top 1</c>, and the relationship schema names it stands for (every activity relationship on <c>regardingobjectid</c> is one
+/// <c>activitypointer</c> read).
+/// </summary>
+internal sealed record AssignCascadeChildRead(string Table, string Column, IReadOnlyList<string> Relationships);
+
+/// <summary>Task 052f (the race): a child that moved with an owner write after the check — its table, its id and the
+/// relationships it was found along.</summary>
+internal sealed record RecordRepairRacedChild(string Table, Guid Id, IReadOnlyList<string> Relationships);
+
 /// <summary>A reported field's outcome.</summary>
 internal enum RecordRepairFieldState
 {
@@ -1077,6 +1360,14 @@ internal sealed record RecordRepairOutcome
     /// <summary>Field-mapping warnings, as the create reports them.</summary>
     public IReadOnlyList<string> Warnings { get; init; } = [];
 
+    /// <summary>Task 052f (the race): children found along an unaccepted relationship after the owner write that the check before
+    /// it did not find (<see cref="RecordRepairReason.OwnerAssignCascadeRaced"/>); empty when none, or when no owner was written.</summary>
+    public IReadOnlyList<RecordRepairRacedChild> RacedChildren { get; init; } = [];
+
+    /// <summary>Task 052f (the race): <c>true</c> when a read made again after the owner write failed, so a raced child cannot be
+    /// ruled out for that relationship.</summary>
+    public bool RaceUnchecked { get; init; }
+
     /// <summary>Whether the one update was written.</summary>
     public bool Wrote => Status == RecordRepairStatus.Repaired;
 
@@ -1105,7 +1396,7 @@ internal sealed record RecordRepairOutcome
         // pass's attempt limit).
         RecordRepairReason.MappingFilingUnavailable,
         RecordRepairReason.MappingSourceUnreadable,
-        // Review F1-a: the relationship metadata that says whether an owner write cascades could not be read.
+        // Review F1-a / 052f: whether an owner write would move a child along an unaccepted relationship could not be told.
         RecordRepairReason.OwnerAssignCascadeUnknown,
     };
 
@@ -1220,16 +1511,22 @@ internal static class RecordRepairReason
     /// <summary>Task 016 escalation trigger 2: the owner would move the row to another business unit (fail closed).</summary>
     internal const string OwnerMovesBusinessUnit = "record_repair.owner_moves_business_unit";
 
-    /// <summary>Task 052b (review F1-a): the table has a one-to-many relationship that cascades on Assign to a child table the
-    /// allow-list does not accept (<see cref="RecordCreationService.AcceptedAssignCascades"/>), so an owner write would re-own
-    /// child rows too — the owner is not written. An answer, not a fault: the row is not asked again, and the pass does not
-    /// revisit it when the allow-list or the metadata changes later (its watermark has passed the row); the on-demand repair
-    /// (task 052c) is the path for such rows.</summary>
+    /// <summary>Task 052b (review F1-a) / 052f: the row has a child along a one-to-many relationship that cascades on Assign to
+    /// a child table the allow-list does not accept (<see cref="RecordCreationService.AcceptedAssignCascades"/>), so an owner
+    /// write would re-own that child too — the owner is not written. An answer, not a fault: the row is not asked again, and the
+    /// pass does not revisit it when the child is removed later (its watermark has passed the row; known limit K2); the
+    /// on-demand repair (task 052c) is the path for such rows.</summary>
     internal const string OwnerAssignCascades = "record_repair.owner_assign_cascades";
 
-    /// <summary>Task 052b (review F1-a): the table's relationship metadata could not be read, so whether an owner write would
-    /// cascade cannot be told — the owner is not written, and the row is asked again (a fault).</summary>
+    /// <summary>Task 052b (review F1-a) / 052f: whether an owner write would move a child along an unaccepted relationship
+    /// cannot be told — the table's relationship metadata, or a child read, failed or was refused, or a relationship does not
+    /// state its referencing column. The owner is not written, and the row is asked again (a fault, never "no children").</summary>
     internal const string OwnerAssignCascadeUnknown = "record_repair.owner_assign_cascade_unknown";
+
+    /// <summary>Task 052f (the race): after a confirmed owner write, a child was found along an unaccepted relationship that the
+    /// check before the write did not find — it was added in between and moved with the Assign. Logged with the child's table and
+    /// id and counted; not moved back (known limit K1).</summary>
+    internal const string OwnerAssignCascadeRaced = "record_repair.owner_assign_cascade_raced";
 
     internal const string StampUnavailable = "record_repair.stamp_unavailable";
     internal const string StampNothingMissing = "record_repair.stamp_nothing_missing";

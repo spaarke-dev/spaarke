@@ -182,8 +182,8 @@ public interface IGenericEntityService
     /// </summary>
     /// <remarks>
     /// <para>Added for field-mapping-server-write-path-r1 task 052b (review F1-a): Repair's owner write is an Assign, and Dataverse
-    /// re-owns the child rows of every relationship that cascades on Assign, so the repair pass re-owns no row of a table that
-    /// has one (the Assign-cascade check of <c>scripts/Migrate-DirectMessagesToOwnerTeam.ps1</c>, in C#).</para>
+    /// re-owns the child rows of every relationship that cascades on Assign. Task 052f: Repair re-owns a row only when it has no
+    /// child along a relationship its allow-list does not accept, read per row along each relationship's referencing column.</para>
     /// <para>A fault, or a table Dataverse does not know, is thrown; the caller fails closed. The default body throws, as
     /// <see cref="GetColumnMetadataAsync"/>'s does: a substitute that does not model relationships fails loudly instead of reading
     /// as "nothing cascades".</para>
