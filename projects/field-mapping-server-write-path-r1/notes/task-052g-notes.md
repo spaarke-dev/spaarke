@@ -167,8 +167,8 @@ a secure matter now expect `owner_left_to_secure_pass`, each with a comment nami
 
 | AC | Test(s) |
 |---|---|
-| AC1 | `AC1_APersonOwnedEventUnderAMatterInAnotherUnit_IsReOwnedToThatUnitsTeam_AndTheMoveIsReported`, `AC1_APersonOwnedDocumentUnderAMatterInAnotherUnit_*`, `AC1_AToDoMissingItsStamp_ReportsTheFamilyRootTheStampPlanAdds`, `AC1_ASameUnitReOwn_IsWritten_WithNoMoveReported`, `AC1_AMoveWhoseOwnerTheCascadeCheckTookOut_IsNeitherWrittenNorReported`, `AC1_AMoveWhoseOwnerTheCascadeCheckTookOut_WhileOtherColumnsAreWritten_IsNotReported`, `AC1_AMoveWhoseWriteFails_IsNotReported`; pass: `AC1_TheRunCountsACrossUnitReOwn_AndTheHeartbeatNamesIt` |
-| AC2 | `AC2_APersonOwnedOrdinaryWorkAssignmentUnderAMatterInAnotherUnit_GetsExactlyOneUpdate_AndNoOtherCall` (one conditional update, applied, version advanced; the service made no other write call; the reconciler's double saw no call but reads; no resolver re-own) |
+| AC1 | `AC1_APersonOwnedEventUnderAMatterInAnotherUnit_IsReOwnedToThatUnitsTeam_AndTheMoveIsReported`, `AC1_APersonOwnedDocumentUnderAMatterInAnotherUnit_*`, `AC1_AToDoMissingItsStamp_ReportsTheFamilyRootTheStampPlanAdds`, `AC1_ASameUnitReOwn_IsWritten_WithNoMoveReported`, `AC1_AMoveWhoseOwnerTheCascadeCheckTookOut_IsNeitherWrittenNorReported`, `AC1_AMoveWhoseOwnerTheCascadeCheckTookOut_WhileOtherColumnsAreWritten_IsNotReported`, `AC1_AMoveWhoseWriteFaultsAndDidNotLand_IsNotReported`, `AC1_AWriteThatFaultedButLanded_IsStillWriteFailed_AndTheMoveIsReported` (review round 1); pass: `AC1_TheRunCountsACrossUnitReOwn_AndTheHeartbeatNamesIt` |
+| AC2 | `AC2_APersonOwnedOrdinaryWorkAssignmentUnderAMatterInAnotherUnit_GetsExactlyOneUpdateAndOneReadBack_AndNoOtherWrite` (one conditional update, applied, version advanced; the service made no other write call; the reconciler's double saw no call but reads; no resolver re-own) |
 | AC3 | `AC3_ARowUnderTheSecureMatterWhoseAnswerIsIsolated_IsLeftToTheSecurePass_NeverWritten` (document, event, to-do × Secure named team, another team in the Secure unit, restricted-content team substituted, restricted-content team by name), `AC3_ARowUnderTheSecureMatterAlreadyInTheSecureUnit_IsLeftToTheSecurePass` (×3); pass: `AC3_TheRunCountsRowsLeftToTheSecurePass_AndTheUndecidedOnesAreAlsoCountedAndAskedAgain` |
 | AC4 | `AC4_AUserOwnedRowInTheSecureUnit_WithAnOrdinaryAnswer_IsLeftToTheSecurePass`, `AC4_ARowTheSharedIsolationReadCallsIsolated_IsLeftToTheSecurePass` (the fixture's row reads systemuser-owned while its `owningteam` is the Secure Record owner team: only the shared read, which reads `owningteam`, can tell); the restricted-content team as current owner: K2 |
 | AC4a | `AC4a_WhenIsolationCannotBeTold_TheOwnerIsKept_NeverWritten_AndAskedAgain` (Secure unit read faults, Secure unit ambiguous, answer team read faults, answer team has no unit, row unit unreadable, isolation read faults twice, reconciler not resolvable, configuration not resolvable); twins: `AC4a_AnIsolationReadThatFaultsOnce_IsReadAgainByTheSharedRead_AndTheMoveIsWritten`, `AC4a_AnEnvironmentWithNoSecureRecordUnit_DecidesOnTheRestOfTheGuard` |
@@ -193,3 +193,38 @@ Run on the task branch, with the code commit plus the M3b test.
 | `RecordRepair` filter | 446 / 446 passed |
 | `dotnet format whitespace --verify-no-changes` | clean on `Services/RecordCreation/`, `tests/integration/data-mutation/RecordOwnership/` and `OwnershipDirectory.cs` |
 | AC7 grep | `owner_moves_business_unit` and `OwnerMovesBusinessUnit` have no match in `src/` or `docs/`. The only remaining matches are project history (notes and POMLs), these notes, and the AC7 test. |
+
+## Review round 1
+
+Fix round on the review findings. Each fix has a test that failed with the fix switched off (the fix edited out in place, built,
+run with the `RecordRepair` filter, restored from git; never `git stash`).
+
+| # | Finding | Fix (`Services/RecordCreation/`) | Test (fails with the fix off) |
+|---|---|---|---|
+| 1a | Design §3.3.2 / §3.4 say "If-Match, eviction and a read-back"; a confirmed owner write was reported from the plan, never read back | `RepairAsync`: after a confirmed write that planned a move, one app-only read of `ownerid` and `owningbusinessunit` (`ReadOwnerAsync`, shared with `LogOwnerAfterConflictAsync`). The planned team as owner reports the move with the unit the read showed; another owner logs "another writer changed it" and reports no move; a read fault reports the planned move and the line says "not read back" | `AC1_AConfirmedMove_IsReportedWithTheUnitTheReadBackShowed`, `AC1_AMoveWhoseReadBackShowsAnotherOwner_IsNotReported_AndTheDifferenceIsLogged`, `AC1_AMoveWhoseReadBackFaults_IsReportedAsPlanned_AndTheLineSaysItWasNotReadBack`; the one-read assertions in `AC1_APersonOwnedEvent…` and AC2 (4 + 1 failed) |
+| 1b | A write fault is ambiguous (it may have landed) but its move was never looked for | The generic write-failure catch (not the 412 path): when a move was planned, one read; the planned team as owner logs the move line ("the write landed despite the fault") and sets `MovedBusinessUnit` on the `WriteFailed` outcome (status unchanged, no write, no loop); a read fault is logged and ignored | `AC1_AWriteThatFaultedButLanded_IsStillWriteFailed_AndTheMoveIsReported`, `AC1_AMoveWhoseWriteFaultsAndDidNotLand_IsNotReported`, `AC1_AWriteFaultWhoseReadBackAlsoFaults_IsLoggedAndIgnored_StillWriteFailed` (3 failed) |
+| 1c | The pass counted a move only for `Wrote` outcomes | `RecordRepairPassJob.Count` counts `ownerMovedBusinessUnit` from `MovedBusinessUnit`, whatever the status | pass `AC1_AWriteThatFaultedButLanded_IsCountedAsFailed_AndAsAMove` (1 failed). `AC1_AMoveWhoseWriteFails_IsNotReported` is split into the did-not-land and landed tests above |
+| 1d | A same-unit owner write must not gain a read | The read-back runs only when `OwnerRepair.MovedBusinessUnit` is set | `AC1_ASameUnitReOwn_IsWritten_WithNoMoveReported` asserts no read (a must-not-fire twin: passes with and without the fix). AC2 (cross-unit) is now "exactly one update and one read-back, no other write" |
+| 2 | `FamilyRootOf` returned the held stamp over the plan's replacement | `FamilyRootOf` (now `internal`): per `CoreAncestorLookups` column, the plan's value when the plan names the column (a planned clear gives no root, the next column is asked), else the held value; the precedence of `AsTheRowEnds` | `AC1_AToDoHoldingAStaleStamp_ReportsTheRootThePlanReplacesItWith`, `FamilyRootOf_TakesThePlansValueWhenThePlanNamesTheColumn_AndTheHeldValueOtherwise` (2 failed) |
+| 3 | Resolving the shared read in the guard (scope, `IConfiguration`, `SecureChildReconciler`) could throw out of `RepairAsync` | Scope creation and both resolutions inside a try with the guard's filter; a fault is `owner_isolation_unknown` ("the shared isolation read could not be built") | `AC4a_WhenIsolationCannotBeTold…(ReconcilerFactoryThrows)` (the world's reconciler factory throws; 1 failed) |
+| 4 | An abandoned row's log named no reason when it sat on a field | `ReasonOf`: the outcome's code, else the owner refusal's, else the first field reason in `RecordRepairOutcome.TransientReasons` (so `owner_isolation_unknown`, `owner_assign_cascade_unknown`) | `AC3_ARowAbandonedWhileIsolationCouldNotBeTold_IsLoggedWithThatReason` (1 failed) |
+| 5 | Nothing pinned the guard's team read columns, and the double ignores them | Test only | `AC4b_TheRestrictedContentOwnerTeam_IsTheConfiguredName` asserts every guard team read asked for `businessunitid` and `name` (2 failed with `TeamNameColumn` dropped from the read) |
+| 6 | AC4d did not record that no note is written | Test only, production unchanged | `AC4d_…` also asserts no write targets `annotation` and no Assign was sent (the existing `ownerid` assertion stays; the I-1 stamp write is allowed) |
+
+Seams added to the test world (`RepairWorld`): `AfterWrite` (a change after our write), `WriteFaultAfterLanding` (the update lands,
+then throws), `ReconcilerFactoryFault` (building the reconciler throws), and an optional held stamp on the to-do builder.
+
+### Known limits added by this round
+
+- **K7 — check (g) cannot fire for a systemuser-owned row.** The shared isolation read answers from the row's `owningteam`, and a
+  person-owned row has none, so for the rows Repair reaches the guard rests on the unit checks (d, e) and the restricted-content
+  check (f). Check (g) is covered only by the unit tests that give a person-owned row an owning team (the `AC4_ARowTheSharedIsolationReadCallsIsolated…` fixture).
+- **K8 — an unresolvable `SecureRecord:BusinessUnitName` reads as "no Secure unit".** `ResolveSecureBusinessUnitAsync` answers
+  `(null, false)`, so no unit is isolated by the unit tests. A pre-enable check for it is added to design §6 by the main session.
+- **K9 — what "skipped whole" means for AC4d.** The owner and the notes are untouched; the I-1 stamp write for the same row is
+  still made (the guard keeps only the owner).
+- **K10 — the guard is a local composition of shared reads.** It composes `SecureRecordOwnerTeam`, `RestrictedContentOwnerTeam` and
+  `RefileIsolationRead` in the shape UAC-r2 set; it is not a shared predicate, so a change to their isolation rules needs this
+  method reviewed too.
+- **Read-back is one read, never a loop.** A fault there reports the planned move (the safe side for a follow-up log line); a
+  different owner reports none. The move count is a log and a pass count, not an access decision.
