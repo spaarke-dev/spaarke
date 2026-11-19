@@ -59,7 +59,6 @@ import { StatTiles, type StatTile } from './StatTiles';
 import {
   SendEmailDialog,
   describeSendFailure,
-  plainTextToHtml,
   RichFilePreviewDialog,
   OOB_MODAL_SIZES,
   cleanGuid,
@@ -160,6 +159,7 @@ export interface DailyBriefingAppProps {
 type EmailDialogState =
   | { mode: 'briefing'; defaultSubject: string; defaultBody: string }
   | { mode: 'item'; item: HighPriorityItemResult; defaultSubject: string; defaultBody: string };
+// Both modes carry an HTML `defaultBody`: the composer opens in rich text (task 197).
 
 /**
  * A modal's content, whether it is open, and a key per opening (#2658). A Fluent Dialog unmounted while open leaves
@@ -203,7 +203,7 @@ export function buildRecordDeepLink(clientUrl: string, entityType: string, entit
 export function buildItemEmailDraft(
   item: HighPriorityItemResult,
   clientUrl: string
-): { subject: string; body: string } {
+): { subject: string; body: string; html: string } {
   const kind = item.kindLabel ? `${item.kindLabel}: ` : '';
   const subject = `${kind}${item.name || 'Record'}`.slice(0, 200);
   const link = buildRecordDeepLink(clientUrl, item.entityType, item.entityId);
@@ -211,7 +211,17 @@ export function buildItemEmailDraft(
   if (item.description) lines.push('', item.description);
   if (link) lines.push('', `Open the record: ${link}`);
   lines.push('', '— Shared from the Daily Briefing');
-  return { subject, body: lines.join('\n') };
+  // The same draft as HTML for the rich-text composer (task 197 fix round 1): the record URL is a real anchor, as in the
+  // briefing email below, not text a rich editor leaves unlinked. Every field is escaped.
+  const html = [
+    `<p>${esc(item.name || 'Record')}</p>`,
+    item.description ? `<p>${esc(item.description).replace(/\r?\n/g, '<br>')}</p>` : '',
+    link ? `<p><a href="${esc(link)}">Open the record</a></p>` : '',
+    '<p>— Shared from the Daily Briefing</p>',
+  ]
+    .filter(Boolean)
+    .join('\n');
+  return { subject, body: lines.join('\n'), html };
 }
 
 /** Minimal HTML escaper for the briefing-email builder below. */
@@ -688,8 +698,8 @@ export const DailyBriefingApp: React.FC<DailyBriefingAppProps> = ({ params: _par
 
   const handleEmailItem = React.useCallback(
     (item: HighPriorityItemResult) => {
-      const { subject, body } = buildItemEmailDraft(item, clientUrl);
-      setEmailSlot(prev => openModalSlot(prev, { mode: 'item', item, defaultSubject: subject, defaultBody: body }));
+      const { subject, html } = buildItemEmailDraft(item, clientUrl);
+      setEmailSlot(prev => openModalSlot(prev, { mode: 'item', item, defaultSubject: subject, defaultBody: html }));
     },
     [clientUrl]
   );
@@ -879,10 +889,7 @@ export const DailyBriefingApp: React.FC<DailyBriefingAppProps> = ({ params: _par
           onClose={closeEmailDialog}
           titleOverride={emailDialog.mode === 'briefing' ? 'Email Briefing' : 'Email Item'}
           initialSubject={emailDialog.defaultSubject}
-          // The briefing body is already HTML; an item's drafted body is plain text, opened in rich text (task 197).
-          initialBody={
-            emailDialog.mode === 'briefing' ? emailDialog.defaultBody : plainTextToHtml(emailDialog.defaultBody)
-          }
+          initialBody={emailDialog.defaultBody}
           initialBodyFormat="HTML"
           onSearchRecipients={handleSearchUsers}
           authenticatedFetch={authenticatedFetch}
