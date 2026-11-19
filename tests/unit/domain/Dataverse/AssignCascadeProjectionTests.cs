@@ -28,6 +28,19 @@ public sealed class AssignCascadeProjectionTests
     }
 
     [Fact]
+    public void EachListedRelationship_CarriesItsReferencingColumn_OrNoneWhenTheMetadataDoesNotStateIt()
+    {
+        // Task 052f: Repair reads a row's children along this column; a relationship without one is read as unknown.
+        var withColumn = Relationship("Contact_Annotation", "annotation", CascadeType.Cascade);
+        withColumn.ReferencingAttribute = "objectid";
+        var withoutColumn = Relationship("contact_nocolumn", "sprk_memo", CascadeType.Cascade);
+
+        DataverseServiceClientImpl.AssignCascadesOf(Entity(withColumn, withoutColumn))
+            .Select(c => (c.SchemaName, c.ReferencingAttribute))
+            .Should().BeEquivalentTo(new (string, string?)[] { ("Contact_Annotation", "objectid"), ("contact_nocolumn", null) });
+    }
+
+    [Fact]
     public void ARelationshipThatDoesNotCascadeOnAssign_IsNotListed()
     {
         DataverseServiceClientImpl.AssignCascadesOf(Entity(Relationship("contact_sprk_notes", "sprk_note", CascadeType.NoCascade)))

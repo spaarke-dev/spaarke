@@ -1890,9 +1890,14 @@ internal sealed partial class RepairWorld
         entities
             .Setup(e => e.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
             .Returns((QueryExpression query, CancellationToken _) =>
-                ThreadReadFault is { } threadFault && query.EntityName == RecordThreadFiling.ThreadTable
+                RoleAnswer(query) // task 052f fix round: the app identity's roles (the read depth)
+                ?? CascadeChildAnswer(query) // task 052f: a per-row Assign-cascade child read
+                ?? (ThreadReadFault is { } threadFault && query.EntityName == RecordThreadFiling.ThreadTable
                     ? Task.FromException<EntityCollection>(threadFault)
-                    : Task.FromResult(Directory.Answer(query)));
+                    : Task.FromResult(Directory.Answer(query))));
+        entities
+            .Setup(e => e.GetCurrentIdentityIdAsync(It.IsAny<CancellationToken>()))
+            .Returns(() => AppIdentityAnswer());
         entities
             .Setup(e => e.RetrieveAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
             .Returns((string table, Guid id, string[] columns, CancellationToken _) => Task.FromResult(Read(table, id, columns)));
