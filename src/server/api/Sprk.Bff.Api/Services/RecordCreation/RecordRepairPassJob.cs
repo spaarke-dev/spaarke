@@ -866,6 +866,23 @@ public sealed class RecordRepairPassJob : IScheduledJob
         {
             counts.OwnerAssignCascadeRaceUnchecked++;
         }
+
+        // Task 052g (design 052e §3.3): a confirmed re-own across business units, and the rows Repair left to the secure pass
+        // (an answer, or undecided: counted in both, the undecided ones also on their own).
+        if (outcome.Wrote && outcome.MovedBusinessUnit is not null)
+        {
+            counts.OwnerMovedBusinessUnit++;
+        }
+
+        if (outcome.Fields.Any(f => f.ReasonCode is RecordRepairReason.OwnerLeftToSecurePass or RecordRepairReason.OwnerIsolationUnknown))
+        {
+            counts.OwnerLeftToSecurePass++;
+        }
+
+        if (outcome.Fields.Any(f => f.ReasonCode == RecordRepairReason.OwnerIsolationUnknown))
+        {
+            counts.OwnerIsolationUnknown++;
+        }
     }
 
     private static string? ReasonOf(RecordRepairOutcome outcome) => outcome.ReasonCode ?? outcome.OwnerRefusal?.Code;
@@ -968,6 +985,8 @@ public sealed class RecordRepairPassJob : IScheduledJob
             + "corePairUndecided={CorePairUndecided} corePairRowsUnread={CorePairRowsUnread} reportTruncated={ReportTruncated} "
             + "reportFailures={ReportFailures} ownerAssignCascadesByTable={OwnerAssignCascadesByTable} "
             + "ownerAssignCascadeRaced={OwnerAssignCascadeRaced} ownerAssignCascadeRaceUnchecked={OwnerAssignCascadeRaceUnchecked} "
+            + "ownerMovedBusinessUnit={OwnerMovedBusinessUnit} ownerLeftToSecurePass={OwnerLeftToSecurePass} "
+            + "ownerIsolationUnknown={OwnerIsolationUnknown} "
             + "durationMs={DurationMs} "
             + "trigger={Trigger} runId={RunId} correlationId={CorrelationId}",
             LogPrefix, status, mode, onDemand?.Table ?? "(all)", createdFrom ?? "-", createdTo ?? "-", scanUntil ?? "-", afterId ?? "-", lastIdCovered ?? "-", context.Attempt,
@@ -980,6 +999,7 @@ public sealed class RecordRepairPassJob : IScheduledJob
             report?.Half ?? 0, report?.Changed ?? 0, report?.Undecided ?? 0, report?.RowsUnread ?? 0,
             (report?.Truncated ?? 0) + (report?.FindingsTruncated == true ? 1 : 0), report?.Failures ?? 0,
             byTableText.Length > 0 ? byTableText : "-", counts.OwnerAssignCascadeRaced, counts.OwnerAssignCascadeRaceUnchecked,
+            counts.OwnerMovedBusinessUnit, counts.OwnerLeftToSecurePass, counts.OwnerIsolationUnknown,
             (long)duration.TotalMilliseconds, context.Trigger, context.RunId,
             context.CorrelationId);
 
@@ -1012,6 +1032,9 @@ public sealed class RecordRepairPassJob : IScheduledJob
                     counts.OwnerAssignCascadesByTable,
                     counts.OwnerAssignCascadeRaced,
                     counts.OwnerAssignCascadeRaceUnchecked,
+                    counts.OwnerMovedBusinessUnit,
+                    counts.OwnerLeftToSecurePass,
+                    counts.OwnerIsolationUnknown,
                     counts.TablesWaiting,
                     counts.OutsidePass,
                     counts.Retried,
@@ -1077,6 +1100,15 @@ public sealed class RecordRepairPassJob : IScheduledJob
 
         /// <summary>Task 052f (the race): re-owned rows whose children could not be read again after the write.</summary>
         public int OwnerAssignCascadeRaceUnchecked;
+
+        /// <summary>Task 052g: rows re-owned (confirmed) to a team in another business unit.</summary>
+        public int OwnerMovedBusinessUnit;
+
+        /// <summary>Task 052g: rows whose owner Repair left to the secure pass (isolated, or whether isolated could not be told).</summary>
+        public int OwnerLeftToSecurePass;
+
+        /// <summary>Task 052g: of those, the rows whose isolation could not be told (asked again).</summary>
+        public int OwnerIsolationUnknown;
         public int TablesWaiting;
         public int OutsidePass;
         public int Retried;

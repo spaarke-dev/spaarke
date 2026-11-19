@@ -1542,7 +1542,10 @@ internal sealed partial class RecordCreationService
     /// F1-b — why the row's mapping must not run (its filing resolves to the Secure team that does not own it yet, or its
     /// filing's owner could not be decided), or <c>null</c>.
     /// </summary>
-    private sealed record OwnerRepair(RecordCreationRefusal? Refusal, string? MappingBlocked = null);
+    /// <remarks>Task 052g: <c>MovedBusinessUnit</c> is set when the owner joined the patch and its team sits in another business
+    /// unit than the row's (design 052e §3.3.2); it is reported only after a confirmed write.</remarks>
+    private sealed record OwnerRepair(
+        RecordCreationRefusal? Refusal, string? MappingBlocked = null, RecordRepairBusinessUnitMove? MovedBusinessUnit = null);
 
     /// <summary>
     /// Step 7 for an existing row (Repair, task 016; FR-09), decided BEFORE the mapping (review F1-b). Only a
@@ -1562,10 +1565,12 @@ internal sealed partial class RecordCreationService
     /// <para><b>The mapping gate</b> (review F1-b): a FILED row's filing is resolved whatever happens to its owner. When it
     /// resolves to the Secure team (I-2) and that team does not own the row yet, or it cannot be decided, the mapping is
     /// blocked — Create never copies a secure record's data into a row that is not isolated.</para>
-    /// <para><b>Escalation (task 016 trigger 2), fail closed until the owner decides:</b> an owner in another business unit
-    /// than the row's is NOT written on a table whose rows can have children inheriting access (every ownership-parent
-    /// table) — the move would carry those children's access with it. A leaf table (no rows filed under it) is re-owned:
-    /// the move is the row's own.</para>
+    /// <para><b>Repair leaves isolated rows to the secure pass</b> (task 052g, design 052e §3.3.1): before an owner is written,
+    /// <see cref="IsolatedRowGuardAsync"/> keeps it when the answer or the row sits in the Secure Record business unit, the
+    /// answer is a restricted-content owner team, or the row is owned by the Secure Record owner team; when any of that cannot
+    /// be read, the owner is kept and the row is asked again.</para>
+    /// <para><b>Across business units</b> (task 052g, design 052e §3.3.2, FR-25 as amended): an answer in another ordinary
+    /// business unit is written like any other; the move is reported (<see cref="RecordRepairOutcome.MovedBusinessUnit"/>).</para>
     /// <para><b>FR-41 (#2483, task 042b):</b> the owner question asks over the row's lookups as it ends (<see cref="AsTheRowEnds"/>
     /// over the stamp plan made once before this step, <paramref name="stamp"/>): a missing stamp is added, and a held stamp that
     /// disagrees with its source's root is replaced (042b F1, owner decision A'); the stamp step adds the fill-only part of the
@@ -1690,34 +1695,27 @@ internal sealed partial class RecordCreationService
             return OwnerRefused(row, refusal, report, mappingBlocked);
 
         var team = decided!.OwningTeamId!.Value;
-        Guid teamUnit;
-        try
-        {
-            teamUnit = await TeamBusinessUnitAsync(team, ct).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException) when (ct.IsCancellationRequested)
-        {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "[RECORD-REPAIR] the business unit of the owner team {Team} of {Table} {Id} could not be read; " +
-                                 "the owner was not changed", team, table, row.Id);
-            return OwnerRefused(row, OwnerUnavailable(noun), report, mappingBlocked);
-        }
 
-        if (rowUnit != teamUnit && RecordOwnershipResolver.IsOwnershipParent(table))
+        // Task 052g (design 052e §3.3.1, UAC-r2's shape): Repair leaves isolated rows to the secure pass. Asked here, on the one
+        // path that writes an owner, before the business-unit decision; a left or undecided row keeps its owner and its F1-b
+        // mapping block. The guard reads the answer team's business unit, which the decision below uses.
+        var guard = await IsolatedRowGuardAsync(table, row, rowUnit, decided, ct).ConfigureAwait(false);
+        if (guard.KeptBecause is { } keptBecause)
         {
-            _logger.LogWarning(
-                "[RECORD-REPAIR] ESCALATION (task 016 trigger 2): re-owning {Table} {Id} would move it from business unit {From} " +
-                "to {To} while rows filed under it inherit its access; the owner was not changed", table, row.Id, rowUnit, teamUnit);
-            report.Add(RecordRepairField.Skipped(RecordRepairPart.Owner, OwnerColumn, RecordRepairReason.OwnerMovesBusinessUnit));
+            report.Add(RecordRepairField.Skipped(RecordRepairPart.Owner, OwnerColumn, keptBecause));
             return new OwnerRepair(null, mappingBlocked);
         }
 
+        // Task 052g (design 052e §3.3.2, FR-25 as amended): an answer in another ordinary business unit is written like any other
+        // (the same patch, If-Match, eviction). The move is carried to the outcome; RepairAsync logs and reports it only once the
+        // owner write is confirmed. No family mover is called: a re-owned root's family follows through the ordinary-moves pass.
+        var moved = rowUnit is { } fromUnit && fromUnit != guard.TeamUnit
+            ? new RecordRepairBusinessUnitMove(fromUnit, guard.TeamUnit, FamilyRootOf(row, stamp.Plan))
+            : null;
+
         patch[OwnerColumn] = new EntityReference("team", team);
         report.Add(RecordRepairField.Repaired(RecordRepairPart.Owner, OwnerColumn));
-        return new OwnerRepair(null, mappingBlocked);
+        return new OwnerRepair(null, mappingBlocked, moved);
     }
 
     /// <summary>The owner is kept for <paramref name="kept"/>'s reason; the row stays in its own business unit.</summary>
@@ -1756,18 +1754,6 @@ internal sealed partial class RecordCreationService
     internal static Task<(RecordOwnershipParent? Parent, string? Undetermined)> PairParentAsync(
         IGenericEntityService entities, string table, string? idText, Guid? typeId, CancellationToken ct) =>
         SecureRootInheritance.PairParentAsync(entities, table, idText, typeId, ct);
-
-    /// <summary>
-    /// The business unit of <paramref name="owningTeam"/>, read app-only (step 7; shared with Repair, task 016).
-    /// </summary>
-    /// <exception cref="InvalidOperationException">The team reported no business unit.</exception>
-    private async Task<Guid> TeamBusinessUnitAsync(Guid owningTeam, CancellationToken ct)
-    {
-        var team = await _entities.RetrieveAsync("team", owningTeam, ["businessunitid"], ct).ConfigureAwait(false);
-        if (team?.GetAttributeValue<EntityReference>("businessunitid") is not { } unit || unit.Id == Guid.Empty)
-            throw new InvalidOperationException($"The owner team {owningTeam:D} reported no business unit.");
-        return unit.Id;
-    }
 
     /// <summary>
     /// Step 12 (FR-38, UAC-r2 condition 4): logs <c>client_search_index_dropped</c> for each value dropped before step 5 that
