@@ -65,7 +65,7 @@ The rows created outside the product are exactly those user-owned rows. **Repair
 
 ### 1.4 Live Assign cascades on dev (read-only, 2026-11-18)
 
-**Query.** `GET {org}/api/data/v9.2/RelationshipDefinitions/Microsoft.Dynamics.CRM.OneToManyRelationshipMetadata?$select=SchemaName,ReferencedEntity,ReferencingEntity,ReferencingAttribute,CascadeConfiguration,IsCustomRelationship` returned 13,207 relationships. Filtered to a referenced table that is `sprk_*` or `contact`, with Assign not `NoCascade`, that leaves 50, all `Cascade`. Ownership types come from `EntityDefinitions(LogicalName=…)?$select=OwnershipType,IsActivity`.
+**Query.** `GET {org}/api/data/v9.2/RelationshipDefinitions/Microsoft.Dynamics.CRM.OneToManyRelationshipMetadata?$select=SchemaName,ReferencedEntity,ReferencingEntity,ReferencingAttribute,CascadeConfiguration,IsCustomRelationship` returned 13,207 relationships. Filtered to a referenced table that is `sprk_*` or `contact`, with Assign not `NoCascade`, that leaves 50, all `Cascade` (Cascade All: an Assign moves every child row, whoever owns it; re-read 2026-11-18 for `sprk_event_Annotations`, `sprk_analysis_Annotations` and `Contact_Annotation`). In the table below, "UserOwned", "BusinessOwned" and "OrganizationOwned" are the **child table's ownership type, not the cascade type**. Ownership types come from `EntityDefinitions(LogicalName=…)?$select=OwnershipType,IsActivity`.
 
 **Org setting.** `organization.sharetopreviousowneronassign` = `false` on dev. When it is on, every Assign shares the record back to its previous owner.
 
@@ -106,7 +106,7 @@ The rows created outside the product are exactly those user-owned rows. **Repair
 | Moves nothing | `->team` from matter, project, event, document, invoice and contact; `contact->adx_externalidentity`; `->sharepointdocument` from matter, project, event and contact | No owner columns, or not stored in Dataverse. These relationships are **never read per row** (§3.2). |
 | Follows the record (intended) | `->sharepointdocumentlocation` from matter, project, event and contact | The record's own document location. The 194 pass leaves it to the root's own Assign, and the owner accepted the same cascade for the forward move into the secure team (UAC-r2 round 4 item 3). |
 | Follows the record (intended) | `sprk_analysis->sprk_analysischatmessage`, `->sprk_analysisemailmetadata`, `->sprk_analysisworkingversion` | The analysis's own content, parental by design |
-| Follows the record (owner Q2, 2026-11-18) | `sprk_event->annotation`, `sprk_analysis->annotation` | **Accepted** (owner decision, confirmed in this session; UAC-r2 agrees). The Assign carries the notes owned by the record's owner (UserOwned cascade) to the new owner team, which can then read them. Notes owned by other people stay with them. Spaarke does not use the out-of-the-box Notes, so this is expected to be rare. The §3.3.1 guard sits on the parent: a parent whose answer or current owner is isolated, or whose isolation read faults, is skipped whole, and its notes never move. |
+| Follows the record (owner Q2, 2026-11-18) | `sprk_event->annotation`, `sprk_analysis->annotation` | **Accepted with a per-row check** (owner decision, confirmed in this session; corrected 2026-11-18 after the 052f review; UAC-r2 agrees). The cascade is Cascade All, so the Assign carries **every** note on the row to the new owner team. Repair therefore re-owns an event or analysis only when every note on it is owned by the row's current owner (owner id and type): one `top 1` read for a note owned by any other principal; a hit keeps the row's owner (`owner_assign_cascades`, counted); a faulted read is `owner_assign_cascade_unknown`. Only the row owner's own notes ever move. Spaarke does not use the out-of-the-box Notes, so this is expected to be rare. The §3.3.1 guard sits on the parent: a parent whose answer or current owner is isolated, or whose isolation read faults, is skipped whole, and its notes never move. |
 | Not accepted (UAC-r2, U4) | `contact->annotation` | The same widening, into the customer unit. A contact with a note keeps its owner and is counted. |
 
 **Never accepted.** Listed explicitly so that a later reader cannot add them by habit:
@@ -132,6 +132,7 @@ The rows created outside the product are exactly those user-owned rows. **Repair
   - A failed or refused read is `record_repair.owner_assign_cascade_unknown` (transient, retried), never "no children". A row still unknown after its 12 attempts is abandoned, and 052d's report lists it.
   - "No children" is trustworthy only if the BFF app user reads every table checked at organization depth; an app-only read sees only what its role's depth reaches. On dev the BFF app users are System Administrators.
     - **Pre-enable check (§6):** the app user has organization-level Read on `activitypointer`, `annotation`, `contact` and each per-row table.
+    - **Code check (owner, 2026-11-18, after the 052f review):** once per pass, Repair reads whether the app identity holds the System Administrator role (by role template id). The answer is one of three, cached for the pass: confirmed, not confirmed, or faulted. Only "confirmed" lets the per-row child checks run. Otherwise every row that needs one (contact, analysis, event) is `owner_assign_cascade_unknown`, and a faulted read also logs one error per pass. Rows that need no child read are unaffected. A role held only through a team reads as not confirmed (fails closed).
     - **Test (052f):** a read limited by depth is never "no children".
   - A relationship whose Assign value is unstated still counts as cascading.
 - **The race.**
@@ -195,7 +196,7 @@ Repair and the root-owner step both re-own a person-owned ordinary work assignme
 | A pre-go-live user-owned child | Forward-only, no backfill (Q4) | Nowhere (K3) |
 | A row owned by a non-default team | Repair keeps team-owned rows | 194 report, when in another unit |
 | A row with an activity or child-contact child, or a contact with a note child | Never cascaded (Q5, U4) | `owner_assign_cascades` |
-| A note owned by someone other than its event's or analysis's owner | The UserOwned cascade moves only the owner's notes (Q2) | Nowhere (the note keeps its author) |
+| An event or analysis that has a note owned by someone other than its owner | The cascade is Cascade All, so re-owning the row would move that note too; the row keeps its owner (Q2, corrected 2026-11-18) | `owner_assign_cascades` |
 | A root whose `sprk_issecure` is empty | Repair keeps it (`OwnerRootSecure`); the 194 job lists only `false` | Repair report |
 | A communication that keeps its creator (E1), and its content rows | E1 rule (`RecordOwnershipResolver.cs:941-946`) | Repair report (kept) |
 | Files of documents filed directly under a non-root row moved across units | UAC-r2 issue 2903 (U1) | `ownerMovedBusinessUnit` log line |
@@ -216,7 +217,7 @@ FULL rigor, Opus. Files:
 ACs:
 1. The §3.1 entries (plus Q2's answer), each with its reason in code. Moves-nothing entries are never read per row.
 2. Re-owned: a matter, project, document, invoice or contact row with no unaccepted child.
-3. Owner Q2 (2026-11-18): an event or analysis row with a note child is re-owned and its owner's note moves with it (must fire). Negative: an event or analysis whose answer is isolated is skipped whole and its note is untouched (must not fire; with 052g's guard). Negative: a contact row with a note child is not re-owned (`owner_assign_cascades`, counted; U4).
+3. Owner Q2 (2026-11-18, corrected the same day): an event or analysis row whose notes are all its owner's is re-owned and the notes move with it (must fire); a row with a note owned by another principal (user or team) keeps its owner (`owner_assign_cascades`, counted; must fire). Negative: an event or analysis whose answer is isolated is skipped whole and its note is untouched (must not fire; with 052g's guard). Negative: a contact row with a note child is not re-owned (`owner_assign_cascades`, counted; U4).
 4. Negative: an analysis row with an email activity is not re-owned (`owner_assign_cascades`, with the relationship named).
 5. Negative: a contact with a child contact is not re-owned.
 6. Negative: a failed, refused or depth-limited child read gives `owner_assign_cascade_unknown`, never "no children".
@@ -270,6 +271,8 @@ The live check on dev gains these cases:
 
 **Owner, decided 2026-11-18 in this session.** Q1 and Q3–Q8: yes, as recommended. **Q2: yes** — event and analysis notes move with the re-owned record. The owner first left Q2 to the recommendation (recorded as no), then answered yes in UAC-r2's session and confirmed yes here. The owner states that Spaarke does not use the out-of-the-box Notes (`annotation`) or activities, so both cases are expected to be rare; a row skipped under Q5 or U4 is still counted and reported. Contact notes stay out (U4, unchanged). The isolation guard stays on the parent (§3.3.1), so a note never moves to an isolated owner. Dev held one note in total on 2026-11-18 (read-only count).
 
+**Correction, 2026-11-18 (052f adversarial review; owner decided in this session; UAC-r2 agrees).** Q2 was answered on the premise that only the record owner's notes move. The live cascade on `sprk_event_Annotations` and `sprk_analysis_Annotations` is Cascade All, which moves every note on the row. The owner chose to keep Q2's intent: Repair re-owns an event or analysis only when every note on it is the row owner's (§3.1); a row with anyone else's note keeps its owner and is counted. The owner also chose a code check on the app identity's read depth (§3.2) over the pre-enable check alone.
+
 **UAC-r2, answered 2026-11-18.** Option B is fine: no new family walk, no in-process call.
 
 | Question | Answer |
@@ -286,7 +289,7 @@ The live check on dev gains these cases:
 2. The 052d audit read has been run once, read-only, end to end on that environment.
 3. `ExternalAccess:CustomerBusinessUnitId` is set and its default team confirmed (052b K7).
 4. That environment's live Assign-cascade metadata has been re-read and compared with §1.4. The comparison includes onward cascades from each accepted child (for example a document location's child locations). Any new cascading relationship needs a decision.
-5. The BFF app user has organization-level Read on every table the per-row check reads (§3.2).
+5. The BFF app user has organization-level Read on every table the per-row check reads (§3.2), including each activity type folded into `activitypointer` (custom activity types such as `adx_*` have their own Read privilege) and every table a contact's check reads; the 052f code check holds rows when the app identity is not a System Administrator, so this item matters only where a different role is used.
 6. `organization.sharetopreviousowneronassign` has been read on that environment (`false` on dev).
 7. The values of UAC-r2's `OrdinaryMovesWritesEnabled` and the recent-changes emergency stop on that environment are known. While either stops writes, the families of repaired roots wait, and the run report says so.
 8. UAC-r2's answers to U1–U4 (recorded in §5, 2026-11-18), and their review of the 052g guard diff.

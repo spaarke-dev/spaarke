@@ -61,6 +61,8 @@
     <criterion testable="true">AC1: the §3.1 entries are in the allow-list, each with its reason in code; moves-nothing entries are never read per row.</criterion>
     <criterion testable="true">AC2: a matter, project, document, invoice or contact row with no unaccepted child is re-owned.</criterion>
     <criterion testable="true">AC3 (must fire, owner Q2 2026-11-18): an event row and an analysis row, each with a note owned by the row's owner, are re-owned, and the note moves with the row.</criterion>
+    <criterion testable="true">AC3b (negative, must fire; owner 2026-11-18 after review): the note cascade is Cascade All, so an event or analysis with a note owned by any other principal (user or team; compared on owner id and type against the row's current owner) is not re-owned (`owner_assign_cascades`, counted); a faulted note read is `owner_assign_cascade_unknown`.</criterion>
+    <criterion testable="true">AC6a (owner 2026-11-18 after review): once per pass the app identity's System Administrator role (by role template id) is read into a tri-state cached for the pass (confirmed / not confirmed / faulted). Only "confirmed" runs per-row child checks; otherwise every row that needs one (contact, analysis, event) is `owner_assign_cascade_unknown`, and "faulted" also logs one error per pass. A test for each state; no path turns a failed role read into "confirmed".</criterion>
     <criterion testable="true">AC3a (negative): a contact row with a note child is not re-owned (`owner_assign_cascades`, counted; UAC-r2 U4).</criterion>
     <criterion testable="true">AC4 (negative): an analysis row with an email activity is not re-owned (`owner_assign_cascades`, with the relationship named).</criterion>
     <criterion testable="true">AC5 (negative): a contact with a child contact is not re-owned.</criterion>
@@ -83,7 +85,7 @@
     <cost-of-doing-nothing>With the empty allow-list every row of seven pass tables is refused, so the repair pass cannot give a natively created matter, project, event, document, invoice, analysis or contact its standard owner (FR-25 acceptance).</cost-of-doing-nothing>
   </justification>
 
-  <notes>Created 2026-11-18 from design §4 after the owner approved 052e.</notes>
+  <notes>Created 2026-11-18 from design §4 after the owner approved 052e. Same day, after the first implementation (b695480cf9) and its Opus adversarial review: the live note cascade is Cascade All (every note moves), so the owner kept Q2's intent with a per-row note-owner check (AC3b) and chose a code check on the app identity's read depth (AC6a); UAC-r2 agreed and set the tri-state shape. Review findings 3 (continue after a read fault once a child is found) and 4 (race re-read lists every raced child) fixed in the same round.</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>
