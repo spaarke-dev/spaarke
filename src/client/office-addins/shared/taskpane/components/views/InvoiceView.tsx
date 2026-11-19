@@ -539,8 +539,10 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
       setFirmsReload(n => n + 1);
     }
     // A pending access pass is said by the panel itself (with its Retry); anything else is the server's own sentence.
-    const notice =
-      result.accessState === 'pending' ? null : (result.notice ?? `${firm.name} is on this record.`);
+    const notice = result.accessState === 'pending' ? null : (result.notice ?? `${firm.name} is on this record.`);
+    // Keep the panel mounted through the list update: added from the Firm field, it would otherwise go away the moment
+    // the record lists a firm, taking a pending add's Retry with it. A finished add closes it right after (`onClose`).
+    setAddFirmOpen(true);
     setAddedFirmNotice(notice);
     if (notice) announce(notice);
   };
@@ -621,6 +623,14 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
   const poTooLong = poNumber.trim().length > PO_NUMBER_MAX;
   const succeeded = outcome?.kind === 'success';
   const locked = submitting || succeeded;
+  /** The pane can add a firm to the chosen record (095g wired, a core record chosen). */
+  const firmLookupPossible = Boolean(
+    listLawFirms && addFirmToRecord && coreRecord && isCoreRecordType(coreRecord.entityType)
+  );
+  /** The chosen record's firms are listed, for this record, and there are none. */
+  const noFirmsListed = firms.status === 'ready' && firmsFor === firmsKey && firms.firms.length === 0;
+  /** The firm search stands in for the Firm field (owner UAT 2026-11-18). */
+  const firmLookupAvailable = firmLookupPossible && noFirmsListed && !locked;
   // Running, or showing the result of a submission the server accepted (it carries the tracking number).
   const busy = submitting || outcome?.kind === 'success' || outcome?.kind === 'ended';
   // While busy, the choices that decide which form shows (new or existing, the invoice, correction) are locked, so the
@@ -1126,7 +1136,19 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
       );
     }
     if (firms.firms.length === 0) {
-      // Nothing can be submitted for this record until a firm is added to it in Spaarke: say how, and link to the record.
+      // The firm search IS the Firm field (owner UAT 2026-11-18): `renderAddFirm` renders it, labelled "Firm".
+      if (firmLookupAvailable) return null;
+      // While a submission is running or done, the field stays put, read-only.
+      if (firmLookupPossible) {
+        return (
+          <Field label="Firm" required>
+            <Select disabled value="">
+              <option value="">Choose a firm</option>
+            </Select>
+          </Field>
+        );
+      }
+      // No firm search in this host: nothing can be submitted until a firm is added in Spaarke. Say how, and link to it.
       return (
         <>
           <Field label="Firm" required validationState="warning" validationMessage={NO_FIRM_LINKED_MESSAGE}>
@@ -1192,7 +1214,8 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
             <MessageBarBody>{addedFirmNotice}</MessageBarBody>
           </MessageBar>
         )}
-        {listedCount !== null && !addFirmOpen && (
+        {/* With no firm on the record the search below is the Firm field itself; the button is for a second firm. */}
+        {listedCount !== null && listedCount > 0 && !addFirmOpen && (
           <div>
             <Button
               appearance="transparent"
@@ -1208,12 +1231,15 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
               }}
               data-testid="invoice-add-firm"
             >
-              {listedCount === 0 ? 'Add a firm to this record' : 'Add another firm'}
+              Add another firm
             </Button>
           </div>
         )}
-        {addFirmOpen && !locked && (
+        {/* One slot for both forms: a pending add keeps the same panel (and its Retry) through the reload that lists
+            the new firm, when it stops being the Firm field. */}
+        {(addFirmOpen || firmLookupAvailable) && !locked && (
           <AddFirmPanel
+            asFirmField={firmLookupAvailable && !addFirmOpen}
             target={target}
             listLawFirms={listLawFirms}
             addFirmToRecord={addFirmToRecord}
@@ -1397,10 +1423,11 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
           defaultType={filedRecord && isCoreRecordType(filedRecord.entityType) ? filedRecord.entityType : 'Matter'}
           disabled={locked}
         />
-        {/* Not while the Firm field's "No firm is linked" message is showing: its link opens this same record. */}
+        {/* Not while the Firm field's "No firm is linked" message is showing (no firm search here): its link opens this
+            same record. */}
         {coreRecord &&
           isCoreRecordType(coreRecord.entityType) &&
-          !(firms.status === 'ready' && firms.firms.length === 0 && firmsFor === firmsKey) &&
+          !(noFirmsListed && !firmLookupPossible) &&
           renderOpenInSpaarke(
             coreRecord.logicalName || LOGICAL_NAME_BY_CORE_TYPE[coreRecord.entityType],
             coreRecord.id,

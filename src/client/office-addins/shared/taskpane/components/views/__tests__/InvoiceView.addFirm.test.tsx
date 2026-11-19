@@ -174,10 +174,24 @@ const entryButton = () => screen.getByTestId('invoice-add-firm');
 const confirmButton = () => screen.getByRole('button', { name: 'Add firm' });
 const panel = () => screen.getByTestId('add-firm-panel');
 
-/** Chooses the matter (no firm linked yet), opens the panel and chooses a firm in it. */
+/** The firm search standing in for the Firm field (the record has no firm). */
+const firmFieldSearch = async () => {
+  const found = await screen.findByTestId('add-firm-panel');
+  expect(found).toHaveAttribute('data-as-firm-field', 'true');
+  return found;
+};
+
+/** Chooses the matter (no firm linked yet) and chooses a firm in the firm search that stands in for the Firm field. */
 async function openPanelAndChoose(firmName: string) {
   await chooseMatter();
-  await screen.findByText(NO_FIRM_LINKED);
+  await firmFieldSearch();
+  await userEvent.click(await within(panel()).findByRole('option', { name: firmName }));
+}
+
+/** Chooses the matter (Other LLP already on it), opens "Add another firm" and chooses a firm in the panel. */
+async function openAnotherFirmPanelAndChoose(firmName: string) {
+  await chooseMatter();
+  await waitFor(() => expect(entryButton()).toHaveTextContent('Add another firm'));
   await userEvent.click(entryButton());
   await userEvent.click(await within(panel()).findByRole('option', { name: firmName }));
 }
@@ -209,26 +223,46 @@ afterEach(() => {
 
 // ----- the entry point --------------------------------------------------------------------------------------------
 
-describe('InvoiceView — the "Add a firm to this record" entry point', () => {
+describe('InvoiceView — with no firm on the record, the firm search is the Firm field (owner UAT 2026-11-18)', () => {
   it(
-    'must-fire: with no firm linked it shows next to the message, "Check again" and "Open in Spaarke"',
+    'must-fire: the field is labelled "Firm" and lists the law firms; no message, no "Check again", no entry button, no Cancel',
     async () => {
       process.env.ORG_URL = ORG_URL;
       renderView();
       await chooseMatter();
-      expect(await screen.findByText(NO_FIRM_LINKED)).toBeInTheDocument();
-      expect(entryButton()).toHaveTextContent('Add a firm to this record');
-      expect(screen.getByTestId('invoice-no-firm-recheck')).toBeInTheDocument();
-      expect(screen.getByTestId('invoice-no-firm-open')).toBeInTheDocument();
-      // Opening the panel sends nothing, and the button gives way to the panel.
-      await userEvent.click(entryButton());
-      expect(await screen.findByLabelText('Search law firms')).toBeInTheDocument();
+      const field = await firmFieldSearch();
+      expect(within(field).getByRole('searchbox', { name: /^Firm/ })).toBeInTheDocument();
+      expect(await within(field).findByRole('option', { name: 'Contoso LLP' })).toBeInTheDocument();
+      expect(within(field).getByRole('button', { name: 'Add firm' })).toBeDisabled();
+      expect(within(field).queryByRole('button', { name: 'Cancel' })).not.toBeInTheDocument();
+      // The old no-firm block is gone: the dropdown, its warning, "Check again" and the entry button.
+      expect(screen.queryByText(NO_FIRM_LINKED)).not.toBeInTheDocument();
+      expect(screen.queryByTestId('invoice-no-firm-recheck')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('invoice-no-firm-open')).not.toBeInTheDocument();
       expect(screen.queryByTestId('invoice-add-firm')).not.toBeInTheDocument();
+      expect(screen.queryByRole('combobox', { name: /Firm/ })).not.toBeInTheDocument();
+      // "Open in Spaarke" for the record stays where it always is, under the record.
+      expect(screen.getByTestId('invoice-core-record-open')).toBeInTheDocument();
+      // Showing the field sends nothing, and it does not take focus (the user did not open it).
       expect(posts()).toHaveLength(0);
+      expect(within(field).getByRole('searchbox')).not.toHaveFocus();
     },
     TIMEOUT
   );
 
+  it(
+    'must-not-fire: while a firm is listed it is the dropdown, not the search',
+    async () => {
+      renderView({ loadFirms: jest.fn(async () => [OTHER_FIRM]) });
+      await chooseMatter();
+      await waitFor(() => expect(firmSelect()).toHaveValue(OTHER_FIRM_ID));
+      expect(screen.queryByTestId('add-firm-panel')).not.toBeInTheDocument();
+    },
+    TIMEOUT
+  );
+});
+
+describe('InvoiceView — the "Add another firm" entry point', () => {
   it(
     'must-fire: with firms listed it reads "Add another firm"',
     async () => {
@@ -266,8 +300,11 @@ describe('InvoiceView — the "Add a firm to this record" entry point', () => {
     async () => {
       renderView({}, false);
       await chooseMatter();
+      // No firm search here: the old block stays (the warning, "Check again"), with no entry point and no search.
       expect(await screen.findByText(NO_FIRM_LINKED)).toBeInTheDocument();
+      expect(screen.getByTestId('invoice-no-firm-recheck')).toBeInTheDocument();
       expect(screen.queryByTestId('invoice-add-firm')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('add-firm-panel')).not.toBeInTheDocument();
     },
     TIMEOUT
   );
@@ -281,8 +318,7 @@ describe('InvoiceView — adding a firm', () => {
     async () => {
       renderView();
       await chooseMatter();
-      await screen.findByText(NO_FIRM_LINKED);
-      await userEvent.click(entryButton());
+      await firmFieldSearch();
       await within(panel()).findByRole('option', { name: 'Contoso LLP' });
       const gets = wire.filter(c => c.url.includes('/api/finance/firms'));
       expect(gets).toHaveLength(1);
@@ -307,10 +343,10 @@ describe('InvoiceView — adding a firm', () => {
   );
 
   it(
-    'must-not-fire: Cancel sends nothing and closes the panel; the entry point comes back',
+    'must-not-fire: Cancel ("Add another firm") sends nothing and closes the panel; the entry point comes back',
     async () => {
-      renderView();
-      await openPanelAndChoose('Contoso LLP');
+      renderView({ loadFirms: jest.fn(async () => [OTHER_FIRM]) });
+      await openAnotherFirmPanelAndChoose('Contoso LLP');
       await userEvent.click(screen.getByRole('button', { name: 'Cancel' }));
       expect(screen.queryByTestId('add-firm-panel')).not.toBeInTheDocument();
       expect(posts()).toHaveLength(0);
@@ -350,9 +386,7 @@ describe('InvoiceView — adding a firm', () => {
       renderView();
       await openPanelAndChoose('Contoso LLP');
       await userEvent.click(confirmButton());
-      expect(await screen.findByTestId('invoice-add-firm-notice')).toHaveTextContent(
-        'Contoso LLP is on this record.'
-      );
+      expect(await screen.findByTestId('invoice-add-firm-notice')).toHaveTextContent('Contoso LLP is on this record.');
     },
     TIMEOUT
   );
@@ -490,7 +524,9 @@ describe('InvoiceView — a refusal', () => {
       // Nothing was added: no notice, no firm chosen, and the buttons are usable again.
       expect(screen.queryByTestId('invoice-add-firm-notice')).not.toBeInTheDocument();
       expect(confirmButton()).toBeEnabled();
-      expect(screen.getByText(NO_FIRM_LINKED)).toBeInTheDocument();
+      // The record still has no firm: the search is still the Firm field.
+      expect(panel()).toHaveAttribute('data-as-firm-field', 'true');
+      expect(screen.queryByRole('combobox', { name: /Firm/ })).not.toBeInTheDocument();
     },
     TIMEOUT
   );
@@ -572,13 +608,12 @@ describe('InvoiceView — a refusal', () => {
   it(
     'a list error shows its sentence with Retry (a 503 on GET /api/finance/firms)',
     async () => {
-      renderView();
-      await chooseMatter();
-      await screen.findByText(NO_FIRM_LINKED);
+      // The firm search loads as soon as the record shows no firm: its first request is the list's GET.
       mockFetch.mockImplementationOnce(async () =>
         response(503, { errorCode: 'ebilling.submission.record_unavailable', detail: 'Law firm type not configured' })
       );
-      await userEvent.click(entryButton());
+      renderView();
+      await chooseMatter();
       const error = await screen.findByTestId('add-firm-list-error');
       expect(error).toHaveTextContent(TRY_AGAIN);
       await userEvent.click(within(error).getByRole('button', { name: 'Retry' }));
@@ -629,11 +664,11 @@ describe('InvoiceView — F1: the notice never promises access', () => {
 
 describe('InvoiceView — focus after the panel opens and closes (a11y)', () => {
   it(
-    'opening the panel focuses its search box',
+    'opening the panel ("Add another firm") focuses its search box',
     async () => {
-      renderView();
+      renderView({ loadFirms: jest.fn(async () => [OTHER_FIRM]) });
       await chooseMatter();
-      await screen.findByText(NO_FIRM_LINKED);
+      await waitFor(() => expect(entryButton()).toHaveTextContent('Add another firm'));
       await userEvent.click(entryButton());
       expect(await screen.findByLabelText('Search law firms')).toHaveFocus();
     },
@@ -643,8 +678,8 @@ describe('InvoiceView — focus after the panel opens and closes (a11y)', () => 
   it(
     'Cancel returns focus to the entry button',
     async () => {
-      renderView();
-      await openPanelAndChoose('Contoso LLP');
+      renderView({ loadFirms: jest.fn(async () => [OTHER_FIRM]) });
+      await openAnotherFirmPanelAndChoose('Contoso LLP');
       await userEvent.click(screen.getByRole('button', { name: 'Cancel' }));
       expect(screen.queryByTestId('add-firm-panel')).not.toBeInTheDocument();
       await waitFor(() => expect(entryButton()).toHaveFocus());
@@ -683,7 +718,7 @@ describe('InvoiceView — focus after the panel opens and closes (a11y)', () => 
   );
 });
 
-describe('InvoiceView — an unknown 5xx and the list\'s 404', () => {
+describe("InvoiceView — an unknown 5xx and the list's 404", () => {
   it.each([
     [500, undefined, UNCONFIRMED],
     [502, { title: 'Bad gateway' }, UNCONFIRMED],
@@ -708,13 +743,12 @@ describe('InvoiceView — an unknown 5xx and the list\'s 404', () => {
   it(
     'the law-firm list\'s uniform 404 says "You can\'t list law firms in Spaarke." (not the add sentence)',
     async () => {
-      renderView();
-      await chooseMatter();
-      await screen.findByText(NO_FIRM_LINKED);
+      // The firm search loads as soon as the record shows no firm: its first request is the list's GET.
       mockFetch.mockImplementationOnce(async () =>
         response(404, { errorCode: 'sdap.access.deny.record_unavailable', detail: 'internal text' })
       );
-      await userEvent.click(entryButton());
+      renderView();
+      await chooseMatter();
       const error = await screen.findByTestId('add-firm-list-error');
       expect(error).toHaveTextContent("You can't list law firms in Spaarke.");
       expect(error).not.toHaveTextContent(/isn't available to you/);
@@ -773,8 +807,7 @@ describe('InvoiceView — stale select-after-reload marker and a stale selection
         .mockImplementationOnce(() => new Promise(r => (releaseReload = r)))
         .mockResolvedValue([NEW_FIRM, OTHER_FIRM]);
       const { onSubmit } = renderView({ loadFirms, filedRecord: MATTER });
-      await screen.findByText(NO_FIRM_LINKED);
-      await userEvent.click(entryButton());
+      await firmFieldSearch();
       await userEvent.click(await within(panel()).findByRole('option', { name: 'Contoso LLP' }));
       await userEvent.click(confirmButton());
       await screen.findByTestId('add-firm-pending');
@@ -802,7 +835,7 @@ describe('InvoiceView — stale select-after-reload marker and a stale selection
   );
 
   it(
-    'K1: a chosen firm that the answer\'s list does not contain is cleared (Submit cannot send a firm that is not on the record)',
+    "K1: a chosen firm that the answer's list does not contain is cleared (Submit cannot send a firm that is not on the record)",
     async () => {
       postAnswers = [{ status: 200, body: okBody({ firms: [THIRD_FIRM] }) }];
       renderView({ loadFirms: jest.fn(async () => [OTHER_FIRM]) });
@@ -825,7 +858,7 @@ describe('InvoiceView — stale select-after-reload marker and a stale selection
   );
 
   it(
-    'must-not-fire: a chosen firm that the answer\'s list still contains stays chosen when the added firm is not listed',
+    "must-not-fire: a chosen firm that the answer's list still contains stays chosen when the added firm is not listed",
     async () => {
       postAnswers = [{ status: 200, body: okBody({ firms: [OTHER_FIRM, THIRD_FIRM] }) }];
       renderView({ loadFirms: jest.fn(async () => [OTHER_FIRM]) });
@@ -876,7 +909,7 @@ describe('InvoiceView — K2: an add in flight holds back Submit and the New / E
 
 describe('InvoiceView — F3: stale answers are dropped', () => {
   it(
-    'the record changes while an add is in flight: the panel is closed, no notice shows, and the new record\'s firms are not replaced by the old answer',
+    "the record changes while an add is in flight: the panel is closed, no notice shows, and the new record's firms are not replaced by the old answer",
     async () => {
       let release: () => void = () => undefined;
       postGate = new Promise<void>(r => (release = r));
@@ -890,7 +923,11 @@ describe('InvoiceView — F3: stale answers are dropped', () => {
       await waitFor(() => expect(posts()).toHaveLength(1));
 
       // Pick another record while the add is still in flight.
-      const SECOND: EntitySearchResult = { ...MATTER, id: '9d8c7b6a-5e4f-4a3b-8c2d-1e0f9a8b7c65', name: 'Brown v Green' };
+      const SECOND: EntitySearchResult = {
+        ...MATTER,
+        id: '9d8c7b6a-5e4f-4a3b-8c2d-1e0f9a8b7c65',
+        name: 'Brown v Green',
+      };
       await userEvent.click(screen.getByRole('button', { name: 'Clear selection' }));
       mockSearch.mockResolvedValue([SECOND]);
       const box = screen.getByLabelText('Search Matter records');
@@ -914,27 +951,39 @@ describe('InvoiceView — F3: stale answers are dropped', () => {
     TIMEOUT
   );
 
+  // The "Check again" reload race test went with "Check again" (owner UAT 2026-11-18): with the firm search as the Firm
+  // field, no user action reloads the list while an add is answering. The same guard (an older list request must not
+  // replace the add's answer) is still exercised by the pending, firms: null case above, whose reload is superseded.
+});
+
+describe('InvoiceView — adding from the Firm field keeps the panel through the list update', () => {
   it(
-    'a "Check again" reload held in flight does not overwrite the list an add has just answered with',
+    'a pending add from the Firm field keeps the same panel (Retry, Close) once the record lists the firm',
     async () => {
-      let releaseReload: (list: { firmId: string; name: string }[]) => void = () => undefined;
-      const loadFirms = jest
-        .fn()
-        .mockResolvedValueOnce([])
-        .mockImplementationOnce(() => new Promise(r => (releaseReload = r)));
-      renderView({ loadFirms });
+      postAnswers = [{ status: 200, body: okBody({ access: { state: 'pending', granted: [], revoked: [] } }) }];
+      renderView();
       await openPanelAndChoose('Contoso LLP');
-      // "Check again" asks for the firms; the answer is held.
-      await userEvent.click(screen.getByTestId('invoice-no-firm-recheck'));
-      await waitFor(() => expect(loadFirms).toHaveBeenCalledTimes(2));
-      // The add answers with the list that includes the new firm F, and F is chosen.
       await userEvent.click(confirmButton());
-      await waitFor(() => expect(firmSelect()).toHaveValue(NEW_FIRM_ID));
-      // The held reload now answers with a list that lacks F: it is older than the add's answer, so it is dropped.
-      await act(async () => releaseReload([]));
+      expect(await screen.findByTestId('add-firm-pending')).toBeInTheDocument();
+      // The record now lists the firm, so the Firm field is the dropdown again, and the pending panel is still there.
       expect(firmSelect()).toHaveValue(NEW_FIRM_ID);
-      expect(within(firmSelect()).getByRole('option', { name: 'Contoso LLP' })).toBeInTheDocument();
-      expect(screen.queryByText(NO_FIRM_LINKED)).not.toBeInTheDocument();
+      expect(panel()).not.toHaveAttribute('data-as-firm-field');
+      expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Close' })).toBeInTheDocument();
+    },
+    TIMEOUT
+  );
+
+  it(
+    'a finished add from the Firm field closes the search: the dropdown shows the firm, with "Add another firm"',
+    async () => {
+      renderView();
+      await openPanelAndChoose('Contoso LLP');
+      await userEvent.click(confirmButton());
+      await screen.findByTestId('invoice-add-firm-notice');
+      expect(screen.queryByTestId('add-firm-panel')).not.toBeInTheDocument();
+      expect(firmSelect()).toHaveValue(NEW_FIRM_ID);
+      expect(entryButton()).toHaveTextContent('Add another firm');
     },
     TIMEOUT
   );
