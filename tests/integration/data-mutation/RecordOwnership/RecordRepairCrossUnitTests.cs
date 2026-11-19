@@ -124,6 +124,24 @@ public sealed partial class RecordRepairModeTests
     }
 
     [Fact]
+    public async Task AC1_AMoveWhoseOwnerTheCascadeCheckTookOut_WhileOtherColumnsAreWritten_IsNotReported()
+    {
+        // The write lands, but without the owner: a move is reported only when the confirmed write held the owner.
+        var id = _world.EventUnderTheMatter(clientName: "Acme", practiceArea: null, priority: "Urgent",
+            owner: new EntityReference("systemuser", PersonInGeneral), owningUnit: Directory.GeneralBu, indexed: true);
+        _world.CascadesTo("sprk_event", "sprk_event_Tasks", "activitypointer", "regardingobjectid");
+        _world.AddCascadeChild("activitypointer", "regardingobjectid", id, activityType: "task");
+
+        var outcome = await _world.RepairAsync("sprk_event", id);
+
+        outcome.Status.Should().Be(RecordRepairStatus.Repaired);
+        var write = _world.Writes.Should().ContainSingle().Subject;
+        write.Fields.Should().ContainKey("sprk_practicearea").And.NotContainKey("ownerid");
+        outcome.MovedBusinessUnit.Should().BeNull("the confirmed write did not hold the owner");
+        _world.Log.Entries.Should().NotContain(e => e.Message.Contains("re-owned across business units"));
+    }
+
+    [Fact]
     public async Task AC1_AMoveWhoseWriteFails_IsNotReported()
     {
         var id = _world.EventUnderTheMatter(clientName: "Acme", practiceArea: "Tax", priority: "Urgent",
