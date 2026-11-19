@@ -1,6 +1,6 @@
 # Current Task State
 
-> **Last Updated**: 2026-11-18 (task 016: portal chrome PR #2900 merged + dev SPA redeployed; owner E2E pending)
+> **Last Updated**: 2026-11-19 (task 016: dev SPA `2963d1565b` live on dev BFF `5ae2804884`; owner retest items 3–7 pending)
 > **Format**: CURRENT state only. Each checkpoint REWRITES this file. Target ≤ 10 KB.
 
 ## Quick Recovery (READ THIS FIRST)
@@ -19,10 +19,9 @@
 - Known limits: Edit can't mark Due Date required (server 400 shown); multi-parent events: one parent's assignees (400 shown), Copy link may open not-found; truncated parent list → not-found on re-read; 403 then failed re-read replaces the page.
 
 ## Live state
-- **Dev BFF** `326781c50f` (uac-r2 deploy, live since 2026-11-17T22:03Z): live `e46b6b453b` + master `08161cfb0e` (#2894 D-21 fix) + #2884. Rollback = `e46b6b453b`. uac-r2 asks spa-r4 before any restart.
-- **Dev SPA** master `ea7ba661d6` (PR #2900 portal chrome, owner go "Merge and deploy"; run 44237227405, success; live bundle checked: both plane titles present, old title and welcome band gone). Rollback = redeploy master `ed3a5c2752` (015 build), then `c1eb6e4a8e`. Roll back to `04dbd8df05` only together with BFF `5a9b687a0b`.
+- **Dev BFF** `5ae2804884` (uac-r2 deploy, live since ~2026-11-19T02:01Z; owner go in uac-r2): live `326781c50f` + master `fe51619cfc` (#2904 ebilling 131/132/135, ISS-040); mcp spike kept. Rollback = `326781c50f`. `/healthz/catalog` 503 until ebilling seeds EB-D-256 (not a regression). uac-r2 asks spa-r4 before any restart.
+- **Dev SPA** master `2963d1565b` (run 44441594640, success, live 2026-11-19T02:05:53Z; owner go 2026-11-18 "and then also deploy portal"). Agreed target was `fe51619cfc`; the 8 later master commits don't touch `src/client/external-spa`, and the only shared file the SPA imports that changed (`themeStorage.ts`) is type-only. Live bundle: Billing Guidelines widget + `ebilling/billing-guidelines` route present, both plane titles present, welcome band absent, `assignable-people` present. Rollback = redeploy master `ea7ba661d6` (portal chrome build), then `ed3a5c2752`. Roll back to `04dbd8df05` only together with BFF `5a9b687a0b`.
 - **Portal chrome (#2900):** title by plane (partner "Outside Counsel Collaboration", internal "Legal Service Request Portal"); nav strip and welcome band removed; no Quick Start tab on the CIAM plane (`hasQuickStartFor`), workforce/admin keep it; assistant starts collapsed. The partners-only reading of "remove Quick Start" was not separately confirmed by the owner.
-- **Pending SPA deploy (owner go given 2026-11-18):** deploy-external-spa.yml (dev) on master `fe51619cfc` (ebilling's #2904 merge, 21:53Z), ONLY after uac-r2's dev BFF candidate `5ae2804884` (= live `326781c50f` + master `fe51619cfc`; keeps the mcp spike-v2; uac-r2 asks the owner for that exact SHA) is live (it carries task 135's billing-guidelines route; dev BFF 326781c50f does not). ebilling-r1 sends the SHA; uac-r2 confirms the BFF. Rollback = redeploy master `ea7ba661d6`.
 - **ebilling-r1 task 135** (Billing Guidelines widget, `task/ebilling-135` `f054d8a00e`): SPA review PASS with notes N1–N4 (2026-11-18). Per-record view (`coreRecordId`) has no caller; if the owner wants it on records, it is an R4 follow-up in the record template.
 
 ## Coordination
