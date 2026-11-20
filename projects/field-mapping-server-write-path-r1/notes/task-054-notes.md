@@ -900,6 +900,7 @@ Not verified without a live environment:
   - Review: `no_sentby` 3 (two messages on one thread, one test message on another). They keep their owner, and Move lists them `no_valid_pair`.
   - Nothing written. The review list was kept out of the repo.
   - `-Apply` would write nothing. Its go is still the owner's, with `-Verify` after.
+- **dev, Stamp `-Apply` then `-Verify`, 2026-11-20** (owner go in this session). `-Apply`: exit 0, 0 rows stamped (the same 3 rows listed `no_sentby`). `-Verify`: exit 0, "PASS (no row would stamp; 3 on the manual-review list)", with the precondition OK again. Step 4 of the deploy order is done on dev; Move (step 6) is next, after its own dry run and the owner's go.
 
 ## 054a piece 3 — the Direct owner rule (3a, 3b, 3c)
 

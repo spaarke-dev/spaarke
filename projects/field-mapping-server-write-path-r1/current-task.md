@@ -29,7 +29,7 @@
 1. Dev BFF from master (after ebilling's batch; coordinate with mcp-r1). The `DirectMessage:*` settings stay unset, so piece 3 is off.
 2. 054b: `Set-ThreadFlagFieldSecurity.ps1` dry run → `-Apply` → `-Verify` (owner go in THIS session).
 3. Direct setup + the two `DirectMessage:*` settings (owner go in uac-r2's session), only after 054b `-Verify` exits 0 there. **Binding:** the settings stay unset on an environment until then. DI-026 (#2701) check before the settings go live. **Done on dev 2026-11-20 (uac-r2):** DI-026 read found 0 messages with `sprk_directrecipient`; unit 'Spaarke Direct Messages' and team 'Spaarke Direct Message Owners' created and verified; `Set-ThreadFlagFieldSecurity.ps1 -Verify` PASS; both settings set 04:41:01Z; BFF build 5ae2804884 restarted clean.
-4. 054c Stamp (dry run → owner go → `-Apply` → `-Verify`). **Dry run on dev 2026-11-20: exit 0; 3 selected, 0 to stamp, review `no_sentby` 3** (`notes/task-054-notes.md` "Live runs"). `-Apply` (writes nothing) and `-Verify` wait on the owner's go here.
+4. 054c Stamp (dry run → owner go → `-Apply` → `-Verify`). **Dry run on dev 2026-11-20: exit 0; 3 selected, 0 to stamp, review `no_sentby` 3** (`notes/task-054-notes.md` "Live runs"). **Done on dev 2026-11-20 (owner go):** `-Apply` stamped 0; `-Verify` PASS.
 5. Piece 3 takes effect once the settings are set.
 6. 054c Move (`-DirectShareJobLive`; first run scoped to one `FMSWP-` message, L16).
 
