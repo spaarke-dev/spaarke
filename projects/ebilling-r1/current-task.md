@@ -11,7 +11,7 @@
 ## Quick recovery
 
 - **Active task:** 130g, "Firm view: show the reviewer-confirmed notice prose as the firm-safe reason" (EB-D-259). The owner said "Build 130g first" on 2026-11-20.
-- **Step:** 1 of 4, loading context. **No POML exists yet.** Write `tasks/130g-firm-view-notice-prose.poml`, modelled on `tasks/130f-firm-view-decided-findings.poml`.
+- **Step:** 2 of 4. The POML is written (`tasks/130g-firm-view-notice-prose.poml`); the implementer is launched next. 130g is server only; the SPA renders the field in 134.
 - **Uncommitted files:** none. The work tip is pushed.
 - **Open owner questions:** none. The deploy of the Invoice Review page to dev (checklist M2) waits; the owner chose 130g first.
 

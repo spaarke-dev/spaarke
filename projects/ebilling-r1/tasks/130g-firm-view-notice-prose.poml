@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="130g" project="ebilling-r1">
+  <metadata>
+    <title>Firm view: show the reviewer-confirmed notice prose as the firm-safe reason (EB-D-259)</title>
+    <phase>5 Firm feedback (WP5)</phase>
+    <gate>132 and 132ui merged into work. Branch from work/ebilling-r1 at the sha named in the agent brief.</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Changes what external firm users can read (the 130 firm-safe projection); .cs and tests change. The index said STANDARD; raised.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+    <parallel-safe>true</parallel-safe>
+    <deps>130f, 132, 132ui</deps>
+    <tags>bff-api, external-access, testing</tags>
+    <estimated-effort>0.5 day</estimated-effort>
+  </metadata>
+
+  <prompt>EB-D-259: the firm-safe reason for a Rejected or Returned-to-firm invoice is the notice prose the reviewer confirmed for the firm
+    (132ui sends it; 132 stores it), never the internal reason or note. Today the firm outcome (FirmFindingsProjection, served by
+    GET /api/v1/external/ebilling/invoices/{invoiceId}/outcome) carries the items (130f) but no reason. Add the stored, re-screened prose.
+    The SPA does not render the outcome yet; task 134 builds that page and renders this field. 130g is server only.</prompt>
+
+  <source>
+    <item>Column sprk_invoicesubmission.sprk_firmnoticetext: ONE JSON object { v: 1, source: Reviewer|Action|Template, kind: ReturnedToFirm|InvoiceRejected|SubmissionRejected|ApprovedWithAdjustments, subject, prose, html|null, htmlOmitted }.
+      Written by EbillingNotificationJobHandler (Services/Jobs/Handlers/EbillingNotificationJobHandler.cs, FirmNoticeTextColumn) on the invoice's OWN
+      submission (InvoiceBlockedHold.ReadOwnSubmissionAsync), and on the submission itself for a submission rejection.</item>
+    <item>The column is field-secured: only the "Spaarke BFF-Managed Field Writers" profile reads it (the BFF app user). Read it app-only, like the projection's other reads.</item>
+    <item>Obligation from 132 (notes/132-ebilling-notifications.md, "Stored sent notice"): re-screen prose with FirmNoticeProse.Check before showing it to a firm; NEVER expose the stored html; show prose as plain text.</item>
+  </source>
+
+  <goal>A firm user reading the outcome of its own Rejected or Returned-to-firm invoice also reads the notice text the reviewer confirmed for it, re-screened, as plain text; nothing else of the stored notice and nothing internal is exposed.</goal>
+
+  <constraints>
+    <constraint source="EB-D-259">One optional field on FirmOutcome (for example NoticeProse, JsonIgnore WhenWritingNull). Set only for FirmOutcomeKind Rejected and ReturnedToFirm, and only when the stored kind matches (InvoiceRejected ↔ Rejected, ReturnedToFirm ↔ ReturnedToFirm). Never subject, html, source or anything else of the stored JSON. The internal reject/return reason, the decision note and Decision Record content stay out.</constraint>
+    <constraint source="132 obligation">Re-screen with FirmNoticeProse.Check on every read. A refusal, a malformed or unknown-version JSON, a blank prose, or a kind mismatch gives null (log the reason code and ids, never the text).</constraint>
+    <constraint source="fail-safe">A fault reading the stored text must not show partial or unscreened text. Choose and document one: omit the field and keep the rest of the outcome (a Warning with ids), or mark the outcome Degraded. Prefer omitting the field only: the items are already firm-safe, and the notice is supplementary.</constraint>
+    <constraint source="callers">The projection's callers are a closed set (FirmFindingsProjectionCallerBoundaryGuardTests): FirmOutcomeEndpoints and FirmNoticeComposer. The composer must NOT feed NoticeProse into a new notice (a confirmed notice's prose comes only from the decision request). Check EbillingFeedSource and InvoiceApprovalEndpoints for any use of FirmOutcome that would now carry the field, and keep it out of the feed.</constraint>
+    <constraint source="NFR-10, D-70">The firm scope of the outcome route is unchanged: the field is read only after the route's existing firm and record checks pass; no new route, no new caller identity.</constraint>
+    <constraint source="project">Only FirmFindingsProjection.cs (and a small reader helper if needed, reusing InvoiceBlockedHold.ReadOwnSubmissionAsync), its tests, the API contract doc comment, and the notes file. No schema change, no SPA change, no deploy.</constraint>
+  </constraints>
+
+  <acceptance-criteria>
+    <criterion testable="true">xUnit: a Rejected invoice whose own submission stores { kind: InvoiceRejected, prose: P } projects NoticeProse = P; the same for ReturnedToFirm.</criterion>
+    <criterion testable="true">xUnit (must-not-fire): In Review, Approved, Approved with adjustments, Sent to AP, Paid and SubmissionRejected outcomes have no NoticeProse even when a notice is stored; a kind mismatch gives none.</criterion>
+    <criterion testable="true">xUnit: stored prose that FirmNoticeProse.Check refuses (a digit, a currency sign, a link) gives no NoticeProse; malformed JSON, v != 1, blank prose and a missing own submission give none; none of these fail the outcome.</criterion>
+    <criterion testable="true">xUnit: the stored subject and html (seeded with distinctive markers) appear nowhere in the serialized outcome; the internal reason and note seeded in the store appear nowhere.</criterion>
+    <criterion testable="true">xUnit: a fault reading the stored text leaves the rest of the outcome intact and NoticeProse null (or Degraded, if that option is chosen and documented).</criterion>
+    <criterion testable="true">xUnit: FirmNoticeComposer's output for a Return / Reject after the decision does not contain the stored prose (it is not echoed into a new notice).</criterion>
+    <criterion testable="true">Contract test: GET .../invoices/{id}/outcome serializes noticeProse when present and omits the key when null.</criterion>
+    <criterion testable="true">Filtered FirmFindings|FirmNotice|FirmOutcome|ExternalInvoice|EbillingFeed tests, the related ArchTests (Route, Finance, External, FirmNotice, FirmFindings), and the --warnaserror BFF build pass.</criterion>
+  </acceptance-criteria>
+
+  <out-of-scope>
+    <item>Rendering in the SPA: task 134 (spa-r4 gets the contract).</item>
+    <item>Showing the sent notice inside Invoice Review (internal).</item>
+    <item>The stored notice for SubmissionRejected and ApprovedWithAdjustments (composed drafts, not reviewer reasons).</item>
+  </out-of-scope>
+
+  <knowledge>
+    <files>
+      <file>projects/ebilling-r1/notes/132-ebilling-notifications.md</file>
+      <file>projects/ebilling-r1/notes/130f-firm-view-decided-findings.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Finance/FirmFindingsProjection.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Finance/FirmNoticeComposer.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/EbillingNotificationJobHandler.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/ExternalAccess/FirmOutcomeEndpoints.cs</file>
+      <file>tests/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>
