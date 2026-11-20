@@ -18,7 +18,13 @@
 
 ## Steps
 
-1. **Deploy the L2 control plane (dev) from master.** Owner go. `scripts/provisioning/Deploy-ControlPlane.ps1`, in-process
+1. **DONE 2026-11-20 (owner "Yes, deploy it").** From master `6fe5f83c6d` (detached worktree `C:\code_files\wtcp`):
+   `Deploy-ControlPlane.ps1 -Environment dev -Target Both -Swap -Confirm:$false`, exit 0. Api 14:52:34Z (staging, swapped
+   to production), Worker 14:54:45Z; both `/healthz` 200; queue session + duplicate detection OK; config keys OK. Sidecar
+   unchanged at `2026.10.20-40` (= newest ACR tag, = bicepparam pin; no sidecar source change since);
+   `Verify-Sidecar-Live.ps1` (no `-InTenant`): PASS 3 / WARN 3 / FAIL 0, bound 14:55:40Z. No infra or option change on
+   master since the previous deploy, so no Bicep run.
+   Original step: **Deploy the L2 control plane (dev) from master.** Owner go. `scripts/provisioning/Deploy-ControlPlane.ps1`, in-process
    with `-Confirm:$false` (gotcha: `pwsh -File` stops at the ConfirmImpact prompt). Check that the Exchange sidecar image
    pin matches the code (T186 L58) and that both API and Worker answer health afterwards. From here, any re-run of a stamp
    runs H7b procedure 10, which stops at S27 (Resumable) until the stamp has 1.3.2.0; ACME is the only stamp.
