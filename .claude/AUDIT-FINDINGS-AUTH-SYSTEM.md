@@ -332,7 +332,7 @@ Auth touches many surfaces beyond AI/SprkChat. The target architecture must acco
 
 **Current state**: ✅ **Fully covered.** Flows through existing Graph OBO chain.
 - User JWT → BFF → OBO exchange → Graph token with `FileStorageContainer.Selected` and `Files.Read.All` scopes → SPE container / drive item operations
-- `SpeFileStore` is the single facade ([ADR-007](docs/adr/ADR-007-spe-storage-seam.md)) — all SPE operations route through it; no Graph SDK leaks
+- `SpeFileStore` is the single facade ([ADR-007](../docs/adr/ADR-007-spe-storage-seam-minimalism.md)) — all SPE operations route through it; no Graph SDK leaks
 - Resource-level authorization via `ResourceAccessHandler` + `DocumentAuthorizationFilter` ([AuthorizationModule.cs:78-149](../src/server/api/Sprk.Bff.Api/Infrastructure/DI/AuthorizationModule.cs#L78-L149)) covers driveitem.* and container.* operations
 - 25 named policies map to SPE operations (preview, download, upload, replace, delete, move, copy, share, version, etc.)
 - App-only admin operations (container creation, container type config) handled via `ClientSecretCredential` (Phase 6 will migrate to managed identity)
@@ -361,13 +361,13 @@ Auth touches many surfaces beyond AI/SprkChat. The target architecture must acco
 
 **Specific invariants to maintain for future flexibility**:
 - All env-specific values stay in Dataverse env vars (client) + App Service config + Key Vault (server). No hardcoded tenant IDs, audiences, or URLs in code.
-- All caching keys (Redis, Cosmos) include `tenantId` prefix. Currently true for `AgentTokenService` ([line 28](../src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Agent/AgentTokenService.cs#L28)); verify for other caches.
+- All caching keys (Redis, Cosmos) include `tenantId` prefix. Currently true for `AgentTokenService` ([source](../src/server/api/Sprk.Bff.Api/Api/Agent/AgentTokenService.cs)); verify for other caches.
 - Background jobs scope by tenant. Verify `ServiceBusJobProcessor` carries tenant context through job payloads.
 
 ### C. External users (B2B guests + B2C anonymous + Power Pages portal)
 
 **Current state**:
-- ✅ **B2B guests**: `ExternalCallerAuthorizationFilter` ([line 12](../src/server/api/Sprk.Bff.Api/Infrastructure/Authorization/ExternalCallerAuthorizationFilter.cs#L12)) resolves Dataverse Contact via email claim. Works because B2B guests get a JWT from the home tenant that the BFF validates against `ValidAudiences` + Contact lookup gates access.
+- ✅ **B2B guests**: `ExternalCallerAuthorizationFilter` (line 12; the filter was deleted in commit 213f3ea8a0) resolves Dataverse Contact via email claim. Works because B2B guests get a JWT from the home tenant that the BFF validates against `ValidAudiences` + Contact lookup gates access.
 - ⚠️ **Power Pages portal**: documented as Power Pages B2B but separate JWT validation could be needed (issuer differs).
 - ❌ **B2C anonymous**: not supported today. Would need a separate auth scheme.
 
