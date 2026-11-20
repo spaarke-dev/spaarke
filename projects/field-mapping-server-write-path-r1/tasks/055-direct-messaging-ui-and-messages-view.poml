@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="055" project="field-mapping-server-write-path-r1">
+  <metadata>
+    <title>Direct messaging UI: a "New direct message" entry point and a Messages view (no record), live check on dev</title>
+    <phase>6b W6b Direct and private messaging (owner 2026-11-20)</phase>
+    <gate>PR #2916 (the #2919 fix) merged and deployed to dev by UAC-r2 before the live check. The live check runs only with the owner's go in fm's session.</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .ts/.tsx in the shared UI library and may add a filter to an existing BFF endpoint; exercises a security-sensitive send path end to end.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>The server path is built and tested (054); this is client wiring on existing components plus a live check.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Touches client communication components that 056 touches later; run 055 first.</parallel-reason>
+    <deps>054 (on master); PR #2916 merged and deployed for the live step</deps>
+    <tags>pcf, react, fluent-ui, frontend, communication, testing</tags>
+    <estimated-effort>2-3 sessions</estimated-effort>
+    <issue>https://github.com/spaarke-dev/spaarke/issues/2922</issue>
+  </metadata>
+
+  <prompt>Owner requirement 2026-11-20: a user can send a personal 1:1 message to a named internal user with no record. The first message creates the pair's Direct thread; every later message between the two users goes to that thread. The user sees these non-record conversations in a "Messages" view. Owner decision: built in this project, not deferred (notes/decisions.md 2026-11-20).</prompt>
+  <role>SPAARKE platform developer, shared UI (Fluent v9) and the communication client. Reuse existing components; no new package.</role>
+  <goal>From the Communication / Spaarke Console UI a user starts, continues and rereads a 1:1 conversation with a named colleague with no record; a second "new" message to the same colleague opens the existing pair thread; a Messages view lists only the current user's Direct threads; the live dev check shows the recipient stamped, the Direct team as owner, and both participants (and no one else) able to read.</goal>
+
+  <context>
+    <background>The server side is complete: `POST /api/communications/threads/direct` (find-or-create of the pair thread) and a Message send with no threadId and no record (`CommunicationService.IsOutboundDirectSend`, 054 piece 2b). Piece 3 owns Direct messages by the Direct team and shares them with the two participants; #2919 fixed the version read. On master as of 2026-11-20 no client calls `startDirectThread` and every client Message send carries a threadId, so the path has run on dev only through direct BFF calls.</background>
+    <relevant-files>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/services/communicationThreadListApi.ts (`startDirectThread` exists, no caller; add a Direct-thread list call if needed)</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/ConversationWorkspace/ConversationWorkspace.tsx (all-mode `listThreads`; base for the Messages view)</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/NewThreadModal/NewThreadModal.tsx (beside the record-anchored ＋: a "New direct message" entry choosing one internal user)</file>
+      <file role="reference">src/client/shared/Spaarke.UI.Components/src/components/ConversationView/ConversationView.tsx (open the pair thread)</file>
+      <file role="reference">src/server/api/Sprk.Bff.Api/Api/CommunicationEndpoints.cs (POST /threads/direct, GET /threads)</file>
+      <file role="reference">src/server/api/Sprk.Bff.Api/Services/Communication/Access/DirectMessageRecipient.cs</file>
+      <file role="reference">projects/field-mapping-server-write-path-r1/notes/task-054-notes.md (pieces 2b and 3; Live runs)</file>
+    </relevant-files>
+  </context>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/pcf.md</file>
+      <file>docs/standards/DATA-ACCESS-DECISION-CRITERIA.md</file>
+      <file>docs/standards/MODAL-DECISION-CRITERIA.md</file>
+      <file>projects/field-mapping-server-write-path-r1/notes/decisions.md (2026-11-09, 2026-11-10, 2026-11-11, 2026-11-20)</file>
+    </files>
+  </knowledge>
+
+  <constraints>
+    <constraint source="branching">Brief line 1: `git switch -c task/fm-055 &lt;tip of work/field-mapping-server-write-path-r1&gt;`, then confirm this POML exists on the branch.</constraint>
+    <constraint source="owner">A Direct pair is two internal users (systemusers). External contacts, group conversations and filing a Direct message to a record are out of scope here (filing is a 056 question).</constraint>
+    <constraint source="CLAUDE.md §11">Reuse `startDirectThread`, ConversationWorkspace and ConversationView. Add a filter on GET /threads only if the existing endpoint cannot list Direct threads, and state the §11 answers if added.</constraint>
+    <constraint source="CLAUDE.md §9">Clients call with `@spaarke/auth`; no new auth props or headers.</constraint>
+    <constraint source="project">Live Dataverse writes (the dev send) need the owner's go in fm's session. No deploys from this session; code-page and BFF deploys go through UAC-r2 or the deploy skills with the owner's go.</constraint>
+    <constraint source="ADR-012">Shared components stay in @spaarke/ui-components; mind the PCF React 16/17 vs Code Page React 19 type split.</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step order="0">Branch; FULL rigor; /conflict-check (shared UI communication files are used by other projects).</step>
+    <step order="1">Inventory which surfaces host ConversationWorkspace (Spaarke Console, CommunicationTimeline PCF, side panes); pick the host for the entry point and the Messages view; record the choice in task notes.</step>
+    <step order="2">"New direct message": an internal-user picker (reuse an existing systemuser lookup), then `startDirectThread`, and open the thread in ConversationView; the first send goes on that thread.</step>
+    <step order="3">Messages view: the current user's Direct threads (non-record), newest first; each opens into ConversationView.</step>
+    <step order="4">Tests: component tests for the entry point and the view; if a BFF filter is added, a contract test under tests/integration/contract.</step>
+    <step order="5">Build (`npm run build:prod` where PCF is touched), typecheck, lint; one adversarial review.</step>
+    <step order="6">Live (owner's go, after #2916 is deployed): send a Direct message from the UI on dev; confirm the recipient stamp, the Direct team owner, that both participants can read and a third user cannot, and that a second message reuses the thread. Record in task notes; UAC-r2 reviews the access result.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">AC1: a user starts a 1:1 conversation with a named internal user with no record, and the message is sent on the pair's Direct thread.</criterion>
+    <criterion testable="true">AC2: a second "new direct message" to the same user opens the existing pair thread; no second thread is created.</criterion>
+    <criterion testable="true">AC3: the Messages view lists only the current user's Direct threads; record threads and other users' Direct threads do not appear.</criterion>
+    <criterion testable="true">AC4 (must not fire): the picker offers no external contacts, no application users, and not the sender.</criterion>
+    <criterion testable="true">AC5 (live, dev): recipient stamped; owner is the Direct team; both participants read; a third user does not.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>If the live send leaves the message owned by its creator or unshared, STOP and report to UAC-r2 by message (public repo: no detail in repo text).</trigger>
+    <trigger>If listing Direct threads needs a new endpoint (not a filter), stop and ask before adding it.</trigger>
+  </escalation>
+
+  <notes>Added 2026-11-20 from the owner's requirement and the decision that it is not deferred (#2922).</notes>
+</task>

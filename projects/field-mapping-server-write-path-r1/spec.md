@@ -49,6 +49,9 @@ apply identically on every create path.
 - **W6 Standard, guards, docs, retirement**:
   - the per-table ownership matrix; census and client guards; registry and doc updates;
   - dead-code removal; issue hygiene.
+- **W6b Direct and private messaging (owner 2026-11-20, #2922, #2923)**:
+  - a "New direct message" entry point and a Messages view for 1:1 conversations with no record (task 055);
+  - private messages in a record's thread, readable by the sender and the named recipient only; design first with UAC-r2 (task 056).
 
 ### Out of Scope
 

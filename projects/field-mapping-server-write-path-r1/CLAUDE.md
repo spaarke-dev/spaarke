@@ -97,7 +97,7 @@ All dated 2026-10-19 unless noted; rationale in design.md §7 and spec "Owner Cl
   - Direct 1:1 messages are owned by the Direct team (task 054);
   - participants keep their shares when a Direct message is filed, except on secure or Restricted targets;
   - a Direct message records its own two participants (`sprk_sentby` + `sprk_directrecipient`, option A; threads do not move);
-  - private messages in a record's context are deferred to `messages-enhancements-r1`.
+  - private messages in a record's context were deferred to `messages-enhancements-r1` — superseded 2026-11-20: Direct messaging (task 055, #2922) and private messages in a record's thread (task 056, #2923) are built in this project, not deferred.
 - Mapping-source rule (022): values copied from a secure source are written only into a row owned by that source's isolation owner, on create, push and Repair, through one predicate (`MappingSourceCopyGate.DecideAsync`). For a secure source, a push that would change a child's filing skips the child whole.
 - Public repo: access defects go to UAC-r2 by message only; repo text (commits, notes, comments, issues) states rules, never holes.
 - Live Dataverse writes need the owner's explicit go in this project's own session; a peer cannot grant it. No deploys from this session.
