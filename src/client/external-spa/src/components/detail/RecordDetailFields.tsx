@@ -28,6 +28,7 @@ import { parseDueDate } from '@spaarke/ui-components/utils/dateLocal';
 import type { DocumentRoot } from '../../api/web-api-client';
 import { eventRegardingLink, readEventRecord } from '../events/eventDetail';
 import { childRecordAttributesOf } from '../record/childRecord';
+import { REVIEW_DETAIL_COLUMN, reviewDetailFieldDisplay } from '../record/reviewDetail';
 
 // ---------------------------------------------------------------------------
 // Per-entity description
@@ -46,12 +47,24 @@ export interface DetailFieldLink {
   noun: string;
 }
 
+/** What a gated field shows: its value text (if any) and an explanation line under it. */
+export interface DetailFieldDisplay {
+  text?: string;
+  note?: string;
+}
+
 export interface DetailFieldDef {
   /** Dataverse logical name of the column (must be on the module's allow-list). */
   attribute: string;
   /** Row label. */
   label: string;
   kind?: DetailFieldKind;
+  /**
+   * Task 020 (FR-11). A field whose display is decided by more than its own value (the invoice's Review detail, gated on the
+   * invoice status). Given the read row, returns what to show, or `null` for a blank field: the whole row is then left out
+   * (no label with an empty value). Absent = the generic `formatDetailValue` row, as for every other field.
+   */
+  display?: (record: DetailRecord) => DetailFieldDisplay | null;
   /**
    * Task 015. Resolves the record this field's value points at, or null (no link for this row). The value is drawn as a
    * link-style button, only where the host passes `onOpenLink` to `RecordDetailFields`; with no handler (or a null link) it is
@@ -153,6 +166,9 @@ export const RECORD_DETAIL_ENTITIES: Readonly<Record<string, RecordDetailEntity>
       { attribute: 'sprk_matter', label: 'Matter', kind: 'lookup' },
       { attribute: 'sprk_workassignment', label: 'Work assignment', kind: 'lookup' },
     ],
+    // Read, not shown (R4 task 022, FR-14): the file type decides whether the Preview section can show the file inline. On the
+    // documents module's allow-list (ExternalAccessModule.cs; the documents grid reads it), so it adds no new BFF column.
+    extraColumns: ['sprk_filetype'],
     showsEventsAndTasks: false,
   },
   sprk_invoice: {
@@ -165,6 +181,8 @@ export const RECORD_DETAIL_ENTITIES: Readonly<Record<string, RecordDetailEntity>
       { attribute: 'sprk_name', label: 'Name' },
       { attribute: 'sprk_invoicedate', label: 'Invoice date', kind: 'date' },
       { attribute: 'statuscode', label: 'Status' },
+      // R4 task 020 (FR-11, 082c): read with the record, shown only while the invoice is In Review (`record/reviewDetail.ts`).
+      { attribute: REVIEW_DETAIL_COLUMN, label: 'Review detail', display: reviewDetailFieldDisplay },
       { attribute: 'sprk_totalamount', label: 'Total amount', kind: 'money' },
       { attribute: 'sprk_project', label: 'Project', kind: 'lookup' },
       { attribute: 'sprk_matter', label: 'Matter', kind: 'lookup' },
@@ -359,6 +377,14 @@ const useStyles = makeStyles({
     // A long description keeps its line breaks.
     whiteSpace: 'pre-wrap',
   },
+  // The explanation line under a gated field's value (task 020).
+  note: {
+    display: 'block',
+    color: tokens.colorNeutralForeground2,
+    fontSize: tokens.fontSizeBase200,
+    lineHeight: tokens.lineHeightBase300,
+    whiteSpace: 'normal',
+  },
   // A value that opens another record: link-style, the same as a document name in a grid.
   linkButton: {
     margin: 0,
@@ -393,6 +419,24 @@ export const RecordDetailFields: React.FC<RecordDetailFieldsProps> = ({ cfg, rec
   return (
     <dl className={styles.list} aria-label={`${cfg.label} details`} data-testid="record-detail-fields">
       {cfg.fields.map(def => {
+        if (def.display) {
+          // A gated field (task 020): its own rule decides what shows; a blank one leaves no row at all.
+          const shown = def.display(record);
+          if (!shown) return null;
+          return (
+            <React.Fragment key={def.attribute}>
+              <dt className={styles.term}>{def.label}</dt>
+              <dd className={styles.definition} data-testid={`record-detail-field-${def.attribute}`}>
+                {shown.text}
+                {shown.note && (
+                  <span className={styles.note} data-testid={`record-detail-field-${def.attribute}-note`}>
+                    {shown.note}
+                  </span>
+                )}
+              </dd>
+            </React.Fragment>
+          );
+        }
         const text = formatDetailValue(record, def);
         const link = onOpenLink && def.link ? def.link(record) : null;
         return (

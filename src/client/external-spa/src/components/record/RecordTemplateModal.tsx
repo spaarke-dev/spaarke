@@ -678,6 +678,7 @@ export const RecordTemplateModal: React.FC<RecordTemplateModalProps> = ({
                   facts={config.headerFacts.map(fact => ({
                     label: fact.label,
                     value: formatDetailValue(record, fact),
+                    secondary: fact.secondary?.(record) ?? undefined,
                   }))}
                   // "Your access" (FR-07, task 006): only what the BFF answered for this record; nothing while unknown.
                   access={yourAccess ?? undefined}

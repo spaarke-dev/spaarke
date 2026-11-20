@@ -17,6 +17,7 @@ marker with the issue number.
 | D-9 | 2026-11-11, task 006 review (F1, pre-existing, owner question) | ProjectPage offers creates the project list refused (workforce ceiling → 403) | Defect (user-visible) — **resolved in R4** (owner folded it in, 2026-11-11) | #2716 (closed) |
 | D-10 | 2026-11-11, task 006 | No server answer for the to-do PATCH right; status toggle hidden in the record view | Feature gap (BFF) | #2717 |
 | D-11 | 2026-11-11, task 006 review pass 2 (F2, out of scope) | Access-level label switch duplicated in five places | Maintainability | #2718 |
+| D-23 | 2026-11-20, wave 4 review (F2, out of task 022's scope) | Document preview and download each carry their own parent-order loop | Maintainability — fold into task 023 | #2928 |
 
 ## D-1 — External event create does not write the ADR-024 resolver fields
 
@@ -331,3 +332,11 @@ This under-lists, which fails closed.
 **Status.** Closed, not a defect (2026-11-17, ontology-r1; checked against the source). The Signals executors write through the child-records core, which runs `DataverseWriteItemMapper.MapWebApiPayloadAsync`; it matches each `@odata.bind` key to metadata case-insensitively (~305-333) and sends the metadata navigation name. The external create (D-21) posts directly without that mapper, which is why only it failed.
 
 **Where.** `Services/Signals/Actions/DecisionActionExecutors.cs` ~1509 (lowercase keys, mapped before the write).
+
+## D-23 — Document preview and download each carry their own parent-order loop (#2928)
+
+**Where.** `readDocumentFromParents` in `src/client/external-spa/src/components/record/sections/DocumentPreview.tsx` (task 022) mirrors `downloadDocumentFromParents` in `src/client/external-spa/src/components/DocumentLibrary.tsx`.
+
+**Why it matters.** A change to the parent rule in one copy only makes Preview and Download disagree on which parent serves the file.
+
+**Fix.** Task 023 hoists one `readFromParents(parents, read)` helper used by both (task 022 could not edit `DocumentLibrary.tsx`).

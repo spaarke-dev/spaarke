@@ -124,7 +124,14 @@ async function openDocumentDetail(): Promise<HTMLElement> {
 }
 
 beforeEach(() => {
-  documentRow = { sprk_documentid: DOC_ID, sprk_documentname: 'Contract.pdf', sprk_documenttype: 'Contract' };
+  // `sprk_filetype: 'DOCX'` keeps this file about Download: a file type that is present decides over the name's ".pdf", so the
+  // Preview section (R4 task 022) reads nothing and the content route is called only by Download.
+  documentRow = {
+    sprk_documentid: DOC_ID,
+    sprk_documentname: 'Contract.pdf',
+    sprk_documenttype: 'Contract',
+    sprk_filetype: 'DOCX',
+  };
   gridSpecs[DOCUMENTS_GRID] = { rows: [{ sprk_documentid: DOC_ID, sprk_documentname: 'grid-row' }] };
   bffApiCall.mockReset();
   bffApiBlob.mockReset();

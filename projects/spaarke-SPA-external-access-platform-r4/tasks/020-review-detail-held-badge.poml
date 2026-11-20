@@ -4,7 +4,7 @@
     <title>Review detail (082c) at four render points + held-Accepted badge (FR-11, FR-12)</title>
     <phase>2 Invoices and documents</phase>
     <gate>after 018; the column read is gated on ebilling's 082c-2 allow-list entry (see escalation)</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .ts/.tsx code (InvoicesWidget, template sections, InvoiceSubmissionOutcome) with a binding render gate</rigor-reason>
     <model-tier>sonnet</model-tier>

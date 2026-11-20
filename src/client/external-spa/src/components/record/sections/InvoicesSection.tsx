@@ -16,6 +16,7 @@ import { EMPTY_VALUE, formatDetailValue, type DetailRecord } from '../../detail/
 import { childRecordAttributesOf, useChildRecordOpener, type OpenChildRecord } from '../childRecord';
 import { useRelatedRows, type ListState } from '../recordReads';
 import type { RecordSectionContext } from '../recordTemplate.types';
+import { REVIEW_DETAIL_COLUMN, reviewDetailCellText } from '../reviewDetail';
 import { RecordSectionCard } from './RecordSectionCard';
 
 const useStyles = makeStyles({
@@ -105,6 +106,8 @@ export const INVOICE_COLUMNS = [
   'sprk_invoicenumber',
   'sprk_invoicedate',
   'statuscode',
+  // R4 task 020 (FR-11): on the invoice module's ReadableColumns (ebilling 082c-2, live on dev); shown only while In Review.
+  REVIEW_DETAIL_COLUMN,
   'sprk_totalamount',
 ] as const;
 const INVOICE_ORDER = { attribute: 'sprk_invoicedate', descending: true };
@@ -207,8 +210,12 @@ const InvoiceList: React.FC<{ parentAttribute: string; parentId: string }> = ({ 
       meta={row =>
         [
           formatDetailValue(row, { attribute: 'statuscode' }),
+          // Task 020: the Review detail label sits after the status, only while In Review (the one gate, `reviewDetail.ts`).
+          reviewDetailCellText(row),
           formatDetailValue(row, { attribute: 'sprk_totalamount', kind: 'money' }),
-        ].join(' · ')
+        ]
+          .filter(part => part !== '')
+          .join(' · ')
       }
     />
   );

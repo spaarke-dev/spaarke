@@ -141,7 +141,7 @@
     <criterion testable="true">Test scope: cover the stated contract plus the edge cases named in these criteria. Anything beyond that needs a one-line justification in the task notes.</criterion>
   </acceptance-criteria>
 
-  <notes>Spec FR-15, FR-16; issues #1886, #2490. Spec anchor drift: #1886's SPA side is already done (R3 ISS-011); this task preserves and extends it. Design §6's "DocumentLibrary.tsx:1025" empty state is now :1048 (024 replaces it).</notes>
+  <notes>Spec FR-15, FR-16; issues #1886, #2490. Spec anchor drift: #1886's SPA side is already done (R3 ISS-011); this task preserves and extends it. Design §6's "DocumentLibrary.tsx:1025" empty state is now :1048 (024 replaces it). Also fold in D-23 (#2928): task 022's `readDocumentFromParents` (`record/sections/DocumentPreview.tsx`) mirrors `downloadDocumentFromParents`; hoist one `readFromParents(parents, read)` helper used by both, then close #2928.</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
