@@ -38,6 +38,7 @@ import { EMPTY_PROJECT_FORM } from './projectFormTypes';
 import type { ICreateProjectFormState } from './projectFormTypes';
 
 import { EntityCreationService } from '../../services/EntityCreationService';
+import { discoverNavProps } from '../../services/PolymorphicResolverService';
 import type { IDataService, INavigationService, IUploadService } from '../../types/serviceInterfaces';
 import type { ILookupItem } from '../../types/LookupTypes';
 import type { IUploadedFile, UploadedFileType } from '../FileUpload/fileUploadTypes';
@@ -94,29 +95,10 @@ async function associateProjectWithAccount(
   projectId: string,
   accountId: string
 ): Promise<void> {
-  // Attempt to discover the nav-prop for the account relationship.
-  // Fall back to a known column name if metadata is unavailable.
-  let navPropBind = `sprk_Account@odata.bind`;
-  try {
-    const orgUrl = window.location.origin;
-    const resp = await fetch(
-      `${orgUrl}/api/data/v9.0/EntityDefinitions(LogicalName='sprk_project')/ManyToOneRelationships` +
-        `?$select=ReferencingAttribute,ReferencingEntityNavigationPropertyName,ReferencedEntity`,
-      { credentials: 'include' }
-    );
-    if (resp.ok) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const json = (await resp.json()) as any;
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const rels: Array<any> = json.value ?? [];
-      const accountRel = rels.find((r: { ReferencedEntity: string }) => r.ReferencedEntity === 'account');
-      if (accountRel?.ReferencingEntityNavigationPropertyName) {
-        navPropBind = `${accountRel.ReferencingEntityNavigationPropertyName}@odata.bind`;
-      }
-    }
-  } catch {
-    // Use fallback column name
-  }
+  // The nav-prop of the project's account lookup, from the shared discovery (#2909: one query and one cache per
+  // entity for the page). It never throws; when metadata is unavailable it returns [] and the known column name stands.
+  const accountRel = (await discoverNavProps('sprk_project')).find(e => e.referencedEntity === 'account');
+  const navPropBind = `${accountRel?.navPropName || 'sprk_Account'}@odata.bind`;
 
   await dataService.updateRecord('sprk_project', projectId, {
     [navPropBind]: `/accounts(${accountId})`,

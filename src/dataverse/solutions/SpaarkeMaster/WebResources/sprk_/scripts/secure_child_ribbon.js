@@ -52,7 +52,7 @@ Spaarke.SecureChild = Spaarke.SecureChild || {};
 Spaarke.SecureChild.Ribbon = Spaarke.SecureChild.Ribbon || {};
 
 (function (ns) {
-    ns.VERSION = "1.0.0";
+    ns.VERSION = "1.0.1";
 
     var LOG = "[SecureChild.Ribbon v" + ns.VERSION + "]";
 
@@ -235,7 +235,14 @@ Spaarke.SecureChild.Ribbon = Spaarke.SecureChild.Ribbon || {};
         }, function () { return "HTTP " + response.status; });
     }
 
-    /** The child's lookup to the host (from the subgrid's relationship) as a Web API bind key, via metadata. */
+    /**
+     * The child's lookup to the host (from the subgrid's relationship) as a Web API bind key, via metadata.
+     *
+     * A plain-script copy of the shared discoverNavProps in @spaarke/ui-components (PolymorphicResolverService.ts): a
+     * ribbon web resource has no module system and cannot import it (#2909). It follows the same rules: the logical
+     * names are lowercased, because the metadata endpoint answers a wrong-case name with HTTP 200 and an EMPTY list
+     * (SRFR-050), and an empty list is warned about, naming the table.
+     */
     function bindKeyFor(childTable, hostEntity, selectedControl) {
         var attribute = null;
         try {
@@ -243,14 +250,22 @@ Spaarke.SecureChild.Ribbon = Spaarke.SecureChild.Ribbon || {};
             attribute = relationship && relationship.attributeName;
         } catch (e) { /* fall through to metadata only */ }
 
-        var url = Xrm.Utility.getGlobalContext().getClientUrl() + "/api/data/v9.2/EntityDefinitions(LogicalName='" + childTable +
+        var childLower = String(childTable).toLowerCase();
+        var hostLower = String(hostEntity).toLowerCase();
+        var attributeLower = attribute ? String(attribute).toLowerCase() : null;
+        var url = Xrm.Utility.getGlobalContext().getClientUrl() + "/api/data/v9.2/EntityDefinitions(LogicalName='" + childLower +
             "')/ManyToOneRelationships?$select=ReferencingAttribute,ReferencingEntityNavigationPropertyName,ReferencedEntity";
         return fetch(url, { headers: { Accept: "application/json" }, credentials: "include" }).then(function (response) {
             if (!response.ok) throw new Error("metadata HTTP " + response.status);
             return response.json();
         }).then(function (body) {
-            var candidates = (body.value || []).filter(function (r) {
-                return r.ReferencedEntity === hostEntity && (!attribute || r.ReferencingAttribute === attribute);
+            var relationships = body.value || [];
+            if (relationships.length === 0) {
+                console.warn(LOG, "Nav-prop discovery returned zero entries for entity=\"" + childTable + "\" (normalized \"" +
+                    childLower + "\"). Verify it is a real entity logical name.");
+            }
+            var candidates = relationships.filter(function (r) {
+                return r.ReferencedEntity === hostLower && (!attributeLower || r.ReferencingAttribute === attributeLower);
             });
             if (candidates.length !== 1) {
                 throw new Error("the " + childTable + " -> " + hostEntity + " lookup is not unique (" + candidates.length + ")");
@@ -260,8 +275,8 @@ Spaarke.SecureChild.Ribbon = Spaarke.SecureChild.Ribbon || {};
     }
 
     function entitySetOf(logicalName) {
-        var url = Xrm.Utility.getGlobalContext().getClientUrl() + "/api/data/v9.2/EntityDefinitions(LogicalName='" + logicalName +
-            "')?$select=EntitySetName,PrimaryNameAttribute";
+        var url = Xrm.Utility.getGlobalContext().getClientUrl() + "/api/data/v9.2/EntityDefinitions(LogicalName='" +
+            String(logicalName).toLowerCase() + "')?$select=EntitySetName,PrimaryNameAttribute";
         return fetch(url, { headers: { Accept: "application/json" }, credentials: "include" }).then(function (response) {
             if (!response.ok) throw new Error("metadata HTTP " + response.status);
             return response.json();
