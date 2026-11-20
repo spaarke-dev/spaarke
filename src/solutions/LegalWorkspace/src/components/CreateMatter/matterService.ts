@@ -26,6 +26,7 @@ import { authenticatedFetch } from '../../services/authInit';
 import { buildBffApiUrl } from '@spaarke/auth';
 // task 045 (FR-P3-06, NFR-08): canonical SSE primitives — the ONE parse path.
 import { readSseStream, parseSseEvent } from '@spaarke/ui-components';
+import { discoverNavProps, toNavPropMap } from '@spaarke/ui-components/services/PolymorphicResolverService';
 
 // ---------------------------------------------------------------------------
 // Result types
@@ -77,54 +78,21 @@ export interface IFollowOnActions {
 // ---------------------------------------------------------------------------
 
 /**
- * Query the Dataverse entity metadata API to discover the actual
- * single-valued navigation property names for lookup columns on an entity.
+ * The `columnLogicalName → navigationPropertyName` map for an entity's lookup
+ * columns. Dataverse nav-prop names are PascalCase (e.g. "sprk_MatterType")
+ * and differ from the lowercase column names ("sprk_mattertype"); the
+ * @odata.bind syntax needs the nav-prop name.
  *
- * Dataverse uses PascalCase navigation property names (e.g. "sprk_MatterType")
- * which differ from the lowercase column logical names ("sprk_mattertype").
- * The @odata.bind syntax requires the nav-prop name, not the column name.
- *
- * Results are cached per entity to avoid repeated metadata calls.
+ * Delegates to the shared `discoverNavProps` (#2909, ADR-012 reuse): one
+ * metadata query and one cache per entity for the page, a lowercased logical
+ * name (SRFR-050) and a warning on an empty result. `toNavPropMap` builds the
+ * same column-keyed map this file used to build itself. Never throws; `{}` on
+ * failure, so `_resolveNavProp` falls back to the column name.
  *
  * @param entityLogicalName - e.g. 'sprk_matter', 'sprk_document'
- * @returns Map: { columnLogicalName → navigationPropertyName }
  */
-const _navPropCache: Record<string, Record<string, string>> = {};
-
 async function _discoverNavProps(entityLogicalName: string): Promise<Record<string, string>> {
-  if (_navPropCache[entityLogicalName]) {
-    return _navPropCache[entityLogicalName];
-  }
-
-  try {
-    const url =
-      `/api/data/v9.0/EntityDefinitions(LogicalName='${entityLogicalName}')/ManyToOneRelationships` +
-      `?$select=ReferencingAttribute,ReferencingEntityNavigationPropertyName`;
-
-    const resp = await fetch(url, { credentials: 'include' });
-    if (!resp.ok) {
-      console.warn(`[MatterService] Nav-prop discovery failed for ${entityLogicalName}:`, resp.status);
-      return {};
-    }
-
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const json: any = await resp.json();
-    const rels: Array<{ ReferencingAttribute: string; ReferencingEntityNavigationPropertyName: string }> =
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (json as any).value ?? [];
-
-    const map: Record<string, string> = {};
-    for (const r of rels) {
-      map[r.ReferencingAttribute] = r.ReferencingEntityNavigationPropertyName;
-    }
-
-    console.info(`[MatterService] Nav-props for ${entityLogicalName}:`, map);
-    _navPropCache[entityLogicalName] = map;
-    return map;
-  } catch (err) {
-    console.warn(`[MatterService] Nav-prop discovery error for ${entityLogicalName}:`, err);
-    return {};
-  }
+  return toNavPropMap(await discoverNavProps(entityLogicalName));
 }
 
 /**
