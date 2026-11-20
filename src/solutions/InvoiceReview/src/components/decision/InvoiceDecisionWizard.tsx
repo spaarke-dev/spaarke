@@ -308,7 +308,11 @@ export function InvoiceDecisionWizard(props: InvoiceDecisionWizardProps) {
       // Task 132ui: the server refused the notice (400 `ebilling.notice_refused`, before it decided anything): shown under the notice fields,
       // and on this step, which stays open. The reviewer edits the notice (or turns it off) and finishes again; nothing was decided.
       if (isNoticeRefusal(result.failure)) {
-        set({ noticeError: decisionFailureMessage(result.failure) });
+        // Review round 2: the route answers this before the service is called, so it proves this request decided nothing. A repeat that was
+        // locked after an unsure answer is therefore not a request to repeat any more: drop the lock (page level and form) so the reviewer can
+        // edit the notice or turn it off. The reason and the note stay as typed, now editable.
+        if (f.locked) locks.clear('wizard');
+        set({ noticeError: decisionFailureMessage(result.failure), ...(f.locked ? { locked: false } : {}) });
         return;
       }
       // Saved in part, or no answer at all: the repeat must be the same request, so the reason and the note are locked until it finishes.

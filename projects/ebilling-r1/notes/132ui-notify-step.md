@@ -48,16 +48,16 @@ Tests are in `src/__tests__/firmNoticeStep.test.tsx` unless named.
 
 ## Results
 
-- **Package tests** (`npx jest` in `src/solutions/InvoiceReview`): 18 suites, **628 passed, 0 failed** (after review round 1; 616 before it). Baseline on `e11be217cc`: 16 suites, 562 passed, 1 failed (`serverWordsPin`, see limit 6).
+- **Package tests** (`npx jest` in `src/solutions/InvoiceReview`): 18 suites, **632 passed, 0 failed** (after review round 2; 628 after round 1, 616 before). Baseline on `e11be217cc`: 16 suites, 562 passed, 1 failed (`serverWordsPin`, see limit 6).
 - **tsc**: `npm run typecheck` (the surface gate) reports Surface-owned: 0 errors; the 99 shared-library errors are the pre-existing ones it ignores.
 - **client-lint**: InvoiceReview is not a client-lint package (see limit 5), so `client-lint.mjs check --package ...` has nothing to run for it; the package has no ESLint config either.
 - **Failing before, passing after (AC3 and AC5).** The "before" behaviour (the wizard never sends a notice; a 400 `ebilling.notice_refused` falls to the shell's error bar) was reproduced by temporarily editing `InvoiceDecisionWizard.tsx` (the notice forced to null, the refusal branch disabled), then restoring it. `npx jest src/__tests__/firmNoticeStep.test.tsx -t "AC3|AC5"`:
   - with the old behaviour: **6 failed, 3 passed** (failing: AC3 "Reject with sending on carries exactly the edited, trimmed subject and message", AC3 "Return with sending on carries the Return draft", AC3 "going Back ... after a Skip ... sends the notice", AC5 "shows the refusal under the fields ... edit and finish again", AC5 "turn the notice off after a refusal", AC5 "a refused notice is not an unsure outcome"; the 3 that pass are the negative cases that hold on the old behaviour too: sending off, skipped, and "another 400 stays the shell's alert");
   - with the change: **9 passed, 0 failed**.
 
-## Review round 1
+## Review rounds 1 and 2
 
-An Opus review of `9aca5c8972` found these; all fixed in one commit. Tests are in `firmNoticeStep.test.tsx` ("Review round 1 ..." blocks) unless named. Each new test fails on `9aca5c8972` and passes now (12 failed before, all passing after).
+Round 1: an Opus review of `9aca5c8972` found these; all fixed in one commit (`13cc218391`). Round 2 is the last row. Tests are in `firmNoticeStep.test.tsx` ("Review round 1 ..." blocks) unless named. Each new test fails on `9aca5c8972` and passes now (12 failed before, all passing after).
 
 | Finding | Change | Test |
 |---|---|---|
@@ -66,6 +66,7 @@ An Opus review of `9aca5c8972` found these; all fixed in one commit. Tests are i
 | F1-c: a locked notice read as over the limit | `noticeEntryOfLock` keeps `subjectSuffix: subjectSuffixOf(subject)` | "F1-c": 110 characters plus the tracking number reads 110 / 120, no error, before and after the lock; `noticeModel.test.ts` (`noticeEntryOfLock`, with a must-not-fire) |
 | K2: a 429 draft failure showed no code | the draft failure text ends with `(HTTP <status>)` when there is no `errorCode` (not for status 0 or a sign-in failure); the 429 test double now sends the limiter's real shape (a detail, no `errorCode`) | AC6 "429 rate limited" row; "K2" must-not-fire: no answer shows no HTTP tag |
 | K4: accessibility | each counter is the `aria-describedby` of its input (`useId`); the refusal bar's id is also in both fields' `aria-describedby` while it shows; the Subject hint now reads "The tracking number in brackets is added by Spaarke and does not count toward the limit." | "K4" |
+| Round 2 F1 (low): a locked repeat that gets 400 `notice_refused` was stuck (notice read-only, Skip cannot drop it, only a reload cleared the lock) | `InvoiceDecisionWizard.tsx`, the `isNoticeRefusal` branch: when the form was locked, `locks.clear('wizard')` and `locked: false`; the refusal message stays; reason and note stay as typed, now editable. The route answers this 400 before the service is called, so the request provably decided nothing. **The banner is left as is**: it appears only for a decision the server already started (`incompleteDecision`), and that first attempt passed the same screen, so a repeat there is not refused on the notice | "Review round 2": no answer, then the reopened locked repeat answers `notice_refused`: fields editable and the next Finish sends the edited notice; the switch can be turned off and the next Finish carries none; the page-level lock is gone (a reopened wizard is fresh); must-not-fire: a locked repeat that fails another way keeps its lock. Fails on `13cc218391` (3 of 4), passes now |
 
 ## Known limits and things noticed
 

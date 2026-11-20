@@ -986,3 +986,104 @@ describe('Review round 1 K4: the counters and the refusal are tied to their fiel
     expect(describedBy(proseBox(d))).toEqual(expect.arrayContaining([bar.id, within(d).getByTestId('notice-prose-count').id]));
   });
 });
+
+describe('Review round 2: a locked repeat that the server refuses on the notice is not stuck', () => {
+  const refusal = () =>
+    failed(problem(400, 'ebilling.notice_refused', { detail: 'The notice to the firm was not accepted (prose.digit). Nothing was decided. Edit the notice and try again.' }));
+
+  /** No answer to the first send (locked), then the reopened repeat answers 400 notice_refused: the wizard on its Confirm step. */
+  async function lockedThenRefused() {
+    const decision = mockDecisionApi();
+    decision.reject.mockResolvedValueOnce(failed(new Error('Failed to fetch')));
+    decision.reject.mockResolvedValueOnce(refusal());
+    renderDecisions(clean(), decision);
+    const d = await openWizard();
+    await toLoadedNotify(d, REJECT, 'Duplicate of an earlier invoice');
+    type(proseBox(d), 'We cannot pay invoice 5.');
+    await toConfirm(d);
+    fireEvent.click(btn(d, FINISH_REJECT));
+    await within(d).findByTestId('decision-note-locked');
+    await closeWizard(d);
+
+    const again = await openWizard();
+    fireEvent.click(next(again));
+    fireEvent.click(next(again));
+    await within(again).findByTestId('notify-step');
+    expect(subjectBox(again)).toHaveAttribute('readonly');
+    fireEvent.click(next(again));
+    await within(again).findByTestId('confirm-decision');
+    fireEvent.click(btn(again, FINISH_REJECT));
+    await within(again).findByTestId('confirm-notice-refused');
+    expect(decision.reject).toHaveBeenCalledTimes(2);
+    expect(decision.reject.mock.calls[1]).toEqual(decision.reject.mock.calls[0]);
+    return { decision, d: again };
+  }
+
+  it('the refusal proves nothing was decided: the lock is dropped, the notice is editable, and the next Finish sends the edited notice', async () => {
+    const { decision, d } = await lockedThenRefused();
+    // The refusal stays; the note box is editable again; the reason and the typed notice are as they were.
+    expect(within(d).queryByTestId('decision-note-locked')).not.toBeInTheDocument();
+    expect(within(d).getByLabelText('Note for the decision')).not.toHaveAttribute('readonly');
+    fireEvent.click(back(d));
+    await within(d).findByTestId('notify-step');
+    expect(within(d).getByTestId('notice-refused')).toHaveTextContent('(prose.digit)');
+    expect(within(d).queryByTestId('notice-locked')).not.toBeInTheDocument();
+    expect(subjectBox(d)).not.toHaveAttribute('readonly');
+    expect(proseBox(d)).not.toHaveAttribute('readonly');
+    expect(proseBox(d).value).toBe('We cannot pay invoice 5.');
+    expect(sendSwitch(d)).toBeEnabled();
+    fireEvent.click(back(d));
+    expect(reasonBox(d).value).toBe('Duplicate of an earlier invoice');
+    fireEvent.click(next(d));
+    await within(d).findByTestId('notice-prose');
+    type(proseBox(d), 'We cannot pay this invoice.');
+    await toConfirm(d);
+    expect(within(d).queryByTestId('confirm-notice-refused')).not.toBeInTheDocument();
+    fireEvent.click(btn(d, FINISH_REJECT));
+    await waitFor(() => expect(decision.reject).toHaveBeenCalledTimes(3));
+    expect(decision.reject.mock.calls[2][3]).toEqual({ subject: firmNoticeDraft().subject, prose: 'We cannot pay this invoice.' });
+    expect(await within(d).findByText('Rejected')).toBeInTheDocument();
+  });
+
+  it('the reviewer can turn the notice off, and the next Finish carries none', async () => {
+    const { decision, d } = await lockedThenRefused();
+    fireEvent.click(back(d));
+    await within(d).findByTestId('notify-step');
+    expect(sendSwitch(d)).toBeEnabled();
+    fireEvent.click(sendSwitch(d));
+    expect(sendSwitch(d)).not.toBeChecked();
+    expect(within(d).queryByTestId('notice-refused')).not.toBeInTheDocument();
+    await toConfirm(d);
+    expect(within(d).getByTestId('confirm-notice')).toHaveTextContent('No email is sent to the firm');
+    fireEvent.click(btn(d, FINISH_REJECT));
+    await waitFor(() => expect(decision.reject).toHaveBeenCalledTimes(3));
+    expect(decision.reject.mock.calls[2]).toEqual([INVOICE_ID, 'Duplicate of an earlier invoice']);
+  });
+
+  it('the page-level lock is gone too: closing and reopening the wizard gives a fresh one', async () => {
+    const { d } = await lockedThenRefused();
+    await closeWizard(d);
+    const fresh = await openWizard();
+    expect(radio(fresh, /^Approve/)).toBeChecked();
+  });
+
+  it('(must-not-fire) a locked repeat that fails another way keeps its lock: the notice stays read-only', async () => {
+    const decision = mockDecisionApi();
+    decision.reject.mockResolvedValueOnce(failed(new Error('Failed to fetch')));
+    decision.reject.mockResolvedValueOnce(incomplete());
+    renderDecisions(clean(), decision);
+    const d = await openWizard();
+    await toLoadedNotify(d, REJECT, 'Duplicate');
+    await toConfirm(d);
+    fireEvent.click(btn(d, FINISH_REJECT));
+    await within(d).findByTestId('decision-note-locked');
+    fireEvent.click(btn(d, FINISH_REJECT));
+    await waitFor(() => expect(decision.reject).toHaveBeenCalledTimes(2));
+    expect(await within(d).findByRole('alert', { hidden: true })).toBeInTheDocument();
+    expect(within(d).getByTestId('decision-note-locked')).toBeInTheDocument();
+    fireEvent.click(back(d));
+    await within(d).findByTestId('notify-step');
+    expect(subjectBox(d)).toHaveAttribute('readonly');
+    expect(sendSwitch(d)).toBeDisabled();
+  });
+});
