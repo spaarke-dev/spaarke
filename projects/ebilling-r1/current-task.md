@@ -48,5 +48,5 @@
 - **Agents:**
   - At most 4, each with a named model.
   - A worktree agent starts on master, so its brief names the base sha.
-  - Remove agent worktrees with `scripts/worktree/Remove-WorktreeSafe.ps1`. Waiting for removal, in the main checkout `.claude/worktrees/`: `agent-a15c660293effd9cb` (132ui, locked at the last check), plus the two 130g agent worktrees.
+  - Remove agent worktrees with `scripts/worktree/Remove-WorktreeSafe.ps1`. The 132ui and 130g agent worktrees were removed on 2026-11-20.
 - **Clean-up:** a human should delete C:\wt131a and C:\wt131b.
