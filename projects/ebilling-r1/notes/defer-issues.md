@@ -2377,3 +2377,31 @@ Every firm-visibility reader trusts `sprk_ruleset.sprk_visibletofirms`, so only 
 **Estimated effort**: half a day
 **Blockers**: none
 **Related**: ISS-038 (#2896)
+
+### ISS-041 — Stranded reject/return finished after a page reload sends no firm notice
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | next-round |
+| **Filed** | 2026-11-20 |
+| **Source** | Adversarial review of task 132ui (finding 2) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2930 |
+
+**Description**
+
+A reject or return carrying the reviewer-confirmed notice can stop part way: a 503 `decision_incomplete`, or no answer. 132ui makes the "Finish decision…" banner repeat carry the notice from the page's in-memory lock. After a page reload the lock is gone, so the banner repeats only reason and note. The server answers `Decided` and enqueues without the notice (`InvoiceRejectReturnEndpoints.cs:121` uses the repeat's body), and the firm silently gets no email although the reviewer confirmed one.
+
+**Entry-points**
+
+- `src/solutions/InvoiceReview/src/components/decision/DecideInvoiceAction.tsx` (IncompleteDecisionBanner)
+- `src/server/api/Sprk.Bff.Api/Api/Finance/InvoiceRejectReturnEndpoints.cs:121`
+- `src/server/api/Sprk.Bff.Api/Services/Finance/InvoiceRejectReturnService.cs` (`CompleteOrNoOpAsync`)
+
+**Suggested fix**: one of two options.
+- (a) Client-only: the banner's finish form for a reject or return offers the Notify fields (draft route plus the 132ui NotifyStep).
+- (b) Server: the first attempt stores the screened notice, and the finishing repeat uses it. This also covers a repeat from another tab.
+
+**Estimated effort**: half a day for (a)
+**Blockers**: none
+**Related**: task 132ui, EB-D-258, #2930. Not a security issue.
