@@ -33,6 +33,9 @@ const useStyles = makeStyles({
   row: { display: 'flex', columnGap: tokens.spacingHorizontalM, alignItems: 'center', flexWrap: 'wrap' },
 });
 
+/** An aria-describedby value: the ids that exist, space-separated (Fluent's Field adds its own hint and message ids to it). */
+const describedBy = (...ids: Array<string | null>) => ids.filter(Boolean).join(' ');
+
 export function NotifyStep() {
   const s = useStyles();
   const { form, readOnly, loadNotice, patchNotice } = useWiz();
@@ -40,6 +43,11 @@ export function NotifyStep() {
   const entry = kind ? form.notices[kind] : undefined;
   const locked = form.locked;
   const status = entry?.status;
+  // Review round 1 K4: the counters and the server's refusal are tied to the fields they describe.
+  const uid = React.useId();
+  const subjectCountId = uid + '-subject-count';
+  const proseCountId = uid + '-prose-count';
+  const refusedId = uid + '-refused';
 
   // The draft is asked for when the step is first shown, once per kind (the wizard keeps the guard). A locked reopen holds the request as sent.
   React.useEffect(() => {
@@ -50,6 +58,7 @@ export function NotifyStep() {
 
   const problems = noticeFieldProblems(entry);
   const draft = entry.draft;
+  const refused = entry.send ? form.noticeError : null;
   const edit = (patch: Parameters<typeof patchNotice>[1]) => patchNotice(kind, patch, true);
 
   return (
@@ -108,11 +117,18 @@ export function NotifyStep() {
                   required
                   validationState={problems.subject ? 'error' : 'none'}
                   validationMessage={problems.subject ?? undefined}
-                  hint={entry.subjectSuffix !== '' ? 'Spaarke adds the tracking number after the subject.' : undefined}
+                  hint={entry.subjectSuffix !== '' ? 'The tracking number in brackets is added by Spaarke and does not count toward the limit.' : undefined}
                 >
-                  <Input value={entry.subject} readOnly={locked} onChange={(_, d) => edit({ subject: d.value })} aria-label="Notice subject" data-testid="notice-subject" />
+                  <Input
+                    value={entry.subject}
+                    readOnly={locked}
+                    onChange={(_, d) => edit({ subject: d.value })}
+                    aria-label="Notice subject"
+                    aria-describedby={describedBy(subjectCountId, refused ? refusedId : null)}
+                    data-testid="notice-subject"
+                  />
                 </Field>
-                <Caption1 className={s.muted} data-testid="notice-subject-count">
+                <Caption1 id={subjectCountId} className={s.muted} data-testid="notice-subject-count">
                   {noticeCounterText(subjectCount(entry.subject, entry.subjectSuffix), NOTICE_SUBJECT_MAX)}
                 </Caption1>
               </div>
@@ -132,10 +148,11 @@ export function NotifyStep() {
                     resize="vertical"
                     rows={8}
                     aria-label="Notice message"
+                    aria-describedby={describedBy(proseCountId, refused ? refusedId : null)}
                     data-testid="notice-prose"
                   />
                 </Field>
-                <Caption1 className={s.muted} data-testid="notice-prose-count">
+                <Caption1 id={proseCountId} className={s.muted} data-testid="notice-prose-count">
                   {noticeCounterText(proseCount(entry.prose), NOTICE_PROSE_MAX)}
                 </Caption1>
               </div>
@@ -154,9 +171,9 @@ export function NotifyStep() {
             </>
           )}
 
-          {form.noticeError && (
-            <MessageBar intent="error" layout="multiline" data-testid="notice-refused">
-              <MessageBarBody>{form.noticeError}</MessageBarBody>
+          {refused && (
+            <MessageBar id={refusedId} intent="error" layout="multiline" data-testid="notice-refused">
+              <MessageBarBody>{refused}</MessageBarBody>
             </MessageBar>
           )}
 

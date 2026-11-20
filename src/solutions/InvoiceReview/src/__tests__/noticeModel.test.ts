@@ -106,6 +106,13 @@ describe('the lock of a notice', () => {
   it('a reopened entry is the lock as it was: ready, no draft, no new request', () => {
     expect(noticeEntryOfLock({ send: true, subject: 'S', prose: 'P' })).toMatchObject({ status: 'ready', send: true, subject: 'S', prose: 'P', draft: null });
     expect(noticeEntryOfLock(undefined)).toMatchObject({ status: 'ready', send: false, subject: '', prose: '' });
+    // Review round 1 F1-c: the tracking suffix is read back from the subject, so a locked subject counts as it did before the lock.
+    const locked = noticeEntryOfLock({ send: true, subject: 'x'.repeat(110) + ' (INV-2025-78232.1)', prose: 'P' });
+    expect(locked.subjectSuffix).toBe(' (INV-2025-78232.1)');
+    expect(subjectCount(locked.subject, locked.subjectSuffix)).toBe(110);
+    expect(noticeFieldProblems(locked).subject).toBeNull();
+    // (must-not-fire) a subject with no bracketed tail has no suffix, and is counted whole.
+    expect(noticeEntryOfLock({ send: true, subject: 'x'.repeat(121), prose: 'P' }).subjectSuffix).toBe('');
   });
 });
 

@@ -36,11 +36,13 @@ import {
   recordedReason,
   type InvoiceOutcome,
 } from '../../services/decisionModel';
-import { isNoteRefusal, noteArgs, noteProblem, noteRefusalMessage } from '../../services/noteModel';
+import { isNoteRefusal, noteArgs, noteProblem, noteRefusalMessage, noteToSend } from '../../services/noteModel';
+import { isNoticeRefusal, noticeEntryOfLock, noticeToSend } from '../../services/noticeModel';
 import { NoteField } from '../NoteField';
 import { InvoiceDecisionWizard } from './InvoiceDecisionWizard';
 import { useApprovalSync } from './AwaitingApprovers';
 import { useApproval } from './ApprovalProvider';
+import type { WizardNoticeLock } from './decisionLocks';
 import { REASON_MAX } from './steps';
 
 const useStyles = makeStyles({
@@ -145,6 +147,9 @@ export function IncompleteDecisionBanner({ review, reload }: IncompleteDecisionB
   const [reason, setReason] = React.useState('');
   const [note, setNote] = React.useState('');
   const [noteError, setNoteError] = React.useState<string | null>(null);
+  // Review round 1 F1-a: the firm notice of the request this page sent and that came back unsure (reject or return), as that request carried it.
+  const [noticeLock, setNoticeLock] = React.useState<WizardNoticeLock | undefined>(undefined);
+  const [noticeError, setNoticeError] = React.useState<string | null>(null);
   const [locked, setLocked] = React.useState(false);
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
@@ -174,6 +179,8 @@ export function IncompleteDecisionBanner({ review, reload }: IncompleteDecisionB
       setLocked(!!same);
     }
     setNoteError(null);
+    setNoticeError(null);
+    setNoticeLock(stranded === 'approve' ? undefined : same?.notice);
     setError(null);
     setDialog(prev => (prev?.open ? prev : { open: true, seq: (prev?.seq ?? 0) + 1, outcome: stranded, recorded: recordedStage }));
   };
@@ -183,6 +190,8 @@ export function IncompleteDecisionBanner({ review, reload }: IncompleteDecisionB
   const needsReason = outcome === 'reject' || outcome === 'return';
   const reasonMissing = needsReason && reason.trim() === '';
   const incomplete = reasonMissing || noteProblem(note) !== null;
+  // What the repeat carries for the firm: the kept notice with sending on (the wizard's own rule), else none.
+  const sentNotice = noticeLock && needsReason ? noticeToSend(noticeEntryOfLock(noticeLock), { skipped: false, locked: true }) : null;
 
   const submit = async () => {
     if (!dialog?.open || !outcome || sending.current || incomplete) return;
@@ -190,13 +199,17 @@ export function IncompleteDecisionBanner({ review, reload }: IncompleteDecisionB
     setBusy(true);
     setError(null);
     setNoteError(null);
+    setNoticeError(null);
     const n = noteArgs(note);
+    // The same request the wizard sent, notice included: with the notice on, the argument shape is the wizard's (note, then notice); with it
+    // off, or none kept, the old call exactly (no notice fields).
+    const notice = needsReason ? sentNotice : null;
     const r =
       outcome === 'approve'
         ? await api.approve(invoiceId, ...n)
         : outcome === 'reject'
-          ? await api.reject(invoiceId, reason.trim(), ...n)
-          : await api.returnToFirm(invoiceId, reason.trim(), ...n);
+          ? await (notice ? api.reject(invoiceId, reason.trim(), noteToSend(note), notice) : api.reject(invoiceId, reason.trim(), ...n))
+          : await (notice ? api.returnToFirm(invoiceId, reason.trim(), noteToSend(note), notice) : api.returnToFirm(invoiceId, reason.trim(), ...n));
     if (!alive.current) return;
     if (r.ok) {
       locks.clear('wizard');
@@ -213,11 +226,19 @@ export function IncompleteDecisionBanner({ review, reload }: IncompleteDecisionB
       setNoteError(noteRefusalMessage(r.failure));
       return;
     }
+    // The server refused the notice itself (400, before it decided anything): shown in the form; nothing else changes.
+    if (isNoticeRefusal(r.failure)) {
+      sending.current = false;
+      setBusy(false);
+      setNoticeError(decisionFailureMessage(r.failure));
+      return;
+    }
     // Saved in part, or no answer: the same request is the repeat, so what was sent is locked, here and at page level (as the wizard does).
     const unknown = isOutcomeUnknown(r.failure);
     if (unknown) {
       setLocked(true);
-      locks.set('wizard', { outcome, reason: needsReason ? reason.trim() : '', note });
+      // The notice stays in the lock, so an unsure send here does not erase it.
+      locks.set('wizard', { outcome, reason: needsReason ? reason.trim() : '', note, ...(noticeLock && needsReason ? { notice: noticeLock } : {}) });
     }
     // An unsure outcome or a 409 means the page may be out of date: re-read the approval and the review, as the wizard does.
     if (unknown || r.failure.status === 409) {
@@ -283,6 +304,18 @@ export function IncompleteDecisionBanner({ review, reload }: IncompleteDecisionB
                   data-testid="finish-decision-reason"
                 />
               </Field>
+            )}
+            {needsReason && (
+              <Text className={s.muted} data-testid="finish-decision-notice">
+                {sentNotice
+                  ? `The firm will be emailed this notice, with the findings table: “${sentNotice.subject}”.`
+                  : 'No email is sent to the firm. The decision is still recorded.'}
+              </Text>
+            )}
+            {noticeError && (
+              <MessageBar intent="error" layout="multiline" data-testid="finish-decision-notice-refused">
+                <MessageBarBody>{noticeError}</MessageBarBody>
+              </MessageBar>
             )}
             {!recorded && (
               <NoteField

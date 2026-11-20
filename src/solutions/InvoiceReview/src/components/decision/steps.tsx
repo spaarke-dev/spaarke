@@ -537,6 +537,12 @@ export function ConfirmStep({ notifySkipped }: { notifySkipped: boolean }) {
   // Task 132ui: what the firm is told. The same rule the request is built with (`noticeToSend`), so this sentence is what is sent.
   const noticeKind = readOnly ? undefined : noticeKindOf(form.outcome);
   const sentNotice = noticeKind ? noticeToSend(form.notices[noticeKind], { skipped: notifySkipped, locked: form.locked }) : null;
+  // Review round 1 F1-b: a notice the server refused is shown only while that notice is the one being sent. Skip, or sending turned off,
+  // leaves nothing to refuse (the stale message is dropped), and so does another outcome.
+  const refusal = !readOnly && sentNotice ? form.noticeError : null;
+  React.useEffect(() => {
+    if (!readOnly && form.noticeError && !sentNotice) set({ noticeError: null });
+  }, [readOnly, form.noticeError, sentNotice, set]);
   const adjustments = review.lines.filter(isAdjustment);
   const changed = review.lines.filter(l => l.status === 'Reduced' || l.status === 'Disallowed').sort((a, b) => a.sequence - b.sequence);
   const c = lineCounts(review.lines);
@@ -610,10 +616,10 @@ export function ConfirmStep({ notifySkipped }: { notifySkipped: boolean }) {
           testId="decision-note"
         />
       )}
-      {!readOnly && form.noticeError && (
+      {refusal && (
         <MessageBar intent="error" layout="multiline" data-testid="confirm-notice-refused">
           <MessageBarBody>
-            {form.noticeError} Go Back to the Notify step to edit the notice or turn it off, then finish again.
+            {refusal} Go Back to the Notify step to edit the notice or turn it off, then finish again.
           </MessageBarBody>
         </MessageBar>
       )}

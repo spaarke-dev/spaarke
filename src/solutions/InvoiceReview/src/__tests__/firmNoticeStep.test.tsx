@@ -16,6 +16,7 @@ import type { ApiResult, InvoiceReview } from '../services/invoiceReviewApi';
 import {
   INVOICE_ID,
   approval,
+  decidedReview,
   decisionRecord,
   failed,
   firmNoticeDraft,
@@ -26,6 +27,7 @@ import {
   ok,
   problem,
   review,
+  strandedApproval,
   type MockDecisionApi,
 } from './testKit';
 import * as fs from 'fs';
@@ -447,7 +449,8 @@ describe('AC6: a failed draft shows the message and code with Retry, and the rev
     ['409 not applicable', problem(409, 'ebilling.firm-notice.not_applicable', { detail: 'The invoice is not in a state this notice describes.' }), 'The invoice is not in a state this notice describes. (ebilling.firm-notice.not_applicable)'],
     ['503 unavailable', problem(503, 'ebilling.firm-notice.unavailable', { detail: 'The notice could not be drafted right now. Nothing was changed.' }), 'The notice could not be drafted right now. Nothing was changed. (ebilling.firm-notice.unavailable)'],
     ['503 disabled', problem(503, 'ebilling.disabled', {}), 'eBilling is not enabled in this environment. (ebilling.disabled)'],
-    ['429 rate limited', problem(429, null, {}), 'The request could not be completed. Try again in a moment.'],
+    // The rate limiter's own answer (RateLimitingModule OnRejected): a detail and no errorCode, so the status stands in for the code.
+    ['429 rate limited', problem(429, null, { detail: 'Rate limit exceeded. Please retry after the specified duration.' }), 'Rate limit exceeded. Please retry after the specified duration. (HTTP 429)'],
     ['no answer (network)', new Error('Failed to fetch'), 'The request could not be sent. Check your connection and retry.'],
   ])('%s: the message is shown with Retry, and the decision is sent with no notice', async (_label, err, text) => {
     const decision = mockDecisionApi();
@@ -724,5 +727,262 @@ describe('AC9: no unsafe HTML in the page', () => {
     await toLoadedNotify(d, REJECT);
     expect(document.getElementById('from-draft')).toBeNull();
     expect((window as unknown as { __x?: number }).__x).toBeUndefined();
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Review round 1
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** The open Finish form of the stranded-decision banner (found by role, then by its title text: an open surface may be aria-hidden). */
+async function finishDialog(): Promise<HTMLElement> {
+  return waitFor(() => {
+    const d = screen.getAllByRole('dialog', { hidden: true }).find(x => within(x).queryByText('Finish decision') !== null);
+    if (!d) throw new Error('the Finish form is not open');
+    return d;
+  });
+}
+const finishBtn = (d: HTMLElement) => within(d).getByRole('button', { name: 'Finish', hidden: true });
+
+/**
+ * A page whose first reject (or return) comes back 503 incomplete and leaves the invoice stranded, as the server reports it (the approval read
+ * shows `incompleteDecision`, the review shows the new status): the banner's Finish is then the only way to finish it.
+ */
+function strandingPage(verb: 'Reject' | 'Return' = 'Reject') {
+  const decision = mockDecisionApi();
+  const world = { state: approval(), review: clean() };
+  decision.getApproval.mockImplementation(async () => ok(world.state));
+  const strand = async () => {
+    world.state = strandedApproval(verb);
+    world.review = decidedReview(verb);
+    return incomplete();
+  };
+  (verb === 'Reject' ? decision.reject : decision.returnToFirm).mockImplementationOnce(strand);
+  const { api } = renderDecisions(clean(), decision);
+  api.getReview.mockImplementation(async () => ok(world.review));
+  return { decision, world };
+}
+
+/** Reject through the wizard with the notice as it stands (after `tweak`), send it, and close the wizard that came back unsure. */
+async function sendThenStrand(finishName: RegExp, which: RegExp, tweak?: (d: HTMLElement) => void) {
+  const d = await openWizard();
+  await toLoadedNotify(d, which, 'Duplicate of an earlier invoice');
+  tweak?.(d);
+  await toConfirm(d);
+  fireEvent.click(btn(d, finishName));
+  await within(d).findByTestId('decision-note-locked');
+  await closeWizard(d);
+}
+
+describe('Review round 1 F1-a: the banner\'s Finish repeats the wizard\'s request, notice included', () => {
+  it('Reject with the notice on, 503 incomplete, then Finish: the banner call equals the wizard\'s first call (notice included) and the form says so', async () => {
+    const { decision } = strandingPage('Reject');
+    await sendThenStrand(FINISH_REJECT, REJECT, d => {
+      type(subjectBox(d), 'Edited subject (INV-2025-78232.1)');
+      type(proseBox(d), 'Edited message.');
+    });
+    expect(decision.reject).toHaveBeenCalledTimes(1);
+    expect(decision.reject.mock.calls[0][3]).toEqual({ subject: 'Edited subject (INV-2025-78232.1)', prose: 'Edited message.' });
+
+    fireEvent.click(await screen.findByTestId('finish-decision'));
+    const dialog = await finishDialog();
+    expect(within(dialog).getByTestId('finish-decision-notice')).toHaveTextContent('The firm will be emailed this notice, with the findings table: “Edited subject (INV-2025-78232.1)”.');
+    fireEvent.click(finishBtn(dialog));
+    await waitFor(() => expect(decision.reject).toHaveBeenCalledTimes(2));
+    expect(decision.reject.mock.calls[1]).toEqual(decision.reject.mock.calls[0]);
+    expect(decision.reject.mock.calls[1][3]).toEqual({ subject: 'Edited subject (INV-2025-78232.1)', prose: 'Edited message.' });
+  });
+
+  it('Return with a note: the banner call equals the wizard\'s first call, note and notice', async () => {
+    const { decision } = strandingPage('Return');
+    const d = await openWizard();
+    await toLoadedNotify(d, RETURN, 'Please correct the rates');
+    await toConfirm(d);
+    fireEvent.change(within(d).getByLabelText('Note for the decision'), { target: { value: 'A note' } });
+    fireEvent.click(btn(d, FINISH_RETURN));
+    await within(d).findByTestId('decision-note-locked');
+    await closeWizard(d);
+    fireEvent.click(await screen.findByTestId('finish-decision'));
+    fireEvent.click(finishBtn(await finishDialog()));
+    await waitFor(() => expect(decision.returnToFirm).toHaveBeenCalledTimes(2));
+    expect(decision.returnToFirm.mock.calls[1]).toEqual(decision.returnToFirm.mock.calls[0]);
+    expect(decision.returnToFirm.mock.calls[1][2]).toBe('A note');
+    const draft = firmNoticeDraft({ kind: 'ReturnedToFirm' });
+    expect(decision.returnToFirm.mock.calls[1][3]).toEqual({ subject: draft.subject, prose: draft.prose });
+  });
+
+  it('(must-not-fire) a wizard lock with the notice off carries none: the banner says no email and its call has no notice fields', async () => {
+    const { decision } = strandingPage('Reject');
+    await sendThenStrand(FINISH_REJECT, REJECT, d => fireEvent.click(sendSwitch(d)));
+    expect(decision.reject.mock.calls[0]).toEqual([INVOICE_ID, 'Duplicate of an earlier invoice']);
+
+    fireEvent.click(await screen.findByTestId('finish-decision'));
+    const dialog = await finishDialog();
+    expect(within(dialog).getByTestId('finish-decision-notice')).toHaveTextContent('No email is sent to the firm');
+    fireEvent.click(finishBtn(dialog));
+    await waitFor(() => expect(decision.reject).toHaveBeenCalledTimes(2));
+    expect(decision.reject.mock.calls[1]).toEqual(decision.reject.mock.calls[0]);
+    expect(decision.reject.mock.calls[1]).toHaveLength(2);
+  });
+
+  it('a Finish that comes back unsure again keeps the notice in the lock: the next Finish still carries it', async () => {
+    const { decision } = strandingPage('Reject');
+    await sendThenStrand(FINISH_REJECT, REJECT);
+    decision.reject.mockResolvedValueOnce(incomplete());
+    fireEvent.click(await screen.findByTestId('finish-decision'));
+    const dialog = await finishDialog();
+    fireEvent.click(finishBtn(dialog));
+    await within(dialog).findByTestId('finish-decision-error');
+    expect(decision.reject).toHaveBeenCalledTimes(2);
+    expect(within(dialog).getByTestId('finish-decision-notice')).toHaveTextContent('The firm will be emailed this notice');
+    fireEvent.click(finishBtn(dialog));
+    await waitFor(() => expect(decision.reject).toHaveBeenCalledTimes(3));
+    expect(decision.reject.mock.calls[2]).toEqual(decision.reject.mock.calls[0]);
+    expect(decision.reject.mock.calls[2][3]).toBeDefined();
+  });
+
+  it('a 400 notice_refused on the banner is shown in the form: nothing is re-read and the form stays open to try again', async () => {
+    const { decision } = strandingPage('Reject');
+    await sendThenStrand(FINISH_REJECT, REJECT);
+    decision.reject.mockResolvedValueOnce(
+      failed(problem(400, 'ebilling.notice_refused', { detail: 'The notice to the firm was not accepted (prose.digit). Nothing was decided. Edit the notice and try again.' }))
+    );
+    fireEvent.click(await screen.findByTestId('finish-decision'));
+    const dialog = await finishDialog();
+    const reads = decision.getApproval.mock.calls.length;
+    fireEvent.click(finishBtn(dialog));
+    expect(await within(dialog).findByTestId('finish-decision-notice-refused')).toHaveTextContent('(prose.digit)');
+    expect(within(dialog).queryByTestId('finish-decision-error')).not.toBeInTheDocument();
+    expect(decision.getApproval.mock.calls.length).toBe(reads);
+    expect(finishBtn(dialog)).toBeEnabled();
+  });
+});
+
+describe('Review round 1 F1-b: a refusal of the notice is not shown once there is no such notice', () => {
+  const refusal = () => failed(problem(400, 'ebilling.notice_refused', { detail: 'The notice to the firm was not accepted (prose.digit). Nothing was decided. Edit the notice and try again.' }));
+
+  async function refusedOnReject() {
+    const decision = mockDecisionApi();
+    decision.reject.mockResolvedValueOnce(refusal());
+    renderDecisions(clean(), decision);
+    const d = await openWizard();
+    await toLoadedNotify(d, REJECT, 'Duplicate');
+    await toConfirm(d);
+    fireEvent.click(btn(d, FINISH_REJECT));
+    await within(d).findByTestId('confirm-notice-refused');
+    return { d, decision };
+  }
+
+  it('(1) Skip: Confirm then shows only "no email", and the refusal is gone from the Notify fields too', async () => {
+    const { d } = await refusedOnReject();
+    fireEvent.click(back(d));
+    expect(await within(d).findByTestId('notice-refused')).toBeInTheDocument();
+    fireEvent.click(skip(d));
+    await within(d).findByTestId('confirm-decision');
+    expect(within(d).queryByTestId('confirm-notice-refused')).not.toBeInTheDocument();
+    expect(within(d).getByTestId('confirm-notice')).toHaveTextContent('No email is sent to the firm');
+    fireEvent.click(back(d));
+    await within(d).findByTestId('notify-step');
+    expect(within(d).queryByTestId('notice-refused')).not.toBeInTheDocument();
+  });
+
+  it('(2) switching to Return: no refusal under Return\'s notice, and none on its Confirm', async () => {
+    const { d } = await refusedOnReject();
+    fireEvent.click(back(d)); // Notify
+    fireEvent.click(back(d)); // Reason
+    fireEvent.click(back(d)); // Decision
+    fireEvent.click(radio(d, RETURN));
+    fireEvent.click(next(d));
+    fireEvent.click(next(d));
+    await within(d).findByTestId('notice-subject');
+    expect(within(d).queryByTestId('notice-refused')).not.toBeInTheDocument();
+    await toConfirm(d);
+    expect(within(d).queryByTestId('confirm-notice-refused')).not.toBeInTheDocument();
+    expect(within(d).getByTestId('confirm-notice')).toHaveTextContent('The firm will be emailed this notice');
+  });
+
+  it('(3) switching to Approve: Confirm shows no refusal', async () => {
+    const { d } = await refusedOnReject();
+    fireEvent.click(back(d));
+    fireEvent.click(back(d));
+    fireEvent.click(back(d));
+    fireEvent.click(radio(d, /^Approve/));
+    fireEvent.click(next(d));
+    fireEvent.click(skip(d));
+    await within(d).findByTestId('confirm-decision');
+    expect(within(d).queryByTestId('confirm-notice-refused')).not.toBeInTheDocument();
+    expect(within(d).queryByTestId('confirm-notice')).not.toBeInTheDocument();
+  });
+
+  it('(must-not-fire) with the notice still on, the refusal stays on both steps until the reviewer edits it', async () => {
+    const { d } = await refusedOnReject();
+    expect(within(d).getByTestId('confirm-notice-refused')).toBeInTheDocument();
+    fireEvent.click(back(d));
+    expect(await within(d).findByTestId('notice-refused')).toBeInTheDocument();
+  });
+});
+
+describe('Review round 1 F1-c: a locked notice keeps its tracking suffix, so it is not over the limit', () => {
+  it('a 110-character subject plus the tracking number reads 110 / 120 with no error before and after the lock', async () => {
+    const decision = mockDecisionApi();
+    decision.reject.mockResolvedValueOnce(incomplete());
+    renderDecisions(clean(), decision);
+    const d = await openWizard();
+    await toLoadedNotify(d, REJECT, 'Duplicate');
+    type(subjectBox(d), `${'x'.repeat(110)} (INV-2025-78232.1)`);
+    expect(within(d).getByTestId('notice-subject-count')).toHaveTextContent('110 / 120 characters');
+    await toConfirm(d);
+    fireEvent.click(btn(d, FINISH_REJECT));
+    await within(d).findByTestId('decision-note-locked');
+    // The same wizard, Back to the Notify step: the entry now comes from the lock.
+    fireEvent.click(back(d));
+    await within(d).findByTestId('notify-step');
+    expect(within(d).getByTestId('notice-subject-count')).toHaveTextContent('110 / 120 characters');
+    expect(within(d).queryByText(/at most 120/)).not.toBeInTheDocument();
+    await closeWizard(d);
+
+    const again = await openWizard();
+    fireEvent.click(next(again));
+    fireEvent.click(next(again));
+    await within(again).findByTestId('notify-step');
+    expect(within(again).getByTestId('notice-subject-count')).toHaveTextContent('110 / 120 characters');
+    expect(within(again).queryByText(/at most 120/)).not.toBeInTheDocument();
+  });
+});
+
+describe('Review round 1 K2: a draft that failed with no code of its own shows its HTTP status', () => {
+  it('(must-not-fire) no answer at all (status 0) shows no HTTP tag', async () => {
+    const decision = mockDecisionApi();
+    decision.getFirmNoticeDraft.mockResolvedValueOnce(failed(new Error('Failed to fetch')));
+    renderDecisions(clean(), decision);
+    const d = await openWizard();
+    await toNotify(d, REJECT, 'Duplicate');
+    expect(await within(d).findByTestId('notice-draft-error-text')).not.toHaveTextContent('HTTP');
+  });
+});
+
+describe('Review round 1 K4: the counters and the refusal are tied to their fields', () => {
+  it('each counter is the description of its input, and the refusal bar describes both fields while it shows', async () => {
+    const decision = mockDecisionApi();
+    decision.reject.mockResolvedValueOnce(failed(problem(400, 'ebilling.notice_refused', { detail: 'The notice to the firm was not accepted (prose.digit). Nothing was decided.' })));
+    renderDecisions(clean(), decision);
+    const d = await openWizard();
+    await toLoadedNotify(d, REJECT, 'Duplicate');
+    const describedBy = (el: HTMLElement) => (el.getAttribute('aria-describedby') ?? '').split(' ');
+    expect(within(d).getByTestId('notice-subject-count').id).not.toBe('');
+    expect(describedBy(subjectBox(d))).toContain(within(d).getByTestId('notice-subject-count').id);
+    expect(describedBy(proseBox(d))).toContain(within(d).getByTestId('notice-prose-count').id);
+    // The hint no longer contradicts a subject that already shows the tracking number.
+    expect(within(d).getByText('The tracking number in brackets is added by Spaarke and does not count toward the limit.')).toBeInTheDocument();
+    expect(within(d).queryByTestId('notice-refused')).not.toBeInTheDocument();
+
+    await toConfirm(d);
+    fireEvent.click(btn(d, FINISH_REJECT));
+    await within(d).findByTestId('confirm-notice-refused');
+    fireEvent.click(back(d));
+    const bar = await within(d).findByTestId('notice-refused');
+    expect(bar.id).not.toBe('');
+    expect(describedBy(subjectBox(d))).toEqual(expect.arrayContaining([bar.id, within(d).getByTestId('notice-subject-count').id]));
+    expect(describedBy(proseBox(d))).toEqual(expect.arrayContaining([bar.id, within(d).getByTestId('notice-prose-count').id]));
   });
 });

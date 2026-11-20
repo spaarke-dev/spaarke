@@ -117,7 +117,9 @@ export function noticeLockOf(entry: NoticeEntry | undefined, sent: FirmNotice | 
 
 /** The entry of a locked request, reopened: the text and the choice as sent, no draft to restore to, no new request. */
 export function noticeEntryOfLock(lock: { send: boolean; subject: string; prose: string } | undefined): NoticeEntry {
-  return { ...EMPTY_NOTICE, status: 'ready', subject: lock?.subject ?? '', prose: lock?.prose ?? '', send: lock?.send ?? false };
+  // The tracking suffix is read back from the subject as sent, so the counter and the limit read as they did before the lock (review round 1 F1-c).
+  const subject = lock?.subject ?? '';
+  return { ...EMPTY_NOTICE, status: 'ready', subject, subjectSuffix: subjectSuffixOf(subject), prose: lock?.prose ?? '', send: lock?.send ?? false };
 }
 
 /** True when the server refused the notice itself (400 `ebilling.notice_refused`): nothing was decided, and the notice is shown the reason. */

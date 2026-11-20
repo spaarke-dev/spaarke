@@ -155,7 +155,9 @@ export function InvoiceDecisionWizard(props: InvoiceDecisionWizardProps) {
           // The server's message with its code (the disabled answer is the one sentence that carries no code of its own).
           const text = decisionFailureMessage(r.failure);
           const code = r.failure.errorCode;
-          settle({ status: 'failed', draft: null, send: false, failure: code && !text.includes(code) ? `${text} (${code})` : text });
+          // Review round 1 K2: an answer with no code of its own (a 429 from the rate limiter) shows its HTTP status instead.
+          const tag = code ?? (r.failure.status > 0 && !r.failure.signInFailed ? `HTTP ${r.failure.status}` : null);
+          settle({ status: 'failed', draft: null, send: false, failure: tag && !text.includes(tag) ? `${text} (${tag})` : text });
         }
       });
     },
@@ -181,6 +183,8 @@ export function InvoiceDecisionWizard(props: InvoiceDecisionWizardProps) {
       // lock entry outlives a change of outcome. The form is editable only while the selected outcome differs from the locked one (the text
       // typed so far stays); coming back to the locked outcome restores what was sent and locks the form again. Only a success, or a reload
       // that shows the decision is done, clears the entry.
+      // Review round 1 F1-b: a refusal of one outcome's notice is not shown under another's (nor on Approve's Confirm).
+      if (outcome !== live.current.form.outcome) set({ noticeError: null });
       const lock = locks.get('wizard');
       if (lock) {
         if (outcome === lock.outcome) {

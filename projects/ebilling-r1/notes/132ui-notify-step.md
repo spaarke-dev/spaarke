@@ -25,8 +25,8 @@ Client-only (`src/solutions/InvoiceReview`). No server, schema, shared-library, 
 - Next is held while the draft loads (so the Confirm wording cannot change under the reviewer), and for a blank or over-limit notice with sending on. A failed draft, or sending off, holds nothing. Skip always works.
 - Skip is read from the shell's own step state (`handle.state.steps`), captured when the Confirm step renders; Back to the Notify step and Next again is not a skip.
 - Sent only when: draft loaded, "Send this notice" on, step not skipped, text valid. Then the call is `reject(id, reason, note | undefined, { subject, prose })` (trimmed). Otherwise it is exactly the old call with no extra argument.
-- A 400 `ebilling.notice_refused` keeps the wizard open, shows the refusal on the Confirm step (with the way back) and under the fields on the Notify step, re-reads nothing, locks nothing; any edit or toggle clears it.
-- An unsure outcome (503 saved in part, or no answer) records `notice: { send, subject, prose }` in the page-level lock and fixes the form's entry to what was sent: the reopened wizard shows the same notice and choice, read-only, and Skip does not drop a locked notice. A draft that lands after the lock is ignored.
+- A 400 `ebilling.notice_refused` keeps the wizard open, shows the refusal on the Confirm step (with the way back) and under the fields on the Notify step, re-reads nothing, locks nothing; any edit or toggle clears it, and so does choosing another outcome. It is shown on Confirm only while that notice is the one being sent (Skip, or sending turned off, drops the stale message).
+- An unsure outcome (503 saved in part, or no answer) records `notice: { send, subject, prose }` in the page-level lock and fixes the form's entry to what was sent: the reopened wizard shows the same notice and choice, read-only, and Skip does not drop a locked notice. A draft that lands after the lock is ignored. The banner's "Finish decision..." (ISS-032) repeats the same request: the form shows read-only whether the firm is emailed and the subject, and the call carries the notice exactly as the wizard's first call did (review round 1 F1-a).
 
 ## Acceptance criteria to tests
 
@@ -48,19 +48,31 @@ Tests are in `src/__tests__/firmNoticeStep.test.tsx` unless named.
 
 ## Results
 
-- **Package tests** (`npx jest` in `src/solutions/InvoiceReview`): 18 suites, **616 passed, 0 failed**. Baseline on `e11be217cc`: 16 suites, 562 passed, 1 failed (`serverWordsPin`, see limit 7).
+- **Package tests** (`npx jest` in `src/solutions/InvoiceReview`): 18 suites, **628 passed, 0 failed** (after review round 1; 616 before it). Baseline on `e11be217cc`: 16 suites, 562 passed, 1 failed (`serverWordsPin`, see limit 6).
 - **tsc**: `npm run typecheck` (the surface gate) reports Surface-owned: 0 errors; the 99 shared-library errors are the pre-existing ones it ignores.
-- **client-lint**: InvoiceReview is not a client-lint package (see limit 6), so `client-lint.mjs check --package ...` has nothing to run for it; the package has no ESLint config either.
+- **client-lint**: InvoiceReview is not a client-lint package (see limit 5), so `client-lint.mjs check --package ...` has nothing to run for it; the package has no ESLint config either.
 - **Failing before, passing after (AC3 and AC5).** The "before" behaviour (the wizard never sends a notice; a 400 `ebilling.notice_refused` falls to the shell's error bar) was reproduced by temporarily editing `InvoiceDecisionWizard.tsx` (the notice forced to null, the refusal branch disabled), then restoring it. `npx jest src/__tests__/firmNoticeStep.test.tsx -t "AC3|AC5"`:
   - with the old behaviour: **6 failed, 3 passed** (failing: AC3 "Reject with sending on carries exactly the edited, trimmed subject and message", AC3 "Return with sending on carries the Return draft", AC3 "going Back ... after a Skip ... sends the notice", AC5 "shows the refusal under the fields ... edit and finish again", AC5 "turn the notice off after a refusal", AC5 "a refused notice is not an unsure outcome"; the 3 that pass are the negative cases that hold on the old behaviour too: sending off, skipped, and "another 400 stays the shell's alert");
   - with the change: **9 passed, 0 failed**.
 
+## Review round 1
+
+An Opus review of `9aca5c8972` found these; all fixed in one commit. Tests are in `firmNoticeStep.test.tsx` ("Review round 1 ..." blocks) unless named. Each new test fails on `9aca5c8972` and passes now (12 failed before, all passing after).
+
+| Finding | Change | Test |
+|---|---|---|
+| F1-a (high): the banner's Finish repeat dropped the notice, so the firm got no email | `DecideInvoiceAction.tsx`: `open()` keeps `same?.notice` from the wizard lock; `submit()` sends `reject` / `returnToFirm` with `(id, reason, noteToSend(note), notice)` when the lock sent a notice (the old call otherwise); `locks.set('wizard', ...)` keeps the notice on an unsure banner send; the form shows read-only whether the firm is emailed and the subject; a 400 `ebilling.notice_refused` is shown in the form (`finish-decision-notice-refused`), nothing else changes | "F1-a": wizard to 503 to banner Finish, call equals the wizard's first call, notice included (Reject, and Return with a note); must-not-fire: lock with the notice off gives a 2-argument banner call; an unsure Finish keeps the notice for the next one; refusal on the banner |
+| F1-b: a stale refusal message | `onOutcome` clears `noticeError` when the outcome changes; `ConfirmStep` shows `confirm-notice-refused` only while a notice is being sent and clears the stale error otherwise; `NotifyStep` shows the refusal only while sending is on | "F1-b" (1) Skip, (2) switch to Return, (3) switch to Approve, must-not-fire: still on while the notice is on |
+| F1-c: a locked notice read as over the limit | `noticeEntryOfLock` keeps `subjectSuffix: subjectSuffixOf(subject)` | "F1-c": 110 characters plus the tracking number reads 110 / 120, no error, before and after the lock; `noticeModel.test.ts` (`noticeEntryOfLock`, with a must-not-fire) |
+| K2: a 429 draft failure showed no code | the draft failure text ends with `(HTTP <status>)` when there is no `errorCode` (not for status 0 or a sign-in failure); the 429 test double now sends the limiter's real shape (a detail, no `errorCode`) | AC6 "429 rate limited" row; "K2" must-not-fire: no answer shows no HTTP tag |
+| K4: accessibility | each counter is the `aria-describedby` of its input (`useId`); the refusal bar's id is also in both fields' `aria-describedby` while it shows; the Subject hint now reads "The tracking number in brackets is added by Spaarke and does not count toward the limit." | "K4" |
+
 ## Known limits and things noticed
 
 1. **No HTML preview.** The server's `html` is not rendered (allowed by the task); a preview would be a sandboxed iframe only.
-2. **The "Finish decision..." banner repeat sends no notice.** `IncompleteDecisionBanner` (ISS-032) repeats a stranded reject or return with the reason and note only. If the wizard's request carried a notice and came back unsure, finishing it from the banner sends no firm email (the wizard reopen path is exact). Not changed here (out of scope); worth a follow-up so a stranded decision can carry the locked notice.
-3. **The tracking suffix is a heuristic.** The subject counter excludes the draft's trailing ` (...)` group, as the server removes the exact ` (tracking)` suffix before it counts. The server stays the authority.
-4. **The refusal cannot move the wizard.** The shell has no go-to-step, so after a refusal the Confirm step shows the message and says to go Back; the Notify step shows it under the fields.
-5. **A locked reopen has no draft to restore to** (no source line, no Restore draft); the text and choice are shown as sent.
-6. **Lint.** InvoiceReview is not a client-lint package (`PACKAGES` in `scripts/quality/client-lint/eslint.client.config.mjs` does not list it) and the package has no ESLint config, so only `tsc` (the surface gate) applies.
-7. **Pre-existing red, fixed here.** `serverWordsPin.test.ts` was failing on `e11be217cc` (the server's `InvoiceDecisionRequest` gained `NoticeSubject` and `NoticeProse` in 132, the pin still expected two members). Updated to the real shape.
+2. **The tracking suffix is a heuristic.** The subject counter excludes the draft's trailing ` (...)` group, as the server removes the exact ` (tracking)` suffix before it counts. The server stays the authority.
+3. **The refusal cannot move the wizard.** The shell has no go-to-step, so after a refusal the Confirm step shows the message and says to go Back; the Notify step shows it under the fields.
+4. **A locked reopen has no draft to restore to** (no source line, no Restore draft); the text and choice are shown as sent.
+5. **Lint.** InvoiceReview is not a client-lint package (`PACKAGES` in `scripts/quality/client-lint/eslint.client.config.mjs` does not list it) and the package has no ESLint config, so only `tsc` (the surface gate) applies.
+6. **Pre-existing red, fixed here.** `serverWordsPin.test.ts` was failing on `e11be217cc` (the server's `InvoiceDecisionRequest` gained `NoticeSubject` and `NoticeProse` in 132, the pin still expected two members). Updated to the real shape.
+7. **A stranded decision after a page reload cannot carry the notice.** The notice is kept only in the page-level lock of the session that sent it (plain memory). After a reload there is no lock, so the banner's Finish repeats with reason and note only and the firm gets no email. Filed separately by the coordinator; not fixed here.
