@@ -892,6 +892,15 @@ Not verified without a live environment:
   - restored: **Passed 113, Failed 0**.
 - **CI job set** (`Set-CustomerOwnerTeams.Tests.ps1` + the new file, Pester 5.7.1 as CI pins): **131 passed, 0 failed** before the F1 round; **149 passed, 0 failed** after it. Under Pester 6.2 the files fail at load (the harness incompatibility the workflow's pin comment records), not a script defect.
 
+### Live runs
+
+- **dev, Stamp `-DryRun`, 2026-11-20** (owner go in this session; after UAC-r2's D-2 step 3 on dev). Script as on master. Exit 0.
+  - Precondition: all five columns field-secured; both BFF application users on the writer profile; only the BFF identities can write. OK.
+  - Selection: 3 Direct messages with an empty `sprk_directrecipient`. **Plan: 0 rows to stamp.**
+  - Review: `no_sentby` 3 (two messages on one thread, one test message on another). They keep their owner, and Move lists them `no_valid_pair`.
+  - Nothing written. The review list was kept out of the repo.
+  - `-Apply` would write nothing. Its go is still the owner's, with `-Verify` after.
+
 ## 054a piece 3 — the Direct owner rule (3a, 3b, 3c)
 
 **Rule.** A Direct 1:1 message filed under no record is owned by the Direct message owner team (the `DirectMessage:BusinessUnitName` and `DirectMessage:OwnerTeamName` settings, resolved by `DirectMessageOwnerTeam`). One member assigns it: `DirectMessageOwnerStep.WriteDirectTeamOwnerAsync`. The step runs at the join (the chat ingestor and the outbound send) and on an unfile (the four re-file writers). A message filed under a record stays the resolver's.
