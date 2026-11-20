@@ -4,7 +4,7 @@
     <title>Firm view: show the reviewer-confirmed notice prose as the firm-safe reason (EB-D-259)</title>
     <phase>5 Firm feedback (WP5)</phase>
     <gate>132 and 132ui merged into work. Branch from work/ebilling-r1 at the sha named in the agent brief.</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Changes what external firm users can read (the 130 firm-safe projection); .cs and tests change. The index said STANDARD; raised.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -67,6 +67,10 @@
       <file>tests/CLAUDE.md</file>
     </files>
   </knowledge>
+  <notes>
+    Completed 2026-11-20, merged into work 6b84fb1db1 (branch task/ebilling-130g, tip ffb384c1e9). FirmOutcome.NoticeProse: the stored prose of the invoice own submission, Rejected / ReturnedToFirm only, matching kind and version, re-screened on every read; a read fault omits only the field. Both outcome routes carry it. Opus adversarial review: no F1/F3/F4; F2 reader/writer tie (shared SentNoticeVersion, real-writer round-trip tests), F2 routine SubmissionRejected mismatch logged at Information, K1 lone-surrogate catch: fixed. uac-r2 PASS; N1 wording and N2 submission-route cases fixed. Known limits (HTML-shaped prose, the extra read, source unfiltered): notes/130g-firm-view-notice-prose.md; task 134 renders the field as plain text. Filtered tests 1221/0, ArchTests 638/0, build 0 warnings, publish +1,102 bytes against ff496f2aa0.
+    rework: fix-round-1 task 130g
+  </notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
