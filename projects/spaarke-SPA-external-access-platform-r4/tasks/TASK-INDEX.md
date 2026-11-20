@@ -25,8 +25,8 @@
 | 015 | SPA: Add event with type/priority/assignee/description; Event record (child + deep link) with Edit and Change status (FR-35–FR-37) | 1 | ✅ [done] | 014 | — | sonnet / high |
 | 016 | Event forms deploy (BFF via uac-r2, SPA dev) + owner E2E | 1 | 🔄 [wip] | 014, 015 | — (live) | sonnet / high |
 | 018 | P1 deploy (BFF via uac-r2, SPA dev) + E2E + first-E2E checks (FR-33) — redeploy + retest after 008–013 | 1 | ✅ [done] | 002, 004, 005, 006, 007, 008, 009, 010, 011, 012, 013 | — (live) | sonnet / high |
-| 020 | Review detail (082c) + held-Accepted badge (FR-11, FR-12) | 2 | 🔲 [open] | 018 | Group B | sonnet / high |
-| 022 | Inline PDF/image preview (FR-14) | 2 | 🔲 [open] | 018 | Group B | sonnet / high |
+| 020 | Review detail (082c) + held-Accepted badge (FR-11, FR-12) | 2 | ✅ [done] | 018 | Group B | sonnet / high |
+| 022 | Inline PDF/image preview (FR-14) | 2 | ✅ [done] | 018 | Group B | sonnet / high |
 | 023 | Documents with no file + Documents on shared DataGrid (FR-15, FR-16) | 2 | 🔲 [open] | 018, 022 | — | sonnet / xhigh |
 | 021 | Invoice Files section; remove invoice upload/versions (FR-13) — gated on ebilling routes | 2 | ✅ [done] | 018, 020, 023 | — | sonnet / high |
 | 024 | Shared EmptyState everywhere (FR-17) | 2 | 🔲 [open] | 018, 023 | — | sonnet / high |

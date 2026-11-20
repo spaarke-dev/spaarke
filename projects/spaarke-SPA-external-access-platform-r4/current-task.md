@@ -1,16 +1,16 @@
 # Current Task State
 
-> **Last Updated**: 2026-11-19 (task 016: dev SPA `2963d1565b` live on dev BFF `5ae2804884`; owner retest items 3–7 pending)
+> **Last Updated**: 2026-11-20 (Phase 2 wave 4 running: 020 + 022 in parallel; 016 waits on owner retest items 3–7)
 > **Format**: CURRENT state only. Each checkpoint REWRITES this file. Target ≤ 10 KB.
 
 ## Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
 |-------|-------|
-| **Task** | **016** Event forms deploy + owner E2E, `tasks/016-event-forms-deploy-e2e.poml`. In progress (STANDARD, prescriptive) |
-| **Step** | Step 3: owner retest. Steps 1–2 done: dev SPA deployed from master `ed3a5c2752` (run 44153057447). Retest found a 500 on typed event create (D-21 #2892); fix PR #2894 merged as `08161cfb0e`; dev BFF `326781c50f` live 22:03Z with the fix; owner retest of items 1–6 next |
-| **Status** | 015 ✅ done: PR #2886 squash-merged to master as `242696586f` (CI 32 pass / 0 fail). Notes: `notes/task-015-notes.md` |
-| **Next Action** | Record the owner's retest results in `notes/task-016-notes.md` (table of 8 checks); file findings via /project-defer-issue-tracking or a follow-up task; then mark 016 done. SPA rollback = rerun deploy-external-spa.yml (dev) on master `ed3a5c2752` |
+| **Task** | **Wave 4 (P2) done: 020** Review detail (FR-11; FR-12 already on master from ebilling) and **022** inline document preview (FR-14) — owner go 2026-11-20 "Yes, start Phase 2". Also open: **016** (owner retest items 3–7) |
+| **Step** | Both ✅ in POML + index (drift check clean). Build, full SPA vitest (1908 + 2 new), ArchTests 2724/2724, adr-check clean, one adversarial review: F3 fixed (streamed size cap), F2 filed as D-23 #2928 → task 023. Notes: `notes/task-020-notes.md`, `task-022-notes.md` |
+| **Status** | 016 🔄 (items 1–2, 8 pass); 020 ✅; 022 ✅ — on branch, PR for the owner's merge go |
+| **Next Action** | Owner: merge go for the wave PR. Then wave 5: 023 (fold in D-23) → 024 → 028 (P2 deploy + E2E; grid PATCH for 3ff4102c with owner approval; any env needs 082c-2 first). Owner wording question: show "The client is reviewing this invoice." beyond the Information field? |
 
 ## Task 015 outcome (for 016's E2E)
 - Add event: Event Type required (options = `creatableEventTypes`), Due Date required by type, Priority, Assigned To ("Me" first), Description. Add event hidden when no type is offered.
