@@ -196,7 +196,8 @@ public class ExternalInvoiceVisibilityGuardTests
             + "no invoice-family row beyond that submission.",
         ["Sprk.Bff.Api.Services.Finance.FirmFindingsProjection::ReadNoticeProseAsync"] =
             "Reviewed 130g (EB-D-259). Reads the notice text (sprk_firmnoticetext only, app-only: the column is field-secured to the BFF identity) of the "
-            + "ONE admitted invoice's OWN submission (InvoiceBlockedHold.ReadOwnSubmissionAsync, the one own-submission rule), only for a Rejected or "
+            + "ONE admitted invoice's OWN submission (InvoiceBlockedHold.ReadOwnSubmissionAsync, the one own-submission rule: it queries the submissions "
+            + "linked to the invoice and keeps only its OWN (id-derived) one; no other row's text leaves the method), only for a Rejected or "
             + "Returned-to-firm invoice GetForInvoiceAsync already built after the route's filter admitted it. It returns the prose alone, re-screened "
             + "by FirmNoticeProse.Check and only for the matching stored kind; a fault, or anything unreadable, is no prose (never the subject or html).",
         ["Sprk.Bff.Api.Services.Finance.FirmFindingsProjection::ReadRejectionSignalsAsync"] =

@@ -89,7 +89,8 @@ public enum FirmOutcomeDecision
 /// the invoice's OWN submission (<c>sprk_firmnoticetext</c>) and re-screened by <see cref="FirmNoticeProse.Check"/> on every read. It is the firm-safe
 /// reason for the decision, never the internal reason or note. Null (omitted from the JSON) when nothing is stored, when the stored text is
 /// unreadable, of another version or kind, or refused by the screen, when its read faulted, and for every other outcome. The stored subject, html
-/// and source are never exposed.
+/// and source are never exposed. Both routes carry the field: the invoice route, and the submission route for an Accepted submission whose invoice is
+/// decided (it returns that invoice's outcome).
 /// </param>
 public sealed record FirmOutcome(
     FirmOutcomeKind Kind,
@@ -1130,8 +1131,11 @@ public sealed class FirmFindingsProjection
     /// <summary>The stable log code of a stored notice that was not shown (ids and a reason only, never the text).</summary>
     internal const string NoticeProseNotShownCode = "EBILLING-FIRM-OUTCOME-NOTICE-PROSE-NOT-SHOWN";
 
-    /// <summary>The stored notice's schema version this reader understands (<c>EbillingNotificationJobHandler.SentNoticeJson</c> writes 1).</summary>
-    internal const int StoredNoticeVersion = 1;
+    /// <summary>
+    /// The reason of a stored notice for a rejected SUBMISSION found on the own submission of a decided invoice. Routine (an automatic rejection, or
+    /// a held submission later decided without a confirmed notice, leaves one there), so it is logged at Information, not as a Warning.
+    /// </summary>
+    internal const string SubmissionNoticeReason = "submission-notice";
 
     /// <summary>
     /// <see cref="FirmNoticeProse.Check"/> screens a subject and a body together and refuses a blank subject. Only the prose is shown, so it is
@@ -1151,7 +1155,7 @@ public sealed class FirmFindingsProjection
         Entity? own;
         try
         {
-            // App-only (the column is field-secured to the BFF writers), through the one own-submission rule: another submission linked to the invoice is never read.
+            // App-only (the column is field-secured to the BFF writers), through the one own-submission rule: it queries the submissions linked to the invoice and keeps only its OWN (id-derived) one; no other row's text leaves the method.
             own = await InvoiceBlockedHold.ReadOwnSubmissionAsync(
                 _entities, invoiceId, [EbillingNotificationJobHandler.FirmNoticeTextColumn], ct).ConfigureAwait(false);
         }
@@ -1176,7 +1180,11 @@ public sealed class FirmFindingsProjection
         var (prose, reason) = ScreenStoredNotice(stored, expectedKind);
         if (prose is null)
         {
-            _logger.LogWarning(
+            // A SubmissionRejected notice on a decided invoice's own submission is the normal result of the routine paths above: Information.
+            // Every other not-shown reason (malformed, version, another kind, a refusal) is unexpected data: Warning.
+            var level = reason == SubmissionNoticeReason ? LogLevel.Information : LogLevel.Warning;
+            _logger.Log(
+                level,
                 "[{Code}] The stored notice of invoice {Id} (submission {SubmissionId}) is not shown ({Reason}).",
                 NoticeProseNotShownCode, invoiceId, own!.Id, reason);
         }
@@ -1197,15 +1205,23 @@ public sealed class FirmFindingsProjection
             }
 
             if (!root.TryGetProperty("v", out var version) || version.ValueKind != JsonValueKind.Number
-                || !version.TryGetInt32(out var versionNumber) || versionNumber != StoredNoticeVersion)
+                || !version.TryGetInt32(out var versionNumber) || versionNumber != EbillingNotificationJobHandler.SentNoticeVersion)
             {
                 return (null, "unsupported-version");
             }
 
-            if (!root.TryGetProperty("kind", out var kind) || kind.ValueKind != JsonValueKind.String
-                || !string.Equals(kind.GetString(), expectedKind, StringComparison.Ordinal))
+            if (!root.TryGetProperty("kind", out var kind) || kind.ValueKind != JsonValueKind.String)
             {
                 return (null, "kind-mismatch");
+            }
+
+            var storedKind = kind.GetString();
+            if (!string.Equals(storedKind, expectedKind, StringComparison.Ordinal))
+            {
+                // Only Rejected and Returned invoices are read here, so a stored SubmissionRejected notice is the submission-stage one: expected, no prose.
+                return string.Equals(storedKind, nameof(FirmNoticeKind.SubmissionRejected), StringComparison.Ordinal)
+                    ? (null, SubmissionNoticeReason)
+                    : (null, "kind-mismatch");
             }
 
             if (!root.TryGetProperty("prose", out var proseElement) || proseElement.ValueKind != JsonValueKind.String)
@@ -1217,8 +1233,10 @@ public sealed class FirmFindingsProjection
             var refusal = FirmNoticeProse.Check(ScreenSubject, prose);
             return refusal is null ? (prose, null) : (null, "refused:" + refusal);
         }
-        catch (JsonException)
+        catch (Exception ex) when (ex is JsonException or InvalidOperationException or ArgumentException)
         {
+            // JsonException: not JSON. ArgumentException: JsonDocument.Parse over a lone surrogate. InvalidOperationException: GetString over an
+            // escaped lone surrogate (\ud800). All are an unreadable stored notice: no prose, never a fault of the outcome.
             return (null, "malformed");
         }
     }

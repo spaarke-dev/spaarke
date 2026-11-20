@@ -9,6 +9,7 @@ using Sprk.Bff.Api.Services.Ai.PublicContracts;
 using Sprk.Bff.Api.Services.Finance;
 using Sprk.Bff.Api.Services.Finance.Models;
 using Sprk.Bff.Api.Services.Finance.Submission;
+using Sprk.Bff.Api.Services.Jobs.Handlers;
 using Xunit;
 using World = Sprk.Bff.Api.Tests.Services.Finance.FirmFindingsProjectionTests.World;
 
@@ -157,7 +158,6 @@ public sealed class FirmOutcomeNoticeProseTests
     [Theory(DisplayName = "130g AC2 (must-not-fire): a stored notice of another kind than this decision's gives no prose")]
     [InlineData(InvoiceStatusCodes.Rejected, "ReturnedToFirm")]
     [InlineData(InvoiceStatusCodes.ReturnedToFirm, "InvoiceRejected")]
-    [InlineData(InvoiceStatusCodes.Rejected, "SubmissionRejected")]
     [InlineData(InvoiceStatusCodes.ReturnedToFirm, "ApprovedWithAdjustments")]
     [InlineData(InvoiceStatusCodes.Rejected, "invoicerejected")]
     [InlineData(InvoiceStatusCodes.Rejected, "")]
@@ -385,5 +385,125 @@ public sealed class FirmOutcomeNoticeProseTests
         (await OutcomeAsync(world)).NoticeProse.Should().Be(StoredMarker);
         drafted.Draft!.Html.Should().Contain("Rate exceeds the agreed rate.");
         confirmed.Draft!.Prose.Should().Be("Please review the rates and respond.");
+    }
+
+    // ── Fix round 1 (F2-a): the reader is tied to the REAL writer ──
+
+    /// <summary>The submission row of the invoice's OWN submission holding <paramref name="stored"/> (what the notification job writes).</summary>
+    private static void StoreOnOwnSubmission(World world, string stored) =>
+        world.Submissions.Add(new Entity("sprk_invoicesubmission", SubmissionId)
+        {
+            ["sprk_invoice"] = new EntityReference("sprk_invoice", InvoiceId),
+            [Column] = stored,
+        });
+
+    /// <summary>The confirmed Reviewer draft, built through the composer the job uses (so its Kind, Source, Subject, Prose and Html are the real ones).</summary>
+    private static async Task<FirmNoticeDraft> ConfirmedDraftAsync(World world, FirmNoticeKind kind)
+    {
+        var confirmed = await NoticeComposer(world, aiEnabled: false)
+            .ComposeConfirmedForInvoiceAsync(kind, InvoiceId, "Invoice decided", "Please review the rates and respond.", CancellationToken.None);
+        confirmed.Status.Should().Be(ConfirmedFirmNoticeStatus.Composed);
+        confirmed.Draft!.Source.Should().Be(FirmNoticeSource.Reviewer);
+        return confirmed.Draft;
+    }
+
+    [Theory(DisplayName = "130g fix 1 (F2-a): the REAL writer output (EbillingNotificationJobHandler.SentNoticeJson of the confirmed Reviewer draft) is projected as the firm's prose")]
+    [InlineData(InvoiceStatusCodes.Rejected, FirmNoticeKind.InvoiceRejected, FirmOutcomeKind.Rejected)]
+    [InlineData(InvoiceStatusCodes.ReturnedToFirm, FirmNoticeKind.ReturnedToFirm, FirmOutcomeKind.ReturnedToFirm)]
+    public async Task TheWritersRealOutput_IsProjectedAsTheProse(int status, FirmNoticeKind kind, FirmOutcomeKind outcomeKind)
+    {
+        var world = DecidedWorld(status, stored: null);
+        var draft = await ConfirmedDraftAsync(world, kind);
+        var stored = EbillingNotificationJobHandler.SentNoticeJson(draft);
+        StoreOnOwnSubmission(world, stored);
+
+        var outcome = await OutcomeAsync(world);
+
+        outcome.Kind.Should().Be(outcomeKind);
+        outcome.NoticeProse.Should().Be("Please review the rates and respond.").And.Be(draft.Prose);
+        // Controls: what the writer stored really carries the html, so the projection is not passing on a stripped object.
+        stored.Should().Contain("\"v\":" + EbillingNotificationJobHandler.SentNoticeVersion).And.Contain("\"htmlOmitted\":false");
+        JsonSerializer.Serialize(outcome).Should().NotContain(draft.Subject).And.NotContain("<p>").And.NotContain("\"html\"");
+    }
+
+    [Theory(DisplayName = "130g fix 1 (F2-a): the writer's html-omitted variant (the html would not fit the column) still projects the prose")]
+    [InlineData(InvoiceStatusCodes.Rejected, FirmNoticeKind.InvoiceRejected)]
+    [InlineData(InvoiceStatusCodes.ReturnedToFirm, FirmNoticeKind.ReturnedToFirm)]
+    public async Task TheWritersHtmlOmittedOutput_IsProjectedAsTheProse(int status, FirmNoticeKind kind)
+    {
+        var world = DecidedWorld(status, stored: null);
+        var draft = await ConfirmedDraftAsync(world, kind);
+        var huge = draft with { Html = new string('x', EbillingNotificationJobHandler.FirmNoticeTextMaxLength + 1) };
+        var stored = EbillingNotificationJobHandler.SentNoticeJson(huge);
+        StoreOnOwnSubmission(world, stored);
+
+        var outcome = await OutcomeAsync(world);
+
+        // Control: the writer really took the omitted branch.
+        stored.Should().Contain("\"htmlOmitted\":true").And.NotContain("xxxxxxxx");
+        outcome.NoticeProse.Should().Be(draft.Prose);
+    }
+
+    // ── Fix round 1 (F2-b): a routine kind mismatch is Information; any other is a Warning ──
+
+    [Theory(DisplayName = "130g fix 1 (F2-b): a stored SubmissionRejected notice on a Rejected or Returned invoice's own submission is routine: no prose, Information with reason submission-notice, no Warning")]
+    [InlineData(InvoiceStatusCodes.Rejected)]
+    [InlineData(InvoiceStatusCodes.ReturnedToFirm)]
+    public async Task ASubmissionNotice_IsRoutine_InformationNotWarning(int status)
+    {
+        var world = DecidedWorld(status, Stored("SubmissionRejected"));
+
+        var outcome = await OutcomeAsync(world);
+
+        outcome.NoticeProse.Should().BeNull();
+        outcome.Degraded.Should().BeFalse();
+        outcome.Items.Should().HaveCount(1);
+        world.Logger.Lines.Should().Contain(l =>
+            l.Level == LogLevel.Information && l.Message.Contains(FirmFindingsProjection.NoticeProseNotShownCode)
+            && l.Message.Contains("submission-notice") && l.Message.Contains(InvoiceId.ToString()));
+        world.Logger.Lines.Should().NotContain(l => l.Level >= LogLevel.Warning && l.Message.Contains(FirmFindingsProjection.NoticeProseNotShownCode));
+    }
+
+    [Fact(DisplayName = "130g fix 1 (F2-b control): any other mismatch (a Returned notice on a Rejected invoice) stays a Warning with reason kind-mismatch, and gives no prose")]
+    public async Task AnyOtherMismatch_StaysAWarning()
+    {
+        var world = DecidedWorld(InvoiceStatusCodes.Rejected, Stored("ReturnedToFirm"));
+
+        var outcome = await OutcomeAsync(world);
+
+        outcome.NoticeProse.Should().BeNull();
+        world.Logger.Lines.Should().Contain(l => l.Level == LogLevel.Warning && l.Message.Contains("kind-mismatch"));
+        world.Logger.Lines.Should().NotContain(l => l.Message.Contains("submission-notice"));
+    }
+
+    // ── Fix round 1 (K1): ill-formed text of the stored notice is "malformed", never a fault ──
+
+    /// <summary>Stored text with a lone surrogate: escaped in the prose, escaped in the kind, or a raw lone surrogate in the text itself (built here: a theory cannot carry one).</summary>
+    public static TheoryData<string> LoneSurrogateStoredNotices() => new()
+    {
+        "{\"v\":1,\"kind\":\"InvoiceRejected\",\"prose\":\"\\ud800\"}",
+        "{\"v\":1,\"kind\":\"\\ud800\",\"prose\":\"Please review the rates.\"}",
+        "{\"v\":1,\"kind\":\"InvoiceRejected\",\"prose\":\"Please " + '\uD800' + " review the rates.\"}",
+    };
+
+    [Theory(DisplayName = "130g fix 1 (K1): a lone surrogate in the stored notice (escaped in the prose or the kind, or raw in the text) gives no prose and does not fail the outcome")]
+    [MemberData(nameof(LoneSurrogateStoredNotices))]
+    public async Task ALoneSurrogate_GivesNoProse_AndTheOutcomeStands(string stored)
+    {
+        var world = DecidedWorld(InvoiceStatusCodes.Rejected, stored);
+
+        var outcome = await OutcomeAsync(world);
+
+        outcome.NoticeProse.Should().BeNull();
+        outcome.Kind.Should().Be(FirmOutcomeKind.Rejected);
+        outcome.Degraded.Should().BeFalse();
+        outcome.Items.Should().HaveCount(1);
+    }
+
+    [Theory(DisplayName = "130g fix 1 (K1): the pure screen answers malformed (not an exception) for a lone surrogate")]
+    [MemberData(nameof(LoneSurrogateStoredNotices))]
+    public void TheScreen_ReadsALoneSurrogateAsMalformed(string stored)
+    {
+        FirmFindingsProjection.ScreenStoredNotice(stored, "InvoiceRejected").Should().Be(((string?)null, (string?)"malformed"));
     }
 }

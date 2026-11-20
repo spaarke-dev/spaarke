@@ -110,6 +110,53 @@ public sealed partial class FirmOutcomeScopeTests
         (await response.Content.ReadAsStringAsync()).Should().NotContain("noticeProse").And.NotContain(NoticeProse);
     }
 
+    /// <summary>An Accepted submission of the caller's firm whose derived invoice has <paramref name="status"/> and, when set, its own submission row holding <paramref name="stored"/>.</summary>
+    private Guid SeedAcceptedSubmission(int status, string? stored)
+    {
+        var submission = SeedSubmission(FirmA, status: InvoiceSubmissionStatus.Accepted);
+        var invoice = SeedInvoice(FirmA, status: status, id: InvoiceSubmissionPersister.InvoiceIdFor(submission));
+        SeedReducedLine(invoice, Reason);
+        if (stored is not null)
+        {
+            // The submission's own row (SeedSubmission added it without the invoice link or the notice).
+            var row = _submissionRows.Single(r => r.Id == submission);
+            row["sprk_invoice"] = new EntityReference("sprk_invoice", invoice);
+            row["sprk_firmnoticetext"] = stored;
+        }
+
+        return submission;
+    }
+
+    [Theory(DisplayName = "130g N2: the SUBMISSION route of an Accepted submission whose invoice is Rejected or Returned also carries noticeProse (the same field as the invoice route)")]
+    [InlineData(InvoiceStatusCodes.Rejected, "Rejected", "InvoiceRejected")]
+    [InlineData(InvoiceStatusCodes.ReturnedToFirm, "ReturnedToFirm", "ReturnedToFirm")]
+    public async Task Submission_AcceptedWithADecidedInvoice_SerializesTheNoticeProse(int status, string kind, string storedKind)
+    {
+        var submission = SeedAcceptedSubmission(status, StoredNotice(storedKind));
+
+        var response = await Submission(submission);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var text = await response.Content.ReadAsStringAsync();
+        text.Should().NotContain(NoticeSubjectMarker).And.NotContain(NoticeHtmlMarker).And.NotContain("\"subject\"").And.NotContain("\"html\"");
+        using var body = JsonDocument.Parse(text);
+        body.RootElement.GetProperty("kind").GetString().Should().Be(kind);
+        body.RootElement.GetProperty("noticeProse").GetString().Should().Be(NoticeProse);
+    }
+
+    [Theory(DisplayName = "130g N2 (must-not-fire): the submission route carries no noticeProse key when the invoice is not decided, even with a notice stored on its own submission")]
+    [InlineData(InvoiceStatusCodes.InReview)]
+    [InlineData(InvoiceStatusCodes.Approved)]
+    public async Task Submission_AcceptedWithAnUndecidedInvoice_OmitsTheKey(int status)
+    {
+        var submission = SeedAcceptedSubmission(status, StoredNotice("InvoiceRejected"));
+
+        var response = await Submission(submission);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        (await response.Content.ReadAsStringAsync()).Should().NotContain("noticeProse").And.NotContain(NoticeProse);
+    }
+
     [Fact(DisplayName = "130g AC5/AC7: a fault reading the stored notice still answers 200 with the items, and the key is omitted (never a 503 for a supplementary field)")]
     public async Task Invoice_ANoticeReadFault_Is200WithoutTheKey()
     {
