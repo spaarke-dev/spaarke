@@ -487,7 +487,8 @@ public partial class SignalSuppressionTests
 
     private static Task<IResult> Route(Guid signal, Store s, (SignalCoreRecordAccess Access, IDataverseUserClient Users) c, HttpContext? http = null, CancellationToken ct = default) =>
         DecisionPlanEndpoints.GetSuppressionAsync(
-            signal, http ?? new DefaultHttpContext(), c.Access, s.Service, c.Users, NullLogger<SignalSuppressionService>.Instance, ct);
+            signal, http ?? DecisionCapabilityFixtures.SignedIn(),
+            DecisionCapabilityFixtures.Capability(c.Access, suppression: s.Service, caller: c.Users), ct);
 
     [Fact]
     public async Task TheRoute_Returns200WithTheCountAndTheUntilDate_ForACallerWhoCanReadEverySignal()
@@ -577,7 +578,7 @@ public partial class SignalSuppressionTests
         s.Signals.Single(x => x.Id == noPolicy).Attributes.Remove("sprk_policy");
         var readable = s.Open(MatterId, Guid.NewGuid());
 
-        static HttpContext Http() => new DefaultHttpContext { TraceIdentifier = "trace-1" };
+        static HttpContext Http() => DecisionCapabilityFixtures.SignedIn("trace-1");
         static string Body(IResult r) => JsonSerializer.Serialize(r.Should().BeOfType<ProblemHttpResult>().Subject.ProblemDetails);
 
         var denied = await Route(readable, s, Caller(s, Ok(SignalRow()), Fail(404, DataverseUserClientErrorCodes.NotFound)), Http());
@@ -594,7 +595,7 @@ public partial class SignalSuppressionTests
         var s = new Store { FailReads = true };
         var signal = s.Open(MatterId, Guid.NewGuid());
 
-        var result = await Route(signal, s, Caller(s, Ok(SignalRow()), Ok(new { createdon = "x" })), new DefaultHttpContext { TraceIdentifier = "trace-9" });
+        var result = await Route(signal, s, Caller(s, Ok(SignalRow()), Ok(new { createdon = "x" })), DecisionCapabilityFixtures.SignedIn("trace-9"));
 
         var problem = result.Should().BeOfType<ProblemHttpResult>().Subject;
         problem.StatusCode.Should().Be(503);
@@ -1277,7 +1278,7 @@ public partial class SignalSuppressionTests
         var s = new Store { SecureBusinessUnitAmbiguous = true };
         var signal = s.Open(MatterId, Guid.NewGuid());
 
-        var result = await Route(signal, s, Caller(s, Ok(SignalRow()), Ok(new { createdon = "x" })), new DefaultHttpContext { TraceIdentifier = "trace-7" });
+        var result = await Route(signal, s, Caller(s, Ok(SignalRow()), Ok(new { createdon = "x" })), DecisionCapabilityFixtures.SignedIn("trace-7"));
 
         var problem = result.Should().BeOfType<ProblemHttpResult>().Subject;
         problem.StatusCode.Should().Be(503, "a count that cannot be partitioned is never answered");

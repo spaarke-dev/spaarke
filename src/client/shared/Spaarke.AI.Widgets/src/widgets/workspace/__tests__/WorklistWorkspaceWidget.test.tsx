@@ -13,12 +13,14 @@ let xrm: unknown;
 let widgetProps: Record<string, unknown> | undefined;
 let cardProps: Record<string, unknown> | undefined;
 const createWorklistService = jest.fn((opts: unknown) => ({ opts }));
+const openInvoiceReview = jest.fn(async (_target: unknown) => undefined);
 const navigation = { openLookup: jest.fn(async (_o: unknown) => []), openRecordModal: jest.fn(async () => undefined) };
 
 jest.mock('@spaarke/ui-components', () => ({
   __esModule: true,
   XrmDataverseClient: class {},
   getXrm: () => xrm,
+  openInvoiceReview: (target: unknown) => openInvoiceReview(target),
   createWorklistService: (opts: unknown) => createWorklistService(opts),
   createXrmNavigationService: () => navigation,
   searchContactsAsLookup: jest.fn(),
@@ -86,6 +88,14 @@ describe('WorklistWorkspaceWidget', () => {
     expect(navigation.openLookup).toHaveBeenCalledWith(
       expect.objectContaining({ entityType: 'contact', allowMultiSelect: false })
     );
+  });
+
+  it('hands the shared widget the Invoice Review opener, with or without Xrm (it rejects itself when there is no host; D-207)', async () => {
+    render(<WorklistWorkspaceWidget {...props} />);
+    const open = widgetProps?.openInvoiceReview as (t: unknown) => Promise<unknown>;
+    expect(typeof open).toBe('function');
+    await open({ invoiceId: 'inv-1', lineId: 'line-1' });
+    expect(openInvoiceReview).toHaveBeenCalledWith({ invoiceId: 'inv-1', lineId: 'line-1' });
   });
 
   it('"Open Email Review" opens the reconciliation tab on the workspace channel', () => {

@@ -1,0 +1,19 @@
+{
+  "case": "worklist.200.decided-empty",
+  "status": 200,
+  "contentType": "application/json; charset=utf-8",
+  "body": "{\"set\":\"decided\",\"lanes\":[{\"lane\":\"Decide\",\"groups\":[]},{\"lane\":\"Do\",\"groups\":[]}]}",
+  "bodyPretty": {
+    "set": "decided",
+    "lanes": [
+      {
+        "lane": "Decide",
+        "groups": []
+      },
+      {
+        "lane": "Do",
+        "groups": []
+      }
+    ]
+  }
+}

@@ -1,0 +1,139 @@
+{
+  "case": "worklist.200.lanes",
+  "status": 200,
+  "contentType": "application/json; charset=utf-8",
+  "body": "{\"set\":\"lanes\",\"lanes\":[{\"lane\":\"Decide\",\"groups\":[{\"core\":{\"recordType\":\"sprk_matter\",\"recordId\":\"<guid-1>\",\"typeLabel\":\"Matter\",\"name\":\"Acme v Widget\",\"number\":\"MAT-0042\"},\"notFiled\":false,\"items\":[{\"signalId\":\"<guid-2>\",\"lane\":\"Decide\",\"status\":\"Open\",\"title\":\"Fee change without a budget revision\",\"subjectName\":\"RE: revised fees\",\"ruleShortName\":\"Budget gap\",\"workType\":\"approveOrRebudget\",\"pastDueWording\":\"overdue\",\"raisedOn\":\"2026-10-01T09:00:00+00:00\",\"dueDate\":null,\"evidenceRefs\":\"[{\\\"type\\\":\\\"sprk_communication\\\"}]\",\"policyVersionId\":\"<guid-3>\",\"resolvedOn\":null,\"resolutionType\":null,\"suppressedUntil\":null,\"sentence\":\"Fees rose 12% with no budget revision on file.\",\"subjectRecordType\":null,\"subjectRecordId\":null,\"decision\":null,\"invoiceReview\":null},{\"signalId\":\"<guid-4>\",\"lane\":\"Decide\",\"status\":\"Open\",\"title\":\"Duplicate invoice\",\"subjectName\":null,\"ruleShortName\":\"Rule\",\"workType\":\"askOutsideCounsel\",\"pastDueWording\":\"overdue\",\"raisedOn\":\"2026-10-03T09:00:00+00:00\",\"dueDate\":null,\"evidenceRefs\":\"[]\",\"policyVersionId\":\"<guid-5>\",\"resolvedOn\":null,\"resolutionType\":null,\"suppressedUntil\":null,\"sentence\":\"Invoice INV-90 duplicates INV-77.1.\",\"subjectRecordType\":null,\"subjectRecordId\":null,\"decision\":null,\"invoiceReview\":{\"invoiceId\":\"<guid-6>\",\"lineId\":\"<guid-7>\"}},{\"signalId\":\"<guid-8>\",\"lane\":\"Decide\",\"status\":\"Open\",\"title\":\"Duplicate invoice\",\"subjectName\":null,\"ruleShortName\":\"Rule\",\"workType\":\"askOutsideCounsel\",\"pastDueWording\":\"overdue\",\"raisedOn\":\"2026-10-04T09:00:00+00:00\",\"dueDate\":null,\"evidenceRefs\":\"[]\",\"policyVersionId\":\"<guid-9>\",\"resolvedOn\":null,\"resolutionType\":null,\"suppressedUntil\":null,\"sentence\":\"Invoice INV-90 duplicates INV-77.1.\",\"subjectRecordType\":null,\"subjectRecordId\":null,\"decision\":null,\"invoiceReview\":{\"invoiceId\":\"<guid-10>\",\"lineId\":null}}]}]},{\"lane\":\"Do\",\"groups\":[{\"core\":{\"recordType\":\"sprk_matter\",\"recordId\":\"<guid-1>\",\"typeLabel\":\"Matter\",\"name\":\"Acme v Widget\",\"number\":\"MAT-0042\"},\"notFiled\":false,\"items\":[{\"signalId\":\"<guid-11>\",\"lane\":\"Do\",\"status\":\"Open\",\"title\":\"Prepare for the hearing\",\"subjectName\":\"Hearing\",\"ruleShortName\":\"Event follow-up\",\"workType\":\"askOutsideCounsel\",\"pastDueWording\":\"overdue\",\"raisedOn\":\"2026-10-02T09:00:00+00:00\",\"dueDate\":null,\"evidenceRefs\":null,\"policyVersionId\":\"<guid-12>\",\"resolvedOn\":null,\"resolutionType\":null,\"suppressedUntil\":null,\"sentence\":null,\"subjectRecordType\":\"sprk_event\",\"subjectRecordId\":\"<guid-13>\",\"decision\":null,\"invoiceReview\":null}]}]}]}",
+  "bodyPretty": {
+    "set": "lanes",
+    "lanes": [
+      {
+        "lane": "Decide",
+        "groups": [
+          {
+            "core": {
+              "recordType": "sprk_matter",
+              "recordId": "<guid-1>",
+              "typeLabel": "Matter",
+              "name": "Acme v Widget",
+              "number": "MAT-0042"
+            },
+            "notFiled": false,
+            "items": [
+              {
+                "signalId": "<guid-2>",
+                "lane": "Decide",
+                "status": "Open",
+                "title": "Fee change without a budget revision",
+                "subjectName": "RE: revised fees",
+                "ruleShortName": "Budget gap",
+                "workType": "approveOrRebudget",
+                "pastDueWording": "overdue",
+                "raisedOn": "2026-10-01T09:00:00+00:00",
+                "dueDate": null,
+                "evidenceRefs": "[{\"type\":\"sprk_communication\"}]",
+                "policyVersionId": "<guid-3>",
+                "resolvedOn": null,
+                "resolutionType": null,
+                "suppressedUntil": null,
+                "sentence": "Fees rose 12% with no budget revision on file.",
+                "subjectRecordType": null,
+                "subjectRecordId": null,
+                "decision": null,
+                "invoiceReview": null
+              },
+              {
+                "signalId": "<guid-4>",
+                "lane": "Decide",
+                "status": "Open",
+                "title": "Duplicate invoice",
+                "subjectName": null,
+                "ruleShortName": "Rule",
+                "workType": "askOutsideCounsel",
+                "pastDueWording": "overdue",
+                "raisedOn": "2026-10-03T09:00:00+00:00",
+                "dueDate": null,
+                "evidenceRefs": "[]",
+                "policyVersionId": "<guid-5>",
+                "resolvedOn": null,
+                "resolutionType": null,
+                "suppressedUntil": null,
+                "sentence": "Invoice INV-90 duplicates INV-77.1.",
+                "subjectRecordType": null,
+                "subjectRecordId": null,
+                "decision": null,
+                "invoiceReview": {
+                  "invoiceId": "<guid-6>",
+                  "lineId": "<guid-7>"
+                }
+              },
+              {
+                "signalId": "<guid-8>",
+                "lane": "Decide",
+                "status": "Open",
+                "title": "Duplicate invoice",
+                "subjectName": null,
+                "ruleShortName": "Rule",
+                "workType": "askOutsideCounsel",
+                "pastDueWording": "overdue",
+                "raisedOn": "2026-10-04T09:00:00+00:00",
+                "dueDate": null,
+                "evidenceRefs": "[]",
+                "policyVersionId": "<guid-9>",
+                "resolvedOn": null,
+                "resolutionType": null,
+                "suppressedUntil": null,
+                "sentence": "Invoice INV-90 duplicates INV-77.1.",
+                "subjectRecordType": null,
+                "subjectRecordId": null,
+                "decision": null,
+                "invoiceReview": {
+                  "invoiceId": "<guid-10>",
+                  "lineId": null
+                }
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "lane": "Do",
+        "groups": [
+          {
+            "core": {
+              "recordType": "sprk_matter",
+              "recordId": "<guid-1>",
+              "typeLabel": "Matter",
+              "name": "Acme v Widget",
+              "number": "MAT-0042"
+            },
+            "notFiled": false,
+            "items": [
+              {
+                "signalId": "<guid-11>",
+                "lane": "Do",
+                "status": "Open",
+                "title": "Prepare for the hearing",
+                "subjectName": "Hearing",
+                "ruleShortName": "Event follow-up",
+                "workType": "askOutsideCounsel",
+                "pastDueWording": "overdue",
+                "raisedOn": "2026-10-02T09:00:00+00:00",
+                "dueDate": null,
+                "evidenceRefs": null,
+                "policyVersionId": "<guid-12>",
+                "resolvedOn": null,
+                "resolutionType": null,
+                "suppressedUntil": null,
+                "sentence": null,
+                "subjectRecordType": "sprk_event",
+                "subjectRecordId": "<guid-13>",
+                "decision": null,
+                "invoiceReview": null
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

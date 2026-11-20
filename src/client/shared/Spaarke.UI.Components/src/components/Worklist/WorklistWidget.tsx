@@ -18,7 +18,11 @@
  * the outcome of an open inquiry. If so the disposition picker opens (the reply, the four outcomes) instead of the wizard, and a
  * recorded outcome reads the lanes again. Any other row opens the wizard at once, with no lookup. The widget still reads no Dataverse.
  *
- * Task: spaarke-ontology-platform-r1, task 059. Fluent v9 tokens only (ADR-021). No React 18-only API (shared with PCF hosts).
+ * Billing items (D-207, task 175): a Work Item with `invoiceReview` is decided only in the Invoice Review page, so activating one
+ * calls the host's `openInvoiceReview` (a dialog on its invoice, focused on its line) INSTEAD of the wizard, and the lanes are read
+ * again when that dialog closes. The wizard's browse set leaves billing items out, so "next" never reaches one.
+ *
+ * Task: spaarke-ontology-platform-r1, task 059 (task 175 added the billing items). Fluent v9 tokens only (ADR-021). No React 18-only API (shared with PCF hosts).
  */
 
 import * as React from 'react';
@@ -44,7 +48,9 @@ import type {
   DecisionOpenRecord,
 } from '../DecisionWizard/decisionWizardTypes';
 import type { LaneFilterKey } from './laneCountFilters';
-import type { OpenItemEvent, WorklistLane } from './types';
+import { INVOICE_REVIEW_FAILED } from './openInvoiceReview';
+import { hasInvoiceReview } from './types';
+import type { InvoiceReviewTarget, OpenItemEvent, WorklistLane } from './types';
 import { useWorklistData } from './useWorklistData';
 import { useWorklistNarrative } from './useWorklistNarrative';
 import { WorklistDisclosures } from './WorklistDisclosures';
@@ -78,6 +84,12 @@ export interface WorklistWidgetProps {
   openRecord?: DecisionOpenRecord;
   /** Opens the decision wizard. Defaults to the in-app host's launcher; tests inject one. */
   launchWizard?: (request: DecisionWizardLaunchRequest) => Promise<DecisionWizardLaunchResult>;
+  /**
+   * Opens Invoice Review for a billing item (D-207); the promise settles when its dialog closes. The host builds it over
+   * `Xrm.Navigation` (`openInvoiceReview`). Absent, or when it rejects, a billing item shows "Invoice Review could not be opened"
+   * and never opens the wizard.
+   */
+  openInvoiceReview?: (target: InvoiceReviewTarget) => Promise<unknown>;
   /** The email aggregate row (task 054's card), placed at the top of the Do lane. */
   aggregateRow?: React.ReactNode;
   /**
@@ -139,6 +151,7 @@ export const WorklistWidget: React.FC<WorklistWidgetProps> = ({
   openLookup,
   openRecord,
   launchWizard = launchDecisionWizard,
+  openInvoiceReview,
   aggregateRow,
   narrative,
   today: todayProp,
@@ -258,12 +271,48 @@ export const WorklistWidget: React.FC<WorklistWidgetProps> = ({
     [launchWizard, loaderFor, lookup, openLookup, openRecord, reload]
   );
 
+  // A billing item (D-207) is decided only in Invoice Review: open it as a dialog on the item's invoice and read the lanes again when
+  // it closes. The promise settling is the only signal (no postMessage); a rejection reads again too, since the dialog may have done
+  // work before it failed. Never reaches the wizard.
+  const openReview = React.useCallback(
+    async (review: InvoiceReviewTarget) => {
+      const state = opens.current;
+      state.seq += 1; // supersedes any inquiry lookup still in flight
+      state.pendingTodoId = null;
+      setNotice(null);
+      if (!openInvoiceReview) {
+        setNotice({ text: INVOICE_REVIEW_FAILED, intent: 'warning' });
+        return;
+      }
+      try {
+        await openInvoiceReview({ invoiceId: review.invoiceId, lineId: review.lineId ?? null });
+      } catch {
+        if (state.mounted) setNotice({ text: INVOICE_REVIEW_FAILED, intent: 'warning' });
+      }
+      if (state.mounted) reload();
+    },
+    [openInvoiceReview, reload]
+  );
+
   // A Do row whose subject is a To Do may be an inquiry-outcome To Do (D-111): ask the BFF first. Only the lanes can hold one (a closed
   // copy has nothing left to record). 404 / not an inquiry opens the wizard as for any row; a failed lookup opens nothing, because
   // the To Do might be an inquiry's and the wizard cannot complete one (the server refuses mark-complete while the inquiry is open).
   const openWizard = React.useCallback(
-    async (event: OpenItemEvent, sourceSet: WorklistSetName) => {
+    async (rawEvent: OpenItemEvent, sourceSet: WorklistSetName) => {
       const state = opens.current;
+      const opened = findItem(sourceSet, rawEvent.itemId);
+      if (opened?.item.invoiceReview && hasInvoiceReview(opened.item)) {
+        await openReview(opened.item.invoiceReview);
+        return;
+      }
+      // The wizard never browses to a billing item (D-207): its set is the visible list without them.
+      const event: OpenItemEvent = {
+        ...rawEvent,
+        visibleList: rawEvent.visibleList.filter(id => {
+          const other = findItem(sourceSet, id);
+          return !(other && hasInvoiceReview(other.item));
+        }),
+      };
       const found = sourceSet === 'lanes' ? findItem('lanes', event.itemId) : null;
       const todoId = found ? inquiryTodoIdOf(found.item) : null;
       // A second click on the To Do whose lookup is running changes nothing. A click on any other row is a new open (below).
@@ -300,16 +349,20 @@ export const WorklistWidget: React.FC<WorklistWidgetProps> = ({
       }
       await launchFor(event, sourceSet);
     },
-    [findItem, launchFor, service]
+    [findItem, launchFor, openReview, service]
   );
 
   const startLane = (lane: WorklistLane) => {
     const view = views[lane];
     if (view.groups.length === 0) return;
-    const first = view.groups[0];
+    // Start on the first item the wizard can decide: a billing item opens Invoice Review instead (D-207), so it is only the start
+    // when nothing else is visible (for example, under the Invoice decisions card).
+    const first = view.groups
+      .flatMap(g => g.items.map(item => ({ group: g.group, item })))
+      .find(e => !hasInvoiceReview(e.item)) ?? { group: view.groups[0].group, item: view.groups[0].items[0] };
     void openWizard(
       {
-        itemId: view.visibleIds[0],
+        itemId: first.item.signalId,
         core: coreRef(first.group.core),
         visibleList: [...view.visibleIds],
       },

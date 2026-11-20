@@ -217,6 +217,10 @@ const LookupParameter: React.FC<FieldProps> = ({ parameter, scope }) => {
         onSearch={search}
         openOnFocus
         placeholder={`Search ${parameter.label.toLowerCase()}`}
+        // The host's optional seams (the MCP widget's search): a minimum length it will search, and the words for a failed search.
+        minSearchLength={lookup.minChars}
+        shortQueryHint={lookup.minChars && lookup.minChars > 1 ? `Type at least ${lookup.minChars} letters` : undefined}
+        searchErrorText={lookup.failureText}
       />
       {parameter.hint ? <Caption1 className={styles.prefilled}>{parameter.hint}</Caption1> : null}
     </div>

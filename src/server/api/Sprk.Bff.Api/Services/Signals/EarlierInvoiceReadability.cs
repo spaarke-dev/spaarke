@@ -186,6 +186,12 @@ public sealed class EarlierInvoiceReadability
         return readable;
     }
 
+    /// <summary>The log label and the stated consequence of a failed read made for the D-176 Duplicate check (the defaults of
+    /// <see cref="ReadAsCallerAsync"/>); another read through the same helper (task 174's invoice-line read) passes its own.</summary>
+    internal const string DuplicateCheck = "Duplicate earlier-invoice check";
+
+    internal const string DuplicateConsequence = "every Duplicate's earlier-invoice detail is withheld (D-176, fail closed)";
+
     /// <summary>
     /// A batched read AS THE CALLER, with this check's fail-closed rules: the rows on success; none on a 403 (no Read on the table);
     /// null on anything else (a 401 is the token failing mid-request, so a fault, not a verdict; a 5xx; an unparseable body; a page
@@ -194,7 +200,8 @@ public sealed class EarlierInvoiceReadability
     /// invoice through this too, so the D-176 reads share one rule.
     /// </summary>
     internal async Task<IReadOnlyList<JsonElement>?> ReadAsCallerAsync(
-        IDataverseUserClient caller, string relativePath, string table, CancellationToken ct)
+        IDataverseUserClient caller, string relativePath, string table, CancellationToken ct,
+        string check = DuplicateCheck, string consequence = DuplicateConsequence)
     {
         DataverseUserResponse response;
         try
@@ -204,8 +211,8 @@ public sealed class EarlierInvoiceReadability
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
             _logger.LogWarning(
-                "Duplicate earlier-invoice check: the caller's read of {Table} faulted ({ExceptionType}); every Duplicate's earlier-invoice detail is withheld (D-176, fail closed).",
-                table, ex.GetType().Name);
+                "{Check}: the caller's read of {Table} faulted ({ExceptionType}); {Consequence}.",
+                check, table, ex.GetType().Name, consequence);
             return null;
         }
 
@@ -216,8 +223,8 @@ public sealed class EarlierInvoiceReadability
             if (body.TryGetProperty("@odata.nextLink", out _))
             {
                 _logger.LogWarning(
-                    "Duplicate earlier-invoice check: the caller's read of {Table} returned more than one page; every Duplicate's earlier-invoice detail is withheld (D-176, fail closed).",
-                    table);
+                    "{Check}: the caller's read of {Table} returned more than one page; {Consequence}.",
+                    check, table, consequence);
                 return null;
             }
 
@@ -230,8 +237,8 @@ public sealed class EarlierInvoiceReadability
         }
 
         _logger.LogWarning(
-            "Duplicate earlier-invoice check: the caller's read of {Table} failed ({ErrorCode}); every Duplicate's earlier-invoice detail is withheld (D-176, fail closed).",
-            table, response.IsSuccess ? "unparseable" : response.ErrorCode);
+            "{Check}: the caller's read of {Table} failed ({ErrorCode}); {Consequence}.",
+            check, table, response.IsSuccess ? "unparseable" : response.ErrorCode, consequence);
         return null;
     }
 
