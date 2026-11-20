@@ -159,14 +159,31 @@ public interface IGenericEntityService
             "GetColumnMetadataAsync is implemented by DataverseServiceClientImpl only; a substitute must model column metadata.");
 
     /// <summary>
+    /// The audit facts of the table <paramref name="entityLogicalName"/>: its numeric object type code and whether auditing is on
+    /// for the table (published metadata, read under this connection's identity — app-only in the BFF). Uncached: each call is one
+    /// metadata read.
+    /// </summary>
+    /// <remarks>
+    /// <para>Added for field-mapping-server-write-path-r1 task 052d (review fix round 1): an <c>audit</c> row is read by the
+    /// table's NUMERIC object type code (Dataverse refuses the logical name), and a table whose auditing is off has no history to
+    /// read, which the core-pair report must not take as "no change". The same <c>RetrieveEntityRequest</c> as
+    /// <see cref="GetColumnMetadataAsync"/>, asked for the entity's own properties.</para>
+    /// <para>A fault, or a table Dataverse does not know, is thrown; the caller fails closed. The default body throws, as
+    /// <see cref="GetColumnMetadataAsync"/>'s does.</para>
+    /// </remarks>
+    Task<TableAuditMetadata> GetTableAuditMetadataAsync(string entityLogicalName, CancellationToken ct = default) =>
+        throw new NotSupportedException(
+            "GetTableAuditMetadataAsync is implemented by DataverseServiceClientImpl only; a substitute must model table metadata.");
+
+    /// <summary>
     /// The one-to-many relationships of <paramref name="entityLogicalName"/> along which an Assign cascades to the child rows:
     /// every relationship whose Assign cascade is not <c>NoCascade</c>, one whose metadata states none included (published
     /// metadata, read under this connection's identity — app-only in the BFF). Uncached: each call is one metadata read.
     /// </summary>
     /// <remarks>
     /// <para>Added for field-mapping-server-write-path-r1 task 052b (review F1-a): Repair's owner write is an Assign, and Dataverse
-    /// re-owns the child rows of every relationship that cascades on Assign, so the repair pass re-owns no row of a table that
-    /// has one (the Assign-cascade check of <c>scripts/Migrate-DirectMessagesToOwnerTeam.ps1</c>, in C#).</para>
+    /// re-owns the child rows of every relationship that cascades on Assign. Task 052f: Repair re-owns a row only when it has no
+    /// child along a relationship its allow-list does not accept, read per row along each relationship's referencing column.</para>
     /// <para>A fault, or a table Dataverse does not know, is thrown; the caller fails closed. The default body throws, as
     /// <see cref="GetColumnMetadataAsync"/>'s does: a substitute that does not model relationships fails loudly instead of reading
     /// as "nothing cascades".</para>

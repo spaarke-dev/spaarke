@@ -4,6 +4,9 @@
  *
  *   Override…        only when the server says `canOverride` (the caller holds the eBilling Override privilege, D-76). A reason is required.
  *   Return to firm…  only when the server says `canReturn` (no privilege needed, D-73). A reason is required.
+ *   Finish as operator…  only when the server says `canFinishAsOperator` and names a `strandedDecision` the caller did not record
+ *                    (ISS-034, EB-D-244): another person's Override or Return that was recorded but did not finish. It is finished exactly as
+ *                    recorded; the reason and note given here are the operator's own. The page never works out who may do this.
  *
  * Each is one reason on `FormModal` (a single-field form, ADR-050). A refusal (403 without the privilege, 409 already decided, 503 partly
  * saved) is shown in the form with its code and nothing changes on the page; a 503 is finished by submitting the same request again. The
@@ -27,8 +30,17 @@ import {
   tokens,
 } from '@fluentui/react-components';
 import { FormModal } from '@spaarke/ui-components';
-import { decisionFailureMessage, isDecisionIncomplete, type BlockedFinding, type BlockedSubmission } from '../../services/decisionApi';
+import {
+  decisionFailureMessage,
+  isBlockedDefiniteRefusal,
+  isBlockedOutcomeUnknown,
+  isFinishStaleRefusal,
+  type BlockedFinding,
+  type BlockedSubmission,
+} from '../../services/decisionApi';
 import type { ApiFailure, InvoiceReview } from '../../services/invoiceReviewApi';
+import { isNoteRefusal, noteArgs, noteProblem, noteRefusalMessage } from '../../services/noteModel';
+import { NoteField } from '../NoteField';
 import { useApproval } from './ApprovalProvider';
 
 const REASON_MAX = 2000;
@@ -55,7 +67,21 @@ export function findingLine(f: BlockedFinding): string {
   return f.detailWithheld ? `${base} (detail withheld for your role)` : base;
 }
 
-type Action = 'override' | 'return';
+type Action = 'override' | 'return' | 'finish';
+
+/** The warning when another request of this submission came back unsure and is not finished: this form must not start a second decision. */
+const LOCK_NOUN: Record<Action, string> = { override: 'An Override', return: 'A Return', finish: 'A finish' };
+const BEFORE_VERB: Record<Action, string> = { override: 'overriding', return: 'returning', finish: 'finishing as operator' };
+
+/** What the finish dialog says: the pending decision (an Override or a Return recorded by another person) and that it finishes exactly as recorded. A generic wording for a verb the page does not know (the dialog opens only from the server's hint, so there is always a verb). */
+export function finishIntro(verb: string | null): string {
+  const tail = 'Your reason is required and is recorded with your name; their reason and note stay as recorded.';
+  if (verb === 'Override')
+    return `Another person recorded an override of this submission, but it did not finish. Finishing it as operator completes it exactly as recorded: the invoice is released into the normal review. ${tail}`;
+  if (verb === 'Return')
+    return `Another person recorded a return of this submission to the firm, but it did not finish. Finishing it as operator completes it exactly as recorded: the invoice goes back to the firm. ${tail}`;
+  return `Another person's decision on this submission was recorded, but it did not finish. Finishing it as operator completes it exactly as recorded. ${tail}`;
+}
 
 export interface BlockedBannerProps {
   review: InvoiceReview;
@@ -64,18 +90,30 @@ export interface BlockedBannerProps {
 
 export function BlockedBanner({ review, reload }: BlockedBannerProps) {
   const s = useStyles();
-  const { api, refresh } = useApproval();
+  const { api, refresh, locks } = useApproval();
   const held = review.header.held;
-  const submissionId = submissionIdOf(review);
+  // The submission the review names. Once the hold is gone the review may name none; an open form keeps the last one it was opened for, so its
+  // repeat still goes to the same submission.
+  const lastSubmissionId = React.useRef<string | null>(null);
+  const named = submissionIdOf(review);
+  if (named) lastSubmissionId.current = named;
+  const submissionId = named ?? lastSubmissionId.current;
 
   const [blocked, setBlocked] = React.useState<BlockedSubmission | null>(null);
   const [failure, setFailure] = React.useState<ApiFailure | null>(null);
   // The action last shown, kept after the form closes: the FormModal is closed with `open={false}`, never unmounted while
   // open, which would leave the page aria-hidden (#2658). `seq` keys each opening, so every opening starts fresh.
-  const [dialog, setDialog] = React.useState<{ action: Action; open: boolean; seq: number } | null>(null);
+  // `verb` is the stranded decision the finish dialog names, taken when it opens (the offer goes away once the server finishes it).
+  const [dialog, setDialog] = React.useState<{ action: Action; open: boolean; seq: number; verb: string | null } | null>(null);
   const action = dialog?.action ?? null;
   const closeDialog = () => setDialog(prev => (prev ? { ...prev, open: false } : prev));
   const [reason, setReason] = React.useState('');
+  // Task 095f-2ui: the optional note. Like the reason, it is kept across a refusal (a 409 or 503) so the reviewer can resend. A decision saved
+  // in part (503), or one that got no answer (status 0), is repeated with the same reason and note, so both are locked from then on, and the
+  // locked request is kept at page level (`locks`) so closing and reopening the form does not lose it.
+  const [note, setNote] = React.useState('');
+  const [noteError, setNoteError] = React.useState<string | null>(null);
+  const [locked, setLocked] = React.useState(false);
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const alive = React.useRef(true);
@@ -102,29 +140,95 @@ export function BlockedBanner({ review, reload }: BlockedBannerProps) {
     if (held) void load();
   }, [held, load]);
 
-  if (!held || !submissionId) return null;
+  // The hold is gone (the decision is done): nothing is left to repeat, so a lock kept from an unsure send is dropped. Not while the form is
+  // still open: an unsure send (a 503 after the decision stood and the invoice was released, with a Signal close failed) re-reads the page, the
+  // hold clears, and the form must stay open with its error and its lock so the same request can be repeated and finish the close.
+  const dialogOpen = dialog?.open === true;
+  React.useEffect(() => {
+    if (!held && !dialogOpen) locks.clear('blocked');
+  }, [held, dialogOpen, locks]);
+
+  // Only the banner goes with the hold; an open form does not (see above), and no form is ever shown unless one was opened.
+  if (!submissionId) return null;
+
+  // ISS-034: offered only on the server's word (`canFinishAsOperator`) and only for a decision someone else recorded: the decider finishes
+  // their own by repeating it (Override or Return above), never through this action.
+  const stranded = blocked?.canFinishAsOperator === true && blocked.strandedDecision && !blocked.strandedDecision.callerIsDecider ? blocked.strandedDecision : null;
 
   const open = (a: Action) => {
-    setReason('');
+    // An Override or Return that came back unsure is reopened as it was sent, locked, so the repeat is the same request. Review round 2: the
+    // lock is KEPT when the other action is opened (the first may already be recorded, and the server finishes a repeat from what it
+    // stored). The other action opens with an empty, editable form that warns and cannot be submitted until the lock clears.
+    const kept = locks.get('blocked');
+    const same = kept && kept.action === a ? kept : undefined;
+    setReason(same ? same.reason : '');
+    setNote(same ? same.note : '');
+    setNoteError(null);
+    setLocked(!!same);
     setError(null);
-    setDialog(prev => (prev?.open ? { ...prev, action: a } : { action: a, open: true, seq: (prev?.seq ?? 0) + 1 }));
+    const verb = a === 'finish' ? stranded?.verb ?? null : null;
+    setDialog(prev => (prev?.open ? { ...prev, action: a, verb } : { action: a, open: true, seq: (prev?.seq ?? 0) + 1, verb }));
   };
 
+  // An Override or Return of the OTHER action that came back unsure and is not finished: this form must not start a second decision.
+  const lock = locks.get('blocked');
+  const otherLock = action && lock && lock.action !== action ? lock : null;
+
   const submit = async () => {
-    if (!dialog?.open || !action || reason.trim() === '') return;
+    if (!dialog?.open || !action || otherLock || reason.trim() === '' || noteProblem(note) !== null) return;
     setBusy(true);
     setError(null);
-    const r = action === 'override' ? await api.overrideBlocked(submissionId, reason.trim()) : await api.returnBlocked(submissionId, reason.trim());
+    setNoteError(null);
+    const n = noteArgs(note);
+    const r =
+      action === 'override'
+        ? await api.overrideBlocked(submissionId, reason.trim(), ...n)
+        : action === 'finish'
+          ? await api.finishStranded(submissionId, reason.trim(), ...n)
+          : await api.returnBlocked(submissionId, reason.trim(), ...n);
     if (!alive.current) return;
     if (r.ok) {
+      locks.clear('blocked');
       setBusy(false);
       closeDialog();
       await Promise.all([reload(), refresh(), load()]);
       return;
     }
-    // A 503 `ebilling.blocked.unavailable` can come after the decision stood (the Signals were not all closed): show the server's state
-    // (the hold may already be gone) before the error.
-    if (isDecisionIncomplete(r.failure)) {
+    // The server refused the note itself (400): the field message goes under the Note box, and the form keeps the reason and the note.
+    if (isNoteRefusal(r.failure)) {
+      setBusy(false);
+      setNoteError(noteRefusalMessage(r.failure));
+      return;
+    }
+    // A 503 saved part of the decision, no answer came back, or a 409 `concurrent_change` (the server answers it before AND after the Decision
+    // Record is written, so a record MAY have been written): the same request, repeated, finishes it, so the reason and the note are held as they
+    // were sent, here and at page level. Locking on `concurrent_change` is deliberately conservative: a repeat with the same text succeeds either way.
+    const unknown = isBlockedOutcomeUnknown(r.failure);
+    if (unknown) {
+      setLocked(true);
+      locks.set('blocked', { action, reason: reason.trim(), note });
+    }
+    // A 503 `ebilling.blocked.unavailable` can come after the decision stood (the Signals were not all closed), and a send with no answer may
+    // have been recorded: show the server's state (the hold may already be gone) before the error.
+    if (unknown) {
+      await Promise.all([reload(), refresh(), load()]);
+      if (!alive.current) return;
+    }
+    // Review round 3: the repeat of a locked decision got a DEFINITE refusal (`decision_conflict`, `record_refused`, `not_blocked`, a 403, ...):
+    // the server says this request is not going to finish, so the lock is a trap, not a protection. It is cleared (here and at page level), the
+    // form is editable again, the refusal is shown, and the page, the approval and the blocked view are re-read to show what the server holds.
+    // A transient answer (`in_progress`, `still_processing`) keeps the lock: the same request can still finish.
+    let reread = unknown;
+    if (isBlockedDefiniteRefusal(r.failure) && (locked || locks.get('blocked'))) {
+      locks.clear('blocked');
+      setLocked(false);
+      reread = true;
+      await Promise.all([reload(), refresh(), load()]);
+      if (!alive.current) return;
+    }
+    // ISS-034: a refusal of the operator finish that says the page's picture is out of date (already finished, taken by the caller, not
+    // there, not permitted): re-read so the offer follows the server's state, then show the refusal.
+    if (action === 'finish' && !reread && isFinishStaleRefusal(r.failure)) {
       await Promise.all([reload(), refresh(), load()]);
       if (!alive.current) return;
     }
@@ -135,10 +239,12 @@ export function BlockedBanner({ review, reload }: BlockedBannerProps) {
 
   const blocking = (blocked?.findings ?? []).filter(f => f.blocking && !f.overridden);
   const shown = blocking.slice(0, 5);
-  const title = action === 'override' ? 'Override the block' : 'Return to firm';
+  const title = action === 'override' ? 'Override the block' : action === 'finish' ? 'Finish as operator' : 'Return to firm';
+  const submitLabel = action === 'override' ? 'Override' : action === 'finish' ? 'Finish' : 'Return';
 
   return (
     <>
+      {held && (
       <MessageBar intent="warning" layout="multiline" data-testid="blocked-banner">
         <MessageBarBody>
           <MessageBarTitle>This invoice is on hold</MessageBarTitle>
@@ -167,7 +273,7 @@ export function BlockedBanner({ review, reload }: BlockedBannerProps) {
             </Caption1>
           )}
         </MessageBarBody>
-        {blocked && (blocked.canOverride || blocked.canReturn) && (
+        {blocked && (blocked.canOverride || blocked.canReturn || stranded) && (
           <MessageBarActions>
             {blocked.canOverride && (
               <Button size="small" onClick={() => open('override')} data-testid="override-block">
@@ -179,9 +285,15 @@ export function BlockedBanner({ review, reload }: BlockedBannerProps) {
                 Return to firm…
               </Button>
             )}
+            {stranded && (
+              <Button size="small" onClick={() => open('finish')} data-testid="finish-stranded">
+                Finish as operator…
+              </Button>
+            )}
           </MessageBarActions>
         )}
       </MessageBar>
+      )}
 
       {dialog && (
         <FormModal
@@ -189,8 +301,8 @@ export function BlockedBanner({ review, reload }: BlockedBannerProps) {
           open={dialog.open}
           size="sm"
           title={title}
-          submitLabel={action === 'override' ? 'Override' : 'Return'}
-          submitDisabled={reason.trim() === ''}
+          submitLabel={submitLabel}
+          submitDisabled={otherLock !== null || reason.trim() === '' || noteProblem(note) !== null}
           busy={busy}
           onClose={() => {
             if (!busy) closeDialog();
@@ -198,11 +310,22 @@ export function BlockedBanner({ review, reload }: BlockedBannerProps) {
           onSubmit={() => void submit()}
         >
           <div className={s.form}>
-            <Text>
-              {action === 'override'
-                ? 'The invoice is released into the normal review. A reason is required and is recorded with your name.'
-                : 'The invoice goes back to the firm, which can correct and resubmit it. A reason is required and the firm sees it.'}
-            </Text>
+            {action === 'finish' ? (
+              <Text data-testid="finish-stranded-intro">{finishIntro(dialog.verb)}</Text>
+            ) : (
+              <Text>
+                {action === 'override'
+                  ? 'The invoice is released into the normal review. A reason is required and is recorded with your name.'
+                  : 'The invoice goes back to the firm, which can correct and resubmit it. A reason is required and the firm sees it.'}
+              </Text>
+            )}
+            {otherLock && action && (
+              <MessageBar intent="warning" layout="multiline" data-testid="blocked-other-lock">
+                <MessageBarBody>
+                  {LOCK_NOUN[otherLock.action]} may have been saved in part. Submit it again to finish it before {BEFORE_VERB[action]}.
+                </MessageBarBody>
+              </MessageBar>
+            )}
             <Field label="Reason" required>
               <Textarea
                 value={reason}
@@ -210,10 +333,28 @@ export function BlockedBanner({ review, reload }: BlockedBannerProps) {
                 resize="vertical"
                 rows={3}
                 maxLength={REASON_MAX}
+                readOnly={locked}
                 aria-label="Reason"
                 data-testid="blocked-reason"
               />
             </Field>
+            <NoteField
+              value={note}
+              onChange={v => {
+                setNote(v);
+                setNoteError(null);
+              }}
+              serverError={noteError}
+              readOnly={locked}
+              ariaLabel="Note"
+              testId="blocked-note"
+            />
+            {locked && (
+              <Caption1 className={s.muted} data-testid="blocked-note-locked">
+                This decision was saved in part, or no answer came back. Submitting again finishes it with the same reason and note, so they cannot be
+                changed now.
+              </Caption1>
+            )}
             {error && (
               <MessageBar intent="error" layout="multiline" data-testid="blocked-error">
                 <MessageBarBody>{error}</MessageBarBody>

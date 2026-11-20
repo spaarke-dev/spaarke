@@ -143,12 +143,18 @@ export type {
 // Wraps applyResolverFields with clear-and-set semantics across all 11 lookups.
 export {
   TODO_REGARDING_CATALOG,
+  resolveAllowedCatalog,
+  findRegardingCatalogEntry,
   buildTodoRegardingUpdate,
   buildTodoRegardingClear,
   discoverTodoNavProps,
   _resetTodoNavPropCacheForTests,
 } from './TodoRegardingUpdateBuilder';
-export type { ITodoRegardingTargetCatalogEntry, ITodoRegardingUpdate } from './TodoRegardingUpdateBuilder';
+export type {
+  ITodoRegardingTargetCatalogEntry,
+  ITodoRegardingUpdate,
+  IRegardingSelection,
+} from './TodoRegardingUpdateBuilder';
 export { renderMarkdown, SPRK_MARKDOWN_CSS } from './renderMarkdown';
 export type { RenderMarkdownOptions } from './renderMarkdown';
 export { SprkChatBridge } from './SprkChatBridge';

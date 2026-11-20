@@ -23,7 +23,7 @@ namespace Sprk.Bff.Api.Tests.Services.Communication;
 /// </summary>
 /// <remarks>The lookup is the real <see cref="DirectMessageOwnerTeam"/> over <see cref="DirectMessageOwnerTeamDouble"/>; Dataverse is
 /// an in-memory row store behind <see cref="IGenericEntityService"/>.</remarks>
-public class DirectMessageOwnerStepTests
+public partial class DirectMessageOwnerStepTests
 {
     private static readonly Guid MessageId = Guid.Parse("a1a1a1a1-0000-0000-0000-000000000001");
     private static readonly Guid ThreadId = Guid.Parse("a1a1a1a1-0000-0000-0000-000000000002");
@@ -910,7 +910,7 @@ public class DirectMessageOwnerStepTests
             return Task.FromException(new InvalidOperationException("Refused."));
 
         var row = _rows[(table, id)];
-        row.GetAttributeValue<long>("versionnumber").ToString(System.Globalization.CultureInfo.InvariantCulture).Should().Be(version);
+        DirectMessageOwnerStep.VersionOf(row)!.Value.ToString(System.Globalization.CultureInfo.InvariantCulture).Should().Be(version);
         var team = (EntityReference)fields["ownerid"];
         row["ownerid"] = team;
         row["owningteam"] = team;

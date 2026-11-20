@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="052f" project="field-mapping-server-write-path-r1">
+  <metadata>
+    <title>Repair pass: Assign-cascade allow-list and per-row child check (replaces the per-table refusal; FR-25 amended 2026-11-18)</title>
+    <phase>5 W5 Records created outside the product</phase>
+    <gate>052e approved (owner 2026-11-18: Q1–Q8 yes; Q2 yes = event and analysis notes move). Nothing here enables the pass on any environment (`RecordRepair:Pass:GoLive` stays unset).</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .cs in Sprk.Bff.Api: the repair job writes owners as the system principal, and an Assign moves child rows with it. A wrong "no children" answer moves rows nobody chose to move. Security fails closed.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Ownership semantics of Dataverse Assign cascades and fail-closed reads under app-only depth.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>W5-B</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>052g edits the same Repair owner path; run 052f first (owner Q6).</parallel-reason>
+    <deps>052e</deps>
+    <tags>bff-api, jobs, security, ownership, testing</tags>
+    <estimated-effort>1 session</estimated-effort>
+  </metadata>
+
+  <prompt>Implement design §3.1 and §3.2 of `notes/task-052e-design.md`. Today `RecordCreationService.AcceptedAssignCascades` is empty, so one unaccepted cascading relationship on a table blocks the owner write for every row of that table (matter, project, event, document, invoice, analysis and contact are all blocked on dev). Fill the allow-list with exactly the §3.1 entries, each with its reason in code, and replace the per-table refusal with a per-row check: a row keeps its owner only when it actually has a child along an unaccepted relationship. Every failed, refused or depth-limited read is "unknown", never "no children".</prompt>
+  <role>SPAARKE platform developer: .NET 10 BFF, the BFF write path (ADR-002), Repair mode and the ADR-036 repair pass, Dataverse relationship metadata and Assign cascades. Security fails closed.</role>
+  <goal>A matter, project, event, document, invoice, analysis or contact row with no child along an unaccepted relationship gets its standard owner from Repair; a row with such a child keeps its owner and is counted and logged with the relationship named; nothing that is not on the §3.1 list is ever moved by a Repair owner write.</goal>
+
+  <context>
+    <background>
+- Design (binding): `notes/task-052e-design.md` §1.4 (live inventory and its query), §3.1 (allow-list, never-accepted list), §3.2 (per-row check, fail closed, race), §3.6, §4 "052f", §5 (owner decisions), §6 item 5 (organization-level Read pre-enable check).
+- Owner 2026-11-18: Q2 yes. `sprk_event->annotation` and `sprk_analysis->annotation` are accepted (the record's owner's notes move with it). `contact->annotation` is NOT accepted (UAC-r2 U4). Q5: activities and child contacts never move. Spaarke does not use out-of-the-box Notes or activities, so these cases are expected to be rare; skipped rows are still counted. A note never moves to an isolated owner: 052g's guard on the parent skips the whole row.
+- Code today: `RecordCreationService.Repair.cs` `AcceptedAssignCascades` and `AssignCascadeRefusalAsync` (~:284-339, table-level); the check runs before the mapping reads (~:182) and the owner write follows them (~:246). Re-grep: line numbers drift.
+- Allow-list key: `"{table}->{child}"`. Moves-nothing entries (`->team`, `contact->adx_externalidentity`, `->sharepointdocument`) are never read per row (`sharepointdocument` reads are refused on dev).
+- Activity tables collapse into one `activitypointer` read on `regardingobjectid`.
+- Public repo: code comments, tests, commits and notes state rules only.
+    </background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/RecordCreation/RecordCreationService.Repair.cs (allow-list, per-row check, raced re-read)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/RecordCreation/RecordRepairPassContext.cs (per-table counts, if the counts live there)</file>
+      <file role="read">src/server/api/Sprk.Bff.Api/Services/RecordCreation/RecordCreationService.cs (Repair owner branch), RecordRepairPassJob.cs</file>
+      <file role="read">the existing app-only query seam (`IGenericEntityService` or FetchXML through it); extend only with a read, and say why</file>
+      <file role="new">tests/integration/data-mutation/RecordOwnership/RecordRepairAssignCascadeTests.cs (or the matching KEEP path)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="owner 2026-11-18 / design §3.1">The allow-list holds exactly the §3.1 "moves nothing" and "follows the record" entries (including event and analysis notes, owner Q2). No `contact->annotation`, activity, `contact->contact`, actioncard, socialprofile, mailboxtrackingfolder or syncerror entry, and no relationship to `sprk_signal`, `sprk_decisionrecord` or `sprk_budgetrevision`.</constraint>
+    <constraint source="fail closed">A failed, refused or depth-limited child read is `record_repair.owner_assign_cascade_unknown` (transient, retried), never "no children". An unstated Assign value counts as cascading.</constraint>
+    <constraint source="ADR-036 / ADR-052 / §11">Inside the existing job, its lease, claims and state store; no new job, route, store, package or role. Metadata read once per table per pass; child reads `top 1` per unaccepted relationship.</constraint>
+    <constraint source="forward-only / D-204">A pre-go-live row is never written. No write ever reaches an activity, a child contact, `sprk_signal`, `sprk_decisionrecord` or `sprk_budgetrevision`.</constraint>
+    <constraint source="scope">Do not change the cross-unit skip (`owner_moves_business_unit`): that is 052g. Do not edit SecureRootInheritance.cs, DirectThreadAccessService.cs, DirectMessageParticipantShares.cs, SecureChildShareReconciliationJob.cs, SecureChildReconciler.cs, OwnedChildWrite.cs, or anything under `.claude/`.</constraint>
+    <constraint source="ADR-038 / §10">Tests at KEEP paths; each must-fire shown to fail with its rule switched off. Never run Sprk.Bff.Api.Tests unfiltered (use `scripts/verify-suites.sh`). Placement Justification and §11 answers in the notes; publish delta and CVE check are the main session's.</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step order="0">Branch `task/fm-052f` from the work branch tip; check this POML exists; FULL rigor; read the design sections above and the code; record file:line facts.</step>
+    <step order="1">Allow-list entries with reasons; moves-nothing entries skipped from per-row reads.</step>
+    <step order="2">Per-row check replacing the table-level refusal; activitypointer collapse; fail-closed unknown; counts and log lines with relationship schema names.</step>
+    <step order="3">Post-write re-read for children created since the check began: log and count `owner_assign_cascade_raced` with the child's table and id.</step>
+    <step order="4">Tests (ACs), build 0 warnings, ArchTests, filtered suites, `dotnet format whitespace --verify-no-changes`; `notes/task-052f-notes.md` with Known limits K1 (race not undone) and K2 (skipped rows not revisited by the window; 052c on-demand retries them). Commit on `task/fm-052f`; do not push.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">AC1: the §3.1 entries are in the allow-list, each with its reason in code; moves-nothing entries are never read per row.</criterion>
+    <criterion testable="true">AC2: a matter, project, document, invoice or contact row with no unaccepted child is re-owned.</criterion>
+    <criterion testable="true">AC3 (must fire, owner Q2 2026-11-18): an event row and an analysis row, each with a note owned by the row's owner, are re-owned, and the note moves with the row.</criterion>
+    <criterion testable="true">AC3b (negative, must fire; owner 2026-11-18 after review): the note cascade is Cascade All, so an event or analysis with a note owned by any other principal (user or team; compared on owner id and type against the row's current owner) is not re-owned (`owner_assign_cascades`, counted); a faulted note read is `owner_assign_cascade_unknown`.</criterion>
+    <criterion testable="true">AC6a (owner 2026-11-18 after review): once per pass the app identity's System Administrator role (by role template id) is read into a tri-state cached for the pass (confirmed / not confirmed / faulted). Only "confirmed" runs per-row child checks; otherwise every row that needs one (contact, analysis, event) is `owner_assign_cascade_unknown`, and "faulted" also logs one error per pass. A test for each state; no path turns a failed role read into "confirmed".</criterion>
+    <criterion testable="true">AC3a (negative): a contact row with a note child is not re-owned (`owner_assign_cascades`, counted; UAC-r2 U4).</criterion>
+    <criterion testable="true">AC4 (negative): an analysis row with an email activity is not re-owned (`owner_assign_cascades`, with the relationship named).</criterion>
+    <criterion testable="true">AC5 (negative): a contact with a child contact is not re-owned.</criterion>
+    <criterion testable="true">AC6 (negative): a failed, refused or depth-limited child read gives `owner_assign_cascade_unknown`, never "no children".</criterion>
+    <criterion testable="true">AC7 (negative): a row still unknown after its attempts is abandoned and appears in the 052d report.</criterion>
+    <criterion testable="true">AC8 (negative): an unstated Assign value counts as cascading.</criterion>
+    <criterion testable="true">AC9: the post-write re-read logs and counts `owner_assign_cascade_raced` for a child created after the check.</criterion>
+    <criterion testable="true">AC10 (negative): no write ever reaches an activity, a child contact, `sprk_signal`, `sprk_decisionrecord` or `sprk_budgetrevision`.</criterion>
+    <criterion testable="true">AC11: a must-fire test for each rule, failing with that rule switched off; K1 and K2 recorded in the notes; build 0 warnings; ArchTests and affected suites green; owner-write census unchanged.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>If the per-row read needs a privilege or role change for the BFF identity, STOP and escalate (UAC-r2 owns roles).</trigger>
+    <trigger>If a live Assign cascade not in design §1.4 appears from a pass table, STOP: it is not accepted until the owner decides.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>`AcceptedAssignCascades` and `AssignCascadeRefusalAsync` already exist in Repair and refuse per table; the metadata read exists.</existing>
+    <extension>Fills the existing allow-list and narrows the existing refusal to the row; adds one child-presence read through the existing query seam. No new service, route or registration.</extension>
+    <cost-of-doing-nothing>With the empty allow-list every row of seven pass tables is refused, so the repair pass cannot give a natively created matter, project, event, document, invoice, analysis or contact its standard owner (FR-25 acceptance).</cost-of-doing-nothing>
+  </justification>
+
+  <notes>Created 2026-11-18 from design §4 after the owner approved 052e. Same day, after the first implementation (b695480cf9) and its Opus adversarial review: the live note cascade is Cascade All (every note moves), so the owner kept Q2's intent with a per-row note-owner check (AC3b) and chose a code check on the app identity's read depth (AC6a); UAC-r2 agreed and set the tri-state shape. Review findings 3 (continue after a read fault once a child is found) and 4 (race re-read lists every raced child) fixed in the same round. Completed 2026-11-18: merged to the work branch at c80ae18907 (task/fm-052f b695480cf9, 42b02a7756, 0e005619b0). Scoped Sonnet re-check of the fix diff: no fail-open path; its F2 (team-owner and unreadable-owner branches untested) fixed in 0e005619b0 with must-fire rounds. UAC-r2 PASS (N1, N2 recorded as known limits; N3 pre-enable item confirmed read-only on dev). Both new query shapes (note-owner filter, role join) accepted by dev read-only. AC1–AC11, AC3a, AC3b, AC6a met; AC2 for invoices is held by the invoice-family guard (K5). Details and K1–K10: `notes/task-052f-notes.md`. No live write, no setting; `RecordRepair:Pass:GoLive` stays unset; 052g's isolation guard must land before go-live.
+rework: fix-round-2 task 052f</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

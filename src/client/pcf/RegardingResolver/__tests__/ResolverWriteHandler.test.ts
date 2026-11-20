@@ -45,6 +45,7 @@ import {
   _resetNavPropCacheForTests,
 } from '../RegardingResolver/handlers/ResolverWriteHandler';
 import {
+  discoverNavProps as sharedDiscoverNavProps,
   _resetNavPropCacheForTests as _resetSharedNavPropCache,
   _resetRecordNumberFieldCacheForTests,
   _resetDisplayNameFieldCacheForTests,
@@ -884,6 +885,42 @@ describe('ResolverWriteHandler', () => {
     const fetchImpl = makeFetch({});
     const result = await discoverHostNavProps('sprk_communication', fetchImpl as unknown as typeof fetch);
     expect(result).toEqual([]);
+  });
+
+  // Pattern D (#2803 / #2804): the handler no longer keeps a private nav-prop cache — it reads and fills the SHARED one,
+  // so the metadata query runs once per entity however many writers ask for it.
+  test('discoverHostNavProps shares its cache with the shared discoverNavProps (one metadata query, not two)', async () => {
+    const fetchImpl = makeFetch({ sprk_todo: FULL_NAV_PROPS });
+    await sharedDiscoverNavProps('sprk_todo', fetchImpl as unknown as typeof fetch);
+
+    const viaHandler = await discoverHostNavProps('sprk_todo', fetchImpl as unknown as typeof fetch);
+
+    expect(viaHandler.length).toBeGreaterThan(0);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  test('discoverHostNavProps requests the lowercased host entity (a wrong-case `entity` input still resolves)', async () => {
+    const fetchImpl = makeFetch({ sprk_todo: FULL_NAV_PROPS });
+
+    const entries = await discoverHostNavProps('sprk_Todo', fetchImpl as unknown as typeof fetch);
+
+    expect(entries.length).toBeGreaterThan(0);
+    expect(String(fetchImpl.mock.calls[0][0])).toContain("LogicalName='sprk_todo'");
+  });
+
+  test('applyRegardingSelection on an unknown entity type keeps the handler-specific error prefix', async () => {
+    const webApi = makeWebApi();
+    const result = await applyRegardingSelection(
+      { webApi, ...bffWired(webApi), hostEntity: 'sprk_todo', hostRecordId: HOST_TODO },
+      { entityType: 'sprk_nothing', recordId: MATTER_1, recordName: 'X' },
+      resolveAllowedCatalog('sprk_matter,sprk_project'),
+      makeFetch({ sprk_todo: FULL_NAV_PROPS }) as unknown as typeof fetch
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.error).toBe(
+      '[RegardingResolver] Unknown entity type "sprk_nothing". Allowed: sprk_matter, sprk_project.'
+    );
   });
 });
 

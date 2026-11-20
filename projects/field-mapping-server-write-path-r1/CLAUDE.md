@@ -97,7 +97,7 @@ All dated 2026-10-19 unless noted; rationale in design.md §7 and spec "Owner Cl
   - Direct 1:1 messages are owned by the Direct team (task 054);
   - participants keep their shares when a Direct message is filed, except on secure or Restricted targets;
   - a Direct message records its own two participants (`sprk_sentby` + `sprk_directrecipient`, option A; threads do not move);
-  - private messages in a record's context are deferred to `messages-enhancements-r1`.
+  - private messages in a record's context were deferred to `messages-enhancements-r1` — superseded 2026-11-20: Direct messaging (task 055, #2922) and private messages in a record's thread (task 056, #2923) are built in this project, not deferred.
 - Mapping-source rule (022): values copied from a secure source are written only into a row owned by that source's isolation owner, on create, push and Repair, through one predicate (`MappingSourceCopyGate.DecideAsync`). For a secure source, a push that would change a child's filing skips the child whole.
 - Public repo: access defects go to UAC-r2 by message only; repo text (commits, notes, comments, issues) states rules, never holes.
 - Live Dataverse writes need the owner's explicit go in this project's own session; a peer cannot grant it. No deploys from this session.
@@ -160,6 +160,8 @@ All dated 2026-10-19 unless noted; rationale in design.md §7 and spec "Owner Cl
 - 2026-11-09 — Shell calls time out under agent load: prefer Grep/Read, use timeouts ≥ 300 s and background runs; `timeout 400 git commit`. lint-staged backs up into the shared stash and drops it itself: never pop or drop a stash. Use `gh --jq`, not `jq`. Never print a token.
 - 2026-11-09 — In Git Bash, `git sparse-checkout set --no-cone /path/` gets its leading `/` rewritten to `C:/Program Files/Git/...`; prefix with `MSYS_NO_PATHCONV=1`. A sparse worktree also needs `scripts/quality/`, the archive-prefix baseline in `tests/Spaarke.ArchTests/`, `package.json` and `.lintstagedrc.mjs` for the pre-commit hook to pass.
 - 2026-11-09 — Web API `@odata.bind` keys use the navigation property name. The regarding pair's type lookup is `sprk_RegardingRecordType` on every pair table except `sprk_invoice` (lower case): use `OwnedChildWrite.RegardingRecordTypeNavigationPropertyOf(table)`, guarded by `PairTypeBindSpellingGuardTests`.
+- 2026-11-18 — `Spaarke.ArchTests` is not built by `dotnet build Spaarke.sln`; `dotnet test tests/Spaarke.ArchTests --no-build` after a sln build runs a stale copy (8 false failures seen). Run it without `--no-build`.
+- 2026-11-18 — Every live Assign cascade from a pass table is `Cascade` (Cascade All): it moves every child row whoever owns it. "UserOwned" in metadata listings is the child table's ownership type, not the cascade type.
 - 2026-10-19 — A user-owned row stays readable by Deep (Parent:Child) readers in the owner's BU and its ancestors. The
   harm of OOB Assign is the BU move and User-depth tables (e.g. `sprk_communication`), not "only the owner sees it".
 

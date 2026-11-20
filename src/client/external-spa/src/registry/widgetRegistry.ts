@@ -37,6 +37,7 @@ import {
   MoneyRegular,
   ShieldKeyholeRegular,
   DocumentBulletListRegular,
+  ReceiptRegular,
 } from '@fluentui/react-icons';
 import type { Plane, MeEntitlementsResponse } from '../api/me-client';
 import type { WidgetBodyComponent } from './PlaceholderWidgetBody';
@@ -88,6 +89,8 @@ const workAssignmentsLoader = (): Promise<{ default: WidgetBodyComponent }> =>
   import('../widgets/WorkAssignmentsWidget').then(m => ({ default: m.WorkAssignmentsWidgetBody }));
 const documentsLoader = (): Promise<{ default: WidgetBodyComponent }> =>
   import('../widgets/DocumentsWidget').then(m => ({ default: m.DocumentsWidgetBody }));
+const billingGuidelinesLoader = (): Promise<{ default: WidgetBodyComponent }> =>
+  import('../widgets/BillingGuidelinesWidget').then(m => ({ default: m.BillingGuidelinesWidgetBody }));
 const invoicesLoader = (): Promise<{ default: WidgetBodyComponent }> =>
   import('../widgets/InvoicesWidget').then(m => ({ default: m.InvoicesWidgetBody }));
 // Internal-only Service Requests read tab (task 028) — a thin `<DataGrid configId=… />` binding.
@@ -250,6 +253,20 @@ export const WIDGET_DEFINITIONS: WidgetDefinition[] = [
     // governed by Tier-2 grants (tasks 028 read / 070+071 write), not by a Tier-1 module gate.
     defaultForRoles: ['ciam'],
     lazyLoader: invoicesLoader,
+  },
+  {
+    // ebilling-r1 task 135 (FR-49, D-66): the published billing rules in force for the caller's firm. CIAM outside counsel
+    // only; blanket-entitled like the tabs above (no Tier-1 module gate: the route is CIAM-plane-only and every read is
+    // firm-scoped server-side). Openable from the library, NOT a default tab. The body renders nothing when the eBilling
+    // kill switch is off (503 ebilling.disabled).
+    id: 'billing-guidelines',
+    title: 'Billing Guidelines',
+    icon: ReceiptRegular,
+    ariaLabel: 'Open Billing Guidelines — the billing rules that apply to your firm',
+    description: 'The billing rules that apply to your firm.',
+    planes: ['ciam'],
+    defaultForRoles: [],
+    lazyLoader: billingGuidelinesLoader,
   },
   // ── Core-user admin (MDA) ──────────────────────────────────────────────────
   {

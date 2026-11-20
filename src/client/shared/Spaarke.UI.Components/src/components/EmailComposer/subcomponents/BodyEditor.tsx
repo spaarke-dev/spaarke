@@ -27,6 +27,7 @@ import { InlineAiToolbar } from '../../InlineAiToolbar';
 import type { InlineAiAction } from '../../InlineAiToolbar';
 import { useInlineAiToolbar } from '../../../hooks/useInlineAiToolbar';
 import type { EmailComposerBodyFormat } from '../EmailComposer.types';
+import { plainTextToHtml } from '../composeOnlyText';
 
 /**
  * Convert an HTML body to readable plain text when the user switches to Plain text,
@@ -177,6 +178,9 @@ export const BodyEditor = React.forwardRef<RichTextEditorRef, IBodyEditorProps>(
                   onChange(htmlToPlainText(value));
                   onFormatChange('PlainText');
                 } else {
+                  // The textarea holds plain text; the rich editor parses its value as HTML. Convert first (task 197
+                  // fix round 1): paragraphs and line breaks survive and a typed `<b>` or `&` is shown, not parsed.
+                  onChange(plainTextToHtml(value));
                   onFormatChange('HTML');
                 }
               }}

@@ -87,6 +87,13 @@ public sealed record BillingSignalMapping(SignalWriteRequest Request, BillingMes
 
     /// <summary>How 073 decided the group (task 049 part D); <see cref="BillingGroupDecision.NotDecided"/> when no decisions were given.</summary>
     public BillingGroupDecision Decision { get; init; } = BillingGroupDecision.NotDecided;
+
+    /// <summary>
+    /// Task 130e-1 fix round 1 (O2, ontology-r1 decision (a)): true when the request is the held group's preflight fallback (the no-value held
+    /// sentence, <c>HeldSentenceNoValue</c>). Such a Signal never carries a firm reason; the plan records it (<c>heldFallback</c>) so the replay
+    /// writes the same Signal and never re-derives one.
+    /// </summary>
+    public bool HeldFallback { get; init; }
 }
 
 /// <summary>
@@ -98,7 +105,7 @@ public sealed record BillingSignalMapping(SignalWriteRequest Request, BillingMes
 /// <remarks>
 /// <para><b>One Signal per (policy, subject) (ontology-r1, Signal dedupe option a, 2026-10-18).</b> The writer's key is
 /// <c>policy|subjectEntity|subjectId|episode</c> and a write to an open row only refreshes it, so a second finding of one policy on one
-/// subject (an ExpenseRule code and cap on one line, RequiredData with several missing fields) was silently dropped. <see cref="MapAll(IReadOnlyList{BillingFinding}, IReadOnlyDictionary{Guid, BillingRuleCandidate}, BillingSignalSubjects, IReadOnlyList{FindingDecision}, SubmissionEvaluationKind?)"/>
+/// subject (an ExpenseRule code and cap on one line, RequiredData with several missing fields) was silently dropped. <see cref="MapAll(IReadOnlyList{BillingFinding}, IReadOnlyDictionary{Guid, BillingRuleCandidate}, BillingSignalSubjects, IReadOnlyList{FindingDecision}, SubmissionEvaluationKind?, ILogger?)"/>
 /// merges them: the reason codes sorted (ordinal); the strongest consequence wins (<see cref="BillingSignalMapping.Consequence"/>);
 /// the evidence holds one <see cref="ReasonEvidenceKind"/> line per reason with that reason's own text, the union of the values read
 /// (<see cref="FieldEvidenceKind"/> for an extracted field with its confidence, <see cref="ReferenceEvidenceKind"/> for a reference
@@ -173,14 +180,14 @@ public static class BillingFindingSignalMapper
     /// <summary>The severity of a Signal whose primary reason is flag-only: the lowest, so a note never ranks like a breach.</summary>
     internal const int FlagOnlySeverity = SignalWriter.SeverityInfo;
 
-    /// <summary>The Signal writes of one evaluation: <see cref="MapAll(IReadOnlyList{BillingFinding}, IReadOnlyDictionary{Guid, BillingRuleCandidate}, BillingSignalSubjects, IReadOnlyList{FindingDecision}, SubmissionEvaluationKind?)"/>
+    /// <summary>The Signal writes of one evaluation: <see cref="MapAll(IReadOnlyList{BillingFinding}, IReadOnlyDictionary{Guid, BillingRuleCandidate}, BillingSignalSubjects, IReadOnlyList{FindingDecision}, SubmissionEvaluationKind?, ILogger?)"/>
     /// over its findings and rule versions.</summary>
     public static IReadOnlyList<BillingSignalMapping> MapAll(
         BillingEvaluationResult evaluation, BillingSignalSubjects subjects, IReadOnlyList<FindingDecision>? decisions = null,
-        SubmissionEvaluationKind? outcome = null)
+        SubmissionEvaluationKind? outcome = null, ILogger? logger = null)
     {
         ArgumentNullException.ThrowIfNull(evaluation);
-        return MapAll(evaluation.Findings, evaluation.RulesByVersion, subjects, decisions, outcome);
+        return MapAll(evaluation.Findings, evaluation.RulesByVersion, subjects, decisions, outcome, logger);
     }
 
     /// <summary>
@@ -200,12 +207,14 @@ public static class BillingFindingSignalMapper
     /// (<see cref="BillingGroupDecision.Blocked"/>: <see cref="HeldHeadline"/>, <see cref="HeldSentenceTemplate"/> and a
     /// <see cref="DecisionEvidenceKind"/> <c>Held</c> line with <see cref="SubmissionReasonCodes.Blocked"/>); any other value changes nothing.
     /// The caller does not special-case it: it passes the outcome and stores what the mapper returns.</param>
+    /// <param name="logger">Optional (task 130e-1): where a dropped firm description is logged, with its stable code and the policy version id
+    /// only (<see cref="FirmDescriptionRules.DroppedLogCode"/>); nothing is logged when it is null.</param>
     /// <exception cref="ArgumentException">A finding's version is not in <paramref name="rulesByVersion"/>, or its line has no row in
     /// <paramref name="subjects"/>, or <paramref name="decisions"/> is not one decision per finding, of that finding, or
     /// <paramref name="outcome"/> is Blocked and <paramref name="decisions"/> is null (nothing says which reason would reject).</exception>
     public static IReadOnlyList<BillingSignalMapping> MapAll(
         IReadOnlyList<BillingFinding> findings, IReadOnlyDictionary<Guid, BillingRuleCandidate> rulesByVersion, BillingSignalSubjects subjects,
-        IReadOnlyList<FindingDecision>? decisions = null, SubmissionEvaluationKind? outcome = null)
+        IReadOnlyList<FindingDecision>? decisions = null, SubmissionEvaluationKind? outcome = null, ILogger? logger = null)
     {
         ArgumentNullException.ThrowIfNull(findings);
         ArgumentNullException.ThrowIfNull(rulesByVersion);
@@ -238,7 +247,7 @@ public static class BillingFindingSignalMapper
             group.Add((finding, rule, decisionOf?[index]));
         }
 
-        return groups.Select(g => MapGroup(g, subjects, decided: decisionOf is not null, blocked: outcome == SubmissionEvaluationKind.Blocked)).ToList();
+        return groups.Select(g => MapGroup(g, subjects, decided: decisionOf is not null, blocked: outcome == SubmissionEvaluationKind.Blocked, logger)).ToList();
     }
 
     private static FindingDecision[]? DecisionsByIndex(IReadOnlyList<BillingFinding> findings, IReadOnlyList<FindingDecision>? decisions)
@@ -273,10 +282,10 @@ public static class BillingFindingSignalMapper
             && string.Equals(decided.ReasonCode, finding.ReasonCode, StringComparison.Ordinal);
     }
 
-    /// <summary>One finding alone (a group of one). Internal: 049 maps an evaluation with <see cref="MapAll(BillingEvaluationResult, BillingSignalSubjects, IReadOnlyList{FindingDecision}, SubmissionEvaluationKind?)"/>,
+    /// <summary>One finding alone (a group of one). Internal: 049 maps an evaluation with <see cref="MapAll(BillingEvaluationResult, BillingSignalSubjects, IReadOnlyList{FindingDecision}, SubmissionEvaluationKind?, ILogger?)"/>,
     /// so two findings of one policy on one subject are never sent as two requests.</summary>
     /// <exception cref="ArgumentException">The finding is not <paramref name="rule"/>'s, or its line has no row in <paramref name="subjects"/>.</exception>
-    internal static BillingSignalMapping Map(BillingFinding finding, BillingRuleCandidate rule, BillingSignalSubjects subjects)
+    internal static BillingSignalMapping Map(BillingFinding finding, BillingRuleCandidate rule, BillingSignalSubjects subjects, ILogger? logger = null)
     {
         ArgumentNullException.ThrowIfNull(finding);
         ArgumentNullException.ThrowIfNull(rule);
@@ -286,7 +295,7 @@ public static class BillingFindingSignalMapper
             throw new ArgumentException("The finding was not produced by this rule version.", nameof(rule));
         }
 
-        return MapGroup([(finding, rule, null)], subjects, decided: false, blocked: false);
+        return MapGroup([(finding, rule, null)], subjects, decided: false, blocked: false, logger);
     }
 
     /// <summary>The reason-set fingerprint: the sorted reason codes and the strongest consequence.</summary>
@@ -294,7 +303,8 @@ public static class BillingFindingSignalMapper
         string.Join(",", sortedReasonCodes) + "|" + consequence;
 
     private static BillingSignalMapping MapGroup(
-        IReadOnlyList<(BillingFinding Finding, BillingRuleCandidate Rule, FindingDecision? Decision)> group, BillingSignalSubjects subjects, bool decided, bool blocked)
+        IReadOnlyList<(BillingFinding Finding, BillingRuleCandidate Rule, FindingDecision? Decision)> group, BillingSignalSubjects subjects, bool decided, bool blocked,
+        ILogger? logger)
     {
         // Reason order: code (ordinal), then content, so the result does not depend on the order the findings arrived in.
         var members = group
@@ -389,14 +399,25 @@ public static class BillingFindingSignalMapper
             evidence);
 
         var request = RequestOf(template, facts);
+        var tookPreflightFallback = false;
         if (held)
         {
             // The deciding finding's own rendered reason (the text its evidence line carries; never a raw code) follows the held wording as
             // a fact. The writer's own checks (SignalWriter.PreflightRefusal, the same ones the persisted plan is held to) decide whether
             // that sentence fits; if not, the reason is left out whole (the no-value wording), never cut. The reason stays in its evidence line.
+            // Task 130e-1 (O2, C3): both requests are checked WITHOUT a firm reason, so a firm description can never decide this choice.
             var withReason = RequestOf(HeldSentenceTemplate, new Dictionary<string, object?>(facts) { [HeldReasonFact] = ReasonText(primary.Finding, primary.Rule, withheld) });
-            request = SignalWriter.PreflightRefusal(withReason) is null ? withReason : RequestOf(HeldSentenceNoValue, facts);
+            tookPreflightFallback = SignalWriter.PreflightRefusal(withReason) is not null;
+            request = tookPreflightFallback ? RequestOf(HeldSentenceNoValue, facts) : withReason;
             source = BillingMessageSource.HeldForReview;
+        }
+
+        // Task 130e-1 (DEF-060, design 3.2; C3, C4, O2): the firm description of the version the Signal cites (the primary reason's), only after
+        // FirmDescriptionRules passed with that version's own rule set and policy names. A text that fails is dropped (code-only Warning): the
+        // Signal keeps its sentence and is written without a firm reason. The preflight fallback request, when built, carries none (O2).
+        if (!tookPreflightFallback && FirmReasonOf(rule, logger) is { } firmReason)
+        {
+            request = request with { FirmReason = firmReason };
         }
 
         return new BillingSignalMapping(request, source)
@@ -406,7 +427,25 @@ public static class BillingFindingSignalMapper
             Consequence = consequence,
             Fingerprint = fingerprint,
             Decision = groupDecision,
+            HeldFallback = tookPreflightFallback,
         };
+    }
+
+    /// <summary>
+    /// The firm reason a Signal of <paramref name="rule"/> carries (task 130e-1): its stored firm description after
+    /// <see cref="FirmDescriptionRules.Validate(string?, string?, string?, string?)"/> with the version's rule set and policy names and its rule type (a Duplicate takes none, F4); <c>null</c> when it is
+    /// blank or fails, and a failure is logged as a Warning with the stable code and the policy version id only, never the text.
+    /// </summary>
+    internal static string? FirmReasonOf(BillingRuleCandidate rule, ILogger? logger)
+    {
+        var check = FirmDescriptionRules.Validate(rule.FirmDescription, rule.RuleSetName, rule.PolicyName, rule.RuleType);
+        if (!check.IsValid)
+        {
+            logger?.LogWarning("[{Code}] The firm description of policy version {PolicyVersionId} was not copied to its Signal ({Reason}); the Signal is written without one.",
+                FirmDescriptionRules.DroppedLogCode, rule.PolicyVersionId, check.RefusalCode);
+        }
+
+        return check.Text;
     }
 
     /// <summary>A flag-only reason is a Flag whatever its version says; a missing or unknown consequence is a Flag (task 073 fails

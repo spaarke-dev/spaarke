@@ -80,6 +80,10 @@ public sealed class AuthenticationSchemeCensusTests
         // caller's active firms, Read on its core record, not hidden by the (a') predicate; every refusal the same 403).
         "GET /api/v1/external/ebilling/invoices/{invoiceId:guid}/outcome",
         "GET /api/v1/external/ebilling/submissions/{submissionId:guid}/outcome",
+        // ebilling-r1 task 135 (FR-49): the Billing Guidelines view, on the collaboration group behind CallerPrincipalAuthorizationFilter
+        // and BillingGuidelinesAuthorizationFilter (a CIAM contact with an active firm only; an optional core record the contact can
+        // read; a workforce principal is the same stable 403 before any read).
+        "GET /api/v1/external/ebilling/billing-guidelines",
         // R4 task 014b (FR-35/FR-36): the event record read and edit, and the assignable-people lists, on the collaboration
         // group behind CallerPrincipalAuthorizationFilter with workforce ceilings; every parent must be readable (uniform 404).
         "GET /api/v1/external/events/{id:guid}",

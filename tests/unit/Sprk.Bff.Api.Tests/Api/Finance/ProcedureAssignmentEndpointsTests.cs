@@ -38,6 +38,7 @@ namespace Sprk.Bff.Api.Tests.Api.Finance;
 public sealed class ProcedureAssignmentEndpointsTests
 {
     private static readonly Guid RecordId = Guid.NewGuid();
+    private static readonly Guid Decider = Guid.NewGuid();
     private static readonly Guid ProcedureId = Guid.NewGuid();
     private static readonly Guid PolicyId = Guid.NewGuid();
     private const string ProcedureSet = "sprk_procedures";
@@ -80,10 +81,13 @@ public sealed class ProcedureAssignmentEndpointsTests
             (RuleSetService)RuntimeHelpers.GetUninitializedObject(typeof(RuleSetService)),
             (Sprk.Bff.Api.Services.Signals.SignalClosureService)RuntimeHelpers.GetUninitializedObject(typeof(Sprk.Bff.Api.Services.Signals.SignalClosureService)),
             (AffectedInvoiceCounter)RuntimeHelpers.GetUninitializedObject(typeof(AffectedInvoiceCounter)),
-            NullLogger<ProcedureAssignmentService>.Instance);
+            NullLogger<ProcedureAssignmentService>.Instance,
+            // Task 084h-2: the recorder (never reached: the service is substituted) and no repair queue.
+            (BillingDecisionRecorder)RuntimeHelpers.GetUninitializedObject(typeof(BillingDecisionRecorder)), null!);
 
         public readonly FinAuth.RecordingAccessDataSource Access = new();
-        public readonly FinAuth.RecordingPrivilegeProbe Probe = new();
+        // Task 084h-2: the caller's systemuserid, the decider the write routes resolve (a test sets it null for the 403).
+        public readonly FinAuth.RecordingPrivilegeProbe Probe = new() { CallerSystemUserId = Decider };
         private WebApplication _app = null!;
         public HttpClient Client = null!;
 
@@ -161,10 +165,10 @@ public sealed class ProcedureAssignmentEndpointsTests
 
         public void NoWrites()
         {
-            Service.Verify(s => s.AssignProcedureAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<ProcedureAssignmentRequest>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()), Times.Never);
-            Service.Verify(s => s.ExcludeRuleAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<RuleExcludeRequest>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()), Times.Never);
-            Service.Verify(s => s.ChangeRuleAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<RuleChangeRequest>(), It.IsAny<Guid?>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Never);
-            Service.Verify(s => s.RemoveAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Never);
+            Service.Verify(s => s.AssignProcedureAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<ProcedureAssignmentRequest>(), It.IsAny<Guid?>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
+            Service.Verify(s => s.ExcludeRuleAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<RuleExcludeRequest>(), It.IsAny<Guid?>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
+            Service.Verify(s => s.ChangeRuleAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<RuleChangeRequest>(), It.IsAny<Guid?>(), It.IsAny<Guid>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Never);
+            Service.Verify(s => s.RemoveAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<OverrideRemovalRequest?>(), It.IsAny<Guid>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Never);
             Service.Verify(s => s.PreviewRemovalAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Never);
         }
 
@@ -390,8 +394,8 @@ public sealed class ProcedureAssignmentEndpointsTests
         var view = new OverrideView(Guid.NewGuid(), "Procedure", "Excluded", ProcedureId, null, null, null, null);
         string? seenTable = null;
         Guid? seenCaller = null;
-        host.Service.Setup(s => s.AssignProcedureAsync(It.IsAny<string>(), RecordId, It.IsAny<ProcedureAssignmentRequest>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
-            .Callback((string t, Guid _, ProcedureAssignmentRequest _, Guid? c, CancellationToken _) => (seenTable, seenCaller) = (t, c))
+        host.Service.Setup(s => s.AssignProcedureAsync(It.IsAny<string>(), RecordId, It.IsAny<ProcedureAssignmentRequest>(), It.IsAny<Guid?>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .Callback((string t, Guid _, ProcedureAssignmentRequest _, Guid? c, Guid _, CancellationToken _) => (seenTable, seenCaller) = (t, c))
             .ReturnsAsync(RuleSetOutcome<OverrideView>.Done(view));
         var url = $"/api/finance/{segment}/{RecordId}/procedure-assignments";
 
@@ -413,8 +417,8 @@ public sealed class ProcedureAssignmentEndpointsTests
         var firm = Guid.NewGuid();
         RuleExcludeRequest? seen = null;
         string? seenTable = null;
-        host.Service.Setup(s => s.ExcludeRuleAsync(It.IsAny<string>(), RecordId, It.IsAny<RuleExcludeRequest>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
-            .Callback((string t, Guid _, RuleExcludeRequest r, Guid? _, CancellationToken _) => (seenTable, seen) = (t, r))
+        host.Service.Setup(s => s.ExcludeRuleAsync(It.IsAny<string>(), RecordId, It.IsAny<RuleExcludeRequest>(), It.IsAny<Guid?>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .Callback((string t, Guid _, RuleExcludeRequest r, Guid? _, Guid _, CancellationToken _) => (seenTable, seen) = (t, r))
             .ReturnsAsync(RuleSetOutcome<OverrideView>.Done(new OverrideView(Guid.NewGuid(), "RuleExcluded", "Excluded", null, null, PolicyId, firm, "agreed")));
 
         var response = await host.Client.SendAsync(Post($"/api/finance/{segment}/{RecordId}/rule-overrides/exclude",
@@ -444,9 +448,9 @@ public sealed class ProcedureAssignmentEndpointsTests
     {
         await using var host = await Host.StartAsync();
         var duplicate = RuleSetOutcome<OverrideView>.Refused(409, "assignment.duplicate", ProcedureAssignmentService.DuplicateDetail);
-        host.Service.Setup(s => s.AssignProcedureAsync(It.IsAny<string>(), RecordId, It.IsAny<ProcedureAssignmentRequest>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+        host.Service.Setup(s => s.AssignProcedureAsync(It.IsAny<string>(), RecordId, It.IsAny<ProcedureAssignmentRequest>(), It.IsAny<Guid?>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(duplicate);
-        host.Service.Setup(s => s.ExcludeRuleAsync(It.IsAny<string>(), RecordId, It.IsAny<RuleExcludeRequest>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+        host.Service.Setup(s => s.ExcludeRuleAsync(It.IsAny<string>(), RecordId, It.IsAny<RuleExcludeRequest>(), It.IsAny<Guid?>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(duplicate);
 
         var response = await host.Client.SendAsync(Post($"/api/finance/matters/{RecordId}{suffix}"));
@@ -461,7 +465,7 @@ public sealed class ProcedureAssignmentEndpointsTests
     public async Task AnInvalidRequest_Is400WithTheErrorCodeAndTheFieldsNamed()
     {
         await using var host = await Host.StartAsync();
-        host.Service.Setup(s => s.AssignProcedureAsync(It.IsAny<string>(), RecordId, It.IsAny<ProcedureAssignmentRequest>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+        host.Service.Setup(s => s.AssignProcedureAsync(It.IsAny<string>(), RecordId, It.IsAny<ProcedureAssignmentRequest>(), It.IsAny<Guid?>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(RuleSetOutcome<OverrideView>.Invalid("assignment.invalid",
                 new[] { new RuleSetError(null, null, "pinnedVersionId", "A pinned assignment names the Procedure Version it pins.", null) }));
 
@@ -542,8 +546,8 @@ public sealed class ProcedureAssignmentEndpointsTests
         var view = new RuleChangedView(
             new OverrideView(Guid.NewGuid(), "RuleChanged", "Excluded", null, null, PolicyId, null, "x"),
             new RecordRuleView(Guid.NewGuid(), Guid.NewGuid(), "BRR-x", Guid.NewGuid(), 1, Guid.NewGuid(), "Record", null));
-        host.Service.Setup(s => s.ChangeRuleAsync(It.IsAny<string>(), RecordId, It.IsAny<RuleChangeRequest>(), It.IsAny<Guid?>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
-            .Callback((string t, Guid _, RuleChangeRequest r, Guid? _, string? token, CancellationToken _) => (seenTable, seen, seenToken) = (t, r, token))
+        host.Service.Setup(s => s.ChangeRuleAsync(It.IsAny<string>(), RecordId, It.IsAny<RuleChangeRequest>(), It.IsAny<Guid?>(), It.IsAny<Guid>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .Callback((string t, Guid _, RuleChangeRequest r, Guid? _, Guid _, string? token, CancellationToken _) => (seenTable, seen, seenToken) = (t, r, token))
             .ReturnsAsync(RuleSetOutcome<RuleChangedView>.Done(view));
         var url = $"/api/finance/{segment}/{RecordId}/rule-overrides/change";
 
@@ -594,7 +598,7 @@ public sealed class ProcedureAssignmentEndpointsTests
         host.Service.Setup(s => s.SubjectOfOverrideAsync(It.IsAny<string>(), RecordId, OverrideId, It.IsAny<CancellationToken>())).ReturnsAsync(subject);
         host.Service.Setup(s => s.PreviewRemovalAsync(It.IsAny<string>(), RecordId, OverrideId, It.IsAny<string?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(RuleSetOutcome<OverrideRemovalPreview>.Done(new OverrideRemovalPreview(OverrideId, "RuleExcluded", false, null, null, null)));
-        host.Service.Setup(s => s.RemoveAsync(It.IsAny<string>(), RecordId, OverrideId, It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+        host.Service.Setup(s => s.RemoveAsync(It.IsAny<string>(), RecordId, OverrideId, It.IsAny<OverrideRemovalRequest?>(), It.IsAny<Guid>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(RuleSetOutcome<OverrideRemoved>.Done(new OverrideRemoved(OverrideId, "RuleExcluded", false, true, null, null, null)));
     }
 
@@ -673,7 +677,7 @@ public sealed class ProcedureAssignmentEndpointsTests
 
         removed.StatusCode.Should().Be(HttpStatusCode.Forbidden);
         previewed.StatusCode.Should().Be(HttpStatusCode.OK, "must not fire: the preview writes nothing");
-        host.Service.Verify(s => s.RemoveAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Never);
+        host.Service.Verify(s => s.RemoveAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<OverrideRemovalRequest?>(), It.IsAny<Guid>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     public static TheoryData<string, string, string, string, string> RemovalRoutesBySubject
@@ -720,7 +724,7 @@ public sealed class ProcedureAssignmentEndpointsTests
 
         await using var missing = await Host.StartAsync();
         StoredRowOverrides(missing, null);
-        missing.Service.Setup(s => s.RemoveAsync(It.IsAny<string>(), RecordId, OverrideId, It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+        missing.Service.Setup(s => s.RemoveAsync(It.IsAny<string>(), RecordId, OverrideId, It.IsAny<OverrideRemovalRequest?>(), It.IsAny<Guid>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(ProcedureAssignmentService.OverrideNotFound<OverrideRemoved>());
         missing.Service.Setup(s => s.PreviewRemovalAsync(It.IsAny<string>(), RecordId, OverrideId, It.IsAny<string?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(ProcedureAssignmentService.OverrideNotFound<OverrideRemovalPreview>());
@@ -744,7 +748,7 @@ public sealed class ProcedureAssignmentEndpointsTests
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         if (method == "DELETE")
         {
-            host.Service.Verify(s => s.RemoveAsync(TableOf(set), RecordId, OverrideId, It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Once);
+            host.Service.Verify(s => s.RemoveAsync(TableOf(set), RecordId, OverrideId, It.IsAny<OverrideRemovalRequest?>(), It.IsAny<Guid>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Once);
         }
         else
         {
@@ -785,7 +789,7 @@ public sealed class ProcedureAssignmentEndpointsTests
 
         response.StatusCode.Should().Be(HttpStatusCode.NotFound);
         (await Json(response))["errorCode"]!.GetValue<string>().Should().Be("assignment.override_not_found");
-        host.Service.Verify(s => s.RemoveAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Never);
+        host.Service.Verify(s => s.RemoveAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<OverrideRemovalRequest?>(), It.IsAny<Guid>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Never);
         host.Service.Verify(s => s.PreviewRemovalAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Never);
         host.NoWrites();
     }
@@ -832,5 +836,147 @@ public sealed class ProcedureAssignmentEndpointsTests
 
         response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
         host.NoWrites();
+    }
+
+    // ── Task 084h-2: the decider, the note and the decisionRecord member (design notes/084h §11 S6, S7, S10) ──
+
+    [Theory(DisplayName = "084h-2 S7 must-fire: on every create route an unresolved decider is 403 assignment.decider_unresolved, before the service")]
+    [MemberData(nameof(AllRoutes))]
+    public async Task EveryCreateRoute_AnUnresolvedDecider_Is403_BeforeTheService(string url, string _)
+    {
+        await using var host = await Host.StartAsync();
+        host.Probe.CallerSystemUserId = null;
+
+        var response = await host.Client.SendAsync(Post(url));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        (await Json(response))["reasonCode"]!.GetValue<string>().Should().Be(ProcedureAssignmentService.CodeDeciderUnresolved, "the 403 shape every Forbidden uses");
+        host.NoWrites();
+    }
+
+    [Theory(DisplayName = "084h-2 S7 must-fire: on every DELETE route an unresolved decider is 403 assignment.decider_unresolved, before the service")]
+    [MemberData(nameof(RemovalRoutes))]
+    public async Task EveryRemovalRoute_AnUnresolvedDecider_Is403_BeforeTheService(string method, string url, string _)
+    {
+        await using var host = await Host.StartAsync();
+        StoredRowOverrides(host, new OverrideSubject(PolicySet, PolicyId));
+        host.Probe.CallerSystemUserId = null;
+
+        var response = await host.Client.SendAsync(Send(method, url));
+
+        if (method == "DELETE")
+        {
+            response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+            (await Json(response))["reasonCode"]!.GetValue<string>().Should().Be(ProcedureAssignmentService.CodeDeciderUnresolved, "the 403 shape every Forbidden uses");
+            host.NoWrites();
+        }
+        else
+        {
+            response.StatusCode.Should().Be(HttpStatusCode.OK, "must-not-fire: the read-only preview names no decider");
+        }
+    }
+
+    [Theory(DisplayName = "084h-2: each POST hands the service the caller's systemuserid as the decider and the body's note; the answer carries decisionRecord")]
+    [MemberData(nameof(Cores))]
+    public async Task Assign_HandsTheServiceTheDeciderAndTheNote_AndAnswersTheDecisionRecord(string segment, string _, string table)
+    {
+        await using var host = await Host.StartAsync();
+        var record = Guid.NewGuid();
+        Guid? seenDecider = null;
+        ProcedureAssignmentRequest? seen = null;
+        string? seenTable = null;
+        host.Service.Setup(s => s.AssignProcedureAsync(It.IsAny<string>(), RecordId, It.IsAny<ProcedureAssignmentRequest>(), It.IsAny<Guid?>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .Callback((string t, Guid _, ProcedureAssignmentRequest r, Guid? _, Guid d, CancellationToken _) => (seenTable, seen, seenDecider) = (t, r, d))
+            .ReturnsAsync(RuleSetOutcome<OverrideView>.Done(new OverrideView(
+                Guid.NewGuid(), "Procedure", "FollowLatest", ProcedureId, null, null, null, null, OverrideDecisionRecord.RecordedAs(record))));
+
+        var response = await host.Client.SendAsync(Post($"/api/finance/{segment}/{RecordId}/procedure-assignments",
+            content: JsonContent.Create(new { procedureId = ProcedureId, note = "why we chose it" })));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Created);
+        seenDecider.Should().Be(Decider);
+        seen!.Note.Should().Be("why we chose it");
+        seenTable.Should().Be(table);
+        var json = await Json(response);
+        json["decisionRecord"]!["status"]!.GetValue<string>().Should().Be("Recorded");
+        json["decisionRecord"]!["recordId"]!.GetValue<Guid>().Should().Be(record);
+    }
+
+    [Fact(DisplayName = "084h-2 S10: a change's answer carries decisionRecord once, inside override")]
+    public async Task Change_AnswersTheDecisionRecordOnce_InsideOverride()
+    {
+        await using var host = await Host.StartAsync();
+        Guid? seenDecider = null;
+        string? seenNote = null;
+        var view = new RuleChangedView(
+            new OverrideView(Guid.NewGuid(), "RuleChanged", "Excluded", null, null, PolicyId, null, "x", OverrideDecisionRecord.QueuedForRepair),
+            new RecordRuleView(Guid.NewGuid(), Guid.NewGuid(), "BRR-x", Guid.NewGuid(), 1, Guid.NewGuid(), "Record", null));
+        host.Service.Setup(s => s.ChangeRuleAsync(It.IsAny<string>(), RecordId, It.IsAny<RuleChangeRequest>(), It.IsAny<Guid?>(), It.IsAny<Guid>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .Callback((string _, Guid _, RuleChangeRequest r, Guid? _, Guid d, string? _, CancellationToken _) => (seenNote, seenDecider) = (r.Note, d))
+            .ReturnsAsync(RuleSetOutcome<RuleChangedView>.Done(view));
+
+        var response = await host.Client.SendAsync(Post($"/api/finance/matters/{RecordId}/rule-overrides/change",
+            content: JsonContent.Create(new { policyId = PolicyId, reason = "x", shortHeadline = "Cap", note = "line\nbreak" })));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Created);
+        seenDecider.Should().Be(Decider);
+        seenNote.Should().Be("line\nbreak");
+        var json = await Json(response);
+        json.ContainsKey("decisionRecord").Should().BeFalse("decisionRecord appears once per answer");
+        json["override"]!["decisionRecord"]!["status"]!.GetValue<string>().Should().Be("Queued");
+    }
+
+    [Theory(DisplayName = "084h-2: a DELETE takes an optional JSON body { note }: with it the service gets the note, without it (empty body) none; the answer carries decisionRecord")]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Remove_TakesAnOptionalJsonNote_AndAnswersTheDecisionRecord(bool withBody)
+    {
+        await using var host = await Host.StartAsync();
+        StoredRowOverrides(host, new OverrideSubject(PolicySet, PolicyId));
+        OverrideRemovalRequest? seen = null;
+        Guid? seenDecider = null;
+        host.Service.Setup(s => s.RemoveAsync(It.IsAny<string>(), RecordId, OverrideId, It.IsAny<OverrideRemovalRequest?>(), It.IsAny<Guid>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .Callback((string _, Guid _, Guid _, OverrideRemovalRequest? r, Guid d, string? _, CancellationToken _) => (seen, seenDecider) = (r, d))
+            .ReturnsAsync(RuleSetOutcome<OverrideRemoved>.Done(new OverrideRemoved(
+                OverrideId, "RuleExcluded", false, true, null, null, null, OverrideDecisionRecord.NotRecordedFailure)));
+        var request = RateCardImportEndpointsTests.Req("DELETE", $"/api/finance/matters/{RecordId}/overrides/{OverrideId}",
+            content: withBody ? JsonContent.Create(new { note = "no longer needed" }) : null);
+
+        var response = await host.Client.SendAsync(request);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        seenDecider.Should().Be(Decider);
+        if (withBody)
+        {
+            // Review F4: the body must bind; a null request would silently drop the note on every unpin and remove.
+            seen.Should().NotBeNull();
+            seen!.Note.Should().Be("no longer needed");
+        }
+        else
+        {
+            seen?.Note.Should().BeNull();
+        }
+        if (!withBody)
+        {
+            seen.Should().BeNull();
+        }
+
+        var record = (await Json(response))["decisionRecord"]!;
+        record["status"]!.GetValue<string>().Should().Be("NotRecorded");
+        record["errorCode"]!.GetValue<string>().Should().Be(ProcedureAssignmentService.CodeDecisionRecordFailed);
+    }
+
+    [Fact(DisplayName = "084h-2 S6: the service's note refusal reaches the caller as 400 with its stable code")]
+    public async Task ANoteRefusal_Is400WithItsCode()
+    {
+        await using var host = await Host.StartAsync();
+        host.Service.Setup(s => s.ExcludeRuleAsync(It.IsAny<string>(), RecordId, It.IsAny<RuleExcludeRequest>(), It.IsAny<Guid?>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(RuleSetOutcome<OverrideView>.Refused(400, ProcedureAssignmentService.CodeNoteTooLong, "The note is longer than 2000 characters."));
+
+        var response = await host.Client.SendAsync(Post($"/api/finance/matters/{RecordId}/rule-overrides/exclude",
+            content: JsonContent.Create(new { policyId = PolicyId, reason = "agreed", note = new string('n', 2001) })));
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        (await Json(response))["errorCode"]!.GetValue<string>().Should().Be(ProcedureAssignmentService.CodeNoteTooLong);
     }
 }

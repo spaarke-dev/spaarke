@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="130f" project="ebilling-r1">
+  <metadata>
+    <title>Firm view: a Rejected or Returned-to-firm invoice shows its line findings, as In Review does (EB-D-259)</title>
+    <phase>5 Firm feedback (WP5); owner EB-D-259 (131 review finding 1)</phase>
+    <gate>131 merged into work. Branch from work/ebilling-r1 at the sha named in the agent brief.</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Changes what external firm users see (130's firm-safe projection); tests modified.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+    <parallel-safe>true</parallel-safe>
+    <deps>130, 131</deps>
+    <tags>bff-api, external-access, testing</tags>
+    <estimated-effort>0.5 day</estimated-effort>
+  </metadata>
+
+  <prompt>FirmFindingsProjection (src/server/api/Sprk.Bff.Api/Services/Finance/FirmFindingsProjection.cs, the status switch near :299-304) returns a Rejected or Returned-to-firm invoice with no items. So the 131 firm notice's findings table and the SPA invoice view are empty after a whole-invoice Reject or Return, although EB-D-254 makes them the firm's only written record. The owner decided (EB-D-259) that such an invoice shows the same line items as In Review: the same item kinds, built by the same code path, with the same firm-safety rules (D-66, D-79/EB-D-209, EB-D-210/212, the clause visibility decision). The outcome kind and label stay Rejected / "Returned to firm"; the billed total stays; no approved total and no invoice-level adjustment items (those belong to Approved and later). The reviewer's reason and note are internal and are NOT shown (EB-D-259: the firm-safe reason is the confirmed notice prose, task 130g, after 132).</prompt>
+
+  <goal>After a Reject or Return, the firm sees why line by line, exactly as it saw the findings while the invoice was In Review, and the 131 notice carries that table.</goal>
+
+  <constraints>
+    <constraint source="EB-D-259">One code path: reuse the In Review item construction; do not copy it. No new DTO field, no new endpoint, no schema change.</constraint>
+    <constraint source="D-66, EB-D-209, EB-D-210, EB-D-212">Every firm-safety rule that applies to In Review items applies unchanged. The reviewer's reject/return reason, the decision note and any Decision Record content never reach the projection.</constraint>
+    <constraint source="130 decision 4 (superseded)">Record in notes/130f-firm-view-decided-findings.md that 130's "decided invoices have no items" decision is superseded by EB-D-259, and why.</constraint>
+    <constraint source="consumers">The projection's callers are a closed set (FirmFindingsProjectionCallerBoundaryGuardTests): the SPA outcome route and FirmNoticeComposer. Check both render the items for the Rejected/ReturnedToFirm kinds (the composer's post-decision table; the SPA client in src/client/external-spa if it hides items by kind). A client change, if needed, is in scope; spa-r4 gets a copy.</constraint>
+    <constraint source="project">Only FirmFindingsProjection.cs, the composer or SPA rendering if needed, their tests, and the notes file. No deploy.</constraint>
+  </constraints>
+
+  <acceptance-criteria>
+    <criterion testable="true">xUnit: a Rejected and a Returned-to-firm invoice project the same items as the same invoice In Review (same lines, findings, values, firm-safe clause decisions); kind and label are the decided ones; no approved total; no invoice-level adjustment items.</criterion>
+    <criterion testable="true">xUnit (must-not-fire): the reviewer's reason, the decision note and an override reason seeded in the store appear nowhere in the projection, the notice subject, prose request or HTML.</criterion>
+    <criterion testable="true">xUnit: flag-off rule sets keep EB-D-209 behaviour for Rejected and Returned items (reason only, no clause, section or rule set name).</criterion>
+    <criterion testable="true">xUnit: the 131 notice for Reject and Return now renders the findings table; a fault reading items keeps the projection's existing fail-safe outcome.</criterion>
+    <criterion testable="true">Filtered FirmFindings|FirmNotice|ExternalInvoice|FirmOutcome tests, the external-spa suite if a client change was made, and the --warnaserror BFF build pass.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

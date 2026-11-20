@@ -33,7 +33,7 @@ import * as React from 'react';
 import { MessageBar, MessageBarBody, Text, makeStyles, tokens } from '@fluentui/react-components';
 import { EmailComposer } from '../../EmailComposer/EmailComposer';
 import { composedEmailFromState, pendingAttachments } from '../../EmailComposer/composeOnlySend';
-import { plainTextToHtml, toPlainText } from '../../EmailComposer/composeOnlyText';
+import { isUnchangedPlainBody, plainTextToHtml } from '../../EmailComposer/composeOnlyText';
 import type { IComposedEmail, IEmailComposeHandlers } from '../../EmailComposer/composeOnlySend';
 import type { EmailComposerState, IAttachmentItem } from '../../EmailComposer/EmailComposer.types';
 import type { AuthenticatedFetchFn } from '../../../services/EntityCreationService';
@@ -121,41 +121,16 @@ function signature(email: IComposedEmail): string {
   ]);
 }
 
-/** Text as the rich-text editor shows it: runs of spaces and tabs collapse, line ends are trimmed. */
-function visibleText(text: string): string {
-  return text
-    .replace(/\u00a0/g, ' ')
-    .split('\n')
-    .map(line => line.replace(/[ \t]+/g, ' ').trim())
-    .join('\n')
-    .trim();
-}
-
-/** Elements a plain paragraph is written with: anything else (bold, a link, a list...) is formatting. */
-const PLAIN_ELEMENTS = new Set(['P', 'BR', 'SPAN', 'DIV']);
-
-/** True when a rich-text body carries formatting: an element other than paragraphs, breaks and spans, or a style. */
-function hasFormatting(html: string): boolean {
-  if (!/</.test(html)) return false;
-  // DOMParser builds an inert document: nothing in the markup runs.
-  const body = new DOMParser().parseFromString(html, 'text/html').body;
-  return Array.from(body.querySelectorAll('*')).some(el => {
-    if (!PLAIN_ELEMENTS.has(el.tagName)) return true;
-    const style = (el.getAttribute('style') ?? '').replace(/white-space\s*:\s*pre-wrap\s*;?/gi, '').trim();
-    return style !== '';
-  });
-}
-
 /**
  * A plain-text body opened as rich-text paragraphs is still that plain text while its visible text is unchanged and it
  * has no formatting (the editor re-serialises the paragraphs and collapses spacing; that is not an edit), so the
  * composer's state keeps the plain-text body. Formatting added to the same text is an edit.
  */
 function keepPlainBody(next: IComposedEmail, previous: IComposedEmail): IComposedEmail {
-  if (previous.bodyFormat !== 'PlainText' || next.bodyFormat !== 'HTML' || hasFormatting(next.body)) return next;
-  const asShown = (html: string) => visibleText(toPlainText(html, 'HTML'));
-  const sameText = asShown(next.body) === asShown(plainTextToHtml(previous.body));
-  return sameText ? { ...next, body: previous.body, bodyFormat: 'PlainText' } : next;
+  if (previous.bodyFormat !== 'PlainText' || next.bodyFormat !== 'HTML') return next;
+  return isUnchangedPlainBody(previous.body, next.body)
+    ? { ...next, body: previous.body, bodyFormat: 'PlainText' }
+    : next;
 }
 
 /** A local file whose upload had not finished when the composer closed: the composer drops a result it gets after that. */

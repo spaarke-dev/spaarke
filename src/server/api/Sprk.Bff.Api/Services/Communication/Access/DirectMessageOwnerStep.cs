@@ -78,6 +78,18 @@ public sealed class DirectMessageOwnerStep
     private const string VersionColumn = "versionnumber";
     private const string EvictionReason = "direct-message-owner-step";
 
+    /// <summary>
+    /// The version a row was read at: the <c>versionnumber</c> attribute when the read carries it, else <see cref="Entity.RowVersion"/>,
+    /// where the Dataverse ServiceClient returns it on a <c>ColumnSet(true)</c> read (#2919). <c>null</c> when neither is there, which
+    /// keeps the row's owner. The same reading as <c>RecordCreationService.Repair</c> and <c>RecordOwnershipResolver</c>.
+    /// </summary>
+    internal static long? VersionOf(Entity row) =>
+        row.GetAttributeValue<long?>(VersionColumn)
+        ?? (long.TryParse(row.RowVersion, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture,
+            out var version)
+            ? version
+            : null);
+
     private readonly IDirectThreadAccessService _access;
     private readonly IGenericEntityService _dataverse;
     private readonly DirectMessageOwnerTeam _lookup;
@@ -529,7 +541,7 @@ public sealed class DirectMessageOwnerStep
         }
 
         var message = await ReadMessageAsync(communicationId, ct).ConfigureAwait(false);
-        if (message is null || message.GetAttributeValue<long?>(VersionColumn) is not { } version)
+        if (message is null || VersionOf(message) is not { } version)
         {
             _logger.LogError(MessageNotMovedEvent,
                 "Message {CommunicationId} keeps its owner: it could not be read before its Direct owner write.", communicationId);
@@ -765,7 +777,7 @@ public sealed class DirectMessageOwnerStep
                     continue;
                 }
 
-                var fault = row.GetAttributeValue<long?>(VersionColumn) is { } version
+                var fault = VersionOf(row) is { } version
                     ? await WriteDirectTeamOwnerAsync(table, row.Id, version, teamId, ct).ConfigureAwait(false)
                     : "its version could not be read";
                 if (fault is not null)

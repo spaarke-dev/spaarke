@@ -464,6 +464,76 @@ public sealed class InvoiceCorrectionEndpointsAuthorizationContractTests
     }
 
     // =========================================================================================
+    // 095f-2d2 (EB-D-242): the optional note on both write routes
+    // =========================================================================================
+
+    [Theory(DisplayName = "095f-2d2: both routes take an optional note and store it on the row; the row's id and the response shape are unchanged")]
+    [MemberData(nameof(WriteRoutes))]
+    public async Task Note_IsStoredOnTheRow(string method, string url, object? body)
+    {
+        await using var plain = await Host.StartAsync();
+        await using var noted = await Host.StartAsync();
+        plain.GrantAll();
+        noted.GrantAll();
+        var fields = body!.GetType().GetProperties().ToDictionary(p => p.Name, p => p.GetValue(body));
+        fields["note"] = "  Checked against the engagement letter.\n  ";
+
+        var first = await plain.SendAsync(Request(method, url, body));
+        var second = await noted.SendAsync(Request(method, url, fields));
+
+        first.StatusCode.Should().Be(HttpStatusCode.OK);
+        second.StatusCode.Should().Be(HttpStatusCode.OK);
+        var row = noted.World.Corrections.Should().ContainSingle().Subject;
+        row.GetAttributeValue<string>("sprk_note").Should().Be("Checked against the engagement letter.");
+        plain.World.Corrections.Single().Contains("sprk_note").Should().BeFalse();
+        row.Id.Should().Be(plain.World.Corrections.Single().Id);
+        var json = JsonNode.Parse(await second.Content.ReadAsStringAsync())!.AsObject();
+        json["correction"]!.AsObject().ContainsKey("note").Should().BeFalse("the note is never read back");
+    }
+
+    [Theory(DisplayName = "095f-2d2: a refused note is a 400 with the shared code, and nothing is read or written (both routes)")]
+    [InlineData("LINE", 2001, "ebilling.note_too_long")]
+    [InlineData("LINE", 0, "ebilling.note_invalid_characters")]
+    [InlineData("HEADER", 2001, "ebilling.note_too_long")]
+    [InlineData("HEADER", 0, "ebilling.note_invalid_characters")]
+    public async Task RefusedNote_Is400_AndReadsAndWritesNothing(string route, int length, string code)
+    {
+        await using var host = await Host.StartAsync();
+        host.GrantAll();
+        var note = length > 0 ? "NOTE-SENTINEL" + new string('n', length) : "NOTE-SENTINEL\u0007";
+        var (url, body) = route == "LINE"
+            ? (LineRoute(), (object)new { field = "Hours", value = "2.5", note })
+            : (HeaderRoute, new { field = "TotalDue", value = "2400", note });
+
+        var response = await host.SendAsync(Request("POST", url, body));
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        (await ErrorCode(response)).Should().Be(code);
+        (await response.Content.ReadAsStringAsync()).Should().NotContain("NOTE-SENTINEL");
+        host.World.Entities.VerifyNoOtherCalls();
+        host.World.Corrections.Should().BeEmpty();
+        host.World.ValueWrites.Should().BeEmpty();
+    }
+
+    [Theory(DisplayName = "095f-2d2: 2000 characters, a newline and a tab are accepted (both routes)")]
+    [InlineData("LINE")]
+    [InlineData("HEADER")]
+    public async Task NoteAtTheLimit_WithNewlineAndTab_Is200(string route)
+    {
+        await using var host = await Host.StartAsync();
+        host.GrantAll();
+        var note = "a\n\tb" + new string('n', 1996);
+        var (url, body) = route == "LINE"
+            ? (LineRoute(), (object)new { field = "Hours", value = "2.5", note })
+            : (HeaderRoute, new { field = "TotalDue", value = "2400", note });
+
+        var response = await host.SendAsync(Request("POST", url, body));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        host.World.Corrections.Single().GetAttributeValue<string>("sprk_note").Should().Be(note);
+    }
+
+    // =========================================================================================
     // The corrections list
     // =========================================================================================
 

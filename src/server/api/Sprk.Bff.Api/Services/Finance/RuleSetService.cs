@@ -66,12 +66,16 @@ public sealed record RuleSetSummary(
 /// Why an admin rejected the draft (task 077, D-113): set only while <paramref name="State"/> is <c>Rejected</c>, otherwise null. <b>Admin-only</b>:
 /// this view is the Rule Review read; no firm projection (<see cref="FirmClauseText"/>) carries it.
 /// </param>
+/// <param name="FirmDescription">
+/// Task 130e-1 (DEF-060): the working version's firm description (<c>sprk_firmdescription</c>) as stored, or null. Firms see it in place of the
+/// reason table's text, even when the rule set is hidden from firms; a Duplicate rule never carries one.
+/// </param>
 public sealed record ProposalView(
     Guid PolicyId, string PolicyCode, string Name, string State, bool InForce, bool HasPublishedVersion,
     Guid VersionId, int VersionNumber, string? RuleType, JsonNode? RuleBody, string? MessageTemplate, string? ShortHeadline,
     string? Consequence, string? DescriptionText, string? DescriptionFormal, string? DescriptionRefusal,
     string? ClauseQuote, string? ClauseLocation, IReadOnlyList<string> ValidationErrors,
-    string? RowVersion = null, string? RejectionReason = null);
+    string? RowVersion = null, string? RejectionReason = null, string? FirmDescription = null);
 
 /// <summary>
 /// A rule set with its rules (the Rule Review page's read). <see cref="NotConverted"/> is the not-converted list of the drafting run of the
@@ -82,9 +86,12 @@ public sealed record RuleSetDetail(
     RuleSetSummary RuleSet, JsonNode? NotConverted, IReadOnlyList<ProposalView> Proposals);
 
 /// <summary>An edit to a rule's working version. A <c>null</c> member is left as it is.</summary>
+/// <param name="FirmDescription">Task 130e-1 (DEF-060): the firm description; null leaves it as it is, a blank text clears it. Accepted only on a
+/// working version that is a draft; on a published one the edit creates a new draft that takes it, and the published row keeps its own text
+/// (C2, fix round 1 F1). Validated by <see cref="FirmDescriptionRules"/>.</param>
 public sealed record ProposalEdit(
     string? RuleType, string? RuleBody, string? MessageTemplate, string? ShortHeadline, string? Consequence,
-    string? ClauseReference, string? ClauseLocation, Guid? CallerObjectId);
+    string? ClauseReference, string? ClauseLocation, Guid? CallerObjectId, string? FirmDescription = null);
 
 /// <summary>The result of an edit: the working version after it, and whether a new version was created.</summary>
 public sealed record ProposalEdited(ProposalView Proposal, bool CreatedNewVersion);
@@ -170,7 +177,7 @@ public static class RuleSetClauseVisibility
     /// </summary>
     public static FirmClauseText ForFirm(bool? ruleSetVisibleToFirms, string? clauseQuote, string? clauseLocation, string? firmFacingName = null)
     {
-        if (ruleSetVisibleToFirms != true)
+        if (!IsVisibleToFirms(ruleSetVisibleToFirms))
         {
             return FirmClauseText.None;
         }
@@ -180,6 +187,43 @@ public static class RuleSetClauseVisibility
         return quote is null && location is null ? FirmClauseText.None : new FirmClauseText(quote, location, NullIfBlank(firmFacingName));
     }
 
+    /// <summary>
+    /// The ONE decision whether a rule set is shown to firms at all (ebilling-r1 task 135): its flag is on. A missing flag is off. <see cref="ForFirm"/>
+    /// asks it, and so does <see cref="VisibleToFirms"/>, which the Billing Guidelines view asks to decide whether a rule is listed, so the two cannot disagree.
+    /// </summary>
+    public static bool IsVisibleToFirms(bool? ruleSetVisibleToFirms) => ruleSetVisibleToFirms == true;
+
+    /// <summary>
+    /// ISS-038 (uac-r2): THE one reading of a rule set's <c>sprk_visibletofirms</c> flag for a firm-visibility decision; its answer feeds
+    /// <see cref="ForFirm"/>. A rule set that is not record-scoped answers by its own flag, as before. A record-scoped set
+    /// (<see cref="RecordRuleSet.IsRecordScoped"/>) is shared by every changed rule of one record (and firm), and takes its flag from the first rule
+    /// changed there, so its flag alone says nothing about a later rule: per-record visibility uses both rule sets' flags. The record rule is visible
+    /// only when the record set's flag is on AND every <paramref name="baseRuleSets"/> entry (the rule set of each base rule version the record rule's
+    /// slot named) is a readable rule set that is not itself record-scoped with its flag on.
+    /// <para>Fails closed: a missing flag is off; for a record-scoped set, no base rule set at all, or a null entry (a base version, policy or rule
+    /// set that could not be read), is not visible.</para>
+    /// </summary>
+    /// <param name="ruleSet">The rule set that holds the rule version the firm would be shown.</param>
+    /// <param name="baseRuleSets">For a record-scoped <paramref name="ruleSet"/>: the base rule's rule set per base version (null where unreadable).
+    /// Ignored for any other set.</param>
+    internal static bool VisibleToFirms(Entity ruleSet, IReadOnlyCollection<Entity?> baseRuleSets)
+    {
+        ArgumentNullException.ThrowIfNull(ruleSet);
+        ArgumentNullException.ThrowIfNull(baseRuleSets);
+        if (!IsVisibleToFirms(ruleSet.GetAttributeValue<bool?>("sprk_visibletofirms")))
+        {
+            return false;
+        }
+
+        if (!RecordRuleSet.IsRecordScoped(ruleSet))
+        {
+            return true;
+        }
+
+        return baseRuleSets.Count > 0 && baseRuleSets.All(baseSet =>
+            baseSet is not null && !RecordRuleSet.IsRecordScoped(baseSet) && IsVisibleToFirms(baseSet.GetAttributeValue<bool?>("sprk_visibletofirms")));
+    }
+
     private static string? NullIfBlank(string? text) => string.IsNullOrWhiteSpace(text) ? null : text;
 }
 
@@ -187,7 +231,7 @@ public enum RuleSetOutcomeKind
 {
     Done,
 
-    /// <summary>The input has problems (<see cref="RuleSetOutcome{T}.Errors"/>): HTTP 400, nothing written.</summary>
+    /// <summary>The input has problems (<see cref="RuleSetOutcome{T}.Errors"/>): HTTP 400 (422 when a firm description is refused), nothing written.</summary>
     Invalid,
 
     /// <summary>Refused for another stable reason (<see cref="RuleSetOutcome{T}.ErrorCode"/> with its status).</summary>
@@ -212,8 +256,18 @@ public sealed class RuleSetOutcome<T> where T : class
 
     internal static RuleSetOutcome<T> Done(T value) => new() { Kind = RuleSetOutcomeKind.Done, Value = value };
 
+    /// <remarks>The status is 400, or 422 when any error is on the firm description (DEF-060 Q4: a refused firm description is a 422 with
+    /// a stable reason code; the message never echoes the text). One rule here, so every endpoint that maps an Invalid outcome agrees.</remarks>
     internal static RuleSetOutcome<T> Invalid(string errorCode, IReadOnlyList<RuleSetError> errors) =>
-        new() { Kind = RuleSetOutcomeKind.Invalid, ErrorCode = errorCode, Errors = errors };
+        new()
+        {
+            Kind = RuleSetOutcomeKind.Invalid,
+            ErrorCode = errorCode,
+            Errors = errors,
+            StatusCode = errors.Any(e => e.Field == RuleSetService.FirmDescriptionField)
+                ? StatusCodes.Status422UnprocessableEntity
+                : StatusCodes.Status400BadRequest,
+        };
 
     internal static RuleSetOutcome<T> Refused(int statusCode, string errorCode, string detail) =>
         new() { Kind = RuleSetOutcomeKind.Refused, StatusCode = statusCode, ErrorCode = errorCode, Detail = detail };
@@ -366,6 +420,12 @@ public class RuleSetService
     /// </summary>
     internal const string CodeProcedureOwned = "ruleset.procedure_owned";
 
+    /// <summary>Task 130e-1: <c>sprk_policyversion.sprk_firmdescription</c> (the one definition is the loader's).</summary>
+    internal const string FirmDescriptionColumn = Sprk.Bff.Api.Services.Signals.Billing.BillingFactLoader.FirmDescriptionColumn;
+
+    /// <summary>Task 130e-1 (design section 5): the stable reason of a firm description on a Duplicate rule, which never shows one.</summary>
+    internal const string FirmDescriptionOnDuplicateReason = FirmDescriptionRules.OnDuplicate;
+
     // ── Task 081 (EB-D-148, procedure model 7.2): the version chain re-keyed per (policy, Procedure Version). ──
 
     /// <summary><c>sprk_ruleset.sprk_procedure</c>: the Procedure whose rules the set holds (080). A set without it is a legacy set.</summary>
@@ -434,11 +494,11 @@ public class RuleSetService
     private static readonly string[] PolicyColumns =
         { "sprk_name", "sprk_policycode", "sprk_currentversion", "sprk_enabled", "sprk_ruleset", RuleDomains.PolicyDomainColumn, RowVersionColumn };
 
-    private static readonly string[] VersionColumns =
+    internal static readonly string[] VersionColumns =
     {
         "sprk_policy", "sprk_versionnumber", "sprk_ruletype", "sprk_rulebody", "sprk_messagetemplate", "sprk_shortheadline",
         "sprk_consequence", "sprk_proposalstatus", "sprk_clausereference", "sprk_clauselocation", "sprk_inforcefrom", "sprk_inforceto",
-        RowVersionColumn, RejectionReasonColumn, ProcedureVersionColumn, PublishStateColumn,
+        RowVersionColumn, RejectionReasonColumn, ProcedureVersionColumn, PublishStateColumn, FirmDescriptionColumn,
     };
 
     // Task 089c (089a K1): the core-record lookups are read too, so every read here can refuse a record-scoped set
@@ -533,9 +593,11 @@ public class RuleSetService
         }
 
         var views = new List<ProposalView>();
+        var setName = set.GetAttributeValue<string>("sprk_name");
         foreach (var rule in loaded.Rules.OrderBy(r => r.Policy.Code, StringComparer.Ordinal))
         {
-            views.Add(await ViewAsync(rule, ct, carryRowVersion: true));
+            // Fix round 1 F2d: with the rule set's name, so a description that names it shows its error in the review before publish.
+            views.Add(await ViewAsync(rule with { RuleSetName = setName }, ct, carryRowVersion: true));
         }
 
         JsonNode? notConverted = null;
@@ -1855,9 +1917,25 @@ public class RuleSetService
         var work = rule.Working;
         var errors = new List<RuleSetError>();
 
-        if (edit is { RuleType: null, RuleBody: null, MessageTemplate: null, ShortHeadline: null, Consequence: null, ClauseReference: null, ClauseLocation: null })
+        if (edit is { RuleType: null, RuleBody: null, MessageTemplate: null, ShortHeadline: null, Consequence: null, ClauseReference: null, ClauseLocation: null, FirmDescription: null })
         {
             errors.Add(new RuleSetError(policyId, rule.Policy.Name, "edit", "Nothing to change: name at least one member.", null));
+        }
+
+        // Task 130e-1 (DEF-060, uac-r2 C2; fix round 1 F1): a published version is never updated: an edit of one becomes a NEW draft version
+        // (below), so a firm description change, a clear included, lands on that new draft and the published row keeps its text. A draft is
+        // edited in place. The same text is not a change; a blank text clears it.
+        var firmDescription = work.FirmDescription;
+        var firmDescriptionTouched = false;
+        if (edit.FirmDescription is not null)
+        {
+            var proposed = string.IsNullOrWhiteSpace(edit.FirmDescription) ? null : edit.FirmDescription.Trim();
+            var stored = string.IsNullOrWhiteSpace(work.FirmDescription) ? null : work.FirmDescription.Trim();
+            if (!string.Equals(proposed, stored, StringComparison.Ordinal))
+            {
+                firmDescription = proposed;
+                firmDescriptionTouched = true;
+            }
         }
 
         int? consequence = work.Consequence;
@@ -1874,6 +1952,18 @@ public class RuleSetService
         }
 
         var ruleTypeRaw = edit.RuleType ?? work.RuleType?.ToString(CultureInfo.InvariantCulture);
+
+        // Fix round 1 F1: a published version's text carried onto the new draft, which this edit did not touch and which fails the checks now
+        // (a form edit outside the BFF, or a type changed to Duplicate), is left off the new draft with a code-only Warning, so it never blocks an
+        // edit that does not touch it. The published row keeps it either way.
+        if (!firmDescriptionTouched && !work.IsDraft(rule.Policy)
+            && FirmDescriptionRefusal(ruleTypeRaw, firmDescription, rule.RuleSetName, rule.Policy.Name) is { } droppedBecause)
+        {
+            _logger.LogWarning("[{Code}] Rule {PolicyId}: the firm description of published version {VersionId} was not carried to the new version ({Reason})",
+                FirmDescriptionRules.DroppedLogCode, policyId, work.Id, droppedBecause);
+            firmDescription = null;
+        }
+
         var merged = work with
         {
             RuleBody = edit.RuleBody ?? work.RuleBody,
@@ -1882,8 +1972,9 @@ public class RuleSetService
             Consequence = consequence,
             ClauseReference = edit.ClauseReference ?? work.ClauseReference,
             ClauseLocation = edit.ClauseLocation ?? work.ClauseLocation,
+            FirmDescription = firmDescription,
         };
-        errors.AddRange(ValidateRule(rule.Policy, ruleTypeRaw, merged));
+        errors.AddRange(ValidateRule(rule.Policy, ruleTypeRaw, merged, rule.RuleSetName));
         if (errors.Count > 0)
         {
             return RuleSetOutcome<ProposalEdited>.Invalid(CodeInvalid, errors);
@@ -1916,15 +2007,23 @@ public class RuleSetService
                     fields["sprk_clauselocation"] = merged.ClauseLocation;
                 }
 
+                // Task 130e-1: written only when this edit changed it (a blank clears it).
+                var firmDescriptionChanged = !string.Equals(merged.FirmDescription, work.FirmDescription, StringComparison.Ordinal);
+                if (firmDescriptionChanged)
+                {
+                    fields[FirmDescriptionColumn] = merged.FirmDescription is { } text ? text : DBNull.Value;
+                }
+
                 // What the rule does, or what the firm is shown of it, changed: it is back in review (D-109: the clause text and its
-                // location count, as the type, body, template and consequence do). The status is written with EVERY content change,
+                // location count, as the type, body, template and consequence do; task 130e-1: so does the firm description). The status is written with EVERY content change,
                 // even when this read saw Proposed (a no-op then), so the content and "not yet reviewed" always travel in one write. The
                 // races are closed by row versions: an Accept that lands between this read and this write makes this write refused
                 // (below), and one that read the old content before this write landed is refused itself (DecideAsync). A headline edit,
                 // or one that sets the same values, keeps the decision.
                 if (merged.RuleType != work.RuleType || merged.RuleBody != work.RuleBody
                     || merged.Template != work.Template || merged.Consequence != work.Consequence
-                    || merged.ClauseReference != work.ClauseReference || merged.ClauseLocation != work.ClauseLocation)
+                    || merged.ClauseReference != work.ClauseReference || merged.ClauseLocation != work.ClauseLocation
+                    || firmDescriptionChanged)
                 {
                     fields["sprk_proposalstatus"] = new OptionSetValue((int)ProposalState.Proposed);
 
@@ -1995,6 +2094,12 @@ public class RuleSetService
             if (merged.ClauseLocation is not null)
             {
                 created["sprk_clauselocation"] = merged.ClauseLocation;
+            }
+
+            // Task 130e-1 (C2, F1): the new draft's firm description: this edit's change, or the published version's text carried forward.
+            if (merged.FirmDescription is not null)
+            {
+                created[FirmDescriptionColumn] = merged.FirmDescription;
             }
 
             if (work.ProcedureVersionId is { } procedureVersionId)
@@ -2110,7 +2215,8 @@ public class RuleSetService
 
         if (accept)
         {
-            var errors = ValidateRule(rule.Policy, work.RuleType?.ToString(CultureInfo.InvariantCulture), work);
+            // Fix round 1 F2d: with the rule set's name, as edit and publish check it.
+            var errors = ValidateRule(rule.Policy, work.RuleType?.ToString(CultureInfo.InvariantCulture), work, rule.RuleSetName);
             if (errors.Count > 0)
             {
                 return RuleSetOutcome<ProposalView>.Invalid(CodeInvalid, errors);
@@ -2343,7 +2449,7 @@ public class RuleSetService
         foreach (var rule in candidates)
         {
             var work = rule.Working;
-            errors.AddRange(ValidateRule(rule.Policy, work.RuleType?.ToString(CultureInfo.InvariantCulture), work));
+            errors.AddRange(ValidateRule(rule.Policy, work.RuleType?.ToString(CultureInfo.InvariantCulture), work, set.GetAttributeValue<string>("sprk_name")));
             if (rule.Predecessor is { } predecessor && predecessor.InForceFrom is { } from && effectiveStart < from.Date)
             {
                 errors.Add(new RuleSetError(rule.Policy.Id, rule.Policy.Name, "effectiveDate",
@@ -2894,6 +3000,7 @@ public class RuleSetService
 
             if (source.ClauseReference is not null) copy["sprk_clausereference"] = source.ClauseReference;
             if (source.ClauseLocation is not null) copy["sprk_clauselocation"] = source.ClauseLocation;
+            if (source.FirmDescription is not null) copy[FirmDescriptionColumn] = source.FirmDescription; // 130e-1 (C2): the copy carries it forward
             owner.ApplyTo(copy);
             creates.Add(new CreateRequest { Target = copy });
         }
@@ -2949,7 +3056,7 @@ public class RuleSetService
             {
                 case ProposalState.Accepted:
                     candidates.Add(rule);
-                    errors.AddRange(ValidateRule(rule.Policy, work.RuleType?.ToString(CultureInfo.InvariantCulture), work));
+                    errors.AddRange(ValidateRule(rule.Policy, work.RuleType?.ToString(CultureInfo.InvariantCulture), work, set.GetAttributeValue<string>("sprk_name")));
                     if (PolicyVersionValidator.ValidateProcedureVersionLink(rule.Policy.Domain, procedureVersionId) is { IsValid: false } link)
                     {
                         errors.Add(new RuleSetError(rule.Policy.Id, rule.Policy.Name, ProcedureVersionColumn, link.Errors[0], link.Reason));
@@ -3033,7 +3140,10 @@ public class RuleSetService
     /// before the snapshot existed, a snapshot a patch dropped, an unknown snapshot version, a damaged one), when the snapshot does not list
     /// the version as applied (displaced, excluded or absent), when the version, its billing policy or its rule set cannot be read, when the rule
     /// set is not Published or Retired, when a Procedure rule set's Procedure cannot be named, when the rule set's visible-to-firms flag is off
-    /// (the last step, <see cref="RuleSetClauseVisibility.ForFirm"/>), and on any read fault.</para>
+    /// (the last step, <see cref="RuleSetClauseVisibility.ForFirm"/>), and on any read fault. For a record rule (ISS-038) the flag is
+    /// <see cref="RuleSetClauseVisibility.VisibleToFirms"/>: the record set's AND the base rule's own rule set's, the base taken from the
+    /// snapshot's record-rule slot; no base on record, one that cannot be read, or one whose Procedure is an Internal Standard one (or whose
+    /// Procedure type cannot be read) is no text.</para>
     /// <para>The result names the clause with <see cref="FirmClauseText.FirmFacingName"/> only: the Procedure's firm-facing name (its name when
     /// that is blank), or the neutral record label for a record rule. Never the Procedure's name when a firm-facing name is set, an id or an
     /// override reason; nothing here logs one.</para>
@@ -3122,10 +3232,14 @@ public class RuleSetService
         }
 
         // (4) The label: neutral for a record rule, else the Procedure's firm-facing name; a legacy set has no Procedure and no label.
+        // ISS-038: a record rule also brings the rule set of each base rule version its snapshot slot named (the invoice's own basis, not a re-read
+        // of the override rows), for the visibility decision below.
         string? label;
+        IReadOnlyCollection<Entity?> baseRuleSets = [];
         if (RecordRuleSet.IsRecordScoped(set))
         {
             label = RecordRuleSet.Name;
+            baseRuleSets = await BaseRuleSetsOfRecordRuleAsync(snapshot, invoiceId, policyVersionId, ct);
         }
         else if (set.GetAttributeValue<EntityReference>(ProcedureColumn)?.Id is { } procedureId)
         {
@@ -3140,12 +3254,93 @@ public class RuleSetService
             label = null;
         }
 
-        // (5) The visible-to-firms flag decides last.
+        // (5) The visible-to-firms flag decides last: the set's own, and for a record rule its base rule's set's as well (ISS-038).
         return RuleSetClauseVisibility.ForFirm(
-            set.GetAttributeValue<bool>("sprk_visibletofirms"),
+            RuleSetClauseVisibility.VisibleToFirms(set, baseRuleSets),
             version.GetAttributeValue<string>("sprk_clausereference"),
             version.GetAttributeValue<string>("sprk_clauselocation"),
             label);
+    }
+
+    /// <summary>
+    /// ISS-038: the rule set of each base rule version the invoice's snapshot names for the record rule version <paramref name="recordVersionId"/>
+    /// (its <c>recordRule.basePolicyVersionId</c>; one per distinct base across the dates). Each is read version, then Billing policy, then rule set;
+    /// an entry is null when any of those cannot be read (or the slot itself could not be, <see cref="Guid.Empty"/>). Empty when the snapshot names no
+    /// base for it. Either way <see cref="RuleSetClauseVisibility.VisibleToFirms"/> then answers not visible, and one Information entry names the
+    /// invoice and the record rule version (ids only) so the hidden clause can be traced.
+    /// </summary>
+    private async Task<IReadOnlyCollection<Entity?>> BaseRuleSetsOfRecordRuleAsync(
+        StoredProcedureSnapshot snapshot, Guid invoiceId, Guid recordVersionId, CancellationToken ct)
+    {
+        var sets = new List<Entity?>();
+        if (snapshot.RecordRuleBaseVersionIds.TryGetValue(recordVersionId, out var baseVersionIds))
+        {
+            foreach (var baseVersionId in baseVersionIds)
+            {
+                sets.Add(await RuleSetOfVersionAsync(baseVersionId, ct));
+            }
+        }
+
+        if (sets.Count == 0 || sets.Contains(null))
+        {
+            _logger.LogInformation(
+                "A record rule's base rule set is not available for a firm clause (invoice {InvoiceId}, policy version {PolicyVersionId}); no clause is shown",
+                invoiceId, recordVersionId);
+        }
+
+        return sets;
+    }
+
+    /// <summary>
+    /// The Billing rule set (record-scoped or not) of the policy of <paramref name="policyVersionId"/>, or null when any step cannot be read, or
+    /// when the set's Procedure is an Internal Standard one or its type cannot be read: the same Internal Standard rule
+    /// <c>FirmFindingsProjection.CitableVersionsAsync</c> applies to a Procedure's rule set, applied to the base here because a record set has no
+    /// Procedure link of its own (see uac-r2 thread). A base set with no Procedure link (a legacy set) is returned as read. Internal: the Billing
+    /// Guidelines view (task 135) reads a record rule's base set live through it, so the Internal Standard check has one home.
+    /// </summary>
+    internal async Task<Entity?> RuleSetOfVersionAsync(Guid policyVersionId, CancellationToken ct)
+    {
+        if (policyVersionId == Guid.Empty)
+        {
+            return null;
+        }
+
+        var versionQuery = new QueryExpression(VersionEntity)
+        {
+            ColumnSet = new ColumnSet("sprk_policy"),
+            Criteria = { Conditions = { new ConditionExpression("sprk_policyversionid", ConditionOperator.Equal, policyVersionId) } },
+            TopCount = 1,
+        };
+        var version = (await _entities.RetrieveMultipleAsync(versionQuery, ct)).Entities.FirstOrDefault(r => r.Id == policyVersionId);
+        if (version?.GetAttributeValue<EntityReference>("sprk_policy")?.Id is not { } policyId)
+        {
+            return null;
+        }
+
+        var policy = (await _entities.RetrieveMultipleAsync(PolicyQuery("sprk_policyid", ConditionOperator.Equal, new object[] { policyId }), ct))
+            .Entities.FirstOrDefault(r => r.Id == policyId && RuleDomains.IsBillingRow(r));
+        if (policy?.GetAttributeValue<EntityReference>("sprk_ruleset")?.Id is not { } ruleSetId)
+        {
+            return null;
+        }
+
+        var set = await LoadBillingRuleSetAsync(ruleSetId, ct);
+        if (set?.GetAttributeValue<EntityReference>(ProcedureColumn)?.Id is { } procedureId)
+        {
+            var typeQuery = new QueryExpression(ProcedureEntity.Entity)
+            {
+                ColumnSet = new ColumnSet(ProcedureEntity.TypeColumn),
+                Criteria = { Conditions = { new ConditionExpression("sprk_procedureid", ConditionOperator.Equal, procedureId) } },
+                TopCount = 1,
+            };
+            var procedure = (await _entities.RetrieveMultipleAsync(typeQuery, ct)).Entities.FirstOrDefault(r => r.Id == procedureId);
+            if (procedure?.GetAttributeValue<OptionSetValue>(ProcedureEntity.TypeColumn)?.Value is not { } type || type == (int)ProcedureType.InternalStandard)
+            {
+                return null;
+            }
+        }
+
+        return set;
     }
 
     /// <summary>The Procedure's firm-facing name, or its name when that is blank; null when the Procedure cannot be read or has neither.</summary>
@@ -3158,14 +3353,7 @@ public class RuleSetService
             TopCount = 1,
         };
         var procedure = (await _entities.RetrieveMultipleAsync(query, ct)).Entities.FirstOrDefault(r => r.Id == procedureId);
-        if (procedure is null)
-        {
-            return null;
-        }
-
-        var firmFacing = procedure.GetAttributeValue<string>(ProcedureEntity.FirmFacingNameColumn);
-        var name = string.IsNullOrWhiteSpace(firmFacing) ? procedure.GetAttributeValue<string>(ProcedureEntity.NameColumn) : firmFacing;
-        return string.IsNullOrWhiteSpace(name) ? null : name.Trim();
+        return ProcedureEntity.FirmFacingLabelOf(procedure);
     }
 
     // ───────────────────────────────────────────────────────────────────────────────────────────────
@@ -3181,7 +3369,7 @@ public class RuleSetService
     internal sealed record VersionRow(
         Guid Id, int Number, int? RuleType, string? RuleBody, string? Template, string? Headline, int? Consequence, int? State,
         string? ClauseReference, string? ClauseLocation, DateTime? InForceFrom, DateTime? InForceTo, long? RowVersion = null,
-        string? RejectionReason = null, Guid? ProcedureVersionId = null, int? PublishState = null)
+        string? RejectionReason = null, Guid? ProcedureVersionId = null, int? PublishState = null, string? FirmDescription = null)
     {
         public ProposalState StateOrProposed =>
             State is { } s && Enum.IsDefined(typeof(ProposalState), s) ? (ProposalState)s : ProposalState.Proposed;
@@ -3204,6 +3392,10 @@ public class RuleSetService
     /// <see cref="Versions"/> belongs to that Procedure Version, so the working version and the predecessor are per (policy, Procedure Version).</remarks>
     internal sealed record RuleSetRule(PolicyRow Policy, IReadOnlyList<VersionRow> Versions, VersionRow Working)
     {
+        /// <summary>Task 130e-1 (uac-r2 Q4): the rule set's <c>sprk_name</c> when the reader had it (the by-id rule read), for the firm
+        /// description's name check; null otherwise.</summary>
+        public string? RuleSetName { get; init; }
+
         /// <summary>
         /// Legacy: the policy's current version when it is not the working one (what a publish of the working version stamps ended).
         /// Task 081 (model 7.2): for a version keyed to a Procedure Version, the latest PUBLISHED version under the same Procedure Version (the
@@ -3406,7 +3598,7 @@ public class RuleSetService
 
         return rule is null
             ? (null, RuleSetOutcome<T>.Refused(StatusCodes.Status404NotFound, CodeProposalNotFound, "The rule was not found in this rule set."))
-            : (rule, null);
+            : (rule with { RuleSetName = set.GetAttributeValue<string>("sprk_name") }, null);
     }
 
     /// <summary>Fix round 4: whether <paramref name="policyId"/> is a Billing policy of this set that is Inactive (by id: no statecode filter).</summary>
@@ -3435,7 +3627,8 @@ public class RuleSetService
         v.GetAttributeValue<long?>(RowVersionColumn),
         v.GetAttributeValue<string>(RejectionReasonColumn),
         v.GetAttributeValue<EntityReference>(ProcedureVersionColumn)?.Id,
-        v.GetAttributeValue<OptionSetValue>(PublishStateColumn)?.Value);
+        v.GetAttributeValue<OptionSetValue>(PublishStateColumn)?.Value,
+        v.GetAttributeValue<string>(FirmDescriptionColumn));
 
     private static RuleSetSummary Summarize(Entity set, int ruleCount)
     {
@@ -3468,7 +3661,7 @@ public class RuleSetService
     private async Task<ProposalView> ViewAsync(RuleSetRule rule, CancellationToken ct, bool carryRowVersion = false)
     {
         var work = rule.Working;
-        var validation = ValidateRule(rule.Policy, work.RuleType?.ToString(CultureInfo.InvariantCulture), work);
+        var validation = ValidateRule(rule.Policy, work.RuleType?.ToString(CultureInfo.InvariantCulture), work, rule.RuleSetName);
 
         string? text = null, formal = null, refusal = null;
         var description = await _describer.DescribeAsync(work.RuleBody, ct);
@@ -3504,7 +3697,8 @@ public class RuleSetService
             text, formal, refusal, work.ClauseReference, work.ClauseLocation,
             validation.Select(e => $"{e.Field}: {e.Message}").ToList(),
             carryRowVersion ? work.RowVersion?.ToString(CultureInfo.InvariantCulture) : null,
-            work.StateOrProposed == ProposalState.Rejected ? work.RejectionReason : null);
+            work.StateOrProposed == ProposalState.Rejected ? work.RejectionReason : null,
+            work.FirmDescription);
     }
 
     // ───────────────────────────────────────────────────────────────────────────────────────────────
@@ -3517,8 +3711,11 @@ public class RuleSetService
     /// columns (consequence, headline, template). Task 073 (FR-26, I-5, D-89): the validator also gets the consequence, so a rule whose
     /// type may not carry it (Reject on an AiObservation rule, say) is refused on every one of these paths, publish included.
     /// </summary>
-    /// <remarks>Internal for task 089c: a record rule (<c>ProcedureAssignmentService.ChangeRuleAsync</c>) is validated by this same method.</remarks>
-    internal List<RuleSetError> ValidateRule(PolicyRow policy, string? ruleTypeRaw, VersionRow version)
+    /// <remarks>Internal for task 089c: a record rule (<c>ProcedureAssignmentService.ChangeRuleAsync</c>) is validated by this same method.
+    /// <para>Task 130e-1 (DEF-060): a firm description is checked by <see cref="FirmDescriptionRules.Validate(string?, string?, string?)"/> with the
+    /// policy's name and, when the caller has it (<paramref name="ruleSetName"/>; publish always passes it, uac-r2 Q4), the rule set's; a Duplicate
+    /// rule may not carry one (design section 5). Each error names the field and the stable reason, never the text.</para></remarks>
+    internal List<RuleSetError> ValidateRule(PolicyRow policy, string? ruleTypeRaw, VersionRow version, string? ruleSetName = null)
     {
         var errors = new List<RuleSetError>();
         void Add(string field, string message, string? reason = null) =>
@@ -3565,8 +3762,35 @@ public class RuleSetService
             Add("messageTemplate", "The rule needs a message template.");
         }
 
+        if (FirmDescriptionRefusal(ruleTypeRaw, version.FirmDescription, ruleSetName, policy.Name) is { } firmRefusal)
+        {
+            Add(FirmDescriptionField, FirmDescriptionMessage(firmRefusal), firmRefusal);
+        }
+
         return errors;
     }
+
+    /// <summary>The request member and error field of the firm description (task 130e-1).</summary>
+    internal const string FirmDescriptionField = "firmDescription";
+
+    /// <summary>
+    /// Task 130e-1: why a firm description cannot stand on a version of this type, or null when it can (or there is none). A Duplicate rule never
+    /// carries one; any other text goes through <see cref="FirmDescriptionRules.Validate(string?, string?, string?)"/> with the rule set and policy names.
+    /// </summary>
+    internal static string? FirmDescriptionRefusal(string? ruleTypeRaw, string? text, string? ruleSetName, string? policyName) =>
+        FirmDescriptionRules.Validate(text, ruleSetName, policyName, ruleTypeRaw).RefusalCode;
+
+    /// <summary>The fixed message of a firm description refusal: it says which rule failed and never quotes the text.</summary>
+    internal static string FirmDescriptionMessage(string code) => code switch
+    {
+        FirmDescriptionOnDuplicateReason => "A Duplicate rule cannot carry a firm description: firms always see the standard duplicate wording.",
+        FirmDescriptionRules.TooLong => $"The firm description is longer than {FirmDescriptionRules.MaxRunes} characters.",
+        FirmDescriptionRules.Braces => "The firm description cannot contain { or }.",
+        FirmDescriptionRules.Markup => "The firm description cannot contain < or >.",
+        FirmDescriptionRules.InvisibleCharacter => "The firm description cannot contain line breaks, tabs or invisible characters.",
+        FirmDescriptionRules.NamesTheRule => "The firm description cannot name the rule set or the rule: firms see it even when the rule set is hidden from them.",
+        _ => "The firm description is not valid.",
+    };
 
     internal static bool TryParseConsequence(string? text, out BillingConsequence consequence)
     {

@@ -219,36 +219,8 @@ public sealed partial class RecordRepairModeTests
         AssertNoIndexKey(outcome);
     }
 
-    [Fact]
-    public async Task AnOwnerInAnotherBusinessUnit_IsNotWritten_EscalationTrigger2()
-    {
-        // The person who owns the event sits in the GENERAL unit; the matter it is filed under is in the CHILD unit.
-        var id = _world.EventUnderTheMatter(clientName: "Acme", practiceArea: "Tax", priority: "Urgent",
-            owner: new EntityReference("systemuser", Directory.CallerUserId), owningUnit: Directory.GeneralBu);
-
-        var outcome = await _world.RepairAsync("sprk_event", id);
-
-        _world.Writes.Should().BeEmpty();
-        Field(outcome, RecordRepairPart.Owner, "ownerid").ReasonCode.Should().Be(RecordRepairReason.OwnerMovesBusinessUnit);
-    }
-
-    [Fact]
-    public async Task ADocumentOwnedInAnotherBusinessUnit_IsNotWritten_EscalationTrigger2()
-    {
-        // Restored as owner-only (task 041, UAC-r2 NOTE 1): the trigger-2 guard runs per table (IsOwnershipParent), so the
-        // document needs its own case. A user-owned document in the GENERAL unit, filed under the matter of the CHILD unit:
-        // the move is refused and nothing is written.
-        var id = _world.RowOf("sprk_document", Directory.GeneralBu, new Dictionary<string, object>
-        {
-            ["ownerid"] = new EntityReference("systemuser", Directory.CallerUserId),
-            ["sprk_matter"] = new EntityReference("sprk_matter", RepairWorld.Matter),
-        });
-
-        var outcome = await _world.RepairAsync("sprk_document", id);
-
-        _world.Writes.Should().BeEmpty();
-        Field(outcome, RecordRepairPart.Owner, "ownerid").ReasonCode.Should().Be(RecordRepairReason.OwnerMovesBusinessUnit);
-    }
+    // Task 052g (design 052e §3.3.2): the two task 016 / 041 escalation-trigger-2 tests (an event and a document owned in another
+    // business unit, not written) are replaced by RecordRepairCrossUnitTests.AC1_*: the move is written and reported.
 
     // =====================================================================================
     // Search index (task 041, FR-40: Repair writes none) and the I-1 stamp, fill-only
@@ -297,18 +269,21 @@ public sealed partial class RecordRepairModeTests
     // ── field-mapping-server-write-path-r1 task 042b (FR-41, #2483; UAC-r2 condition (c)): the stamp is planned before the owner ──
 
     [Fact]
-    public async Task AUserOwnedToDoMissingItsStampUnderATeamOwnedInvoiceOfASecureMatter_IsReOwnedToSecureAndStamped_InOneUpdate()
+    public async Task AUserOwnedToDoMissingItsStampUnderATeamOwnedInvoiceOfASecureMatter_IsLeftToTheSecurePass_AndStamped()
     {
-        // The to-do sits in the Secure Record unit already (a same-unit re-own; a cross-unit one is the escalation below).
+        // The to-do sits in the Secure Record unit already. Before task 052g it was re-owned to the Secure team here; now Repair
+        // leaves isolated rows to the secure pass (design 052e §3.3.1). The owner question still includes the root the missing
+        // stamp names: its answer is the Secure Record owner team (042b), which the guard names. The stamp is still written.
         var id = _world.ToDoMissingItsStampUnderATeamOwnedInvoiceOfTheSecureMatter(Directory.SecureBu);
 
         var outcome = await _world.RepairAsync("sprk_todo", id);
 
-        var write = _world.Writes.Should().ContainSingle("the owner and the stamp land in the one update").Subject;
-        write.Fields["ownerid"].Should().Be(new EntityReference("team", Directory.SecureNamedTeam),
-            "the owner question includes the root the missing stamp names");
+        var write = _world.Writes.Should().ContainSingle("the stamp lands in the one update").Subject;
+        write.Fields.Should().NotContainKey("ownerid");
         write.Fields["sprk_regardingmatter"].Should().Be(new EntityReference("sprk_matter", RepairWorld.SecureMatter));
-        Field(outcome, RecordRepairPart.Owner, "ownerid").State.Should().Be(RecordRepairFieldState.Repaired);
+        Field(outcome, RecordRepairPart.Owner, "ownerid").ReasonCode.Should().Be(RecordRepairReason.OwnerLeftToSecurePass);
+        _world.Log.Entries.Should().Contain(e => e.Message.Contains(id.ToString())
+            && e.Message.Contains("the answer is the Secure Record owner team"), "the owner question includes the stamp's root");
         Field(outcome, RecordRepairPart.CoreAncestorStamp, "sprk_regardingmatter").State.Should().Be(RecordRepairFieldState.Repaired);
     }
 
@@ -316,12 +291,15 @@ public sealed partial class RecordRepairModeTests
     public async Task AUserOwnedToDoInAnotherUnitUnderATeamOwnedInvoiceOfASecureMatter_IsNeverReOwnedToTheOrdinaryTeam_AndIsStamped()
     {
         // Before 042b the owner was decided over the invoice alone: the child unit's ordinary team, same unit, written. Now the
-        // answer is the Secure team, a move to another unit, which task 016's escalation does not write on a to-do.
+        // answer is the Secure team, which Repair leaves to the secure pass (task 052g, design 052e §3.3.1; before 052g task
+        // 016's cross-unit escalation kept it).
         var id = _world.ToDoMissingItsStampUnderATeamOwnedInvoiceOfTheSecureMatter(Directory.ChildBu);
 
         var outcome = await _world.RepairAsync("sprk_todo", id);
 
-        Field(outcome, RecordRepairPart.Owner, "ownerid").ReasonCode.Should().Be(RecordRepairReason.OwnerMovesBusinessUnit);
+        Field(outcome, RecordRepairPart.Owner, "ownerid").ReasonCode.Should().Be(RecordRepairReason.OwnerLeftToSecurePass);
+        _world.Log.Entries.Should().Contain(e => e.Message.Contains(id.ToString())
+            && e.Message.Contains("the answer is the Secure Record owner team"));
         var write = _world.Writes.Should().ContainSingle().Subject;
         write.Fields.Should().NotContainKey("ownerid", "never re-owned to the ordinary team (#2483)");
         write.Fields["sprk_regardingmatter"].Should().Be(new EntityReference("sprk_matter", RepairWorld.SecureMatter));
@@ -330,20 +308,21 @@ public sealed partial class RecordRepairModeTests
     // ── 042b fix round 1 (F1, owner decision A'; security finding 6): a HELD stamp that disagrees with the source's root ──
 
     [Fact]
-    public async Task AUserOwnedToDoHoldingAStaleStampUnderATeamOwnedInvoiceOfASecureMatter_IsReOwnedToSecure_AndItsStampIsKept()
+    public async Task AUserOwnedToDoHoldingAStaleStampUnderATeamOwnedInvoiceOfASecureMatter_IsLeftToTheSecurePass_AndItsStampIsKept()
     {
         // Before the fix the owner question held the stale ordinary matter, which ranks above the invoice in the to-do's
         // lineage order: the to-do was re-owned to an ordinary team, then the reconciliation job's restamp left it there.
+        // Task 052g (design 052e §3.3.1): the answer (the Secure team) is no longer written by Repair; it is left to the secure pass.
         var id = _world.ToDoMissingItsStampUnderATeamOwnedInvoiceOfTheSecureMatter(Directory.SecureBu, heldMatterStamp: RepairWorld.OtherMatter);
 
         var outcome = await _world.RepairAsync("sprk_todo", id);
 
-        var write = _world.Writes.Should().ContainSingle().Subject;
-        write.Fields["ownerid"].Should().Be(new EntityReference("team", Directory.SecureNamedTeam),
-            "the owner question holds the root the row ends under (the invoice's Secure matter), not the stale stamp");
-        write.Fields.Should().NotContainKey("sprk_regardingmatter",
+        _world.Writes.SelectMany(w => w.Fields.Keys).Should().NotContain(["ownerid", "sprk_regardingmatter"],
             "Repair is fill-only: a held stamp, even a stale one, is the reconciliation job's to replace");
-        Field(outcome, RecordRepairPart.Owner, "ownerid").State.Should().Be(RecordRepairFieldState.Repaired);
+        Field(outcome, RecordRepairPart.Owner, "ownerid").ReasonCode.Should().Be(RecordRepairReason.OwnerLeftToSecurePass);
+        _world.Log.Entries.Should().Contain(e => e.Message.Contains(id.ToString())
+            && e.Message.Contains("the answer is the Secure Record owner team"),
+            "the owner question holds the root the row ends under (the invoice's Secure matter), not the stale stamp");
     }
 
     [Fact]
@@ -353,8 +332,9 @@ public sealed partial class RecordRepairModeTests
 
         var outcome = await _world.RepairAsync("sprk_todo", id);
 
-        Field(outcome, RecordRepairPart.Owner, "ownerid").ReasonCode.Should().Be(RecordRepairReason.OwnerMovesBusinessUnit,
-            "the answer is the Secure team, a move to another unit that task 016's escalation does not write on a to-do");
+        // Task 052g (design 052e §3.3.1): the answer is the Secure team, which Repair leaves to the secure pass.
+        Field(outcome, RecordRepairPart.Owner, "ownerid").ReasonCode.Should().Be(RecordRepairReason.OwnerLeftToSecurePass,
+            "the answer is the Secure team; Repair leaves isolated rows to the secure pass");
         _world.Writes.SelectMany(w => w.Fields.Keys).Should().NotContain(["ownerid", "sprk_regardingmatter"]);
         _world.Directory.Row("sprk_todo", id).GetAttributeValue<EntityReference>("ownerid")
             .Should().Be(new EntityReference("systemuser", RepairWorld.PersonInChild), "never re-owned to the ordinary team");
@@ -1430,6 +1410,13 @@ internal sealed partial class RepairWorld
     /// <summary>When set, the repair's update is recorded and then throws it (not applied).</summary>
     public Exception? WriteFault { get; set; }
 
+    /// <summary>Task 052g review round 1: with <see cref="WriteFault"/>, the update LANDS on the row and then throws (the ambiguous
+    /// fault: it may have landed).</summary>
+    public bool WriteFaultAfterLanding { get; set; }
+
+    /// <summary>Task 052g review round 1: runs once, just after the update landed on the row (another writer's change after ours).</summary>
+    public Action? AfterWrite { get; set; }
+
     /// <summary>When set, every owner decision asked of the resolver throws it.</summary>
     public Exception? ResolverFault { get; set; }
 
@@ -1868,7 +1855,8 @@ internal sealed partial class RepairWorld
                 It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
             .Callback<string, string, Guid, string?, CancellationToken>((table, set, id, _, _) => Evictions.Add((table, set, id)))
             .Returns(Task.CompletedTask);
-        var scopes = new ServiceCollection().AddSingleton(invalidator.Object).BuildServiceProvider()
+        // Task 052g: the isolated-row guard resolves the configuration and the reconciler (the shared isolation read) per row.
+        var scopes = WithTheIsolationRead(new ServiceCollection().AddSingleton(invalidator.Object)).BuildServiceProvider()
             .GetRequiredService<IServiceScopeFactory>();
 
         return new RecordCreationService(
@@ -1887,12 +1875,19 @@ internal sealed partial class RepairWorld
     private IGenericEntityService Entities()
     {
         var entities = new Mock<IGenericEntityService>(MockBehavior.Strict);
+        ServiceEntityMocks.Add(entities); // task 052g: a test can list every call the service made
         entities
             .Setup(e => e.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
             .Returns((QueryExpression query, CancellationToken _) =>
-                ThreadReadFault is { } threadFault && query.EntityName == RecordThreadFiling.ThreadTable
+                RoleAnswer(query) // task 052f fix round: the app identity's roles (the read depth)
+                ?? CascadeChildAnswer(query) // task 052f: a per-row Assign-cascade child read
+                ?? SecureUnitAnswer(query) // task 052g: the guard's read of the Secure Record unit, when a test faults it
+                ?? (ThreadReadFault is { } threadFault && query.EntityName == RecordThreadFiling.ThreadTable
                     ? Task.FromException<EntityCollection>(threadFault)
-                    : Task.FromResult(Directory.Answer(query)));
+                    : Task.FromResult(Directory.Answer(query))));
+        entities
+            .Setup(e => e.GetCurrentIdentityIdAsync(It.IsAny<CancellationToken>()))
+            .Returns(() => AppIdentityAnswer());
         entities
             .Setup(e => e.RetrieveAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
             .Returns((string table, Guid id, string[] columns, CancellationToken _) => Task.FromResult(Read(table, id, columns)));
@@ -1908,14 +1903,23 @@ internal sealed partial class RepairWorld
                 var applied = current == version;
                 // Task 052a review F3: Dataverse refuses the whole update when one value is not the CLR type its column takes.
                 var mistyped = MistypedColumns(table, fields);
-                Writes.Add((table, id, version, new Dictionary<string, object>(fields), applied && WriteFault is null && mistyped.Count == 0));
+                var landsThenFaults = WriteFault is not null && WriteFaultAfterLanding && applied && mistyped.Count == 0;
+                Writes.Add((table, id, version, new Dictionary<string, object>(fields),
+                    applied && (WriteFault is null || landsThenFaults) && mistyped.Count == 0));
                 if (WriteFault is { } fault)
+                {
+                    if (landsThenFaults)
+                        Directory.Write(table, id, fields.ToDictionary(f => f.Key, f => (object?)f.Value));
                     throw fault;
+                }
+
                 if (mistyped.Count > 0)
                     throw new InvalidOperationException($"Test: {table} {id}: the SDK refuses {string.Join("; ", mistyped)}.");
                 if (!applied)
                     throw new DBConcurrencyException($"Test: {table} {id} is at version {current}, not {version}.");
                 Directory.Write(table, id, fields.ToDictionary(f => f.Key, f => (object?)f.Value));
+                AfterWrite?.Invoke();
+                AfterWrite = null;
                 return Task.CompletedTask;
             });
         entities
@@ -2039,9 +2043,16 @@ internal sealed partial class RepairWorld
         {
             case "team":
                 {
+                    // Task 052g: the guard's one read of the answer team (its business unit and name), faulted or unit-less on demand.
+                    TeamReads.Add((id, columns));
+                    if (AnswerTeamReadFault is { } teamFault)
+                        throw teamFault;
                     var query = new QueryExpression("team") { ColumnSet = new ColumnSet("businessunitid") };
                     query.Criteria.AddCondition("teamid", ConditionOperator.Equal, id);
-                    return Directory.Answer(query).Entities.Single();
+                    var team = Directory.Answer(query).Entities.Single();
+                    if (TeamsWithoutUnit.Contains(id))
+                        team.Attributes.Remove("businessunitid");
+                    return team;
                 }
 
             case "systemuser":
@@ -2072,6 +2083,10 @@ internal sealed partial class RepairWorld
 
             default:
                 {
+                    // Task 052g: the one read of a row's owner after a 412 on an owner write.
+                    if (columns is ["ownerid", "owningbusinessunit"])
+                        return OwnerReRead(table, id);
+
                     // A mapping source's columns (the system principal's app-only read).
                     if (SourceReadFault is { } readFault)
                         throw readFault;

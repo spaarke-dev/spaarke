@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="095f-2e1" project="ebilling-r1">
+  <metadata>
+    <title>Decision notes, part 2e-1: from-document requires a note on a Correction (EB-D-237)</title>
+    <phase>5 Partner surfaces — 095f part 2</phase>
+    <gate>Branch from work/ebilling-r1 at the sha named in the agent brief. Independent of 2a.</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>BFF C#: a contract change (a Correction without a note becomes a 400) on a submission route.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>bff-api, testing</tags>
+    <estimated-effort>0.5 day</estimated-effort>
+  </metadata>
+
+  <prompt>Build design §6.1: SubmitInvoiceFromDocumentRequest gains CorrectionNote; Validate adds part 1's field-error rules word for word (a note on New, too long, control characters); after Validate and before PrepareCorrectionAsync, a Correction with a missing or blank note gives 400 ebilling.submission.correction_note_required (reuse the constant and detail text); the note reaches BuildJob(..., correctionNote:) and the persister writes it to sprk_correctionnote as it does for from-email.</prompt>
+
+  <goal>A Correction submitted through from-document always carries the firm's correction note, the same as from-email.</goal>
+
+  <constraints>
+    <constraint source="EB-D-237">sprk_correctionnote here is the firm's correction text, written only by the persister (unchanged writer).</constraint>
+    <constraint source="design 6.1">The coded 400 happens before any read or write.</constraint>
+    <constraint source="project">The client of this route is our shared emailInvoiceSubmission.ts (CommunicationActions, EmailWorkspace); it sends New only, so no deployed caller breaks. No client change in this task. No live call. Never run python. Never --no-verify. No bare git stash.</constraint>
+  </constraints>
+
+  <acceptance-criteria>
+    <criterion testable="true">New plus a note gives the field error; New without one behaves as before.</criterion>
+    <criterion testable="true">Correction without a note gives the coded 400 with zero reads; 2000 accepted; 2001 and \u0007 give field errors.</criterion>
+    <criterion testable="true">The job payload carries the note; the persister writes it; the persister's no-note warning is not logged for a from-document Correction with a note (must-not-fire).</criterion>
+    <criterion testable="true">BFF build --warnaserror 0 warnings; submission suites green; ArchTests green.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load the knowledge files first. Follow task-execute for rigor, checkpoints and quality gates.</protocol>
+  </execution>
+</task>

@@ -525,6 +525,92 @@ public sealed class InvoiceCorrectionIntakeTests
         }
     }
 
+    // ── the upload entry (SubmitAsync), task 095f-2e2a (EB-D-245, design 16 option B') ──────────────────────────────
+
+    private const string UploadNote = "The firm re-issued the invoice with the corrected rate.";
+
+    private static InvoiceSubmissionRequest Upload(Entity? corrected, string number = CorrectionSeed.Number, string? note = UploadNote) =>
+        InvoiceSubmissionServiceTests.Spa(number: number) with
+        {
+            Channel = InvoiceSubmissionChannel.Internal,
+            ExternalCaller = null,
+            CallerObjectId = Guid.NewGuid(),
+            CorrectedInvoice = corrected,
+            CorrectionNote = note,
+        };
+
+    [Fact(DisplayName = "095f-2e2a: an allowed upload Correction stages the PDF and creates the submission with sprk_resubmissionof = the replaced invoice's submission; the note rides the job")]
+    public async Task Upload_AllowedCorrection_RecordsTheTarget_AndTheJobCarriesTheNote()
+    {
+        var h = new Harness { Allocation = TrackingNumberResult.Created("INV-7.2", 2) };
+        var invoice = CorrectionSeed.Seed(h);
+
+        var outcome = await h.Build().SubmitAsync(Upload(invoice), CancellationToken.None);
+
+        outcome.Kind.Should().Be(InvoiceSubmissionOutcomeKind.Received);
+        outcome.Receipt!.TrackingNumber.Should().Be("INV-7.2");
+        var allocation = h.Allocations.Should().ContainSingle().Subject;
+        (allocation.FirmId, allocation.Number).Should().Be((FirmId, CorrectionSeed.Number));
+        allocation.Fields!["sprk_resubmissionof"].Should().Be(new EntityReference("sprk_invoicesubmission", CorrectionSeed.OldSubmissionId));
+        h.Stages.Should().ContainSingle();
+        h.JobsSent.Should().ContainSingle().Which.Payload!.RootElement.GetProperty("correctionNote").GetString().Should().Be(UploadNote);
+    }
+
+    [Fact(DisplayName = "095f-2e2a: a refused upload Correction stages nothing, creates nothing and queues nothing (the check runs before the first write)")]
+    public async Task Upload_RefusedCorrection_WritesNothing()
+    {
+        var h = new Harness();
+        var invoice = CorrectionSeed.Seed(h, CorrectionSeed.Invoice(state: InvoiceStatusCodes.StateActive, status: InvoiceStatusCodes.Approved));
+
+        var outcome = await h.Build().SubmitAsync(Upload(invoice), CancellationToken.None);
+
+        RefusedWith(outcome, "invoice_status");
+        h.Stages.Should().BeEmpty();
+        h.Allocations.Should().BeEmpty();
+        h.JobsSent.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "095f-2e2a: an upload Correction under another firm invoice number is 409 different_invoice_number; nothing written")]
+    public async Task Upload_CorrectionWithAnotherNumber_Is409()
+    {
+        var h = new Harness();
+        var invoice = CorrectionSeed.Seed(h);
+
+        var outcome = await h.Build().SubmitAsync(Upload(invoice, number: "INV-8"), CancellationToken.None);
+
+        RefusedWith(outcome, "different_invoice_number");
+        h.Stages.Should().BeEmpty();
+        h.Allocations.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "095f-2e2a (must not fire): an upload with no correction is unchanged: no sprk_resubmissionof, no note on the job (even if one were set), no submission read for it")]
+    public async Task Upload_New_IsUnchanged()
+    {
+        var h = new Harness();
+        CorrectionSeed.Seed(h);
+
+        var outcome = await h.Build().SubmitAsync(Upload(null), CancellationToken.None);
+
+        outcome.Kind.Should().Be(InvoiceSubmissionOutcomeKind.Received);
+        h.Allocations.Should().ContainSingle().Which.Fields!.Should().NotContainKey("sprk_resubmissionof");
+        h.JobsSent.Should().ContainSingle().Which.Payload!.RootElement.TryGetProperty("correctionNote", out _).Should().BeFalse();
+        h.Entities.Verify(e => e.RetrieveMultipleAsync(
+            It.Is<Microsoft.Xrm.Sdk.Query.QueryExpression>(q => q.EntityName == "sprk_invoicesubmission"), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact(DisplayName = "095f-2e2a (must not fire): a Correction on the SPA channel is a caller defect, refused by a throw before anything is read or written")]
+    public async Task Upload_SpaCorrection_Throws()
+    {
+        var h = new Harness();
+        var invoice = CorrectionSeed.Seed(h);
+
+        var act = () => h.Build().SubmitAsync(InvoiceSubmissionServiceTests.Spa(number: CorrectionSeed.Number) with { CorrectedInvoice = invoice }, CancellationToken.None);
+
+        await act.Should().ThrowAsync<ArgumentException>();
+        h.Stages.Should().BeEmpty();
+        h.Allocations.Should().BeEmpty();
+    }
+
     // ── the job's snapshot ─────────────────────────────────────────────────────────────────────────────────────────
 
     private static Entity NewSubmissionRow(Guid? resubmissionOf) => new("sprk_invoicesubmission", Guid.NewGuid())

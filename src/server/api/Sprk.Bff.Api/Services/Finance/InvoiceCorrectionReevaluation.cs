@@ -892,7 +892,7 @@ public sealed class InvoiceCorrectionReevaluation
             }
 
             var signals = new InvoiceRuleSignalReconciler(
-                _lifecycle, _closeSignal, _logger, SignalLogContext.Correction, applied.InvoiceId, applied.Field);
+                _entities, _lifecycle, _closeSignal, _logger, SignalLogContext.Correction, applied.InvoiceId, applied.Field);
             foreach (var change in ruleChanges)
             {
                 await signals.ReconcileRuleAsync(root, change, ct).ConfigureAwait(false);
@@ -963,7 +963,7 @@ public sealed class InvoiceCorrectionReevaluation
                 continue;
             }
 
-            var mapping = BillingFindingSignalMapper.MapAll(left, rules, subjects).Single();
+            var mapping = BillingFindingSignalMapper.MapAll(left, rules, subjects, logger: _logger).Single();
             await signals.WriteAsync(mapping.Request, mapping.Fingerprint, ct).ConfigureAwait(false);
         }
     }

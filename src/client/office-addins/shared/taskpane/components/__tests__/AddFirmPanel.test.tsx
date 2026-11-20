@@ -425,6 +425,34 @@ describe('AddFirmPanel — the access pass is still pending', () => {
   );
 });
 
+describe('AddFirmPanel — as the Firm field (asFirmField, owner UAT 2026-11-18)', () => {
+  it(
+    'must-fire: labelled "Firm" (required), no Cancel, and it does not take focus when it appears',
+    async () => {
+      setup({ asFirmField: true });
+      await screen.findByRole('option', { name: 'Firm 1' });
+      const search = screen.getByRole('searchbox', { name: /^Firm/ });
+      expect(search).toBeRequired();
+      expect(search).not.toHaveFocus();
+      expect(screen.queryByLabelText('Search law firms')).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Cancel' })).not.toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Add firm' })).toBeDisabled();
+    },
+    TIMEOUT
+  );
+
+  it(
+    'must-not-fire: without it the panel keeps its own label and Cancel',
+    async () => {
+      setup();
+      await screen.findByRole('option', { name: 'Firm 1' });
+      expect(screen.getByLabelText('Search law firms')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Cancel' })).toBeInTheDocument();
+    },
+    TIMEOUT
+  );
+});
+
 describe('AddFirmPanel — focus', () => {
   it(
     'a11y: opening the panel puts focus on its search box (the entry button that opened it is gone)',

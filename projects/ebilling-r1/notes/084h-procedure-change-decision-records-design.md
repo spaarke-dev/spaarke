@@ -457,3 +457,17 @@ Order: 084h-1 → 084h-2 → 084h-3 → 084h-4 → 084h-5. 084h-1 cannot merge w
 - All of the reviewer's writer, catalog, `PAS` and assign-firm line numbers match the code at f22abed770.
 - One partial mismatch: for "a repeat gets 409/404" the review cites `PAS:2626-2636`. That range (`WriteRefused`) gives the 409 (`Duplicate`, which returns 409 at `PAS:2822-2823`). The DELETE's 404 comes from the endpoint's row check (`PAE:605-611`), not from `PAS`. The substance holds; §7.1 cites both.
 - The draft's own `CoreAncestorResolver.cs:637-645` is the core branch's body; the branch starts at `:635`. Cited as `:635-645` in §3.2.
+
+## 17. Owner answers (2026-11-16, EB-D-239)
+
+These settle §13 Q6-Q10. This section overrides earlier sections where they differ.
+
+| Q | Answer |
+|---|---|
+| 6 | Two records for a Pin-to-Follow plan (unpin, then assign). K-4 stands as designed. |
+| 7 | The §8 classes and gate tiers are accepted as proposed. |
+| 8 | The DELETE note travels in a JSON body `{ "note": "..." }`. No query string, no new POST route. The owner asked that the changes be documented: each of the seven acts files a Decision Record naming the act, the Procedure and version or rule, the person, and the note (§4). |
+| 9 | `reason` keeps its existing check (trim and length). Only the new `note` refuses control characters. |
+| 10 | The `decisionRecord` member and the NotRecorded warning ship to `RecordProcedures` (084h-4). The owner requires server-side retry: the ADR-004 repair job (084h-3, §7.3) retries a retryable refusal (J4) and ships in the same deploy as 084h-2. |
+
+No open owner questions remain. Next: the POMLs for 084h-2, 084h-3 and 084h-4.

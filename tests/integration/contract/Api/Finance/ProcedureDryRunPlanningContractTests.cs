@@ -33,6 +33,7 @@ public sealed class ProcedureDryRunPlanningContractTests
     private const string Matter = "sprk_matter";
     private static readonly Guid MatterId = Guid.Parse("084d0001-0000-4000-8000-000000000001");
     private static readonly Guid Caller = Guid.Parse("084d0001-0000-4000-8000-0000000000ca");
+    private static readonly Guid Decider = Guid.Parse("084d0001-0000-4000-8000-0000000000cb");
     private static readonly DateTime Now = new(2026, 11, 5, 14, 30, 0, DateTimeKind.Utc);
     private static readonly DateTime Stamp = new(2026, 11, 5, 14, 31, 0, DateTimeKind.Utc);
     private static readonly CancellationToken Ct = CancellationToken.None;
@@ -56,7 +57,7 @@ public sealed class ProcedureDryRunPlanningContractTests
         nameof(IGenericEntityService.RetrieveMultipleAsync), nameof(IGenericEntityService.GetEntitySetNameAsync),
         nameof(IGenericEntityService.GetLookupNavigationAsync), nameof(IGenericEntityService.GetColumnMetadataAsync),
         nameof(IGenericEntityService.GetCollectionNavigationAsync), nameof(IGenericEntityService.GetCurrentIdentityIdAsync),
-        nameof(IGenericEntityService.GetAssignCascadesAsync),
+        nameof(IGenericEntityService.GetAssignCascadesAsync), nameof(IGenericEntityService.GetTableAuditMetadataAsync),
     };
 
     [Fact(DisplayName = "084d-1 F1: every member of IGenericEntityService is classified as a read or a write")]
@@ -150,10 +151,12 @@ public sealed class ProcedureDryRunPlanningContractTests
         }
 
         public ProcedureAssignmentService Service() =>
-            new(H.Entities.Object, H.Ownership.Object, H.Service(), Closure.Object,
+            Records.Writing(H.Entities.Object, H.Ownership.Object, H.Service(), Closure.Object,
                 new AffectedInvoiceCounter(H.Entities.Object, Probe.Object, NullLogger<AffectedInvoiceCounter>.Instance),
-                NullLogger<ProcedureAssignmentService>.Instance)
-            { Clock = new FixedClock(new DateTimeOffset(Now)) };
+                new FixedClock(new DateTimeOffset(Now)));
+
+        /// <summary>Task 084h-2: the Decision Records the writes filed (a plan files none).</summary>
+        public readonly ProcedureDecisionRecords Records = new();
 
         public WriteRefusingEntityService Reads() => new(H.Entities.Object);
 
@@ -219,7 +222,7 @@ public sealed class ProcedureDryRunPlanningContractTests
 
         // The same change, written: every row it creates is a planned row, and holds each planned column's value.
         var before = w.H.Writes.Count;
-        (await service.ChangeRuleAsync(Matter, MatterId, Change(rule), Caller, null, Ct)).Kind.Should().Be(RuleSetOutcomeKind.Done);
+        (await service.ChangeRuleAsync(Matter, MatterId, Change(rule), Caller, Decider, null, Ct)).Kind.Should().Be(RuleSetOutcomeKind.Done);
         w.H.Writes.Skip(before).Where(x => x.Kind == RuleSetServiceTests.Write.Create).Select(x => new EntityReference(x.Entity, x.Id))
             .Should().BeEquivalentTo(plan.Created);
         foreach (var image in plan.AfterImages)
@@ -239,8 +242,8 @@ public sealed class ProcedureDryRunPlanningContractTests
         var w = new World();
         var rule = w.Rule();
         var service = w.Service();
-        var first = await service.ChangeRuleAsync(Matter, MatterId, Change(rule), Caller, null, Ct);
-        (await service.RemoveAsync(Matter, MatterId, first.Value!.Override.Id, null, Ct)).Value!.RuleSwitchedOff.Should().BeTrue();
+        var first = await service.ChangeRuleAsync(Matter, MatterId, Change(rule), Caller, Decider, null, Ct);
+        (await service.RemoveAsync(Matter, MatterId, first.Value!.Override.Id, null, Decider, null, Ct)).Value!.RuleSwitchedOff.Should().BeTrue();
         var recordRule = first.Value.RecordRule.PolicyId;
         var mark = w.Mark();
 
@@ -262,7 +265,7 @@ public sealed class ProcedureDryRunPlanningContractTests
         var w = new World();
         var rule = w.Rule();
         var service = w.Service();
-        var changed = (await service.ChangeRuleAsync(Matter, MatterId, Change(rule), Caller, null, Ct)).Value!;
+        var changed = (await service.ChangeRuleAsync(Matter, MatterId, Change(rule), Caller, Decider, null, Ct)).Value!;
         var mark = w.Mark();
 
         var plan = (await service.PlanRemoveAsync(w.Reads(), Matter, MatterId, changed.Override.Id, Ct)).Value!;
@@ -296,7 +299,7 @@ public sealed class ProcedureDryRunPlanningContractTests
         exclude.Created.Should().ContainSingle().Which.Id.Should().Be(
             ProcedureAssignmentService.AssignmentIdFor(Matter, MatterId, ProcedureAssignmentEntity.ExcludedPolicyColumn, rule));
 
-        var written = (await service.ExcludeRuleAsync(Matter, MatterId, new RuleExcludeRequest(rule, "Waived", null), Caller, Ct)).Value!;
+        var written = (await service.ExcludeRuleAsync(Matter, MatterId, new RuleExcludeRequest(rule, "Waived", null), Caller, Decider, Ct)).Value!;
         mark = w.Mark();
         var remove = (await service.PlanRemoveAsync(w.Reads(), Matter, MatterId, written.Id, Ct)).Value!;
         w.NothingSince(mark);
@@ -321,41 +324,41 @@ public sealed class ProcedureDryRunPlanningContractTests
                 var retired = w.Procedure(ProcedureEntity.StatusRetired);
                 var assign = new ProcedureAssignmentRequest(retired, null, null, null);
                 plan = async () => Of(await service.PlanAssignProcedureAsync(w.Reads(), Matter, MatterId, assign, Ct));
-                write = async () => Of(await service.AssignProcedureAsync(Matter, MatterId, assign, Caller, Ct));
+                write = async () => Of(await service.AssignProcedureAsync(Matter, MatterId, assign, Caller, Decider, Ct));
                 break;
             case "non-billing-procedure":
                 // EB-D-228: the plan refuses a Procedure of another area as the write does, so a preview never shows an assign the write refuses.
                 var otherArea = new ProcedureAssignmentRequest(w.Procedure(area: RuleDomains.PolicyDomainBilling + 1), null, null, null);
                 plan = async () => Of(await service.PlanAssignProcedureAsync(w.Reads(), Matter, MatterId, otherArea, Ct));
-                write = async () => Of(await service.AssignProcedureAsync(Matter, MatterId, otherArea, Caller, Ct));
+                write = async () => Of(await service.AssignProcedureAsync(Matter, MatterId, otherArea, Caller, Decider, Ct));
                 break;
             case "inactive-procedure":
                 // EB-D-232 (ISS-021): Status Active but statecode 1 - the plan refuses as the write does, so a preview never shows an assign the write refuses.
                 var inactive = new ProcedureAssignmentRequest(w.Procedure(state: 1), null, null, null);
                 plan = async () => Of(await service.PlanAssignProcedureAsync(w.Reads(), Matter, MatterId, inactive, Ct));
-                write = async () => Of(await service.AssignProcedureAsync(Matter, MatterId, inactive, Caller, Ct));
+                write = async () => Of(await service.AssignProcedureAsync(Matter, MatterId, inactive, Caller, Decider, Ct));
                 break;
             case "inactive-owner-change":
                 // EB-D-232 (ISS-021): a rule change whose owning Procedure is deactivated (statecode 1, Status Active) - plan and write both refuse 409 rule_not_in_force.
                 w.H.Row("sprk_ruleset", w.H.Row("sprk_policy", rule).GetAttributeValue<EntityReference>("sprk_ruleset").Id)["sprk_procedure"] =
                     new EntityReference("sprk_procedure", w.Procedure(state: 1));
                 plan = async () => Of(await service.PlanChangeRuleAsync(w.Reads(), Matter, MatterId, Change(rule), Now, Ct));
-                write = async () => Of(await service.ChangeRuleAsync(Matter, MatterId, Change(rule), Caller, null, Ct));
+                write = async () => Of(await service.ChangeRuleAsync(Matter, MatterId, Change(rule), Caller, Decider, null, Ct));
                 break;
             case "duplicate-exclude":
-                (await service.ExcludeRuleAsync(Matter, MatterId, new RuleExcludeRequest(rule, "Waived", null), Caller, Ct)).Kind.Should().Be(RuleSetOutcomeKind.Done);
+                (await service.ExcludeRuleAsync(Matter, MatterId, new RuleExcludeRequest(rule, "Waived", null), Caller, Decider, Ct)).Kind.Should().Be(RuleSetOutcomeKind.Done);
                 plan = async () => Of(await service.PlanChangeRuleAsync(w.Reads(), Matter, MatterId, Change(rule), Now, Ct));
-                write = async () => Of(await service.ChangeRuleAsync(Matter, MatterId, Change(rule), Caller, null, Ct));
+                write = async () => Of(await service.ChangeRuleAsync(Matter, MatterId, Change(rule), Caller, Decider, null, Ct));
                 break;
             case "not-in-force":
                 w.H.Row("sprk_policy", rule)["sprk_enabled"] = false;
                 plan = async () => Of(await service.PlanChangeRuleAsync(w.Reads(), Matter, MatterId, Change(rule), Now, Ct));
-                write = async () => Of(await service.ChangeRuleAsync(Matter, MatterId, Change(rule), Caller, null, Ct));
+                write = async () => Of(await service.ChangeRuleAsync(Matter, MatterId, Change(rule), Caller, Decider, null, Ct));
                 break;
             case "no-reason":
                 var noReason = new RuleExcludeRequest(rule, " ", null);
                 plan = async () => Of(await service.PlanExcludeRuleAsync(w.Reads(), Matter, MatterId, noReason, Ct));
-                write = async () => Of(await service.ExcludeRuleAsync(Matter, MatterId, noReason, Caller, Ct));
+                write = async () => Of(await service.ExcludeRuleAsync(Matter, MatterId, noReason, Caller, Decider, Ct));
                 break;
             case "set-conflict":
                 // A row at the record's derived set id that is not the record's set: the write refuses it at stage 1, before any send.
@@ -365,11 +368,11 @@ public sealed class ProcedureDryRunPlanningContractTests
                     ["sprk_scope"] = new OptionSetValue((int)RuleSetScope.ClientDefault),
                 });
                 plan = async () => Of(await service.PlanChangeRuleAsync(w.Reads(), Matter, MatterId, Change(rule), Now, Ct));
-                write = async () => Of(await service.ChangeRuleAsync(Matter, MatterId, Change(rule), Caller, null, Ct));
+                write = async () => Of(await service.ChangeRuleAsync(Matter, MatterId, Change(rule), Caller, Decider, null, Ct));
                 break;
             default:
                 plan = async () => Of(await service.PlanRemoveAsync(w.Reads(), Matter, MatterId, Guid.NewGuid(), Ct));
-                write = async () => Of(await service.RemoveAsync(Matter, MatterId, Guid.NewGuid(), null, Ct));
+                write = async () => Of(await service.RemoveAsync(Matter, MatterId, Guid.NewGuid(), null, Decider, null, Ct));
                 break;
         }
 

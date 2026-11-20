@@ -128,9 +128,13 @@ public sealed class InvoiceSubmissionProcessingFlowTests
             Recorder = new BillingDecisionRecorder(Records.Writer, new Mock<IIdentityNormalizationService>(MockBehavior.Strict).Object, NullLogger<BillingDecisionRecorder>.Instance);
 
             Entities.Setup(e => e.RetrieveAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
-                .ReturnsAsync((string entity, Guid id, string[] columns, CancellationToken _) => entity == FinanceBaseValues.SubmissionEntity
-                    ? ReadSubmission(columns)
-                    : new Entity(entity, id) { [RegardingRecordType.GetPrimaryNameField(entity)!] = "Acme v. Roe", ["sprk_matternumber"] = "M-1" });
+                .ReturnsAsync((string entity, Guid id, string[] columns, CancellationToken _) => entity switch
+                {
+                    FinanceBaseValues.SubmissionEntity => ReadSubmission(columns),
+                    // 130e-1 (C1): the plan replay re-reads each rule's policy version for its firm description; none here.
+                    "sprk_policyversion" => new Entity(entity, id),
+                    _ => new Entity(entity, id) { [RegardingRecordType.GetPrimaryNameField(entity)!] = "Acme v. Roe", ["sprk_matternumber"] = "M-1" },
+                });
             Entities.Setup(e => e.CreateAsync(It.Is<Entity>(x => x.LogicalName == "appnotification"), It.IsAny<CancellationToken>()))
                 .Returns((Entity bell, CancellationToken _) =>
                 {

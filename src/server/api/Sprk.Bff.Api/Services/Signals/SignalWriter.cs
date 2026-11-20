@@ -109,6 +109,14 @@ public sealed record SignalWriteRequest(
     /// raised today: the nightly job and the event triggers (one evaluate-plan-write path, <see cref="SignalReevaluationJob"/>) act
     /// for nobody, so the row records no person. Server-derived only, never bound from a request body.</summary>
     public RecordRequester? RequestedBy { get; init; }
+
+    /// <summary>ebilling-r1 task 130e-1 (DEF-060, EB-D-212): the firm-facing description of the rule version that fired, written to
+    /// <c>sprk_firmreason</c> on CREATE only (never by the dedupe refresh, never on a Resolved row). <c>null</c> for every Signal except a billing
+    /// one: it is set only by the billing mapper and the billing plan replay, from the stored policy version after
+    /// <see cref="Sprk.Bff.Api.Services.Finance.FirmDescriptionRules"/>, never from a request body, a fact value, a value read, the sentence or
+    /// AI output. It is not part of the dedupe key, the sentence or any fingerprint. A text that fails the rules is refused by the preflight
+    /// (<see cref="SignalWriteRefusal.FirmReasonInvalid"/>), which only a caller that bypasses the mapper can reach.</summary>
+    public string? FirmReason { get; init; }
 }
 
 /// <summary>The result of one <see cref="SignalWriter.WriteAsync"/> call.</summary>
@@ -280,6 +288,11 @@ public static class SignalWriteRefusal
 
     /// <summary><c>Episode</c> is not a whole number from 1 (D-13).</summary>
     public const string EpisodeInvalid = "episode_invalid";
+
+    /// <summary>ebilling-r1 task 130e-1 (ontology-r1 O2): <c>FirmReason</c> is set and fails
+    /// <see cref="Sprk.Bff.Api.Services.Finance.FirmDescriptionRules.Validate(string?)"/>. Bypass detection only: the billing mapper and the plan
+    /// replay validate first and pass <c>null</c> for a text that fails, so their requests never get this code.</summary>
+    public const string FirmReasonInvalid = "firm_reason_invalid";
 
     /// <summary><c>MessageTemplate</c> is null or blank.</summary>
     public const string TemplateMissing = "template_missing";
@@ -1830,6 +1843,15 @@ public sealed partial class SignalWriter
             request.EvidenceRefs ?? Array.Empty<SignalEvidenceRef>(), EvidenceRefJsonOptions);
 
         entity["sprk_name"] = request.ShortHeadline;
+
+        // ebilling-r1 task 130e-1 (DEF-060, design 3.3 (a)(b)(c)): the firm description rides this one create, as the writer identity; no
+        // update path ever sends it (the dedupe refresh sends sprk_lastevaluated and, while open, sprk_duedate only). CheckRequest refused a
+        // text that fails FirmDescriptionRules before this point. Fix round 1 (a): the stored value is the validated, trimmed text, never the raw one.
+        if (Sprk.Bff.Api.Services.Finance.FirmDescriptionRules.Validate(request.FirmReason).Text is { } firmReason)
+        {
+            entity["sprk_firmreason"] = firmReason;
+        }
+
         entity["sprk_signalstatus"] = new OptionSetValue(SignalStatusOpen);
         entity["sprk_firstdetected"] = nowUtc.UtcDateTime;
         entity["sprk_lastevaluated"] = nowUtc.UtcDateTime;
@@ -1998,7 +2020,7 @@ public sealed partial class SignalWriter
     /// It runs <see cref="CheckRequest"/>, the SAME method <see cref="WriteAsync"/> runs first, so the two cannot drift. Checked, in
     /// <see cref="WriteAsync"/>'s order: the request is not null; the subject name is a logical name; <c>SubjectId</c> is set;
     /// <c>PolicyCode</c> is set and at most 50 characters; <c>ShortHeadline</c> is set and at most 200; <c>Lane</c>, <c>Severity</c>
-    /// and <c>Episode</c> are valid; the template is set, <c>FactValues</c> is set, the template renders strictly from the snapshot
+    /// and <c>Episode</c> are valid; a set <c>FirmReason</c> passes the firm description rules; the template is set, <c>FactValues</c> is set, the template renders strictly from the snapshot
     /// (§0.3), and the rendered sentence is at most 2000 characters; the subject table is in <see cref="VerifiedSubjects"/>.
     /// <para><b>Not checked here, because each needs I/O:</b> the core record is derivable and unambiguous (the core-ancestor
     /// resolver reads Dataverse); the subject has an owner (the ownership resolver); the core record's table has a catalog row; the
@@ -2044,6 +2066,12 @@ public sealed partial class SignalWriter
         if (request.Episode < 1)
             return new(SignalWriteRefusal.EpisodeInvalid,
                 new ArgumentException($"Episode {request.Episode} is not a whole number from 1 (D-13).", nameof(request)));
+
+        // ebilling-r1 task 130e-1 (O2): defence in depth only; the message names the rule's code, never the text.
+        if (request.FirmReason is not null
+            && Sprk.Bff.Api.Services.Finance.FirmDescriptionRules.Validate(request.FirmReason) is { IsValid: false } firmReason)
+            return new(SignalWriteRefusal.FirmReasonInvalid, new ArgumentException(
+                $"FirmReason fails the firm description rules ({firmReason.RefusalCode}).", nameof(request)));
 
         // R2 (second independent review): an unrenderable template is a logged, metered refusal in WriteAsync, so it is returned here
         // as the exception the write's catch clause reads. RenderSentence's own blank-template / null-snapshot guards are argument

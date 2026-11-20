@@ -20,6 +20,15 @@ public interface IInvoiceTotalsService
     /// <exception cref="KeyNotFoundException">The invoice does not exist.</exception>
     /// <exception cref="DBConcurrencyException">The invoice kept changing for <see cref="InvoiceTotalsService.MaxWriteAttempts"/> attempts; nothing was committed and the caller may retry.</exception>
     Task<InvoiceTotalsCalculation> RecalculateAsync(Guid invoiceId, CancellationToken ct = default);
+
+    /// <summary>
+    /// ebilling-r1 task 095f-2b (EB-D-240, EB-D-241; design 3 "Change, either option"): <see cref="RecalculateAsync(Guid, CancellationToken)"/> that
+    /// also writes <paramref name="decisionNote"/> to <c>sprk_invoice.sprk_decisionnote</c> (<see cref="InvoiceCorrectionNote.DecisionColumn"/>) in
+    /// the SAME conditional update as the five totals, so the note never lands without its totals and a refused or conflicting calculation writes
+    /// neither. Null writes no note column (exactly the two-argument call). The text is the adjustment service's: a note already checked by
+    /// <see cref="InvoiceCorrectionNote.Check"/>, or an add's required reason; this method neither checks nor trims it.
+    /// </summary>
+    Task<InvoiceTotalsCalculation> RecalculateAsync(Guid invoiceId, string? decisionNote, CancellationToken ct);
 }
 
 /// <summary>
@@ -82,7 +91,11 @@ public sealed class InvoiceTotalsService : IInvoiceTotalsService
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
-    public async Task<InvoiceTotalsCalculation> RecalculateAsync(Guid invoiceId, CancellationToken ct = default)
+    public Task<InvoiceTotalsCalculation> RecalculateAsync(Guid invoiceId, CancellationToken ct = default) =>
+        RecalculateAsync(invoiceId, decisionNote: null, ct);
+
+    /// <inheritdoc />
+    public async Task<InvoiceTotalsCalculation> RecalculateAsync(Guid invoiceId, string? decisionNote, CancellationToken ct)
     {
         for (var attempt = 1; ; attempt++)
         {
@@ -148,21 +161,24 @@ public sealed class InvoiceTotalsService : IInvoiceTotalsService
                 continue;
             }
 
+            var fields = new Dictionary<string, object?>
+            {
+                [InvoiceFeesTotal] = calculation.FeesTotal,
+                [InvoiceExpensesTotal] = calculation.ExpensesTotal,
+                [InvoiceLineAdjustmentsTotal] = calculation.LineAdjustmentsTotal,
+                [InvoiceInvoiceAdjustmentsTotal] = calculation.InvoiceAdjustmentsTotal,
+                [InvoiceApprovedTotal] = calculation.ApprovedTotal,
+            };
+
+            // 095f-2b (EB-D-240): an adjustment's decision note rides in the same conditional update as the totals; never sprk_correctionnote.
+            if (decisionNote is not null)
+            {
+                fields[InvoiceCorrectionNote.DecisionColumn] = decisionNote;
+            }
+
             try
             {
-                await _records.UpdateRecordFieldsIfUnchangedAsync(
-                    InvoiceEntity,
-                    invoiceId,
-                    new Dictionary<string, object?>
-                    {
-                        [InvoiceFeesTotal] = calculation.FeesTotal,
-                        [InvoiceExpensesTotal] = calculation.ExpensesTotal,
-                        [InvoiceLineAdjustmentsTotal] = calculation.LineAdjustmentsTotal,
-                        [InvoiceInvoiceAdjustmentsTotal] = calculation.InvoiceAdjustmentsTotal,
-                        [InvoiceApprovedTotal] = calculation.ApprovedTotal,
-                    },
-                    version,
-                    ct);
+                await _records.UpdateRecordFieldsIfUnchangedAsync(InvoiceEntity, invoiceId, fields, version, ct);
                 return calculation;
             }
             catch (DBConcurrencyException changed)

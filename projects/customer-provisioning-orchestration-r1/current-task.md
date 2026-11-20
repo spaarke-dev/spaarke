@@ -2,14 +2,14 @@
 
 > **Format**: CURRENT state only, REWRITTEN at each checkpoint (≤ 10 KB) — never prepend. Standing rules → project `CLAUDE.md` §2/§3/§6. Decisions → `notes/model1-dedicated-remediation-plan.md`. Narrative → commit messages. Full detail of every open item below as of 2026-11-06 (verbatim): `notes/handoff-history/current-task-archive-2026-11-06.md`.
 
-> **Last Updated**: 2026-11-16 (Desktop session `provisioning-r1`; task 270 complete, PR pending).
+> **Last Updated**: 2026-11-16 (Desktop session `provisioning-r1`; task 270 merged, PR #2862 → `4256166205`; 1.3.2.0 follow-up in PR).
 
 ## 🎯 Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
 |-------|-------|
-| **Task** | None in progress. Last completed: **270** (H7b procedure 10: S27 verifies the #2799 invoice-family lock, S28 the message-access lock; owner path A 2026-11-16) — PR pending. Before it: 269 → PR #2780 `3ab55ee877`; 268 → PR #2766 `4b45bdf3fe`. |
-| **Next Action** | Task 270 PR: open, bind, wait for every check green, merge only on the owner's go. Then **wait for uac-r2's SpaarkeMaster release carrying the #2799 lock** (branch `fix/2859-invoice-lock-in-spaarkemaster`, planned 1.3.2.0; uac-r2 sends version + commit): name the version in `InvoiceFamilyLockRemedy` and add the invoice-family package-row check to `BffManagedLinkColumnLockListTests` (like the S28 one); then close ISS-029 / #2859. Also, with owner go: H7c (#2429) — `wip/h7c-customer-owner-teams` (`8ca1c13911`, unreviewed): merge master into it (it also edits Set-CustomerOwnerTeams.ps1 and H7b — resolve against tasks 269/270), review, resume. |
+| **Task** | None in progress. Last completed: **270** (H7b procedure 10: S27 verifies the #2799 invoice-family lock, S28 the message-access lock; owner path A 2026-11-16) — PR #2862 merged → `4256166205` (2026-11-16, owner go "Yes proceed"). Before it: 269 → PR #2780 `3ab55ee877`; 268 → PR #2766 `4b45bdf3fe`. |
+| **Next Action** | Task 270 follow-up (SpaarkeMaster 1.3.2.0 named in S27; uac-r2 #2865 → `57431c8e6a`, #2859 closed, ISS-029 resolved): PR open — merge only on the owner's go when every check is green. 1.3.2.0 is merged but **not published or imported anywhere** (uac-r2, owner go). Also, with owner go: H7c (#2429) — `wip/h7c-customer-owner-teams` (`8ca1c13911`, unreviewed): merge master into it (it also edits Set-CustomerOwnerTeams.ps1 and H7b — resolve against tasks 269/270), review, resume. |
 | **Done 2026-11-11/13** | PR #2676 (task 267) → `df93d2029c`. ebilling #2689 → `2fc434c912`. Task 268 → PR #2766 `4b45bdf3fe`; #2725 / ISS-028 filed (19 operator scripts excuse System Administrator by name; ebilling fixing its 4 sites). SpaarkeMaster 1.3.1.0 published 2026-11-13. |
 | **Quality alert** | #1821 mutation-nightly open (2026-11-15); not started. |
 | **Working tree** | Clean after the close-out commit. |
@@ -40,7 +40,7 @@
 - No stamp gets a master BFF containing ebilling 116 / #2724 (on master since 2026-11-12 05:25Z) before SpaarkeMaster 1.3.1.0 is installed there: 1.3.1.0 adds `sprk_procedureversion.sprk_notconvertedlist`, which #2724 reads; without it the rule-set and procedure-version routes fail (ebilling-r1, 2026-11-12).
 - SpaarkeMaster 1.3.1.0 (NOT 1.3.0.1; ebilling-r1 2026-11-12): carries 166 (what S26 checks), 095a/095c-1, DEF-061, DEF-059 Decision Record Reader role, uac-r2 193 `sprk_pairedsystemuser`, `sprk_notconvertedlist`. PUBLISHED 2026-11-13 03:22Z (owner go in ebilling-r1's session): run 43358397122 from master `d8b53ec0c3`; `dataverse-solutions-latest.json` = 1.3.1.0 (managed sha256 `4f7cda4c…32e6d4`), versioned manifest `dataverse-solutions-2026.11.13-318-1.json`; expectations `spaarkemaster-1.3.1.0.json`. Also carries field-mapping #2733 (secured message-access columns + BFF profile grants) and the #2725 profile-id fix. The #2724 gate is per stamp: 1.3.1.0 must be INSTALLED there (H6 on a new run), not just published. An environment that already has `sprk_invoicesubmission` rows runs `Deploy-EbillingSubmissionTrackingScopeSchema.ps1` steps 1–8 right after import; a new stamp needs nothing. ebilling will send the version + run when published.
 - ACME BFF upgrade gated on A9 home sign-in; any BFF from master needs `Set-ExternalAccessContactSecuritySchema.ps1 -Apply` + `-Verify` first.
-- **No L2 Worker deploy with H7b procedure version 10 (task 270, S27) before uac-r2's SpaarkeMaster release carrying the #2799 lock is published** — otherwise every new run, and every re-run of an existing stamp (the version salts H7b's key), stops at H7b (Resumable). Fails closed. A stamp then needs a NEW run that imports the release at H6.
+- **No L2 Worker deploy with H7b procedure version 10 (task 270, S27) before SpaarkeMaster 1.3.2.0 (#2859; carries the #2799 lock; merged `57431c8e6a`, not yet published) is published** — otherwise every new run, and every re-run of an existing stamp (the version salts H7b's key), stops at H7b (Resumable). Fails closed. A stamp then needs a NEW run that imports the release at H6.
 - Never remove System Administrator from the BFF identities.
 
 ## 📋 Remaining (detail in the archive file)

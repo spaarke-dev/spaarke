@@ -652,8 +652,9 @@ describe('InvoiceReviewPage: failures and recovery (task 110 fix round 2)', () =
     const dialog = await screen.findByRole('dialog');
     fireEvent.change(within(dialog).getByLabelText('Correct value'), { target: { value: '2' } });
     fireEvent.click(within(dialog).getByRole('button', { name: 'Save correction' }));
-    await waitFor(() => expect(screen.queryByTestId('correct-error')).not.toBeInTheDocument());
-    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    // Wait for the dialog itself to go (the error box is absent from the start, so waiting on it proved nothing).
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(screen.queryByTestId('correct-error')).not.toBeInTheDocument();
     expect(await screen.findByTestId('notice-reload')).toBeInTheDocument();
   });
 
@@ -829,8 +830,13 @@ describe('InvoiceReviewPage: corrections (task 101) and the PDF', () => {
     await screen.findByTestId('review-title');
     fireEvent.click(row(7));
     const pane = await screen.findByTestId(`pane-line-${lineId(7)}`);
+    // 095f-2ui: Confirm opens a small form (it carries the optional Note); nothing is sent until its own Confirm as read.
     fireEvent.click(within(pane).getByTestId('confirm-Hours'));
+    const dialog = await screen.findByRole('dialog');
+    expect(api.correctLine).not.toHaveBeenCalled();
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Confirm as read' }));
     await waitFor(() => expect(api.correctLine).toHaveBeenCalledWith(INVOICE_ID, lineId(7), { field: 'Hours', value: null, confirm: true }));
+    expect(Object.keys(api.correctLine.mock.calls[0][2])).not.toContain('note');
   });
 
   it('keeps a refused correction in the dialog with the server message', async () => {

@@ -23,14 +23,14 @@ import {
 import { thinScrollbarStyle } from '@spaarke/ui-components';
 import { ParamEditor } from './ParamEditor';
 import { ProposalStateBadge } from './Notices';
-import type { Consequence, ProposalView, RuleEdit } from '../services/ruleSetApi';
+import type { ProposalView, RuleEdit } from '../services/ruleSetApi';
+import { MAX_FIRM_DESCRIPTION, type FirmRefusal } from '../services/firmDescription';
+import { computeRuleForm, firmFieldReducer, initialFirmField, shownRefusals } from '../services/ruleForm';
 import {
   CONSEQUENCES,
   CONSEQUENCE_LABELS,
-  buildBody,
   ruleTypeDef,
   ruleTypeLabel,
-  sameBody,
   toParamValues,
   type ParamValues,
 } from '../services/ruleTypes';
@@ -71,6 +71,9 @@ const useStyles = makeStyles({
     fontFamily: tokens.fontFamilyMonospace, fontSize: tokens.fontSizeBase200, overflowX: 'auto',
   },
   list: { margin: 0, paddingLeft: tokens.spacingHorizontalL },
+  count: { color: tokens.colorNeutralForeground3 },
+  countOver: { color: tokens.colorPaletteRedForeground1 },
+  notice: { color: tokens.colorNeutralForeground2, display: 'block' },
   actions: { display: 'flex', flexWrap: 'wrap', gap: tokens.spacingHorizontalS, alignItems: 'center' },
   spacer: { flexGrow: 1 },
 });
@@ -82,6 +85,10 @@ export interface ProposalDetailPaneProps {
   /** False for a retired rule set (the server refuses changes to it). */
   editable: boolean;
   busy: boolean;
+  /** The rule set's name: the firm description may not contain it (the server refuses a text that does). */
+  ruleSetName?: string | null;
+  /** The server's refusals of this rule's firm description from the last failed save, accept or publish (422). */
+  firmRefusals?: readonly FirmRefusal[];
   onAccept: (proposal: ProposalView) => void;
   onReject: (proposal: ProposalView) => void;
   onSave: (proposal: ProposalView, edit: RuleEdit) => Promise<void>;
@@ -105,7 +112,7 @@ interface FormProps extends Omit<ProposalDetailPaneProps, 'proposal'> {
   proposal: ProposalView;
 }
 
-const RuleForm: React.FC<FormProps> = ({ proposal, canWrite, editable, busy, onAccept, onReject, onSave }) => {
+const RuleForm: React.FC<FormProps> = ({ proposal, canWrite, editable, busy, ruleSetName, firmRefusals, onAccept, onReject, onSave }) => {
   const s = useStyles();
   const def = ruleTypeDef(proposal.ruleType);
   const mayEdit = canWrite && editable;
@@ -116,33 +123,17 @@ const RuleForm: React.FC<FormProps> = ({ proposal, canWrite, editable, busy, onA
   const [template, setTemplate] = React.useState(proposal.messageTemplate ?? '');
   const [quote, setQuote] = React.useState(proposal.clauseQuote ?? '');
   const [location, setLocation] = React.useState(proposal.clauseLocation ?? '');
+  const [firmField, dispatchFirm] = React.useReducer(firmFieldReducer, proposal.firmDescription, initialFirmField);
   const [errors, setErrors] = React.useState<Record<string, string>>({});
 
-  // What the form would send: only the members that differ from the stored rule (an empty PATCH is refused by the server).
-  const built = def ? buildBody(def, params) : null;
-  const edit = React.useMemo<RuleEdit>(() => {
-    const e: RuleEdit = {};
-    if (built?.ok && !sameBody(built.body, proposal.ruleBody)) e.ruleBody = built.body;
-    if (consequence && consequence !== (proposal.consequence ?? '')) e.consequence = consequence as Consequence;
-    if (headline !== (proposal.shortHeadline ?? '') && headline.trim()) e.shortHeadline = headline;
-    if (template !== (proposal.messageTemplate ?? '') && template.trim()) e.messageTemplate = template;
-    if (quote !== (proposal.clauseQuote ?? '') && quote.trim()) e.clauseReference = quote;
-    if (location !== (proposal.clauseLocation ?? '') && location.trim()) e.clauseLocation = location;
-    return e;
-  }, [built, consequence, headline, template, quote, location, proposal]);
-  // A text field emptied by hand cannot be sent (the server keeps the stored text), but it IS an unsaved change: it keeps Accept off
-  // and Discard on, and Save says why nothing was sent.
-  const blanked = React.useMemo<Record<string, string>>(() => {
-    const b: Record<string, string> = {};
-    const emptied = (now: string, stored: string | null): boolean => !now.trim() && !!stored?.trim();
-    if (emptied(headline, proposal.shortHeadline)) b.headline = 'The headline cannot be empty.';
-    if (emptied(template, proposal.messageTemplate)) b.template = 'The message cannot be empty.';
-    if (emptied(quote, proposal.clauseQuote)) b.quote = 'The quote cannot be empty.';
-    if (emptied(location, proposal.clauseLocation)) b.location = 'The location cannot be empty.';
-    return b;
-  }, [headline, template, quote, location, proposal]);
-  const dirty = Object.keys(edit).length > 0 || Object.keys(blanked).length > 0;
-  const clauseEdited = edit.clauseReference !== undefined || edit.clauseLocation !== undefined;
+  // What the form would send, and whether it may be saved (services/ruleForm.ts, tested there).
+  const form = computeRuleForm(
+    proposal,
+    def,
+    { params, consequence, headline, template, quote, location, firmText: firmField.text },
+    { ruleSetName, shownRefusals: shownRefusals(firmRefusals, firmField), busy }
+  );
+  const { built, edit, blanked, dirty, clauseEdited, firm } = form;
 
   const reset = (): void => {
     setParams(def ? toParamValues(def, proposal.ruleBody) : {});
@@ -151,10 +142,12 @@ const RuleForm: React.FC<FormProps> = ({ proposal, canWrite, editable, busy, onA
     setTemplate(proposal.messageTemplate ?? '');
     setQuote(proposal.clauseQuote ?? '');
     setLocation(proposal.clauseLocation ?? '');
+    dispatchFirm({ type: 'reset', stored: proposal.firmDescription, refusals: firmRefusals });
     setErrors({});
   };
 
   const save = async (): Promise<void> => {
+    if (firm.blocked) return;
     if ((built && !built.ok) || Object.keys(blanked).length > 0) {
       setErrors({ ...(built && !built.ok ? built.errors : {}), ...blanked });
       return;
@@ -266,6 +259,74 @@ const RuleForm: React.FC<FormProps> = ({ proposal, canWrite, editable, busy, onA
               data-testid="edit-template"
             />
           </Field>
+
+          <Field
+            label="Firm description"
+            validationState={firm.messages.length > 0 ? 'error' : 'none'}
+            validationMessage={
+              firm.messages.length > 0 ? (
+                <span data-testid="firm-description-error">
+                  {firm.messages.map(m => (
+                    <span key={m} className={s.notice}>
+                      {m}
+                    </span>
+                  ))}
+                </span>
+              ) : undefined
+            }
+            hint={
+              firm.isDuplicate ? undefined : (
+                <span className={mergeClasses(s.count, firm.over && s.countOver)} data-testid="firm-description-count">
+                  {firm.count ?? 0} / {MAX_FIRM_DESCRIPTION}
+                </span>
+              )
+            }
+          >
+            <Textarea
+              resize="vertical"
+              rows={3}
+              value={firmField.text}
+              disabled={!mayEdit}
+              readOnly={firm.isDuplicate}
+              onChange={(_, d) => dispatchFirm({ type: 'edit', text: d.value, refusals: firmRefusals })}
+              data-testid="edit-firm-description"
+            />
+          </Field>
+          {mayEdit && firm.carryWarning && (
+            <Text size={200} className={mergeClasses(s.warn, s.notice)} data-testid="firm-description-carry-warning">
+              This text no longer passes the checks. Saving creates a new draft without it.
+            </Text>
+          )}
+          {firm.isDuplicate ? (
+            <>
+              <Text size={200} className={s.muted} data-testid="firm-description-duplicate">
+                A Duplicate rule has no firm description: firms always see the standard duplicate wording.
+                {firm.removable && ' The text stored on this rule is not used. Remove it.'}
+              </Text>
+              {firm.removable && mayEdit && (
+                <div className={s.actions}>
+                  <Button
+                    size="small"
+                    disabled={busy || firm.removing}
+                    onClick={() => dispatchFirm({ type: 'edit', text: '', refusals: firmRefusals })}
+                    data-testid="firm-description-remove"
+                  >
+                    Remove
+                  </Button>
+                  {firm.removing && (
+                    <Text size={200} className={s.muted} data-testid="firm-description-removing">
+                      The text is removed when you save.
+                    </Text>
+                  )}
+                </div>
+              )}
+            </>
+          ) : (
+            <Text size={200} className={s.notice} data-testid="firm-description-notice">
+              Firms see this text when this rule rejects their invoice. Do not name the rule set or the rule, and do not put internal notes here.
+              The check for names does not catch letters from other alphabets that look the same, so read the text through before you save.
+            </Text>
+          )}
         </section>
 
         <section className={mergeClasses(s.card, s.clauseCard)} aria-label="Quoted clause" data-testid="detail-clause">
@@ -307,7 +368,7 @@ const RuleForm: React.FC<FormProps> = ({ proposal, canWrite, editable, busy, onA
 
       {mayEdit && (
         <div className={s.actions} data-testid="detail-actions">
-          <Button appearance="primary" disabled={busy || !dirty} onClick={() => void save()} data-testid="save-edit">
+          <Button appearance="primary" disabled={form.saveDisabled} onClick={() => void save()} data-testid="save-edit">
             Save changes
           </Button>
           <Button disabled={busy || !dirty} onClick={reset} data-testid="reset-edit">

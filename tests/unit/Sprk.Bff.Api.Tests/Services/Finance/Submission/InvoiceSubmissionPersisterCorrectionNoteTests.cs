@@ -58,6 +58,55 @@ public partial class InvoiceSubmissionPersisterTests
         InvoiceCreate(store).Attributes.Should().NotContainKey("sprk_correctionnote");
     }
 
+    // Task 095f-2e1 (EB-D-237): the from-document route now carries a note on the job, so a from-document Correction reaches the persister with
+    // one, and the persister's "no note" warning (legacy payloads only) must stay quiet for it. The control proves the warning still fires.
+    private const string NoNoteWarning = "carries no correction note";
+
+    [Fact(DisplayName = "095f-2e1 (must-not-fire): a Correction that carries a note (a from-document one now does) never logs the no-note warning")]
+    public async Task CorrectionWithANote_DoesNotLogTheNoNoteWarning()
+    {
+        var logger = new CapturingLogger();
+        var store = CorrectionStore(logger: logger);
+
+        var result = await store.Build().PersistAsync((await CorrectionOutcomeAsync()) with { CorrectionNote = NoteText }, null);
+
+        result.Status.Should().Be(SubmissionPersistStatus.Committed);
+        InvoiceCreate(store).GetAttributeValue<string>("sprk_correctionnote").Should().Be(NoteText);
+        logger.Entries.Should().NotContain(e => e.Message.Contains(NoNoteWarning));
+    }
+
+    [Fact(DisplayName = "095f-2e1 (must-fire control): a Correction with no note (a legacy payload) still logs the no-note warning once and persists")]
+    public async Task CorrectionWithoutANote_StillLogsTheNoNoteWarning()
+    {
+        var logger = new CapturingLogger();
+        var store = CorrectionStore(logger: logger);
+
+        var result = await store.Build().PersistAsync(await CorrectionOutcomeAsync(), null);
+
+        result.Status.Should().Be(SubmissionPersistStatus.Committed);
+        logger.Entries.Where(e => e.Level == Microsoft.Extensions.Logging.LogLevel.Warning && e.Message.Contains(NoNoteWarning)).Should().ContainSingle();
+    }
+
+    // Task 095f-2e2a (EB-D-245): the internal upload route now takes a Correction. Its submission is an Internal upload (no source document, the
+    // PDF staged under the submission id) naming the replaced invoice's submission; the commit is the same as every other channel's.
+    [Fact(DisplayName = "095f-2e2a: an internal upload Correction commits like every channel's: the new invoice supersedes the old one, the old one closes Superseded in the same transaction, and the note is on the new invoice")]
+    public async Task InternalUploadCorrection_SupersedesTheOldInvoice_AndWritesTheNote()
+    {
+        var store = CorrectionStore();
+        store.Submission["sprk_channel"] = new OptionSetValue((int)InvoiceSubmissionChannel.Internal);
+        store.Submission.Attributes.Should().NotContainKey("sprk_document", "an upload names no source document");
+
+        var result = await store.Build().PersistAsync((await CorrectionOutcomeAsync()) with { CorrectionNote = NoteText }, null);
+
+        result.Status.Should().Be(SubmissionPersistStatus.Committed);
+        var transaction = store.Transactions.Should().ContainSingle().Subject;
+        var created = InvoiceCreate(store);
+        created.GetAttributeValue<EntityReference>("sprk_supersedesinvoice").Id.Should().Be(OldInvoiceId);
+        created.GetAttributeValue<string>("sprk_correctionnote").Should().Be(NoteText);
+        transaction.OfType<UpdateRequest>().Should().ContainSingle(u => u.Target.LogicalName == "sprk_invoice" && u.Target.Id == OldInvoiceId);
+        store.OldInvoiceStatus.Should().Be(InvoiceStatusCodes.Superseded);
+    }
+
     [Theory(DisplayName = "095f: a note over the column's length or with a control character is never written, never truncated")]
     [InlineData("tooLong")]
     [InlineData("control")]

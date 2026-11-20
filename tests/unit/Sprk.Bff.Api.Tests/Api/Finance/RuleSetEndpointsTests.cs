@@ -39,7 +39,7 @@ namespace Sprk.Bff.Api.Tests.Api.Finance;
 /// is not a billing admin (including an Ontology administrator who holds every policy privilege), the stable disabled code with the flag
 /// off, and the HTTP shape of each outcome. The service is substituted at its own seam (its behaviour is <see cref="Services.Finance.RuleSetServiceTests"/>).
 /// </summary>
-public sealed class RuleSetEndpointsTests
+public sealed partial class RuleSetEndpointsTests
 {
     private const string Base = "/api/finance/rulesets";
     private static readonly Guid SetId = Guid.NewGuid();
@@ -72,6 +72,10 @@ public sealed class RuleSetEndpointsTests
         public readonly System.Collections.Concurrent.ConcurrentQueue<string> Logs = new();
         private WebApplication _app = null!;
         public HttpClient Client = null!;
+
+        /// <summary>130e-1 fix round 2 (F4): the host's endpoints, for the route metadata (the OpenAPI contract) checks.</summary>
+        public IEnumerable<Microsoft.AspNetCore.Routing.RouteEndpoint> Endpoints =>
+            _app.Services.GetRequiredService<Microsoft.AspNetCore.Routing.EndpointDataSource>().Endpoints.OfType<Microsoft.AspNetCore.Routing.RouteEndpoint>();
 
         public Host()
         {

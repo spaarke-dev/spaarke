@@ -88,22 +88,45 @@ internal static class InvoiceSubmissionHttp
     }
 
     /// <summary>The OpenAPI contract of a submit route (documentation only; authorization is on each route's own chain).</summary>
-    internal static RouteHandlerBuilder WithSubmitContract(this RouteHandlerBuilder builder, string coreNoun) => builder
-        .Accepts<IFormFile>("multipart/form-data")
-        .WithSummary($"Submit an invoice PDF against a {coreNoun}")
-        .WithDescription(
-            "Stores the PDF in the record's container, creates the document (type Invoice) and the submission (Received, with its " +
-            "tracking number) and enqueues processing. Form: file (PDF), firmInvoiceNumber (required), poNumber. Query: firmId. " +
-            "Refusals are ProblemDetails with errorCode: 400 not_pdf, file_required, firm_invoice_number_required, firm_invalid; " +
-            "403 without the rights the route needs; 413 too_large; 503 ebilling.disabled.")
-        .Produces<InvoiceSubmissionAccepted>(StatusCodes.Status202Accepted)
-        .ProducesProblem(StatusCodes.Status400BadRequest)
-        .ProducesProblem(StatusCodes.Status401Unauthorized)
-        .ProducesProblem(StatusCodes.Status403Forbidden)
-        .ProducesProblem(StatusCodes.Status409Conflict)
-        .ProducesProblem(StatusCodes.Status413PayloadTooLarge)
-        .ProducesProblem(StatusCodes.Status422UnprocessableEntity)
-        .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
+    /// <remarks>Task 095f-2e2a (EB-D-245): <paramref name="acceptsCorrection"/> is set by the internal routes only, which also take a Correction;
+    /// it appends <see cref="CorrectionContract"/> and lists 404. The external route passes nothing, so its contract is unchanged.</remarks>
+    internal static RouteHandlerBuilder WithSubmitContract(this RouteHandlerBuilder builder, string coreNoun, bool acceptsCorrection = false)
+    {
+        builder
+            .Accepts<IFormFile>("multipart/form-data")
+            .WithSummary($"Submit an invoice PDF against a {coreNoun}")
+            .WithDescription(
+                "Stores the PDF in the record's container, creates the document (type Invoice) and the submission (Received, with its " +
+                "tracking number) and enqueues processing. Form: file (PDF), firmInvoiceNumber (required), poNumber. Query: firmId. " +
+                "Refusals are ProblemDetails with errorCode: 400 not_pdf, file_required, firm_invoice_number_required, firm_invalid; " +
+                "403 without the rights the route needs; 413 too_large; 503 ebilling.disabled." +
+                (acceptsCorrection ? CorrectionContract : string.Empty))
+            .Produces<InvoiceSubmissionAccepted>(StatusCodes.Status202Accepted)
+            .ProducesProblem(StatusCodes.Status400BadRequest)
+            .ProducesProblem(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status403Forbidden)
+            .ProducesProblem(StatusCodes.Status409Conflict)
+            .ProducesProblem(StatusCodes.Status413PayloadTooLarge)
+            .ProducesProblem(StatusCodes.Status422UnprocessableEntity)
+            .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
+        if (acceptsCorrection)
+        {
+            builder.ProducesProblem(StatusCodes.Status404NotFound);
+        }
+
+        return builder;
+    }
+
+    /// <summary>Task 095f-2e2a: the Correction part of the internal submit routes' contract (the from-document route's fields and refusals).</summary>
+    internal const string CorrectionContract =
+        " Correction (internal routes only): form fields mode (New, the default, or Correction, exact case), invoiceId (required for " +
+        "Correction: the In Review invoice it replaces, same firm, record and firm invoice number; not sent for New) and correctionNote " +
+        "(required for Correction, at most 2000 characters, no control characters other than a line break or a tab: why the invoice is " +
+        "corrected; not sent for New); each field at most once. A Correction also needs Write on the invoice it replaces; the new " +
+        "submission gets the next tracking number of the same firm invoice number and supersedes that invoice when it is accepted. " +
+        "Its refusals: 400 validation (errors on mode, invoiceId or correctionNote), correction_note_required (a Correction with no note); " +
+        "404 (reasonCode record_unavailable) the invoice is not one the caller can Write; 409 correction_not_allowed (reason); " +
+        "503 record_unavailable.";
 
     /// <summary>202 with <c>Location</c> = the channel's status URL, or the refusal as ProblemDetails (ADR-019).</summary>
     /// <remarks>ebilling-r1 082c-3: <paramref name="warning"/> is the external route's provisional pre-check warning, carried only on a 202; a refusal never carries it.</remarks>

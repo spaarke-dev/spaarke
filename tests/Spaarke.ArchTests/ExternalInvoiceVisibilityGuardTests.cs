@@ -118,6 +118,9 @@ public class ExternalInvoiceVisibilityGuardTests
             "Creates the caller's own submission and returns its receipt (tracking number); a new submission has no invoice yet.",
         [$"{typeof(ExternalUserContextEndpoint).FullName}::HandleAsync"] =
             "Reads the caller's active firm NAMES for the SPA header; no family row.",
+        ["Sprk.Bff.Api.Api.ExternalAccess.BillingGuidelinesEndpoints::GetAsync"] =
+            "Reviewed ebilling-r1 task 135. Reads the caller's active firm NAMES (the same one-query read the SPA header uses) and the billing "
+            + "rules in force for those firms (Procedures, rule sets, rules); no invoice, line, submission or other family row is read or returned.",
         // ── the firm outcome (ebilling-r1 task 130b, FR-38): the predicate is applied by the route's filter, once, before the handler ──
         ["Sprk.Bff.Api.Api.ExternalAccess.FirmOutcomeEndpoints::GetInvoiceOutcomeAsync"] =
             "Reviewed 130b. Reads the projection only for the invoice id FirmOutcomeAuthorizationFilter admitted (stored in the request's items; "
@@ -129,6 +132,13 @@ public class ExternalInvoiceVisibilityGuardTests
             + "invoice decision the invoice route makes (its own firm, its own core record, ExternalInvoiceHiding; fix round 1). It passes the "
             + "filter's InvoiceDecided to the projection (fix round 2): false when the invoice did not exist at the filter, and then nothing of "
             + "that invoice is read (in progress: no billed total; Accepted: 503).",
+        // ── the eBilling feed source (ebilling-r1 task 132, FR-39) ──
+        ["Sprk.Bff.Api.Api.ExternalAccess.EbillingFeedSource::CandidateQuery"] =
+            "Reviewed 132 (review fix). Builds the app-only candidate query (the caller's own firms' invoices that the caller submitted or bills for: ids, "
+            + "status, change time, the audience columns and the access rule's scope columns); it reads nothing itself. ReadAsync re-checks the audience "
+            + "in memory, then returns an invoice only after FirmOutcomeAuthorizationFilter.DecideInvoicesForFeedAsync cleared the whole batch with the "
+            + "outcome route's own invoice rule (firm, core-record Read, secure roots and ExternalInvoiceHiding), fail closed. EbillingFeedSourceTests prove "
+            + "a Denied or undecidable invoice, and an invoice outside the audience, is never an item.",
         ["Sprk.Bff.Api.Api.ExternalAccess.FirmOutcomeAuthorizationFilter::.cctor"] =
             "Reviewed 130b fix rounds 5 and 6. Static column lists (the invoice's and the submission's own lookups, incl. the parents the "
             + "secure-roots rule takes in); reads nothing.",
@@ -187,6 +197,9 @@ public class ExternalInvoiceVisibilityGuardTests
         ["Sprk.Bff.Api.Services.Finance.FirmFindingsProjection::ReadRejectionSignalsAsync"] =
             "Reviewed 130c. Reads the firm reasons of Signals the BFF writer created (WriterCreatedRecord) for the derived invoice the caller "
             + "decided, only after BuildRejectionItemsAsync's invoiceDecided check; a Signal naming another invoice is dropped.",
+        ["Sprk.Bff.Api.Services.Finance.FirmFindingsProjection::NamesTheFindingsReason"] =
+            "Reviewed 130e-1. A private predicate over a Signal row ReadRejectionSignalsAsync already read: true when the row's stored "
+            + "evidence names the finding's reason code (ReasonCodesOf parses the JSON). Reads nothing.",
     };
 
     /// <summary>

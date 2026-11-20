@@ -60,6 +60,12 @@ export interface AddFirmPanelProps {
   announce: (message: string, mode?: AnnounceMode) => void;
   /** Rendered with the "two firms are already assigned" refusal: the view's "Open in Spaarke" link for the record. */
   openInSpaarke?: React.ReactNode;
+  /**
+   * The record has no firm yet, so the panel IS the Firm field (owner UAT 2026-11-18): it is labelled "Firm" (required),
+   * has no border and no Cancel (there is nothing to go back to), and does not take focus when it appears (the user did
+   * not open it). Off: the panel the "Add another firm" button opens.
+   */
+  asFirmField?: boolean;
 }
 
 /** The search input's debounce. */
@@ -104,6 +110,11 @@ const useStyles = makeStyles({
     border: `1px solid ${tokens.colorNeutralStroke2}`,
     borderRadius: tokens.borderRadiusMedium,
   },
+  field: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: tokens.spacingVerticalS,
+  },
   scroller: {
     maxHeight: '240px',
     overflowY: 'auto',
@@ -131,6 +142,7 @@ export const AddFirmPanel: React.FC<AddFirmPanelProps> = ({
   onBusyChange,
   announce,
   openInSpaarke,
+  asFirmField = false,
 }) => {
   const styles = useStyles();
 
@@ -159,8 +171,10 @@ export const AddFirmPanel: React.FC<AddFirmPanelProps> = ({
   const retryButtonRef = useRef<HTMLButtonElement | null>(null);
   const onBusyChangeRef = useRef(onBusyChange);
   onBusyChangeRef.current = onBusyChange;
+  // Only when the user opened it: as the Firm field it appears on its own, and must not pull focus from where they are.
+  const focusOnOpenRef = useRef(!asFirmField);
   useEffect(() => {
-    searchInputRef.current?.focus();
+    if (focusOnOpenRef.current) searchInputRef.current?.focus();
   }, []);
   useEffect(() => {
     onBusyChangeRef.current?.(sending);
@@ -350,15 +364,22 @@ export const AddFirmPanel: React.FC<AddFirmPanelProps> = ({
   }
 
   return (
-    <div className={styles.panel} role="group" aria-label="Add a firm to this record" data-testid="add-firm-panel">
-      <Field label="Search law firms">
+    <div
+      className={asFirmField ? styles.field : styles.panel}
+      role="group"
+      // As the Firm field the field's own label names it; a group label too would be read twice.
+      aria-label={asFirmField ? undefined : 'Add a firm to this record'}
+      data-testid="add-firm-panel"
+      data-as-firm-field={asFirmField ? 'true' : undefined}
+    >
+      <Field label={asFirmField ? 'Firm' : 'Search law firms'} required={asFirmField}>
         <SearchBox
           ref={el => {
             searchInputRef.current = el;
           }}
           value={searchText}
           onChange={(_, data) => setSearchText(data.value)}
-          placeholder="Firm name"
+          placeholder={asFirmField ? 'Search law firms' : 'Firm name'}
           disabled={sending}
           data-testid="add-firm-search"
         />
@@ -442,9 +463,11 @@ export const AddFirmPanel: React.FC<AddFirmPanelProps> = ({
         >
           Add firm
         </Button>
-        <Button appearance="secondary" disabled={sending} onClick={onClose} data-testid="add-firm-cancel">
-          Cancel
-        </Button>
+        {!asFirmField && (
+          <Button appearance="secondary" disabled={sending} onClick={onClose} data-testid="add-firm-cancel">
+            Cancel
+          </Button>
+        )}
       </div>
     </div>
   );

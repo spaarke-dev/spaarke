@@ -345,8 +345,13 @@ public class DecisionActionCatalogTests
     // Billing actions (ebilling-r1 task 074; FR-30, D-75): a closed set of their own, outside the Signals commit route
     // =================================================================================================
 
+    // 095f-2b (EB-D-241; design 3 option A): add-adjustment and remove-adjustment amend this exact set (ontology-r1 reviewed amendment of D-100's
+    // "additive only", not an addition). ISS-034 / iss034a (EB-D-244): finish-stranded-decision amends it the same way (ontology-r1 reviews it).
     private static readonly string[] BillingCodes =
-        ["accept-line", "reduce-line", "disallow-line", "approve-invoice", "reject-invoice", "return-to-firm", "override-submission", "assign-firm", "add-line"];
+    [
+        "accept-line", "reduce-line", "disallow-line", "approve-invoice", "reject-invoice", "return-to-firm", "override-submission", "assign-firm", "add-line",
+        "add-adjustment", "remove-adjustment", "finish-stranded-decision",
+    ];
 
     [Fact]
     public void BillingActions_AreExactlyTheStatedSet_EachWithAPlanLaneARecordClassAndAGate()
@@ -375,12 +380,25 @@ public class DecisionActionCatalogTests
     [InlineData("override-submission", DecisionRecordClass.Judgement, GateRiskTier.Tier3)]
     [InlineData("assign-firm", DecisionRecordClass.Judgement, GateRiskTier.Tier4)] // 095d-1b: declared Tier3; not reversible and visible to the firm, it resolves to Tier4
     [InlineData("add-line", DecisionRecordClass.Judgement, GateRiskTier.Tier2b)] // 164a-2 (EB-D-198): Tier2b, reversible by a later disallow-line
+    [InlineData("add-adjustment", DecisionRecordClass.Judgement, GateRiskTier.Tier2b)] // 095f-2b (EB-D-241): gates as add-line
+    [InlineData("remove-adjustment", DecisionRecordClass.Judgement, GateRiskTier.Tier2b)] // 095f-2b (EB-D-241): gates as add-line
+    [InlineData("finish-stranded-decision", DecisionRecordClass.Judgement, GateRiskTier.Tier4)] // iss034a (EB-D-244): not reversible, a record-of-truth change
     public void EachBillingAction_HasItsRecordClassAndGateTier(string code, DecisionRecordClass recordClass, GateRiskTier tier)
     {
         DecisionActionCatalog.TryGetBilling(code, out var action).Should().BeTrue();
 
         action.RecordClass.Should().Be(recordClass);
         DecisionGateTier.Resolve(action.Gate!).Should().Be(tier);
+    }
+
+    [Fact(DisplayName = "iss034a review round 1 (ontology-r1): finish-stranded-decision gates with return-to-firm's factors: not reversible, externally visible (a finished return reaches the firm), a record-of-truth change, Tier4")]
+    public void FinishStrandedDecision_GatesAsReturnToFirm_ExternallyVisible()
+    {
+        DecisionActionCatalog.TryGetBilling("finish-stranded-decision", out var finish).Should().BeTrue();
+        DecisionActionCatalog.TryGetBilling("return-to-firm", out var returned).Should().BeTrue();
+
+        finish.Gate.Should().Be(new DecisionGateFactors(GateRiskTier.Tier4, Reversible: false, ExternallyVisible: true, RecordOfTruthImpact: true));
+        finish.Gate.Should().Be(returned.Gate, "a finished return reaches the firm, so the finish gates as return-to-firm does");
     }
 
     [Theory]
@@ -391,6 +409,9 @@ public class DecisionActionCatalogTests
     [InlineData("override-submission", "reason")]
     [InlineData("assign-firm", "firm")] // 095d-1b: the firm is required, the note is not
     [InlineData("add-line", "reason")] // 164a-2 (EB-D-198): the reason is required
+    [InlineData("add-adjustment", "method", "value", "reason")] // 095f-2b (EB-D-241): the rule and the note are optional
+    [InlineData("remove-adjustment", "adjustment")] // 095f-2b (EB-D-241): no reason (the remove route takes none); the note is optional
+    [InlineData("finish-stranded-decision", "finishedDecision", "finishedRecord", "reason")] // iss034a (EB-D-244): the operator's note is optional
     [InlineData("accept-line")]
     [InlineData("approve-invoice")]
     public void BillingActions_RequireExactlyTheStatedParameters_AReasonForEveryAdverseDecisionAndOverride(string code, params string[] required)
@@ -402,6 +423,30 @@ public class DecisionActionCatalogTests
             action.Parameters.Single(p => p.Code == "reason").Kind.Should().Be(DecisionParameterKind.TextArea);
         if (required.Contains("approvedAmount"))
             action.Parameters.Single(p => p.Code == "approvedAmount").Kind.Should().Be(DecisionParameterKind.Money);
+    }
+
+    /// <summary>ebilling-r1 095f-2a (EB-D-236; design 8, Q6): every invoice-level decision declares the optional "note" its service writes to
+    /// <c>Values["note"]</c> when a note is given. Must fire: reject-invoice and return-to-firm declared no note before 095f-2a, and
+    /// override-submission (the Override's code) none before 095f-2c, and accept-line, reduce-line and disallow-line none before 095f-2d1 (the
+    /// line decision's note, one per line's own record).</summary>
+    [Theory]
+    [InlineData("accept-line")]
+    [InlineData("reduce-line")]
+    [InlineData("disallow-line")]
+    [InlineData("approve-invoice")]
+    [InlineData("reject-invoice")]
+    [InlineData("return-to-firm")]
+    [InlineData("override-submission")]
+    [InlineData("add-adjustment")] // 095f-2b (EB-D-241)
+    [InlineData("remove-adjustment")] // 095f-2b (EB-D-241)
+    [InlineData("finish-stranded-decision")] // iss034a (EB-D-244)
+    public void InvoiceDecisions_DeclareNoteAsAnOptionalTextAreaParameter(string code)
+    {
+        DecisionActionCatalog.TryGetBilling(code, out var action).Should().BeTrue();
+
+        var note = action.Parameters.Should().ContainSingle(p => p.Code == "note").Subject;
+        note.Required.Should().BeFalse("a decision without a note is unchanged (EB-D-236)");
+        note.Kind.Should().Be(DecisionParameterKind.TextArea);
     }
 
     [Fact]

@@ -57,7 +57,7 @@ let isDark = isDarkTheme(themeParams);
 // Set body background to match detected theme — prevents white flash in dark mode
 // Uses the theme object's actual colorNeutralBackground1 value (a resolved hex/rgb string),
 // NOT tokens.* (which are CSS variable references that only work inside FluentProvider).
-const _bodyBg = (theme as Record<string, string>).colorNeutralBackground1;
+const _bodyBg = theme.colorNeutralBackground1;
 if (_bodyBg) {
   document.body.style.backgroundColor = _bodyBg;
 }
@@ -106,7 +106,7 @@ initializeAuth()
 setupThemeListener(() => {
   theme = detectTheme(themeParams);
   isDark = isDarkTheme(themeParams);
-  const _updatedBg = (theme as Record<string, string>).colorNeutralBackground1;
+  const _updatedBg = theme.colorNeutralBackground1;
   if (_updatedBg) {
     document.body.style.backgroundColor = _updatedBg;
   }

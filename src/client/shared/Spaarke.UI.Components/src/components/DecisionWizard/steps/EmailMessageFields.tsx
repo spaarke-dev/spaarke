@@ -12,7 +12,13 @@
  * - The To lookup opens the host's side-pane lookup for contacts (task 158's `openLookup`) and adds the pick by its email address;
  *   a pick with no usable address adds nothing and the step says so (a warning: type one in To); a side pane that fails to open says so the same way. Both warnings clear when the next lookup starts or To changes. Typed addresses are accepted as the
  *   composer accepts them; Next stays disabled while any address in To is not one (`stepValid`).
- * - The body is committed as plain text: a body the user switched to rich text is converted back.
+ * - The composer opens in rich text (task 197, owner 2026-11-18): the step's plain-text body is opened as paragraphs
+ *   (`plainTextToHtml`). The commit route sends the body as plain text (`BodyFormat.PlainText` in `DecisionActionExecutors` and
+ *   `BudgetInquiryExecutor`, which also appends plain link lines), so the body is committed as plain text: a body whose visible
+ *   text the user has not changed keeps the step's own value (line breaks and all), and an edited one is converted back from rich
+ *   text (`richTextToPlainText`: blocks become blank-line-separated, a link becomes `text (address)`, list items keep their
+ *   bullet or number). Formatting such as bold is not kept in this one email, and the step says so: a known limit, never raw
+ *   HTML sent as plain text.
  * - Cc and Bcc: an action that declares `cc` and `bcc` parameters (send-budget-inquiry, task 190, D-222) commits them like To
  *   (addresses joined with "; ") and the commit route sends them; the composer is their only editor. An action that does not declare
  *   them (send-reminder) keeps the warning: when the user adds any, the step says they will not be sent.
@@ -24,7 +30,7 @@ import * as React from 'react';
 import { MessageBar, MessageBarBody, makeStyles, tokens } from '@fluentui/react-components';
 import { EmailComposer } from '../../EmailComposer/EmailComposer';
 import { EMAIL_RE } from '../../EmailComposer/EmailComposer.reducer';
-import { toPlainText } from '../../EmailComposer/composeOnlyText';
+import { isUnchangedPlainBody, plainTextToHtml, richTextToPlainText } from '../../EmailComposer/composeOnlyText';
 import type { EmailComposerState, IRecipient } from '../../EmailComposer/EmailComposer.types';
 import type { AuthenticatedFetchFn } from '../../../services/EntityCreationService';
 import { fieldValue, withValue } from '../decisionDraft';
@@ -56,6 +62,17 @@ const joinAddresses = (recipients: IRecipient[]): string =>
     .filter(Boolean)
     .join('; ');
 
+/**
+ * The body as the commit route takes it: plain text. A rich-text body whose visible text is the step's own plain-text value
+ * (the editor re-serialising its paragraphs is not an edit) keeps that value; an edited one is converted back keeping what the
+ * user can see (`richTextToPlainText`): a link's address in brackets after its text, list markers, a blank line between blocks.
+ */
+function committedBody(state: Pick<EmailComposerState, 'body' | 'bodyFormat'>, current: string): string {
+  if (state.bodyFormat !== 'HTML') return state.body;
+  if (isUnchangedPlainBody(current, state.body)) return current;
+  return richTextToPlainText(state.body);
+}
+
 const useStyles = makeStyles({
   root: { display: 'flex', flexDirection: 'column', rowGap: tokens.spacingVerticalS },
 });
@@ -82,7 +99,8 @@ export const EmailMessageFields: React.FC<{ scope: StepScope; action: DecisionAc
     cc: sendsCopies ? splitAddresses(fieldValue(draft, scope, 'cc')) : [],
     bcc: sendsCopies ? splitAddresses(fieldValue(draft, scope, 'bcc')) : [],
     subject: fieldValue(draft, scope, 'subject'),
-    body: fieldValue(draft, scope, 'body'),
+    // The step's plain-text body, opened as rich-text paragraphs (task 197).
+    body: plainTextToHtml(fieldValue(draft, scope, 'body')),
   }));
 
   const onStateChange = React.useCallback(
@@ -91,7 +109,7 @@ export const EmailMessageFields: React.FC<{ scope: StepScope; action: DecisionAc
       const next: Record<string, string> = {
         to: joinAddresses(state.to),
         subject: state.subject,
-        body: toPlainText(state.body, state.bodyFormat),
+        body: committedBody(state, fieldValue(latest.current, scope, 'body')),
       };
       if (sendsCopies) {
         next.cc = joinAddresses(state.cc);
@@ -149,12 +167,15 @@ export const EmailMessageFields: React.FC<{ scope: StepScope; action: DecisionAc
         initialBcc={initial.bcc}
         initialSubject={initial.subject}
         initialBody={initial.body}
-        initialBodyFormat="PlainText"
+        initialBodyFormat="HTML"
         showAssociations={false}
         attachmentSources={[]}
         onStateChange={onStateChange}
         onLookupRecipients={onLookupRecipients}
       />
+      <MessageBar intent="info" data-testid="plain-text-note">
+        <MessageBarBody>This email is sent as plain text, so formatting such as bold is not kept.</MessageBarBody>
+      </MessageBar>
       {noAddressFor ? (
         <MessageBar intent="warning" data-testid="no-email">
           <MessageBarBody>{noAddressFor} has no email address that could be read; type one in To.</MessageBarBody>

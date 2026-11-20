@@ -113,7 +113,9 @@ describe('useDocumentActions — openInWeb', () => {
 });
 
 describe('useDocumentActions — openInDesktop', () => {
-  test('uses desktopUrl when present', async () => {
+  // ISS-004: Office files open in the Office app without leaving the page; anything else downloads through
+  // /content — never the SharePoint webUrl (a read-only user on a secure record cannot open it).
+  test('Office file: launches the Office app through a hidden iframe, without a download', async () => {
     mockedFetch.mockResolvedValueOnce(
       jsonResponse({
         webUrl: 'https://web/doc',
@@ -122,20 +124,46 @@ describe('useDocumentActions — openInDesktop', () => {
         fileName: 'a.docx',
       })
     );
+    jest.useFakeTimers();
+    try {
+      const { result } = renderHook(() => useDocumentActions({ bffBaseUrl: BFF }));
 
-    const { result } = renderHook(() => useDocumentActions({ bffBaseUrl: BFF }));
+      await act(async () => {
+        await result.current.openInDesktop('doc-1');
+      });
 
-    await act(async () => {
-      await result.current.openInDesktop('doc-1');
-    });
-
-    expect(window.open).toHaveBeenCalledWith('ms-word:ofe%7Cu%7Chttps://web/doc');
+      expect(mockedFetch).toHaveBeenCalledTimes(1); // open-links only
+      expect(window.open).not.toHaveBeenCalled();
+      expect(result.current.actionError).toBeNull();
+      // The launch: a hidden iframe whose src is the desktop URL.
+      const frame = document.querySelector('iframe');
+      expect(frame).not.toBeNull();
+      expect(frame!.getAttribute('src')).toBe('ms-word:ofe%7Cu%7Chttps://web/doc');
+      act(() => {
+        jest.runAllTimers();
+      });
+      expect(document.querySelector('iframe')).toBeNull();
+    } finally {
+      jest.useRealTimers();
+    }
   });
 
-  test('falls back to webUrl when desktopUrl missing', async () => {
-    mockedFetch.mockResolvedValueOnce(
-      jsonResponse({ webUrl: 'https://web/doc', mimeType: 'application/pdf', fileName: 'a.pdf' })
-    );
+  test('non-Office file: downloads through /content instead of opening the web view', async () => {
+    mockedFetch
+      .mockResolvedValueOnce(
+        jsonResponse({ webUrl: 'https://web/doc', mimeType: 'application/pdf', fileName: 'a.pdf' })
+      )
+      .mockResolvedValueOnce(blobResponse(null));
+    const realCreate = document.createElement.bind(document);
+    let anchor: HTMLAnchorElement | null = null;
+    jest.spyOn(document, 'createElement').mockImplementation((tag: string) => {
+      const el = realCreate(tag);
+      if (tag === 'a') {
+        (el as HTMLAnchorElement).click = jest.fn();
+        anchor = el as HTMLAnchorElement;
+      }
+      return el;
+    });
 
     const { result } = renderHook(() => useDocumentActions({ bffBaseUrl: BFF }));
 
@@ -143,7 +171,28 @@ describe('useDocumentActions — openInDesktop', () => {
       await result.current.openInDesktop('doc-1');
     });
 
-    expect(window.open).toHaveBeenCalledWith('https://web/doc', '_blank');
+    expect(mockedFetch).toHaveBeenLastCalledWith(`${BFF}/api/documents/doc-1/content`);
+    expect(window.open).not.toHaveBeenCalled();
+    expect(anchor!.download).toBe('a.pdf');
+    expect(result.current.actionError).toBeNull();
+  });
+
+  test('non-Office file: a failed download shows the desktop-app error', async () => {
+    mockedFetch
+      .mockResolvedValueOnce(
+        jsonResponse({ webUrl: 'https://web/doc', mimeType: 'application/pdf', fileName: 'a.pdf' })
+      )
+      .mockRejectedValueOnce(new ApiError('HTTP 403', 403));
+
+    const { result } = renderHook(() => useDocumentActions({ bffBaseUrl: BFF }));
+
+    await act(async () => {
+      await result.current.openInDesktop('doc-1');
+    });
+
+    expect(result.current.actionError).toBe(
+      "Couldn't open the document in the desktop app: You do not have permission to do this with this document."
+    );
   });
 });
 

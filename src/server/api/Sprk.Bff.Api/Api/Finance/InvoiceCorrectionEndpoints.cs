@@ -21,7 +21,8 @@ namespace Sprk.Bff.Api.Api.Finance;
 /// token. A correction is kept separate from Reduce (task 100): it writes a correction row and a value, never a line decision.</para>
 /// <para><b>Status codes.</b> 200 applied (<c>alreadyApplied</c> true when a repeat found everything written); 400 invalid (<c>errorCode</c>
 /// says which rule: <c>ebilling.code.not_in_set</c>, <c>ebilling.correction.field_unknown</c>, <c>field_not_applicable</c>,
-/// <c>timekeeper_mismatch</c>, <c>value_required</c>, <c>value_invalid</c>, <c>nothing_to_confirm</c>); 401; 403; 404 uniform (invoice or
+/// <c>timekeeper_mismatch</c>, <c>value_required</c>, <c>value_invalid</c>, <c>nothing_to_confirm</c>, and, for the optional note, <c>ebilling.note_too_long</c> and
+/// <c>ebilling.note_invalid_characters</c>); 401; 403; 404 uniform (invoice or
 /// line absent or unreadable); 409 (not In Review, line Pending or already decided, no recorded AI source, no code set, the line or invoice
 /// changed, <c>ebilling.invoice.totals_refused</c> when the invoice totals would be refused with the corrected value (detail: the refusal code; nothing is written),
 /// <c>ebilling.correction.too_large</c> when the line's stored extraction would exceed its column, <c>ebilling.correction.extraction_unavailable</c> when the line
@@ -52,7 +53,7 @@ public static class InvoiceCorrectionEndpoints
                 "must be in the line's resolved code set (400 ebilling.code.not_in_set). A timekeeper or date correction re-resolves the approved rate; a " +
                 "timekeeper the resolution does not match for the line is refused (400 ebilling.correction.timekeeper_mismatch). Only while the invoice is " +
                 "In Review and the line is Clean or Flagged (a code of an uncoded invoice's Pending line is the re-code path). Never changes the line's " +
-                "approved amount or decision; its status follows the re-evaluation. Repeating the request writes no second row.")
+                "approved amount or decision; its status follows the re-evaluation. Repeating the request writes no second row. An optional note (at most 2000 characters; 400 ebilling.note_too_long or ebilling.note_invalid_characters) is stored on the correction row this call creates; a call that finds that row already written keeps the first note (or none).")
             .Produces<CorrectionResponse>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
@@ -71,7 +72,7 @@ public static class InvoiceCorrectionEndpoints
             .WithDescription(
                 "Fields: FirmInvoiceNumber, InvoiceDate, BillingPeriodStart, BillingPeriodEnd, Currency, TotalDue. Send a value, or confirm to keep the value as " +
                 "read. Writes one Corrected or Confirmed individually row and updates the invoice. " +
-                "Only while the invoice is In Review. Repeating the request writes no second row.")
+                "Only while the invoice is In Review. Repeating the request writes no second row. An optional note (at most 2000 characters; 400 ebilling.note_too_long or ebilling.note_invalid_characters) is stored on the correction row this call creates; a call that finds that row already written keeps the first note (or none).")
             .Produces<CorrectionResponse>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
@@ -112,7 +113,7 @@ public static class InvoiceCorrectionEndpoints
             return ReviewerUnresolved(httpContext);
         }
 
-        var result = await service.CorrectAsync(new CorrectionCommand(invoiceId, lineId, body.Field, body.Value, body.Confirm, reviewer), ct);
+        var result = await service.CorrectAsync(new CorrectionCommand(invoiceId, lineId, body.Field, body.Value, body.Confirm, reviewer, body.Note), ct);
         return ToResult(result, httpContext);
     }
 
@@ -129,7 +130,7 @@ public static class InvoiceCorrectionEndpoints
             return ReviewerUnresolved(httpContext);
         }
 
-        var result = await service.CorrectAsync(new CorrectionCommand(invoiceId, null, body.Field, body.Value, body.Confirm, reviewer), ct);
+        var result = await service.CorrectAsync(new CorrectionCommand(invoiceId, null, body.Field, body.Value, body.Confirm, reviewer, body.Note), ct);
         return ToResult(result, httpContext);
     }
 
@@ -183,8 +184,11 @@ public static class InvoiceCorrectionEndpoints
 /// <summary>
 /// Body of both correction routes: the field (<c>Hours</c>, <c>Amount</c>, <c>TaskCode</c>, <c>TotalDue</c> and so on) and either the final
 /// <c>value</c> as text or <c>confirm</c> true to keep the value as read. There is no outcome, role or reviewer in the body.
+/// Task 095f-2d2 (EB-D-242): an optional <c>note</c> (at most 2000 characters, no control character other than newline, carriage return and tab) is stored on the
+/// correction row this request creates; a blank note is no note, an over-long one is 400 <c>ebilling.note_too_long</c> and one with a refused
+/// control character is 400 <c>ebilling.note_invalid_characters</c>. A call that finds the row already written (the latest Corrected or Confirmed row holds the requested final value, even when the line value is rewritten in that call) writes no row and stores no note; the first note (or none) stays.
 /// </summary>
-public sealed record CorrectionRequest(string? Field, string? Value, bool Confirm = false);
+public sealed record CorrectionRequest(string? Field, string? Value, bool Confirm = false, string? Note = null);
 
 /// <summary>200 body of a correction: the correction row (the one written, or the existing one when the repeat found it) and whether everything was already in place.</summary>
 public sealed record CorrectionResponse(CorrectionDto Correction, bool AlreadyApplied);
