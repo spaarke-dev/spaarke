@@ -1,0 +1,110 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="132ui" project="ebilling-r1">
+  <metadata>
+    <title>Invoice Review notify step: see, edit and confirm the 131 notice before Reject / Return</title>
+    <phase>5 Firm feedback (WP5)</phase>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+    <parallel-safe>true</parallel-safe>
+    <tags>frontend, react, fluent-ui, code-page, ebilling</tags>
+    <dependencies>132 (on master fe51619cfc), 131 (Action seeded on dev 2026-11-19)</dependencies>
+    <source>EB-D-258 (notes/decisions-log.md); notes/132-ebilling-notifications.md (owner question 2: "confirm 132ui covers both routes")</source>
+  </metadata>
+
+  <goal>
+    On an In Review invoice, a reviewer who chooses Reject or Return to firm in the decision wizard sees the drafted notice to the firm,
+    may edit its subject and prose, and sends it with the decision. The server already does everything else (132): it screens the
+    confirmed notice before deciding, sends the email only when the request carries the notice, and stores the sent text. This task is
+    client-only (src/solutions/InvoiceReview); no server, schema or shared-library change.
+  </goal>
+
+  <server-contract>
+    <item>Draft: POST /api/finance/invoices/{invoiceId}/firm-notice/draft?kind=InvoiceRejected|ReturnedToFirm (no body). 200 FirmNoticeDraftResponse
+      { kind, subject, prose, html, source ("Action" | "Template"), actionVersion, fallbackReason }. 400 ebilling.firm-notice.invalid_kind;
+      404 uniform; 409 ebilling.firm-notice.not_applicable; 429 (rate limit "ai-batch", 20 per minute per user); 503 ebilling.disabled or
+      ebilling.firm-notice.unavailable. Nothing is stored or sent. Source: Api/Finance/FirmNoticeEndpoints.cs.</item>
+    <item>Decide: POST .../reject and .../return take InvoiceDecisionRequest { reason, note?, noticeSubject?, noticeProse? }
+      (Api/Finance/InvoiceRejectReturnEndpoints.cs:168). When either notice part is non-blank the server screens both BEFORE deciding
+      (FirmNoticeProse.ScreenConfirmed): a refusal is 400 ebilling.notice_refused with the reason code in the detail, and nothing is decided.
+      With neither part, the decision stands and no firm email is sent (feed and status only).</item>
+    <item>Limits (Services/Finance/FirmNoticeComposer.cs, FirmNoticeProse): subject 120 characters after the code-written tracking suffix is
+      removed (the route accepts up to 280 with the suffix); prose 1500 characters. The prose may not contain digits, currency, links, number
+      words or numbered line references; the table, amounts and clause quotes are added by code, never typed.</item>
+  </server-contract>
+
+  <steps mode="directional">
+    <step n="1">Replace the empty notifyStep slot with a built-in Notify step in components/decision (steps.tsx or a new NotifyStep file),
+      shown on the Reject and Return paths when the wizard is editable (not on Approve, not read-only). Remove the slot prop chain
+      (InvoiceReviewWithDecisions → DecideInvoiceAction → InvoiceDecisionWizard) if nothing else uses it, and replace the slot test
+      (InvoiceDecisions.test.tsx "shows a supplied notify step…") with tests of the built-in step.</step>
+    <step n="2">The step fetches the draft for the chosen outcome (reject → InvoiceRejected, return → ReturnedToFirm) when it is first shown,
+      once per kind per opened wizard; switching outcome keeps each kind's draft and edits apart. Add the draft call to services/decisionApi.ts
+      (same authenticatedFetch / ApiResult pattern as the other calls).</step>
+    <step n="3">Show: an editable Subject field and an editable Message field (prose) with n / limit counters; a line saying where the text came
+      from (AI draft, or the standard wording when the AI was unavailable); a short note that the findings table, amounts and clause quotes are
+      added by Spaarke and are not editable; a "Restore draft" action. The HTML preview, if shown, is rendered only in a sandboxed iframe
+      (srcdoc, sandbox with no allowances), never with dangerouslySetInnerHTML, and is labelled as the drafted version (edits are not reflected).</step>
+    <step n="4">Sending is explicit: the step has a "Send this notice to the firm" choice, on by default once a draft loaded. Skip, or turning it
+      off, sends the decision without a notice; the Confirm step then says plainly that the firm gets no email. A blank subject or prose with
+      sending on blocks Next with a field message. A draft that failed to load (any non-200) shows the server's message and code, offers Retry,
+      and lets the reviewer continue without a notice (never blocks the decision).</step>
+    <step n="5">Pass noticeSubject and noticeProse (trimmed) with reject / returnToFirm when sending is on. A 400 ebilling.notice_refused is shown
+      under the notice fields (like isNoteRefusal for the note), the wizard returns to or stays reachable at the Notify step, and nothing else
+      changes. A decision that came back unsure locks the notice with the reason and note (decisionLocks / locks.set('wizard', …) must carry the
+      notice and the send choice) so the repeat is the same request.</step>
+    <step n="6">Tests in src/__tests__ (existing InvoiceDecisions.test.tsx patterns, mockDecisionApi): one per acceptance criterion below,
+      including the negative ones. Run the package's tests, tsc and client-lint for the touched files.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion id="AC1">Reject and Return each show the Notify step after Reason; Approve and a read-only (decided) wizard never show it.</criterion>
+    <criterion id="AC2">The draft is requested with the kind matching the outcome, at most once per kind per opened wizard (no request on Approve,
+      none before the step is shown); edits to one kind survive switching outcome and back.</criterion>
+    <criterion id="AC3">With sending on, the reject / return request carries exactly the edited, trimmed subject and prose; with sending off or the
+      step skipped, it carries neither field (no empty strings).</criterion>
+    <criterion id="AC4">The Confirm step states whether the firm will be emailed this notice or gets no email.</criterion>
+    <criterion id="AC5">A 400 ebilling.notice_refused shows the refusal under the notice fields; the decision is not shown as made; the reviewer can
+      edit and finish again.</criterion>
+    <criterion id="AC6">A failed draft (409, 429, 503, network) shows the message and code with Retry, and the reviewer can still finish without a
+      notice; nothing is sent with a half-loaded draft.</criterion>
+    <criterion id="AC7">Subject over 120 or prose over 1500 characters, or blank with sending on, holds Next with a field message; nothing is cut off
+      silently.</criterion>
+    <criterion id="AC8">A decision that came back unsure reopens with the same reason, note, notice and send choice, locked.</criterion>
+    <criterion id="AC9">No dangerouslySetInnerHTML anywhere in the change; any preview uses a sandboxed iframe with no allowances.</criterion>
+    <criterion id="AC10">Existing decision-wizard tests still pass; tsc and client-lint clean for touched files.</criterion>
+  </acceptance-criteria>
+
+  <constraints>
+    <constraint source="ADR-002">Nothing is computed or decided client-side; the server screens and decides. The client limits are hints that
+      mirror the server's caps; the server stays the authority.</constraint>
+    <constraint source="ADR-021">Fluent UI v9 only, semantic tokens, dark mode.</constraint>
+    <constraint source="ADR-028">Calls go through the existing authenticated decision API client; no raw fetch with headers.</constraint>
+    <constraint source="ADR-050 / D-58">The step lives in the existing WizardShell; no new modal.</constraint>
+    <constraint>Do not change the server, the shared library (@spaarke/ui-components) or the external SPA.</constraint>
+  </constraints>
+
+  <out-of-scope>
+    <item>Showing the sent notice on a decided invoice (read-only wizard, History tab): the internal view is not asked for; the firm view is 130g.</item>
+    <item>System rejections (SubmissionRejected) and Approved with adjustments: the server sends the composed draft unchanged (EB-D-258).</item>
+    <item>The blocked-submission Override / Return (FormModal) path: no notice in R1.</item>
+    <item>Deploying the page to dev: a separate step with the owner's OK (code-page-deploy).</item>
+  </out-of-scope>
+
+  <knowledge>
+    <files>
+      <file>projects/ebilling-r1/notes/132-ebilling-notifications.md</file>
+      <file>projects/ebilling-r1/notes/131-firm-notice-action.md</file>
+      <file>src/solutions/InvoiceReview/src/components/decision/InvoiceDecisionWizard.tsx</file>
+      <file>src/solutions/InvoiceReview/src/components/decision/steps.tsx</file>
+      <file>src/solutions/InvoiceReview/src/components/decision/wizardContext.ts</file>
+      <file>src/solutions/InvoiceReview/src/components/decision/decisionLocks.ts</file>
+      <file>src/solutions/InvoiceReview/src/services/decisionApi.ts</file>
+      <file>src/solutions/InvoiceReview/src/services/noteModel.ts</file>
+      <file>src/solutions/InvoiceReview/src/__tests__/InvoiceDecisions.test.tsx</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Finance/FirmNoticeEndpoints.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Finance/InvoiceRejectReturnEndpoints.cs</file>
+    </files>
+  </knowledge>
+</task>
