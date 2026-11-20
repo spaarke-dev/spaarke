@@ -124,7 +124,7 @@ These states are hard to cause by hand; they need a fault during a decision. If 
 
 ## M. Notifications (task 132): ready to test on dev (BFF 5ae2804884 live ~02:01Z 2026-11-19; firm notice Action seeded ~02:05Z)
 
-Firm emails come from the shared mailbox; the Invoice Review "notify" step (132ui) is not built yet, so Reject / Return emails only go when a reviewer-confirmed notice exists.
+Firm emails come from the shared mailbox. Reject and Return emails go only when the reviewer confirms a notice. The step that does that is built (132ui) but is not on dev until the Invoice Review page is redeployed (see M2).
 - [ ] Submit an invoice that the checks reject. The submitter (and the firm's billing contact, if they can open that matter) gets one email with the findings table in the body.
 - [ ] Approve an invoice with an adjustment. The same two people get one email; approving with no adjustment sends none.
 - [ ] A billing contact who has no access to a secure matter gets no email for that matter's invoice.
@@ -132,6 +132,16 @@ Firm emails come from the shared mailbox; the Invoice Review "notify" step (132u
 - [ ] Approvers get one in-app notification "Invoice ready for your review" per invoice; non-approvers get none.
 - [ ] With eBilling switched off, the portal bell shows no billing items.
 - [ ] The "notice text" field is locked (applied to dev 2026-11-17, ready to test now). As a non-admin user, the submission form shows the field masked (\*\*\*\*\*) and you can't edit it. It disappears from the form once the SpaarkeMaster release with task 132's form change is imported.
+
+### M2. Notice to the firm on Reject / Return (task 132ui): after the Invoice Review page is redeployed to dev (your OK)
+
+On an In Review invoice, choose Decide → Reject or Return to firm, give a reason, then Next:
+- [ ] A **Notify firm** step shows the drafted subject and message, and says whether the AI wrote it or the standard wording was used. Approve never shows this step.
+- [ ] Edit the message and finish. The firm's email carries your edited text plus the findings table, which Spaarke adds.
+- [ ] Type a figure or an amount into the message (for example "$500" or "two lines"). Finishing is refused with a message under the notice, and nothing is decided. Remove it and finish again.
+- [ ] Turn "Send this notice to the firm" off, or Skip the step. The Confirm step says the firm gets no email, and none is sent. The decision is still recorded.
+- [ ] Switch between Reject and Return. Each keeps its own draft and edits.
+- [ ] "Restore draft" puts back the drafted text.
 
 ## N. Billing Guidelines in the external portal (task 135): the dev BFF carries it (5ae2804884); test after spa-r4 deploys the external SPA
 

@@ -3,7 +3,7 @@
   <metadata>
     <title>Invoice Review notify step: see, edit and confirm the 131 notice before Reject / Return</title>
     <phase>5 Firm feedback (WP5)</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <model-tier>sonnet</model-tier>
     <effort>high</effort>
@@ -107,4 +107,13 @@
       <file>src/server/api/Sprk.Bff.Api/Api/Finance/InvoiceRejectReturnEndpoints.cs</file>
     </files>
   </knowledge>
+  <notes>
+    Completed 2026-11-20, merged into work 04718b3224 (branch task/ebilling-132ui, tip 1e1e2db3b3). Built-in Notify step on Reject / Return; the
+    banner repeat of a stranded decision carries the locked notice. Opus adversarial review: F1 banner repeat dropped the notice, F1 stale
+    refusal message, F1 false over-limit on a locked subject (fixed in round 1, with K2 HTTP tag and K4 aria fixes); coordinator re-check F1
+    locked repeat stuck after notice_refused (fixed in round 2). Out of scope, filed: ISS-041 #2930 (after a page reload a stranded reject or
+    return cannot carry the notice, so the firm gets no email). Known limits: notes/132ui-notify-step.md. 632 package tests pass; typecheck
+    clean; InvoiceReview is outside client-lint (ISS-015).
+    rework: fix-round-2 task 132ui
+  </notes>
 </task>
