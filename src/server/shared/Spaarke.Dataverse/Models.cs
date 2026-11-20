@@ -1001,7 +1001,11 @@ public sealed record TableAuditMetadata(int? ObjectTypeCode, bool? IsAuditEnable
 /// <param name="ReferencingEntity">The child table (logical name).</param>
 /// <param name="Assign">The relationship's Assign cascade as its metadata states it (<c>Cascade</c>, <c>Active</c>,
 /// <c>UserOwned</c>, ...); <c>null</c> when the metadata does not state it.</param>
-public sealed record AssignCascadeRelationship(string SchemaName, string ReferencingEntity, string? Assign);
+/// <param name="ReferencingAttribute">The child table's lookup column that holds the parent (logical name), from the same
+/// metadata read; <c>null</c> when the metadata does not state it. Field-mapping-server-write-path-r1 task 052f: Repair reads a
+/// row's children along this column, and a relationship without it is read as unknown, never as "no children".</param>
+public sealed record AssignCascadeRelationship(
+    string SchemaName, string ReferencingEntity, string? Assign, string? ReferencingAttribute = null);
 
 /// <summary>
 /// Analysis entity model (sprk_analysis)

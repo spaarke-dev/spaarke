@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="049b" project="field-mapping-server-write-path-r1">
+  <metadata>
+    <title>Create path: when the maker is the root's Assigned To, grant only the maker inline and queue the other subjects (UAC-r2 ruling 2026-11-06)</title>
+    <phase>2 W2 Unified RecordCreationService (follow-up)</phase>
+    <gate>049 on master.</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Changes when assigned access is granted on every create through RecordCreationService (.cs, bff-api); authorization-adjacent.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Grant ordering and idempotency across the inline pass and the queued full pass.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits RecordCreationService, which 049c also edits.</parallel-reason>
+    <deps>049</deps>
+    <tags>bff-api, performance, security, testing</tags>
+    <estimated-effort>1 session</estimated-effort>
+  </metadata>
+
+  <prompt>Backfilled record (2026-11-19): 049b ran from the UAC-r2 ruling in notes/decisions.md ("049b: only the maker is granted inside the request") before a task file was written. The design, conditions, fix rounds and gate results are in notes/task-049b-notes.md. This file exists so the task index and the task files describe the same set of tasks.</prompt>
+  <role>SPAARKE platform developer, BFF write path. Security fails closed.</role>
+  <goal>When the maker is the root's Assigned To, the maker's access is granted inside the create request and every other subject is granted by the existing queued full pass, with the same end state as before.</goal>
+
+  <acceptance-criteria>
+    <criterion testable="true">AC1: the maker's subject is evaluated inline; the ended-assignment loop is skipped for that one-subject pass, so it never revokes.</criterion>
+    <criterion testable="true">AC2: the full pass is queued after the inline pass and writes nothing for the maker (idempotent).</criterion>
+    <criterion testable="true">AC3: the non-maker case is unchanged.</criterion>
+  </acceptance-criteria>
+
+  <notes>Completed 2026-11-07: on master via #2619 (d53d67f604). Details: notes/task-049b-notes.md. This POML was written afterwards, on 2026-11-19, because the index row had no task file.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>
