@@ -1438,6 +1438,9 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
       // Task 084: a record the caller cannot file to is never selected, whatever path asked for it. The
       // picker already offers no way to select one; this is the pane-level backstop.
       if (entity?.canFile === false) return;
+      // Task 133 slice C: Save files to Matter/Project only. The hook ignores any other type; returning here as well
+      // keeps the screen reader from announcing a selection that did not happen.
+      if (entity && !isSaveTargetType(entity.entityType)) return;
       setSelectedEntity(entity);
       if (entity) {
         announce(`Selected ${entity.entityType}: ${entity.name}`, 'polite');

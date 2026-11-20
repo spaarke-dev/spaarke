@@ -131,6 +131,51 @@ describe('fetchEnginePreSelection', () => {
     expect(result?.predicted.id).toBe('11111111-1111-1111-1111-111111111111');
   });
 
+  it('task 133 slice C must-fire: an Invoice prediction is no prediction — the ribbon Quick Save saves unfiled', async () => {
+    const invoiceId = '44444444-4444-4444-4444-444444444444';
+    mockGet.mockResolvedValueOnce(
+      matterSuggestion({
+        candidates: [
+          {
+            field: 'sprk_regardinginvoice',
+            targetEntity: 'sprk_invoice',
+            targetId: invoiceId,
+            reinforcedConfidence: 0.95,
+            deterministicConfidence: 0.95,
+            written: false,
+            conflict: false,
+            contributors: [
+              { rung: 'IdentifierReverseLookup', confidence: 0.95, provenance: 'identifier:sprk_invoice' },
+            ],
+          },
+        ],
+      })
+    );
+
+    expect(await fetchEnginePreSelection('<invoice@contoso.com>')).toBeNull();
+    // The same response's candidate is still READ as an Invoice (cards, readers): only the save prediction drops it.
+    mockGet.mockResolvedValueOnce(
+      matterSuggestion({
+        candidates: [
+          {
+            field: 'sprk_regardinginvoice',
+            targetEntity: 'sprk_invoice',
+            targetId: invoiceId,
+            reinforcedConfidence: 0.95,
+            deterministicConfidence: 0.95,
+            written: false,
+            conflict: false,
+            contributors: [
+              { rung: 'IdentifierReverseLookup', confidence: 0.95, provenance: 'identifier:sprk_invoice' },
+            ],
+          },
+        ],
+      })
+    );
+    const related = await fetchRelatedCandidates('<invoice@contoso.com>');
+    expect(related.map(r => r.entityType)).toEqual(['Invoice']);
+  });
+
   it('returns null (no pre-selection) when the email is not captured (404)', async () => {
     mockGet.mockRejectedValueOnce(new ApiClientError({ type: 'about:blank', title: 'Not Found', status: 404 }));
 
