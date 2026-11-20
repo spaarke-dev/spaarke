@@ -901,6 +901,14 @@ Not verified without a live environment:
   - Nothing written. The review list was kept out of the repo.
   - `-Apply` would write nothing. Its go is still the owner's, with `-Verify` after.
 - **dev, Stamp `-Apply` then `-Verify`, 2026-11-20** (owner go in this session). `-Apply`: exit 0, 0 rows stamped (the same 3 rows listed `no_sentby`). `-Verify`: exit 0, "PASS (no row would stamp; 3 on the manual-review list)", with the precondition OK again. Step 4 of the deploy order is done on dev; Move (step 6) is next, after its own dry run and the owner's go.
+- **dev, Move `-DryRun`, 2026-11-20** (after UAC-r2 confirmed piece 3 and 198 are live: piece 3's merges are ancestors of master fe51619cfc in dev build 5ae2804884; both `DirectMessage:*` settings live since 04:41Z).
+  - The precondition was OK. Direct team check OK: a direct child of the root, no members, no users, not Secure Record.
+  - **First run: refused (exit 1), as designed.** The one Assign-cascading relationship found, `sprk_document -> team.regardingobjectid` (Cascade), was not accepted. Nothing was selected.
+  - **Second run, with `-AcceptedAssignCascade team` (read-only): exit 0.**
+    - `sharetopreviousowneronassign` = false.
+    - 3 Direct messages selected, **0 to move**, review `no_valid_pair` 3: the same 3 rows, which have no sender.
+  - Accepting `->team` matches the owner-approved 052e class "Moves nothing": a team has no owner columns. Accepting it for `-Apply` is the owner's decision.
+  - L16 note: no message on dev holds a valid pair and is still user-owned, so the owner grant (`GrantAccess` body shape) cannot be exercised here without seeding a row. It fails safe: a wrong shape lists the message `participant_grant_unconfirmed`, and the message does not move.
 
 ## 054a piece 3 — the Direct owner rule (3a, 3b, 3c)
 
