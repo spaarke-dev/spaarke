@@ -9,6 +9,8 @@
  *             POST /api/finance/invoices/{id}/adjustments                  add an adjustment (method, value, reason, rule; the server computes the amount)
  *             DELETE /api/finance/invoices/{id}/adjustments/{lineId}       remove one
  *   Task 104  POST /api/finance/invoices/{id}/reject | /return             reject / return to firm (a reason is required)
+ *   Task 132ui POST /api/finance/invoices/{id}/firm-notice/draft?kind=     the drafted notice to the firm (nothing stored or sent); a reject or return carries the
+ *                                                                          reviewer-confirmed noticeSubject / noticeProse, or neither (no firm email)
  *   Task 105  GET  /api/finance/submissions/{id}/blocked                   the blocked internal submission: findings, canOverride, canReturn
  *             POST /api/finance/submissions/{id}/override | /return        override (privilege + reason) / return (reason)
  *   Task 106  GET  /api/finance/invoices/{id}/context                      five independent sections, each available / unavailable / notTracked
@@ -160,6 +162,32 @@ export interface AdjustmentResponse {
   removedLineId: string | null;
   totals: { billed: number | null; fees: number | null; expenses: number | null; lineAdjustments: number | null; invoiceAdjustments: number | null; approved: number | null } | null;
   alreadyApplied: boolean;
+}
+
+// Firm notice (131 draft route, 132 decide routes)
+
+/** The kind the draft route is asked for: Reject asks `InvoiceRejected`, Return to firm asks `ReturnedToFirm` (exact names; the server refuses any other word). */
+export type FirmNoticeKind = 'InvoiceRejected' | 'ReturnedToFirm';
+
+/** 200 body of `POST /api/finance/invoices/{id}/firm-notice/draft` (`FirmNoticeDraftResponse`). `html` is the server's preview of the whole notice; this page does not render it. */
+export interface FirmNoticeDraft {
+  kind: string;
+  /** The subject line; the invoice's tracking number is appended by code (` (tracking)`). */
+  subject: string;
+  /** The editable plain-text prose. */
+  prose: string;
+  html: string;
+  /** `Action` (the AI drafted it) or `Template` (the fixed wording: the AI was unavailable, off, or its text failed the checks). */
+  source: 'Action' | 'Template' | string;
+  actionVersion: string | null;
+  /** A stable code, set only when `source` is `Template`. */
+  fallbackReason: string | null;
+}
+
+/** The reviewer-confirmed notice a reject or return carries (`noticeSubject` and `noticeProse` on the wire). */
+export interface FirmNotice {
+  subject: string;
+  prose: string;
 }
 
 // Blocked submission (105)
@@ -522,8 +550,11 @@ export function decisionFailureMessage(f: ApiFailure): string {
 export interface InvoiceDecisionApi {
   getApproval(invoiceId: string): Promise<ApiResult<ApprovalState>>;
   approve(invoiceId: string, note?: string): Promise<ApiResult<ApproveResponse>>;
-  reject(invoiceId: string, reason: string, note?: string): Promise<ApiResult<DecisionResponse>>;
-  returnToFirm(invoiceId: string, reason: string, note?: string): Promise<ApiResult<DecisionResponse>>;
+  /** Task 132ui: `notice` is the reviewer-confirmed firm notice; absent, the decision stands and no firm email is sent. */
+  reject(invoiceId: string, reason: string, note?: string, notice?: FirmNotice): Promise<ApiResult<DecisionResponse>>;
+  returnToFirm(invoiceId: string, reason: string, note?: string, notice?: FirmNotice): Promise<ApiResult<DecisionResponse>>;
+  /** Task 132ui: the drafted notice for the chosen outcome. Nothing is stored or sent. */
+  getFirmNoticeDraft(invoiceId: string, kind: FirmNoticeKind): Promise<ApiResult<FirmNoticeDraft>>;
   listAdjustmentRules(invoiceId: string): Promise<ApiResult<AdjustmentRulesResponse>>;
   addAdjustment(invoiceId: string, request: AddAdjustmentRequest): Promise<ApiResult<AdjustmentResponse>>;
   removeAdjustment(invoiceId: string, lineId: string, note?: string): Promise<ApiResult<AdjustmentResponse>>;
@@ -552,6 +583,8 @@ export const decisionRoutes = {
   approve: (base: string, invoiceId: string) => `${trimBase(base)}/api/finance/invoices/${id(invoiceId)}/approve`,
   reject: (base: string, invoiceId: string) => `${trimBase(base)}/api/finance/invoices/${id(invoiceId)}/reject`,
   returnToFirm: (base: string, invoiceId: string) => `${trimBase(base)}/api/finance/invoices/${id(invoiceId)}/return`,
+  firmNoticeDraft: (base: string, invoiceId: string, kind: FirmNoticeKind) =>
+    `${trimBase(base)}/api/finance/invoices/${id(invoiceId)}/firm-notice/draft?kind=${encodeURIComponent(kind)}`,
   adjustmentRules: (base: string, invoiceId: string) => `${trimBase(base)}/api/finance/invoices/${id(invoiceId)}/adjustment-rules`,
   adjustments: (base: string, invoiceId: string) => `${trimBase(base)}/api/finance/invoices/${id(invoiceId)}/adjustments`,
   adjustment: (base: string, invoiceId: string, lineId: string) =>
@@ -577,6 +610,16 @@ const unexpected = (what: string): ApiFailure => ({
 
 const isObject = (b: unknown): b is Record<string, unknown> => !!b && typeof b === 'object';
 
+/**
+ * The request body members for a firm notice: `{ noticeSubject, noticeProse }` (both trimmed) when BOTH parts have text, else nothing, so the keys
+ * are absent from the JSON (never empty strings: the server screens the notice when either part is non-blank, and sends no firm email with neither).
+ */
+function noticeMembers(notice: FirmNotice | undefined): { noticeSubject?: string; noticeProse?: string } {
+  const subject = notice?.subject.trim() ?? '';
+  const prose = notice?.prose.trim() ?? '';
+  return subject !== '' && prose !== '' ? { noticeSubject: subject, noticeProse: prose } : {};
+}
+
 export function createInvoiceDecisionApi(fetchFn: AuthenticatedFetchFn, bffBaseUrl: string): InvoiceDecisionApi {
   /** One call; a body that does not pass `valid` is a failure, never an empty answer. */
   async function call<T>(url: string, method: 'GET' | 'POST' | 'DELETE', body: unknown, valid: (b: unknown) => boolean, what: string): Promise<ApiResult<T>> {
@@ -595,10 +638,18 @@ export function createInvoiceDecisionApi(fetchFn: AuthenticatedFetchFn, bffBaseU
     getApproval: invoiceId =>
       call(decisionRoutes.approval(bffBaseUrl, invoiceId), 'GET', null, b => isObject(b) && typeof b.status === 'string' && Array.isArray(b.eligibleApprovers), 'approval body'),
     approve: (invoiceId, note) => call(decisionRoutes.approve(bffBaseUrl, invoiceId), 'POST', { ...noteMember(note) }, b => isObject(b) && typeof b.outcome === 'string', 'approve body'),
-    reject: (invoiceId, reason, note) =>
-      call(decisionRoutes.reject(bffBaseUrl, invoiceId), 'POST', { reason, ...noteMember(note) },b => isObject(b) && typeof b.outcome === 'string', 'decision body'),
-    returnToFirm: (invoiceId, reason, note) =>
-      call(decisionRoutes.returnToFirm(bffBaseUrl, invoiceId), 'POST', { reason, ...noteMember(note) },b => isObject(b) && typeof b.outcome === 'string', 'decision body'),
+    reject: (invoiceId, reason, note, notice) =>
+      call(decisionRoutes.reject(bffBaseUrl, invoiceId), 'POST', { reason, ...noteMember(note), ...noticeMembers(notice) }, b => isObject(b) && typeof b.outcome === 'string', 'decision body'),
+    returnToFirm: (invoiceId, reason, note, notice) =>
+      call(decisionRoutes.returnToFirm(bffBaseUrl, invoiceId), 'POST', { reason, ...noteMember(note), ...noticeMembers(notice) }, b => isObject(b) && typeof b.outcome === 'string', 'decision body'),
+    getFirmNoticeDraft: (invoiceId, kind) =>
+      call(
+        decisionRoutes.firmNoticeDraft(bffBaseUrl, invoiceId, kind),
+        'POST',
+        null,
+        b => isObject(b) && typeof b.subject === 'string' && typeof b.prose === 'string' && typeof b.source === 'string',
+        'firm notice draft body'
+      ),
     listAdjustmentRules: invoiceId =>
       call(decisionRoutes.adjustmentRules(bffBaseUrl, invoiceId), 'GET', null, b => isObject(b) && Array.isArray(b.rules), 'adjustment rules body'),
     addAdjustment: (invoiceId, r) =>
