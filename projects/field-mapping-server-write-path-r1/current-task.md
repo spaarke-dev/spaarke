@@ -31,7 +31,7 @@
 3. Direct setup + the two `DirectMessage:*` settings (owner go in uac-r2's session), only after 054b `-Verify` exits 0 there. **Binding:** the settings stay unset on an environment until then. DI-026 (#2701) check before the settings go live. **Done on dev 2026-11-20 (uac-r2):** DI-026 read found 0 messages with `sprk_directrecipient`; unit 'Spaarke Direct Messages' and team 'Spaarke Direct Message Owners' created and verified; `Set-ThreadFlagFieldSecurity.ps1 -Verify` PASS; both settings set 04:41:01Z; BFF build 5ae2804884 restarted clean.
 4. 054c Stamp (dry run → owner go → `-Apply` → `-Verify`). **Dry run on dev 2026-11-20: exit 0; 3 selected, 0 to stamp, review `no_sentby` 3** (`notes/task-054-notes.md` "Live runs"). **Done on dev 2026-11-20 (owner go):** `-Apply` stamped 0; `-Verify` PASS.
 5. Piece 3 takes effect once the settings are set.
-6. 054c Move (`-DirectShareJobLive`; first run scoped to one `FMSWP-` message, L16).
+6. 054c Move (`-DirectShareJobLive`; first run scoped to one `FMSWP-` message, L16). **Done on dev 2026-11-20 (owner go, `-AcceptedAssignCascade team`):** scoped `-Apply` moved 0; unscoped `-Verify` PASS; 3 `no_valid_pair` rows on review. The `GrantAccess` shape (L16) is still not exercised live.
 
 After every SpaarkeMaster import on an environment where 054b is applied: `Set-ThreadFlagFieldSecurity.ps1 -Verify`, and `-Apply` if it fails. **Assign invariant:** a message moves to the Direct team only with a valid stamped pair. Details: `notes/task-054-notes.md`.
 

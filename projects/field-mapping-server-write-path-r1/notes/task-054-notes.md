@@ -909,6 +909,11 @@ Not verified without a live environment:
     - 3 Direct messages selected, **0 to move**, review `no_valid_pair` 3: the same 3 rows, which have no sender.
   - Accepting `->team` matches the owner-approved 052e class "Moves nothing": a team has no owner columns. Accepting it for `-Apply` is the owner's decision.
   - L16 note: no message on dev holds a valid pair and is still user-owned, so the owner grant (`GrantAccess` body shape) cannot be exercised here without seeding a row. It fails safe: a wrong shape lists the message `participant_grant_unconfirmed`, and the message does not move.
+- **dev, Move `-Apply` then `-Verify`, 2026-11-20** (owner go in this session, including accepting `-AcceptedAssignCascade team`).
+  - **`-Apply`:** scoped `-NamePrefix FMSWP-` per L16, with `-DirectShareJobLive`. Exit 0. 0 messages selected, 0 rows moved, review none.
+  - **`-Verify`, unscoped:** exit 0. "PASS (every valid-pair Direct message and its content rows are on the Direct team, and every enabled participant of a Direct-owned message holds Read on it; 3 on the manual-review list)". Precondition and Direct team checks OK.
+  - **Step 6 of the deploy order is done on dev.** The 3 `no_valid_pair` rows keep their owner.
+  - Still open: the `GrantAccess` body shape (L16), not exercised live. The first environment with a user-owned valid-pair message runs its scoped `-Apply` on one `FMSWP-` message first, as the rule says.
 
 ## 054a piece 3 — the Direct owner rule (3a, 3b, 3c)
 
