@@ -793,8 +793,8 @@ public sealed class CommunicationEnrichmentService : ICommunicationEnrichmentSer
     /// resolver files children under (<see cref="Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext.ParentsOf"/>,
     /// the resolver's own definition, read over every column: no per-table column list) — or when the row cannot be
     /// read at all (fail closed: an unknown filing is never routed). Task 146 r2. b2: also the row's
-    /// <c>versionnumber</c> at that read — the routed owner write is conditional on it; a row whose version cannot be
-    /// read is treated as unreadable (never routed).
+    /// version at that read (<see cref="VersionOf"/>) — the routed owner write is conditional on it; a row whose version
+    /// cannot be read is treated as unreadable (never routed).
     /// </summary>
     private async Task<(bool FiledOrUnreadable, long Version)> IsFiledOrUnreadableAsync(Guid communicationId, CancellationToken ct)
     {
@@ -806,11 +806,23 @@ public sealed class CommunicationEnrichmentService : ICommunicationEnrichmentSer
         query.Criteria.AddCondition("sprk_communicationid", ConditionOperator.Equal, communicationId);
 
         var row = (await _genericEntityService.RetrieveMultipleAsync(query, ct).ConfigureAwait(false)).Entities.FirstOrDefault();
-        if (row is null || row.GetAttributeValue<long?>("versionnumber") is not { } version)
+        if (row is null || VersionOf(row) is not { } version)
             return (true, 0);
 
         return (Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext.ParentsOf(row).Count > 0, version);
     }
+
+    /// <summary>
+    /// The version a row was read at: the <c>versionnumber</c> attribute when the read carries it, else <see cref="Entity.RowVersion"/>,
+    /// where the Dataverse ServiceClient returns it on a <c>ColumnSet(true)</c> read (#2919). <c>null</c> when neither is there, which
+    /// leaves the row unrouted (fail closed). The same reading as <c>DirectMessageOwnerStep.VersionOf</c>.
+    /// </summary>
+    private static long? VersionOf(Entity row) =>
+        row.GetAttributeValue<long?>("versionnumber")
+        ?? (long.TryParse(row.RowVersion, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture,
+            out var version)
+            ? version
+            : null);
 
     /// <summary>Resolves a team NAME to its <c>teamid</c> via the SAME name-lookup read path
     /// <see cref="ResolveTriageCategoryIdAsync"/> uses (no new query mechanism). Null when no team matches.</summary>
