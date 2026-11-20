@@ -275,8 +275,8 @@ Spaarke.SecureChild.Ribbon = Spaarke.SecureChild.Ribbon || {};
     }
 
     function entitySetOf(logicalName) {
-        var url = Xrm.Utility.getGlobalContext().getClientUrl() + "/api/data/v9.2/EntityDefinitions(LogicalName='" + logicalName +
-            "')?$select=EntitySetName,PrimaryNameAttribute";
+        var url = Xrm.Utility.getGlobalContext().getClientUrl() + "/api/data/v9.2/EntityDefinitions(LogicalName='" +
+            String(logicalName).toLowerCase() + "')?$select=EntitySetName,PrimaryNameAttribute";
         return fetch(url, { headers: { Accept: "application/json" }, credentials: "include" }).then(function (response) {
             if (!response.ok) throw new Error("metadata HTTP " + response.status);
             return response.json();
