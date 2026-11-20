@@ -30,7 +30,7 @@ and §10 without renumbering. Instructions alone did not hold the redline rules;
 | Readable playbook (`(agent knowledge).docx`) | `Documents/Cowork/Playbooks/<type>/` | The agents, as knowledge picked from OneDrive | Untested (A-1) |
 | Agent instructions v0.3 (`NDAR-1112-A`, `LHR-1112-A`) | Agent Builder, pasted from the recipe | The agents: rated review in chat, then a line pointing to `/nda-review` or `/legal-hold-review` | Built 2026-11-12; untested (A-2) |
 | Word playbook (four columns), review method | `Documents/Cowork/Playbooks/...` | Word, attached by the user | Tested (Word round 1) |
-| Templates and precedents | `Documents/Cowork/Playbooks/<type>/Templates` (proposal; owner to confirm) | Word drafting (attached). No drafting skill yet | Word R-2/R-3 in round 2 |
+| Templates and precedents | `Documents/Cowork/Playbooks/<type>/Templates` (owner decision, 2026-11-19) | Word drafting (attached). No drafting skill yet | Word R-2/R-3 in round 2 |
 | More review guides, as skills | `Documents/Cowork/Skills/` when built | Cowork | Candidates only. They can't go in an agent: an agent can't carry skills or scripts |
 
 **Hand-off to Word.** The skill saves its files next to the original in OneDrive. To keep working with the Legal
@@ -47,5 +47,5 @@ instructions don't point to the skill or tell the agent to build a redline. Test
   design around it.
 - Test 3: did it start from a fresh copy of the Brightwater NDA? Its 15 substantive edits are stamped 2:12 PM
   under the owner's name, before the agent's own edits (5:51 PM). That may have been an earlier Word review.
-- The four-tier draft (`accelerator-components-by-surface.md`) keeps agents in the advanced tiers. This note
-  narrows their role; it doesn't settle the four-tier decision.
+- The four-tier package (`accelerator-components-by-surface.md`, adopted 2026-11-19) keeps agents in the advanced
+  tiers; this note narrows their role there.

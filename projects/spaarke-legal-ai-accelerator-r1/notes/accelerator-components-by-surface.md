@@ -1,8 +1,9 @@
 # Spaarke AI Accelerator for Microsoft Copilot: components by tier and surface (DRAFT v2, 2026-11-10)
 
-Status: proposal for owner decision. Agents move to the *advanced* tiers, so the base package is files only. That
-keeps the standing directive "two editions (Word vs Cowork)". Adding agents at the advanced tiers still needs the
-directive "no declarative agents in the package" revoked (spike DA-1). Mechanics first; quality and scoring later.
+Status: **adopted by the owner, 2026-11-19.** Agents sit in the *advanced* tiers only, so the base package is files
+only. That keeps the standing directive "two editions (Word vs Cowork)". The decision revokes "no declarative agents
+in the package" for the advanced tiers. Agents are optional and review in chat only (skills first, 2026-11-12,
+`copilot-app-components.md`). Mechanics first; quality and scoring later.
 Basis: `notes/poc-e2e/synopsis-word-and-cowork.md`, `results.md`, design §2.4, §5.2–5.4 and §8.1a, and researcher
 note `declarative-agents-in-word-2026-11-09`.
 

@@ -20,6 +20,20 @@
 > - `[Verify]`: must be proven in the test tenant (§12)
 > - `[Proposed]`: a v0.5 change awaiting owner approval (§18)
 
+**Owner decisions after v0.6** (not yet worked into the body; where they conflict with it, they win):
+1. **Four-tier package adopted** (2026-11-19): individual base and advanced, team without IT and with IT. Design:
+   [notes/accelerator-components-by-surface.md](notes/accelerator-components-by-surface.md). This **revokes "no
+   declarative agents" for the advanced tiers only**: user-built Agent Builder agents (individual advanced),
+   shared ones (team without IT) and admin-deployed packaged agents (team with IT). The base tiers stay files only.
+2. **Skills first in the Copilot app** (2026-11-12): Cowork skills do reviews and redlines; the agents are
+   optional, review in chat only and point to the skill for a redline
+   ([notes/copilot-app-components.md](notes/copilot-app-components.md)).
+3. **Personal files under `Documents/Cowork/`** (2026-11-10): skills in `Cowork/Skills/`, playbooks in
+   `Cowork/Playbooks/<type>/`, and templates and precedents in `Cowork/Playbooks/<type>/Templates` (2026-11-19).
+   The team library keeps the name *Legal Knowledge*. The folder layout described in the body is older.
+4. **Word reads no folder** (2026-11-11): the user attaches the playbook and any reference files; Word steps follow
+   four use cases (contract review and drafting, non-contract review and drafting).
+
 **Changes in v0.6** (2026-11-06; from the end-to-end POC, `notes/poc-e2e/results.md` and `gap-log.md` #1–#29, and the owner's act-by-act review of it):
 1. **"Playbook" is the canonical concept** (owner): the artifact that describes how a legal procedure or protocol works, not limited to contracts or to review. A JPS playbook and a Microsoft playbook are **the same concept in different formats**. Microsoft's four-column table is the **contract-review playbook** subtype. Changed sections: §2.2 and §2.3. The ontology project adopted this as **D-209** (ontology §3, commit `80b3098373`), and §2.3 mirrors its wording. **OD-36 ("playbooks for contract families only") is superseded.**
 2. **Playbook template aligned with Microsoft's four columns**, with the Markdown master as a superset, and one Word copy per playbook (§5.3, OD-39).
@@ -383,7 +397,8 @@ S6 is answered (§12).
 - **T3 work:** Policy versions, Decision Record, Obligations, Finance Intelligence.
 - **Any change to the BFF, Dataverse, the Spaarke Console or the Office add-ins.**
 - **Partner Center / Microsoft 365 App Store listing, pricing, a download portal.** Distribution in R1 is upload and share (test) plus admin deploy (production, T-14).
-- **Declarative agents, Copilot Tuning, and an Office add-in for redlining** (owner, 2026-11-02).
+- **Copilot Tuning, and an Office add-in for redlining** (owner, 2026-11-02). Declarative agents were out too until
+  the four-tier package (owner, 2026-11-19) brought them into the advanced tiers; they stay out of the base tiers.
 - **Hosting deterministic logic on Spaarke servers for T0/T1.** Engines ship inside the skill package and run in the customer's Cowork sandbox (§5.6). A BFF-hosted engine is the T2 connector path (§10).
 - **Jurisdictions other than the United States** (OD-6).
 
