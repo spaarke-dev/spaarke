@@ -156,6 +156,40 @@ public sealed class SearchIndexClientProvisionerTests
     }
 
     [Fact]
+    public async Task ProvisionAsync_ExistingIndexesUpdatedWith204_ReturnsSuccessForAllSeven()
+    {
+        // An upgrade run meets the stamp's existing indexes; AI Search answers an update PUT with
+        // 204 No Content. Before the fix this failed on the first index (ACME run 3b6f7b65, 2026-11-20).
+        var putCount = 0;
+        var handler = new FakeArmHttpMessageHandler(_ => { putCount++; return new HttpResponseMessage(HttpStatusCode.NoContent); });
+        var provisioner = BuildProvisioner(handler);
+        var request = BuildRequest(CanonicalSeven);
+
+        var outcome = await provisioner.ProvisionAsync(request, CancellationToken.None);
+
+        var success = outcome.Should().BeOfType<AiSearchIndexProvisionOutcome.Success>().Subject;
+        success.ProvisionedIndexNames.Should().Equal(CanonicalSeven);
+        putCount.Should().Be(7, "every index is PUT, not only the first");
+    }
+
+    [Theory]
+    [InlineData(HttpStatusCode.Accepted)]
+    [InlineData((HttpStatusCode)207)]
+    [InlineData(HttpStatusCode.Conflict)]
+    public async Task ProvisionAsync_StatusOtherThan200Or201Or204_StillFails(HttpStatusCode status)
+    {
+        // Only 200/201/204 mean the definition was written; any other answer stays a failure.
+        var handler = new FakeArmHttpMessageHandler(_ => new HttpResponseMessage(status));
+        var provisioner = BuildProvisioner(handler);
+        var request = BuildRequest(System.Collections.Immutable.ImmutableArray.Create("spaarke-files-index"));
+
+        var outcome = await provisioner.ProvisionAsync(request, CancellationToken.None);
+
+        var failure = outcome.Should().BeOfType<AiSearchIndexProvisionOutcome.Failure>().Subject;
+        failure.Diagnostic.Should().Contain(((int)status).ToString(System.Globalization.CultureInfo.InvariantCulture));
+    }
+
+    [Fact]
     public async Task ProvisionAsync_ServerRejectsPut_ReturnsFailureWithStatusAndBody()
     {
         var handler = new FakeArmHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.BadRequest)
