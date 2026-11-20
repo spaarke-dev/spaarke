@@ -161,10 +161,12 @@ Full log with sources and superseded items: [`notes/decisions.md`](notes/decisio
   remove System Administrator from the existing BFF identities; strip `Service Writer` / `Service Deleter` (held only
   by Microsoft first-party app identities — benign, verified); add a field security profile to these tables.
 - **Deploy order**: role edits land **before** any BFF build carrying new secure-record config, in every environment.
+- **Dev BFF deploys are uac-r2's (2026-11-13):** every dev BFF deploy is master + the mcp spike (`d7369fecf1`), pinged to mcp-r1 first, cleared with any session running an owner E2E (spa-r4), behind uac-r2's pre-deploy checks and 30-min gate. We do not run `Deploy-BffApi.ps1` on dev ourselves: ask uac-r2 to include our merged PRs, then deploy our code pages after their AFTER notice.
 - **Writer identity**: config key `Ontology:Writer:ManagedIdentityClientId` (UAMI `mi-ontology-writer-dev`);
   live seam tests run with `AZURE_TOKEN_CREDENTIALS=AzureCliCredential`.
 
 ## 6. Gotchas — do not re-learn
+- **(2026-11-12) Local `npx eslint` does not run the type-aware client-lint ratchet CI runs.** #2742 passed local ESLint and failed CI on a console-only catch (`no-restricted-syntax`: put `// eslint-disable-next-line no-restricted-syntax -- <reason>` above the lone statement). Run `node scripts/quality/client-lint/client-lint.mjs check` (needs the root `npm install`) before pushing client code.
 - **(2026-11-09) Dataverse MCP `read_query` returns datetimes in LOCAL time (UTC-5), unlabelled.** A Signal shown `21:30:03` was raised by the 02:30Z nightly. Add 5 h before comparing with App Insights or calling a time "Z". For telemetry older than today use Log Analytics `spe-logs-dev-67e2xz` (`AppRequests`/`AppDependencies`, sampled at 25%), not the App Insights query.
 - **(2026-11-04) Commits in this worktree:** lint-staged needs prettier on PATH: `export PATH="/c/code_files/spaarke-wt-spaarke-ontology-platform-r1/node_modules/.bin:$PATH"` (never a junction). Integration tests under `tests/integration/auth/**` compile into `tests/unit/Sprk.Bff.Api.Tests`; filter there. `ontology-script-tests` CI is pinned to Pester 5.7.1 (#2428).
 - **(2026-11-08) Public repo:** private access-control detail (core-pair/lineage mechanics, misuse steps, per-identity privilege tables, environment identity ids) never goes on any branch, issue or PR; pass it by message. Older occurrences: DI-145 #2639.

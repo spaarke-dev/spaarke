@@ -3,7 +3,7 @@ import { Button, FluentProvider, makeStyles, tokens, Text, webDarkTheme } from '
 import type { Theme } from '@fluentui/react-components';
 import { useMsal } from '@azure/msal-react';
 import { InteractionStatus } from '@azure/msal-browser';
-import { BrowserRouter, Routes, Route, useNavigate, useLocation } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, useNavigate } from 'react-router-dom';
 import {
   resolveCodePageTheme,
   setupCodePageThemeListener,
@@ -15,8 +15,8 @@ import { isDevMockEnabled } from './dev-mock';
 import { clearStoredRealm } from './auth/realm';
 import { clearInviteCode } from './auth/invite-code';
 import { clearActiveBackend } from './auth/backend-selection';
-import { accountsForActivePlane } from './auth/msal-auth';
-import { AppHeader } from './components/AppHeader';
+import { accountsForActivePlane, isWorkforceHomePlaneActive } from './auth/msal-auth';
+import { AppHeader, portalTitleFor } from './components/AppHeader';
 import { AuthGuard } from './components/AuthGuard';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { NotificationBell } from './components/shell/NotificationBell';
@@ -134,7 +134,6 @@ const AppShell: React.FC<{
 }> = ({ isDark, onToggleDark, portalUser, teamsHost, onSignOut }) => {
   const styles = useStyles();
   const navigate = useNavigate();
-  const location = useLocation();
   const { inProgress } = useMsal();
   // The workforce home plane holds the workspace back until the contact is registered or linked (A9, task 058); every
   // other plane is ready at once.
@@ -148,8 +147,9 @@ const AppShell: React.FC<{
         onSettingsClick={() => navigate('/settings')}
         onSignOut={onSignOut}
         teamsHost={teamsHost}
-        // The tall welcome band only reads on the workspace landing.
-        showWelcomeBand={location.pathname === '/'}
+        // Partner (CIAM) vs internal contact (workforce home plane, in a browser or Teams) — the same plane rule as
+        // me-client's fallback plane. The plane is mounted before the app renders (standalone-plane.ts / TeamsHostAdapter).
+        title={portalTitleFor(teamsHost || isWorkforceHomePlaneActive())}
         // Only for a signed-in user with no MSAL interaction running: the bell reads the BFF as soon as it mounts, which
         // must neither precede sign-in nor compete with a redirect or token renewal that is still in progress. On the
         // workforce home plane it also waits for the registration gate (an unregistered contact is refused by the BFF).

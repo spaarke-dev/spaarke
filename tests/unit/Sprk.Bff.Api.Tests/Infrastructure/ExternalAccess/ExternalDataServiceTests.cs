@@ -656,6 +656,7 @@ public class ExternalDataServiceTests
     [InlineData("sprk_project", "sprk_projects", "sprk_projectid", "sprk_projectname")]
     [InlineData("sprk_matter", "sprk_matters", "sprk_matterid", "sprk_mattername")]
     [InlineData("sprk_workassignment", "sprk_workassignments", "sprk_workassignmentid", "sprk_name")]
+    [InlineData("sprk_invoice", "sprk_invoices", "sprk_invoiceid", "sprk_name")]
     public async Task GetRecordNames_ReadsTheRightEntitySet_WithItsIdAndNameColumns(
         string entity, string entitySet, string idColumn, string nameColumn)
     {
@@ -720,7 +721,7 @@ public class ExternalDataServiceTests
     {
         var (service, handler) = NewService();
 
-        var unknown = await service.GetRecordNamesAsync("sprk_invoice", new[] { Guid.NewGuid() });
+        var unknown = await service.GetRecordNamesAsync("sprk_budget", new[] { Guid.NewGuid() });
         unknown.Names.Should().BeEmpty();
         unknown.Complete.Should().BeFalse("an entity the feed cannot title is not 'gone'");
 

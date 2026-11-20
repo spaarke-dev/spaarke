@@ -19,9 +19,9 @@ namespace Sprk.Bff.Api.Tests.Services.Signals;
 public sealed partial class DecisionRecordWriterTests
 {
     /// <summary>A communication filed under a matter, with the mocked resolver (so <c>OwnerAsks</c> counts every owner question).</summary>
-    private static Harness MatterFiledCommunication()
+    private static Harness MatterFiledCommunication(IReadOnlySet<DecisionRecordWriter.KeyedEntry>? derivedRecordIds = null)
     {
-        var h = new Harness();
+        var h = new Harness(derivedRecordIds: derivedRecordIds);
         h.Rows[("sprk_communication", CommunicationId)] = new Entity("sprk_communication", CommunicationId)
         {
             ["sprk_regardingmatter"] = new EntityReference("sprk_matter", MatterId),

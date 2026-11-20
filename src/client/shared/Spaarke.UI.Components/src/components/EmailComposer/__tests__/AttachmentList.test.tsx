@@ -184,3 +184,32 @@ describe('AttachmentList — reply/forward include toggles (task 104)', () => {
     expect(screen.queryByRole('checkbox')).toBeNull();
   });
 });
+
+describe('AttachmentList - heading layout (task 197 fix round 1)', () => {
+  it('without a headerAction the heading row is master layout: toggle spans the row, chevron at the right edge', () => {
+    renderWithProviders(<AttachmentList items={[]} onRemove={jest.fn()} onToggleSelected={jest.fn()} />);
+
+    const region = screen.getByRole('region', { name: 'Attachments' });
+    const toggle = screen.getByRole('button', { name: /Attachments/ });
+    // No extra wrapper row: the toggle is the region's direct child, as on master.
+    expect(toggle.parentElement).toBe(region);
+    expect(getComputedStyle(toggle).justifyContent).toBe('space-between');
+  });
+
+  it('with a headerAction the toggle shrinks to its content and the action sits beside it', () => {
+    renderWithProviders(
+      <AttachmentList
+        items={[]}
+        onRemove={jest.fn()}
+        onToggleSelected={jest.fn()}
+        headerAction={<button type="button">Attach</button>}
+      />
+    );
+
+    const toggle = screen.getByRole('button', { name: /Attachments/ });
+    const action = screen.getByRole('button', { name: 'Attach' });
+    expect(action.parentElement).toBe(toggle.parentElement);
+    expect(toggle.parentElement).not.toBe(screen.getByRole('region', { name: 'Attachments' }));
+    expect(getComputedStyle(toggle).justifyContent).not.toBe('space-between');
+  });
+});

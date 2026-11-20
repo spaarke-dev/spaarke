@@ -15,27 +15,31 @@
  * not the record behind it. Sections reach it through `childRecord.ts` (`useChildRecordOpener`), never by import.
  *
  * FOCUS AND REFRESH. `useChildDialog` remembers the control that opened it and returns focus to it on close. The close also
- * asks the activating section to re-read when the opener named one (an invoice child may have changed something: an upload, a
- * message), which draws the section's rows anew, so `refocusChildRecordRow` puts focus on the same row once it is back. A
+ * asks the activating section to re-read when the opener named one (an invoice child may have changed something: a
+ * message; its Files are read-only), which draws the section's rows anew, so `refocusChildRecordRow` puts focus on the same row once it is back. A
  * document child names none (it cannot change the list), so the parent's grid keeps its sort.
+ *
+ * A SEEDED CHILD (task 015). An opener may hand over the row it already has (`source.seed`) and how to read it again
+ * (`source.read`): the child then appears at once and Refresh reads through the opener's reader (an event re-reads the list it
+ * was opened from, because a multi-parent event can be in a readable list yet 404 on its own GET).
  */
 import * as React from 'react';
 import { useChildDialog } from '../createAction';
-import { childRecordKeyOf, refocusChildRecordRow, type OpenChildRecord } from './childRecord';
+import { childRecordKeyOf, refocusChildRecordRow, type ChildRecordSource, type OpenChildRecord } from './childRecord';
 import { RecordTemplateModal } from './RecordTemplateModal';
 import type { RecordSectionId } from './recordTemplate.types';
 import { getRecordTemplate } from './recordTemplates';
 
 const noopIndexChange = (): void => undefined;
 
-export interface ChildRecordModalProps {
+export interface ChildRecordModalProps extends ChildRecordSource {
   open: boolean;
   entity: string;
   recordId: string;
   onClose: () => void;
 }
 
-export const ChildRecordModal: React.FC<ChildRecordModalProps> = ({ open, entity, recordId, onClose }) => {
+export const ChildRecordModal: React.FC<ChildRecordModalProps> = ({ open, entity, recordId, onClose, seed, read }) => {
   const config = getRecordTemplate(entity);
   if (!config) return null;
   return (
@@ -47,11 +51,13 @@ export const ChildRecordModal: React.FC<ChildRecordModalProps> = ({ open, entity
       recordIds={[recordId]}
       index={0}
       onIndexChange={noopIndexChange}
+      seed={seed}
+      readRecord={read}
     />
   );
 };
 
-interface ChildTarget {
+interface ChildTarget extends ChildRecordSource {
   entity: string;
   recordId: string;
   /** The section to re-read on close; absent = nothing to re-read. */
@@ -75,11 +81,18 @@ export function useChildRecordHost(refreshSection: (section: RecordSectionId) =>
   const { show, hide } = dialog;
 
   const open = React.useCallback<OpenChildRecord>(
-    (entity, recordId, trigger, section) => {
+    (entity, recordId, trigger, section, source) => {
       if (!getRecordTemplate(entity)) return;
       // Some browsers do not focus a button on click; focusing it first makes it the control focus returns to.
       trigger?.focus();
-      setTarget(prev => ({ entity, recordId, section, seq: (prev?.seq ?? 0) + 1 }));
+      setTarget(prev => ({
+        entity,
+        recordId,
+        section,
+        seed: source?.seed,
+        read: source?.read,
+        seq: (prev?.seq ?? 0) + 1,
+      }));
       show();
     },
     [show]
@@ -101,6 +114,8 @@ export function useChildRecordHost(refreshSection: (section: RecordSectionId) =>
       entity={target.entity}
       recordId={target.recordId}
       onClose={close}
+      seed={target.seed}
+      read={target.read}
     />
   ) : null;
   return { open, modal };

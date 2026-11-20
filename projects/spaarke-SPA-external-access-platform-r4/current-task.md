@@ -1,46 +1,32 @@
 # Current Task State
 
-> **Last Updated**: 2026-11-14
+> **Last Updated**: 2026-11-17 (task 016: dev SPA deployed, owner E2E pending)
 > **Format**: CURRENT state only. Each checkpoint REWRITES this file. Target ≤ 10 KB.
 
 ## Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
 |-------|-------|
-| **Task** | 018 retest round 2: 012 ✅ and 013 ✅ in PR #2837 (CI pending). Next: merge, SPA dev deploy (owner approval), owner retest. Then 021 (ebilling 093) |
-| **Step** | PR #2837 open; waiting on CI and the owner go for merge + SPA deploy |
-| **Status** | Dev BFF `5a9b687a0b` (see Live state). Dev SPA from run 43598875136 (master `2747977f47`), live 13:19Z; bundle has the new strings, no "Can contribute" or "To Do". |
-| **Next Action** | After the owner says go: merge #2837 once CI is green, then dispatch deploy-external-spa.yml (dev, master); rollback master `2747977f47`. NOTE: no SPA deploy once 021 is merged and before the 093 BFF swap. |
+| **Task** | **016** Event forms deploy + owner E2E, `tasks/016-event-forms-deploy-e2e.poml`. In progress (STANDARD, prescriptive) |
+| **Step** | Step 3: owner retest. Steps 1–2 done: dev SPA deployed from master `ed3a5c2752` (run 44153057447). Retest found a 500 on typed event create (D-21 #2892); fix PR #2894 merged as `08161cfb0e`; dev BFF `326781c50f` live 22:03Z with the fix; owner retest of items 1–6 next |
+| **Status** | 015 ✅ done: PR #2886 squash-merged to master as `242696586f` (CI 32 pass / 0 fail). Notes: `notes/task-015-notes.md` |
+| **Next Action** | Record the owner's retest results in `notes/task-016-notes.md` (table of 8 checks); file findings via /project-defer-issue-tracking or a follow-up task; then mark 016 done. SPA rollback = rerun deploy-external-spa.yml (dev) on `c1eb6e4a8e` |
 
-## Done after merge
-- The merge SHA was sent to ebilling-r1 (for their 095 notes) and acknowledged to uac-r2.
-- Closed D-6 #2703, D-11 #2718 and D-12 #2769, each with a merge reference.
-- The last pre-merge commit `593c75cdb9` adds a reasoned eslint-disable on the DataGrid host-command catch (CI client-lint ratchet). Filed D-16 #2823: two older silent catches in the shared DataGrid. Both are in the suppression baseline.
-
-## Owner retest list (after the SPA deploy)
-- Section actions on matter / project / WA records. No To Do anywhere.
-- The Submit invoice modal over the record, with the record fixed. On a WA it stays in the header (the owner confirms this).
-- Submit invoice in the Invoices grid toolbar, with no standalone button.
-- Access labels: View Only / Collaborate / Full Access. "Can contribute" never appears.
-- Tasks / Events split, Add task, and Add event without the type select.
-- Documents columns and tooltips.
-- Unfinished E2E items in `notes/task-018-notes.md`, plus the CMRCL-788888 Submit invoice icon.
-- ebilling 095e: invoice names should now read "{firm} - {number}" (#2822 is in BFF `5a9b687a0b`).
-- SPA inputs: master `7da54c00a3` vs `bd43110169` show no diff under `src/client/external-spa` or `src/client/shared`, so a master SPA build equals the reviewed rework.
+## Task 015 outcome (for 016's E2E)
+- Add event: Event Type required (options = `creatableEventTypes`), Due Date required by type, Priority, Assigned To ("Me" first), Description. Add event hidden when no type is offered.
+- Event record: row opens a child record from row data; deep link `?record=event:{id}` (token amended from `sprk_event:`).
+- Edit / Change status per `canEdit` / `canChangeStatus` / `allowedStatuses`; Delete (creator only).
+- Known limits: Edit can't mark Due Date required (server 400 shown); multi-parent events: one parent's assignees (400 shown), Copy link may open not-found; truncated parent list → not-found on re-read; 403 then failed re-read replaces the page.
 
 ## Live state
-- **Dev BFF:** `5a9b687a0b` = master `2747977f47` + mcp spike (uac-r2, live ~15:19Z). BFF rollback `0173e1486e`.
-- **Dev SPA:** master `2747977f47` build (run 43598875136, 2026-11-14 13:19Z). Previous build: `2ef4a17915`.
-- **Never deploy the BFF directly.** uac-r2 orchestrates the BFF deploy, and the owner gives the go per SHA.
+- **Dev BFF** `326781c50f` (uac-r2 deploy, live since 2026-11-17T22:03Z): live `e46b6b453b` + master `08161cfb0e` (#2894 D-21 fix) + #2884. Rollback = `e46b6b453b`. uac-r2 asks spa-r4 before any restart.
+- **Dev SPA** master `ed3a5c2752` (015 included; deployed 2026-11-17 ~18:56Z, run 44153057447). Rollback = redeploy `c1eb6e4a8e` (runs against the same BFF). Roll back to `04dbd8df05` only together with BFF `5a9b687a0b`.
 
-## Open items / issues
-- D-13 #2800 (retire the to-do routes after the retest), D-14 #2809 (Task GUID copies), D-15 #2810 (dead header icons), D-16 #2823 (silent DataGrid failures).
-- Older owner questions: D-1 #2686, D-2 #2687, D-4 #2693, and the #2786 backfill (uac-r2).
+## Coordination
+- uac-r2 (session `uac-r2`) reviews BFF PRs as a gate and deploys the dev BFF. The owner gives the merge go each time. Peer messages are not owner approval.
 
-## Uncommitted
-- current-task.md (this checkpoint)
-
-## ebilling 093 (invoice files) — consumer review done 2026-11-15
-- dc2e5ab86c (not merged): list `{value:[{id,fileName,contentType?,sizeBytes?,createdOn?,scanStatus: Clean|Checking|NotScanned}]}`; content 409 `file_scan_pending`, uniform 404 `sdap.access.deny.record_unavailable`, 503 `file_store_unavailable` / `ebilling.disabled`; no Content-Disposition name (the SPA names the blob from `fileName`). The four `/invoices/{id}/documents` routes are retired in the same commit; the only SPA caller is `FilesSection.tsx`.
-- **Deploy order is strict both ways:** uac-r2 swaps the BFF with 093 first, then the 021 SPA right after. NO other SPA deploy may run between merging 021 and that swap: a master SPA build with 021 on the old BFF breaks the invoice Files section.
-- Pulling 021 forward ahead of 020/022/023 is pending owner confirmation.
+## Open items
+- D-13 #2800, D-14 #2809, D-15 #2810, D-16 #2823; D-19 #2854, D-20 #2860.
+- Older owner questions: D-1 #2686, D-2 #2687, D-4 #2693, #2786 backfill.
+- Phase 2 (020/022/023/024/028) still open.
+- CI: office-scope legs sit at their 20-min cap (known #1474/#1718/#2767). Re-run on a cancel; not ours.

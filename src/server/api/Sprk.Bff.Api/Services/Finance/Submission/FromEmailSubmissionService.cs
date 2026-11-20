@@ -230,7 +230,7 @@ internal sealed class FromEmailSubmissionService
         {
             _logger.LogInformation("From-email Correction with no note refused before any write (400)");
             return FromEmailSubmissionOutcome.Refused(StatusCodes.Status400BadRequest, FromEmailSubmissionErrors.CorrectionNoteRequired,
-                "A correction needs a note saying why the invoice is corrected.");
+                FromEmailSubmissionErrors.CorrectionNoteRequiredDetail);
         }
 
         // ── 7. The communication, if the email was already captured, must not be filed under another core record (409) ──
@@ -546,7 +546,7 @@ internal sealed class FromEmailSubmissionService
         {
             _logger.LogInformation("From-email submission {SubmissionId}: a retry of a Received Correction carries no note; refused (400), not re-queued", row.Id);
             return FromEmailSubmissionOutcome.Refused(StatusCodes.Status400BadRequest, FromEmailSubmissionErrors.CorrectionNoteRequired,
-                "A correction needs a note saying why the invoice is corrected.");
+                FromEmailSubmissionErrors.CorrectionNoteRequiredDetail);
         }
 
         var jobId = FromEmailSubmissionKey.JobIdFor(k, generation);

@@ -44,6 +44,10 @@ jest.mock('@spaarke/auth', () => ({
 }));
 
 jest.mock('@spaarke/ui-components', () => ({
+  // The real hook, from source: this factory replaces the whole module, and before task 033 the hook came unmocked
+  // from the retired document-operations package.
+  useDocumentActions: jest.requireActual('../../../Spaarke.UI.Components/src/hooks/useDocumentActions')
+    .useDocumentActions,
   ConfirmModal: () => null,
   createXrmNavigationService: () => ({ openLookup: jest.fn() }),
   createXrmDataService: () => ({ retrieveRecord: jest.fn() }),

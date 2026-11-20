@@ -97,12 +97,11 @@ internal sealed class RecordRepairPassContext
             _columns[table] = columns;
     }
 
-    // ── Review F1-a: the Assign cascades of a table, read once per pass ─────────────────────────────────────────────
+    // ── Review F1-a: the Assign cascades of a table, read once per pass (task 052f: each row's children are read per row,
+    //    never kept here) ──────────────────────────────────────────────────────────────────────────────────────────────
 
     private readonly ConcurrentDictionary<string, IReadOnlyList<AssignCascadeRelationship>> _assignCascades =
         new(StringComparer.OrdinalIgnoreCase);
-
-    private readonly ConcurrentDictionary<string, byte> _assignCascadeRefusalsLogged = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>The Assign cascades of <paramref name="table"/> this pass already read, if any.</summary>
     internal bool TryGetAssignCascades(string table, out IReadOnlyList<AssignCascadeRelationship> cascades) =>
@@ -121,6 +120,37 @@ internal sealed class RecordRepairPassContext
     /// <summary>Keeps a failed read as unknown for the rest of the pass; <c>true</c> the first time (log it once).</summary>
     internal bool KeepAssignCascadesUnknown(string table) => _assignCascadesUnknown.TryAdd(table, 0);
 
-    /// <summary><c>true</c> the first time this pass refuses an owner write of <paramref name="table"/> for its cascades.</summary>
-    internal bool FirstAssignCascadeRefusal(string table) => _assignCascadeRefusalsLogged.TryAdd(table, 0);
+    // ── Task 052f fix round (B): the read depth the per-row child checks need, asked once per pass ──────────────────────
+
+    private readonly object _readDepthGate = new();
+    private Task<RecordRepairReadDepth>? _readDepth;
+
+    /// <summary>
+    /// Whether the app identity holds organization-level Read for the per-row child reads, asked through
+    /// <paramref name="read"/> the first time only and kept for the rest of the pass, whatever it answered — so a faulted read
+    /// is not asked again (and logged once), and the rows wait for the next run. Only <paramref name="read"/> decides the answer.
+    /// </summary>
+    internal Task<RecordRepairReadDepth> ReadDepthAsync(Func<Task<RecordRepairReadDepth>> read)
+    {
+        ArgumentNullException.ThrowIfNull(read);
+        lock (_readDepthGate)
+            return _readDepth ??= read();
+    }
+}
+
+/// <summary>
+/// Task 052f fix round (B): whether the pass may make per-row child reads — each needs organization-level Read on the table it
+/// reads, or "none found" would not mean none.
+/// </summary>
+internal enum RecordRepairReadDepth
+{
+    /// <summary>The app identity holds the System Administrator role directly: the per-row child reads are made.</summary>
+    Confirmed,
+
+    /// <summary>The roles were read and that role is not among them (a role held only through a team reads so too): every row
+    /// that needs a per-row child read keeps its owner (<see cref="RecordRepairReason.OwnerAssignCascadeUnknown"/>).</summary>
+    NotConfirmed,
+
+    /// <summary>The identity or its roles could not be read: as <see cref="NotConfirmed"/>, never as confirmed.</summary>
+    Faulted,
 }

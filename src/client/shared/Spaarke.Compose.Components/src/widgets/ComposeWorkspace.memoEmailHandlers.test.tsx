@@ -55,6 +55,7 @@ jest.mock('@spaarke/ui-components', () => ({
   createXrmEmailComposeHandlers: (options?: unknown) => createHandlersMock(options),
   SprkModal: () => null,
   RichFilePreviewDialog: () => null,
+  useDocumentActions: () => ({ openInWeb: jest.fn(), openInDesktop: jest.fn(), isActing: false }),
 }));
 
 jest.mock('@spaarke/ai-widgets/events', () => ({

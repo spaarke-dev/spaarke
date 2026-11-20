@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="052e" project="field-mapping-server-write-path-r1">
+  <metadata>
+    <title>Repair pass family cascade: design how a repaired root's family follows its owner (cross-BU re-own, Assign cascades) (FR-25 amended 2026-11-02)</title>
+    <phase>5 W5 Records created outside the product</phase>
+    <gate>052b, 052c and 052d on master (#2790, #2898). Design only: no code, no live write, no setting changed. The pass stays off (`RecordRepair:Pass:GoLive` unset).</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Ownership design for a job that writes existing rows as the system principal: a mistake moves rows, and the rows filed under them, to another business unit. Security fails closed.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Architectural: ties Repair's owner rule to the record family service, Dataverse Assign cascades and UAC-r2's secure-family jobs.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>W5-B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Design note only; edits no code. 023's live check touches no code either.</parallel-reason>
+    <deps>052b, 052c, 052d, 016, W7 (record family service)</deps>
+    <tags>design, security, ownership, bff-api, jobs</tags>
+    <estimated-effort>1 session (plus owner and UAC-r2 review)</estimated-effort>
+  </metadata>
+
+  <prompt>Slice e of task 052. Design the family cascade that amended FR-25 requires (owner, 2026-11-02, binding outcome; mechanism is ours): for any record created outside the server-mediated owner process, the repair process brings every member of that record's family to the same owner. The root goes to its standard owner and each child to its family's owner, including children that already exist when a root is repaired and the cross-BU re-own that task 016 left open. Today Repair writes no owner in two cases that block that outcome: (1) a re-own that would move an ownership-parent row to another business unit (`record_repair.owner_moves_business_unit`, task 016's fail-closed default); (2) a table with a one-to-many relationship that cascades on Assign to a child not on `RecordCreationService.AcceptedAssignCascades` (empty; 052b K9, K11). Read the code and the live dev relationship metadata (read-only), choose the mechanism, and write it down with the implementation tasks it needs. Write no code.</prompt>
+  <role>SPAARKE platform architect: Dataverse ownership, business units and Assign cascades; the BFF write path (ADR-002), Repair mode and the ADR-036 repair pass; the record family service (W7). Security fails closed.</role>
+  <goal>`notes/task-052e-design.md` lets the owner and UAC-r2 approve one mechanism, and lets a follow-on task implement it without re-deriving anything. It states which rows move, in what order, as which principal, what never moves, how a fault leaves the family, and the exact allow-list entries proposed, each with its reason.</goal>
+
+  <context>
+    <background>
+- Parents: `tasks/052-repair-pass-scheduled-job.poml`; spec.md FR-25 (amendment 2026-11-02, "every member of that record's family to the same owner"); `notes/decisions.md` 2026-11-02 "Repair and the marker"; `notes/task-016-notes.md` "Escalations" trigger 2; `notes/task-052b-notes.md` "Assign cascade", K9, K11, K12; `design.md` §12 (W7 record family service).
+- Code today: `RecordCreationService.cs` Repair owner branch (`OwnerMovesBusinessUnit` skip ~:1709); `RecordCreationService.Repair.cs` `AcceptedAssignCascades` (~:284) and `AssignCascadeRefusalAsync`; `RecordOwnershipResolver` (`OwnershipParentEntities`, `ResolveOwnerAsync`); `RecordFamilyReader` / `RecordFamilyEdges` (W7, read-only family walk); `OwnedChildWrite` re-file (`ReparentAsync`, restamp, `AfterRefileAsync`).
+- UAC-r2 owns the secure family: `SecureRootInheritance` (read-only for us), `SecureChildReconciler`, `SecureChildShareReconciliationJob`, `ExternalTeamShareSynchronizer`. Secure children stay theirs.
+- Platform fact to confirm and cite: an owner write is an Assign; a relationship whose `CascadeConfiguration.Assign` is Cascade, Active, UserOwned or unstated moves child rows with it; the cascade runs as the writing principal and also moves the child's business unit.
+- Public repo: the design note states rules, never holes. Anything that reads as an access defect goes to UAC-r2 by message.
+    </background>
+    <relevant-files>
+      <file role="new">projects/field-mapping-server-write-path-r1/notes/task-052e-design.md</file>
+      <file role="read">src/server/api/Sprk.Bff.Api/Services/RecordCreation/RecordCreationService.cs, RecordCreationService.Repair.cs, RecordRepairPassJob.cs, RecordTableRules.cs</file>
+      <file role="read">src/server/api/Sprk.Bff.Api/Services/Dataverse/RecordOwnershipResolver.cs, RecordFamilyReader.cs, RecordFamilyEdges.cs, OwnedChildWrite.cs</file>
+      <file role="read">src/server/api/Sprk.Bff.Api/Services/Access/ (SecureRootInheritance, SecureChildReconciler, SecureChildShareReconciliationJob, ExternalTeamShareSynchronizer)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="owner 2026-11-02 / FR-25">The outcome is fixed: every family member ends on the family's owner. Any case the design cannot bring there is named, counted and reported, never silently left.</constraint>
+    <constraint source="forward-only">Only a root created after go-live starts a cascade. Whether a pre-go-live child under a post-go-live root may move is a decision the note puts to the owner, with a recommendation.</constraint>
+    <constraint source="UAC-r2">Secure families (Secure Record business unit, secure-by-ownership tables) are not moved by Repair. Do not propose edits to SecureRootInheritance.cs, DirectThreadAccessService.cs, DirectMessageParticipantShares.cs, SecureChildShareReconciliationJob.cs or SecureChildReconciler.cs.</constraint>
+    <constraint source="ADR-002 / ADR-036 / ADR-052">One owner decision (the create one, `ResolveOwnerAsync`); no plugin, flow or OOB mapping; inside the existing job, its lease, claims and state store; no new job, store, package or role.</constraint>
+    <constraint source="D-204 / 2026-11-02">Signal, Decision Record and Budget Revision rows are never written, including by a cascade. If a live Assign cascade reaches one of those tables, that relationship is not accepted.</constraint>
+    <constraint source="live actions">Dev reads only (relationship metadata, row counts). No write, no setting, no deploy. A step that would need one is listed for the owner's go.</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step order="0">Rigor FULL. Read the parents and the code above; record the facts with file:line.</step>
+    <step order="1">Inventory, read-only on dev: for each table the pass covers, every one-to-many relationship whose `CascadeConfiguration.Assign` is not NoCascade (schema name, child table, Assign value, and whether the child is a family edge in `RecordFamilyEdges`, a secure-family table, an append-only table or something else such as activities, notes or connections).</step>
+    <step order="2">Options, at least: (A) accept the parental Assign cascades and let Dataverse move children; (B) keep or narrow the cascades and have Repair walk the family (W7) and write each member's owner through the create owner decision, root first or leaves first; (C) a mix. For each: which rows move, cross-BU behaviour, secure children, rows outside the family, partial failure, idempotency, cost per run, and the reviewers it needs.</step>
+    <step order="3">Recommendation with the exact `AcceptedAssignCascades` entries (or none), what replaces the cross-BU skip, the fault and partial-family behaviour, the counters and report codes, and the follow-on implementation task list (052f…) with ACs. Name every owner decision as a numbered question with a recommendation.</step>
+    <step order="4">Adversarial review of the note (one top-tier pass). Fix, then send the access-relevant parts to UAC-r2 by message. Owner decision in this session. Mark 052e complete when the note is approved; implementation tasks are created then.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="false">AC1: every pass table's live Assign-cascading relationships on dev are listed and classified; the read is reproducible (the query is in the note).</criterion>
+    <criterion testable="false">AC2: the note says, for each option, exactly which rows move and which never move (secure, append-only, outside-family, pre-go-live), and how a fault leaves a half-moved family.</criterion>
+    <criterion testable="false">AC3: one recommendation, its allow-list entries (each with its reason) or an explicit "none", and the replacement for `owner_moves_business_unit`.</criterion>
+    <criterion testable="false">AC4: each owner decision is a numbered question with a recommendation; nothing is decided silently.</criterion>
+    <criterion testable="false">AC5: follow-on implementation tasks with closed-set ACs, including negative cases (a secure child is not moved; an append-only table is never written; a pre-go-live root starts nothing).</criterion>
+    <criterion testable="false">AC6: adversarial review recorded; UAC-r2 consulted; no code, live write or setting changed by this task.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>Any option that would need a role change, a field-security change or an edit to UAC-r2's files: STOP and message UAC-r2; do not design around it silently.</trigger>
+    <trigger>A live Assign cascade from a pass table reaches an append-only or secure-family table: record it as never accepted, and tell the owner before enabling anything.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>Repair decides one row's owner with the create owner decision; W7 reads families; UAC-r2's jobs keep secure families aligned. Nothing moves an ordinary family's existing children when its root is re-owned.</existing>
+    <extension>The design extends Repair and the existing pass; it adds no job, store or route.</extension>
+    <cost-of-doing-nothing>The owner's binding outcome (2026-11-02) is unmet: a repaired root's children keep other owners, and with the cross-BU skip and the empty allow-list most roots are never re-owned at all, so the pass cannot be enabled to do what FR-25 requires.</cost-of-doing-nothing>
+  </justification>
+
+  <notes>Written 2026-11-18 in the main session (owner "Yes, start 052e"). Design only; implementation follows owner approval. Completed 2026-11-18: owner approved Q1–Q8 (yes). Q2 was first recorded as no, then the owner answered yes (event and analysis notes move; contact notes stay out per UAC-r2 U4; Spaarke does not use out-of-the-box Notes or activities). FR-25 amended in spec.md. Follow-on tasks 052f and 052g created. AC1–AC6 met.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

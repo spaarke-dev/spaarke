@@ -42,10 +42,11 @@
  *     with the real `DataGridViewSelector` in one tree. Same "one instance"
  *     fix as the existing React/ReactDOM dedup above, just extended to the
  *     Fluent/tabster trio.
- *   - `@spaarke/auth` is intentionally NOT mapped here — this package never
- *     initializes `@spaarke/auth` itself, so every test file that needs it
- *     supplies its own `jest.mock('@spaarke/auth', () => ({ ... }))`
- *     (see `CommunicationsWorkspaceWidget.test.ts`).
+ *   - `@spaarke/auth` maps to SOURCE, like `@spaarke/ui-components`: its built
+ *     `dist/` is ESM, and the ui-components barrel reaches it (`useDocumentActions`),
+ *     so without the mapping every suite that loads the barrel failed to load
+ *     (14 of 40, 2026-11-18). A test that needs auth behaviour still supplies its
+ *     own `jest.mock('@spaarke/auth', () => ({ ... }))`, which takes precedence.
  */
 /** @type {import('jest').Config} */
 module.exports = {
@@ -72,6 +73,8 @@ module.exports = {
     '^d3-force$': '<rootDir>/src/__mocks__/d3-force.ts',
     '^marked$': '<rootDir>/src/__mocks__/marked.ts',
     '^@spaarke/sdap-client$': '<rootDir>/src/__mocks__/sdap-client.ts',
+    // ESM dist, reached through the ui-components barrel (see note above).
+    '^@spaarke/auth$': '<rootDir>/../Spaarke.Auth/src/index.ts',
     // Dedupe React so a component mounted from @spaarke/ui-components SOURCE
     // shares this package's React instance (avoids "Invalid hook call").
     '^react$': '<rootDir>/node_modules/react',

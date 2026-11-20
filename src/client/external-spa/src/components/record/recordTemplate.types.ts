@@ -57,6 +57,8 @@ export type RecordToolbarActionId = Extract<
   | 'delete'
   | 'history'
   | 'send'
+  | 'edit'
+  | 'changeStatus'
 >;
 
 /**
@@ -132,6 +134,11 @@ export interface RecordViewContext {
   onRecordDeleted: () => void;
   /** Ask one section of this record to re-read (the service request recall re-reads the Messages thread). */
   refreshSection: (section: RecordSectionId) => void;
+  /**
+   * Re-read THIS record (what the modal's Refresh does: the shown record stays on screen until the answer arrives, and every
+   * section re-reads). An action host calls it after a save (Edit, Change status: task 015) so the record shows the new values.
+   */
+  refreshRecord: () => void;
 }
 
 /** What a section renderer gets. */
@@ -162,13 +169,6 @@ export interface RecordSectionContext extends RecordViewContext {
    * `recordAccess.ts`), or null/absent when it is not read-only or that is not known yet.
    */
   readOnlyNote?: string | null;
-  /**
-   * Task 006 fix round 1 (FR-07). For a section whose list has a create right WITHOUT a toolbar action (the invoice Files
-   * list's own Upload, `'filesUpload'`): the stable reporter through which it tells the template that right (`true` /
-   * `false`, or `null` while unknown and on unmount), so "Your access" and its read-only line follow it. It adds nothing
-   * to the toolbar.
-   */
-  reportRight?: (id: 'filesUpload') => (right: boolean | null) => void;
 }
 
 /** A toolbar action an action host offers: hidden unless `visible` (hide, don't disable). */

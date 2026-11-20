@@ -26,7 +26,8 @@ namespace Sprk.Bff.Api.Services.Finance.Submission;
 /// <para><b>Internal part (uac-r2, binding; 082d resolves the U3 tension of the 082 notes).</b> Chain ids, Procedure Version ids, override row ids
 /// and override reasons are in this member ONLY. <c>sprk_findingsjson</c> is field-secured with no reader profile and read app-only
 /// (<c>FindingsJsonFieldSecurityAgreementTests</c>, <c>FindingsJsonAppOnlyReadGuardTests</c>), and no reader projection emits this member: the review
-/// read model, the status view, the admin attention text and the hold readers read named members field by field and never this one. A reader-facing
+/// read model, the status view, the admin attention text and the hold readers read named members field by field and never emit this one (the review
+/// read model hands the stored text to task 113's <c>ProcedureChangeBanner</c>, which reads this member and returns ONE state, never the basis). A reader-facing
 /// member about Procedures is built from <see cref="ProcedureRulesOnDate.ForReaders"/> / <see cref="ProcedureGap.ForReaders"/> only (the gap
 /// pipeline finding). Tests: <c>ProcedureSnapshotTests</c>.</para>
 /// <para><b>Versions.</b> <see cref="Version"/> is 1. A row stored before 082d has no member: <see cref="Read(JsonObject)"/> answers null, which
@@ -44,13 +45,15 @@ internal static class ProcedureSnapshot
     internal const string DecisionRecordFact = "procedureSnapshot";
 
     /// <summary>The snapshot of <paramref name="evaluation"/>'s basis, or null when nothing was evaluated (a held fault, a pre-evaluation stop).</summary>
-    internal static JsonObject? Build(BillingEvaluationResult? evaluation)
-    {
-        if (evaluation?.ProcedureBasis is not { } basis)
-        {
-            return null;
-        }
+    internal static JsonObject? Build(BillingEvaluationResult? evaluation) =>
+        evaluation?.ProcedureBasis is { } basis ? Build(basis) : null;
 
+    /// <summary>
+    /// The snapshot of <paramref name="basis"/>. The one builder: the submission's snapshot is <c>Build(evaluation.ProcedureBasis)</c> and task 113's
+    /// read-time comparison builds the current resolution's side with the same code, so the two can only differ by what they were built from.
+    /// </summary>
+    internal static JsonObject Build(BillingProcedureBasis basis)
+    {
         var rows = new Dictionary<Guid, ProcedureOverrideRow>();
         void Collect(IEnumerable<ProcedureOverrideRow> deciding)
         {
@@ -337,6 +340,7 @@ internal static class ProcedureSnapshot
 
             var procedures = new HashSet<string>(StringComparer.Ordinal);
             var gaps = 0;
+            var recordRuleBases = new Dictionary<Guid, HashSet<Guid>>();
             foreach (var resolution in resolutions)
             {
                 if (resolution is not JsonObject entry)
@@ -346,9 +350,13 @@ internal static class ProcedureSnapshot
 
                 procedures.UnionWith(Ids(entry["procedures"], "procedureId"));
                 gaps += (entry["gaps"] as JsonArray)?.Count ?? 0;
+                CollectRecordRuleBases(entry["rules"], recordRuleBases);
             }
 
-            return new StoredProcedureSnapshot(number, applied, displaced, procedures.Count, gaps);
+            return new StoredProcedureSnapshot(number, applied, displaced, procedures.Count, gaps)
+            {
+                RecordRuleBaseVersionIds = recordRuleBases.ToDictionary(p => p.Key, p => (IReadOnlyList<Guid>)p.Value.Order().ToList()),
+            };
         }
         catch (Exception ex) when (ex is InvalidOperationException or FormatException or JsonException)
         {
@@ -390,6 +398,29 @@ internal static class ProcedureSnapshot
         ["gaps"] = snapshot.GapCount,
     };
 
+    /// <summary>
+    /// ISS-038: every record rule in force on a date, by its policy version, with the base rule version its slot names (<c>recordRule.basePolicyVersionId</c>).
+    /// A record rule whose slot cannot be read records <see cref="Guid.Empty"/>, so the firm clause read fails closed for that rule alone; the rest of the
+    /// snapshot still reads (this never turns a readable snapshot into "no snapshot").
+    /// </summary>
+    private static void CollectRecordRuleBases(JsonNode? rules, Dictionary<Guid, HashSet<Guid>> bases)
+    {
+        foreach (var rule in (rules as JsonArray ?? []).OfType<JsonObject>())
+        {
+            if (rule["recordRule"] is not JsonObject slot || !Guid.TryParse(Text(rule, "policyVersionId"), out var versionId))
+            {
+                continue;
+            }
+
+            if (!bases.TryGetValue(versionId, out var set))
+            {
+                bases[versionId] = set = [];
+            }
+
+            set.Add(Guid.TryParse(Text(slot, "basePolicyVersionId"), out var baseVersionId) ? baseVersionId : Guid.Empty);
+        }
+    }
+
     private static bool HasSubject(JsonNode? subjects) =>
         subjects is JsonObject s && (s["invoice"]?.GetValue<bool>() == true || (s["lines"] as JsonArray)?.Count > 0);
 
@@ -404,16 +435,23 @@ internal static class ProcedureSnapshot
 /// The parts of a stored <see cref="ProcedureSnapshot"/> its readers need today. <see cref="AppliedPolicyVersionIds"/>: the versions that judged at
 /// least one subject (task 083: a clause is shown only for these); <see cref="DisplacedPolicyVersionIds"/>: those applied on no subject and displaced
 /// on at least one. Only <see cref="GapCount"/> feeds the Decision Record summary (no other count does: see <see cref="ProcedureSnapshot.DecisionRecordSummary"/>);
-/// <see cref="ProcedureCount"/> is for 113. Internal: it carries policy version ids.
+/// <see cref="ProcedureCount"/> has no reader today (task 113 compares the members themselves, not these counts; tests read it). Internal: it carries policy version ids.
 /// </summary>
 internal sealed record StoredProcedureSnapshot(
     int Version, IReadOnlyList<Guid> AppliedPolicyVersionIds, IReadOnlyList<Guid> DisplacedPolicyVersionIds, int ProcedureCount, int GapCount)
 {
+    /// <summary>
+    /// ISS-038: each record rule version the snapshot holds in force, with the base rule version(s) its slot named (one per distinct base across the
+    /// dates; <see cref="Guid.Empty"/> for a slot that could not be read). A record rule version absent here has no base on record: the firm clause
+    /// read treats it as not visible. Read by <c>RuleSetService.GetFirmClauseAsync</c> only.
+    /// </summary>
+    public IReadOnlyDictionary<Guid, IReadOnlyList<Guid>> RecordRuleBaseVersionIds { get; init; } = new Dictionary<Guid, IReadOnlyList<Guid>>();
+
     private bool PrintMembers(System.Text.StringBuilder builder)
     {
         builder.Append("Version = ").Append(Version).Append(", Applied = ").Append(AppliedPolicyVersionIds.Count)
             .Append(", Displaced = ").Append(DisplacedPolicyVersionIds.Count).Append(", Procedures = ").Append(ProcedureCount)
-            .Append(", Gaps = ").Append(GapCount);
+            .Append(", Gaps = ").Append(GapCount).Append(", RecordRules = ").Append(RecordRuleBaseVersionIds.Count);
         return true;
     }
 }

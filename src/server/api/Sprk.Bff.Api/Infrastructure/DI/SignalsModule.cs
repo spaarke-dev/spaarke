@@ -1,6 +1,7 @@
 using Spaarke.Scheduling;
 using Sprk.Bff.Api.Infrastructure.HealthChecks;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Sprk.Bff.Api.Services.Finance;
 using Sprk.Bff.Api.Services.Jobs;
 using Sprk.Bff.Api.Services.Ontology;
 using Sprk.Bff.Api.Services.Signals;
@@ -196,6 +197,17 @@ public static class SignalsModule
         // scope. Unconditional (bff-extensions.md F.1): JobSubmissionService, IGenericEntityService and IIdempotencyService are too.
         services.AddSingleton<GateDecisionRecordEnqueuer>();
         services.AddScoped<IJobHandler, GateDecisionRecordJobHandler>();
+
+        // ebilling-r1 task 084h-3 (EB-D-239 Q10): the repair of a per-record Procedure change whose inline Decision Record failed after the
+        // change committed. The enqueuer is 084h-2's optional IRecordProcedureDecisionEnqueuer (ProcedureAssignmentService takes it; with none
+        // registered a failed record answers NotRecorded); ONE ADR-004 IJobHandler writes the record through BillingDecisionRecorder
+        // (FinanceModule, singleton). Singleton enqueuer (JobSubmissionService is one); SCOPED handler (IIdempotencyService is). Unconditional,
+        // as the gate's pair above. The handler reads Ebilling:Enabled itself (ADR-018; FinanceModule's flag rule) through
+        // IOptionsMonitor<EbillingOptions>, bound by FinanceModule (084h-3 review round 1). CLAUDE.md section 11: Existing - the gate's
+        // pair above. Extension - bound to the gate entry and payload, so copied in shape, not widened. Cost of doing nothing - a
+        // post-commit record failure is a permanent gap no user can close.
+        services.AddSingleton<IRecordProcedureDecisionEnqueuer, RecordProcedureDecisionEnqueuer>();
+        services.AddScoped<IJobHandler, RecordProcedureDecisionJobHandler>();
         services.AddHealthChecks()
             .AddCatalogCheck<SignalEvaluatorHealthCheck>(
                 "signal-reevaluation",

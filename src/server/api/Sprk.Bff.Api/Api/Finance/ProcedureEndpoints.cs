@@ -708,7 +708,7 @@ public static class ProcedureEndpoints
         {
             RuleSetOutcomeKind.Done => Results.Ok(outcome.Value),
             RuleSetOutcomeKind.Invalid => Results.Problem(
-                statusCode: StatusCodes.Status400BadRequest,
+                statusCode: outcome.StatusCode,
                 title: outcome.ErrorCode == ProcedureService.CodePublishInvalid ? "Procedure version cannot be published" : "Procedure request is not valid",
                 detail: $"{outcome.Errors.Count} problem(s) found; nothing was written.",
                 extensions: new Dictionary<string, object?>

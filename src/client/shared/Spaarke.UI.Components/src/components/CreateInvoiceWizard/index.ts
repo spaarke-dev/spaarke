@@ -21,6 +21,9 @@ export type { BlockedSubmissionPanelProps } from './BlockedSubmissionPanel';
 export {
   createInternalInvoiceSubmission,
   resolveInitialInvoiceRecord,
+  readCorrectionPrefill,
+  correctionTargetFromPrefill,
+  correctionPrefillErrorMessage,
   isBlockedStatus,
   blockedDecisionErrorMessage,
   BLOCKED_REASON_CODE,
@@ -33,6 +36,8 @@ export type {
   InternalInvoiceSubmission,
   InternalInvoiceSubmissionOptions,
   IInitialInvoiceAssociation,
+  CorrectionPrefill,
+  CorrectionLaunch,
   BlockedSubmissionView,
   BlockedSubmissionState,
   BlockedFinding,

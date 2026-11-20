@@ -10,13 +10,16 @@ using Moq;
 using Spaarke.Core.Auth;
 using Spaarke.Core.Auth.Rules;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Services.Finance;
 using Sprk.Bff.Api.Services.Finance.Files;
 using Sprk.Bff.Api.Services.Finance.Models;
+using Sprk.Bff.Api.Services.Finance.Procedures;
 using Sprk.Bff.Api.Services.Finance.Submission;
 using Sprk.Bff.Api.Services.Signals;
 using Sprk.Bff.Api.Services.Signals.Billing;
+using Sprk.Bff.Api.Tests.Services.Finance.Procedures;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Services.Finance;
@@ -61,6 +64,10 @@ public sealed class InvoiceReviewReadServiceTests
         public List<Entity> History = [];
         public List<Entity> Roster = [];
 
+        /// <summary>ISS-034 iss034d: the users whose names the completer read returns; a fault makes that read throw.</summary>
+        public List<Entity> Users = [];
+        public bool UserFault;
+
         /// <summary>Task 092: the Servable Invoice PDF Stored Files the query returns (Dataverse applies the filter; the query shape is asserted).</summary>
         public List<Entity> Files = [];
         public readonly List<QueryExpression> Queries = [];
@@ -75,6 +82,9 @@ public sealed class InvoiceReviewReadServiceTests
         public readonly List<string> CallerPaths = [];
         public Func<string, Task<DataverseUserResponse>>? CallerFault;
         public readonly Mock<ILogger<InvoiceReviewReadService>> Logger = new();
+
+        /// <summary>Task 113: the Dataverse the Procedure-change banner reads (a separate evaluating double); by default the strict one above, which refuses its reads.</summary>
+        public Mock<IGenericEntityService>? BannerEntities;
 
         public World(int status = InvoiceStatusCodes.InReview)
         {
@@ -110,6 +120,7 @@ public sealed class InvoiceReviewReadServiceTests
                         "sprk_invoicesubmission" => new EntityCollection(Submission is null ? [] : [Requested(Submission, query.ColumnSet)]),
                         "sprk_decisionrecord" => new EntityCollection(History.ToList()),
                         "sprk_timekeeper" => new EntityCollection(Roster.ToList()),
+                        "systemuser" => UserFault ? throw new InvalidOperationException("users down") : new EntityCollection(Users.ToList()),
                         "sprk_storedfile" => new EntityCollection(Files.ToList()),
                         _ => throw new InvalidOperationException($"Unexpected read of {query.EntityName}"),
                     };
@@ -144,7 +155,8 @@ public sealed class InvoiceReviewReadServiceTests
                 .Returns((string path, CancellationToken _) => AnswerCaller(path));
             return new InvoiceReviewReadService(
                 Entities.Object, authorization, settings.Object, caller.Object,
-                new EarlierInvoiceReadability(NullLogger<EarlierInvoiceReadability>.Instance), Logger.Object);
+                new EarlierInvoiceReadability(NullLogger<EarlierInvoiceReadability>.Instance),
+                new ProcedureChangeBanner(BannerEntities?.Object ?? Entities.Object, NullLogger<ProcedureChangeBanner>.Instance), Logger.Object);
         }
 
         public int CallerReads(string set) => CallerPaths.Count(p => p.StartsWith(set + "?", StringComparison.Ordinal));
@@ -738,6 +750,166 @@ public sealed class InvoiceReviewReadServiceTests
         history[0].DecidedBy!.Name.Should().Be("R. Reviewer");
     }
 
+    // ── ISS-034 iss034d (EB-D-257): "Finished by" on the history entry of a blocked Override / Return an operator finished ──
+
+    private static readonly Guid Operator = Guid.Parse("10000000-0000-4000-8000-0000000000e3");
+    private static readonly Guid OtherOperator = Guid.Parse("10000000-0000-4000-8000-0000000000e4");
+
+    /// <summary>The stored findings with <paramref name="member"/> stamped as iss034c writes it (<paramref name="completer"/> null: a stamp without one).</summary>
+    private static string Stamped(string member, Entity record, Guid? completer, string? findings = null, Guid? bySystemUser = null) =>
+        SubmissionOverrideService.WithStamp(
+            findings ?? FindingsJson(), member,
+            new BlockedDecisionStamp(record.Id, bySystemUser ?? Reviewer, new DateTimeOffset(2026, 10, 1, 0, 0, 0, TimeSpan.Zero), "because", completer));
+
+    private static World FinishedWorld(string member, string action, Guid? completer, out Entity record, Guid? stampRecord = null)
+    {
+        var w = new World();
+        w.AddLine(1, InvoiceLineStatus.Flagged);
+        record = Record(action, null, new DateTime(2026, 10, 1, 0, 0, 0, DateTimeKind.Utc));
+        var other = Record(action, null, new DateTime(2026, 10, 2, 0, 0, 0, DateTimeKind.Utc));
+        w.History = [record, other];
+        w.Submission = SubmissionRow(
+            Stamped(member, stampRecord is { } id ? new Entity("sprk_decisionrecord", id) : record, completer), blocked: false);
+        w.Users = [new Entity("systemuser", Operator) { ["fullname"] = "O. Operator" }, new Entity("systemuser", Reviewer) { ["fullname"] = "R. Reviewer" }];
+        return w;
+    }
+
+    [Theory(DisplayName = "iss034d: an operator-finished Override or Return gives completedBy.name on that history entry only")]
+    [InlineData("override", "override-submission")]
+    [InlineData("return", "return-to-firm")]
+    public async Task OperatorFinished_GivesCompletedByOnItsEntry(string member, string action)
+    {
+        var w = FinishedWorld(member, action, Operator, out var record);
+
+        var history = (await w.Service().GetAsync(InvoiceId, Caller, CancellationToken.None))!.DecisionHistory;
+
+        history.Single(h => h.RecordId == record.Id).CompletedBy.Should().Be(new ReviewCompletedByDto("O. Operator"));
+        history.Single(h => h.RecordId != record.Id).CompletedBy.Should().BeNull("the stamp names the first record only");
+        history.Single(h => h.RecordId == record.Id).DecidedBy!.Name.Should().Be("R. Reviewer", "the decider stays");
+        w.Reads("systemuser").Should().Be(1);
+    }
+
+    [Fact(DisplayName = "iss034d: the completedBy member is on the wire only when present")]
+    public async Task CompletedBy_IsOnTheWireOnlyWhenPresent()
+    {
+        var with = FinishedWorld("override", "override-submission", Operator, out _);
+        var without = FinishedWorld("override", "override-submission", null, out _);
+
+        var a = JsonSerializer.Serialize((await with.Service().GetAsync(InvoiceId, Caller, CancellationToken.None))!.DecisionHistory, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        var b = JsonSerializer.Serialize((await without.Service().GetAsync(InvoiceId, Caller, CancellationToken.None))!.DecisionHistory, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+
+        a.Should().Contain("\"completedBy\":{\"name\":\"O. Operator\"}");
+        b.Should().NotContain("completedBy");
+    }
+
+    [Theory(DisplayName = "iss034d: no completedBy for the decider's own completion, a stamp without a completer, or a stamp naming another record (and no user read)")]
+    [InlineData("decider")]
+    [InlineData("none")]
+    [InlineData("otherRecord")]
+    public async Task NoCompleter_GivesNone_AndReadsNoUsers(string kind)
+    {
+        var w = kind switch
+        {
+            "decider" => FinishedWorld("override", "override-submission", Reviewer, out _),
+            "none" => FinishedWorld("override", "override-submission", null, out _),
+            _ => FinishedWorld("override", "override-submission", Operator, out _, stampRecord: Guid.NewGuid()),
+        };
+
+        var history = (await w.Service().GetAsync(InvoiceId, Caller, CancellationToken.None))!.DecisionHistory;
+
+        history.Should().OnlyContain(h => h.CompletedBy == null);
+        w.Reads("systemuser").Should().Be(0);
+    }
+
+    [Fact(DisplayName = "iss034d: no completedBy when the completer is the record's own decider, even if the stamp's decider differs (never 'Decided by X / Finished by X')")]
+    public async Task CompleterEqualToTheRecordsDecider_GivesNone_WhateverTheStampsDecider()
+    {
+        var w = FinishedWorld("override", "override-submission", Reviewer, out var record);
+        w.Submission = SubmissionRow(Stamped("override", record, Reviewer, bySystemUser: OtherOperator));
+
+        var history = (await w.Service().GetAsync(InvoiceId, Caller, CancellationToken.None))!.DecisionHistory;
+
+        history.Single(h => h.RecordId == record.Id).DecidedBy!.Id.Should().Be(Reviewer);
+        history.Should().OnlyContain(h => h.CompletedBy == null);
+        w.Reads("systemuser").Should().Be(0);
+    }
+
+    [Fact(DisplayName = "iss034d: a stamp for the verb whose record carries another action code gives none")]
+    public async Task StampNamingARecordOfAnotherVerb_GivesNone()
+    {
+        var w = FinishedWorld("return", "override-submission", Operator, out _);
+
+        (await w.Service().GetAsync(InvoiceId, Caller, CancellationToken.None))!.DecisionHistory.Should().OnlyContain(h => h.CompletedBy == null);
+    }
+
+    [Fact(DisplayName = "iss034d: a malformed stamp, an unreadable findings column and no history give none and the review still returns")]
+    public async Task UnreadableStamp_GivesNone_AndTheReviewReturns()
+    {
+        var w = FinishedWorld("override", "override-submission", Operator, out var record);
+        w.Submission = SubmissionRow("{ not json");
+        (await w.Service().GetAsync(InvoiceId, Caller, CancellationToken.None))!.DecisionHistory.Should().OnlyContain(h => h.CompletedBy == null);
+
+        w.Submission = SubmissionRow(SubmissionOverrideService.WithStamp(FindingsJson(), "override", new BlockedDecisionStamp(record.Id, Reviewer, DateTimeOffset.UtcNow, "x", Operator))
+            .Replace(Operator.ToString("D"), "not-a-guid"));
+        (await w.Service().GetAsync(InvoiceId, Caller, CancellationToken.None))!.DecisionHistory.Should().OnlyContain(h => h.CompletedBy == null);
+
+        w.Submission = null;
+        (await w.Service().GetAsync(InvoiceId, Caller, CancellationToken.None))!.DecisionHistory.Should().OnlyContain(h => h.CompletedBy == null);
+        w.History = [];
+        (await w.Service().GetAsync(InvoiceId, Caller, CancellationToken.None)).Should().NotBeNull();
+    }
+
+    [Theory(DisplayName = "iss034d: a fault reading the user, or a user with no name, gives none, logs ids only, and the review still returns")]
+    [InlineData("fault")]
+    [InlineData("missing")]
+    [InlineData("blank")]
+    public async Task UserReadProblem_GivesNone_AndTheReviewReturns(string kind)
+    {
+        var w = FinishedWorld("override", "override-submission", Operator, out _);
+        if (kind == "fault") w.UserFault = true;
+        if (kind == "missing") w.Users = [];
+        if (kind == "blank") w.Users = [new Entity("systemuser", Operator) { ["fullname"] = " " }];
+
+        var review = await w.Service().GetAsync(InvoiceId, Caller, CancellationToken.None);
+
+        review.Should().NotBeNull();
+        review!.DecisionHistory.Should().HaveCount(2).And.OnlyContain(h => h.CompletedBy == null);
+        review.Lines.Should().HaveCount(1);
+        if (kind == "fault")
+        {
+            w.Logger.Verify(
+                l => l.Log(
+                    LogLevel.Warning, It.IsAny<EventId>(),
+                    It.Is<It.IsAnyType>((state, _) => state.ToString()!.Contains(InvoiceId.ToString()) && !state.ToString()!.Contains("users down") && !state.ToString()!.Contains(Operator.ToString())),
+                    It.IsAny<Exception?>(), It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
+                Times.Once);
+        }
+    }
+
+    [Theory(DisplayName = "iss034d: the user reads do not grow with the history rows (one batched read for Override and Return together)")]
+    [InlineData(2)]
+    [InlineData(60)]
+    public async Task UserReads_DoNotGrowWithTheHistoryRows(int rows)
+    {
+        var w = FinishedWorld("override", "override-submission", Operator, out var overrideRecord);
+        var returnRecord = Record("return-to-firm", null, new DateTime(2026, 10, 3, 0, 0, 0, DateTimeKind.Utc));
+        var stamped = Stamped("override", overrideRecord, Operator);
+        w.Submission = SubmissionRow(Stamped("return", returnRecord, OtherOperator, stamped));
+        w.Users.Add(new Entity("systemuser", OtherOperator) { ["fullname"] = "P. Other" });
+        w.History = [overrideRecord, returnRecord];
+        for (var i = 0; i < rows - 2; i++)
+        {
+            w.History.Add(Record("reduce-line", null, new DateTime(2026, 10, 4, 0, 0, 0, DateTimeKind.Utc).AddMinutes(i)));
+        }
+
+        var history = (await w.Service().GetAsync(InvoiceId, Caller, CancellationToken.None))!.DecisionHistory;
+
+        history.Should().HaveCount(rows);
+        history.Where(h => h.CompletedBy != null).Select(h => h.CompletedBy!.Name).Should().BeEquivalentTo("O. Operator", "P. Other");
+        w.Reads("systemuser").Should().Be(1);
+        w.Queries.Single(q => q.EntityName == "systemuser").Criteria.Conditions.Single().Values.Should().HaveCount(2);
+    }
+
     // ── NFR-02: the number of Dataverse reads does not depend on the number of lines ──
 
     [Theory(DisplayName = "100: the Dataverse read count is the same for 3 and 150 lines (none per line)")]
@@ -762,6 +934,107 @@ public sealed class InvoiceReviewReadServiceTests
         w.Reads("sprk_billingevent").Should().Be(1);
         w.Reads("sprk_decisionrecord").Should().Be(1);
         w.Reads("sprk_timekeeper").Should().Be(1);
+    }
+
+    // ── ebilling-r1 task 113 (model 8.2): the Procedure-change banner on the review ──
+
+    /// <summary>
+    /// A review World whose invoice sits on the banner world's matter and firm, with stored findings that carry the snapshot of the banner world's
+    /// rows as they stand now. The banner reads its own Dataverse double, so the review's strict one still refuses any other entity.
+    /// </summary>
+    private static async Task<(World Review, ProcedureBannerWorld Banner)> BannerWorldAsync(int status = InvoiceStatusCodes.InReview, int lines = 2, bool changed = true)
+    {
+        var banner = new ProcedureBannerWorld();
+        var (_, _, rule, _) = banner.Simple("RATE-1");
+        var w = new World(status) { BannerEntities = banner.Entities };
+        w.Invoice!["sprk_vendororg"] = new EntityReference("sprk_organization", ProcedureBannerWorld.F);
+        w.Invoice["sprk_matter"] = new EntityReference("sprk_matter", ProcedureBannerWorld.M);
+        for (var i = 1; i <= lines; i++)
+        {
+            w.AddLine(i, InvoiceLineStatus.Flagged, extraction: Extraction, timekeeper: TimekeeperId);
+        }
+
+        // The invoice and its lines are dated 2026-09-30 and 2026-09-01: the stored snapshot judged exactly those dates.
+        var stored = JsonNode.Parse(await banner.StoredFindingsAsync(ProcedureBannerWorld.F, new DateOnly(2026, 9, 1), new DateOnly(2026, 9, 30)))!.AsObject();
+        var findings = JsonNode.Parse(FindingsJson())!.AsObject();
+        findings[ProcedureSnapshot.Member] = stored[ProcedureSnapshot.Member]!.DeepClone();
+        findings["receivedOn"] = "2026-10-02";
+        w.Submission = SubmissionRow(findings.ToJsonString());
+        if (changed) banner.ExcludeRule(ProcedureBannerWorld.M, rule); // the rows changed after the invoice was judged
+        return (w, banner);
+    }
+
+    [Fact(DisplayName = "113 (model 8.2): an internal caller of an open invoice gets Changed once the rows changed; the same request, rows unchanged, gets NotChanged")]
+    public async Task Banner_InternalCaller_OpenInvoice_ReflectsTheRows()
+    {
+        var (w, banner) = await BannerWorldAsync();
+
+        var changed = await w.Service().GetAsync(InvoiceId, Caller, FinanceStepZeroVerdict.Internal, CancellationToken.None);
+
+        changed!.ProcedureChange.Should().Be(new ProcedureChangeBannerDto("Changed", "The procedures that apply to this invoice have changed; re-check to apply them."));
+
+        var (unchangedWorld, _) = await BannerWorldAsync(changed: false);
+
+        var same = await unchangedWorld.Service().GetAsync(InvoiceId, Caller, FinanceStepZeroVerdict.Internal, CancellationToken.None);
+
+        same!.ProcedureChange.Should().Be(new ProcedureChangeBannerDto("NotChanged", null));
+        banner.Wrote.Should().BeFalse();
+    }
+
+    [Fact(DisplayName = "113 (model 8.2) must-not-fire: a request without the Internal step-0 verdict (the two-argument entry, or an explicit null) gets no member, and the banner's Dataverse is not read")]
+    public async Task Banner_NoVerdict_IsAbsent_AndReadsNothing()
+    {
+        var (w, banner) = await BannerWorldAsync();
+        var before = banner.Reads;
+
+        var viaOldEntry = await w.Service().GetAsync(InvoiceId, Caller, CancellationToken.None);
+        var viaNull = await w.Service().GetAsync(InvoiceId, Caller, stepZero: null, CancellationToken.None);
+
+        viaOldEntry!.ProcedureChange.Should().BeNull();
+        viaNull!.ProcedureChange.Should().BeNull();
+        banner.Reads.Should().Be(before);
+        JsonSerializer.Serialize(viaNull, new JsonSerializerOptions(JsonSerializerDefaults.Web)).Should().NotContainEquivalentOf("procedureChange", "an absent member is omitted, not null");
+    }
+
+    [Fact(DisplayName = "113 (model 8.2) must-not-fire: a decided invoice keeps its snapshot and gets no banner, even for an internal caller")]
+    public async Task Banner_DecidedInvoice_IsAbsent()
+    {
+        var (w, banner) = await BannerWorldAsync(InvoiceStatusCodes.Approved);
+        var before = banner.Reads;
+
+        var review = await w.Service().GetAsync(InvoiceId, Caller, FinanceStepZeroVerdict.Internal, CancellationToken.None);
+
+        review!.ProcedureChange.Should().BeNull();
+        banner.Reads.Should().Be(before);
+    }
+
+    [Fact(DisplayName = "113 (model 8.2): the member is serialised as its state and text only")]
+    public async Task Banner_Serialised_CarriesTheStateAndTheTextOnly()
+    {
+        var (w, _) = await BannerWorldAsync();
+
+        var review = await w.Service().GetAsync(InvoiceId, Caller, FinanceStepZeroVerdict.Internal, CancellationToken.None);
+
+        var json = JsonNode.Parse(JsonSerializer.Serialize(review, new JsonSerializerOptions(JsonSerializerDefaults.Web)))!.AsObject();
+        json["procedureChange"]!.ToJsonString().Should().Be(
+            """{"state":"Changed","text":"The procedures that apply to this invoice have changed; re-check to apply them."}""");
+    }
+
+    [Theory(DisplayName = "113 (model 8.2, NFR-02): the banner's reads are one resolution per request; the same count for 3 and 150 lines; the page's own queries are unchanged")]
+    [InlineData(3)]
+    [InlineData(150)]
+    public async Task Banner_ReadCount_DoesNotGrowWithTheLineCount(int lineCount)
+    {
+        var (w, banner) = await BannerWorldAsync(lines: lineCount);
+        w.Roster = [new Entity("sprk_timekeeper", TimekeeperId) { ["sprk_name"] = "Jane Smith" }];
+        var before = banner.World.Queries.Count;
+
+        var review = await w.Service().GetAsync(InvoiceId, Caller, FinanceStepZeroVerdict.Internal, CancellationToken.None);
+
+        review!.Lines.Should().HaveCount(lineCount);
+        review.ProcedureChange!.State.Should().Be("Changed");
+        (banner.World.Queries.Count - before).Should().Be(7, "the resolver's reads, once, whatever the number of lines");
+        w.Queries.Should().HaveCount(6, "the page's own reads are exactly as before the banner");
     }
 
     // ── canDecide, tolerance, absence ──

@@ -9,6 +9,7 @@
  *   Modal (default, `embedded={false}`) — renders INSIDE `SprkModal`, which owns the
  *   envelope, header (‹ N of M › nav · title · maximize · ×), body and footer slots:
  *     SprkModal size={size ?? 'wizard'} dismiss={dismiss ?? 'explicit'} uiScale nav
+ *               [nonBlocking yieldToSidePane — opt-in, a host lookup pane in the same document; task 194]
  *       footerStart = Cancel + footerLeftExtra       footer = [spinner] [step actions] Skip · Back · Next/Finish
  *       body        = WizardStepper sidebar | statusBar + error bar + step content / success screen
  *
@@ -171,6 +172,9 @@ export const WizardShell = React.forwardRef<IWizardShellHandle, IWizardShellProp
     size = 'wizard',
     dismiss = 'explicit',
     uiScale,
+    // ontology task 194 — additive, opt-in, modal-only: yield to the host's lookup side pane (SendEmailDialog contract)
+    nonBlocking,
+    yieldToSidePane,
     nav,
     statusBar,
     footer: footerOverride,
@@ -552,6 +556,8 @@ export const WizardShell = React.forwardRef<IWizardShellHandle, IWizardShellProp
       size={size}
       dismiss={dismiss}
       uiScale={uiScale}
+      nonBlocking={nonBlocking}
+      yieldToSidePane={yieldToSidePane}
       nav={nav}
       padded={false}
       footerStart={successConfig ? undefined : footerStart}

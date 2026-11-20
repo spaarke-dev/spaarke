@@ -489,7 +489,9 @@ export interface IThemeWebApi {
     maxPageSize?: number
   ): Promise<{ entities: Record<string, unknown>[] }>;
   createRecord(entityType: string, data: Record<string, unknown>): Promise<{ id: string }>;
-  updateRecord(entityType: string, id: string, data: Record<string, unknown>): Promise<void>;
+  // The result is never read. `unknown`, not `void`: Xrm.WebApi and LegalWorkspace's IWebApi
+  // resolve to `{ id }`, and Promise<{ id }> is not assignable to Promise<void>.
+  updateRecord(entityType: string, id: string, data: Record<string, unknown>): Promise<unknown>;
 }
 
 /**

@@ -3,7 +3,6 @@ import {
   makeStyles,
   tokens,
   Text,
-  LargeTitle,
   Button,
   Tooltip,
   Menu,
@@ -53,24 +52,7 @@ const useStyles = makeStyles({
     flexShrink: 0,
   },
   brandName: { color: tokens.colorNeutralForeground1, whiteSpace: 'nowrap' },
-  // Decorative portal nav strip (non-functional in task 011; real nav is a later task).
-  navStrip: { display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalL },
-  navLink: { color: tokens.colorNeutralForeground3, cursor: 'default' },
-  navLinkActive: { color: tokens.colorBrandForeground1, fontWeight: tokens.fontWeightSemibold },
   right: { display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalXS, flexShrink: 0 },
-  // Welcome band — gives the portal presence on the workspace landing.
-  welcomeBand: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: tokens.spacingVerticalXXS,
-    paddingTop: tokens.spacingVerticalL,
-    paddingBottom: tokens.spacingVerticalL,
-    paddingLeft: tokens.spacingHorizontalXL,
-    paddingRight: tokens.spacingHorizontalXL,
-    backgroundColor: tokens.colorNeutralBackground1,
-  },
-  welcomeTitle: { color: tokens.colorNeutralForeground1 },
-  welcomeSub: { color: tokens.colorNeutralForeground3 },
   // Teams-embedded: the host provides its own header + theme; show only a thin hint.
   teamsHint: {
     display: 'flex',
@@ -101,8 +83,8 @@ interface AppHeaderProps {
   onSignOut?: () => void;
   /** When embedded in Teams, the host owns the header/theme — render only a thin hint. */
   teamsHost?: boolean;
-  /** Show the tall "Welcome to the Legal Department Service Portal" band (workspace landing only). */
-  showWelcomeBand?: boolean;
+  /** The portal title next to the logo — {@link portalTitleFor} the signed-in plane. */
+  title: string;
   /**
    * The notification bell (task 055), rendered at the right of the header and of the Teams hint. A slot, not an import: the
    * caller mounts it only for a signed-in user, because the bell reads the BFF the moment it mounts.
@@ -110,13 +92,23 @@ interface AppHeaderProps {
   bell?: React.ReactNode;
 }
 
+/** The portal title a partner (CIAM plane) sees. */
+export const PARTNER_PORTAL_TITLE = 'Outside Counsel Collaboration';
+/** The portal title an internal contact (workforce plane: company-account sign-in or Teams) sees. */
+export const WORKFORCE_PORTAL_TITLE = 'Legal Service Request Portal';
+
+/** The header title for the signed-in plane (owner, 2026-11-17): one SPA, two audiences, two names. */
+export function portalTitleFor(workforcePlane: boolean): string {
+  return workforcePlane ? WORKFORCE_PORTAL_TITLE : PARTNER_PORTAL_TITLE;
+}
+
 /**
- * AppHeader — the branded portal header (ShellChrome) for the Legal Department
- * Service Portal (task 011 §2). A taller, "intranet/website" brand + nav strip
- * (Spaarke logo + "Legal Department Service Portal" + decorative sections) with a
- * shared `ThemeToggle` and an account menu; an optional welcome band gives the
- * workspace landing presence. Styled exclusively with Fluent v9 semantic tokens
- * (ADR-021 — no hardcoded colors). Teams-embedded hides redundant chrome.
+ * AppHeader — the branded portal header (ShellChrome) (task 011 §2). A brand bar
+ * (Spaarke logo + the plane's portal title) with the notification bell, a shared
+ * `ThemeToggle` and an account menu. The decorative Home/Services/Resources/Help strip
+ * and the "Welcome to …" landing band were removed (owner, 2026-11-17): the strip did
+ * nothing and the band repeated the title. Styled exclusively with Fluent v9 semantic
+ * tokens (ADR-021 — no hardcoded colors). Teams-embedded hides redundant chrome.
  */
 export const AppHeader: React.FC<AppHeaderProps> = ({
   isDark,
@@ -124,7 +116,7 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
   onSettingsClick,
   onSignOut,
   teamsHost = false,
-  showWelcomeBand = false,
+  title,
   bell = null,
 }) => {
   const styles = useStyles();
@@ -147,23 +139,8 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
           </div>
           <span className={styles.divider} aria-hidden="true" />
           <Text size={400} weight="semibold" className={styles.brandName}>
-            Legal Department Service Portal
+            {title}
           </Text>
-          <span className={styles.divider} aria-hidden="true" />
-          <nav className={styles.navStrip} aria-label="Portal sections">
-            <Text size={200} className={styles.navLinkActive}>
-              Home
-            </Text>
-            <Text size={200} className={styles.navLink}>
-              Services
-            </Text>
-            <Text size={200} className={styles.navLink}>
-              Resources
-            </Text>
-            <Text size={200} className={styles.navLink}>
-              Help
-            </Text>
-          </nav>
         </div>
 
         <div className={styles.right}>
@@ -200,13 +177,6 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
           )}
         </div>
       </div>
-
-      {showWelcomeBand && (
-        <div className={styles.welcomeBand}>
-          <LargeTitle className={styles.welcomeTitle}>Welcome to the Legal Department Service Portal</LargeTitle>
-          {portalUser?.displayName && <Text className={styles.welcomeSub}>{portalUser.displayName}</Text>}
-        </div>
-      )}
     </header>
   );
 };

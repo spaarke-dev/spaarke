@@ -62,13 +62,11 @@ export interface RecordDocumentListProps {
   onCreateActionChange?: CreateActionReporter;
   /** Report an upload in flight, so the record modal holds. */
   onBusyChange?: (busy: boolean) => void;
-  /** Tell the template the Upload right without offering a toolbar action (the invoice Files list; task 006 fix round 1). */
-  onUploadRightChange?: (right: boolean | null) => void;
   /** Open a document's record over the shown record (the Documents section only; see OPEN above). */
   onOpenDocument?: (documentId: string, trigger: HTMLElement) => void;
 }
 
-/** The R3 documents block: `DocumentLibrary` with R3's props, under R3's test id. Shared by Documents and (P1) Files. */
+/** The R3 documents block: `DocumentLibrary` with R3's props, under R3's test id. Used by the Documents section. */
 export const RecordDocumentList: React.FC<RecordDocumentListProps> = ({
   root,
   recordId,
@@ -77,7 +75,6 @@ export const RecordDocumentList: React.FC<RecordDocumentListProps> = ({
   refreshSignal,
   onCreateActionChange,
   onBusyChange,
-  onUploadRightChange,
   onOpenDocument,
 }) => (
   <div data-testid="record-detail-documents">
@@ -91,7 +88,6 @@ export const RecordDocumentList: React.FC<RecordDocumentListProps> = ({
       writeAccessPerRecord={callerContext?.writeAccessPerRecord === true}
       onCreateActionChange={onCreateActionChange}
       onBusyChange={onBusyChange}
-      onUploadRightChange={onUploadRightChange}
       onOpenDocument={onOpenDocument}
     />
   </div>

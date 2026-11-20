@@ -28,11 +28,8 @@
  * Standards: ADR-012 (shared components)
  */
 
-import type {
-  SectionRegistration,
-  SectionCategory,
-  NarrateRequest,
-} from "@spaarke/ui-components";
+import type { SectionRegistration, SectionCategory } from "@spaarke/ui-components";
+import type { NarrateRequest } from "@spaarke/daily-briefing-components/widgets";
 import { SECTION_METADATA_CATALOG } from "@spaarke/ui-components";
 import { getStartedRegistration } from "./sections/getStarted.registration";
 import { quickSummaryRegistration } from "./sections/quickSummary.registration";

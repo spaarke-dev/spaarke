@@ -156,8 +156,11 @@ export interface PortalWorkspaceShellProps {
   onCloseTab: (id: string) => void;
   /** Invoked by the "Add widget" affordance (task 012 opens the widget library). */
   onAddWidget: () => void;
-  /** Quick Start home node — rendered in the body when the pinned Quick Start tab is active. */
-  quickStart: React.ReactNode;
+  /**
+   * Quick Start home node — rendered in the body when the pinned Quick Start tab is active. Omit it and there is NO Quick
+   * Start tab (partners, owner 2026-11-17): the widget tabs stand alone and the first one shows when none is active.
+   */
+  quickStart?: React.ReactNode;
   /** Assistant pane body — omit when the persona has no assistant (FR-26 gating). */
   assistant?: React.ReactNode;
   /** Render the active widget's body (task 012 supplies real widgets). */
@@ -186,14 +189,19 @@ export const PortalWorkspaceShell: React.FC<PortalWorkspaceShellProps> = ({
 }) => {
   const s = useStyles();
 
-  // Quick Start home is always available; fall back to it when no valid widget tab is active.
-  const active =
-    activeTabId === QUICK_START_TAB || widgetTabs.some(t => t.id === activeTabId) ? activeTabId : QUICK_START_TAB;
-  const isQuickStart = active === QUICK_START_TAB;
+  // With a Quick Start home, fall back to it when no valid widget tab is active; without one (partners), fall back to the
+  // first widget tab, or to nothing (the empty state) when no widget tab is open.
+  const hasQuickStart = quickStart != null;
+  const active: string | null = widgetTabs.some(t => t.id === activeTabId)
+    ? activeTabId
+    : hasQuickStart
+      ? QUICK_START_TAB
+      : (widgetTabs[0]?.id ?? null);
+  const isQuickStart = hasQuickStart && active === QUICK_START_TAB;
 
-  // Pinned Quick Start (home) tab first + the open widget tabs (closable).
+  // Pinned Quick Start (home) tab first, when there is one, + the open widget tabs (closable).
   const tabs: TabItem[] = [
-    { id: QUICK_START_TAB, title: 'Quick Start', icon: HomeRegular, closable: false },
+    ...(hasQuickStart ? [{ id: QUICK_START_TAB, title: 'Quick Start', icon: HomeRegular, closable: false }] : []),
     ...widgetTabs.map(w => ({ id: w.id, title: w.title, icon: w.icon, closable: true })),
   ];
 
@@ -253,7 +261,7 @@ export const PortalWorkspaceShell: React.FC<PortalWorkspaceShellProps> = ({
       </div>
     ) : null;
 
-  const activeWidgetBody = !isQuickStart ? renderWidget?.(active) : null;
+  const activeWidgetBody = !isQuickStart && active !== null ? renderWidget?.(active) : null;
 
   return (
     <div className={s.bodyRow}>
@@ -279,7 +287,9 @@ export const PortalWorkspaceShell: React.FC<PortalWorkspaceShellProps> = ({
             <div className={s.empty}>
               <AppsAddInRegular className={s.emptyIcon} aria-hidden="true" />
               <Title3>Nothing to show here</Title3>
-              <Text>Add a widget, or head back to Quick Start.</Text>
+              <Text>
+                {hasQuickStart ? 'Add a widget, or head back to Quick Start.' : 'Add a widget to get started.'}
+              </Text>
               <Button appearance="primary" icon={<AddRegular />} onClick={onAddWidget}>
                 Add widget
               </Button>

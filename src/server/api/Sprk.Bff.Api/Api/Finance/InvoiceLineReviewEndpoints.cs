@@ -22,6 +22,9 @@ namespace Sprk.Bff.Api.Api.Finance;
 /// <para><b>Signals.</b> A decision closes the Open and Acknowledged Signals on its lines (D-122) through the app-identity writer, so the
 /// service first asks, AS THE CALLER with the caller's own token, for AppendTo on the core record and Write on each such line; a missing right is
 /// 403 <c>ebilling.decision.not_authorized</c> and nothing is written.</para>
+/// <para><b>Notes (095f-2d1, EB-D-236).</b> The single-line and multi-line bodies take an optional <c>note</c>; it lands on each decided line's own
+/// Decision Record (<c>Values["note"]</c>) and never on an invoice column. Accept all Clean and the approval's bulk accept take none. A refused note
+/// is 400 <c>ebilling.note_too_long</c> or <c>ebilling.note_invalid_characters</c>, before any read.</para>
 /// <para><b>Status codes.</b> 200 applied; 400 invalid (<c>errorCode</c> says which rule); 401; 403; 404 uniform (invoice or line absent or
 /// unreadable); 409 (not In Review, line Pending or not decidable, totals refused, another decision in progress, a line changed,
 /// <c>ebilling.line.corrections_pending</c> while a correction of a chosen line, or for Accept all Clean of the invoice, was saved but did not finish:
@@ -65,7 +68,10 @@ public static class InvoiceLineReviewEndpoints
             .WithDescription(
                 "Accept (approved = billed), Reduce (approvedAmount and reason required; between 0 and the billed amount) or Disallow (reason " +
                 "required; approved 0). Only while the invoice is In Review; a Pending line cannot be decided. Recomputes the invoice totals and " +
-                "records the decision. Repeating the request with the same decisionId records nothing twice.")
+                "records the decision. Repeating the request with the same decisionId records nothing twice. An optional note (at most 2000 " +
+                "characters; 400 ebilling.note_too_long or ebilling.note_invalid_characters, checked before any read) is saved on this line's own " +
+                "Decision Record and nowhere else. A repeat with the same decisionId must carry the same note: another note (or none) is refused by " +
+                "the record as a different decision, answered 503 ebilling.decision.incomplete (failedStep record); once the line's record exists, the first note stays on it. Use a new decisionId for a new note.")
             .Produces<LineDecisionResponse>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
@@ -82,7 +88,9 @@ public static class InvoiceLineReviewEndpoints
             .WithSummary("Apply one action and reason to several invoice lines")
             .WithDescription(
                 "The selected lines get the same action and reason; a Reduce carries its own approvedAmount per line (apply a suggestion to n " +
-                "lines). All or nothing: one invalid line writes nothing. An Accept writes the 'Accepted in bulk' correction rows (never a label).")
+                "lines). All or nothing: one invalid line writes nothing. An Accept writes the 'Accepted in bulk' correction rows (never a label). " +
+                "An optional note (the single-line route's rules) is saved on every selected line's own Decision Record, one record per line, and " +
+                "nowhere else; a repeat with the same decisionId must carry the same note (see the single-line route).")
             .Produces<LineDecisionResponse>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
@@ -99,7 +107,7 @@ public static class InvoiceLineReviewEndpoints
             .WithSummary("Accept every Clean line of an invoice")
             .WithDescription(
                 "Accepts exactly the lines that are Clean when the request runs, at their billed amount. Flagged, Pending and already decided " +
-                "lines are untouched. Writes the 'Accepted in bulk' correction rows (never a label).")
+                "lines are untouched. Writes the 'Accepted in bulk' correction rows (never a label). Takes no note: its records carry none.")
             .Produces<LineDecisionResponse>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
@@ -137,7 +145,9 @@ public static class InvoiceLineReviewEndpoints
             CallerResolution.ResolveObjectId(httpContext.User) ?? string.Empty,
             TokenHelper.ExtractBearerTokenOrNull(httpContext));
 
-        var review = await service.GetAsync(invoiceId, caller, ct);
+        // Task 113 (model 8.2): step 0's verdict decides who gets the Procedure-change banner; it is read from the request, never resolved again.
+        var review = await service.GetAsync(
+            invoiceId, caller, FinanceAuthorizationFilter.StepZeroClassedInternal(httpContext) ? FinanceStepZeroVerdict.Internal : null, ct);
         return review is null
             ? FinanceAuthorizationFilter.UniformRecordNotFound(httpContext)
             : TypedResults.Ok(review);
@@ -164,7 +174,7 @@ public static class InvoiceLineReviewEndpoints
         var result = await service.DecideAsync(
             new LineDecisionCommand(
                 invoiceId, body.DecisionId, action, body.Reason,
-                [new LineDecisionLine(lineId, body.ApprovedAmount)], decider, Bulk: false, TokenHelper.ExtractBearerTokenOrNull(httpContext)),
+                [new LineDecisionLine(lineId, body.ApprovedAmount)], decider, Bulk: false, TokenHelper.ExtractBearerTokenOrNull(httpContext), body.Note),
             ct);
         return ToResult(result, httpContext, body.DecisionId);
     }
@@ -195,7 +205,7 @@ public static class InvoiceLineReviewEndpoints
         var result = await service.DecideAsync(
             new LineDecisionCommand(
                 invoiceId, body.DecisionId, action, body.Reason,
-                body.Lines.Select(l => new LineDecisionLine(l.LineId, l.ApprovedAmount)).ToList(), decider, Bulk: true, TokenHelper.ExtractBearerTokenOrNull(httpContext)),
+                body.Lines.Select(l => new LineDecisionLine(l.LineId, l.ApprovedAmount)).ToList(), decider, Bulk: true, TokenHelper.ExtractBearerTokenOrNull(httpContext), body.Note),
             ct);
         return ToResult(result, httpContext, body.DecisionId);
     }
@@ -310,15 +320,24 @@ public static class InvoiceLineReviewEndpoints
             extensions: new Dictionary<string, object?> { ["errorCode"] = errorCode });
 }
 
-/// <summary>Body of the single-line decision route. <paramref name="Action"/> is <c>accept</c>, <c>reduce</c> or <c>disallow</c>.</summary>
-public sealed record SingleLineDecisionRequest(Guid DecisionId, string? Action, string? Reason, decimal? ApprovedAmount);
+/// <summary>
+/// Body of the single-line decision route. <paramref name="Action"/> is <c>accept</c>, <c>reduce</c> or <c>disallow</c>. <paramref name="Note"/> is
+/// optional (095f-2d1, EB-D-236): at most 2000 characters after trimming, no control character other than newline, carriage return or tab (400
+/// <c>ebilling.note_too_long</c> / <c>ebilling.note_invalid_characters</c>, before any read); blank means none. It is saved only on this line's own
+/// Decision Record, never on the invoice.
+/// </summary>
+public sealed record SingleLineDecisionRequest(Guid DecisionId, string? Action, string? Reason, decimal? ApprovedAmount, string? Note = null);
 
 public sealed record MultiLineDecisionLine(Guid LineId, decimal? ApprovedAmount);
 
-/// <summary>Body of the multi-line route: one action and reason, a per-line amount for a Reduce.</summary>
-public sealed record MultiLineDecisionRequest(Guid DecisionId, string? Action, string? Reason, IReadOnlyList<MultiLineDecisionLine>? Lines);
+/// <summary>
+/// Body of the multi-line route: one action and reason, a per-line amount for a Reduce. <paramref name="Note"/> is the single-line route's optional
+/// note (095f-2d1): one note, saved on every selected line's own Decision Record, as the reason is applied to every line.
+/// </summary>
+public sealed record MultiLineDecisionRequest(
+    Guid DecisionId, string? Action, string? Reason, IReadOnlyList<MultiLineDecisionLine>? Lines, string? Note = null);
 
-/// <summary>Body of Accept all Clean.</summary>
+/// <summary>Body of Accept all Clean. It carries no note (095f-2d1): the lines it accepts are accepted in bulk, and each record is written without one.</summary>
 public sealed record AcceptCleanRequest(Guid DecisionId);
 
 /// <summary>200 body of a decision: the lines decided (with their new state) and the invoice totals as 016 stored them (null when nothing was decided).</summary>

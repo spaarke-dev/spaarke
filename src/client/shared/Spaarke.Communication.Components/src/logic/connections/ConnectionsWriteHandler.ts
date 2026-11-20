@@ -26,11 +26,15 @@
 import {
   applyResolverFields,
   cleanGuid,
+  discoverNavProps,
+  findRegardingCatalogEntry,
   updateChildRecordViaBff,
   nullRecordNumberWhenTargetHasNone,
   TODO_REGARDING_CATALOG,
+  _resetNavPropCacheForTests as _resetSharedNavPropCacheForTests,
   type INavPropEntry,
   type IPolymorphicWebApi,
+  type IRegardingSelection,
   type ITodoRegardingTargetCatalogEntry,
 } from '@spaarke/ui-components';
 import type { AuthenticatedFetchFn } from '@spaarke/auth';
@@ -42,14 +46,8 @@ const ASSOCIATION_STATUS_RESOLVED = 100000000;
 // Types
 // ---------------------------------------------------------------------------
 
-export interface IRegardingSelection {
-  /** Dataverse logical name of the selected parent entity (e.g., 'sprk_matter'). */
-  entityType: string;
-  /** GUID of the selected parent record (with or without braces / case). */
-  recordId: string;
-  /** Display name of the selected parent record (used for sprk_regardingrecordname). */
-  recordName: string;
-}
+// The selection shape is shared with the RegardingResolver handler (one definition, in ui-components).
+export type { IRegardingSelection };
 
 export interface IResolverWriteContext {
   /** WebApi instance (Xrm.WebApi-compatible — context.webAPI from PCF). */
@@ -128,65 +126,8 @@ export interface IResolverWriteResult {
 }
 
 // ---------------------------------------------------------------------------
-// Nav-prop discovery (per-host-entity, cached)
+// Nav-prop discovery — the shared `discoverNavProps` (ui-components): one metadata query + cache for every writer.
 // ---------------------------------------------------------------------------
-
-const _navPropCache: Record<string, INavPropEntry[]> = {};
-
-/**
- * Discover ManyToOne navigation properties for the host entity. Mirrors the
- * RegardingResolver `discoverHostNavProps` — parameterized on host entity so the
- * PCF stays entity-agnostic (FR-22).
- */
-export async function discoverHostNavProps(
-  hostEntity: string,
-  fetchImpl: typeof fetch = globalThis.fetch
-): Promise<INavPropEntry[]> {
-  if (_navPropCache[hostEntity]) {
-    return _navPropCache[hostEntity];
-  }
-
-  try {
-    const hostEntityLower = hostEntity.toLowerCase();
-    const url =
-      `/api/data/v9.0/EntityDefinitions(LogicalName='${hostEntityLower}')/ManyToOneRelationships` +
-      `?$select=ReferencingAttribute,ReferencingEntityNavigationPropertyName,ReferencedEntity`;
-
-    const resp = await fetchImpl(url, { credentials: 'include' });
-    if (!resp.ok) {
-      console.warn(`[CommunicationConnections] Nav-prop discovery failed for ${hostEntity}: HTTP ${resp.status}`);
-      return [];
-    }
-
-    const json = (await resp.json()) as {
-      value?: {
-        ReferencingAttribute: string;
-        ReferencingEntityNavigationPropertyName: string;
-        ReferencedEntity: string;
-      }[];
-    };
-
-    const entries: INavPropEntry[] = (json.value ?? []).map(r => ({
-      columnName: r.ReferencingAttribute,
-      navPropName: r.ReferencingEntityNavigationPropertyName,
-      referencedEntity: r.ReferencedEntity,
-    }));
-
-    if (entries.length === 0) {
-      console.warn(
-        `[CommunicationConnections] Nav-prop discovery returned zero entries for hostEntity="${hostEntity}" ` +
-          `(normalized "${hostEntityLower}"). Verify the Host Entity input matches a real logical name — ` +
-          `all resolver writes will silently fail otherwise.`
-      );
-    }
-
-    _navPropCache[hostEntity] = entries;
-    return entries;
-  } catch (err) {
-    console.warn(`[CommunicationConnections] Nav-prop discovery error for ${hostEntity}:`, err);
-    return [];
-  }
-}
 
 /**
  * The host's REGARDING lookup to `targetEntity` (its column named `sprk_regarding…`) — never another lookup that happens
@@ -201,34 +142,9 @@ function regardingNavPropFor(navProps: INavPropEntry[], targetEntity: string): I
   );
 }
 
-/** Reset the nav-prop cache. Test-only. @internal */
+/** Reset the shared nav-prop cache (the cache is the shared one, not a private copy). Test-only. @internal */
 export function _resetNavPropCacheForTests(): void {
-  for (const k of Object.keys(_navPropCache)) {
-    delete _navPropCache[k];
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Catalog lookup
-// ---------------------------------------------------------------------------
-
-/**
- * Parse an optional comma-separated allow-list of regarding target logical names.
- * Empty → full canonical catalog.
- */
-export function resolveAllowedCatalog(
-  regardingTargetsRaw: string | null | undefined
-): readonly ITodoRegardingTargetCatalogEntry[] {
-  if (!regardingTargetsRaw || !regardingTargetsRaw.trim()) {
-    return TODO_REGARDING_CATALOG;
-  }
-  const allowed = new Set(
-    regardingTargetsRaw
-      .split(',')
-      .map(s => s.trim().toLowerCase())
-      .filter(Boolean)
-  );
-  return TODO_REGARDING_CATALOG.filter(c => allowed.has(c.entityType.toLowerCase()));
+  _resetSharedNavPropCacheForTests();
 }
 
 // ---------------------------------------------------------------------------
@@ -271,7 +187,7 @@ export async function applyRegardingSelection(
   catalog: readonly ITodoRegardingTargetCatalogEntry[] = TODO_REGARDING_CATALOG,
   fetchImpl: typeof fetch = globalThis.fetch
 ): Promise<IResolverWriteResult> {
-  const catalogEntry = catalog.find(c => c.entityType === selection.entityType);
+  const catalogEntry = findRegardingCatalogEntry(catalog, selection.entityType);
   if (!catalogEntry) {
     return {
       success: false,
@@ -281,7 +197,7 @@ export async function applyRegardingSelection(
     };
   }
 
-  const navProps = await discoverHostNavProps(ctx.hostEntity, fetchImpl);
+  const navProps = await discoverNavProps(ctx.hostEntity, fetchImpl);
 
   // ADDITIVE: start with an EMPTY payload — do NOT null sibling typed lookups.
   // `applyResolverFields` adds only the chosen `@odata.bind` + the 4 denormalized
@@ -354,7 +270,7 @@ export async function unlinkRegarding(
     return { success: true }; // Nothing filed to unlink without a persisted record.
   }
 
-  const navProps = await discoverHostNavProps(ctx.hostEntity, fetchImpl);
+  const navProps = await discoverNavProps(ctx.hostEntity, fetchImpl);
   const target = entityType.toLowerCase();
   const navProp = regardingNavPropFor(navProps, target);
   if (!navProp) {
@@ -416,7 +332,7 @@ export async function clearPrimaryRegarding(
   // association (a denorm-only primary has entityType '' → nothing to null).
   const target = entityType.trim().toLowerCase();
   if (target) {
-    const navProps = await discoverHostNavProps(ctx.hostEntity, fetchImpl);
+    const navProps = await discoverNavProps(ctx.hostEntity, fetchImpl);
     const navProp = regardingNavPropFor(navProps, target);
     if (navProp) {
       payload[`${navProp.navPropName}@odata.bind`] = null;

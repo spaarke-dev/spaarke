@@ -6,14 +6,15 @@ namespace Spaarke.ArchTests;
 
 /// <summary>
 /// field-mapping-server-write-path-r1 task 042c fix round 4 (owner decision 2026-11-04, ontology D-204): a Signal, a Decision
-/// Record and a Budget Revision are created only by their writers, and the general create refuses those tables
+/// Record, a Budget Revision and (ISS-028, EB-D-248) a correction row are created only by their writers, and the general create refuses those tables
 /// (<see cref="RecordTableRule.CreatedOnlyByItsWriter"/>). So the writers themselves must never reach the general create: if one
 /// did, the refusal would stop it. This guard names each writer and proves none of them depends on the general create.
 /// </summary>
 /// <remarks>
 /// <para><b>The writers, named.</b> <c>SignalWriter</c> (Signals), <c>DecisionRecordWriter</c> (Decision Records),
 /// <c>ReviseBudgetExecutor</c> (the decision action executor that creates a Budget Revision) and
-/// <c>OntologyWriterDataverseClient</c> (the writer identity the Budget Revision is created with).</para>
+/// <c>OntologyWriterDataverseClient</c> (the writer identity the Budget Revision is created with), and <c>InvoiceCorrectionService</c> and
+/// <c>InvoiceLineDecisionService</c> (the correction rows).</para>
 /// <para><b>The general create.</b> <c>RecordCreationService</c> and its request, the in-process child-records route
 /// (<c>ChildRecordEndpoints</c>, and <c>DecisionRouteCores</c> whose <c>CreateChildAsync</c> calls it), and the chat
 /// <c>dataverse.create_record</c> tool (<c>DataverseCreateRecordHandler</c>).</para>
@@ -39,6 +40,9 @@ public class WriterOnlyTablesWritersGuardTests
         "Sprk.Bff.Api.Services.Signals.DecisionRecordWriter",
         "Sprk.Bff.Api.Services.Signals.Actions.ReviseBudgetExecutor",
         "Sprk.Bff.Api.Services.Signals.OntologyWriterDataverseClient",
+        // ebilling-r1 ISS-028 (EB-D-248): the two services that write correction rows (and their note); sprk_invoicecorrection is writer-only.
+        "Sprk.Bff.Api.Services.Finance.InvoiceCorrectionService",
+        "Sprk.Bff.Api.Services.Finance.InvoiceLineDecisionService",
     ];
 
     /// <summary>The general create, by full type name (a dependency on any of these is a route into it).</summary>
@@ -67,6 +71,8 @@ public class WriterOnlyTablesWritersGuardTests
         "Sprk.Bff.Api.Services.Dataverse.IDataverseUpdateHandler",
         "Sprk.Bff.Api.Api.FieldMappings.FieldMappingEndpoints",
         "Sprk.Bff.Api.Services.Ai.TopicRegistryWorkProductPersister",
+        // The re-file core (OwnedChildWrite.RefileAsync) asks the same refusal; a writer calling it would be refused.
+        "Sprk.Bff.Api.Services.Dataverse.OwnedChildWrite",
     ];
 
     /// <summary>The writers whose own updates of the three tables the update refusal must leave alone: the writers above, and
@@ -83,6 +89,8 @@ public class WriterOnlyTablesWritersGuardTests
         ("src/server/api/Sprk.Bff.Api/Services/Signals/SignalWriter.cs", null),
         ("src/server/api/Sprk.Bff.Api/Services/Signals/DecisionRecordWriter.cs", null),
         ("src/server/api/Sprk.Bff.Api/Services/Signals/OntologyWriterDataverseClient.cs", null),
+        ("src/server/api/Sprk.Bff.Api/Services/Finance/InvoiceCorrectionService.cs", null),
+        ("src/server/api/Sprk.Bff.Api/Services/Finance/InvoiceLineDecisionService.cs", null),
         ("src/server/api/Sprk.Bff.Api/Services/Signals/Actions/DecisionActionExecutors.cs", "ReviseBudgetExecutor"),
     ];
 
@@ -148,7 +156,7 @@ public class WriterOnlyTablesWritersGuardTests
         return hits;
     }
 
-    [Fact(DisplayName = "042c fix round 4 (D-204): SignalWriter, DecisionRecordWriter, ReviseBudgetExecutor and the writer identity never depend on the general create (IL)")]
+    [Fact(DisplayName = "042c fix round 4 (D-204): the writers of the writer-only tables never depend on the general create (IL)")]
     public void TheWriters_NeverDependOnTheGeneralCreate_IL()
     {
         var bff = typeof(RecordCreationService).Assembly;
@@ -159,8 +167,8 @@ public class WriterOnlyTablesWritersGuardTests
 
         var found = WritersThatDependOnTheGeneralCreate(bff, Writers);
         Assert.True(found.Count == 0,
-            "A Signal, Decision Record or Budget Revision is created only by its writer, and the general create refuses those "
-            + "tables (RecordTableRule.CreatedOnlyByItsWriter; owner decision D-204), so a writer may not reach it: "
+            "A writer-only table (see RecordTableRule.CreatedOnlyByItsWriter) is created only by its writer, and the general create refuses it, "
+            + "so a writer may not reach it (owner decision D-204): "
             + string.Join(", ", found));
     }
 
@@ -175,8 +183,8 @@ public class WriterOnlyTablesWritersGuardTests
 
         var found = WritersThatDependOnAny(bff, UpdatingWriters, GeneralUpdate);
         Assert.True(found.Count == 0,
-            "A Signal, Decision Record or Budget Revision is changed only by its writer, and the generic update paths refuse those "
-            + "tables (RecordTableRules.RefuseWriterOnlyTableUpdate; owner decision D-204), so a writer may not reach one: "
+            "A writer-only table is changed only by its writer, and the generic update paths refuse it "
+            + "(RecordTableRules.RefuseWriterOnlyTableUpdate; owner decision D-204), so a writer may not reach one: "
             + string.Join(", ", found));
     }
 

@@ -151,11 +151,8 @@ def field_id(create):
 
 def board_items():
     """[(item_id, slug, task_count, tasks_planned)] for every Type=Project item (None = unset)."""
-    r = subprocess.run(["gh", "project", "item-list", ubs.PROJECT_NUMBER, "--owner", ubs.OWNER,
-                        "--format", "json", "-L", "500"],
-                       capture_output=True, text=True, encoding="utf-8", errors="replace", check=True)
     out = []
-    for i in json.loads(r.stdout)["items"]:
+    for i in ubs.list_board_items():
         if i.get("type") != "Project":
             continue
         m = re.search(r"\[Project\]:\s*(.+)", i["content"]["title"])

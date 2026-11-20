@@ -90,8 +90,6 @@ import {
   readOnlyNoteOf,
   recordAccessFactsOf,
   yourAccessOf,
-  type CreateRight,
-  type RecordSectionRightId,
 } from './recordAccess';
 import { useRecord, type RecordState } from './recordReads';
 import { RecordSectionStateContext, sectionStateUserKeyOf } from './recordSectionState';
@@ -142,6 +140,13 @@ export interface RecordTemplateModalProps {
    * child never opens a grandchild. Absent everywhere else.
    */
   nested?: boolean;
+  /**
+   * Task 015. The record as the opener already has it (a row of a list): shown as ready at once, with no read. Refresh and a
+   * re-read after a save then read through `readRecord`, else the entity's own reader.
+   */
+  seed?: DetailRecord;
+  /** Task 015. How this opening reads its record again (a child opened from a list re-reads that list). Absent = the entity's reader. */
+  readRecord?: (id: string) => Promise<DetailRecord>;
 }
 
 // ---------------------------------------------------------------------------
@@ -224,6 +229,7 @@ const useStyles = makeStyles({
     flexDirection: 'column',
     gap: tokens.spacingVerticalS,
     ':empty': { display: 'none' },
+    ':not(:empty)': { marginBottom: tokens.spacingVerticalL },
   },
   center: {
     display: 'flex',
@@ -267,6 +273,8 @@ export const RecordTemplateModal: React.FC<RecordTemplateModalProps> = ({
   onSettled,
   renderSection = renderRecordSection,
   nested = false,
+  seed,
+  readRecord,
 }) => {
   const styles = useStyles();
   const detail = getRecordDetailEntity(config.entity);
@@ -284,10 +292,6 @@ export const RecordTemplateModal: React.FC<RecordTemplateModalProps> = ({
   const [hostActionCallbacks] = React.useState(
     () => new Map<RecordToolbarActionId, (action: RecordHostAction | null) => void>()
   );
-  // Rights a section reports without a toolbar action (the invoice Files list's Upload; task 006 fix round 1), and one
-  // stable reporter per right id. A list reports `null` on unmount, so paging to another record forgets the old answer.
-  const [sectionRights, setSectionRights] = React.useState<Partial<Record<RecordSectionRightId, CreateRight>>>({});
-  const [sectionRightCallbacks] = React.useState(() => new Map<RecordSectionRightId, (right: CreateRight) => void>());
   // Per-section re-read requests (an action asked one section to re-read), added to that section's `refreshSignal`.
   const [sectionSignals, setSectionSignals] = React.useState<Partial<Record<RecordSectionId, number>>>({});
   // The record on screen when Refresh was pressed, kept until the re-read answers (no flash of the loading state).
@@ -301,7 +305,7 @@ export const RecordTemplateModal: React.FC<RecordTemplateModalProps> = ({
   const isDeleted = !!id && deletedIds.has(id);
   const holdNavigation = busyKeys.size > 0;
 
-  const state = useRecord(detail, open && !isDeleted ? id : undefined, attempt);
+  const state = useRecord(detail, open && !isDeleted ? id : undefined, attempt, { seed, read: readRecord });
   // The refreshed record stays on screen while its re-read is in flight, and also when the re-read did not return a
   // record while an operation is in flight: replacing the sections then would unmount the busy one and lose its result
   // (task 003 review R3). The answer is shown once the hold releases.
@@ -316,6 +320,20 @@ export const RecordTemplateModal: React.FC<RecordTemplateModalProps> = ({
   React.useEffect(() => {
     if (stale && state.status !== 'loading' && (state.status === 'ready' || !holdNavigation)) setStale(null);
   }, [state.status, stale, holdNavigation]);
+
+  // Task 015: the action hosts stay mounted (at one place in the tree) while the record is ready, and when a re-read answers
+  // not-found they keep the last ready record: a save refused with 404 re-reads the record, and the dialog that shows
+  // "This event is no longer available." must not be unmounted under that message. No toolbar is drawn then (the chrome
+  // needs a record), so no action is offered for the vanished record.
+  const lastReady = React.useRef<{ key: string; record: DetailRecord } | null>(null);
+  const shownRecord = shown.status === 'ready' ? shown.record : null;
+  React.useEffect(() => {
+    if (shownRecord) lastReady.current = { key: recordKey, record: shownRecord };
+  }, [shownRecord, recordKey]);
+  const hostRow: DetailRecord | null = isDeleted
+    ? null
+    : (shownRecord ??
+      (shown.status === 'notfound' && lastReady.current?.key === recordKey ? lastReady.current.record : null));
 
   const settled = !isDeleted && (state.status === 'ready' || state.status === 'denied' || state.status === 'notfound');
   React.useEffect(() => {
@@ -366,26 +384,6 @@ export const RecordTemplateModal: React.FC<RecordTemplateModalProps> = ({
     [hostActionCallbacks]
   );
 
-  const sectionRightCallbackFor = React.useCallback(
-    (rightId: RecordSectionRightId): ((right: CreateRight) => void) => {
-      let callback = sectionRightCallbacks.get(rightId);
-      if (!callback) {
-        callback = (right: CreateRight) =>
-          setSectionRights(prev => {
-            if (right === null && !(rightId in prev)) return prev;
-            if (prev[rightId] === right) return prev;
-            const next = { ...prev };
-            if (right === null) delete next[rightId];
-            else next[rightId] = right;
-            return next;
-          });
-        sectionRightCallbacks.set(rightId, callback);
-      }
-      return callback;
-    },
-    [sectionRightCallbacks]
-  );
-
   const refreshSection = React.useCallback(
     (section: RecordSectionId) => setSectionSignals(prev => ({ ...prev, [section]: (prev[section] ?? 0) + 1 })),
     []
@@ -427,6 +425,15 @@ export const RecordTemplateModal: React.FC<RecordTemplateModalProps> = ({
     setNotice(null);
     setAttempt(n => n + 1);
   };
+  // What an action host calls after a save (task 015): the same re-read as Refresh. Not held by `holdNavigation`: the host
+  // that saved has already reported not busy, and the re-read keeps the shown record until the answer arrives. It does
+  // nothing once the record is already not-found: a re-read would learn nothing new, and it would send the state back to
+  // loading, which unmounts the hosts and the dialog that is showing why (a second refused save). The toolbar Refresh is
+  // `handleRefresh` and is unchanged.
+  const refreshRecord = (): void => {
+    if (state.status === 'notfound') return;
+    handleRefresh();
+  };
 
   const handleCopyLink = async (): Promise<void> => {
     if (!id) return;
@@ -456,14 +463,13 @@ export const RecordTemplateModal: React.FC<RecordTemplateModalProps> = ({
   const actionIds = recordActionIdsOf(config);
   // Task 006 (FR-06 / FR-07): the rights the record's lists reported with their create offers. A create action is shown
   // only when its list offers it AND reported its right as `true` (`isCreateActionOffered`); the sections' read-only lines
-  // are derived from the same answers (recordAccess.ts), never from the entity type. A section's right without an action
-  // of the template's (the invoice Files list's Upload) counts for its own section's line, and adds no action.
-  const createRights = createRightsOf(actionIds, hostActions, sectionRights);
+  // are derived from the same answers (recordAccess.ts), never from the entity type.
+  const createRights = createRightsOf(actionIds, hostActions);
   // The record's route root (its read description's documents root) tells `recordAccessFactsOf` whether `/me` has a level
   // for it (task 011: `projects` for a project, `records` for a matter or work assignment), and whether that level is an
   // answer or only the fail-safe guess (no entry for the project). "Your access" is that level and nothing else, and it
   // is display only: a level DECIDES writes only for a project caller without `writeAccessPerRecord` (the lists decide
-  // the rest; the Task type of Add event follows `canCreateTask`), and a `writeAccessPerRecord` caller sees no level line.
+  // the rest; Add event also needs a creatable event type), and a `writeAccessPerRecord` caller sees no level line.
   const accessFacts = recordAccessFactsOf(detail.documentsRoot, id ?? '', callerContext);
   const yourAccess = yourAccessOf(accessFacts);
   // One descriptor per action, wherever it shows (the toolbar or a section's header): the same visibility rule for both.
@@ -502,6 +508,7 @@ export const RecordTemplateModal: React.FC<RecordTemplateModalProps> = ({
     onBusyChange: noop,
     onRecordDeleted: handleRecordDeleted,
     refreshSection,
+    refreshRecord,
   });
 
   const sectionContext = (
@@ -520,7 +527,6 @@ export const RecordTemplateModal: React.FC<RecordTemplateModalProps> = ({
     headerActions: headerActionsOf(section),
     // Task 006 (FR-07): why this section is read-only, from the rights its lists reported (none while unknown).
     readOnlyNote: readOnlyNoteOf(section, createRights, accessFacts),
-    reportRight: sectionRightCallbackFor,
   });
 
   const hostContext = (actionId: RecordToolbarActionId, row: DetailRecord, rowId: string): RecordActionHostContext => ({
@@ -601,7 +607,6 @@ export const RecordTemplateModal: React.FC<RecordTemplateModalProps> = ({
         if (shownTab !== 'overview') {
           return (
             <div className={styles.ready}>
-              {renderActionHosts(row, id)}
               <div data-testid="record-template-tab-panel">{one(shownTab, true)}</div>
             </div>
           );
@@ -609,7 +614,6 @@ export const RecordTemplateModal: React.FC<RecordTemplateModalProps> = ({
         const twoColumns = config.right.length > 0;
         return (
           <div className={styles.ready}>
-            {renderActionHosts(row, id)}
             <div
               className={mergeClasses(styles.columns, twoColumns ? styles.twoColumns : styles.oneColumn)}
               data-testid="record-template-columns"
@@ -727,6 +731,7 @@ export const RecordTemplateModal: React.FC<RecordTemplateModalProps> = ({
             )}
             {/* Keyed by record, so every section's own state resets when the user pages to another row. */}
             <div className={styles.content} key={recordKey} data-testid="record-template-content">
+              {hostRow && id && renderActionHosts(hostRow, id)}
               {renderBody()}
             </div>
             {!nested && childHost.modal}

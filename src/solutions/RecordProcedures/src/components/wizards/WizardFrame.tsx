@@ -33,11 +33,11 @@ import { Button, MessageBar, MessageBarBody } from '@fluentui/react-components';
 import { CheckmarkCircle48Filled } from '@fluentui/react-icons';
 import { WizardShell, type IWizardShellHandle, type IWizardShellProps, type IWizardStepConfig, type IWizardSuccessConfig } from '@spaarke/ui-components';
 import type { CoreRoute, ProceduresQuery } from '../../services/recordProceduresApi';
-import { failureText, toWriteFailure, type OverridesApi, type RemovalPreview, type WriteFailure, type WriteResult } from '../../services/overridesApi';
+import { NOTE_ERROR_CODES, failureText, noteProblem, noteToSend, toWriteFailure, type OverridesApi, type RemovalPreview, type WriteFailure, type WriteResult } from '../../services/overridesApi';
 import { dryRunBody, dryRunRequestOf, requestFirmOf, type DryRunApi, type DryRunRequest, type DryRunView } from '../../services/dryRunApi';
 import { executePlan, removalOf, type Plan, type PlanRun } from './plan';
 import { asksRemovalPreview } from './impact';
-import { ConfirmStep, ImpactStep, O21_LINE, READ_ONLY_LINE, useWizardStyles, type DryRunState, type PreviewState } from './steps';
+import { ConfirmStep, ImpactStep, NOT_RECORDED_LINE, O21_LINE, READ_ONLY_LINE, useWizardStyles, type DryRunState, type PreviewState } from './steps';
 
 /**
  * Told to the panel after a write: `done` (the plan ran to its end) or `partial` (its first call was accepted and the next refused). For a
@@ -240,6 +240,14 @@ export const WizardFrame: React.FC<WizardFrameProps> = props => {
     setPreviewAnswers(new Map());
   }, []);
 
+  // Task 084h-4: the optional note on the Confirm step. It is kept in a ref too, for the step closures the shell keeps calling and for `onFinish`.
+  const [note, setNote] = React.useState('');
+  const noteRef = React.useRef(note);
+  noteRef.current = note;
+  const noteProblemText = noteProblem(note);
+  const noteProblemRef = React.useRef(noteProblemText);
+  noteProblemRef.current = noteProblemText;
+
   // A partial save leaves the wizard on a row that is out of date; it is held (Finish off) until the panel hands back the re-read row.
   const [stale, setStale] = React.useState(false);
   const staleRef = React.useRef(false);
@@ -257,6 +265,7 @@ export const WizardFrame: React.FC<WizardFrameProps> = props => {
     abortAll(dryRunInFlight.current);
     abortAll(previewInFlight.current);
     setStale(false);
+    setNote('');
   }
 
   // ── The write ────────────────────────────────────────────────────────────
@@ -266,17 +275,22 @@ export const WizardFrame: React.FC<WizardFrameProps> = props => {
     if (p.readOnly) throw new Error(READ_ONLY_LINE);
     // A plan with no call is no change: never report it as a success (084d-5b review, F1).
     if (p.plan.steps.length === 0) throw new Error(EMPTY_PLAN_LINE);
+    // The note the server would refuse is never sent (Confirm holds Finish off for it; this is the backstop).
+    const noteText = noteProblemRef.current;
+    if (noteText) throw new Error(noteText);
     saving.current = true;
     let run: PlanRun;
     try {
-      run = await executePlan(p.api, p.core, p.recordId, p.plan);
+      run = await executePlan(p.api, p.core, p.recordId, p.plan, noteToSend(noteRef.current));
     } finally {
       saving.current = false;
     }
     if (!run.ok) {
       const failure = run.failure as WriteFailure;
       p.onRefused?.(failure);
-      const text = [failureText(failure), p.refusalHint?.(failure, run.completed > 0)].filter((x): x is string => !!x).join(' ');
+      // A refused note (400 assignment.note_too_long / note_invalid_characters) is shown as the server's title and detail, with its code named.
+      const noteCode = failure.errorCode && NOTE_ERROR_CODES.includes(failure.errorCode) ? `(${failure.errorCode})` : null;
+      const text = [failureText(failure), noteCode, p.refusalHint?.(failure, run.completed > 0), run.notRecorded ? NOT_RECORDED_LINE : null].filter((x): x is string => !!x).join(' ');
       if (run.completed > 0) {
         // The first call of the plan was accepted and the second was refused: the record's override changed, so the lists are read again,
         // and the wizard (still on the row it was opened with, whose override is now gone) waits for the re-read row.
@@ -296,6 +310,11 @@ export const WizardFrame: React.FC<WizardFrameProps> = props => {
       title: p.successTitle,
       body: (
         <div data-testid="success-body">
+          {run.notRecorded && (
+            <MessageBar intent="warning" layout="multiline" data-testid="success-not-recorded">
+              <MessageBarBody>{NOT_RECORDED_LINE}</MessageBarBody>
+            </MessageBar>
+          )}
           <p>{p.successBody}</p>
           {notes.map(n => (
             <p key={n}>{n}</p>
@@ -385,8 +404,14 @@ export const WizardFrame: React.FC<WizardFrameProps> = props => {
     {
       id: 'confirm',
       label: 'Confirm',
-      renderContent: () => <ConfirmStep rows={live.current.confirmRows} uncheckedClose={uncheckedCloseRef.current} />,
-      canAdvance: () => !staleRef.current && live.current.plan.steps.length > 0,
+      renderContent: () => (
+        <ConfirmStep
+          rows={live.current.confirmRows}
+          uncheckedClose={uncheckedCloseRef.current}
+          note={{ value: noteRef.current, onChange: setNote, problem: noteProblemRef.current }}
+        />
+      ),
+      canAdvance: () => !staleRef.current && live.current.plan.steps.length > 0 && noteProblemRef.current === null,
     },
   ];
 

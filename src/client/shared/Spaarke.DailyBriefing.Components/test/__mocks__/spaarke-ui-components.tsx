@@ -28,6 +28,11 @@ import type { SavedQueryResult } from '../../../Spaarke.UI.Components/src/servic
 // shared RowActionMenu. Re-export the REAL component (dependency-free deep import, same pattern as getXrm / cleanGuid):
 // a stub would hide the menu behaviour these suites assert.
 export { RowActionMenu } from '../../../Spaarke.UI.Components/src/components/RowActionMenu/RowActionMenu';
+// ISS-004: the shared "Open in desktop" helper (import-free), re-exported for real for the same reason.
+export {
+  openInDesktopApp,
+  OPEN_IN_DESKTOP_FAILED_MESSAGE,
+} from '../../../Spaarke.UI.Components/src/utils/openInDesktopApp';
 export type {
   RowActionDescriptor,
   RowActionMenuProps,

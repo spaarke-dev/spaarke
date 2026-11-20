@@ -8,6 +8,7 @@ import type { IWizardShellHandle } from '@spaarke/ui-components';
 import type { AdjustmentMethod, ApprovalState, InvoiceDecisionApi } from '../../services/decisionApi';
 import type { InvoiceReview } from '../../services/invoiceReviewApi';
 import type { InvoiceOutcome } from '../../services/decisionModel';
+import type { DecisionLocks } from './decisionLocks';
 
 export interface WizardForm {
   outcome?: InvoiceOutcome;
@@ -19,9 +20,38 @@ export interface WizardForm {
   adjReason: string;
   /** '' = no rule. */
   adjRule: string;
+  /** Task 095f-2ui: the optional note of the adjustment being typed. Blank is left out of the request. */
+  adjNote: string;
+  /** Task 095f-2ui: the optional note of the approve, reject or return decision (the Confirm step). Kept across a failed send. */
+  note: string;
+  /** The server refused the note (400 `ebilling.note_too_long` / `note_invalid_characters`): its sentence, shown under the Note box until the note is edited. */
+  noteError: string | null;
+  /**
+   * A decision that was saved in part (503 incomplete), or that got no answer at all (status 0), is repeated with the SAME request: the server
+   * keeps the first note (reject and return drop an edited one on a repeat without a word), so the reason and the note are read-only from then
+   * on, until the decision finishes or the outcome is changed (a different outcome is a new request). Review round 1: the reason is locked too.
+   */
+  locked: boolean;
+  /** Review round 1: the id of the adjustment being typed; kept across steps and openings so a repeat after an unsure add files it once. */
+  adjId: string;
+  /** Review round 1: the adjustment add came back unsure (503, or no answer): its form is read-only and the button says Repeat. */
+  adjLocked: boolean;
 }
 
-export const EMPTY_FORM: WizardForm = { reason: '', adjMethod: 'percent', adjValue: '', adjReason: '', adjRule: '' };
+export const EMPTY_FORM: WizardForm = {
+  reason: '',
+  adjMethod: 'percent',
+  adjValue: '',
+  adjReason: '',
+  adjRule: '',
+  adjNote: '',
+  note: '',
+  noteError: null,
+  locked: false,
+  // The wizard gives each opening its own id (or the locked one); an id here would be shared by every opening.
+  adjId: '',
+  adjLocked: false,
+};
 
 export interface WizardCtx {
   form: WizardForm;
@@ -35,6 +65,8 @@ export interface WizardCtx {
   /** Re-read the review (after an adjustment is added or removed); resolves with the review now shown, or null when the re-read failed. */
   reload: () => Promise<InvoiceReview | null>;
   onOutcome: (outcome: InvoiceOutcome, handle: IWizardShellHandle) => void;
+  /** The requests locked until they finish (page level: they survive closing and reopening the wizard). */
+  locks: DecisionLocks;
 }
 
 export const WizardContext = React.createContext<WizardCtx | null>(null);
@@ -47,5 +79,5 @@ export function useWiz(): WizardCtx {
 
 /** Unsaved text in the adjustment form: it must be added or cleared before the step is left with Next (Skip discards it). */
 export function adjustmentFormDirty(f: WizardForm): boolean {
-  return f.adjValue.trim() !== '' || f.adjReason.trim() !== '';
+  return f.adjValue.trim() !== '' || f.adjReason.trim() !== '' || f.adjNote.trim() !== '';
 }

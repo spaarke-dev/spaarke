@@ -592,6 +592,8 @@ internal sealed class OwnershipDirectory
                     // fm task 054 (F1): the shared Direct-team check reads a team's own kind first.
                     ["isdefault"] = t.IsDefault,
                     ["teamtype"] = new OptionSetValue(t.TeamType),
+                    // fm task 052g: the repair guard reads the answer team's name (the restricted-content owner team check).
+                    ["name"] = t.Name,
                 }),
             // R4b-2c: by id too (the walk to the customer's top unit), with its parent.
             "businessunit" => _businessUnits

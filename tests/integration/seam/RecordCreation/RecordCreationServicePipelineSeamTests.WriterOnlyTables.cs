@@ -24,6 +24,7 @@ public sealed partial class RecordCreationServicePipelineSeamTests
         { "sprk_signal", "caller-webapi" }, { "sprk_signal", "caller-mapped" }, { "sprk_signal", "system" },
         { "sprk_decisionrecord", "caller-webapi" }, { "sprk_decisionrecord", "caller-mapped" }, { "sprk_decisionrecord", "system" },
         { "sprk_budgetrevision", "caller-webapi" }, { "sprk_budgetrevision", "caller-mapped" }, { "sprk_budgetrevision", "system" },
+        { "sprk_invoicecorrection", "caller-webapi" }, { "sprk_invoicecorrection", "caller-mapped" }, { "sprk_invoicecorrection", "system" },
     };
 
     [Theory(DisplayName = "042c fix round 4 (D-204, must fire): a create of a table only its writer creates is refused before any read, for the caller and the system principal")]
@@ -60,6 +61,7 @@ public sealed partial class RecordCreationServicePipelineSeamTests
     [InlineData("sprk_signal")]
     [InlineData("sprk_decisionrecord")]
     [InlineData("sprk_budgetrevision")]
+    [InlineData("sprk_invoicecorrection")]
     public async Task CreateAsync_ATableOnlyItsWriterCreates_IsRefusedAsAnUnregisteredTableIs(string table)
     {
         const string unregistered = "sprk_notregisteredfixture";

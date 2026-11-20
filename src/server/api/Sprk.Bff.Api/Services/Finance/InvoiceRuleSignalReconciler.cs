@@ -31,10 +31,13 @@ internal sealed class InvoiceRuleSignalReconciler
     private readonly SignalLogContext _context;
     private readonly Guid _invoiceId;
     private readonly string? _field;
+    private readonly BillingFirmReasonReplay _firmReasons;
 
+    /// <param name="entities">Task 130e-1 (C1): the reads of a replayed plan entry's firm description (<see cref="BillingFirmReasonReplay"/>).</param>
     /// <param name="field">The corrected field (a field name, never a value): the log lines read "Correction of {Field} on invoice ..." as before the
     /// move (164a fix round K3: the property stays <c>Field</c>). Null for Add line: "Add line on invoice ...".</param>
     internal InvoiceRuleSignalReconciler(
+        Spaarke.Dataverse.IGenericEntityService entities,
         SignalEpisodeLifecycle lifecycle,
         Func<Guid, string, int, string, CancellationToken, Task<SignalCloseOutcome>> closeSignal,
         ILogger logger,
@@ -48,6 +51,7 @@ internal sealed class InvoiceRuleSignalReconciler
         _context = context;
         _invoiceId = invoiceId;
         _field = field;
+        _firmReasons = new BillingFirmReasonReplay(entities, logger);
     }
 
     /// <summary>The writer's permanent refusals of this run (049 F1-3): recorded in the findings by <see cref="RecordWriteRefusals"/>.</summary>
@@ -113,8 +117,9 @@ internal sealed class InvoiceRuleSignalReconciler
             return;
         }
 
+        // Task 130e-1 (C1): the firm reason is re-derived from the entry's policy version, never taken from the plan.
         var planned = InvoiceSubmissionAfterSteps.StoredFindings.ParsePlanEntry(entry);
-        await WriteAsync(planned.Request, planned.Fingerprint, ct).ConfigureAwait(false);
+        await WriteAsync(await _firmReasons.ApplyAsync(planned.Request, planned.HeldFallback, ct).ConfigureAwait(false), planned.Fingerprint, ct).ConfigureAwait(false);
     }
 
     /// <summary>

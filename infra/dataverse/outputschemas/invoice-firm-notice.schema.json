@@ -1,0 +1,22 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://spaarke.com/schemas/analysisaction/invoice-firm-notice.schema.json",
+  "title": "Invoice Firm Notice (INVOICE-FIRM-NOTICE@v1) - Output Schema (invoice-firm-notice)",
+  "description": "Output schema for sprk_analysisaction sprk_actioncode='invoice-firm-notice' (ebilling-r1 task 131, FR-50, D-60, D-52). Deployed by scripts/Deploy-ActionMirrors.ps1 as the sprk_outputschemajson sidecar of infra/dataverse/actions/invoice-firm-notice.action.json. It MUST stay in step with IInvoiceAi.DraftFirmNoticeAsync's parser (InvoiceAiOutputParser.ParseFirmNotice in Services/Ai/PublicContracts/InvoiceAi.cs) and the result DTO InvoiceFirmNoticeDraft (InvoiceAiContracts.cs); tests/integration/contract/Catalog/InvoiceFirmNoticeActionContractTests.cs pins the three together. FR-50: the schema has NO numeric property (no number or integer type anywhere): the subject and the prose are strings, and every amount, line reference, clause quote and the findings table are inserted by FirmNoticeComposer from data. Azure OpenAI Structured Outputs compatible: additionalProperties:false, object-level required array, every property listed in required.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["subject", "body"],
+  "$comment-required": "Object-level required array only - property-level boolean 'required' is FORBIDDEN (OpenAiFunctionSchemaValidator).",
+  "properties": {
+    "subject": {
+      "type": "string",
+      "description": "A short subject line (three to ten words) that names the outcome. No digit.",
+      "maxLength": 120
+    },
+    "body": {
+      "type": "string",
+      "description": "Two to four short paragraphs of plain text, separated by a blank line. No digit, no link, no greeting or sign-off.",
+      "maxLength": 1500
+    }
+  }
+}

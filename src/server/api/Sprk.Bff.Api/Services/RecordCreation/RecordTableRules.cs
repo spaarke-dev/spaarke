@@ -439,6 +439,11 @@ internal static partial class RecordTableRules
             Kind = RecordTableKind.Child,
             MappingProtectedColumns = InvoiceFamilyCoreLookupsOf("sprk_invoicecorrection"),
             PreWriteRules = [InvoiceFamilyRule],
+            // ebilling-r1 ISS-028 (EB-D-248): a correction row, and the reviewer's note it carries, is created and changed only by the
+            // e-billing services that own it (InvoiceCorrectionService, InvoiceLineDecisionService), the same as a Signal and a Decision
+            // Record: the generic create, update and delete paths refuse the table (CreatedOnlyByItsWriter). Both writers send their rows
+            // through IGenericEntityService.ExecuteTransactionAsync, which asks none of those refusals.
+            CreatedOnlyByItsWriter = true,
         },
 
         // ── Other server create tables named by the old lists ────────────────────────────────────────────────────────

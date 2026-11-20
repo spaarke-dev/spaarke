@@ -718,6 +718,55 @@ public sealed class SecureRecordSetupProcedureTests
                         .Add(new SecureSetupFieldPermission(dv.AddProfile("Billing Admins"), "sprk_invoice", 4, 4, 0)),
                 SecureRecordSetupRejectionCodes.InvoiceMoneyLockOtherWriter, FailureClass.QuarantineRequired },
 
+            // ---- S27: the invoice-family links (task 270; unified-access-control-r2 #2799) ----
+            { "sprk_invoice.sprk_matter not secured (SpaarkeMaster 1.3.1.0)", dv =>
+                    dv.SecuredColumns[FakeSecureRecordSetupDataverse.ColumnKey("sprk_invoice", "sprk_matter")] = false,
+                SecureRecordSetupRejectionCodes.InvoiceFamilyLockIncomplete, FailureClass.Resumable },
+            { "sprk_externalidentifier.sprk_regardinginvoice absent", dv =>
+                    dv.SecuredColumns.Remove(FakeSecureRecordSetupDataverse.ColumnKey("sprk_externalidentifier", "sprk_regardinginvoice")),
+                SecureRecordSetupRejectionCodes.InvoiceFamilyLockIncomplete, FailureClass.Resumable },
+            { "Readers cannot read sprk_invoicesubmission.sprk_regardingworkassignment", dv =>
+                    dv.RemoveGrant("sprk_invoicesubmission", "sprk_regardingworkassignment", dv.ReaderProfileId),
+                SecureRecordSetupRejectionCodes.InvoiceFamilyLockIncomplete, FailureClass.Resumable },
+            { "Writers cannot update sprk_billingevent.sprk_invoice (4/4/0)", dv =>
+                    dv.SetGrant("sprk_billingevent", "sprk_invoice", dv.WriterProfileId, 4, 4, 0),
+                SecureRecordSetupRejectionCodes.InvoiceFamilyLockIncomplete, FailureClass.Resumable },
+            { "Writers grant sprk_regardingmatter on the other family tables but not sprk_invoiceapproval", dv =>
+                    dv.RemoveGrant("sprk_invoiceapproval", "sprk_regardingmatter", dv.WriterProfileId),
+                SecureRecordSetupRejectionCodes.InvoiceFamilyLockIncomplete, FailureClass.Resumable },
+            { "the Readers profile may update sprk_invoicecorrection.sprk_invoice (4/0/4)", dv =>
+                    dv.SetGrant("sprk_invoicecorrection", "sprk_invoice", dv.ReaderProfileId, 4, 0, 4),
+                SecureRecordSetupRejectionCodes.InvoiceFamilyLockOtherWriter, FailureClass.QuarantineRequired },
+            { "a look-alike 'System Administrator' profile (another id) may update sprk_invoice.sprk_project", dv =>
+                    dv.ColumnPermissions("sprk_project").Add(new SecureSetupFieldPermission(
+                        dv.AddProfile(SecureRecordSetupProcedure.SystemAdministratorProfileName), "sprk_invoice", 4, 0, 4)),
+                SecureRecordSetupRejectionCodes.InvoiceFamilyLockOtherWriter, FailureClass.QuarantineRequired },
+
+            // ---- S28: the message-access columns (task 270; field-mapping task 054b) ----
+            { "sprk_communication.sprk_sentby not secured", dv =>
+                    dv.SecuredColumns[FakeSecureRecordSetupDataverse.ColumnKey("sprk_communication", "sprk_sentby")] = false,
+                SecureRecordSetupRejectionCodes.MessageAccessLockIncomplete, FailureClass.Resumable },
+            { "Writers cannot create sprk_communicationthread.sprk_threadtype (4/0/4)", dv =>
+                    dv.SetGrant("sprk_communicationthread", "sprk_threadtype", dv.WriterProfileId, 4, 0, 4),
+                SecureRecordSetupRejectionCodes.MessageAccessLockIncomplete, FailureClass.Resumable },
+            { "the direct recipient exists but is not secured", dv =>
+                {
+                    dv.AddDirectRecipient();
+                    dv.SecuredColumns[FakeSecureRecordSetupDataverse.ColumnKey("sprk_communication", "sprk_directrecipient")] = false;
+                },
+                SecureRecordSetupRejectionCodes.MessageAccessLockIncomplete, FailureClass.Resumable },
+            { "another profile may update sprk_communication.sprk_communicationthread", dv =>
+                    dv.ColumnPermissions("sprk_communicationthread").Add(new SecureSetupFieldPermission(
+                        dv.AddProfile("Mail Admins"), "sprk_communication", 4, 0, 4)),
+                SecureRecordSetupRejectionCodes.MessageAccessLockOtherWriter, FailureClass.QuarantineRequired },
+            { "another profile may create the direct recipient", dv =>
+                {
+                    dv.AddDirectRecipient();
+                    dv.ColumnPermissions("sprk_directrecipient").Add(new SecureSetupFieldPermission(
+                        dv.AddProfile("Mail Admins"), "sprk_communication", 4, 4, 0));
+                },
+                SecureRecordSetupRejectionCodes.MessageAccessLockOtherWriter, FailureClass.QuarantineRequired },
+
             // ---- S19–S21: the standing-grant environment (ISS-020 / #1565) ----
             { "standing-grant profile missing", dv => dv.Profiles.Remove(SecureRecordSetupProcedure.StandingGrantProfileName),
                 SecureRecordSetupRejectionCodes.FieldProfileUnresolved, FailureClass.Resumable },
@@ -1136,7 +1185,8 @@ public sealed class SecureRecordSetupProcedureTests
         var refused = Refused(await RunAsync(dv), SecureRecordSetupRejectionCodes.InvoiceMoneyLockIncomplete, FailureClass.Resumable);
 
         refused.Diagnostic.Should().Contain("sprk_invoice.sprk_totalamount").And.Contain("IsSecured=False")
-            .And.Contain("scripts/ebilling/Set-EbillingInvoiceMoneyFieldSecurity.ps1").And.Contain("Nothing was written");
+            .And.Contain("scripts/ebilling/Set-EbillingInvoiceMoneyFieldSecurity.ps1").And.Contain("Nothing was written")
+            .And.Contain("Only where H7b has completed on this environment before");
         dv.Writes.Should().BeEmpty();
     }
 
@@ -1165,6 +1215,94 @@ public sealed class SecureRecordSetupProcedureTests
             .Add(new SecureSetupFieldPermission(dv.AddProfile("Correction Admins"), "sprk_invoicecorrection", 4, 4, 4));
 
         (await RunAsync(dv)).Should().BeOfType<SecureRecordSetupOutcome.Applied>();
+    }
+
+    // ------------------------------------------------------------ S27/S28: invoice-family links and message access (task 270)
+
+    [Fact]
+    public async Task InvoiceFamilyLock_OnSpaarkeMaster1310_IsRefusedResumable_NamingTheColumnAndTheRemedy()
+    {
+        // Must fire: SpaarkeMaster 1.3.1.0 ships the 24 columns unsecured with no profile rows. A BFF from master would run
+        // where any user could re-file an invoice-family row past the BFF's checks (#2799).
+        var dv = NewEnv();
+        foreach (var (table, column) in SecureRecordSetupProcedure.InvoiceFamilyLinkColumns)
+        {
+            dv.SecuredColumns[FakeSecureRecordSetupDataverse.ColumnKey(table, column)] = false;
+            dv.ColumnPermissions(column).RemoveAll(p => string.Equals(p.EntityName, table, StringComparison.OrdinalIgnoreCase));
+        }
+
+        var refused = Refused(await RunAsync(dv), SecureRecordSetupRejectionCodes.InvoiceFamilyLockIncomplete, FailureClass.Resumable);
+
+        refused.Diagnostic.Should().Contain("sprk_billingevent.sprk_invoice").And.Contain("IsSecured=False")
+            .And.Contain("re-file an invoice-family row").And.Contain("scripts/Set-InvoiceFamilyFieldSecurity.ps1")
+            .And.Contain("Only where H7b has completed on this environment before").And.Contain("import SpaarkeMaster 1.3.2.0 or later")
+            .And.Contain("Nothing was written");
+        dv.Writes.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task InvoiceFamilyLock_OtherWriter_IsQuarantined_NamingTheProfileAndTheColumn()
+    {
+        var dv = NewEnv();
+        var billingAdmins = dv.AddProfile("Billing Admins");
+        dv.ColumnPermissions("sprk_supersedesinvoice")
+            .Add(new SecureSetupFieldPermission(billingAdmins, "sprk_invoice", 4, 4, 0));
+
+        var refused = Refused(await RunAsync(dv), SecureRecordSetupRejectionCodes.InvoiceFamilyLockOtherWriter,
+            FailureClass.QuarantineRequired);
+
+        refused.Diagnostic.Should().Contain(billingAdmins.ToString()).And.Contain("sprk_invoice.sprk_supersedesinvoice")
+            .And.Contain("#2799");
+        dv.Writes.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task InvoiceFamilyAndMessageLocks_AWriterOnASameNamedColumnOfAnotherTable_DoesNotRefuse()
+    {
+        // Must not fire: sprk_matter / sprk_invoice / sprk_communicationthread are common column names; a profile writing one
+        // on a table outside the lock (here sprk_event, sprk_document) is no writer of the locked column.
+        var dv = NewEnv();
+        var other = dv.AddProfile("Event Admins");
+        dv.ColumnPermissions("sprk_matter").Add(new SecureSetupFieldPermission(other, "sprk_event", 4, 4, 4));
+        dv.ColumnPermissions("sprk_invoice").Add(new SecureSetupFieldPermission(other, "sprk_document", 4, 4, 4));
+        dv.ColumnPermissions("sprk_communicationthread").Add(new SecureSetupFieldPermission(other, "sprk_document", 4, 4, 4));
+
+        (await RunAsync(dv)).Should().BeOfType<SecureRecordSetupOutcome.Applied>();
+    }
+
+    [Fact]
+    public async Task MessageAccessLock_DirectRecipientAbsent_Passes_WithTheDirectMessageNote()
+    {
+        var applied = (await RunAsync(NewEnv())).Should().BeOfType<SecureRecordSetupOutcome.Applied>().Subject;
+
+        applied.State.Notes.Should().ContainSingle(n => n.Contains("sprk_communication.sprk_directrecipient: not in this environment")
+                                                        && n.Contains("the Direct-message feature stays off: leave DirectMessage:BusinessUnitName and DirectMessage:OwnerTeamName unset"));
+    }
+
+    [Fact]
+    public async Task MessageAccessLock_DirectRecipientPresentAndLocked_Passes_WithoutTheNote()
+    {
+        var dv = NewEnv();
+        dv.AddDirectRecipient();
+
+        var applied = (await RunAsync(dv)).Should().BeOfType<SecureRecordSetupOutcome.Applied>().Subject;
+
+        applied.State.Notes.Should().NotContain(n => n.Contains("sprk_directrecipient", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task MessageAccessLock_DirectRecipientPresentButUnlocked_IsRefused_NamingTheThreadFlagScript()
+    {
+        // Must fire: the column exists (Set-DirectRecipientSchema.ps1 ran) but its lock does not — a user could name
+        // themselves a message's direct recipient.
+        var dv = NewEnv();
+        dv.SecuredColumns[FakeSecureRecordSetupDataverse.ColumnKey("sprk_communication", "sprk_directrecipient")] = false;
+
+        var refused = Refused(await RunAsync(dv), SecureRecordSetupRejectionCodes.MessageAccessLockIncomplete, FailureClass.Resumable);
+
+        refused.Diagnostic.Should().Contain("sprk_communication.sprk_directrecipient").And.Contain("IsSecured=False")
+            .And.Contain("scripts/Set-ThreadFlagFieldSecurity.ps1").And.Contain("-SolutionUniqueName SpaarkeMaster")
+            .And.Contain("only where sprk_communication.sprk_directrecipient exists").And.Contain("Nothing was written");
     }
 
     // ------------------------------------------------------------ S18/S19: an environment on SpaarkeMaster 1.2.3.1

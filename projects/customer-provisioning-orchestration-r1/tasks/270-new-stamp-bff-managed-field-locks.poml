@@ -1,0 +1,110 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="270" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>A new stamp gets the invoice-family and message-access field locks, and H7b refuses one without them</title>
+    <phase>Model 1 dedicated-stamp remediation — master review 2026-11-15 (owner go 2026-11-16: "Yes, create the task")</phase>
+    <gate>owner-decision</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .cs in H7b (SecureRecordSetupProcedure.cs) and its ProcedureVersion, and possibly the SpaarkeMaster solution source; a field-security lock whose absence lets users re-file invoice records or set message-access columns past the BFF's checks.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Security lock on a customer stamp; tags security and field-security; touches release ordering across projects.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Changes H7b SecureRecordSetupProcedure.cs and its ProcedureVersion; sequential with H7c (#2429) and any other H7b work.</parallel-reason>
+    <deps>268</deps>
+    <tags>provisioning, provisioning-handler, l2-controlplane, dataverse, security, field-security, testing</tags>
+    <estimated-effort>1–1.5 days (path A); 2 days (path B)</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Master now has two per-environment field locks that a NEW customer stamp does not get:
+    (1) uac-r2 #2799 — 24 invoice-family lookups (scripts/common/InvoiceFamilyLockedColumns.psd1: the core-record lookups and invoice link on
+    sprk_billingevent, sprk_externalidentifier, sprk_invoice, sprk_invoiceapproval, sprk_invoicecorrection, sprk_invoicesubmission) that only the
+    BFF application user may write, applied by scripts/Set-InvoiceFamilyFieldSecurity.ps1 (= Set-DocumentPointerFieldSecurity.ps1 -Target
+    InvoiceFamilyLinks). They are NOT secured in SpaarkeMaster 1.3.1.0 (sprk_Invoice.sprk_Matter IsSecured=0 in source).
+    (2) field-mapping 054b — the message-access columns (sprk_communicationthread.sprk_threadtype, .sprk_isdefaultthread;
+    sprk_communication.sprk_sentby, .sprk_directrecipient, .sprk_communicationthread), applied by scripts/Set-ThreadFlagFieldSecurity.ps1.
+    Four are IsSecured with both BFF-managed profiles' permissions in SpaarkeMaster source; sprk_directrecipient exists only where
+    Set-DirectRecipientSchema.ps1 ran. The customer deployment guide §7.4 says "provisioning runs the script" for a new environment, but neither
+    L2 nor /provision-environment runs it (verified 2026-11-15: no reference in the skill, scripts/provision-environment or the control plane).
+    H7b today checks only S14 (sprk_issecure) and S26 (invoice money). Close both gaps so a stamp reaches Ready only with both locks whole.
+  </prompt>
+
+  <role>SPAARKE platform developer (L2 handler H7b). L2 never shells out to pwsh (project CLAUDE.md §2): any write is C# in the Worker.</role>
+
+  <goal>
+    A stamp provisioned from master ends with both locks whole, and H7b refuses (fails closed) a stamp where either is not:
+    for each locked column, the column exists and IsSecured is true; "Spaarke BFF-Managed Field Readers" grants Read (4); "Spaarke BFF-Managed
+    Field Writers" grants the release's Writer permissions; and no profile other than the Writers profile and the platform System Administrator
+    profile (by its fixed id 572329c1-a042-4e22-be47-367c6374ea45, never by name — ISS-028) may create or update it.
+    The guide no longer claims a step that does not run.
+  </goal>
+
+  <decision owner="owner" status="decided" answer="A" date="2026-11-16">
+    How a new stamp gets the locks. Ask before Step 2; the rest of the task follows the answer.
+    - A (recommended): package the locks in the next SpaarkeMaster release (IsSecured + both BFF-managed profiles' field permissions on the
+      24 invoice-family columns — the 054b pattern), released by uac-r2 (owner of #2799) through the CI publish; H7b only VERIFIES (new S27
+      invoice-family, S28 message-access). H6 imports the lock, H7b already maintains the profiles' memberships (S10–S12), and a new stamp's
+      BFF (H9, master artifact) and web resources (SpaarkeMaster source) already write the links as the application. Cost: a release, and its
+      import ORDER on existing environments (BFF with #2799 first, then import) belongs to uac-r2's release note; H7b with S27 needs that release
+      published first (release-ordering rule like #2317).
+    - B: H7b WRITES the locks itself (C# port of the secure-then-grant steps of Set-DocumentPointerFieldSecurity.ps1 for both column sets), then
+      verifies. No release dependency; more code, and a second writer of the same lock beside the script (the script stays the owner on
+      existing environments).
+    Not offered: an operator step in /provision-environment — it adds a human step (owner 2026-09-01: no human interaction) and nothing checks it.
+  </decision>
+
+  <context>
+    <background>
+      Copy H7b S26 (task 268: SecureRecordSetupProcedure.cs, the ListFieldPermissionsAsync / IsSecured read, the System Administrator
+      fixed-id excuse, Resumable vs QuarantineRequired) for each new step. The column list is ONE list: read the same set the BFF guard pins
+      (InvoiceFamilyLockedWrite.LockedColumns ↔ scripts/common/InvoiceFamilyLockedColumns.psd1, InvoiceFamilyFieldLockGuardTests) — do not
+      hand-copy a third list; add an ArchTest that pins H7b's list to the same source. Run order: H7b runs after H6/H7 and BEFORE H9 (HandlerIds
+      order), so H7b may not assume the stamp BFF is deployed (path B: the lock is safe before H9 — no users exist until H11).
+      sprk_directrecipient: decide with the owner whether S28 covers it (it needs Set-DirectRecipientSchema.ps1, which provisioning also does
+      not run) or S28 covers the four packaged columns and the Direct-message feature stays off on stamps (DirectMessage:* unset — guide §7.4
+      binding rule). Bump the H7b ProcedureVersion.
+    </background>
+    <relevant-files>
+      <file role="modify">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/SecureRecordSetup/SecureRecordSetupProcedure.cs</file>
+      <file role="modify">src/server/services/Sprk.Provisioning.ControlPlane.Tests/** — the H7b procedure tests (copy the S26 rows)</file>
+      <file role="modify">tests/Spaarke.ArchTests/** — pin H7b's invoice-family list to the BFF guard's list</file>
+      <file role="modify">docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md — §7.4 "New environment" lines; §7.11 H7b checks; change log</file>
+      <file role="read">scripts/Set-DocumentPointerFieldSecurity.ps1, scripts/Set-InvoiceFamilyFieldSecurity.ps1, scripts/Set-ThreadFlagFieldSecurity.ps1</file>
+      <file role="modify-if-path-A">src/dataverse/solutions/SpaarkeMaster/** — through uac-r2's release, not by this project alone</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="owner">No live Azure/Dataverse change and no deploy in this task; a SpaarkeMaster publish is uac-r2's release with the owner's go.</constraint>
+    <constraint source="ISS-028">The System Administrator profile is excused by its fixed id only, never by name.</constraint>
+    <constraint source="R6">No column, profile or unit name is compared in code except through the one shared list and the profile ids/names H7b already pins.</constraint>
+    <constraint source="CLAUDE.md §2">L2 never shells out to pwsh/az/pac.</constraint>
+  </constraints>
+
+  <acceptance-criteria>
+    <criterion testable="true">Must fire: H7b refuses Resumable when any invoice-family column is not IsSecured, lacks the Readers Read grant or the Writers grant; and QuarantineRequired when another profile (not Writers, not the fixed-id System Administrator) may create or update one. Same for the message-access columns in scope.</criterion>
+    <criterion testable="true">Must fire: a profile NAMED "System Administrator" with a different id is not excused.</criterion>
+    <criterion testable="true">Must not fire: a stamp with both locks whole passes; S14 and S26 behave as before.</criterion>
+    <criterion testable="true">H7b's invoice-family column list is pinned by an ArchTest to the BFF guard's list (must-fire and must-not-fire controls).</criterion>
+    <criterion testable="true">Path B only: on a stamp without the lock, H7b secures the columns and grants both profiles, then its own check passes; re-running writes nothing.</criterion>
+    <criterion testable="true">The guide states what provisioning actually does for both locks; ProcedureVersion bumped; L2 tests and ArchTests pass.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    <note date="2026-11-16">Created on the owner's go ("Yes, create the task") from the 2026-11-15 master review (current-task.md "Master review 2026-11-15"; ISS-029). The A/B decision is open; start with it.</note>
+    <note date="2026-11-16">Owner decision: "A: package in SpaarkeMaster". uac-r2 (owner of #2799) packages the 24-column lock (branch fix/2859-invoice-lock-in-spaarkemaster, planned SpaarkeMaster 1.3.2.0, with its own psd1 ↔ Entity.xml ↔ profiles ArchTest) and will send the version and commit when it merges; the import into any environment is its live step with the owner's go.</note>
+    <note date="2026-11-16">Implemented (FULL rigor, tags security/field-security/testing). H7b procedure version 10: S27 verifies the #2799 invoice-family lock (24 columns, InvoiceFamilyLinkColumns = the psd1), S28 the message-access lock (4 packaged columns; sprk_directrecipient only where it exists, otherwise a gate-evidence note that the Direct-message feature stays off). S26–S28 share CheckBffManagedColumnLockAsync (S26 behaviour and text unchanged apart from its remedy; compared with master). Incomplete → Resumable; another writer → QuarantineRequired; System Administrator excused only by fixed id. Four new rejection codes. Guide §5/§7.4/§7.11 + change log; Set-ThreadFlagFieldSecurity.ps1 help; release-process 1.3.1.0 row (stamp exception).</note>
+    <note date="2026-11-16">Deviation (criterion 4): the list pin is BffManagedLinkColumnLockListTests in the L2 Tests project (the S26 InvoiceMoneyColumnLockPackagedTests pattern), not tests/Spaarke.ArchTests: ArchTests do not reference the L2 assemblies. It pins H7b's list to the psd1, which InvoiceFamilyFieldLockGuardTests (ArchTest) pins to the BFF list; scan controls on seeded text. Known limit: the L2 tests run in advisory CI only, so a psd1 change that skips H7b would be flagged there, not by a blocking check; a missed column means H7b verifies less, while the package (uac-r2 ArchTest) still carries the lock.</note>
+    <note date="2026-11-16">Step 9.5. Two Opus adversarial reviews (security tag). Fixed: (F1) the S26/S27 remedies named scripts whose preconditions need the BFF-managed profiles' members, which H7b adds only after S26/S27 (S11/S12), so on a stamp's first H7b run the only remedy is a new run importing the release — remedies, rejection-code docs and guide now say the scripts apply only where H7b completed before (S26 was pre-existing, fixed in scope); (F1) the S28 remedy named Set-ThreadFlagFieldSecurity.ps1, which exits 1 wherever sprk_directrecipient is absent and defaults to SpaarkeCore — remedy now names the import, and the script only where the column exists, with -SolutionUniqueName SpaarkeMaster; (F2) guide §7.4 "after every import run -Verify" scoped to environments with the column; release-process 1.3.1.0 row got the stamp exception; two doc comments named non-existent test classes; no test pinned the version bump — ARunCompletedUnderProcedureVersion9_* added; ISS-029 owner row updated. Arch guard fm 054 3a flagged the tests' bare "DirectMessage:*" literals — assertions now use the note's wording. Mutation proofs (each restored byte-identical): drop S27 loop → 10 fail; drop S28 four columns → 3; always skip the direct recipient → 4; drop the per-table filter → 6; excuse every profile → 9; accept an unsecured column → 6. L2 3449 passed; Pester thread-flag 10/10.</note>
+    <note date="2026-11-16">Known limits. (K1) Release ordering: SpaarkeMaster 1.3.1.0 lacks the #2799 lock, so S27 refuses every stamp (new run, or re-run of an existing stamp since the version salts H7b's key) until uac-r2's release is published and imported — do not deploy an L2 Worker with procedure version 10 before that (current-task ordering rules, guide §7.11). Fails closed. (K2) The psd1 pin regex reads single-line `sprk_x = @{ … Columns = @(…) }` entries only; the list has 24 entries, so an unreadable psd1 cannot pass. Follow-up in this project when the release lands: name 1.3.2.0 in the S27 remedy and add the invoice-family package-row check to BffManagedLinkColumnLockListTests.</note>
+    <note date="2026-11-16">Merged: PR #2862 → 4256166205 (owner "Yes proceed", all 45 checks terminal: 36 pass, 9 skipped). Follow-up after uac-r2 #2865 (SpaarkeMaster 1.3.2.0, → 57431c8e6a; #2859 closed): S27 remedy, rejection-code doc and guide §5/§7.11 name 1.3.2.0; the release-ordering rule now reads "before SpaarkeMaster 1.3.2.0 is published". The planned invoice-family package-row check was NOT added: uac-r2's blocking ArchTest InvoiceFamilyFieldLockSourceGuardTests already pins the package to the same psd1 at exactly S27's pass condition (IsSecured=1, Readers 4/0/0, Writers 4/4/4, no other profile; both ways, with controls), so a copy in BffManagedLinkColumnLockListTests would duplicate it (CLAUDE.md §11); the test header names that guard. ISS-029 resolved.</note>
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;relevant-files&gt;. Follow task-execute for the pre-execution checklist. Ask the owner the &lt;decision&gt; before writing code.</protocol>
+  </execution>
+</task>

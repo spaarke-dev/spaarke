@@ -31,12 +31,15 @@ import {
 } from '@fluentui/react-components';
 import { FormModal, type IWizardShellHandle } from '@spaarke/ui-components';
 import {
+  CODE_ADJUSTMENT_ID_REUSED,
   decisionFailureMessage,
   isDecisionIncomplete,
   newAdjustmentId,
   type AdjustmentMethod,
   type AdjustmentRule,
 } from '../../services/decisionApi';
+import { isNoteRefusal, noteArgs, noteMember, noteProblem, noteRefusalMessage } from '../../services/noteModel';
+import { NoteField } from '../NoteField';
 import { approveBlocker, firmNeededBlocker, INVOICE_OUTCOME_LABEL, outcomeOfApproval, type InvoiceOutcome } from '../../services/decisionModel';
 import { isAdjustment, isDecided, money, shortDate, signedMoney } from '../../services/reviewModel';
 import type { ReviewLine } from '../../services/invoiceReviewApi';
@@ -162,14 +165,17 @@ const REREAD_FAILED = 'The totals could not be read back from the server, so the
 
 export function AdjustStep() {
   const s = useStyles();
-  const { form, set, readOnly, review, api, invoiceId, reload, approval } = useWiz();
+  const { form, set, readOnly, review, api, invoiceId, reload, approval, locks } = useWiz();
   // EB-D-197: an adjustment (add or remove) is refused (409) while the invoice needs its firm, so it is disabled the same way Approve is.
   const firmBlocker = readOnly ? null : firmNeededBlocker(approval);
   const [rules, setRules] = React.useState<AdjustmentRule[] | null>(null);
   const [rulesUnavailable, setRulesUnavailable] = React.useState(false);
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
-  const [repeatable, setRepeatable] = React.useState(false);
+  // Review round 1: the add's id and its "outcome unknown" lock live in the wizard form (and, for a reopened wizard, in the page-level locks),
+  // not in this step, which is unmounted whenever the reviewer leaves it: a new mount must not mint a new id over an add that may be saved.
+  const repeatable = form.adjLocked;
+  const [clearedNote, setClearedNote] = React.useState(false);
   // The adjustment last asked about, kept after the confirm closes: the FormModal is closed with `open={false}`, never
   // unmounted while open, which would leave the wizard behind it aria-hidden (#2658). `seq` keys each opening.
   const [removeDialog, setRemoveDialog] = React.useState<{ line: ReviewLine; open: boolean; seq: number } | null>(null);
@@ -179,7 +185,14 @@ export function AdjustStep() {
   const closeRemove = () => setRemoveDialog(prev => (prev ? { ...prev, open: false } : prev));
   const [removeBusy, setRemoveBusy] = React.useState(false);
   const [removeError, setRemoveError] = React.useState<string | null>(null);
-  const adjustmentId = React.useRef(newAdjustmentId());
+  // Task 095f-2ui: the optional notes. The add form's note lives in the wizard form (with the rest of it); the removal's is the confirm's own.
+  const [removeNote, setRemoveNote] = React.useState('');
+  const [removeNoteError, setRemoveNoteError] = React.useState<string | null>(null);
+  // The removal was saved but the re-read failed: Remove again is the same request, so the note cannot change now.
+  const [removeLocked, setRemoveLocked] = React.useState(false);
+  // The adjustment was already gone when the list was re-read after a 409 `id_reused`: the form is closed and the server's sentence is kept here.
+  const [removeNotice, setRemoveNotice] = React.useState<string | null>(null);
+  const [addNoteError, setAddNoteError] = React.useState<string | null>(null);
   const alive = React.useRef(true);
 
   React.useEffect(() => {
@@ -204,60 +217,126 @@ export function AdjustStep() {
 
   const adjustments = review.lines.filter(isAdjustment);
   const valueError = adjustmentValueError(form.adjMethod, form.adjValue);
-  const canAdd = !readOnly && !busy && firmBlocker === null && form.adjValue.trim() !== '' && !valueError && form.adjReason.trim() !== '';
+  const canAdd =
+    !readOnly && !busy && firmBlocker === null && form.adjValue.trim() !== '' && !valueError && form.adjReason.trim() !== '' && noteProblem(form.adjNote) === null;
 
   const add = async () => {
     setBusy(true);
     setError(null);
+    setAddNoteError(null);
+    setClearedNote(false);
+    // What this send carries. The lock below keeps exactly this, with the id, so a repeat (even after the wizard was closed) is the same request.
+    const sent = { adjustmentId: form.adjId, method: form.adjMethod, value: form.adjValue, reason: form.adjReason.trim(), rule: form.adjRule, note: form.adjNote };
+    const lockForm = () => {
+      set({ adjLocked: true });
+      locks.set('adjust', sent);
+    };
     const r = await api.addAdjustment(invoiceId, {
-      adjustmentId: adjustmentId.current,
-      method: form.adjMethod,
-      value: Number(form.adjValue),
-      reason: form.adjReason.trim(),
-      ruleId: form.adjRule || null,
+      adjustmentId: sent.adjustmentId,
+      method: sent.method,
+      value: Number(sent.value),
+      reason: sent.reason,
+      ruleId: sent.rule || null,
+      ...noteMember(sent.note),
     });
-    if (!alive.current) return;
+    // The lock is wizard-level state, so it is kept even if this step was left while the send was out.
+    if (!r.ok && (r.failure.status === 503 || r.failure.status === 0)) lockForm();
+    // Review round 2: a SUCCESS is finished even when this step was left while the send was out. The re-read and the reset (or the lock) go
+    // through the wizard's form state and the page-level locks, which outlive the step; otherwise the form would keep the saved add's id
+    // unlocked and a second send of the same text would file a second adjustment.
+    if (!alive.current && !r.ok) return;
     if (r.ok) {
       // The server computed the amount and stored the totals; the page re-reads them and shows what the re-read returns.
       const fresh = await reload();
-      if (!alive.current) return;
+      if (!fresh) lockForm();
       if (fresh) {
-        adjustmentId.current = newAdjustmentId();
-        setRepeatable(false);
-        set({ adjValue: '', adjReason: '', adjRule: '' });
-      } else {
+        locks.clear('adjust');
+        set({ adjId: newAdjustmentId(), adjLocked: false, adjValue: '', adjReason: '', adjRule: '', adjNote: '' });
+      } else if (alive.current) {
         // Saved, but the page is not showing the server's totals. The form stays, locked, with the same id: Repeat answers "already applied"
         // and re-reads, so nothing is added twice and a new id is never minted over a saved adjustment.
         setError(`${REREAD_FAILED} Repeat to read them again; nothing is added twice.`);
-        setRepeatable(true);
       }
+      if (!alive.current) return;
+    } else if (isNoteRefusal(r.failure)) {
+      // The server refused the note itself (400, before any read): the field message goes under the Note box, and the form keeps everything.
+      setAddNoteError(noteRefusalMessage(r.failure));
+      set({ adjLocked: false });
+      locks.clear('adjust');
     } else {
       setError(decisionFailureMessage(r.failure));
       // A 503 where the line was written but the totals were not: the same request, with the same id, finishes it. Show the server's state
-      // first (the page still shows the old totals), as 110's writes do.
-      if (isDecisionIncomplete(r.failure)) {
+      // first (the page still shows the old totals), as 110's writes do. No answer at all (status 0) may also have been recorded: read the list too.
+      // 409 `id_reused`: this id was already used for other content or by another reviewer, so the page is out of date: re-read the list (the
+      // form keeps its text; Clear starts a new adjustment, with a new id, once the list has been seen).
+      const reused = r.failure.status === 409 && r.failure.errorCode === CODE_ADJUSTMENT_ID_REUSED;
+      if (isDecisionIncomplete(r.failure) || r.failure.status === 0 || reused) {
         await reload();
         if (!alive.current) return;
       }
-      setRepeatable(r.failure.status === 503);
+      if (!(r.failure.status === 503 || r.failure.status === 0)) {
+        set({ adjLocked: false });
+        locks.clear('adjust');
+      }
     }
     setBusy(false);
   };
 
+  /** Clear: a form locked after an unsure send reads the list back first, so a new adjustment is never typed over one that may be saved. */
+  const clearForm = async () => {
+    if (form.adjLocked) {
+      setBusy(true);
+      const fresh = await reload();
+      if (!alive.current) return;
+      setBusy(false);
+      if (!fresh) {
+        setError(`${REREAD_FAILED} The earlier add may have been saved, so the form stays as it was. Try Clear again.`);
+        return;
+      }
+      setClearedNote(true);
+    }
+    locks.clear('adjust');
+    set({ adjValue: '', adjReason: '', adjRule: '', adjNote: '', adjId: newAdjustmentId(), adjLocked: false });
+    setError(null);
+    setAddNoteError(null);
+  };
+
   const confirmRemove = async () => {
     if (!removing) return;
+    const target = removing;
     setRemoveBusy(true);
     setRemoveError(null);
-    const r = await api.removeAdjustment(invoiceId, removing.id);
+    setRemoveNoteError(null);
+    const r = await api.removeAdjustment(invoiceId, target.id, ...noteArgs(removeNote));
     if (!alive.current) return;
     if (r.ok) {
       const fresh = await reload();
       if (!alive.current) return;
       setRemoveBusy(false);
       // A failed re-read leaves the list as it was: the form stays open and says so; Remove again answers "already applied" and re-reads.
+      // The note is locked then: Remove again is the same request (an edited note would be refused as a reused id).
       if (fresh) closeRemove();
-      else setRemoveError(`The adjustment was removed. ${REREAD_FAILED} Remove again to read them again; nothing is removed twice.`);
+      else {
+        setRemoveLocked(true);
+        setRemoveError(`The adjustment was removed. ${REREAD_FAILED} Remove again to read them again; nothing is removed twice.`);
+      }
+    } else if (isNoteRefusal(r.failure)) {
+      setRemoveBusy(false);
+      setRemoveNoteError(noteRefusalMessage(r.failure));
     } else {
+      // 409 `id_reused` on a removal: another reviewer already removed it, or a repeat carried another note. The page is out of date, so the
+      // list is re-read. When that shows the adjustment is gone, there is nothing left to remove: the form closes and the server's sentence stays
+      // on the step. Otherwise (still listed, or the re-read failed) the form stays open with the sentence and the note, kept for a resend.
+      if (r.failure.status === 409 && r.failure.errorCode === CODE_ADJUSTMENT_ID_REUSED) {
+        const fresh = await reload();
+        if (!alive.current) return;
+        if (fresh && !fresh.lines.some(l => l.id === target.id)) {
+          setRemoveBusy(false);
+          setRemoveNotice(decisionFailureMessage(r.failure));
+          closeRemove();
+          return;
+        }
+      }
       setRemoveBusy(false);
       setRemoveError(decisionFailureMessage(r.failure));
     }
@@ -279,13 +358,19 @@ export function AdjustStep() {
                 {a.reason ? ` · ${a.reason}` : ''}
               </Text>
               {!readOnly && (
-                <Button size="small" appearance="subtle" disabled={firmBlocker !== null} onClick={() => { setRemoveError(null); askRemove(a); }} data-testid={`remove-adjustment-${a.id}`}>
+                <Button size="small" appearance="subtle" disabled={firmBlocker !== null} onClick={() => { setRemoveError(null); setRemoveNote(''); setRemoveNoteError(null); setRemoveLocked(false); setRemoveNotice(null); askRemove(a); }} data-testid={`remove-adjustment-${a.id}`}>
                   Remove…
                 </Button>
               )}
             </div>
           ))}
         </div>
+      )}
+
+      {removeNotice && (
+        <MessageBar intent="info" layout="multiline" data-testid="remove-notice">
+          <MessageBarBody>{removeNotice}</MessageBarBody>
+        </MessageBar>
       )}
 
       {firmBlocker !== null && (
@@ -331,6 +416,18 @@ export function AdjustStep() {
           <Field label="Reason" required={form.adjValue.trim() !== ''}>
             <Textarea value={form.adjReason} disabled={repeatable} onChange={(_, d) => set({ adjReason: d.value })} resize="vertical" aria-label="Adjustment reason" maxLength={REASON_MAX} />
           </Field>
+          <NoteField
+            value={form.adjNote}
+            onChange={v => {
+              set({ adjNote: v });
+              setAddNoteError(null);
+            }}
+            serverError={addNoteError}
+            disabled={repeatable}
+            ariaLabel="Adjustment note"
+            testId="adjustment-note"
+            rows={2}
+          />
           {error && (
             <MessageBar intent="error" layout="multiline" data-testid="adjustment-error">
               <MessageBarBody>{error}</MessageBarBody>
@@ -341,11 +438,16 @@ export function AdjustStep() {
               {repeatable ? 'Repeat' : 'Add adjustment'}
             </Button>
             {adjustmentFormDirty(form) && !busy && (
-              <Button appearance="subtle" onClick={() => { set({ adjValue: '', adjReason: '', adjRule: '' }); setError(null); setRepeatable(false); adjustmentId.current = newAdjustmentId(); }}>
+              <Button appearance="subtle" onClick={() => void clearForm()} data-testid="clear-adjustment">
                 Clear
               </Button>
             )}
           </div>
+          {clearedNote && (
+            <Caption1 className={s.muted} data-testid="adjustment-cleared">
+              The list above was read again before the form was cleared. If the earlier adjustment was saved, it is listed there.
+            </Caption1>
+          )}
         </>
       )}
 
@@ -359,6 +461,7 @@ export function AdjustStep() {
           title="Remove adjustment"
           submitLabel="Remove"
           busy={removeBusy}
+          submitDisabled={noteProblem(removeNote) !== null}
           onClose={() => {
             if (!removeBusy) closeRemove();
           }}
@@ -368,6 +471,18 @@ export function AdjustStep() {
             Remove the adjustment of {signedMoney(removeDialog.line.amount)}
             {removeDialog.line.reason ? ` (${removeDialog.line.reason})` : ''}? The approved total is recalculated by the server.
           </Text>
+          <NoteField
+            value={removeNote}
+            onChange={v => {
+              setRemoveNote(v);
+              setRemoveNoteError(null);
+            }}
+            serverError={removeNoteError}
+            readOnly={removeLocked}
+            ariaLabel="Removal note"
+            testId="remove-note"
+            rows={2}
+          />
           {removeError && (
             <MessageBar intent="error" layout="multiline" data-testid="remove-error">
               <MessageBarBody>{removeError}</MessageBarBody>
@@ -398,7 +513,7 @@ export function ReasonStep() {
       <Field label="Reason" required hint={`${form.reason.length} / ${REASON_MAX}`}>
         <Textarea
           value={form.reason}
-          readOnly={readOnly}
+          readOnly={readOnly || form.locked}
           onChange={(_, d) => set({ reason: d.value })}
           resize="vertical"
           rows={4}
@@ -416,7 +531,7 @@ export function ReasonStep() {
 
 export function ConfirmStep() {
   const s = useStyles();
-  const { form, readOnly, review, approval } = useWiz();
+  const { form, set, readOnly, review, approval } = useWiz();
   const outcome = form.outcome ?? outcomeOfApproval(approval.status);
   const adjustments = review.lines.filter(isAdjustment);
   const changed = review.lines.filter(l => l.status === 'Reduced' || l.status === 'Disallowed').sort((a, b) => a.sequence - b.sequence);
@@ -471,6 +586,22 @@ export function ConfirmStep() {
           </>
         )}
       </div>
+      {!readOnly && (
+        <NoteField
+          value={form.note}
+          onChange={v => set({ note: v, noteError: null })}
+          serverError={form.noteError}
+          readOnly={form.locked}
+          ariaLabel="Note for the decision"
+          testId="decision-note"
+        />
+      )}
+      {!readOnly && form.locked && (
+        <Caption1 className={s.muted} data-testid="decision-note-locked">
+          This decision was saved in part, or no answer came back. Repeating it sends the same reason and note, so they cannot be changed now. To decide
+          differently, go Back and choose another decision.
+        </Caption1>
+      )}
       {changed.length > 0 && (
         <Accordion collapsible>
           <AccordionItem value="changed">

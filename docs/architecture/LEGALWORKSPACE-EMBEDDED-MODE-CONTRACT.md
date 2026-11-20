@@ -3,7 +3,9 @@
 > **Purpose**: Authoritative, testable contract for any host page embedding `LegalWorkspaceApp` in embedded mode (`<LegalWorkspaceApp embedded ... />`). Lists every host obligation as a MUST with a verification step and a reference-implementation pointer into SpaarkeAi.
 >
 > **Status**: New architectural reference doc introduced in R4 (DR-07 / C-2).
-> **Last reviewed**: 2026-05-26 (R4 task 015 / C-2 — initial publication).
+> **Last Reviewed**: 2026-11-13 (reuse-governance-tightening-r1 task 032: SpaarkeAi imports from the `legal-workspace` solution entry point; the `@spaarke/legal-workspace` facade was retired).
+>
+> **Initial publication**: 2026-05-26 (R4 task 015 / C-2).
 > **Audience**: Authors of future hosts that want to embed the LegalWorkspace dashboard engine; SpaarkeAi maintainers when modifying the existing embed path.
 > **Predecessor framing**: This doc supersedes any ad-hoc / tribal understanding of "how SpaarkeAi embeds LegalWorkspace." If you are extending the embed, this contract is now binding.
 >
@@ -63,7 +65,7 @@ LegalWorkspace ships its OWN `runtimeConfig` singleton (`src/solutions/LegalWork
 
 **Reference implementation** (SpaarkeAi):
 
-- `src/solutions/SpaarkeAi/src/main.tsx` lines 50–60 — imports `setLegalWorkspaceRuntimeConfig` from `@spaarke/legal-workspace`.
+- `src/solutions/SpaarkeAi/src/main.tsx` lines 50–60 — imports `setLegalWorkspaceRuntimeConfig` from `legal-workspace` (the LegalWorkspace solution's `exports` entry, a declared `file:` dependency).
 - `src/solutions/SpaarkeAi/src/main.tsx` lines 217–235 — after `setRuntimeConfig(config)` for SpaarkeAi's own singleton, calls `setLegalWorkspaceRuntimeConfig(config)` with the SAME `IRuntimeConfig`. Both singletons hold equivalent values; they remain distinct in-process instances by design.
 - `src/solutions/LegalWorkspace/src/index.ts` lines 23–47 — barrel export of `setRuntimeConfig as setLegalWorkspaceRuntimeConfig`.
 - `src/solutions/LegalWorkspace/src/config/runtimeConfig.ts` lines 25–54 — singleton implementation + `[LegalWorkspace] Runtime config not initialized` error.
@@ -319,7 +321,7 @@ If any row above fails, the host is non-compliant with this contract. Re-read th
 
 - [`SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md`](./SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md) — the parent architectural framing. §2.1 (Dashboard wrapper) and §5 (LegalWorkspace as the dashboard engine) are the conceptual home of this contract.
 - [`SPAARKEAI-WORKSPACE-ARCHITECTURE.md`](./SPAARKEAI-WORKSPACE-ARCHITECTURE.md) — the cold-load → widget render pipeline this contract sits inside.
-- [`SPAARKEAI-COMPONENT-MODEL.md`](./SPAARKEAI-COMPONENT-MODEL.md) — inventory of the `@spaarke/*` libraries this contract leans on (`@spaarke/auth`, `@spaarke/legal-workspace`, `@spaarke/ai-widgets`, `@spaarke/ui-components`).
+- [`SPAARKEAI-COMPONENT-MODEL.md`](./SPAARKEAI-COMPONENT-MODEL.md) — inventory of the `@spaarke/*` libraries this contract leans on (`@spaarke/auth`, `@spaarke/ai-widgets`, `@spaarke/ui-components`, and the `legal-workspace` entry point).
 - `LEGALWORKSPACE-RETIREMENT.md` (forward — published by R4 W-6) — formal record of the standalone Code Page retirement that makes this contract forward-looking rather than backward-compatible.
 
 ### 9.2 ADRs

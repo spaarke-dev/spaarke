@@ -53,6 +53,8 @@ import {
   ruleLabel,
   shortDate,
 } from '../services/reviewModel';
+import { noteMember, noteProblem } from '../services/noteModel';
+import { NoteField } from './NoteField';
 
 const useStyles = makeStyles({
   root: { display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalL, padding: tokens.spacingHorizontalL },
@@ -96,6 +98,8 @@ export interface PaneDecision {
   action: DecisionAction;
   reason: string | null;
   approvedAmount: number | null;
+  /** Task 095f-2ui: the optional note, as typed. Present only when there is one (blank is never sent as null or ""). */
+  note?: string;
 }
 
 export interface LineReviewPaneProps {
@@ -109,6 +113,10 @@ export interface LineReviewPaneProps {
   /** Correction rows of this line (GET corrections), newest first. */
   corrections: Correction[];
   toDecideCount: number;
+  /** The server refused the note of the last decision (400 note code): shown under the Note box until the note is edited. */
+  noteError?: string | null;
+  /** The note was edited: the page clears `noteError`. */
+  onNoteEdit?: () => void;
   onStart: () => void;
   onDecide: (decision: PaneDecision) => void;
   /** Opens the Correct value dialog for one field. */
@@ -206,12 +214,28 @@ function decisionFormKey(line: ReviewLine): string {
 }
 
 /** "Your decision": suggestion first, nothing happens until the single Confirm. */
-function DecisionForm({ line, busy, firmNeeded, onDecide }: { line: ReviewLine; busy: boolean; firmNeeded: boolean; onDecide: (d: PaneDecision) => void }) {
+function DecisionForm({
+  line,
+  busy,
+  firmNeeded,
+  noteError,
+  onNoteEdit,
+  onDecide,
+}: {
+  line: ReviewLine;
+  busy: boolean;
+  firmNeeded: boolean;
+  noteError: string | null;
+  onNoteEdit: () => void;
+  onDecide: (d: PaneDecision) => void;
+}) {
   const s = useStyles();
   const suggestion = lineSuggestion(line);
   const suggestedAmount = suggestion?.kind === 'Reduce' && suggestion.amount !== null ? reducedAmount(line.amount, suggestion.amount) : null;
   const [choice, setChoice] = React.useState<Choice | ''>(suggestion ? 'suggested' : '');
   const [reason, setReason] = React.useState('');
+  // Task 095f-2ui: one optional note for whichever decision is chosen; kept in this form across a refused send (409, 503, a refused note).
+  const [note, setNote] = React.useState('');
   const [amountText, setAmountText] = React.useState(suggestedAmount !== null ? suggestedAmount.toFixed(2) : '');
 
   // "Suggested" with no suggestion (the rules re-ran and the finding is gone) decides nothing: Confirm stays disabled.
@@ -221,17 +245,18 @@ function DecisionForm({ line, busy, firmNeeded, onDecide }: { line: ReviewLine; 
   const confirm = () => {
     if (!effective) return;
     const trimmed = reason.trim();
+    const withNote = noteMember(note);
     if (effective === 'accept') {
-      // The server stores no reason for an Accept (it drops it), so none is asked for or sent.
-      onDecide({ action: 'accept', reason: null, approvedAmount: null });
+      // The server stores no reason for an Accept (it drops it), so none is asked for or sent. A note is kept on the line's own record.
+      onDecide({ action: 'accept', reason: null, approvedAmount: null, ...withNote });
       return;
     }
     if (effective === 'disallow') {
-      onDecide({ action: 'disallow', reason: trimmed || null, approvedAmount: null });
+      onDecide({ action: 'disallow', reason: trimmed || null, approvedAmount: null, ...withNote });
       return;
     }
     const parsed = Number(amountText.replace(/[, ]/g, ''));
-    onDecide({ action: 'reduce', reason: trimmed || null, approvedAmount: amountText.trim() && Number.isFinite(parsed) ? parsed : null });
+    onDecide({ action: 'reduce', reason: trimmed || null, approvedAmount: amountText.trim() && Number.isFinite(parsed) ? parsed : null, ...withNote });
   };
 
   const body = (option: Choice) => {
@@ -285,13 +310,26 @@ function DecisionForm({ line, busy, firmNeeded, onDecide }: { line: ReviewLine; 
         <Radio value="disallow" label="Disallow" />
         {body('disallow')}
       </RadioGroup>
+      {effective && (
+        <NoteField
+          value={note}
+          onChange={v => {
+            setNote(v);
+            onNoteEdit();
+          }}
+          serverError={noteError}
+          ariaLabel={`Note for line ${line.sequence}`}
+          testId="line-note"
+          rows={2}
+        />
+      )}
       {firmNeeded && (
         <Caption1 className={s.muted} data-testid="decision-firm-first">
           {FIRM_FIRST_WORDS}
         </Caption1>
       )}
       <div className={s.actions}>
-        <Button appearance="primary" disabled={!effective || busy || firmNeeded} onClick={confirm} data-testid="decision-confirm">
+        <Button appearance="primary" disabled={!effective || busy || firmNeeded || noteProblem(note) !== null} onClick={confirm} data-testid="decision-confirm">
           Confirm
         </Button>
       </div>
@@ -443,7 +481,7 @@ function WhatWasRead({
 
 export function LineReviewPane(props: LineReviewPaneProps) {
   const s = useStyles();
-  const { line, invoiceFindings, canWrite, busy, firmNeeded = false, corrections, toDecideCount, onStart, onDecide, onCorrect, onConfirm, onShowField } = props;
+  const { line, invoiceFindings, canWrite, busy, firmNeeded = false, corrections, toDecideCount, noteError = null, onNoteEdit = () => undefined, onStart, onDecide, onCorrect, onConfirm, onShowField } = props;
 
   if (!line) {
     return (
@@ -524,7 +562,17 @@ export function LineReviewPane(props: LineReviewPaneProps) {
       {isDecided(line) && <DecidedState line={line} />}
       {/* Keyed on what the choice was made against: a correction re-runs the rules and can change the status, the amount or the suggestion,
           and a stale "Suggested" choice or amount must not survive that. */}
-      {decidable && <DecisionForm key={decisionFormKey(line)} line={line} busy={busy} firmNeeded={firmNeeded} onDecide={onDecide} />}
+      {decidable && (
+        <DecisionForm
+          key={decisionFormKey(line)}
+          line={line}
+          busy={busy}
+          firmNeeded={firmNeeded}
+          noteError={noteError}
+          onNoteEdit={onNoteEdit}
+          onDecide={onDecide}
+        />
+      )}
 
       <Divider />
       <WhatWasRead

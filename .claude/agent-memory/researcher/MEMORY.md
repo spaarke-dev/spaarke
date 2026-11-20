@@ -151,3 +151,4 @@
 - [MCP server in .NET BFF + Copilot DA widget (2026-11-05)](mcp-server-dotnet-bff-copilot-widget-2026-11-05.md) — C# SDK 2.3.1 + official Extensions.Apps (experimental MCPEXP003); stateless default; Entra SSO setup; no .NET Entra+widget MS sample; Dataverse MCP now 16 tools (invoke_api)
 - [Copilot as Spaarke surface + Frontier (2026-11-05)](copilot-as-spaarke-surface-and-frontier-2026-11-05.md) — MCP Apps = summary+handoff not workspace (UX guide says no whole-SaaS); OpenUrlDialog preview; 3 MCP registration models; Frontier = tenant opt-in, NOT an ISV program; 9 tenant tests
 - [Law-dept benchmarks + OCG provisions (2026-11-03)](law-dept-benchmarks-ocg-2026-11-03.md) — ACC 2025 medians by revenue band; RRR rates; CNA/Allianz/PSU/DE OCG text; all use 0.1-hr increments
+- [SPE container type limit/delete (2026-11-16)](spe-container-type-limit-delete-2026-11-16.md) — 25/tenant, standard not deletable, create delegated-only: CLAUDE.md accurate; Learn MCP works

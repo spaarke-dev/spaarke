@@ -246,7 +246,7 @@ describe('RecordCommandBar', () => {
   });
 
   describe('RECORD_ACTION_ICONS (FR-05)', () => {
-    it('iconMap_HoldsExactlyTheTwelveFr05Entries', () => {
+    it('iconMap_HoldsExactlyTheFourteenFr05Entries', () => {
       const Icons = require('@fluentui/react-icons');
       expect(RECORD_ACTION_ICONS).toEqual({
         refresh: Icons.ArrowClockwise20Regular,
@@ -261,6 +261,8 @@ describe('RecordCommandBar', () => {
         delete: Icons.Delete20Regular,
         history: Icons.History20Regular,
         send: Icons.Send20Regular,
+        edit: Icons.Edit20Regular,
+        changeStatus: Icons.ArrowSwap20Regular,
       });
       Object.values(RECORD_ACTION_ICONS).forEach(icon => expect(icon).toBeDefined());
       expect(Object.isFrozen(RECORD_ACTION_ICONS)).toBe(true);

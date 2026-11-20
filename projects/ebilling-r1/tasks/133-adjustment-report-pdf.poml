@@ -1,10 +1,11 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <task id="133" project="ebilling-r1">
+  <amendment source="EB-D-254, owner 2026-11-17 (option b)">No PDF report file in R1; task 133 is withdrawn. The firm report is the on-screen report (130's projection) in the SPA, plus the findings table in the 131 notice email body. FR-40 and D-36 are amended. This amendment overrides every PDF, report-download and 133 reference below.</amendment>
   <metadata>
     <title>Adjustment report PDF</title>
     <phase>5 Firm feedback (WP5) — wave W5-2</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>cancelled</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Generates a document from an existing projection and stores it through SpeFileStore; one new SpeFileStore method wraps a Graph call; content rules come from 130.</rigor-reason>
     <model-tier>sonnet</model-tier>

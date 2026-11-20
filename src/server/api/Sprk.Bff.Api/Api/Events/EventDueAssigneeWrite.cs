@@ -104,16 +104,28 @@ internal static class EventDueAssigneeWrite
 
         if (request.AssigneeContactId is { } assignee)
         {
-            body["sprk_AssignedTo@odata.bind"] = $"/contacts({assignee:D})";
-            body["statuscode"] = EventStatusCode.Reassigned;
-            body["sprk_reassigneddate"] = now.UtcDateTime.ToString("yyyy-MM-ddTHH:mm:ssZ", System.Globalization.CultureInfo.InvariantCulture);
-            if (callerContactId is { } reassigner && reassigner != Guid.Empty)
-            {
-                body["sprk_ReassignedBy@odata.bind"] = $"/contacts({reassigner:D})";
-            }
+            AddReassignColumns(body, assignee, callerContactId, now);
         }
 
         return JsonSerializer.Serialize(body);
+    }
+
+    /// <summary>
+    /// THE reassign columns, in this order: <c>sprk_AssignedTo@odata.bind</c>, <c>statuscode</c> = Reassigned (statecode is not
+    /// named: it stays Active), <c>sprk_reassigneddate</c> (UTC, seconds) and — only when <paramref name="callerContactId"/> is a
+    /// contact — <c>sprk_ReassignedBy@odata.bind</c>. Shared by <see cref="BuildPatchJson"/> and the external event PATCH
+    /// (spaarke-SPA-external-access-platform-r4 task 014c, owner option (a)), so both reassigns write the same columns.
+    /// </summary>
+    internal static void AddReassignColumns(
+        IDictionary<string, object?> body, Guid assignee, Guid? callerContactId, DateTimeOffset now)
+    {
+        body["sprk_AssignedTo@odata.bind"] = $"/contacts({assignee:D})";
+        body["statuscode"] = EventStatusCode.Reassigned;
+        body["sprk_reassigneddate"] = now.UtcDateTime.ToString("yyyy-MM-ddTHH:mm:ssZ", System.Globalization.CultureInfo.InvariantCulture);
+        if (callerContactId is { } reassigner && reassigner != Guid.Empty)
+        {
+            body["sprk_ReassignedBy@odata.bind"] = $"/contacts({reassigner:D})";
+        }
     }
 
     /// <summary>

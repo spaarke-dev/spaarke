@@ -503,3 +503,13 @@ uac-r2 reviewed 095g at `f1a53f306a`: the access gate holds, and passes with the
 | 503 `ebilling.disabled` | eBilling is off | |
 
 The restricted, secure and limited refusals apply only to an add or a replace, whatever the record's state. A clear is never refused for them.
+
+## Dev seeding (2026-11-14)
+
+- **Owner's go, typed in the ebilling-r1 session:** "Yes run script and leave Spaarke untyped". uac-r2 got notices before and after, and had no objection.
+- `Set-EbillingLawFirmTypeCode.ps1`:
+  - The `-WhatIf` dry run planned exactly one row.
+  - The apply exited 0 with result `set`: `LAWFIRM` on the single active "Law Firm" type row, read back.
+- One law-firm organization that had no type was given the Law Firm type, so it can be offered for a new add. No assignment or grant changed.
+- **After the write:** four active organizations are typed Law Firm. Two stay untyped: the customer's own organization (owner's decision) and one non-firm organization.
+- **Not yet consumed:** the dev BFF (bd43110169) carries neither #2822 nor 095g. The routes go live with a later uac-r2 deploy, which needs its own owner go.

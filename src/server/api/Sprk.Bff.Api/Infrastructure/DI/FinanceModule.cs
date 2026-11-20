@@ -96,10 +96,23 @@ public static class FinanceModule
         services.AddScoped<IInvoiceLifecycleService, InvoiceLifecycleService>();
 
         // Notification seam of the submission pipeline (ebilling-r1 task 049 part A, Processing Pipeline step 9): the processor reports every
-        // Accepted / Rejected submission here after its decision commits. The no-op is the default; task 132 replaces THIS registration with its
-        // job-enqueuing sink, so the interface is a real seam (a second implementation is planned), not a 1:1 convenience (ADR-010).
+        // Accepted / Rejected submission here after its decision commits. Task 132 replaced the no-op default with the job-enqueuing sink
+        // (NoOpEbillingNotificationSink stays as the seam's test double), so the interface is a real seam with two implementations (ADR-010).
         // Scoped like its callers (the pipeline's scoped processor). Unconditional (flag rule above): the processor always calls it.
-        services.AddScoped<IEbillingNotificationSink, NoOpEbillingNotificationSink>();
+        services.AddScoped<IEbillingNotificationSink, EbillingNotificationSink>();
+
+        // eBilling notifications (ebilling-r1 task 132, FR-39, FR-35, FR-50, ADR-004): the one enqueuer (103 approve, 104 reject / return, the sink above),
+        // the recipients reader and the job. Concrete (ADR-010: one implementation each), scoped (the recipients and the job hold scoped Dataverse
+        // services; the enqueuer holds the scoped JobSubmissionService's dependencies). Unconditional (flag rule above): the job reads EbillingOptions.Enabled
+        // itself (ADR-018) and the routes carry the kill switch.
+        services.AddScoped<EbillingNotificationEnqueuer>();
+        services.AddScoped<Sprk.Bff.Api.Api.ExternalAccess.EbillingRecipientAccessRule>(); // the outcome route's row rule, asked for a recipient (D-70); concrete, no interface
+        services.AddScoped<EbillingNotificationRecipients>();
+        services.AddScoped<IJobHandler, Sprk.Bff.Api.Services.Jobs.Handlers.EbillingNotificationJobHandler>();
+
+        // The external notification feed's eBilling source (task 132): derived from invoice status, each invoice re-checked by the outcome route's own
+        // rule. Scoped (it holds the scoped participation and data services). Unconditional; the feed route carries the module and ceiling checks.
+        services.AddScoped<Sprk.Bff.Api.Api.ExternalAccess.EbillingFeedSource>();
 
         // Submission outcome bell (ebilling-r1 task 095b): the job handler tells the submitter, in the model-driven app's bell, when a submission
         // reaches a final status (after it is committed; never fails or delays the outcome). Concrete (ADR-010: one implementation; no second
@@ -128,6 +141,7 @@ public static class FinanceModule
         // resolver. Unconditional (flag rule above); the routes carry the kill switch.
         services.AddScoped<ProcedureAssignmentService>();
         services.AddScoped<RecordProcedureReadService>(); // ebilling-r1 task 084: the caller-read lists of a record's Procedures and rules in force
+        services.AddScoped<BillingGuidelinesService>(); // ebilling-r1 task 135 (FR-49): the SPA Billing Guidelines read; the route carries the kill switch
 
         // Rule drafting job (ebilling-r1 task 075, FR-27): ADR-004 IJobHandler, the same shape as the other Finance handlers. Reads the rule
         // set's source document, asks IInvoiceAi.DraftRulesAsync (which has its Null peer, so AI-off is a clear Poisoned outcome, not a
@@ -147,6 +161,11 @@ public static class FinanceModule
         // 074 recorder and processing lock (decisions). Unconditional (flag rule above); the routes carry the kill switch. The read model also takes
         // the caller's IDataverseUserClient and EarlierInvoiceReadability (SignalsModule, unconditional) for the D-176 Duplicate check (task 119).
         services.AddScoped<InvoiceReviewReadService>();
+        // Read-time Procedure-change banner (ebilling-r1 task 113, model 8.2): the review read model's one extra member, computed on GET /review only,
+        // for an internal caller of an open invoice. Concrete (ADR-010: no interface, one implementation). Scoped, like the read model that holds it.
+        // It reads the Procedure rows with the singleton app-only Dataverse client (the evaluation's identity) and writes nothing. Unconditional (flag
+        // rule above): the read model that takes it maps unconditionally.
+        services.AddScoped<ProcedureChangeBanner>();
         services.AddScoped<InvoiceLineDecisionService>();
         // Invoice-level adjustments (ebilling-r1 task 102, FR-32, D-74): add / remove an Adjustment line and the rule list; 016 owns the amounts and totals.
         services.AddScoped<InvoiceAdjustmentService>();
@@ -163,6 +182,10 @@ public static class FinanceModule
             sp.GetRequiredService<FirmClauseReader>(),
             ct => sp.GetRequiredService<BillingDecisionRecorder>().WriterUserIdAsync(ct),
             sp.GetRequiredService<ILogger<FirmFindingsProjection>>()));
+        // Firm notice (ebilling-r1 task 131, FR-50, D-60): composes the notice from the projection above and the prose of IInvoiceAi.DraftFirmNoticeAsync
+        // (the Null peer when the AI kill switch is off: the composer then uses its fixed template, never a 500). Concrete (ADR-010), scoped: it holds the
+        // scoped projection. Unconditional (flag rule above); the draft route carries the kill switch. The public constructor is the DI one.
+        services.AddScoped<FirmNoticeComposer>();
         // Add line (ebilling-r1 task 164, EB-D-188): a reviewer-typed Fee or Expense line. Concrete (ADR-010), scoped: it holds the scoped CodeSetResolver,
         // IInvoiceResolutionService, BillingFactLoader and InvoiceComplianceEvaluator. Unconditional (flag rule above); the route carries the kill switch.
         services.AddScoped<InvoiceLineAddService>();

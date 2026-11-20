@@ -40,6 +40,13 @@ internal sealed class RecordProcedureWriteRig
 
     public static readonly Guid OwnerTeam = Guid.Parse("084d3000-0000-4000-8000-0000000000e7");
 
+    /// <summary>Task 084h-2: the writer's decider (the caller's systemuserid, as the route resolves it): the creator person the stub ownership
+    /// answer stamps.</summary>
+    public static Guid Decider => Reviewer;
+
+    /// <summary>Task 084h-2: the Decision Records the writer filed.</summary>
+    public ProcedureDecisionRecords Records { get; } = new();
+
     /// <summary>The four tables the overlay covers.</summary>
     public static readonly string[] OverrideTables = { ProcedureAssignmentEntity.Entity, RuleSet, Policy, PolicyVersion };
 
@@ -138,11 +145,9 @@ internal sealed class RecordProcedureWriteRig
             .ReturnsAsync(new PolicySignalClosure(SignalClosureOutcome.None, Array.Empty<OpenPolicySignal>()));
 
         var counter = new AffectedInvoiceCounter(entities.Object, Rig.Probe, NullLogger<AffectedInvoiceCounter>.Instance);
-        Writer = new ProcedureAssignmentService(
-            entities.Object, Ownership.Object, Rig.RuleSets, WriterClosure.Object, counter, NullLogger<ProcedureAssignmentService>.Instance)
-        { Clock = Clock };
-        Planner = new ProcedureAssignmentService(
-            entities.Object, PlannerOwnership.Object, Rig.RuleSets, PlannerClosure.Object, counter, NullLogger<ProcedureAssignmentService>.Instance);
+        // Task 084h-2: the writer files each change's Decision Record (captured in Records); the planner must never reach it.
+        Writer = Records.Writing(entities.Object, Ownership.Object, Rig.RuleSets, WriterClosure.Object, counter, Clock);
+        Planner = ProcedureDecisionRecords.NeverRecording(entities.Object, PlannerOwnership.Object, Rig.RuleSets, PlannerClosure.Object, counter);
     }
 
     // ── Reads ───────────────────────────────────────────────────────────────────────────────────────────────
@@ -320,4 +325,49 @@ internal sealed class SettableClock(DateTimeOffset now) : TimeProvider
     public override DateTimeOffset GetUtcNow() => _now;
 
     public void SetUtcNow(DateTimeOffset value) => _now = value;
+}
+
+/// <summary>
+/// Task 084h-2: the Decision Record seam of a <see cref="ProcedureAssignmentService"/> a contract test builds (the service's internal
+/// constructor). <see cref="Writing"/> runs the REAL writer's preflight (every decision a write builds must pass it) and captures the record and
+/// the enqueue; <see cref="NeverRecording"/> is for a planner: a dry run must never reach the record, so any call to it throws.
+/// </summary>
+internal sealed class ProcedureDecisionRecords
+{
+    public readonly List<RecordProcedureDecision> Preflighted = new();
+    public readonly List<RecordProcedureDecision> Recorded = new();
+    public readonly List<RecordProcedureDecision> Enqueued = new();
+    private BillingDecisionRecorder? _recorder;
+
+    public ProcedureAssignmentService Writing(
+        IGenericEntityService entities, IRecordOwnershipResolver ownership, RuleSetService ruleSets, SignalClosureService closure,
+        AffectedInvoiceCounter counter, TimeProvider? clock = null) =>
+        new(entities, ownership, ruleSets, closure, counter, NullLogger<ProcedureAssignmentService>.Instance,
+            d =>
+            {
+                Preflighted.Add(d);
+                (_recorder ??= new BillingDecisionRecorder(
+                    new Sprk.Bff.Api.Tests.Services.Signals.DecisionRecordWriterTests.Harness().Writer,
+                    new Mock<Sprk.Bff.Api.Services.Ai.Membership.IIdentityNormalizationService>().Object,
+                    NullLogger<BillingDecisionRecorder>.Instance)).PreflightProcedure(d);
+            },
+            (d, _) =>
+            {
+                Recorded.Add(d);
+                return Task.FromResult(new BillingDecisionRecordResult(Guid.NewGuid(), false, RecordedDecisionClass.Routine));
+            },
+            (d, _) =>
+            {
+                Enqueued.Add(d);
+                return Task.CompletedTask;
+            })
+        { Clock = clock ?? TimeProvider.System };
+
+    public static ProcedureAssignmentService NeverRecording(
+        IGenericEntityService entities, IRecordOwnershipResolver ownership, RuleSetService ruleSets, SignalClosureService closure,
+        AffectedInvoiceCounter counter) =>
+        new(entities, ownership, ruleSets, closure, counter, NullLogger<ProcedureAssignmentService>.Instance,
+            _ => throw new InvalidOperationException("A dry run must not preflight a Decision Record."),
+            (_, _) => throw new InvalidOperationException("A dry run must not record a Decision Record."),
+            (_, _) => throw new InvalidOperationException("A dry run must not queue a Decision Record."));
 }

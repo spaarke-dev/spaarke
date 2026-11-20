@@ -187,7 +187,7 @@ public sealed class RecordProcedureDryRunParityContractTests
                         var s = rig.Simple("ASSIGN", ProcedureAppliesTo.AssignedRecordsOnly);
                         var body = new ProcedureAssignmentRequest(s.Procedure, "FollowLatest", null, null);
                         return new(new(ProcedureDryRunRequest.KindAssign, Assign: body),
-                            p => Done(p.AssignProcedureAsync(table, record, body, CallerObjectId, Ct)));
+                            p => Done(p.AssignProcedureAsync(table, record, body, CallerObjectId, Decider, Ct)));
                     }
 
                 case "assign-pin":
@@ -200,7 +200,7 @@ public sealed class RecordProcedureDryRunParityContractTests
                         rig.AddRuleVersion(rule, v2, Mar1, number: 2, headline: "Approved rate, version 2");
                         var body = new ProcedureAssignmentRequest(procedure, "Pinned", v1, "Grandfathered");
                         return new(new(ProcedureDryRunRequest.KindAssign, Assign: body),
-                            p => Done(p.AssignProcedureAsync(table, record, body, CallerObjectId, Ct)));
+                            p => Done(p.AssignProcedureAsync(table, record, body, CallerObjectId, Decider, Ct)));
                     }
 
                 case "exclude-procedure":
@@ -208,7 +208,7 @@ public sealed class RecordProcedureDryRunParityContractTests
                         var s = rig.Simple("EXCL-P");
                         var body = new ProcedureAssignmentRequest(s.Procedure, "Excluded", null, "Not for this record");
                         return new(new(ProcedureDryRunRequest.KindAssign, Assign: body),
-                            p => Done(p.AssignProcedureAsync(table, record, body, CallerObjectId, Ct)));
+                            p => Done(p.AssignProcedureAsync(table, record, body, CallerObjectId, Decider, Ct)));
                     }
 
                 case "exclude-rule":
@@ -216,7 +216,7 @@ public sealed class RecordProcedureDryRunParityContractTests
                         var s = rig.Simple("EXCL-R");
                         var body = new RuleExcludeRequest(s.Rule, "Agreed for this record", null);
                         return new(new(ProcedureDryRunRequest.KindExcludeRule, ExcludeRule: body),
-                            p => Done(p.ExcludeRuleAsync(table, record, body, CallerObjectId, Ct)));
+                            p => Done(p.ExcludeRuleAsync(table, record, body, CallerObjectId, Decider, Ct)));
                     }
 
                 case "change":
@@ -225,21 +225,21 @@ public sealed class RecordProcedureDryRunParityContractTests
                         var body = Change(c.Rule, "Rate agreed for this record");
                         var set = ProcedureAssignmentService.RecordRuleSetIdFor(table, record, null);
                         return new(new(ProcedureDryRunRequest.KindChangeRule, ChangeRule: body),
-                            p => Done(p.ChangeRuleAsync(table, record, body, CallerObjectId, Token, Ct)),
+                            p => Done(p.ChangeRuleAsync(table, record, body, CallerObjectId, Decider, Token, Ct)),
                             ProcedureAssignmentService.RecordRulePolicyIdFor(set, c.Rule), set);
                     }
 
                 case "re-change":
                     {
                         var c = rig.Changeable("RECHG");
-                        var first = await Done(w.Writer.ChangeRuleAsync(table, record, Change(c.Rule, "First agreed rate"), CallerObjectId, Token, Ct));
+                        var first = await Done(w.Writer.ChangeRuleAsync(table, record, Change(c.Rule, "First agreed rate"), CallerObjectId, Decider, Token, Ct));
                         var x = first.Override.Id;
                         var body = Change(c.Rule, "Second agreed rate");
                         return new(new(ProcedureDryRunRequest.KindChangeRule, ReplacesOverrideId: x, ChangeRule: body),
                             async p =>
                             {
-                                await Done(p.RemoveAsync(table, record, x, Token, Ct));
-                                await Done(p.ChangeRuleAsync(table, record, body, CallerObjectId, Token, Ct));
+                                await Done(p.RemoveAsync(table, record, x, null, Decider, Token, Ct));
+                                await Done(p.ChangeRuleAsync(table, record, body, CallerObjectId, Decider, Token, Ct));
                             },
                             first.RecordRule.PolicyId, first.RecordRule.RuleSetId);
                     }
@@ -247,29 +247,29 @@ public sealed class RecordProcedureDryRunParityContractTests
                 case "switch":
                     {
                         var s = rig.Simple("SWITCH", ProcedureAppliesTo.AssignedRecordsOnly);
-                        var x = (await Done(w.Writer.AssignProcedureAsync(table, record, new(s.Procedure, "FollowLatest", null, null), CallerObjectId, Ct))).Id;
+                        var x = (await Done(w.Writer.AssignProcedureAsync(table, record, new(s.Procedure, "FollowLatest", null, null), CallerObjectId, Decider, Ct))).Id;
                         var body = new ProcedureAssignmentRequest(s.Procedure, "Pinned", s.Version, null);
                         return new(new(ProcedureDryRunRequest.KindAssign, ReplacesOverrideId: x, Assign: body),
                             async p =>
                             {
-                                await Done(p.RemoveAsync(table, record, x, Token, Ct));
-                                await Done(p.AssignProcedureAsync(table, record, body, CallerObjectId, Ct));
+                                await Done(p.RemoveAsync(table, record, x, null, Decider, Token, Ct));
+                                await Done(p.AssignProcedureAsync(table, record, body, CallerObjectId, Decider, Ct));
                             });
                     }
 
                 case "remove":
                     {
                         var s = rig.Simple("REMOVE", ProcedureAppliesTo.AssignedRecordsOnly);
-                        var x = (await Done(w.Writer.AssignProcedureAsync(table, record, new(s.Procedure, "FollowLatest", null, null), CallerObjectId, Ct))).Id;
-                        return new(new(ProcedureDryRunRequest.KindRemove, OverrideId: x), p => Done(p.RemoveAsync(table, record, x, Token, Ct)));
+                        var x = (await Done(w.Writer.AssignProcedureAsync(table, record, new(s.Procedure, "FollowLatest", null, null), CallerObjectId, Decider, Ct))).Id;
+                        return new(new(ProcedureDryRunRequest.KindRemove, OverrideId: x), p => Done(p.RemoveAsync(table, record, x, null, Decider, Token, Ct)));
                     }
 
                 case "remove-changed":
                     {
                         var c = rig.Changeable("RMCHG");
-                        var first = await Done(w.Writer.ChangeRuleAsync(table, record, Change(c.Rule, "Agreed rate"), CallerObjectId, Token, Ct));
+                        var first = await Done(w.Writer.ChangeRuleAsync(table, record, Change(c.Rule, "Agreed rate"), CallerObjectId, Decider, Token, Ct));
                         var x = first.Override.Id;
-                        return new(new(ProcedureDryRunRequest.KindRemove, OverrideId: x), p => Done(p.RemoveAsync(table, record, x, Token, Ct)),
+                        return new(new(ProcedureDryRunRequest.KindRemove, OverrideId: x), p => Done(p.RemoveAsync(table, record, x, null, Decider, Token, Ct)),
                             first.RecordRule.PolicyId, first.RecordRule.RuleSetId);
                     }
 
@@ -503,7 +503,7 @@ public sealed class RecordProcedureDryRunParityContractTests
                         _ => new ProcedureAssignmentRequest(s.Procedure, "Excluded", null, "Not for this record"),
                     };
                     request = new(ProcedureDryRunRequest.KindAssign, Assign: body);
-                    write = async p => Outcome(await p.AssignProcedureAsync(table, record, body, CallerObjectId, Ct));
+                    write = async p => Outcome(await p.AssignProcedureAsync(table, record, body, CallerObjectId, Decider, Ct));
                     expectedCode = ProcedureAssignmentService.CodeProcedureInactive;
                     break;
                 }
@@ -514,7 +514,7 @@ public sealed class RecordProcedureDryRunParityContractTests
                     deactivated = c.Procedure;
                     var body = Change(c.Rule, "Rate agreed for this record");
                     request = new(ProcedureDryRunRequest.KindChangeRule, ChangeRule: body);
-                    write = async p => Outcome(await p.ChangeRuleAsync(table, record, body, CallerObjectId, Token, Ct));
+                    write = async p => Outcome(await p.ChangeRuleAsync(table, record, body, CallerObjectId, Decider, Token, Ct));
                     expectedCode = "assignment.rule_not_in_force";
                     break;
                 }
@@ -568,7 +568,7 @@ public sealed class RecordProcedureDryRunParityContractTests
         else
         {
             w.Clock.SetUtcNow(SeedInstant);
-            var first = await Done(w.Writer.ChangeRuleAsync(table, record.Id, Change(c.Rule, "Agreed"), CallerObjectId, Token, Ct));
+            var first = await Done(w.Writer.ChangeRuleAsync(table, record.Id, Change(c.Rule, "Agreed"), CallerObjectId, Decider, Token, Ct));
             w.Clock.SetUtcNow(Instant);
             if (kind == "remove-changed")
             {
@@ -576,7 +576,7 @@ public sealed class RecordProcedureDryRunParityContractTests
             }
             else
             {
-                await Done(w.Writer.RemoveAsync(table, record.Id, first.Override.Id, Token, Ct)); // the record rule is now Off and real
+                await Done(w.Writer.RemoveAsync(table, record.Id, first.Override.Id, null, Decider, Token, Ct)); // the record rule is now Off and real
                 planned = await w.Planner.PlanChangeRuleAsync(reads, table, record.Id, Change(c.Rule, "Agreed again"), Instant.UtcDateTime, Ct);
             }
         }
@@ -665,7 +665,7 @@ public sealed class RecordProcedureDryRunParityContractTests
         w.Strict();
         var snapshot = w.Snapshot();
 
-        var outcome = await w.Writer.AssignProcedureAsync(Project, P, new(s.Procedure, "FollowLatest", null, null), CallerObjectId, Ct);
+        var outcome = await w.Writer.AssignProcedureAsync(Project, P, new(s.Procedure, "FollowLatest", null, null), CallerObjectId, Decider, Ct);
 
         outcome.Kind.Should().NotBe(RuleSetOutcomeKind.Done);
         w.WriteInvocations().Should().Contain(nameof(IGenericEntityService.ExecuteTransactionAsync));

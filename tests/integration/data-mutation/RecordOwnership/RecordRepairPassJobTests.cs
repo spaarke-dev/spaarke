@@ -37,7 +37,7 @@ namespace Sprk.Bff.Api.Tests.Integration.DataMutation.RecordOwnership;
 /// which applies the scan query's conditions to the seeded rows (or, for the defence-in-depth tests, ignores them).
 /// </remarks>
 [Trait("status", "new")]
-public sealed class RecordRepairPassJobTests
+public sealed partial class RecordRepairPassJobTests
 {
     private readonly PassWorld _pass = new();
 
@@ -250,15 +250,16 @@ public sealed class RecordRepairPassJobTests
     // Review F1-a: an owner write is an Assign — never written where it would cascade
     // =====================================================================================
 
-    private static readonly AssignCascadeRelationship ContactTasks = new("Contact_Tasks", "task", "Cascade");
-
     [Fact]
-    public async Task AContactTableThatCascadesAssignToAChild_IsNotReOwned_IsReportedAsAnAnswer_AndLoggedOncePerPass()
+    public async Task AContactWithAnActivityChild_IsNotReOwned_IsReportedAsAnAnswer_AndLoggedPerRow()
     {
+        // Task 052f: the refusal is per row (a contact with a task child), not per table.
         _pass.CustomerTeamResolves();
-        World.AssignCascades["contact"] = [ContactTasks];
+        World.CascadesTo("contact", "Contact_Tasks", "task", "regardingobjectid");
         var first = _pass.NativeContact();
         var second = _pass.NativeContact();
+        World.AddCascadeChild("activitypointer", "regardingobjectid", first, activityType: "task");
+        World.AddCascadeChild("activitypointer", "regardingobjectid", second, activityType: "task");
 
         var result = await _pass.RunAsync();
 
@@ -270,7 +271,7 @@ public sealed class RecordRepairPassJobTests
         PassWorld.Count(result, "ownerAssignCascades").Should().Be(2);
         PassWorld.Count(result, "pendingRetry").Should().Be(0, "an answer, not a fault: not asked again");
         World.AssignCascadeReads.Where(t => t == "contact").Should().ContainSingle("the relationships are read once per pass");
-        World.Log.Entries.Where(e => e.Message.Contains("Contact_Tasks -> task")).Should().ContainSingle("logged once per pass");
+        World.Log.Entries.Where(e => e.Message.Contains("Contact_Tasks")).Should().HaveCount(2, "logged per row, naming the relationship");
 
         var direct = await World.RepairAsync("contact", first, _pass.Context());
         direct.Fields.Should().ContainSingle(f => f.Part == RecordRepairPart.Owner)
@@ -279,10 +280,11 @@ public sealed class RecordRepairPassJobTests
     }
 
     [Fact]
-    public async Task ATableThatCascadesAssign_StillGetsItsMapping_WithoutTheOwner()
+    public async Task ARowWithAnUnacceptedChild_StillGetsItsMapping_WithoutTheOwner()
     {
-        World.AssignCascades["sprk_event"] = [new AssignCascadeRelationship("sprk_event_children", "sprk_memo", null)];
+        World.CascadesTo("sprk_event", "sprk_event_children", "sprk_memo", "sprk_regardingevent", assign: null);
         var id = _pass.NativeEvent();
+        World.AddCascadeChild("sprk_memo", "sprk_regardingevent", id);
 
         var result = await _pass.RunAsync();
 
@@ -308,12 +310,6 @@ public sealed class RecordRepairPassJobTests
         World.AssignCascadeReads.Should().Contain("contact");
         World.Directory.Row("contact", id).GetAttributeValue<EntityReference>("ownerid")
             .Should().Be(new EntityReference("team", CustomerContactOwnerTests.CustomerTeam));
-    }
-
-    [Fact]
-    public void TheAcceptedAssignCascadeList_StartsEmpty()
-    {
-        RecordCreationService.AcceptedAssignCascades.Should().BeEmpty("a child is allowed only by a reasoned entry");
     }
 
     [Fact]
@@ -548,7 +544,8 @@ public sealed class RecordRepairPassJobTests
         World.Writes.Should().HaveCount(3);
         World.ColumnMetadataReads.Count(t => t == "sprk_event").Should().Be(1);
         World.ColumnMetadataReads.Count(t => t == "sprk_matter").Should().Be(1);
-        PassWorld.Count(result, "metadataReads").Should().Be(2);
+        PassWorld.Count(result, "metadataReads").Should().Be(2 + RecordRepairCorePairReport.Tables.Count,
+            "the repair tables' two, and the report's pair-column read of each core-pair table (audit settings are checked every run)");
     }
 
     [Fact]
@@ -792,7 +789,7 @@ public sealed class RecordRepairPassJobTests
     {
         RecordRepairPassJob.DefaultCronSchedule.Should().Be("*/5 * * * *");
         RecordRepairPassJob.ExcludedTables.Should().Contain(
-            ["task", "account", "sprk_signal", "sprk_decisionrecord", "sprk_budgetrevision", "sprk_procedureversion"]);
+            ["task", "account", "sprk_signal", "sprk_decisionrecord", "sprk_budgetrevision", "sprk_invoicecorrection", "sprk_procedureversion"]);
         _pass.Job().Tables.Should().NotIntersectWith(RecordRepairPassJob.ExcludedTables).And.Contain(["sprk_event", "contact"]);
     }
 
@@ -801,7 +798,7 @@ public sealed class RecordRepairPassJobTests
     // =====================================================================================
 
     /// <summary>The job over a <see cref="RepairWorld"/>: its scope, its scan, its claim store, its clock and its settings.</summary>
-    private sealed class PassWorld
+    private sealed partial class PassWorld
     {
         public static readonly DateTimeOffset Now = new(2026, 11, 12, 12, 0, 0, TimeSpan.Zero);
         public static readonly DateTimeOffset GoLive = new(2026, 11, 1, 0, 0, 0, TimeSpan.Zero);
@@ -843,6 +840,12 @@ public sealed class RecordRepairPassJobTests
 
         /// <summary>When set, the scan returns every seeded row of the table (a query that did not hold).</summary>
         public bool ScanIgnoresItsConditions { get; set; }
+
+        /// <summary>Task 052c: the on-demand row budget the job is built with (the production default when unset).</summary>
+        public int? OnDemandRowBudget { get; set; }
+
+        /// <summary>Task 052c: the <c>createdon</c> the scan reports for a row, when it differs from what Repair later reads.</summary>
+        public Dictionary<Guid, DateTimeOffset> ScanReportsCreatedOn { get; } = [];
 
         /// <summary>Every scan query the job sent.</summary>
         public List<QueryExpression> ScanQueries { get; } = [];
@@ -930,6 +933,11 @@ public sealed class RecordRepairPassJobTests
                 });
             entities.Setup(e => e.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
                 .Returns((QueryExpression query, CancellationToken _) => Task.FromResult(Scan(query)));
+            entities.Setup(e => e.GetColumnMetadataAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                .Returns((string table, CancellationToken _) => Task.FromResult(ReportColumns(table)));
+            entities.Setup(e => e.GetTableAuditMetadataAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                .Returns((string table, CancellationToken _) => Task.FromResult(ReportTable(table)));
+            EntityMocks.Add(entities);
 
             var collection = new ServiceCollection()
                 .AddSingleton(entities.Object)
@@ -945,6 +953,7 @@ public sealed class RecordRepairPassJobTests
                 new ConfigurationBuilder().AddInMemoryCollection(Settings).Build(), Log)
             {
                 OntologyWriterIdentity = (_, ct) => OntologyWriter(ct),
+                OnDemandRowBudget = OnDemandRowBudget ?? RecordRepairPassJob.DefaultOnDemandRowBudget,
             };
         }
 
@@ -956,6 +965,11 @@ public sealed class RecordRepairPassJobTests
         /// <summary>The job's window scan over the seeded rows: each condition of the query applied, ordered by id, capped.</summary>
         private EntityCollection Scan(QueryExpression query)
         {
+            if (query.EntityName == RecordRepairCorePairReport.AuditTable
+                || query.EntityName == RecordRepairCorePairReport.OrganizationTable
+                || RecordRepairCorePairReport.Tables.Contains(query.EntityName))
+                return ReportScan(query);
+
             if (query.EntityName == "systemuser")
             {
                 var applicationId = (Guid)query.Criteria.Conditions.Single(c => c.AttributeName == "applicationid").Values[0];
@@ -982,6 +996,9 @@ public sealed class RecordRepairPassJobTests
                     if (row.Attributes.TryGetValue(column, out var value))
                         copy[column] = value;
                 }
+
+                if (ScanReportsCreatedOn.TryGetValue(row.Id, out var reported))
+                    copy["createdon"] = reported.UtcDateTime;
 
                 return copy;
             }).ToList();

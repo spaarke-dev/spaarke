@@ -10,13 +10,13 @@
  *   - ADR-028 (Spaarke Auth v2 — `useDocumentActions` uses `authenticatedFetch`
  *     from `@spaarke/auth` internally; this component handles NO auth tokens)
  *
- * @see src/client/shared/Spaarke.DocumentOperations/src/hooks/useDocumentActions.ts
+ * @see src/client/shared/Spaarke.UI.Components/src/hooks/useDocumentActions.ts
  */
 
 import * as React from 'react';
 import { Toolbar, ToolbarButton, Tooltip, makeStyles, mergeClasses, tokens } from '@fluentui/react-components';
 import { OpenRegular, DesktopRegular, SaveRegular } from '@fluentui/react-icons';
-import { useDocumentActions } from '@spaarke/document-operations';
+import { useDocumentActions } from '@spaarke/ui-components';
 
 // ---------------------------------------------------------------------------
 // Props

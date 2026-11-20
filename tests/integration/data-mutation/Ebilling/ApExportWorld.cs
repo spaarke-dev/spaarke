@@ -686,6 +686,12 @@ internal sealed class WorldLifecycle(ExportDataverse dataverse) : IInvoiceLifecy
         return Task.FromResult(InvoiceTransitionResultFactory.Moved());
     }
 
+    /// <summary>Task 095f-2a: the AP export never names a decision note; a call that does is a defect this double surfaces.</summary>
+    public Task<InvoiceTransitionResult> TransitionAsync(Guid invoiceId, InvoiceLifecycleStatus target, string? decisionNote, CancellationToken ct = default) =>
+        decisionNote is null
+            ? TransitionAsync(invoiceId, target, ct)
+            : throw new NotSupportedException("The AP export moves invoices without a decision note.");
+
     public InvoiceCreateRequestResult BuildInvoiceCreateRequest(Entity invoice, InvoiceLifecycleStatus initialStatus) =>
         throw new NotSupportedException();
 

@@ -66,7 +66,6 @@ import {
   useUiScale,
 } from "@spaarke/ui-components";
 import { authenticatedFetch as spaarkeAuthenticatedFetch, resolveTenantIdSync } from "@spaarke/auth";
-import type { EntityContext, EntityType } from "@spaarke/ai-context";
 import {
   PaneEventBusProvider,
   usePaneEvent,
@@ -76,7 +75,7 @@ import {
   determineStage,
   shouldReset,
 } from "@spaarke/ai-widgets";
-import type { SessionState } from "@spaarke/ai-widgets";
+import type { SessionState, EntityContext, EntityType } from "@spaarke/ai-widgets";
 import { ConversationPane } from "../conversation/ConversationPane";
 import { ContextPaneController } from "../context/ContextPaneController";
 import { WorkspacePane } from "../workspace/WorkspacePane";
