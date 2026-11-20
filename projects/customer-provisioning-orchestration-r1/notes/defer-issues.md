@@ -10,6 +10,74 @@
 
 ## Open (in priority order)
 
+### ISS-031 — No upgrade run can start: CreateRun (REG-07) refuses a Ready registry row and nothing moves it back
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | now (every upgrade of an existing stamp) |
+| **Filed** | 2026-11-20 |
+| **Source** | ACME upgrade to SpaarkeMaster 1.3.2.0: the first `POST /api/runs` returned 400 `registry-setup-status-not-in-progress` |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2926 |
+
+**Description**
+
+`CreateRun` accepts a run only when the customer's `sprk_dataverseenvironment` row has `sprk_setupstatus = InProgress`.
+After a stamp's first run, H13 sets it to Ready. The skill's Step 1a detects an upgrade (`sprk_provisionedon` set) and
+asks the operator to confirm. But neither the skill nor L2 sets the row back to InProgress, so every upgrade run
+fails with 400 before it starts. On 2026-11-20 the owner approved a manual PATCH (2 → 1) for ACME; run `3b6f7b65` then
+started.
+
+**Entry-points**
+
+- `src/server/services/Sprk.Provisioning.ControlPlane.Api/Api/RunsEndpoints.cs:686-698` (REG-07 setupStatus check)
+- `.claude/skills/provision-environment/SKILL.md` Step 1a, the upgrade branch (`$script:IsUpgradeRun = $true`), around line 739
+
+**Suggested fix**
+
+Pick one owner for the transition. Either Step 1a's upgrade branch PATCHes the row to InProgress after the operator
+confirms the upgrade (registry write, like Step 1f), or CreateRun accepts Ready when the row has `sprk_provisionedon`
+and the intake carries an upgrade acknowledgement, and moves the row itself. The second keeps the rule in one place
+on the server.
+
+**Estimated effort**: 2–4 h with tests
+**Blockers**: none
+**Related**: REG-07 (pre-dispatch punch list 2026-08-27); ISS-030; `notes/acme-1.3.2.0-upgrade-plan.md`
+
+### ISS-030 — PRQ-C-03 (global name availability) fails on every upgrade run
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | next-round |
+| **Filed** | 2026-11-20 |
+| **Source** | ACME upgrade prechecks (skill Step 1e-ter), 2026-11-20 |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2925 |
+
+**Description**
+
+PRQ-C-03 calls `checkNameAvailability` / `checkDomainAvailability`, which report every existing name as taken. On an
+upgrade run the stamp's Service Bus namespace, storage account and Cognitive Services subdomains already exist in the
+customer's own resource group, so the check fails. ACME failed it for `spaarke-acme-prod-sbus`, `sprkacmeprodsa`,
+`sprk-acme-prod-docintel` and `sprk-acme-prod-contentsafety`, all four in `rg-spaarke-acme-prod`. The operator has to
+recognise and override a hard-stop check. H2a had the same defect and was fixed on 2026-10-15 (T186 L23); the
+precheck recipe was not.
+
+**Entry-points**
+
+- `scripts/provisioning-prereqs/prereqs.yaml:800-829` (PRQ-C-03 recipe; its `expect` already says "run this before the first attempt only")
+- `src/server/services/Sprk.Provisioning.ControlPlane.Core/.../ArmResourceNameAvailabilityProbe.cs` (H2a's fix to copy)
+
+**Suggested fix**
+
+When a name is unavailable, GET it at its expected ID in `rg-spaarke-{customerId}-{stampEnvironment}` on the stamp
+subscription: 200 means it is the stamp's own (pass), 404 means a real collision (fail), anything else fails with the
+error. This matches H2a.
+
+**Estimated effort**: 1–2 h
+**Blockers**: none
+**Related**: T186 L23; ISS-031
+
 ### ISS-028 — Operator scripts excuse the System Administrator field-security profile by name (#2725)
 
 | Field | Value |
