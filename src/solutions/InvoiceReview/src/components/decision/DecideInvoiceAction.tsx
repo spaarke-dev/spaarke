@@ -38,7 +38,7 @@ import {
 } from '../../services/decisionModel';
 import { isNoteRefusal, noteArgs, noteProblem, noteRefusalMessage } from '../../services/noteModel';
 import { NoteField } from '../NoteField';
-import { InvoiceDecisionWizard, type NotifyStep } from './InvoiceDecisionWizard';
+import { InvoiceDecisionWizard } from './InvoiceDecisionWizard';
 import { useApprovalSync } from './AwaitingApprovers';
 import { useApproval } from './ApprovalProvider';
 import { REASON_MAX } from './steps';
@@ -52,10 +52,9 @@ export interface DecideInvoiceActionProps {
   review: InvoiceReview;
   canWrite: boolean;
   reload: () => Promise<InvoiceReview | null>;
-  notifyStep?: NotifyStep;
 }
 
-export function DecideInvoiceAction({ review, canWrite, reload, notifyStep }: DecideInvoiceActionProps) {
+export function DecideInvoiceAction({ review, canWrite, reload }: DecideInvoiceActionProps) {
   const { state, api, invoiceId, refresh, locks } = useApproval();
   useApprovalSync(review);
   // The server's state shows the decision is done: a request kept locked from an unsure send has nothing left to repeat. ISS-032: not while
@@ -105,7 +104,6 @@ export function DecideInvoiceAction({ review, canWrite, reload, notifyStep }: De
           invoiceId={invoiceId}
           reload={reload}
           refreshApproval={refreshApproval}
-          notifyStep={notifyStep}
           locks={locks}
         />
       )}

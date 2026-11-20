@@ -48,6 +48,7 @@ async function openWizard(): Promise<HTMLElement> {
 const next = (d: HTMLElement) => within(d).getByRole('button', { name: 'Next', hidden: true });
 const radio = (d: HTMLElement, name: RegExp) => within(d).getByRole('radio', { name, hidden: true });
 const finishBtn = (d: HTMLElement, name: RegExp) => within(d).getByRole('button', { name, hidden: true });
+const skipNotify = (d: HTMLElement) => within(d).getByRole('button', { name: 'Skip', hidden: true });
 const noteBox = (d: HTMLElement) => within(d).getByLabelText('Note for the decision') as HTMLTextAreaElement;
 const typeNote = (d: HTMLElement, text: string) => fireEvent.change(noteBox(d), { target: { value: text } });
 
@@ -56,6 +57,7 @@ async function toConfirmViaReject(d: HTMLElement, reason = 'Duplicate of an earl
   fireEvent.click(next(d));
   fireEvent.change(within(d).getByLabelText('Reason for the decision'), { target: { value: reason } });
   fireEvent.click(next(d));
+  fireEvent.click(skipNotify(d));
   await within(d).findByTestId('confirm-decision');
 }
 
@@ -64,6 +66,7 @@ async function toConfirmViaReturn(d: HTMLElement, reason = 'Please correct the r
   fireEvent.click(next(d));
   fireEvent.change(within(d).getByLabelText('Reason for the decision'), { target: { value: reason } });
   fireEvent.click(next(d));
+  fireEvent.click(skipNotify(d));
   await within(d).findByTestId('confirm-decision');
 }
 
