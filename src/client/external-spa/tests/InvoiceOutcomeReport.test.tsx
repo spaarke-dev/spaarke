@@ -10,7 +10,7 @@
  */
 import * as React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { FluentProvider, webDarkTheme, webLightTheme } from '@fluentui/react-components';
 
 const h = vi.hoisted(() => ({ bffApiCall: vi.fn() }));
@@ -35,6 +35,12 @@ import {
   groupOutcomeItems,
   outcomeDifference,
 } from '../src/components/ebilling/InvoiceOutcomeReport';
+import {
+  PRINTING_CLASS,
+  PRINT_FALLBACK_MS,
+  PRINT_GLOBAL_CSS,
+  PRINT_ROOT_ID,
+} from '../src/components/ebilling/outcomePrint';
 import { OutcomeSection } from '../src/components/record/sections/OutcomeSection';
 import { RECORD_SECTIONS } from '../src/components/record/sections';
 import { RECORD_TEMPLATES } from '../src/components/record/recordTemplates';
@@ -548,11 +554,153 @@ describe('InvoiceOutcomeReport', () => {
 // ---------------------------------------------------------------------------
 
 describe('print', () => {
-  it('the "Print or save as PDF" button calls window.print', () => {
+  const printRoot = (): HTMLElement | null => document.getElementById(PRINT_ROOT_ID);
+  const htmlIsPrinting = (): boolean => document.documentElement.classList.contains(PRINTING_CLASS);
+
+  it('F1: with no print in progress the html class is absent and there is no print root', () => {
+    renderReport(outcome());
+    expect(htmlIsPrinting()).toBe(false);
+    expect(printRoot()).toBeNull();
+    expect(screen.queryByTestId('invoice-outcome-report-print')).toBeNull();
+    expect(printSpy).not.toHaveBeenCalled();
+  });
+
+  it('F1: clicking Print mounts the print root with the FULL item list, sets the html class, then calls window.print', () => {
+    let classAtPrint: boolean | null = null;
+    let rootAtPrint: boolean | null = null;
+    printSpy.mockImplementation(() => {
+      classAtPrint = htmlIsPrinting();
+      rootAtPrint = printRoot() !== null && printRoot()!.querySelectorAll('[data-testid="outcome-item"]').length === 3;
+    });
+    renderReport(outcome());
+
+    fireEvent.click(screen.getByRole('button', { name: 'Print or save as PDF' }));
+
+    expect(printSpy).toHaveBeenCalledTimes(1);
+    // The class and the full copy were in place when the browser was asked to print.
+    expect(classAtPrint).toBe(true);
+    expect(rootAtPrint).toBe(true);
+    const root = printRoot()!;
+    expect(root.parentElement).toBe(document.body);
+    const copy = within(root).getByTestId('invoice-outcome-report-print');
+    expect(within(copy).getAllByTestId('outcome-item')).toHaveLength(3);
+    expect(within(copy).getByTestId('outcome-reconciliation')).toBeTruthy();
+    expect(within(copy).queryByTestId('outcome-print')).toBeNull();
+    // The copy sits in its own light-theme provider (a dark page prints in light colours).
+    expect(root.querySelector('.fui-FluentProvider')).toBeTruthy();
+  });
+
+  it('F1: the print copy is rendered in the LIGHT theme even when the page is dark', () => {
+    renderReport(outcome(), webDarkTheme);
+    fireEvent.click(screen.getByRole('button', { name: 'Print or save as PDF' }));
+    const provider = printRoot()!.querySelector('.fui-FluentProvider') as HTMLElement;
+    const providerClasses = Array.from(provider.classList);
+    // The provider's theme is a rule on its own class (inserted into a sheet, so read through the CSSOM).
+    const rules = Array.from(document.styleSheets).flatMap(sheet => Array.from(sheet.cssRules));
+    const rulesOf = (el: HTMLElement) =>
+      rules.filter(r => r instanceof CSSStyleRule && Array.from(el.classList).some(c => r.selectorText === `.${c}`));
+    const background = (el: HTMLElement) =>
+      rulesOf(el)
+        .map(r => /--colorNeutralBackground1:\s*([^;]+);/.exec(r.cssText)?.[1])
+        .find(Boolean);
+    expect(providerClasses.length).toBeGreaterThan(0);
+    expect(background(provider)).toBe(webLightTheme.colorNeutralBackground1);
+    // Control: the page's own provider is the dark one.
+    const pageProvider = document.querySelector('.fui-FluentProvider') as HTMLElement;
+    expect(pageProvider).not.toBe(provider);
+    expect(background(pageProvider)).toBe(webDarkTheme.colorNeutralBackground1);
+  });
+
+  it('F1: afterprint removes the html class and the print root', () => {
+    renderReport(outcome());
+    fireEvent.click(screen.getByRole('button', { name: 'Print or save as PDF' }));
+    expect(htmlIsPrinting()).toBe(true);
+    expect(printRoot()).not.toBeNull();
+
+    act(() => {
+      window.dispatchEvent(new Event('afterprint'));
+    });
+
+    expect(htmlIsPrinting()).toBe(false);
+    expect(printRoot()).toBeNull();
+    // The on-screen report is untouched, and a second print works.
+    expect(screen.getByTestId('invoice-outcome-report')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Print or save as PDF' }));
+    expect(printSpy).toHaveBeenCalledTimes(2);
+    expect(printRoot()).not.toBeNull();
+  });
+
+  it('F1: when afterprint never arrives the fallback timer removes the class and the root', () => {
+    vi.useFakeTimers();
+    try {
+      renderReport(outcome());
+      fireEvent.click(screen.getByRole('button', { name: 'Print or save as PDF' }));
+      expect(htmlIsPrinting()).toBe(true);
+      act(() => {
+        vi.advanceTimersByTime(PRINT_FALLBACK_MS - 1);
+      });
+      expect(htmlIsPrinting()).toBe(true);
+      act(() => {
+        vi.advanceTimersByTime(2);
+      });
+      expect(htmlIsPrinting()).toBe(false);
+      expect(printRoot()).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('F1: a window.print that throws still ends in the fallback clean-up (the page is never left in print-only mode)', () => {
+    vi.useFakeTimers();
+    try {
+      printSpy.mockImplementation(() => {
+        throw new Error('print blocked');
+      });
+      renderReport(outcome());
+      expect(() => fireEvent.click(screen.getByRole('button', { name: 'Print or save as PDF' }))).not.toThrow();
+      act(() => {
+        vi.advanceTimersByTime(PRINT_FALLBACK_MS + 1);
+      });
+      expect(htmlIsPrinting()).toBe(false);
+      expect(printRoot()).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('F1: unmounting during a print removes the html class and the print root', () => {
+    const view = renderReport(outcome());
+    fireEvent.click(screen.getByRole('button', { name: 'Print or save as PDF' }));
+    expect(htmlIsPrinting()).toBe(true);
+    expect(printRoot()).not.toBeNull();
+
+    view.unmount();
+
+    expect(htmlIsPrinting()).toBe(false);
+    expect(printRoot()).toBeNull();
+  });
+
+  it('F1: a second click while a print is in progress starts nothing', () => {
     renderReport(outcome());
     const button = screen.getByRole('button', { name: 'Print or save as PDF' });
     fireEvent.click(button);
+    fireEvent.click(button);
     expect(printSpy).toHaveBeenCalledTimes(1);
+    expect(document.querySelectorAll(`#${PRINT_ROOT_ID}`)).toHaveLength(1);
+  });
+
+  it('F1: a report whose host clips it still prints in full (the copy is not inside the clipping host)', () => {
+    const { container } = render(
+      <FluentProvider theme={webLightTheme}>
+        <div style={{ height: '100px', overflow: 'hidden' }} data-testid="clipping-host">
+          <InvoiceOutcomeReport outcome={parsed(outcome())} />
+        </div>
+      </FluentProvider>
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Print or save as PDF' }));
+    const host = container.querySelector('[data-testid="clipping-host"]')!;
+    expect(host.contains(printRoot())).toBe(false);
+    expect(within(printRoot()!).getAllByTestId('outcome-item')).toHaveLength(3);
   });
 
   it('there is no download control and no report route call (EB-D-254: no PDF in R1)', () => {
@@ -584,8 +732,8 @@ describe('print', () => {
     return selectors;
   }
 
-  it('the print rules are scoped to the report: classes of the report only, and no global (body, html, universal, id) selector', () => {
-    const { container } = renderReport(outcome());
+  it("F1: every print rule is either one of the report's own classes or the single rule gated on the html printing class", () => {
+    renderReport(outcome());
     const root = screen.getByTestId('invoice-outcome-report');
     expect(root.classList.contains(OUTCOME_REPORT_CLASS)).toBe(true);
 
@@ -594,35 +742,129 @@ describe('print', () => {
     const classesInReport = new Set<string>();
     for (const el of [root, ...Array.from(root.querySelectorAll('*'))])
       el.classList.forEach(c => classesInReport.add(c));
+    const gated = `html.${PRINTING_CLASS}`;
     for (const selector of selectors) {
-      expect(selector).toMatch(/^\.[\w-]+/);
-      expect(selector).not.toMatch(/(^|[\s,>+~])(html|body|\*|#)/);
-      // Every print rule belongs to a class of an element inside the report (nothing reaches the record modal or a grid).
-      const classes = Array.from(selector.matchAll(/\.([\w-]+)/g)).map(m => m[1]);
-      expect(classes.some(c => classesInReport.has(c))).toBe(true);
+      for (const part of selector.split(',').map(s => s.trim())) {
+        if (part.startsWith(gated)) continue;
+        // Anything else is a class of an element inside the report: no body, html, universal or id selector.
+        expect(part).toMatch(/^\.[\w-]+/);
+        expect(part).not.toMatch(/(^|[\s,>+~])(html|body|\*|#)/);
+        const classes = Array.from(part.matchAll(/\.([\w-]+)/g)).map(m => m[1]);
+        expect(classes.some(c => classesInReport.has(c))).toBe(true);
+      }
     }
-    // The report itself carries print rules (light palette, page break, hidden button).
-    expect(container.querySelectorAll('[data-testid="outcome-print"]')).toHaveLength(1);
-    expect(selectors.some(s => root.classList.contains(s.replace(/^\./, '')))).toBe(true);
   });
 
-  it('a dark-theme page prints in the light palette: the report re-points its colour tokens at the light theme in print', () => {
-    renderReport(outcome(), webDarkTheme);
-    const root = screen.getByTestId('invoice-outcome-report');
-    const rulesOfRoot = Array.from(document.styleSheets).flatMap(sheet => {
-      try {
-        return Array.from(sheet.cssRules);
-      } catch {
-        return [];
+  it('F1: the global rule is gated on the html class, only under @media print, hides the rest of the body but not the print root, and sets no height or overflow limit on the root', () => {
+    renderReport(outcome());
+    const rules: Array<{ selector: string; css: string; inPrint: boolean }> = [];
+    const visit = (list: CSSRuleList, inPrint: boolean) => {
+      for (const rule of Array.from(list)) {
+        const media = rule as CSSMediaRule;
+        if (media.media !== undefined && media.cssRules)
+          visit(media.cssRules, inPrint || media.media.mediaText.includes('print'));
+        else if (rule instanceof CSSStyleRule) rules.push({ selector: rule.selectorText, css: rule.cssText, inPrint });
       }
-    });
-    const printText = rulesOfRoot
-      .filter(r => (r as CSSMediaRule).media?.mediaText.includes('print'))
-      .map(r => r.cssText)
-      .join('\n');
-    expect(printText).toContain(`--colorNeutralBackground1: ${webLightTheme.colorNeutralBackground1}`);
-    expect(printText).toContain(`--colorNeutralForeground1: ${webLightTheme.colorNeutralForeground1}`);
-    expect(root).toBeTruthy();
+    };
+    // Griffel's makeStaticStyles is a no-op under NODE_ENV=test, so the rule text the hook injects (exported) is parsed here.
+    const style = document.createElement('style');
+    document.head.appendChild(style);
+    try {
+      for (const css of PRINT_GLOBAL_CSS) style.sheet!.insertRule(css, style.sheet!.cssRules.length);
+      visit(style.sheet!.cssRules, false);
+    } finally {
+      style.remove();
+    }
+    const gatedRules = rules.filter(r => r.selector.includes(PRINTING_CLASS));
+    expect(gatedRules.length).toBeGreaterThan(0);
+    // Every rule that mentions the class is under @media print and starts with `html.<class>`.
+    for (const r of gatedRules) {
+      expect(r.inPrint).toBe(true);
+      expect(r.selector).toMatch(new RegExp(`^html\\.${PRINTING_CLASS}`));
+    }
+    const hide = gatedRules.find(r => r.selector.includes('body > *'));
+    expect(hide).toBeTruthy();
+    expect(hide!.selector).toContain(`:not(#${PRINT_ROOT_ID})`);
+    expect(hide!.css).toContain('display: none');
+    const rootRule = gatedRules.find(r => r.selector.endsWith(`#${PRINT_ROOT_ID}`) && !r.selector.includes(':not'));
+    expect(rootRule).toBeTruthy();
+    expect(rootRule!.css).toContain('overflow: visible');
+    expect(rootRule!.css).toContain('height: auto');
+    // The only OTHER rule that mentions the root id is the on-screen hide (outside print): nothing else touches body or html.
+    const outside = rules.filter(r => !r.inPrint && r.selector.includes(PRINT_ROOT_ID));
+    expect(outside.every(r => r.css.includes('display: none'))).toBe(true);
+    // The gate is the class: with no print in progress, no element of the page matches the hide rule.
+    expect(document.querySelector(`html.${PRINTING_CLASS} body > *`)).toBeNull();
+  });
+
+  it('F4 (EB-D-210, FR-28): a finding shows its reason code beside the firm-safe description; none when the code is absent', () => {
+    renderReport(
+      outcome({
+        kind: 'SubmissionRejected',
+        approvedTotal: null,
+        items: [
+          {
+            decision: 'RejectionFinding',
+            reason: null,
+            firmReasons: ['The billed rate is above the approved rate.'],
+            citations: [],
+            lineNumber: 1,
+            valuesRead: [],
+            reasonCode: 'approved_rate.above_approved',
+          },
+          {
+            decision: 'RejectionFinding',
+            reason: null,
+            firmReasons: ['Another finding.'],
+            citations: [],
+            lineNumber: 2,
+            valuesRead: [],
+          },
+        ],
+      })
+    );
+    const items = screen.getAllByTestId('outcome-item');
+    expect(within(items[0]).getByTestId('outcome-item-reason-code').textContent).toBe(
+      'Reason code: approved_rate.above_approved'
+    );
+    expect(within(items[0]).getByTestId('outcome-item-firm-reason').textContent).toBe(
+      'The billed rate is above the approved rate.'
+    );
+    expect(within(items[1]).queryByTestId('outcome-item-reason-code')).toBeNull();
+  });
+
+  it('K4: no "Reduction 0.00" row when nothing was reduced (the totals still show)', () => {
+    renderReport(outcome({ billedTotal: 500, approvedTotal: 500, items: [lineItem({ decision: 'Added' })] }));
+    expect(screen.getByTestId('outcome-reconciliation')).toBeTruthy();
+    expect(screen.queryByTestId('outcome-reconciliation-difference')).toBeNull();
+    expect(screen.getByTestId('outcome-reconciliation-billed').textContent).toBe('500.00');
+    expect(screen.getByTestId('outcome-reconciliation-approved').textContent).toBe('500.00');
+  });
+
+  it('K4: the summary carries the print page break only when items follow', () => {
+    // The `break-after: page` rules the page's print media carries, as selectors; the summary must match one of them (or not).
+    const breakSelectors = (): string[] => {
+      const found: string[] = [];
+      const visit = (list: CSSRuleList, inPrint: boolean) => {
+        for (const rule of Array.from(list)) {
+          const media = rule as CSSMediaRule;
+          if (media.media !== undefined && media.cssRules)
+            visit(media.cssRules, inPrint || media.media.mediaText.includes('print'));
+          else if (inPrint && rule instanceof CSSStyleRule && /break-after:\s*page/.test(rule.cssText))
+            found.push(rule.selectorText);
+        }
+      };
+      for (const sheet of Array.from(document.styleSheets)) visit(sheet.cssRules, false);
+      return found;
+    };
+    renderReport(outcome());
+    const withItems = screen.getByTestId('outcome-summary');
+    expect(breakSelectors().length).toBeGreaterThan(0);
+    expect(breakSelectors().some(s => withItems.matches(s))).toBe(true);
+    cleanup();
+    renderReport(outcome({ items: [], kind: 'Approved' }));
+    const withoutItems = screen.getByTestId('outcome-summary');
+    expect(breakSelectors().some(s => withoutItems.matches(s))).toBe(false);
   });
 });
 

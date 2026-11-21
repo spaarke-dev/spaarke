@@ -20,12 +20,13 @@
  * A citation shows the firm-facing `label`, the rule name, the version, the section reference and the quoted clause; an item with
  * no citation shows its reason only. `noticeProse` is a plain React text node: no HTML is ever interpreted.
  *
- * PRINT (EB-D-254: no PDF in R1). A "Print or save as PDF" button calls `window.print()`. The print rules are in this component's
- * own classes (`@media print` inside the report's `makeStyles`), so they reach only the report: the summary ends the first page, a
- * card is not split across pages, the button is hidden, and the report re-points its colour tokens at the light theme so a dark-mode
- * page prints in light colours. There is NO global `@media print` rule: the record modal and the grids are untouched.
+ * PRINT (EB-D-254: no PDF in R1). A "Print or save as PDF" button prints a COPY of the whole report in a dedicated surface with no
+ * container limits (`outcomePrint.tsx`: a portal root on `<body>`, in a light-theme provider, an `<html>` class while printing, and the
+ * one global print rule gated on that class), because the hosts clip the on-screen report (the modal scrolls, the wizard frame has a
+ * fixed height). The report's own `@media print` classes lay the copy out: the summary ends the first page when items follow, a card
+ * is not split across pages, and the button is not part of the copy.
  *
- * ADR-021: Fluent v9 and semantic tokens only; no hard-coded colour. The print light palette is read from `webLightTheme`.
+ * ADR-021: Fluent v9 and semantic tokens only; no hard-coded colour.
  */
 import * as React from 'react';
 import {
@@ -38,7 +39,6 @@ import {
   makeStyles,
   mergeClasses,
   tokens,
-  webLightTheme,
   type BadgeProps,
 } from '@fluentui/react-components';
 import { PrintRegular } from '@fluentui/react-icons';
@@ -50,17 +50,12 @@ import type {
   FirmOutcomeKind,
 } from '../../api/ebilling-client';
 import { SectionCard } from '../SectionCard';
+import { formatDetailValue } from '../detail/RecordDetailFields';
+import { useOutcomePrint } from './outcomePrint';
 import { useFirmOutcome, type OutcomeLoadState, type OutcomeSubject } from './useFirmOutcome';
 
-/** The class every report carries; the print rules are attached to its classes only, never to a global selector. */
+/** The class every report carries; the report's own print rules are attached to its classes only. */
 export const OUTCOME_REPORT_CLASS = 'sprk-outcome-report';
-
-/** The light theme's colour tokens as custom properties: set on the report in print, so a dark page prints in light colours. */
-const PRINT_LIGHT_TOKENS: Record<string, string> = Object.fromEntries(
-  Object.entries(webLightTheme)
-    .filter(([name, value]) => name.startsWith('color') && typeof value === 'string')
-    .map(([name, value]) => [`--${name}`, value as string])
-);
 
 const useStyles = makeStyles({
   root: {
@@ -70,18 +65,15 @@ const useStyles = makeStyles({
     minWidth: 0,
     maxWidth: '100%',
     boxSizing: 'border-box',
-    '@media print': {
-      ...PRINT_LIGHT_TOKENS,
-      color: tokens.colorNeutralForeground1,
-      backgroundColor: tokens.colorNeutralBackground1,
-    },
   },
   summary: {
     display: 'flex',
     flexDirection: 'column',
     gap: tokens.spacingVerticalS,
     minWidth: 0,
-    // The summary ends the first printed page; the findings start the next.
+  },
+  // The summary ends the first printed page when items follow; the findings start the next.
+  summaryBreak: {
     '@media print': { breakAfter: 'page' },
   },
   facts: {
@@ -106,7 +98,6 @@ const useStyles = makeStyles({
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: tokens.spacingHorizontalS,
-    '@media print': { display: 'none' },
   },
   group: {
     display: 'flex',
@@ -216,9 +207,12 @@ const useStyles = makeStyles({
 // Pure helpers (exported for the tests)
 // ---------------------------------------------------------------------------
 
-/** An amount as text: two decimals, grouped. The contract carries no currency, so none is shown. */
+/**
+ * An amount as text: two decimals, grouped. The contract carries no currency, so none is shown. It is the SPA's own money
+ * formatter (`formatDetailValue`, kind `money`), so the report agrees with the record header's total.
+ */
 export function formatOutcomeAmount(value: number): string {
-  return value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return formatDetailValue({ amount: value }, { attribute: 'amount', kind: 'money' });
 }
 
 /** A yyyy-MM-dd calendar date as text; anything else is shown as received. */
@@ -467,6 +461,12 @@ const ItemCard: React.FC<{ item: FirmOutcomeItem; showLineApproved: boolean }> =
           {text}
         </Text>
       ))}
+      {item.reasonCode && item.reasonCode.trim() && (
+        // EB-D-210 / FR-28: every rejecting finding carries its reason code beside the firm-safe description above.
+        <Text size={200} className={mergeClasses(styles.wrap, styles.meta)} data-testid="outcome-item-reason-code">
+          {`Reason code: ${item.reasonCode}`}
+        </Text>
+      )}
       {item.citations.map((citation, i) => (
         <CitationBlock key={i} citation={citation} />
       ))}
@@ -504,8 +504,29 @@ export interface InvoiceOutcomeReportProps {
   outcome: FirmOutcome;
 }
 
-/** Renders one outcome. See the file header for what each kind shows. */
+/**
+ * Renders one outcome. See the file header for what each kind shows. The print button prints a copy of the whole report in the
+ * print surface (`outcomePrint.tsx`), never the on-screen element, which its host may clip.
+ */
 export const InvoiceOutcomeReport: React.FC<InvoiceOutcomeReportProps> = ({ outcome }) => {
+  const { start, portal } = useOutcomePrint(() => <ReportContent outcome={outcome} printCopy />);
+  return (
+    <>
+      <ReportContent outcome={outcome} onPrint={start} />
+      {portal}
+    </>
+  );
+};
+
+interface ReportContentProps {
+  outcome: FirmOutcome;
+  /** The on-screen report offers printing; the print copy does not. */
+  onPrint?: () => void;
+  /** This is the print copy (no button, its own test id). */
+  printCopy?: boolean;
+}
+
+const ReportContent: React.FC<ReportContentProps> = ({ outcome, onPrint, printCopy = false }) => {
   const styles = useStyles();
   const showLineApproved = !NO_LINE_APPROVAL_KINDS.has(outcome.kind);
   const { lines, invoice } = React.useMemo(() => groupOutcomeItems(outcome.items), [outcome.items]);
@@ -520,10 +541,13 @@ export const InvoiceOutcomeReport: React.FC<InvoiceOutcomeReportProps> = ({ outc
   return (
     <div
       className={mergeClasses(OUTCOME_REPORT_CLASS, styles.root)}
-      data-testid="invoice-outcome-report"
+      data-testid={printCopy ? 'invoice-outcome-report-print' : 'invoice-outcome-report'}
       data-kind={outcome.kind}
     >
-      <div className={styles.summary} data-testid="outcome-summary">
+      <div
+        className={mergeClasses(styles.summary, outcome.items.length > 0 && styles.summaryBreak)}
+        data-testid="outcome-summary"
+      >
         <dl className={styles.facts}>
           {outcome.trackingNumber && (
             <div className={styles.fact}>
@@ -585,17 +609,19 @@ export const InvoiceOutcomeReport: React.FC<InvoiceOutcomeReportProps> = ({ outc
             {prose}
           </Text>
         )}
-        <div className={styles.actions}>
-          <Button
-            appearance="secondary"
-            size="small"
-            icon={<PrintRegular />}
-            onClick={() => window.print()}
-            data-testid="outcome-print"
-          >
-            Print or save as PDF
-          </Button>
-        </div>
+        {onPrint && (
+          <div className={styles.actions}>
+            <Button
+              appearance="secondary"
+              size="small"
+              icon={<PrintRegular />}
+              onClick={onPrint}
+              data-testid="outcome-print"
+            >
+              Print or save as PDF
+            </Button>
+          </div>
+        )}
       </div>
 
       {notShown !== null && (
@@ -631,14 +657,16 @@ export const InvoiceOutcomeReport: React.FC<InvoiceOutcomeReportProps> = ({ outc
               <Text>{formatOutcomeAmount(reconciled.billed)}</Text>
             </dd>
           </div>
-          <div className={styles.reconciliationRow}>
-            <dt className={styles.noMargin}>
-              <Text>{difference < 0 ? 'Increase' : 'Reduction'}</Text>
-            </dt>
-            <dd className={styles.noMargin} data-testid="outcome-reconciliation-difference">
-              <Text>{formatOutcomeAmount(Math.abs(difference))}</Text>
-            </dd>
-          </div>
+          {difference !== 0 && (
+            <div className={styles.reconciliationRow}>
+              <dt className={styles.noMargin}>
+                <Text>{difference < 0 ? 'Increase' : 'Reduction'}</Text>
+              </dt>
+              <dd className={styles.noMargin} data-testid="outcome-reconciliation-difference">
+                <Text>{formatOutcomeAmount(Math.abs(difference))}</Text>
+              </dd>
+            </div>
+          )}
           <div className={styles.reconciliationRow}>
             <dt className={styles.noMargin}>
               <Text weight="semibold">Approved total</Text>
