@@ -9,8 +9,8 @@
 |-------|-------|
 | **Task** | **Wave 4 (P2) done: 020** Review detail (FR-11; FR-12 already on master from ebilling) and **022** inline document preview (FR-14) — owner go 2026-11-20 "Yes, start Phase 2". Also open: **016** (owner retest items 3–7) |
 | **Step** | Both ✅ in POML + index (drift check clean). Build, full SPA vitest (1908 + 2 new), ArchTests 2724/2724, adr-check clean, one adversarial review: F3 fixed (streamed size cap), F2 filed as D-23 #2928 → task 023. Notes: `notes/task-020-notes.md`, `task-022-notes.md` |
-| **Status** | 016 🔄 (items 1–2, 8 pass); 020 ✅; 022 ✅ — on branch, PR for the owner's merge go |
-| **Next Action** | Owner: merge go for the wave PR. Then wave 5: 023 (fold in D-23) → 024 → 028 (P2 deploy + E2E; grid PATCH for 3ff4102c with owner approval; any env needs 082c-2 first). Owner wording question: show "The client is reviewing this invoice." beyond the Information field? |
+| **Status** | 016 🔄 (items 1–2, 8 pass); 020 ✅; 022 ✅ — PR #2929 squash-merged to master as `4c2d26939d` (2026-11-21, owner go "Yes, merge when green"; CI 31 pass / 0 fail). Not deployed: dev SPA stays `2963d1565b` until task 028 |
+| **Next Action** | Wave 5: 023 (fold in D-23) → 024 → 028 (P2 deploy + E2E; grid PATCH for 3ff4102c with owner approval; any env needs 082c-2 first). Owner wording question: show "The client is reviewing this invoice." beyond the Information field? |
 
 ## Task 015 outcome (for 016's E2E)
 - Add event: Event Type required (options = `creatableEventTypes`), Due Date required by type, Priority, Assigned To ("Me" first), Description. Add event hidden when no type is offered.
