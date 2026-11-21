@@ -1,9 +1,9 @@
 /**
  * spaarkeai-word-add-in-r1 task 038, end to end through the pane: Matter quick-create's
  * `POST /api/office/quickcreate/matter` body carries `matterTypeId` as a bare lowercase GUID
- * (ADR-044), Project/Invoice quick-create carries no `matterTypeId`, and the pane never sends a
- * matter number. Unlike `SaveFlow.versionMode.test.tsx`, `RelatedToPicker` is NOT mocked here — it is
- * the component under test for the create-form wiring; `DocumentProfileSection` and `SseClient` are
+ * (ADR-044), Project quick-create carries no `matterTypeId`, and the pane never sends a matter number.
+ * (Invoice quick-create left the pane in task 133 slice C; SaveFlow.invoiceTaskTypes.test.tsx pins that.)
+ * Unlike `SaveFlow.versionMode.test.tsx`, `RelatedToPicker` is NOT mocked here — it is the component under test for the create-form wiring; `DocumentProfileSection` and `SseClient` are
  * mocked (unrelated to this path, matches the sibling suite's pattern).
  */
 import { render, screen, waitFor } from '@testing-library/react';
@@ -96,7 +96,7 @@ function renderPane() {
   );
 }
 
-async function quickCreateCall(entityType: 'matter' | 'project' | 'invoice') {
+async function quickCreateCall(entityType: 'matter' | 'project') {
   await waitFor(
     () =>
       expect(mockFetch.mock.calls.some(([u]) => String(u).includes(`/api/office/quickcreate/${entityType}`))).toBe(
@@ -155,46 +155,6 @@ describe('SaveFlow — Matter quick-create sends matterTypeId (task 038)', () =>
 
       const body = await quickCreateCall('project');
       expect(body).toEqual({ name: 'Acme Project' });
-    },
-    TEST_TIMEOUT_MS
-  );
-
-  it(
-    'Invoice (task 100): description and the PREFILLED Assigned To (from /quickcreate/defaults) are sent, canonical',
-    async () => {
-      mockFetch.mockImplementation(async (url: string) => {
-        const u = String(url);
-        if (u.includes('/api/office/quickcreate/defaults')) {
-          return json(true, 200, {
-            assignedTo: {
-              id: 'EEEEEEEE-1000-4000-8000-000000000100',
-              name: 'Ralph Schroeder',
-              email: 'ralph@spaarke.test',
-            },
-          });
-        }
-        if (u.includes('/api/office/search/')) return json(true, 200, { results: [] });
-        if (u.includes('/api/office/quickcreate/invoice')) {
-          return json(true, 201, { id: 'new-invoice-1', logicalName: 'sprk_invoice', name: 'INV-0100' });
-        }
-        return json(true, 200, {});
-      });
-      renderPane();
-
-      await userEvent.click(screen.getByRole('radio', { name: 'Invoice' }));
-      await userEvent.click(screen.getByRole('button', { name: 'New' }));
-      await userEvent.type(screen.getByLabelText('New Invoice name'), 'INV-0100');
-      await userEvent.type(screen.getByLabelText('Description'), 'Outside counsel, September');
-      // The prefill arrives from the server's own default (never guessed from the signed-in email).
-      await screen.findByText('Ralph Schroeder (ralph@spaarke.test)', undefined, WAIT);
-      await userEvent.click(screen.getByRole('button', { name: 'Create' }));
-
-      const body = await quickCreateCall('invoice');
-      expect(body).toEqual({
-        name: 'INV-0100',
-        description: 'Outside counsel, September',
-        assignedToContactId: 'eeeeeeee-1000-4000-8000-000000000100',
-      });
     },
     TEST_TIMEOUT_MS
   );
