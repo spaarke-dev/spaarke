@@ -39,9 +39,17 @@ interface IHarness {
   pages: Array<{ name: string; data: string }>;
   forms: Array<{ entityName: string; entityId: string }>;
   posts: Array<{ url: string; body: Record<string, unknown> }>;
+  metadataUrls: string[];
+  warnings: string[];
 }
 
-function harness(options: { flag?: boolean | null | 'throw'; bffStatus?: number; bffBody?: unknown }): IHarness {
+function harness(options: {
+  flag?: boolean | null | 'throw';
+  bffStatus?: number;
+  bffBody?: unknown;
+  /** The ManyToOneRelationships read answers 200 with an empty list (what a wrong-case logical name gets). */
+  noRelationships?: boolean;
+}): IHarness {
   const h: IHarness = {
     ribbon: undefined as unknown as IRibbon,
     reads: [],
@@ -49,10 +57,18 @@ function harness(options: { flag?: boolean | null | 'throw'; bffStatus?: number;
     pages: [],
     forms: [],
     posts: [],
+    metadataUrls: [],
+    warnings: [],
   };
   const flag = options.flag;
   const context: Record<string, unknown> = {
-    console: { warn: () => undefined, error: () => undefined, log: () => undefined },
+    console: {
+      warn: (...args: unknown[]) => {
+        h.warnings.push(args.map(String).join(' '));
+      },
+      error: () => undefined,
+      log: () => undefined,
+    },
     Promise,
     Object,
     JSON,
@@ -83,12 +99,13 @@ function harness(options: { flag?: boolean | null | 'throw'; bffStatus?: number;
       Utility: { getGlobalContext: () => ({ getClientUrl: () => 'https://org.crm.dynamics.com' }) },
     },
     fetch: (url: string, init?: { method?: string; body?: string }) => {
+      if (url.includes('EntityDefinitions(')) h.metadataUrls.push(url);
       if (url.includes('/ManyToOneRelationships')) {
         return Promise.resolve({
           ok: true,
           json: () =>
             Promise.resolve({
-              value: [
+              value: options.noRelationships ? [] : [
                 {
                   ReferencingAttribute: 'sprk_matter',
                   ReferencingEntityNavigationPropertyName: 'sprk_Matter',
@@ -337,5 +354,44 @@ describe('sprk_secure_child_ribbon.js — the BFF-backed "New <thing>"', () => {
     expect(h.alerts[0].text).toContain('A record this budget is filed under was not found.');
     expect(h.alerts[0].text).toContain('Nothing was created.');
     expect(h.forms).toEqual([]);
+  });
+});
+
+// #2909: the script keeps its own nav-prop discovery (a ribbon web resource has no module system), aligned with the
+// shared discoverNavProps: lowercased logical names (SRFR-050) and a warning on an empty relationship list.
+describe('sprk_secure_child_ribbon.js — nav-prop discovery follows the shared discoverNavProps (#2909)', () => {
+  it('lowercases a mixed-case host name for the metadata reads and the lookup match, and still files the row under the host', async () => {
+    const h = harness({ flag: true });
+    h.ribbon.newChild(formOf('sprk_Matter'), { getRelationship: () => ({ attributeName: 'sprk_Matter' }) }, 'sprk_budget');
+    for (let i = 0; i < 10 && h.forms.length === 0 && h.alerts.length === 0; i++) await flush();
+
+    expect(h.metadataUrls.length).toBeGreaterThan(0);
+    for (const url of h.metadataUrls) {
+      const name = /LogicalName='([^']*)'/.exec(url)?.[1] ?? '';
+      expect(name).toBe(name.toLowerCase());
+    }
+    expect(h.alerts).toEqual([]);
+    expect(h.posts).toHaveLength(1);
+    expect(h.posts[0].body['sprk_Matter@odata.bind']).toBe(`/sprk_matters(${HOST_ID})`);
+  });
+
+  it('warns, naming the table, when the relationship list is empty, and creates nothing (must fire)', async () => {
+    const h = harness({ flag: true, noRelationships: true });
+    h.ribbon.newChild(formOf('sprk_matter'), { getRelationship: () => ({ attributeName: 'sprk_matter' }) }, 'sprk_budget');
+    for (let i = 0; i < 10 && h.alerts.length === 0; i++) await flush();
+
+    expect(h.warnings.some(w => w.includes('zero entries') && w.includes('sprk_budget'))).toBe(true);
+    expect(h.posts).toEqual([]);
+    expect(h.alerts).toHaveLength(1);
+    expect(h.alerts[0].text).toContain('Nothing was created.');
+  });
+
+  it('does not warn when relationships are found (must not fire)', async () => {
+    const h = harness({ flag: true });
+    h.ribbon.newChild(formOf('sprk_matter'), { getRelationship: () => ({ attributeName: 'sprk_matter' }) }, 'sprk_budget');
+    for (let i = 0; i < 10 && h.forms.length === 0; i++) await flush();
+
+    expect(h.forms).toHaveLength(1);
+    expect(h.warnings.some(w => w.includes('zero entries'))).toBe(false);
   });
 });

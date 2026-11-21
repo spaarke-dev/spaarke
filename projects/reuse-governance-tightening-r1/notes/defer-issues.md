@@ -362,7 +362,7 @@ It is also not deployed on DEV, so the command has no page to open there. Its `p
 
 | Field | Value |
 |---|---|
-| **Status** | Open |
+| **Status** | Done on merge of the `work/def-009-nav-prop-copies` PR (three copies folded in; the ribbon script stays a recorded copy) |
 | **Urgency** | next-round |
 | **Filed** | 2026-11-18 |
 | **Source** | DEF-003/DEF-004 execution (#2803, #2804): the brief limited the de-duplication to the Pattern D packages |
@@ -385,6 +385,34 @@ The companion PR folds three private copies of the ManyToOne nav-prop metadata q
 **Estimated effort**: half a day
 **Blockers**: the companion de-duplication PR merges first
 **Related**: DEF-003, DEF-004
+
+---
+
+### DEF-010 — LegalWorkspace `CreateMatter/matterService.ts` carries a dead `MatterService` class
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | someday |
+| **Filed** | 2026-11-20 |
+| **Source** | Adversarial review of the DEF-009 change (#2909, branch `work/def-009-nav-prop-copies`) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2931 |
+
+**Description**
+
+`src/solutions/LegalWorkspace/src/components/CreateMatter/matterService.ts` holds a `MatterService` class (matter create, file upload, follow-on actions) that nothing instantiates. The file's only importer is `FilePreview/FilePreviewDialog.tsx`, for `searchUsersAsLookup`; the live matter wizard is `Spaarke.UI.Components/src/components/CreateMatterWizard/matterService.ts`. The DEF-009 change folded this file's nav-prop copy into the shared `discoverNavProps`, but the code never runs. The dead class is a third copy of the matter create path: a matter-create fix (payload shape, nav-prop binding, upload) can land in the wrong file, and duplication sweeps keep counting it.
+
+**Entry-points**
+
+- `src/solutions/LegalWorkspace/src/components/CreateMatter/matterService.ts` (class `MatterService`, `_discoverNavProps`, `_resolveNavProp`)
+- `src/solutions/LegalWorkspace/src/components/FilePreview/FilePreviewDialog.tsx:18` (the only importer)
+- `cd src/solutions/LegalWorkspace && npm run typecheck && npx vite build`
+
+**Suggested fix**: delete the class and the helpers only it uses; keep the exported `search*AsLookup` functions (or point `FilePreviewDialog` at the shared ones). Check `formTypes.ts` / `wizardTypes.ts` for other importers first.
+
+**Estimated effort**: 1–2 hours
+**Blockers**: #2909 merges first
+**Related**: DEF-009, ADR-012
 
 ---
 
