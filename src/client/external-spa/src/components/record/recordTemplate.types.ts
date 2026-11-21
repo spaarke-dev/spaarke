@@ -26,7 +26,8 @@ export type RecordSectionId =
   | 'files'
   | 'preview'
   | 'messages'
-  | 'tasksEvents';
+  | 'tasksEvents'
+  | 'outcome';
 
 /** Heading of each section. */
 export const RECORD_SECTION_LABELS: Readonly<Record<RecordSectionId, string>> = {
@@ -37,6 +38,7 @@ export const RECORD_SECTION_LABELS: Readonly<Record<RecordSectionId, string>> = 
   preview: 'Preview',
   messages: 'Messages',
   tasksEvents: 'Events',
+  outcome: 'Outcome',
 };
 
 /**

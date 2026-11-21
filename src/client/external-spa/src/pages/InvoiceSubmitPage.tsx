@@ -39,6 +39,7 @@ import type {
   InvoiceFirmOption,
   InvoiceRecordQuery,
   InvoiceSubmissionAccepted,
+  InvoiceSubmissionStatusView,
 } from '@spaarke/ui-components/components/InvoiceSubmission';
 
 import {
@@ -49,6 +50,7 @@ import {
   submitInvoice,
 } from '../api/web-api-client';
 import { PageContainer, NavigationBar } from '../components';
+import { SubmissionOutcomeReport } from '../components/ebilling/InvoiceOutcomeReport';
 import {
   GUID_PATTERN,
   INVOICE_RECORD_PARAM,
@@ -198,6 +200,14 @@ const useStyles = makeStyles({
 
 const BREADCRUMBS = [{ label: 'My Projects', href: '/' }, { label: 'Submit Invoice' }];
 
+/**
+ * ebilling-r1 task 134 (FR-18, FR-38): the report slot of a Rejected submission, on the resume screen and on the wizard's
+ * result screen. The same `InvoiceOutcomeReport` the invoice record shows, read from the submission's outcome route.
+ */
+const renderSubmissionReport = (status: InvoiceSubmissionStatusView): React.ReactNode => (
+  <SubmissionOutcomeReport submissionId={status.submissionId} />
+);
+
 type Availability = 'checking' | 'available' | 'disabled';
 
 export const InvoiceSubmitPage: React.FC = () => {
@@ -297,7 +307,12 @@ export const InvoiceSubmitPage: React.FC = () => {
           <Text as="h1" size={500} weight="semibold">
             Invoice submission
           </Text>
-          <InvoiceSubmissionOutcome key={resumeId} submissionId={resumeId} getStatus={getInvoiceSubmission} />
+          <InvoiceSubmissionOutcome
+            key={resumeId}
+            submissionId={resumeId}
+            getStatus={getInvoiceSubmission}
+            renderReport={renderSubmissionReport}
+          />
           <div className={styles.actions}>
             <Button appearance="primary" onClick={() => navigate(INVOICE_SUBMIT_PATH)}>
               Submit another invoice
@@ -336,6 +351,7 @@ export const InvoiceSubmitPage: React.FC = () => {
           loadFirms={preselect.loadFirms}
           submit={submitInvoice}
           getStatus={getInvoiceSubmission}
+          renderReport={renderSubmissionReport}
           onSubmitted={handleSubmitted}
         />
       </div>

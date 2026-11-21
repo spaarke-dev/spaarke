@@ -1067,7 +1067,7 @@ describe('FR-01 template sections', () => {
     sprk_project: { left: ['information', 'documents', 'invoices'], right: ['messages', 'tasksEvents'] },
     sprk_matter: { left: ['information', 'documents', 'invoices'], right: ['messages', 'tasksEvents'] },
     sprk_workassignment: { left: ['information', 'documents'], right: ['messages', 'tasksEvents'] },
-    sprk_invoice: { left: ['information', 'files'], right: ['messages'] },
+    sprk_invoice: { left: ['information', 'outcome', 'files'], right: ['messages'] },
     sprk_servicerequest: { left: ['information', 'documents'], right: ['messages'] },
     sprk_document: { left: ['information', 'preview'], right: [] },
   };
