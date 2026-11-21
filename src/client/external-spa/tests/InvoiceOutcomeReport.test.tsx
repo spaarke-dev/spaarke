@@ -406,6 +406,40 @@ describe('InvoiceOutcomeReport', () => {
     expect(screen.getByTestId('outcome-item-approved').textContent).toBe('650.00');
   });
 
+  it('130f K6 (N1): the PRINT copy of an approved invoice shows the per-line approved amount (the control for the next test)', () => {
+    renderReport(outcome({ items: [lineItem()] }));
+    fireEvent.click(screen.getByRole('button', { name: 'Print or save as PDF' }));
+    const root = document.getElementById(PRINT_ROOT_ID)!;
+    expect(root).not.toBeNull();
+    expect(within(root).getByTestId('outcome-item-approved').textContent).toBe('650.00');
+    expect(root.textContent).toContain('650.00');
+  });
+
+  it.each(['Rejected', 'ReturnedToFirm'])(
+    '130f K6 (N1): the PRINT copy of a %s invoice shows the line but never the per-line approved amount, even when the body carries 650',
+    kind => {
+      renderReport(
+        outcome({
+          kind,
+          statusLabel: kind === 'Rejected' ? 'Rejected' : 'Returned to firm',
+          approvedTotal: null,
+          items: [lineItem()],
+        })
+      );
+      fireEvent.click(screen.getByRole('button', { name: 'Print or save as PDF' }));
+
+      const root = document.getElementById(PRINT_ROOT_ID);
+      expect(root).not.toBeNull();
+      // The copy contains the line (its billed amount and reason) ...
+      const item = within(root!).getByTestId('outcome-item');
+      expect(within(item).getByTestId('outcome-item-billed').textContent).toBe('800.00');
+      expect(within(item).getByTestId('outcome-item-reason').textContent).toBe('Rate above the approved rate.');
+      // ... and never the approved amount.
+      expect(within(item).queryByTestId('outcome-item-approved')).toBeNull();
+      expect(root!.textContent).not.toContain('650.00');
+    }
+  );
+
   it.each(['Rejected', 'ReturnedToFirm'])(
     '130g: %s shows noticeProse as the firm-safe reason; markup in it is shown literally, never rendered',
     kind => {

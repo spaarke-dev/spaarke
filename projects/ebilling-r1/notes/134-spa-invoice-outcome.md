@@ -22,7 +22,7 @@ The firm's on-screen outcome report (FR-38, FR-18, FR-40 as amended by EB-D-254)
 | `src/components/record/sections/index.ts` | Registers `outcome: OutcomeSection` (import and entry). |
 | `src/components/record/recordTemplates.ts` | `sprk_invoice.left` becomes `['information', 'outcome', 'files']`; the header table comment row updated. The `headerFacts` lines and the `RecordHeaderFact` type (PR #2929) are untouched. |
 | `src/pages/InvoiceSubmitPage.tsx` | Passes `renderReport` (-> `SubmissionOutcomeReport`) to the resume-screen `InvoiceSubmissionOutcome` and to the wizard's result screen. The shared component is not edited. |
-| `tests/InvoiceOutcomeReport.test.tsx` (new) | 54 tests (client, report, print surface, section, helpers). |
+| `tests/InvoiceOutcomeReport.test.tsx` (new) | 57 tests (client, report, print surface, section, helpers). |
 | `tests/InvoiceSubmitPage.test.tsx` | The old "report placeholder" test now asserts the report (and the submission route call); one new resume-screen test (report shown; kill switch shows nothing). |
 | `tests/RecordTemplateModal.test.tsx`, `tests/RecordTemplateSections.test.tsx` | The expected `sprk_invoice` layout gains `'outcome'` (the old expectation is the very thing this task changes). |
 
@@ -53,7 +53,7 @@ The firm's on-screen outcome report (FR-38, FR-18, FR-40 as amended by EB-D-254)
 | AC6: 051's rejected-submission result screen shows the same component | P "a Rejected result shows the reason code and the outcome report, not the placeholder" (wizard result screen) and "a Rejected submission on the resume screen shows the same outcome report ..., and nothing of it when eBilling is off" |
 | AC7: build and test pass; no new dependency | `npm run build`, full `npm test`; `package.json` untouched |
 | AC8: ui-tests | Not run (see below) |
-| 130f K6 | T "130f K6: a Rejected / ReturnedToFirm invoice shows its items but never a per-line approved amount" (x2) plus the approved control |
+| 130f K6 | T "130f K6: a Rejected / ReturnedToFirm invoice shows its items but never a per-line approved amount" (x2) plus the approved control; and on the print path (N1): "the PRINT copy of a Rejected / ReturnedToFirm invoice shows the line but never the per-line approved amount" (x2), with an Approved print copy as the control that does show 650.00 |
 | D-66 / model 7.4 negative | T "D-66 negative: keys the contract does not name ... never render" and the client "copies only the members of the contract" |
 | NFR-13 cards at narrow width | T "NFR-13: items are stacked cards in a list at 360 px and at desktop width, never a table" |
 | EB-D-254 print (fix round 1 F1) | T "F1: with no print in progress the html class is absent ...", "clicking Print mounts the print root with the FULL item list, sets the html class, then calls window.print", "afterprint removes ...", "when afterprint never arrives the fallback timer ...", "a window.print that throws still ends in the fallback clean-up", "unmounting during a print ...", "a second click ...", "a report whose host clips it still prints in full", "the print copy is rendered in the LIGHT theme even when the page is dark", "every print rule is either one of the report's own classes or the single rule gated on the html printing class", "the global rule is gated on the html class, only under @media print, ..." |
@@ -79,7 +79,7 @@ Not run. They need a dev deploy of the SPA and a firm sign-in (task 136). The fo
 
 ## Checks
 
-- `npx tsc --noEmit -p tsconfig.json` clean; `npm run lint` (eslint src tests) clean; `npm run build` green; `npm test` 66 files, 1878 tests passed (before this task: 1823 tests; +55 net: 54 new in `InvoiceOutcomeReport.test.tsx`, 1 new in `InvoiceSubmitPage.test.tsx`).
+- `npx tsc --noEmit -p tsconfig.json` clean; `npm run lint` (eslint src tests) clean; `npm run build` green; `npm test` 66 files, 1881 tests passed (before this task: 1823 tests; +58 net: 57 new in `InvoiceOutcomeReport.test.tsx`, 1 new in `InvoiceSubmitPage.test.tsx`).
 - `external-spa` is not a package of the shared client-lint (`scripts/quality/client-lint`, `PACKAGES`), so it has no run there.
 - No new npm dependency.
 
