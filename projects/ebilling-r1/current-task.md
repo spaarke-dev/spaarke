@@ -1,6 +1,6 @@
 # Current Task State
 
-> **Last Updated:** 2026-11-20 (130g complete). Session `ebilling-r1` (Claude Desktop) is the only writer to this worktree.
+> **Last Updated:** 2026-11-21 (134 complete). Session `ebilling-r1` (Claude Desktop) is the only writer to this worktree.
 > Older detail: `notes/handoff-history/current-task-2026-11-20a.md` (the previous state, verbatim), plus `-2026-11-16a`, `-15a` and `-13a`.
 
 ## Owner mode
@@ -10,29 +10,22 @@
 
 ## Quick recovery
 
-- **Active task:** 134 (SPA invoice detail and on-screen report), in progress since 2026-11-20. Rigor FULL (the POML says STANDARD, but the task changes .tsx files). Owner said "Not yet, start 134", so the Invoice Review page deploy (M2) is deferred.
-  - Step: an implementer agent (Sonnet) is building it in an agent worktree on branch `task/ebilling-134`, based on work 19866f6606.
-  - Decisions:
-    - In Review renders the DTO's items, because EB-D-202 supersedes the POML's "Under review only".
-    - 130f K6 is hidden in the client: no per-line approved amount for Rejected or Returned.
-    - The result screen uses the existing `renderReport` slot of `InvoiceSubmissionOutcome`, so the shared library is unchanged.
-  - Conflict check: spa-r4's PR #2929 (work/spaarke-SPA-external-access-platform-r4) also edits `recordTemplates.ts` and `recordTemplate.types.ts`, on different lines. spa-r4 must review the external-spa diff before the merge.
-  - Next: Opus review, spa-r4 review, merge into work.
-- **Waiting on the owner:** the OK to redeploy the Invoice Review page to dev (M2). Asked; the owner chose 134 first.
-- **Uncommitted files:** none, after the 130g bookkeeping commit.
+- **Active task:** none. 134 closed 2026-11-21. Next is the first open, ungated task in `tasks/TASK-INDEX.md` (050b), run through task-execute.
+- **Held for the PR to master:** spa-r4 reviews 134's external-spa diff (`git diff 19866f6606 5f7195b9eb -- src/client/external-spa`). Owner chose "Merge, review later" on 2026-11-21. spa-r4's session is not running; send it the diff when it is.
+- **096 gate:** word-add-in-r1 slice C (PR #2927, merge 148ec4dec0) is live on dev since 2026-11-21. 096 still waits for one add-in release after it (POML gate), then removes `POST /api/office/quickcreate/invoice` and the Invoice target of `/api/office/save`.
+- **Waiting on the owner:** the OK to redeploy the Invoice Review page to dev (checklist M2).
+- **Uncommitted files:** none, after the 134 bookkeeping commit.
 
 ## Recently done (detail in the notes and git)
 
-- **130g ✅** merged into work 6b84fb1db1.
-  - `FirmOutcome.NoticeProse` holds the stored prose from the invoice's own submission. It is set for Rejected and ReturnedToFirm only, when the kind and version match, and is re-screened on every read. A read fault omits only the field. Both outcome routes carry it.
-  - Reviews: one Opus pass (two F2s and one K1, all fixed) and uac-r2 PASS (N1 and N2 fixed).
-  - Notes: `notes/130g-firm-view-notice-prose.md`. Checklist section O applies after 134.
-- **132ui ✅** merged into work 04718b3224. ISS-041 #2930 is filed. Checklist M2 waits for the page deploy.
+- **134 ✅** merged into work 5f7195b9eb (branch `task/ebilling-134`, tip b29a9e7c9a). Outcome section in the invoice record modal plus the same report on the submit result screen; print through a body-level portal (EB-D-254). Opus review (F1 print truncation, F4 reason code: fixed) and uac-r2 PASS. Notes: `notes/134-spa-invoice-outcome.md`; checklist section O. A first post-merge vitest run had 16 failures under heavy machine load; the rerun passed 1881/0.
+- **130g ✅** merged into work 6b84fb1db1. Notes: `notes/130g-firm-view-notice-prose.md`.
+- **132ui ✅** merged into work 04718b3224. ISS-041 #2930 filed. Checklist M2 waits for the page deploy.
 - **131 dev seed ✅** 2026-11-19 (EB-D-256). `/healthz/catalog` stays 503 because of pre-existing drift (#1987).
 
 ## Open work
 
-- **Build:** 134, 123, 124, 050b, 096, 117, 121 (121 waits for uac-r2 191).
+- **Build:** 050b, 123, 124, 117, 096 (gated, see above), 121 (waits for uac-r2 191).
 - **Partly done:**
   - 086.
   - 164: the live `-Apply` needs the owner's go.
@@ -54,5 +47,5 @@
 - **Agents:**
   - At most 4, each with a named model.
   - A worktree agent starts on master, so its brief names the base sha.
-  - Remove agent worktrees with `scripts/worktree/Remove-WorktreeSafe.ps1`. The 132ui and 130g agent worktrees were removed on 2026-11-20.
+  - Remove agent worktrees with `scripts/worktree/Remove-WorktreeSafe.ps1`. The 132ui, 130g and 134 agent worktrees have been removed.
 - **Clean-up:** a human should delete C:\wt131a and C:\wt131b.

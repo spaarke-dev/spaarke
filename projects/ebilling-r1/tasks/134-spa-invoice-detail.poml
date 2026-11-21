@@ -7,7 +7,7 @@
     <title>SPA invoice detail and on-screen report</title>
     <phase>5 Firm feedback (WP5) — wave W5-2</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Frontend over an existing read route (130) inside existing SPA detail surfaces; no server change, no auth decision on the client.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -150,7 +150,9 @@
     <criterion testable="true">Cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
   </acceptance-criteria>
 
-  <notes>After 015, invoice status in the generic field list comes from statuscode (015 changes RecordDetailFields); this task does not touch that field. P5-B: 135 owns its own client file and widget, so no file overlap with this task; 131 and 133 are server-only.</notes>
+  <notes>After 015, invoice status in the generic field list comes from statuscode (015 changes RecordDetailFields); this task does not touch that field. P5-B: 135 owns its own client file and widget, so no file overlap with this task; 131 and 133 are server-only.
+    Completed 2026-11-21, merged into work 5f7195b9eb (branch task/ebilling-134, tip b29a9e7c9a). The invoice record modal gains an Outcome section and the submit result screen renders the same report through the renderReport slot; print uses a body-level portal (EB-D-254, no PDF). In Review shows decided and added items (EB-D-202); Rejected / Returned hide the per-line approved amount (130f K6); noticeProse is plain text (130g); the reason code shows (EB-D-210). Opus review: F1 print truncation in hosted surfaces and F4 missing reason code fixed, K4 small items fixed; uac-r2 PASS, N1 print-path K6 test added. Known limits in notes/134-spa-invoice-outcome.md. SPA tests 1881/0, tsc, lint and build clean; no new dependency. UI tests run at the 136 deploy. spa-r4 review of the external-spa diff is held until the PR to master (owner, 2026-11-21).
+    rework: fix-round-1 task 134</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

@@ -1,6 +1,6 @@
 # eBilling R1 — owner testing checklist
 
-Updated 2026-11-20. Each section says when it can be tested. Report anything odd to the `ebilling-r1` session with the record and the time.
+Updated 2026-11-21. Each section says when it can be tested. Report anything odd to the `ebilling-r1` session with the record and the time.
 
 ## A. Testable on dev now (pane from #2789 / #2793, plus #2913 live 2026-11-18)
 
@@ -151,8 +151,14 @@ Dev has no rule sets yet, so this needs a published Billing rule set first.
 - [ ] A rule set with "Visible to Firms" off does not appear at all; neither does an Internal Standard Procedure's rule set.
 - [ ] With eBilling switched off, the card stays and shows "Billing guidelines aren't available." (no error styling, no Retry).
 
-## O. The firm sees the notice you sent (task 130g): after task 134 is built and the dev BFF and external SPA carry both
+## O. The firm's invoice outcome (tasks 130g and 134): after the dev BFF and external SPA carry both (deploy task 136)
 
-The server side (130g) is merged into the work branch; the firm's invoice page that shows it is task 134. Sign in to the external portal as a law-firm user.
+Both are merged into the work branch. Sign in to the external portal as a law-firm user and open one of your firm's invoices; the record shows an **Outcome** section.
+- [ ] An Approved invoice with adjustments lists each reduced, disallowed or added item with its reason or the quoted guideline, and the billed and approved totals.
+- [ ] An In Review invoice says "Under review", lists only items already decided or added, and shows no approved total.
+- [ ] A Rejected or Returned invoice lists its findings, each with its reason code, and shows no approved amount, per line or in total.
+- [ ] **Print** opens the browser print dialog with only the report on the page (no portal chrome, nothing cut off), from the record and from the submit result screen.
+- [ ] After you submit an invoice, the result screen shows the same report.
+- [ ] With eBilling switched off, the Outcome section is not shown.
 - [ ] Open one of your firm's invoices that a reviewer Rejected or Returned **with** a notice (M2). The page shows the message the reviewer sent, as plain text, without the subject and without the internal reason or note.
 - [ ] An invoice rejected or returned **without** a notice (send off or Skip), an invoice the checks rejected automatically, and an In Review or Approved invoice show no message line.
