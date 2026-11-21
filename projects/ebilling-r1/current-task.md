@@ -10,9 +10,15 @@
 
 ## Quick recovery
 
-- **Active task:** none. 130g finished 2026-11-20 (merged into work 6b84fb1db1).
-- **Next candidate:** 134 (SPA invoice detail and on-screen report). Its POML now carries 130g's rule: render `noticeProse` as plain text only. It also has the 130f K6 constraint. It touches `src/client/external-spa`, which is shared with spa-r4, so run /conflict-check and send spa-r4 a copy.
-- **Waiting on the owner:** the OK to redeploy the Invoice Review page to dev, which makes checklist M2 testable.
+- **Active task:** 134 (SPA invoice detail and on-screen report), in progress since 2026-11-20. Rigor FULL (the POML says STANDARD, but the task changes .tsx files). Owner said "Not yet, start 134", so the Invoice Review page deploy (M2) is deferred.
+  - Step: an implementer agent (Sonnet) is building it in an agent worktree on branch `task/ebilling-134`, based on work 19866f6606.
+  - Decisions:
+    - In Review renders the DTO's items, because EB-D-202 supersedes the POML's "Under review only".
+    - 130f K6 is hidden in the client: no per-line approved amount for Rejected or Returned.
+    - The result screen uses the existing `renderReport` slot of `InvoiceSubmissionOutcome`, so the shared library is unchanged.
+  - Conflict check: spa-r4's PR #2929 (work/spaarke-SPA-external-access-platform-r4) also edits `recordTemplates.ts` and `recordTemplate.types.ts`, on different lines. spa-r4 must review the external-spa diff before the merge.
+  - Next: Opus review, spa-r4 review, merge into work.
+- **Waiting on the owner:** the OK to redeploy the Invoice Review page to dev (M2). Asked; the owner chose 134 first.
 - **Uncommitted files:** none, after the 130g bookkeeping commit.
 
 ## Recently done (detail in the notes and git)

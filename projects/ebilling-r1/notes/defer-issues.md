@@ -2405,3 +2405,31 @@ A reject or return carrying the reviewer-confirmed notice can stop part way: a 5
 **Estimated effort**: half a day for (a)
 **Blockers**: none
 **Related**: task 132ui, EB-D-258, #2930. Not a security issue.
+
+---
+
+### ISS-042 — Firm rejection findings show raw valuesRead keys (e.g. line.rate)
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | next-round |
+| **Filed** | 2026-11-20 |
+| **Source** | Adversarial review of task 134 (found in passing, server side) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2933 |
+
+**Description**
+
+A rejected submission's firm outcome (130c) carries each rejecting finding's `valuesRead` as `{ name, value }`, and `name` is the raw internal key the rule read (for example `line.rate`, `FirmOutcomeScopeTests.cs:1365`). The SPA (134) shows the list as received, so a firm reads "line.rate: 650" instead of "Rate: 650". The data is firm-safe; the defect is presentation only.
+
+**Entry-points**
+
+- `src/server/api/Sprk.Bff.Api/Services/Finance/FirmRejectionFindings.cs` (`ValueRead`, the parse at about line 288)
+- `src/server/api/Sprk.Bff.Api/Services/Finance/FirmFindingsProjection.cs` (`FirmOutcomeValueRead`)
+- `src/client/external-spa/src/components/ebilling/InvoiceOutcomeReport.tsx` (where the list is rendered)
+
+**Suggested fix**: the projection maps each known key to a firm label from a closed table in code. An unknown key falls back to a generic label (or the entry is dropped), as `FirmRejectionReasonText` does. The client is not changed.
+
+**Estimated effort**: half a day
+**Blockers**: none
+**Related**: tasks 130c and 134, #2933. Not a security issue.
