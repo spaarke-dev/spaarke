@@ -177,8 +177,13 @@ public sealed class SearchIndexClientProvisioner : IAiSearchIndexProvisioner
                     "(NFR-12 target < 30 min for the full 7-index pass).");
             }
 
+            // Create-or-update PUT: 201 = created; 204 = an existing index was updated (the default, no
+            // Prefer header); 200 = updated with Prefer: return=representation. Every run after a stamp's
+            // first meets existing indexes, so 204 is the normal re-run answer — refusing it quarantined
+            // ACME's first upgrade run at H2b (2026-11-20, run 3b6f7b65).
+            // https://learn.microsoft.com/rest/api/searchservice/update-index#response
             var status = message.Response.Status;
-            if (status is not (200 or 201))
+            if (status is not (200 or 201 or 204))
             {
                 var body = message.Response.Content.ToString();
                 _logger.LogError(
