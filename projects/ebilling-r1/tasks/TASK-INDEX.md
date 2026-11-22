@@ -173,7 +173,7 @@ To begin: `work on task 001`. Wave W0-1 (001, 002, 003) and W2-1 (040, 041) have
 | 121 | 🔲 [open] | Procedure-table role grants after uac-r2 191: O-6 org Read, Billing Administrator Create/Write on sprk_procedure; flip UntilTask191 | FULL | opus / high | P3-R (p-safe false) | 120 |
 | 122 | ✅ | #2235 fix: field-secure sprk_findingsjson (BFF-only), off the form; Decision Records store the generic Duplicate sentence | FULL | opus / high | P4-A | 119 |
 | 123 | 🔲 [open] | Internal upload of supporting files to an existing invoice: POST /api/finance/invoices/{invoiceId}/files (EB-D-161) | FULL | opus / high | P3-F | 090, 092, 086 |
-| 124 | ⏸ [wip; held for uac-r2 agreement on its ExternalVisibility reader, 2026-11-22] | Retire the Procedure Library container: remove Finance:ProcedureLibraryContainerId, close the per-customer SPE hand-off DEF-013 / #1967 (EB-D-163) | FULL | sonnet / high | P3-F | 116, 092 |
+| 124 | ✅ [done] | Retire the Procedure Library container: remove Finance:ProcedureLibraryContainerId, close the per-customer SPE hand-off DEF-013 / #1967 (EB-D-163) | FULL | sonnet / high | P3-F | 116, 092 |
 
 ### Phase 4 — Review and approval (WP4)
 

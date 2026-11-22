@@ -4,7 +4,7 @@
     <title>Retire the Procedure Library container: remove Finance:ProcedureLibraryContainerId and close the per-customer SPE container hand-off (DEF-013 / #1967)</title>
     <phase>3 Rules (WP3) — Procedures and files (EB-D-148); added 2026-10-27 (EB-D-163)</phase>
     <gate>116 merged (no reader of the key is left: the rule-set upload, the draft source and the rate-card workbook are the Procedure Version's Stored File); 092 merged (it retired Finance:EbillingOutputContainerId from the same files)</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies BFF configuration code (.cs) and the start-up validator; removes a provisioning requirement.</rigor-reason>
     <model-tier>sonnet</model-tier>

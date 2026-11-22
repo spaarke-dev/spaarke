@@ -274,3 +274,10 @@ Two Opus adversarial reviews of the first pass. Branch `task/ebilling-124`, tip 
 | `Sprk.Bff.Api.Tests` | `ExternalInvoiceFileRoutes`, `ExternalVisibility`, `CiamSearchRoute`, `ExternalDownloadUnderivedContainer`, `ExternalRecordDocumentRoutes`, `DocumentPointerContainerCheck`, `RefileFileRelocation`, `RelocationTerminalAndHomeRule`, `DocumentContainerRelocator`, `FinanceContainerIdOptions` | 562 passed, 0 failed |
 
 Before the round the guard's census tests were 4 (`Census_MustFireAndMustNotFire`, `EveryFileStoreCaller_IsInTheCensus`, `CiamRoutes_...`, `Routes_MustFireAndMustNotFire`); now 8. The whole `Sprk.Bff.Api.Tests` and the whole ArchTests were not re-run (round 1 rule); the first pass ran both in full (section 12) and this round changed only comments and runtime refusal strings in `src`, plus tests.
+
+## 15. Approval and merge
+
+- **uac-r2 APPROVED 2026-11-22 at `decb4de05f`** (whole diff `d3e20a3ca8..decb4de05f`): conditions 3-6 and the #2151 removal met, no findings. uac-r2 accepted each census allow-list entry and the 8-line change to its `ExternalDocumentNarrowingGuardTests` (Scan, ScanResult, Normalize made internal; the Calls map exposed; behaviour unchanged). Any dev BFF deploy that contains 124 goes through uac-r2 on the owner naming the exact SHA.
+- Merged into `work/ebilling-r1` 2026-11-22 (`3b7367bfbf`).
+- Section 10 applied by the main session: `.claude/constraints/provisioning.md:269` no longer names `Finance__ProcedureLibraryContainerId`; the "never stamped on a business unit" sentence is gone.
+- #1967 closed with the reason; customer-provisioning-orchestration-r1 told that eBilling needs no SPE container on a stamp (only 091's Finance file store).

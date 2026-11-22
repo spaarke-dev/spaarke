@@ -1,6 +1,6 @@
 # Current Task State
 
-> **Last Updated:** 2026-11-22 (050b complete). Session `ebilling-r1` (Claude Desktop) is the only writer to this worktree.
+> **Last Updated:** 2026-11-22 (050b and 124 complete). Session `ebilling-r1` (Claude Desktop) is the only writer to this worktree.
 > Older detail: `notes/handoff-history/current-task-2026-11-20a.md` (the previous state, verbatim), plus `-2026-11-16a`, `-15a` and `-13a`.
 
 ## Owner mode
@@ -10,16 +10,16 @@
 
 ## Quick recovery
 
-- **Active task:** none. 050b closed 2026-11-22. Next open build tasks: 123, 124, 117 (see Open work), run through task-execute.
+- **Active task:** none. 050b and 124 closed 2026-11-22. Next open build tasks: 123, 117 (see Open work), run through task-execute.
 - **Held for the PR to master:** spa-r4 reviews 134's external-spa diff (`git diff 19866f6606 5f7195b9eb -- src/client/external-spa`). Owner chose "Merge, review later" on 2026-11-21. spa-r4's session is not running; send it the diff when it is.
 - **096 gate:** word-add-in-r1 slice C (PR #2927, merge 148ec4dec0) is live on dev since 2026-11-21. 096 still waits for one add-in release after it (POML gate), then removes `POST /api/office/quickcreate/invoice` and the Invoice target of `/api/office/save`.
 - **Waiting on the owner:** the OK to redeploy the Invoice Review page to dev (checklist M2).
-- **124 held (2026-11-22):** escalation trigger fired: uac-r2 191b's ExternalVisibility still reads `Finance:ProcedureLibraryContainerId` (ExternalAccessModule.cs:814). Dev has 0 documents in that container. Owner chose "Ask uac-r2 to agree"; message sent 2026-11-22 asking (a) remove the step and its reason in 124, or keep the reader and retire the rest, (b) review before merge. Nothing built yet.
 - **SpaarkeMaster hotfix (2026-11-22, owner chose "Fix in source"):** 1.3.1.0 and 1.3.2.0 could not be imported because the Invoice form (151e) names `sprk_invoicefiles` and the package lacked it. PR #2935 adds the page, bumps to 1.3.2.1, and adds the publish check `Find-MissingWebResourceReferences`. ✅ Merged 2026-11-22 (bc4565a1b5) and published (run 45037908496; latest.json read back as 1.3.2.1). provisioning-r1 has been told; C:\wtsm has been removed. Dev and ACME imports are the owner's call and provisioning-r1's work, not ours. Task 153 no longer needs to add the web resource to the package; it still deploys it to dev.
 - **Uncommitted files:** none, after the 134 bookkeeping commit.
 
 ## Recently done (detail in the notes and git)
 
+- **124 ✅** merged into work 3b7367bfbf (branch `task/ebilling-124`, tip decb4de05f). Finance:ProcedureLibraryContainerId retired everywhere; the uac-r2 191b library hide step and the #2151 declared-home mechanism removed with uac-r2 agreement; route census ArchTest (whole Ciam call closure) and a Procedure Stored File deny proof added. Two Opus passes + fix round 1; uac-r2 APPROVED decb4de05f. Any dev BFF deploy carrying 124 goes through uac-r2 on the owner naming the exact SHA. #1967 closed, provisioning-r1 told. Notes: `notes/124-retire-procedure-library-key.md`.
 - **050b ✅** merged into work 18b02cbdcf (branch `task/ebilling-050b`, tip b0be013e48). Deleted the legacy extraction path, `OutputOrchestratorService` and the `finance.extraction.*` metrics. One Opus review: no F1/F3, five F2 fixed in round 1. Closed #1918, #1919; reopened #2263 (Optimistic-mode defect, now off every live path). Notes: `notes/050b-retire-legacy-extraction.md`; checklist section P. Send the PR to ontology-r1 at the master PR (POML). The agent worktree has been removed.
 - **134 ✅** merged into work 5f7195b9eb (branch `task/ebilling-134`, tip b29a9e7c9a). Outcome section in the invoice record modal plus the same report on the submit result screen; print through a body-level portal (EB-D-254). Opus review (F1 print truncation, F4 reason code: fixed) and uac-r2 PASS. Notes: `notes/134-spa-invoice-outcome.md`; checklist section O. A first post-merge vitest run had 16 failures under heavy machine load; the rerun passed 1881/0.
 - **130g ✅** merged into work 6b84fb1db1. Notes: `notes/130g-firm-view-notice-prose.md`.
@@ -28,7 +28,7 @@
 
 ## Open work
 
-- **Build:** 123, 124, 117, 096 (gated, see above), 121 (waits for uac-r2 191).
+- **Build:** 123, 117, 096 (gated, see above), 121 (waits for uac-r2 191).
 - **Partly done:**
   - 086.
   - 164: the live `-Apply` needs the owner's go.
