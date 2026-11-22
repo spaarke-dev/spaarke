@@ -47,9 +47,15 @@
  * All list/unread-count reads flow through the injected `authenticatedFetch`
  * (ADR-028); this component never imports `@spaarke/auth`. Fluent v9 semantic
  * tokens only (ADR-021) — dark mode passes through the host `FluentProvider`.
+ *
+ * --- Messages view (fm task 055) ---
+ * In all mode an All / Messages switch sits under the thread-pane header. Messages lists only the caller's own 1:1
+ * Direct conversations (`listThreads({ kind: 'direct' })`, decided server-side) and names each row by the other person
+ * (`counterpartName`); its ＋ opens `<NewDirectMessageModal />` (one internal user + an optional first message). All is
+ * today's list and its ＋ keeps `<NewThreadModal />`. Record mode shows no switch.
  */
 import * as React from 'react';
-import { Text, makeStyles, mergeClasses, tokens } from '@fluentui/react-components';
+import { Tab, TabList, Text, makeStyles, mergeClasses, tokens } from '@fluentui/react-components';
 import { CommentMultipleRegular } from '@fluentui/react-icons';
 import type { AuthenticatedFetchFn } from '../../services/EntityCreationService';
 import type { INavigationService } from '../../types/serviceInterfaces';
@@ -63,6 +69,7 @@ import {
   type IThreadListItemDto,
 } from '../../services/communicationThreadListApi';
 import { NewThreadModal } from '../NewThreadModal';
+import { NewDirectMessageModal } from '../NewDirectMessageModal';
 import { PanelSplitter } from '../PanelSplitter/PanelSplitter';
 import { ThreadList, type IThreadListRow, type ThreadListStatus } from './subcomponents/ThreadList';
 import { useThreadPaneLayout } from './useThreadPaneLayout';
@@ -247,6 +254,12 @@ const useStyles = makeStyles({
     fontSize: '20px',
     color: tokens.colorNeutralForeground2,
   },
+  viewSwitch: {
+    paddingLeft: tokens.spacingHorizontalS,
+    paddingRight: tokens.spacingHorizontalS,
+    paddingBottom: tokens.spacingVerticalXS,
+    flexShrink: 0,
+  },
   placeholder: {
     display: 'flex',
     flexDirection: 'column',
@@ -305,6 +318,7 @@ export const ConversationWorkspace: React.FC<ConversationWorkspaceProps> = ({
   // when `onSearchRecipients` is supplied; `reloadToken` forces a list re-fetch
   // after a create so the new/reused thread appears.
   const [newThreadOpen, setNewThreadOpen] = React.useState(false);
+  const [newDirectOpen, setNewDirectOpen] = React.useState(false);
   const [reloadToken, setReloadToken] = React.useState(0);
 
   const client = React.useMemo<IThreadListApiClientOptions>(
@@ -314,7 +328,11 @@ export const ConversationWorkspace: React.FC<ConversationWorkspaceProps> = ({
 
   const entityType = regarding?.entityType;
   const recordId = regarding?.id;
-  const regardingKey = entityType && recordId ? `${entityType}:${recordId}` : undefined;
+  // All / Messages (fm task 055) — all mode only; record mode always lists the record's threads.
+  const [view, setView] = React.useState<'all' | 'messages'>('all');
+  const messagesView = !regarding && view === 'messages';
+  // The list scope: a change of record or of view re-selects the first row of the new list.
+  const regardingKey = entityType && recordId ? `${entityType}:${recordId}` : messagesView ? 'messages' : undefined;
 
   // — Thread list load (regarding-scoped vs. all-mode) —
   // The thread-list text filter was removed in the Teams-style redesign (task
@@ -334,7 +352,7 @@ export const ConversationWorkspace: React.FC<ConversationWorkspaceProps> = ({
         const result =
           entityType && recordId
             ? await listThreadsByRegarding(entityType, recordId, client)
-            : await listThreads({ top: pageSize }, client);
+            : await listThreads(messagesView ? { top: pageSize, kind: 'direct' } : { top: pageSize }, client);
         if (cancelled) return;
         setAllRows(result.threads);
         setListStatus('ready');
@@ -351,7 +369,7 @@ export const ConversationWorkspace: React.FC<ConversationWorkspaceProps> = ({
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [entityType, recordId, pageSize, client, reloadToken]);
+  }, [entityType, recordId, messagesView, pageSize, client, reloadToken]);
 
   // No thread-list text filter anymore (task 062 / §B4) — the visible set is
   // exactly the loaded, access-filtered set for the current scope.
@@ -438,8 +456,10 @@ export const ConversationWorkspace: React.FC<ConversationWorkspaceProps> = ({
     // Notify the host (optional), and open the built-in modal when the shell owns
     // the create surface.
     onCreateThread?.();
-    if (navigationService) setNewThreadOpen(true);
-  }, [onCreateThread, navigationService]);
+    if (!navigationService) return;
+    if (messagesView) setNewDirectOpen(true);
+    else setNewThreadOpen(true);
+  }, [onCreateThread, navigationService, messagesView]);
 
   const handleThreadCreated = React.useCallback(
     (threadId: string) => {
@@ -447,6 +467,46 @@ export const ConversationWorkspace: React.FC<ConversationWorkspaceProps> = ({
       // renders straight off `selectedThreadId`, so the conversation shows before
       // the list refresh completes) and re-fetch the list so the row appears.
       setNewThreadOpen(false);
+      setSelectedThreadId(threadId);
+      onThreadSelected?.(threadId);
+      setReloadToken(t => t + 1);
+    },
+    [onThreadSelected]
+  );
+
+  const handleViewChange = React.useCallback(
+    (next: 'all' | 'messages') => {
+      if (next === view) return;
+      // Mark the list loading in the same update as the switch, so the selection effect waits for the new list and then
+      // selects its first row (it would otherwise run once against the previous view's rows).
+      setListStatus('loading');
+      setAllRows([]);
+      setView(next);
+    },
+    [view]
+  );
+
+  const handleConversationStarted = React.useCallback(
+    (threadId: string, counterpartName: string) => {
+      // The pair's thread (new or reused) — select it now and show it named by the person until the list re-fetch lands.
+      setNewDirectOpen(false);
+      setAllRows(prev =>
+        prev.some(r => r.threadId === threadId)
+          ? prev
+          : [
+              {
+                threadId,
+                name: null,
+                threadType: 100000001,
+                createdOn: null,
+                isPinned: false,
+                regardingEntityType: null,
+                regardingId: null,
+                counterpartName,
+              },
+              ...prev,
+            ]
+      );
       setSelectedThreadId(threadId);
       onThreadSelected?.(threadId);
       setReloadToken(t => t + 1);
@@ -516,7 +576,8 @@ export const ConversationWorkspace: React.FC<ConversationWorkspaceProps> = ({
   const threadListRows: IThreadListRow[] = React.useMemo(() => {
     const mapped = visibleRows.map(r => ({
       threadId: r.threadId,
-      name: r.name,
+      // A Messages row is named by the other person; every pair thread is called "Direct Conversation".
+      name: messagesView && r.counterpartName ? r.counterpartName : r.name,
       unreadCount: unreadCounts[r.threadId],
       isPinned: r.isPinned,
     }));
@@ -524,14 +585,17 @@ export const ConversationWorkspace: React.FC<ConversationWorkspaceProps> = ({
     // the pinned/unpinned groups the existing order — server createdon-desc (all-mode) or server order
     // (record-mode) — and the word filter's already-narrowed set are both preserved untouched.
     return [...mapped].sort((a, b) => Number(!!b.isPinned) - Number(!!a.isPinned));
-  }, [visibleRows, unreadCounts]);
+  }, [visibleRows, unreadCounts, messagesView]);
 
   const rightPane = selectedThreadId ? (
     renderConversation ? (
       renderConversation({
         threadId: selectedThreadId,
         // Selected thread's display name for the message-pane header (round-8.4 item 3b).
-        threadName: allRows.find(r => r.threadId === selectedThreadId)?.name ?? undefined,
+        threadName: (() => {
+          const row = allRows.find(r => r.threadId === selectedThreadId);
+          return (messagesView && row?.counterpartName) || row?.name || undefined;
+        })(),
         // Selected thread's associated record for the message-pane "open record" affordance (round-8.4 item 3).
         regarding: (() => {
           const row = allRows.find(r => r.threadId === selectedThreadId);
@@ -581,6 +645,22 @@ export const ConversationWorkspace: React.FC<ConversationWorkspaceProps> = ({
               titleAccessory={threadsHeaderAccessory}
               onTogglePin={handleTogglePin}
               onDeleteThread={handleDeleteThread}
+              createLabel={messagesView ? 'New message' : 'New thread'}
+              emptyText={messagesView ? 'No messages yet.' : undefined}
+              subHeader={
+                regarding ? undefined : (
+                  <TabList
+                    className={styles.viewSwitch}
+                    size="small"
+                    selectedValue={view}
+                    onTabSelect={(_e, data) => handleViewChange(data.value === 'messages' ? 'messages' : 'all')}
+                    aria-label="Thread list view"
+                  >
+                    <Tab value="all">All</Tab>
+                    <Tab value="messages">Messages</Tab>
+                  </TabList>
+                )
+              }
             />
           </div>
           <PanelSplitter
@@ -605,6 +685,17 @@ export const ConversationWorkspace: React.FC<ConversationWorkspaceProps> = ({
           navigationService={navigationService}
           onThreadCreated={handleThreadCreated}
           regarding={regarding ? { entityType: regarding.entityType, id: regarding.id } : undefined}
+          onError={onError}
+        />
+      )}
+      {navigationService && !regarding && (
+        <NewDirectMessageModal
+          open={newDirectOpen}
+          onDismiss={() => setNewDirectOpen(false)}
+          authenticatedFetch={authenticatedFetch}
+          bffBaseUrl={bffBaseUrl}
+          navigationService={navigationService}
+          onConversationStarted={handleConversationStarted}
           onError={onError}
         />
       )}
