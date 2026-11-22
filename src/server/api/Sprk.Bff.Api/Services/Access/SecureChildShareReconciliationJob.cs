@@ -51,8 +51,8 @@ namespace Sprk.Bff.Api.Services.Access;
 /// <see cref="MaxDirectCarried"/> holds the watermark, as a listing or sweep fault does, so the dropped messages are listed again;
 /// a listed message this instance finished after its latest listed change is then skipped (#2731), so a held window re-lists
 /// without re-working what is done, and the carry drains; a run that drops messages from its carry is not a success (#2746). A
-/// capped listing moves the watermark to its last row's (<c>modifiedon</c>, id) key, so rows sharing one instant past the cap are
-/// listed by the next runs (#2745). Writes are
+/// capped listing that stops at the window's own start keys the watermark by its last row's id, so rows sharing one instant past
+/// the cap are listed by the next runs (#2745). Writes are
 /// on, like the secure mirror; there is no report-only switch on this job, and no new setting. When the Direct team is not
 /// configured the pass does nothing; when it cannot be resolved it writes nothing and the run is not a success.</para>
 /// </remarks>
@@ -95,9 +95,10 @@ public sealed partial class SecureChildShareReconciliationJob : IScheduledJob
     private readonly object _directGate = new();
     private DateTimeOffset? _directWatermark;
 
-    // #2745: per listed table, the last row id its listing read AT the watermark's instant (a capped listing that stopped there).
-    // The next listing of that table goes on past (watermark, id), so more changed rows than the cap sharing one modifiedon (stored
-    // to the second: a bulk write) are all listed. Set and cleared only with the watermark; a held run keeps both.
+    // #2745: per listed table, the last row id its listing read AT the watermark's instant (a capped listing that stopped at the
+    // window's own start, so the instant is at least one run old). The next listing of that table goes on past (watermark, id), so
+    // more changed rows than the cap sharing one modifiedon (stored to the second: a bulk write) are all listed. Set and cleared
+    // only with the watermark; a held run keeps both.
     private readonly Dictionary<string, Guid> _directAfterId = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<Guid> _directPending = new();
     private Guid? _directSweepCursor;
@@ -265,7 +266,8 @@ public sealed partial class SecureChildShareReconciliationJob : IScheduledJob
                     listingCapped = direct.ListingCapped,
                     backedOff = direct.BackedOff,
                     sweepPassComplete = direct.SweepPassComplete,
-                    // #2746: a carry past its cap: the messages it dropped, and those this run did not list (sweep only).
+                    // #2746: a carry past its cap: the messages it dropped, and those this run did not list (reached
+                    // only by the sweep, unless a later run lists them).
                     carryDropped = direct.CarryDropped,
                     carryDroppedUnlisted = direct.CarryDroppedUnlisted,
                     incompleteMessages = direct.IncompleteIds.Take(50).ToArray(),
@@ -359,7 +361,8 @@ public sealed partial class SecureChildShareReconciliationJob : IScheduledJob
     /// Task 198 Part C — the Direct-team messages: carried, recently changed (the message or a content row), then the rolling
     /// sweep; at most <see cref="MaxDirectMessagesPerRun"/>, each through <see cref="DirectMessageParticipantShares.ReconcileAsync"/>.
     /// Fix round 1 R4: the listings are ordered by <c>modifiedon</c> and a capped listing moves the watermark only to its last row
-    /// (#2745: keyed by that row's id per table, so the next listing goes on past it even at the same instant);
+    /// (#2745: when that row is at the window's own start, keyed by its id per table, so the next listing goes on past it even at
+    /// the same instant);
     /// <see cref="DirectSweepReserve"/> of every run is the sweep's; a message incomplete <see cref="MaxDirectAttempts"/> runs in a
     /// row is backed off for <see cref="DirectBackoff"/> (an error log each time), so it cannot fill the budget. #2731: the recent
     /// messages are worked oldest change first across every table; the carry keeps the incomplete, then the backed-off, then the
@@ -610,7 +613,7 @@ public sealed partial class SecureChildShareReconciliationJob : IScheduledJob
             }
         }
 
-        // The watermark moves with its key: per listed table, the last row id already listed at the watermark's instant (#2745).
+        // The watermark moves with its keys: per listed table, the last row id already listed at the watermark's instant (#2745).
         (DateTimeOffset At, Dictionary<string, Guid> AfterIds)? watermark = null;
         if (failure is null && !carryOverflow)
         {
@@ -620,10 +623,12 @@ public sealed partial class SecureChildShareReconciliationJob : IScheduledJob
             }
             else if (cappedAt.All(c => c.Horizon is not null))
             {
-                // The capped listings were read in (modifiedon, id) order: everything before the earliest last row is listed, and
-                // at that instant, each listing that stopped there listed every row up to its last row's id. #2745: the next runs
-                // list on from that key, so more rows than the cap sharing one instant are all listed (stepping one tick past the
-                // instant left the rest to the sweep).
+                // The capped listings were read in (modifiedon, id) order: everything before the earliest last row is listed. A
+                // watermark that moves to that instant carries no key, so the next run lists the whole instant again: a row stamped
+                // with it but committed after this read (possibly with a lower id) is still listed. #2745: only a capped listing
+                // that stops at the window's own start (an instant at least one run old) keys the watermark by its last row's id,
+                // and the next runs list on from that key, so more rows than the cap sharing one instant are all listed (stepping
+                // one tick past the instant left the rest to the sweep).
                 var horizon = cappedAt.Min(c => c.Horizon!.Value);
                 var nextAfterIds = new Dictionary<string, Guid>(StringComparer.OrdinalIgnoreCase);
                 if (horizon == since)
@@ -631,10 +636,22 @@ public sealed partial class SecureChildShareReconciliationJob : IScheduledJob
                     // The watermark does not move, so a key this run listed from still holds (that listing went past it).
                     foreach (var (table, afterId) in afterIds)
                         nextAfterIds[table] = afterId;
+
+                    foreach (var (table, _, lastId) in cappedAt.Where(c => c.Horizon == horizon))
+                    {
+                        if (afterIds.TryGetValue(table, out var previous) && previous == lastId)
+                        {
+                            // Cannot happen while modifiedon is stored to the second: the listing went past this key, so its last
+                            // row's id is higher. If it does, the same rows came back and this table makes no progress here.
+                            _logger.LogError("[DIRECT-SHARES] run={RunId}: the {Table} listing at {Since:o} ended on the row it " +
+                                "started after; the key did not advance, and the rows past the cap at that instant are reached " +
+                                "only by the sweep.", runId, table, since);
+                        }
+
+                        nextAfterIds[table] = lastId;
+                    }
                 }
 
-                foreach (var (table, _, lastId) in cappedAt.Where(c => c.Horizon == horizon))
-                    nextAfterIds[table] = lastId;
                 watermark = (horizon, nextAfterIds);
             }
         }

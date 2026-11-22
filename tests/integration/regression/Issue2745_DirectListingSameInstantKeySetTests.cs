@@ -25,7 +25,9 @@ namespace Sprk.Bff.Api.Tests.Integration.Regression;
 /// <see cref="Job.MaxDirectListedPerTable"/> per run. When a capped listing's rows all shared the watermark's instant, the watermark
 /// stepped one tick past it, so the rows past the cap at that instant (more than 500 written in one second: <c>modifiedon</c> is
 /// stored to the second) were never listed; only the rolling sweep could reach them. The fix keys the watermark by the last listed
-/// row's id per table, and the next listing goes on past that key.
+/// row's id per table when a capped listing stops at the window's own start (an instant at least one run old), and the next listing
+/// goes on past that key; a watermark that moves to a later instant carries no key, so a row stamped with it but committed after
+/// the read (possibly with a lower id) is still listed.
 /// <para>Over the in-memory Dataverse (<see cref="SecureChildShareWorld"/>) with the REAL job and Direct-team lookup; the sweep answers
 /// nothing, so only the listing and the carry can reach a message. Each arrange is more than one listing's cap of rows at one
 /// instant: an inherent multi-record setup at a KEEP integration path.</para>
@@ -76,13 +78,38 @@ public class Issue2745_DirectListingSameInstantKeySetTests
         var first = await RunAsync(job);
         _time.Advance(TimeSpan.FromMinutes(2));
         var second = await RunAsync(job);
-        var runs = 2 + await RunUntilAsync(job, () => messages.All(Granted), maxRuns: 6);
+        _time.Advance(TimeSpan.FromMinutes(2));
+        var third = await RunAsync(job);
+        var runs = 3 + await RunUntilAsync(job, () => messages.All(Granted), maxRuns: 5);
 
         messages.Should().OnlyContain(m => Granted(m), $"every message changed at the instant is listed, without the sweep (runs: {runs})");
         Bool(first, "listingCapped").Should().BeTrue();
         Since(second).Should().Be(instant.UtcDateTime, "the watermark moves to the capped listing's instant");
-        Int(second, "listed").Should().Be(AtOneInstant - Job.MaxDirectListedPerTable,
-            "the second run lists only the rows past the first run's last row at that instant");
+        Int(second, "listed").Should().Be(Job.MaxDirectListedPerTable,
+            "a watermark that moved to the instant carries no key: the whole instant is listed again, up to the cap");
+        Since(third).Should().Be(instant.UtcDateTime, "the listing capped at the window's own start: the watermark stays, keyed");
+        Int(third, "listed").Should().Be(AtOneInstant - Job.MaxDirectListedPerTable,
+            "the third run lists only the rows past the key at that instant");
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_ARowStampedAtACappedListingsLastInstantWithALowerIdAfterTheRead_IsStillListedAndGranted()
+    {
+        // A capped listing that ends at an instant after the window's start (the current second, in a bulk write): a row stamped
+        // with that instant but committed after the read can carry a lower id. Keying the watermark there would list only past the
+        // last row's id, and the late row would be left to the sweep (answering nothing here).
+        var instant = T0 - TimeSpan.FromMinutes(30);
+        var messages = Enumerable.Range(0, Job.MaxDirectListedPerTable).Select(_ => Message(instant)).ToList();
+        var job = NewJob();
+
+        var first = await RunAsync(job);
+        Bool(first, "listingCapped").Should().BeTrue();
+        var late = Message(instant, Guid.Parse("00000000-0000-0000-0000-000000000001")); // lower than every listed row's id
+
+        var runs = 1 + await RunUntilAsync(job, () => Granted(late) && messages.All(Granted), maxRuns: 6);
+
+        Granted(late).Should().BeTrue($"the late row at the capped listing's last instant is listed and granted (runs: {runs})");
+        messages.Should().OnlyContain(m => Granted(m));
     }
 
     [Fact]
@@ -108,8 +135,9 @@ public class Issue2745_DirectListingSameInstantKeySetTests
     [Fact]
     public async Task ExecuteAsync_TwoTablesCappedAtDifferentInstants_ListsAndGrantsEveryMessageOfBoth()
     {
-        // The messages' own rows cap at an earlier instant than the attachments: the watermark moves to the earlier one first, keyed
-        // for the messages' table only; the attachments, listed past that instant, cap at theirs and are keyed there next.
+        // The messages' own rows cap at an earlier instant than the attachments: the watermark moves to the earlier one first, then
+        // is keyed there for the messages' table only; the attachments, listed past that instant, cap at theirs and are keyed there
+        // next.
         var earlier = T0 - TimeSpan.FromMinutes(40);
         var later = T0 - TimeSpan.FromMinutes(20);
         var own = Enumerable.Range(0, AtOneInstant).Select(_ => Message(earlier)).ToList();
@@ -128,7 +156,9 @@ public class Issue2745_DirectListingSameInstantKeySetTests
         var sinces = results.Select(Since).ToList();
         sinces.Should().BeInAscendingOrder("the watermark never moves back");
         sinces.Should().Contain(earlier.UtcDateTime).And.Contain(later.UtcDateTime, "each capped instant is the watermark in turn");
-        Int(results[1], "listed").Should().Be((AtOneInstant - Job.MaxDirectListedPerTable) + Job.MaxDirectListedPerTable,
+        Int(results[1], "listed").Should().Be(2 * Job.MaxDirectListedPerTable,
+            "unkeyed at the earlier instant, each table is listed again from it, up to its cap");
+        Int(results[2], "listed").Should().Be((AtOneInstant - Job.MaxDirectListedPerTable) + Job.MaxDirectListedPerTable,
             "the 200 messages past the key at the earlier instant, and the attachments' 500 listed again up to their cap");
     }
 
@@ -182,9 +212,9 @@ public class Issue2745_DirectListingSameInstantKeySetTests
 
     /// <summary>A Direct-team message on the thread, from <see cref="Sender"/> to <see cref="Recipient"/>, changed at
     /// <paramref name="changedAt"/> (never, for null: only a content row can list it).</summary>
-    private Guid Message(DateTimeOffset? changedAt)
+    private Guid Message(DateTimeOffset? changedAt, Guid? id = null)
     {
-        var message = Guid.NewGuid();
+        var message = id ?? Guid.NewGuid();
         var columns = new List<(string, object)>
         {
             ("owningteam", new EntityReference("team", DirectTeam)),
