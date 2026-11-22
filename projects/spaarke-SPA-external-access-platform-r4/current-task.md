@@ -1,16 +1,17 @@
 # Current Task State
 
-> **Last Updated**: 2026-11-20 (Phase 2 wave 4 running: 020 + 022 in parallel; 016 waits on owner retest items 3–7)
+> **Last Updated**: 2026-11-22 (023a+023b done, committed `e157b54a62`, master merged `25c0fe0eb3`, PR #2941 open)
 > **Format**: CURRENT state only. Each checkpoint REWRITES this file. Target ≤ 10 KB.
 
 ## Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
 |-------|-------|
-| **Task** | **Wave 4 (P2) done: 020** Review detail (FR-11; FR-12 already on master from ebilling) and **022** inline document preview (FR-14) — owner go 2026-11-20 "Yes, start Phase 2". Also open: **016** (owner retest items 3–7) |
-| **Step** | Both ✅ in POML + index (drift check clean). Build, full SPA vitest (1908 + 2 new), ArchTests 2724/2724, adr-check clean, one adversarial review: F3 fixed (streamed size cap), F2 filed as D-23 #2928 → task 023. Notes: `notes/task-020-notes.md`, `task-022-notes.md` |
-| **Status** | 016 🔄 (items 1–2, 8 pass); 020 ✅; 022 ✅ — on branch, PR for the owner's merge go |
-| **Next Action** | Owner: merge go for the wave PR. Then wave 5: 023 (fold in D-23) → 024 → 028 (P2 deploy + E2E; grid PATCH for 3ff4102c with owner approval; any env needs 082c-2 first). Owner wording question: show "The client is reviewing this invoice." beyond the Information field? |
+| **Task** | **023a** (shared DataGrid: rowSource/rowSourceKey, rowActions wiring onRecordAction, opt-in truncate-tooltip) + **023b** (config `286be8b4-f96f-4d5a-b1d5-82fd83ca9693` `config/external-record-documents.gridconfiguration.json`, `scripts/Apply-ExternalRecordDocumentsGridConfiguration.ps1`, BFF id admission in `OutsideCounselGridConfigurationIds`, test `ExternalRecordDocumentsGridConfigurationTests`). Design APPROVED 2026-11-22 ("Yes, Dataverse record"; grid-owner props approved). 023 = 🚫 split. 023c (SPA Documents on shared grid, all roots + D-23) after these |
+| **Step** | 023a+023b ✅ (POML+index, drift clean). Verified: jest DataGrid 16/160, external-spa tsc, BFF tests 173, ArchTests 2724/2724, publish size 40.603 MB both sides (delta 0). Review F-findings fixed; D-24 #2939 filed (pre-existing). K not done: `useHostRowSource` in CAPABILITY-INDEX row 31 needs a `.claude` edit with owner approval |
+| **Status** | **PR #2941** (bound; branch → master) open, CI running. uac-r2 asked for the BFF gate review 2026-11-22 (no reply yet). #2938 (def-008) also edits `DataGrid.tsx` additively — second to merge resolves. Earlier: 016 🔄 (owner retest 3–7); 020/022 ✅ merged `4c2d26939d`; dev SPA `2963d1565b` |
+| **Side** | Quality alerts: worktree `C:\code_files\spaarke-wt-quality-alert-fixes`, branch `fix/quality-alerts-1906-2934`, **PR #2937** (bound to this session; nightly 5-shard sync + `TestShardFilterSyncGuardTests`; #1906a version tests via `helpers/scriptVersion.ts`). Not merged — owner merge go needed. #1906b → ebilling-r1; #2866 later |
+| **Next Action** | Watch #2941 CI; uac-r2 verdict; owner merge go. Then 023c (SPA Documents on the shared grid, all roots + D-23; closes #2928; file adoption follow-on as DEF) → 024 → 028 (apply script -WhatIf/apply/-Verify with owner go, rollback = delete row; grid PATCH 3ff4102c; BFF deploy via uac-r2 first). Open owner wording Q: show "The client is reviewing this invoice." beyond Information field? |
 
 ## Task 015 outcome (for 016's E2E)
 - Add event: Event Type required (options = `creatableEventTypes`), Due Date required by type, Priority, Assigned To ("Me" first), Description. Add event hidden when no type is offered.

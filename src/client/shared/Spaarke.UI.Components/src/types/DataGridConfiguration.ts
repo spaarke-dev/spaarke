@@ -89,6 +89,12 @@ export interface DisplayConfig {
   densityDefault?: 'comfortable' | 'compact';
   /** Custom empty-state message (default: framework's localized fallback). */
   emptyStateMessage?: string;
+  /**
+   * Opt-in: text cells (the primary-name link and every cell not drawn by a host `columnRenderers` entry) cut long
+   * text with an ellipsis, and a cell whose text overflows shows the full value in a Fluent `Tooltip` on hover or
+   * when the cell receives keyboard focus. Default false (cells render as before). The grid's `truncateWithTooltip` prop, when set, wins.
+   */
+  truncateWithTooltip?: boolean;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

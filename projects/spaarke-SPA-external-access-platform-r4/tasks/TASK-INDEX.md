@@ -27,10 +27,13 @@
 | 018 | P1 deploy (BFF via uac-r2, SPA dev) + E2E + first-E2E checks (FR-33) — redeploy + retest after 008–013 | 1 | ✅ [done] | 002, 004, 005, 006, 007, 008, 009, 010, 011, 012, 013 | — (live) | sonnet / high |
 | 020 | Review detail (082c) + held-Accepted badge (FR-11, FR-12) | 2 | ✅ [done] | 018 | Group B | sonnet / high |
 | 022 | Inline PDF/image preview (FR-14) | 2 | ✅ [done] | 018 | Group B | sonnet / high |
-| 023 | Documents with no file + Documents on shared DataGrid (FR-15, FR-16) | 2 | 🔲 [open] | 018, 022 | — | sonnet / xhigh |
+| 023 | Documents with no file + Documents on shared DataGrid (FR-15, FR-16) — split 2026-11-22 into 023a/b/c (owner: shared grid on all record types, B+C+D) | 2 | 🚫 [cancelled] | 018, 022 | — | — |
+| 023a | Shared DataGrid: host row source, row-actions column, truncate-with-tooltip (design notes/task-023-design.md) | 2 | ✅ [done] | none | Group E | opus / high |
+| 023b | External record documents grid configuration + BFF read admission (uac-r2 review) | 2 | ✅ [done] | none | Group E | sonnet / high |
+| 023c | Documents list on the shared grid, all record types + D-23 hoist (FR-15, FR-16) | 2 | 🔲 [open] | 023a, 023b | — | sonnet / xhigh |
 | 021 | Invoice Files section; remove invoice upload/versions (FR-13) — gated on ebilling routes | 2 | ✅ [done] | 018, 020, 023 | — | sonnet / high |
-| 024 | Shared EmptyState everywhere (FR-17) | 2 | 🔲 [open] | 018, 023 | — | sonnet / high |
-| 028 | P2 deploy (SPA dev) + E2E | 2 | 🔲 [open] | 018, 020, 021, 022, 023, 024 | — (live) | sonnet / high |
+| 024 | Shared EmptyState everywhere (FR-17) | 2 | 🔲 [open] | 018, 023c | — | sonnet / high |
+| 028 | P2 deploy (SPA dev) + E2E | 2 | 🔲 [open] | 018, 020, 021, 022, 023c, 024 | — (live) | sonnet / high |
 | 030 | Live-metadata check of Information columns (owner-approved read) (FR-18a) | 3 | 🔲 [open] | 028 | — (live) | sonnet / high |
 | 031 | ReadableColumns additions (UAC review) + Information section (FR-18) | 3 | 🔲 [open] | 028, 030 | Group C | opus / high |
 | 032 | DataGrid persisted widths/sort + Reset columns (FR-19) | 3 | 🔲 [open] | 028 | Group C | sonnet / high |
