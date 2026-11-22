@@ -1143,3 +1143,22 @@ Rules: (1) every change to an invoice's core record after create is refused (the
 - **Supersedes** the 2026-11-09 line "private messages in a record's context are deferred to `messages-enhancements-r1`". Both pieces are built here.
 - **(b) — task 055, #2922.** The server is built (054 pieces 2b and 3; #2919). The work is the client: a "New direct message" entry point choosing one internal user, a Messages view of the user's Direct threads, and a live check on dev. A Direct pair is two internal users (systemusers); external contacts are out of scope.
 - **(a) — task 056, #2923.** A new access rule: a private message in a record's thread is readable by its sender and its named recipient only. Design first, reviewed by unified-access-control-r2 before code; open questions are listed in #2923 and the 056 POML.
+
+## 2026-11-22 — Task 056a: private messages in a record's context (owner answers, in fm's session; UAC-r2 conditions C1–C6)
+
+Design: `notes/task-056-private-message-design.md`. UAC-r2 approved its access parts on C1–C6 (2026-11-22).
+
+- **Approved as recommended:**
+  - **Q0:** the message is shown in the record's conversation for its two participants. It is stored in the pair's Direct thread with a non-filing reference to the record.
+  - **Q1:** other readers of the record see nothing.
+  - **Q2.1–Q2.3:** secure and Restricted records are allowed when both participants read the record and pass the No Access check. On an effectively Restricted record, an external participant is refused.
+  - **Q4:** owner and audience as for Direct messages: the Direct team and the stamped pair.
+  - **Q5:** filing later is explicit and confirmed, with the context record suggested.
+  - **Q6:** shown in the record's conversation view (the pair only) and in the Messages view.
+- **Q2.4 (after the send), owner:** "not required if easier to remove access when access type changes or user access changes". Either behaviour is acceptable, so the easier one is chosen.
+  - The message stays readable by both participants after a later Restricted flag, No Access entry or lost Read. It has no filing parent, so nothing revokes it.
+  - The record reference is hidden from a viewer who can no longer read the record (C6).
+  - Removing access instead would need new machinery that watches record and user access changes.
+- **Q3 (recipient cannot read the record), owner:** the send is refused with "Recipient does not have required record access".
+  - The text covers every recipient-side cause: no Read, the No Access wall, and external on Restricted. It never says which cause applied.
+  - The "Send as a direct message instead" offer is optional. It is built only if it is a small addition in 056b.
