@@ -413,7 +413,7 @@ public partial class InvoiceFamilyGenericUpdatePathTests
 
         var act = () => Handler(FamilyRowUnderAMatter(Approval).Object).UpdateAsync(
             Approval, FamilyRow, new Dictionary<string, object?> { ["sprk_regardingmatter"] = MatterRef(OtherMatter) },
-            Sprk.Bff.Api.Services.Ai.ConcurrencyMode.None, maxRetries: 1, cancel.Token);
+            Sprk.Bff.Api.Services.Dataverse.ConcurrencyMode.None, maxRetries: 1, cancel.Token);
 
         await act.Should().ThrowAsync<OperationCanceledException>();
         NothingWritten();

@@ -520,7 +520,6 @@ public sealed class LineCodingSeamTests
                 NullLogger<ActionRunner>.Instance,
                 Options.Create(new DocumentIntelligenceOptions { FastModel = "fast-deployment", StandardModel = "standard-deployment" }));
             var ai = new InvoiceAi(
-                new Mock<IPlaybookService>(MockBehavior.Strict).Object,
                 new Mock<IOpenAiClient>(MockBehavior.Strict).Object,
                 actionResolver,
                 runner,

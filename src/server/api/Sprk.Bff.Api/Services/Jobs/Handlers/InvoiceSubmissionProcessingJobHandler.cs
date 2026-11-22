@@ -62,7 +62,7 @@ namespace Sprk.Bff.Api.Services.Jobs.Handlers;
 /// the commit (<see cref="SubmissionPersistStatus.SourceChanged"/>), its new version is staged and, when its bytes are the bytes evaluated,
 /// persisted once more; otherwise the delivery is retried. A kind this handler does not know is refused permanently (task 095 adds its own).</para>
 /// <para><b>Logging (ADR-015).</b> Submission id, invoice id, attempt and reason codes only; never a value read from the invoice.</para>
-/// <para>§11: <i>Existing</i> - <c>InvoiceExtractionJobHandler</c> (payload, document read, pointer-container check, download) and
+/// <para>§11: <i>Existing</i> - <c>InvoiceExtractionJobHandler</c> (deleted by 050b; payload, document read, pointer-container check, download) and
 /// <c>BillingRuleDraftJobHandler</c> (lock, final-delivery rule); the pipeline components are 049 parts B-D. <i>Extension</i> - the extraction
 /// handler is the MVP text-extraction pipeline with a different payload and no submission; the pipeline components deliberately know nothing of
 /// the job framework, so this shell is the one place that does. <i>Cost of doing nothing</i> - 044 enqueues <c>InvoiceSubmissionProcessing</c>;

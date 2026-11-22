@@ -63,7 +63,6 @@ public sealed class ContentUnderstandingLiveTests
         Skip.If(string.IsNullOrWhiteSpace(EndpointValue), "CONTENT_UNDERSTANDING_ENDPOINT is not set.");
 
         var sut = new InvoiceAi(
-            new Mock<IPlaybookService>(MockBehavior.Strict).Object,
             new Mock<IOpenAiClient>(MockBehavior.Strict).Object,
             new NullActionResolver(NullLogger<NullActionResolver>.Instance),
             new NullActionRunner(NullLogger<NullActionRunner>.Instance),
@@ -94,7 +93,6 @@ public sealed class ContentUnderstandingLiveTests
             "CONTENT_UNDERSTANDING_ENDPOINT and CONTENT_UNDERSTANDING_SAMPLE_PDF are not both set.");
 
         var sut = new InvoiceAi(
-            new Mock<IPlaybookService>(MockBehavior.Strict).Object,
             new Mock<IOpenAiClient>(MockBehavior.Strict).Object,
             new NullActionResolver(NullLogger<NullActionResolver>.Instance),
             new NullActionRunner(NullLogger<NullActionRunner>.Instance),

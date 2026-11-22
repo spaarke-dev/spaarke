@@ -69,13 +69,13 @@ public partial class InvoiceFamilyGenericUpdatePathTests
         var fields = new Dictionary<string, object?> { ["sprk_name"] = "Renamed" };
 
         await Handler(InvoiceUnderAMatter().Object).UpdateAsync(
-            "sprk_invoice", Invoice, fields, Sprk.Bff.Api.Services.Ai.ConcurrencyMode.Optimistic, maxRetries: 1, CancellationToken.None);
+            "sprk_invoice", Invoice, fields, Sprk.Bff.Api.Services.Dataverse.ConcurrencyMode.Optimistic, maxRetries: 1, CancellationToken.None);
         Sent().Should().ContainSingle().Which.Method.Should().Be(nameof(IFieldMappingDataverseService.UpdateExistingRecordFieldsAsync));
 
         _writes.Invocations.Clear();
         TheRowIsDeletedAfterTheGuardRead();
         var act = () => Handler(InvoiceUnderAMatter().Object).UpdateAsync(
-            "sprk_invoice", Invoice, fields, Sprk.Bff.Api.Services.Ai.ConcurrencyMode.Optimistic, maxRetries: 1, CancellationToken.None);
+            "sprk_invoice", Invoice, fields, Sprk.Bff.Api.Services.Dataverse.ConcurrencyMode.Optimistic, maxRetries: 1, CancellationToken.None);
 
         CodeOnly((await act.Should().ThrowAsync<RecordOwnerUnresolvedException>()).Which, InvoiceFamilyCoreRecordGuard.RecordNotFoundCode);
         NothingWasCreated();

@@ -1,6 +1,4 @@
-using OpenAI.Chat;
 using Sprk.Bff.Api.Configuration;
-using Sprk.Bff.Api.Models.Ai;
 
 namespace Sprk.Bff.Api.Services.Ai.PublicContracts;
 
@@ -12,10 +10,9 @@ namespace Sprk.Bff.Api.Services.Ai.PublicContracts;
 /// <para>
 /// P3 Fail-Fast pattern per ADR-032 + D-09 §2 L1. Throws <see cref="FeatureDisabledException"/>
 /// on every public method so that Finance consumers
-/// (<c>Services/Finance/InvoiceAnalysisService.cs</c>,
-/// <c>Services/Finance/InvoiceSearchService.cs</c>,
-/// <c>Services/Jobs/Handlers/InvoiceIndexingJobHandler.cs</c>) convert to 503 ProblemDetails
-/// per ADR-018 + ADR-019. Returning empty playbook responses / zero-length embeddings would
+/// (<c>Services/Finance/InvoiceSearchService.cs</c>,
+/// <c>Services/Jobs/Handlers/InvoiceIndexingJobHandler.cs</c>, the submission processor) convert to 503 ProblemDetails
+/// per ADR-018 + ADR-019. Returning empty results / zero-length embeddings would
 /// silently corrupt the invoice index and mislead operators.
 /// </para>
 /// <para>
@@ -39,25 +36,6 @@ public sealed class NullInvoiceAi : IInvoiceAi
     public NullInvoiceAi(ILogger<NullInvoiceAi> logger)
     {
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-    }
-
-    public Task<PlaybookResponse> GetPlaybookByNameAsync(
-        string playbookName,
-        CancellationToken cancellationToken = default)
-    {
-        LogDisabled(nameof(GetPlaybookByNameAsync));
-        throw new FeatureDisabledException(ErrorCode, DetailMessage);
-    }
-
-    public Task<T> GetStructuredCompletionAsync<T>(
-        IEnumerable<ChatMessage> messages,
-        BinaryData jsonSchema,
-        string schemaName,
-        string deploymentName,
-        CancellationToken cancellationToken = default)
-    {
-        LogDisabled(nameof(GetStructuredCompletionAsync));
-        throw new FeatureDisabledException(ErrorCode, DetailMessage);
     }
 
     public Task<ReadOnlyMemory<float>> GenerateEmbeddingAsync(

@@ -1,8 +1,6 @@
 using System.Globalization;
 using System.Text.Json;
-using OpenAI.Chat;
 using Sprk.Bff.Api.Configuration;
-using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Services.Ai.ContentUnderstanding;
 using Sprk.Bff.Api.Services.Ai.Context;
 using Sprk.Bff.Api.Services.Ai.LinearConsumers;
@@ -14,10 +12,9 @@ namespace Sprk.Bff.Api.Services.Ai.PublicContracts;
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b>Legacy members</b> (<see cref="GetPlaybookByNameAsync"/>, <see cref="GetStructuredCompletionAsync{T}"/>,
-/// <see cref="GenerateEmbeddingAsync"/>): a thin wrapper over <see cref="IPlaybookService"/> +
-/// <see cref="IOpenAiClient"/> per the ADR-007 facade pattern — zero behaviour change. The first two retire
-/// with their Finance callers (ebilling-r1 tasks 042 and 050).
+/// <b>Embeddings</b> (<see cref="GenerateEmbeddingAsync"/>): a thin wrapper over <see cref="IOpenAiClient"/> per the
+/// ADR-007 facade pattern. (The by-name playbook lookup and C#-schema structured completion that sat beside it were
+/// removed with their last Finance caller in ebilling-r1 task 050b.)
 /// </para>
 /// <para>
 /// <b>Capability methods</b> (ebilling-r1 task 041, D-52): each resolves its Action through
@@ -32,7 +29,6 @@ namespace Sprk.Bff.Api.Services.Ai.PublicContracts;
 /// </remarks>
 public sealed class InvoiceAi : IInvoiceAi
 {
-    private readonly IPlaybookService _playbook;
     private readonly IOpenAiClient _openAi;
     private readonly IActionResolver _actionResolver;
     private readonly IActionRunner _actionRunner;
@@ -40,49 +36,17 @@ public sealed class InvoiceAi : IInvoiceAi
     private readonly ILogger<InvoiceAi> _logger;
 
     public InvoiceAi(
-        IPlaybookService playbook,
         IOpenAiClient openAi,
         IActionResolver actionResolver,
         IActionRunner actionRunner,
         ContentUnderstandingClient contentUnderstanding,
         ILogger<InvoiceAi> logger)
     {
-        _playbook = playbook ?? throw new ArgumentNullException(nameof(playbook));
         _openAi = openAi ?? throw new ArgumentNullException(nameof(openAi));
         _actionResolver = actionResolver ?? throw new ArgumentNullException(nameof(actionResolver));
         _actionRunner = actionRunner ?? throw new ArgumentNullException(nameof(actionRunner));
         _contentUnderstanding = contentUnderstanding ?? throw new ArgumentNullException(nameof(contentUnderstanding));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-    }
-
-    /// <inheritdoc />
-    public Task<PlaybookResponse> GetPlaybookByNameAsync(
-        string playbookName,
-        CancellationToken cancellationToken = default)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(playbookName);
-        return _playbook.GetByNameAsync(playbookName, cancellationToken);
-    }
-
-    /// <inheritdoc />
-    public Task<T> GetStructuredCompletionAsync<T>(
-        IEnumerable<ChatMessage> messages,
-        BinaryData jsonSchema,
-        string schemaName,
-        string deploymentName,
-        CancellationToken cancellationToken = default)
-    {
-        ArgumentNullException.ThrowIfNull(messages);
-        ArgumentNullException.ThrowIfNull(jsonSchema);
-        ArgumentException.ThrowIfNullOrWhiteSpace(schemaName);
-        ArgumentException.ThrowIfNullOrWhiteSpace(deploymentName);
-
-        return _openAi.GetStructuredCompletionAsync<T>(
-            messages,
-            jsonSchema,
-            schemaName,
-            deploymentName,
-            cancellationToken);
     }
 
     /// <inheritdoc />
