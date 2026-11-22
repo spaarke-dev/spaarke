@@ -256,7 +256,7 @@ describe('column sizing and truncation (replaces the D-12 width classes)', () =>
       listReturns({ value: [row(1, NAME_COL)] });
       renderLibrary();
       const body = await documentRow(NAME_COL);
-      const cell = within(body).getAllByRole('gridcell')[1];
+      const cell = within(body).getByText(NAME_COL).closest('[role="gridcell"]') as HTMLElement;
       const wrapper = cell.querySelector('[data-truncate-cell]') as HTMLElement;
       expect(wrapper).not.toBeNull();
       expect(wrapper.textContent).toBe(NAME_COL);
@@ -276,7 +276,7 @@ describe('column sizing and truncation (replaces the D-12 width classes)', () =>
       listReturns({ value: [row(1, 'Short.pdf')] });
       renderLibrary();
       const body = await documentRow('Short.pdf');
-      const cell = within(body).getAllByRole('gridcell')[1];
+      const cell = within(body).getByText('Short.pdf').closest('[role="gridcell"]') as HTMLElement;
       expect(cell.querySelector('[data-truncate-cell]')).not.toBeNull();
 
       fireEvent.focusIn(cell);

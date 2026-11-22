@@ -1601,6 +1601,7 @@ export const DataGrid: React.FC<DataGridProps> = props => {
   // An incomplete list with no rows, or a failed load, is not "no records": the notice / banner says so instead.
   // (loadState.isLoading is always false here: the configuration-loading state returned above.)
   const isEmpty = !isLoadingRows && records.length === 0 && !hostRowsError && !hostRowsTruncated;
+  const rowsSelectable = resolved.behavior.selectionMode !== 'none';
   const selectedCount = selectedRowIds.size;
   const totalCount = records.length;
   const visibleTitle = resolved.display.title ?? loadState.savedQuery?.name ?? '';
@@ -1762,7 +1763,13 @@ export const DataGrid: React.FC<DataGridProps> = props => {
               aria-label={contextValue.currentView}
             >
               <DataGridHeader>
-                <DataGridRow selectionCell={{ checkboxIndicator: { 'aria-label': 'Select all rows' } }}>
+                <DataGridRow
+                  // Fluent renders an explicitly passed selection cell even when the grid is not selectable, so a
+                  // `selectionMode: 'none'` grid would show dead checkboxes. Pass the slot only when rows can be selected.
+                  selectionCell={
+                    rowsSelectable ? { checkboxIndicator: { 'aria-label': 'Select all rows' } } : undefined
+                  }
+                >
                   {({ renderHeaderCell, columnId }) =>
                     columnId === ROW_ACTIONS_COLUMN_ID ? (
                       // Task 023a: fixed width, no resize handle (`aside`), no sort (no `compare`).
@@ -1779,7 +1786,7 @@ export const DataGrid: React.FC<DataGridProps> = props => {
                 {({ item, rowId }) => (
                   <DataGridRow<GridItem>
                     key={rowId}
-                    selectionCell={{ checkboxIndicator: { 'aria-label': 'Select row' } }}
+                    selectionCell={rowsSelectable ? { checkboxIndicator: { 'aria-label': 'Select row' } } : undefined}
                   >
                     {({ renderCell, columnId }) =>
                       columnId === ROW_ACTIONS_COLUMN_ID ? (

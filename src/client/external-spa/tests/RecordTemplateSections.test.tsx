@@ -388,17 +388,8 @@ describe.each(CASES)('$label grid', c => {
     // Messages section into the New message dialog that its section header opens. So the record modal holds no input at all (a
     // stray input anywhere fails), and for an entity with a thread the dialog the section header opens holds exactly one
     // textbox - a textarea - which is not inside the Messages section (it is its own child dialog).
-    // The Documents grid (task 023c) draws Fluent's row-selection checkboxes even with selectionMode: none (DataGrid.tsx passes
-    // the selectionCell slot unconditionally, a shared-grid defect reported with task 023c); they select nothing and are not a
-    // field, so they are the one thing excluded here.
-    const inputs = Array.from(dialog.querySelectorAll('input, textarea, select, [role="textbox"]')).filter(
-      el =>
-        !(
-          el instanceof HTMLInputElement &&
-          el.type === 'checkbox' &&
-          /^Select (all rows|row)$/.test(el.getAttribute('aria-label') ?? '')
-        )
-    );
+    // The Documents grid (task 023c) is configured with selectionMode: none, so it draws no selection checkboxes either.
+    const inputs = Array.from(dialog.querySelectorAll('input, textarea, select, [role="textbox"]'));
     expect(inputs).toHaveLength(0);
     expect(dialog.querySelectorAll('input[type="file"]')).toHaveLength(0);
     if (c.entityName !== 'sprk_document') {
