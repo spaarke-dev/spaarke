@@ -31,6 +31,7 @@ import {
   Text,
   Tooltip,
   makeStyles,
+  mergeClasses,
   tokens,
 } from '@fluentui/react-components';
 import { StatusBadge } from '../../StatusBadge';
@@ -66,6 +67,11 @@ interface Notice {
 
 const GUIDANCE_PREVIEW_LENGTH = 140;
 
+// Column widths as percentages of the table. The Fluent Table is a native fixed-layout table, so with no widths every column is equal
+// and Guidance (a ~140-character preview) got ~120 px and wrapped into a dozen lines (task 201). Order: category, on/off, guidance,
+// read by, last N days, recall, edit. Sums to 100.
+const COLUMN_WIDTH = ['12%', '11%', '38%', '9%', '7%', '13%', '10%'] as const;
+
 const useStyles = makeStyles({
   root: { display: 'flex', flexDirection: 'column', rowGap: tokens.spacingVerticalM, minWidth: 0 },
   header: {
@@ -80,9 +86,17 @@ const useStyles = makeStyles({
   rules: { display: 'flex', flexDirection: 'column', rowGap: tokens.spacingVerticalXXS },
   badgeRow: { display: 'flex', alignItems: 'center', columnGap: tokens.spacingHorizontalS, flexWrap: 'wrap' },
   numeric: { textAlign: 'right' },
+  col0: { width: COLUMN_WIDTH[0] },
+  col1: { width: COLUMN_WIDTH[1] },
+  col2: { width: COLUMN_WIDTH[2], overflowWrap: 'anywhere' },
+  col3: { width: COLUMN_WIDTH[3] },
+  col4: { width: COLUMN_WIDTH[4] },
+  col5: { width: COLUMN_WIDTH[5] },
+  col6: { width: COLUMN_WIDTH[6] },
 });
 
-const messageOf = (err: unknown, fallback: string): string => (err instanceof Error && err.message ? err.message : fallback);
+const messageOf = (err: unknown, fallback: string): string =>
+  err instanceof Error && err.message ? err.message : fallback;
 
 export const ClassificationArea: React.FC<ClassificationAreaProps> = ({ service }) => {
   const styles = useStyles();
@@ -127,7 +141,13 @@ export const ClassificationArea: React.FC<ClassificationAreaProps> = ({ service 
         const readers = groupRuleReads(category.readBy);
         setNotice(
           !enabled && readers.length > 0
-            ? { intent: 'warning', text: `${category.name} is Off. ${offEffect(category.name, readers.map(r => r.policyCode))}` }
+            ? {
+                intent: 'warning',
+                text: `${category.name} is Off. ${offEffect(
+                  category.name,
+                  readers.map(r => r.policyCode)
+                )}`,
+              }
             : { intent: 'success', text: `${category.name} is ${enabled ? 'On' : 'Off'}.` }
         );
       } catch (err) {
@@ -162,7 +182,10 @@ export const ClassificationArea: React.FC<ClassificationAreaProps> = ({ service 
         setNotice({ intent: 'success', text: `${values.name} was saved.` });
       } else {
         await service.create(values);
-        setNotice({ intent: 'success', text: `${values.name} was created Off. Turn it On when its guidance reads right.` });
+        setNotice({
+          intent: 'success',
+          text: `${values.name} was created Off. Turn it On when its guidance reads right.`,
+        });
       }
       if (alive.current) setForm(null);
       await load();
@@ -207,8 +230,8 @@ export const ClassificationArea: React.FC<ClassificationAreaProps> = ({ service 
             Triage categories
           </Text>
           <Text className={styles.muted}>
-            The categories the classifier chooses from. A change here applies to the next email classified. Recall floor:{' '}
-            {data.recallFloor.percent}% on at least {data.recallFloor.minItems} labelled items.
+            The categories the classifier chooses from. A change here applies to the next email classified. Recall
+            floor: {data.recallFloor.percent}% on at least {data.recallFloor.minItems} labelled items.
           </Text>
         </div>
         {form === null && (
@@ -260,14 +283,16 @@ export const ClassificationArea: React.FC<ClassificationAreaProps> = ({ service 
       {!data.referencesAvailable && (
         <MessageBar intent="warning" data-testid="classification-references-unavailable">
           <MessageBarBody>
-            Which rules read each category could not be checked, so an empty list below does not mean no rule reads it. A category
-            cannot be renamed until it can be checked.
+            Which rules read each category could not be checked, so an empty list below does not mean no rule reads it.
+            A category cannot be renamed until it can be checked.
           </MessageBarBody>
         </MessageBar>
       )}
       {!data.volumeAvailable && (
         <MessageBar intent="warning" data-testid="classification-volume-unavailable">
-          <MessageBarBody>The last {data.volumeWindowDays} days could not be counted; volumes show a dash.</MessageBarBody>
+          <MessageBarBody>
+            The last {data.volumeWindowDays} days could not be counted; volumes show a dash.
+          </MessageBarBody>
         </MessageBar>
       )}
 
@@ -291,13 +316,15 @@ export const ClassificationArea: React.FC<ClassificationAreaProps> = ({ service 
         <Table aria-label="Triage categories" data-testid="classification-table">
           <TableHeader>
             <TableRow>
-              <TableHeaderCell>Category</TableHeaderCell>
-              <TableHeaderCell>On / Off</TableHeaderCell>
-              <TableHeaderCell>Guidance</TableHeaderCell>
-              <TableHeaderCell>Read by</TableHeaderCell>
-              <TableHeaderCell className={styles.numeric}>Last {data.volumeWindowDays} days</TableHeaderCell>
-              <TableHeaderCell>Recall</TableHeaderCell>
-              <TableHeaderCell />
+              <TableHeaderCell className={styles.col0}>Category</TableHeaderCell>
+              <TableHeaderCell className={styles.col1}>On / Off</TableHeaderCell>
+              <TableHeaderCell className={styles.col2}>Guidance</TableHeaderCell>
+              <TableHeaderCell className={styles.col3}>Read by</TableHeaderCell>
+              <TableHeaderCell className={mergeClasses(styles.col4, styles.numeric)}>
+                Last {data.volumeWindowDays} days
+              </TableHeaderCell>
+              <TableHeaderCell className={styles.col5}>Recall</TableHeaderCell>
+              <TableHeaderCell className={styles.col6} />
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -339,14 +366,15 @@ const CategoryRow: React.FC<CategoryRowProps> = ({ category, floor, busy, formOp
   const recall = describeRecall(category.recall, floor);
   const readers = groupRuleReads(category.readBy);
   const guidance = category.guidance ?? '';
-  const preview = guidance.length > GUIDANCE_PREVIEW_LENGTH ? `${guidance.slice(0, GUIDANCE_PREVIEW_LENGTH)}...` : guidance;
+  const preview =
+    guidance.length > GUIDANCE_PREVIEW_LENGTH ? `${guidance.slice(0, GUIDANCE_PREVIEW_LENGTH)}...` : guidance;
 
   return (
     <TableRow data-testid={`classification-row-${category.id}`}>
-      <TableCell>
+      <TableCell className={styles.col0}>
         <Text weight="semibold">{category.name}</Text>
       </TableCell>
-      <TableCell>
+      <TableCell className={styles.col1}>
         <Switch
           checked={category.enabled}
           disabled={busy || formOpen}
@@ -356,7 +384,7 @@ const CategoryRow: React.FC<CategoryRowProps> = ({ category, floor, busy, formOp
           data-testid={`classification-toggle-${category.id}`}
         />
       </TableCell>
-      <TableCell>
+      <TableCell className={styles.col2}>
         {guidance === '' ? (
           <Text className={styles.muted}>No guidance</Text>
         ) : (
@@ -365,13 +393,17 @@ const CategoryRow: React.FC<CategoryRowProps> = ({ category, floor, busy, formOp
           </Tooltip>
         )}
       </TableCell>
-      <TableCell>
+      <TableCell className={styles.col3}>
         {readers.length === 0 ? (
           <Text className={styles.muted}>No rule</Text>
         ) : (
           <div className={styles.rules} data-testid={`classification-readers-${category.id}`}>
             {readers.map(r => (
-              <Tooltip key={r.policyId} content={`${r.policyName ?? r.policyCode}: ${r.versions}`} relationship="description">
+              <Tooltip
+                key={r.policyId}
+                content={`${r.policyName ?? r.policyCode}: ${r.versions}`}
+                relationship="description"
+              >
                 <Text>
                   {r.policyCode}
                   {r.policyEnabled ? '' : ' (Off)'}
@@ -381,10 +413,10 @@ const CategoryRow: React.FC<CategoryRowProps> = ({ category, floor, busy, formOp
           </div>
         )}
       </TableCell>
-      <TableCell className={styles.numeric}>
+      <TableCell className={mergeClasses(styles.col4, styles.numeric)}>
         <Text data-testid={`classification-volume-${category.id}`}>{describeVolume(category.volume30Days)}</Text>
       </TableCell>
-      <TableCell>
+      <TableCell className={styles.col5}>
         <div className={styles.cellStack} data-testid={`classification-recall-${category.id}`}>
           <div className={styles.badgeRow}>
             <StatusBadge label={recall.label} tone={recall.tone} />
@@ -397,8 +429,13 @@ const CategoryRow: React.FC<CategoryRowProps> = ({ category, floor, busy, formOp
           )}
         </div>
       </TableCell>
-      <TableCell>
-        <Button size="small" onClick={onEdit} aria-label={`Edit ${category.name}`} data-testid={`classification-edit-${category.id}`}>
+      <TableCell className={styles.col6}>
+        <Button
+          size="small"
+          onClick={onEdit}
+          aria-label={`Edit ${category.name}`}
+          data-testid={`classification-edit-${category.id}`}
+        >
           Edit
         </Button>
       </TableCell>

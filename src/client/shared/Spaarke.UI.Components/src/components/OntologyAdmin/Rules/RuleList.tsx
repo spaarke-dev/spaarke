@@ -53,8 +53,10 @@ export interface RuleListProps {
   onNewRule?: () => void;
 }
 
-// Column widths as flex ratios (the Fluent Table lays its rows out as flex rows): rule, lane, on/off, version, open items, last fired, action rate.
-const COLUMN_GROW = [2.2, 0.8, 0.8, 0.7, 0.9, 1.4, 1.6] as const;
+// Column widths as percentages of the table. The Fluent Table is a native fixed-layout table here (display: table, table-layout: fixed), so
+// the width on a header cell sets the column and a flex-grow ratio does nothing: the columns were all equal and the Rule column got
+// ~120 px. Order: rule, lane, on/off, version, open items, last fired, action rate. Sums to 100.
+const COLUMN_WIDTH = ['29%', '8%', '10%', '7%', '9%', '17%', '20%'] as const;
 
 const useStyles = makeStyles({
   root: {
@@ -74,23 +76,29 @@ const useStyles = makeStyles({
     cursor: 'pointer',
     ':hover': { backgroundColor: tokens.colorNeutralBackground1Hover },
   },
-  col0: { flexGrow: COLUMN_GROW[0], flexShrink: 1, flexBasis: 0, minWidth: 0 },
-  col1: { flexGrow: COLUMN_GROW[1], flexShrink: 1, flexBasis: 0, minWidth: 0 },
-  col2: { flexGrow: COLUMN_GROW[2], flexShrink: 1, flexBasis: 0, minWidth: 0 },
-  col3: { flexGrow: COLUMN_GROW[3], flexShrink: 1, flexBasis: 0, minWidth: 0 },
-  col4: { flexGrow: COLUMN_GROW[4], flexShrink: 1, flexBasis: 0, minWidth: 0 },
-  col5: { flexGrow: COLUMN_GROW[5], flexShrink: 1, flexBasis: 0, minWidth: 0 },
-  col6: { flexGrow: COLUMN_GROW[6], flexShrink: 1, flexBasis: 0, minWidth: 0 },
+  col0: { width: COLUMN_WIDTH[0] },
+  col1: { width: COLUMN_WIDTH[1] },
+  col2: { width: COLUMN_WIDTH[2] },
+  col3: { width: COLUMN_WIDTH[3] },
+  col4: { width: COLUMN_WIDTH[4] },
+  col5: { width: COLUMN_WIDTH[5] },
+  col6: { width: COLUMN_WIDTH[6] },
   retired: {
     color: tokens.colorNeutralForeground3,
   },
+  // The cell stays a normal table cell: Fluent gives it a 44 px height that a table row treats as a minimum. Never put `display: flex` or
+  // `overflow: hidden` on the cell itself (that made the height hard and clipped a two-line name, task 201). Rows grow to fit, with
+  // vertical padding from the spacing tokens, and a long unbroken code wraps.
   cell: {
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
+    overflowWrap: 'anywhere',
+    paddingTop: tokens.spacingVerticalS,
+    paddingBottom: tokens.spacingVerticalS,
   },
+  // Stacks the code over the name (or the action rate over its badge) INSIDE the cell.
   stack: {
     display: 'flex',
     flexDirection: 'column',
+    rowGap: tokens.spacingVerticalXXS,
     minWidth: 0,
   },
   muted: {
@@ -187,7 +195,9 @@ export const RuleList: React.FC<RuleListProps> = ({ service, onOpen, onNewRule }
                 <TableHeaderCell className={styles.col3}>Version</TableHeaderCell>
                 <TableHeaderCell className={styles.col4}>Open items</TableHeaderCell>
                 <TableHeaderCell className={styles.col5}>{lastFiredLabel(list.lastFiredWindowDays)}</TableHeaderCell>
-                <TableHeaderCell className={styles.col6}>Action rate ({list.actionRateWindowDays} days)</TableHeaderCell>
+                <TableHeaderCell className={styles.col6}>
+                  Action rate ({list.actionRateWindowDays} days)
+                </TableHeaderCell>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -200,13 +210,15 @@ export const RuleList: React.FC<RuleListProps> = ({ service, onOpen, onNewRule }
                   onClick={() => onOpen(rule.policyId)}
                   data-testid={`rule-row-${rule.code}`}
                 >
-                  <TableCell className={mergeClasses(styles.col0, styles.cell, styles.stack)}>
-                    <Link as="button" aria-label={`Open ${rule.code}`} data-testid={`rule-open-${rule.code}`}>
-                      <Text weight="semibold">{rule.code}</Text>
-                    </Link>
-                    <Text size={200} className={styles.muted}>
-                      {rule.headline ?? rule.name}
-                    </Text>
+                  <TableCell className={mergeClasses(styles.col0, styles.cell)}>
+                    <div className={styles.stack} data-stack>
+                      <Link as="button" aria-label={`Open ${rule.code}`} data-testid={`rule-open-${rule.code}`}>
+                        <Text weight="semibold">{rule.code}</Text>
+                      </Link>
+                      <Text size={200} className={styles.muted}>
+                        {rule.headline ?? rule.name}
+                      </Text>
+                    </div>
                   </TableCell>
                   <TableCell className={mergeClasses(styles.col1, styles.cell)} data-testid="rule-lane">
                     <Text>{rule.lane}</Text>
@@ -227,11 +239,15 @@ export const RuleList: React.FC<RuleListProps> = ({ service, onOpen, onNewRule }
                       {describeLastFired(rule.metrics, list.metricsAvailability, list.lastFiredWindowDays)}
                     </Text>
                   </TableCell>
-                  <TableCell className={mergeClasses(styles.col6, styles.cell, styles.stack)} data-testid="rule-action-rate">
-                    <Text size={200} className={list.metricsAvailability.actionRate ? undefined : styles.muted}>
-                      {describeActionRate(rule.metrics, list.minimumJudged, list.metricsAvailability)}
-                    </Text>
-                    {rule.metrics.needsALook ? <StatusBadge label="Needs a look" tone={severityTone('Warning')} /> : null}
+                  <TableCell className={mergeClasses(styles.col6, styles.cell)} data-testid="rule-action-rate">
+                    <div className={styles.stack} data-stack>
+                      <Text size={200} className={list.metricsAvailability.actionRate ? undefined : styles.muted}>
+                        {describeActionRate(rule.metrics, list.minimumJudged, list.metricsAvailability)}
+                      </Text>
+                      {rule.metrics.needsALook ? (
+                        <StatusBadge label="Needs a look" tone={severityTone('Warning')} />
+                      ) : null}
+                    </div>
                   </TableCell>
                 </TableRow>
               ))}
