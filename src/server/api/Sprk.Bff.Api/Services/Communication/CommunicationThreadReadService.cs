@@ -242,14 +242,21 @@ public sealed class CommunicationThreadReadService
     /// (incremental poll). Returns an EMPTY result (never 404) when the caller can see no messages — a 404 would
     /// leak the existence of a private thread (NFR-06); "none visible" and "does not exist" are intentionally
     /// indistinguishable to the client.
+    /// <para>fm task 056. Each message carries <see cref="ThreadMessageDto.PrivateContext"/>, the record it is about as the
+    /// caller may see it (<see cref="ReadPrivateContextNamesAsync"/>). <paramref name="about"/> (<c>{table}:{id}</c>, parsed by
+    /// <see cref="PrivateContextColumns.TryParseAbout"/>; malformed is a 400) narrows the page to the caller's private messages
+    /// about that record (<see cref="AboutMessageFilter"/>), still impersonated: row security decides who reads, the filter
+    /// only narrows what is shown.</para>
     /// </summary>
     public async Task<ThreadReadResult> ReadThreadAsync(
         Guid threadId,
         ClaimsPrincipal? caller,
         DateTimeOffset? since,
         int? top,
-        CancellationToken ct)
+        CancellationToken ct,
+        string? about = null)
     {
+        var aboutRecord = ParseAbout(about);
         var callerSystemUserId = await ResolveCallerOrThrowAsync(caller, ct);
         var pageSize = NormalizePageSize(top);
 
@@ -271,13 +278,19 @@ public sealed class CommunicationThreadReadService
             // annotation (the impersonated query requests annotations; ParseMessageRow reads it) — messaging-r3 2026-07-22.
             DirectionField, SentByValue, CreatedByValue,
             SentAtField, CreatedOnField, InReplyToField, InternalOnlyField, PrivilegeField, IsPrivateField,
-        });
+        }.Concat(PrivateContextSelect));
         var filter = new StringBuilder($"{ThreadLookupValue} eq {threadId} and {ActiveOnlyClause}");
         if (since is { } s)
             filter.Append($" and {CreatedOnField} gt {FormatOData(s)}");
+        if (aboutRecord is { } narrowTo)
+            filter.Append($" and {AboutMessageFilter(narrowTo.Table, narrowTo.Id, callerSystemUserId)}");
 
         var odata = $"$select={select}&{CreatedByExpand}&$filter={filter}&$orderby={CreatedOnField} asc&$top={pageSize}";
         var rows = await _query.QueryAsync(CommunicationSet, odata, callerSystemUserId, ct);
+
+        // fm task 056: the about filter is re-checked on every returned row, so a query that drifted cannot widen the page.
+        if (aboutRecord is { } recheck)
+            rows = rows.Where(r => IsAboutForCaller(r, recheck.Table, recheck.Id, callerSystemUserId)).ToList();
 
         // 2) Apply the SHARED internal-only + privilege filter on top of the already-scoped rows. Hardcoding internal made
         // CommunicationAccessFilter treat every caller as internal, so an external-licensed systemuser could read
@@ -296,7 +309,11 @@ public sealed class CommunicationThreadReadService
         var attachmentsByMessage = await LoadAttachmentsAsync(
             visible.Select(v => v.Parsed.MessageId).ToList(), callerSystemUserId, ct);
 
-        var messages = visible.Select(v => BuildDto(v.Parsed, v.Decision, attachmentsByMessage)).ToList();
+        // fm task 056: the records the visible messages are about, read AS THE CALLER (one batched read per table).
+        var contextNames = await ReadPrivateContextNamesAsync(
+            visible.Select(v => v.Parsed.PrivateContext).OfType<(string Table, Guid Id)>().ToList(), callerSystemUserId, ct);
+
+        var messages = visible.Select(v => BuildDto(v.Parsed, v.Decision, attachmentsByMessage, contextNames)).ToList();
 
         // Thread label (R3 task 002 / FR-18): one bounded IMPERSONATED projection on sprk_communicationthread by id.
         // Impersonated, so a caller who cannot see the thread record gets null — no existence leak (fail closed).
@@ -883,6 +900,10 @@ public sealed class CommunicationThreadReadService
     /// the impersonated-query seam does not surface the <c>@odata.nextLink</c> skiptoken): <paramref name="pageToken"/>
     /// is the opaque base64 cursor returned by the previous page, decoded to a <c>createdon lt …</c> lower bound — so
     /// pages are stable and non-overlapping. A malformed token is a 400 (ADR-019).</para>
+    /// <para><b>fm task 056, <paramref name="about"/>.</b> With <c>kind=direct</c> only (any other kind is a 400, as is a
+    /// malformed value): the caller's pair threads that hold at least one of the caller's private messages about that record
+    /// (<see cref="ReadThreadsWithPrivateMessagesAboutAsync"/>). The same query, paging and 1:1 narrowing as <c>kind=direct</c>,
+    /// with one more clause naming those threads; without <paramref name="about"/> the query is unchanged.</para>
     /// </summary>
     public async Task<ThreadListResult> ListThreadsAsync(
         ClaimsPrincipal? caller,
@@ -890,9 +911,13 @@ public sealed class CommunicationThreadReadService
         int? top,
         string? pageToken,
         CancellationToken ct,
-        string? kind = null)
+        string? kind = null,
+        string? about = null)
     {
         var directOnly = ParseThreadListKind(kind);
+        var aboutRecord = ParseAbout(about);
+        if (aboutRecord is not null && !directOnly)
+            throw BadRequest("about is valid only with kind=direct.");
         if (directOnly && (_entities is null || _recordShares is null))
         {
             // Fail closed: without the pair check the Messages list is not served at all (never a wider list).
@@ -907,6 +932,7 @@ public sealed class CommunicationThreadReadService
         var pageSize = NormalizeThreadListPageSize(top);
         if (directOnly)
             pageSize = Math.Min(pageSize, MaxDirectThreadListPage);
+        var isExternal = await _identityResolver.IsExternalAsync(callerSystemUserId, ct);
 
         // Build the filter: NO regarding scoping (record-less inclusion) + optional name search + keyset cursor.
         // Active-only (round-8): deactivated (soft-deleted) threads must drop out of the list.
@@ -918,9 +944,22 @@ public sealed class CommunicationThreadReadService
             clauses.Add($"{ThreadTypeField} eq {ThreadTypeDirectValue}");
             clauses.AddRange(ThreadRegardingFields.Select(x => $"_{x.RegardingField}_value eq null"));
         }
+
+        if (aboutRecord is { } record)
+        {
+            // fm task 056: only the threads that hold one of the caller's private messages about the record. The page token
+            // is validated first, so a malformed one is a 400 whether or not any thread qualifies.
+            DecodePageToken(pageToken);
+            var aboutThreads = await ReadThreadsWithPrivateMessagesAboutAsync(
+                record.Table, record.Id, callerSystemUserId, isExternal, ct);
+            if (aboutThreads.Count == 0)
+                return new ThreadListResult(Array.Empty<ThreadListItem>(), 0, null, false);
+            clauses.Add("(" + string.Join(" or ", aboutThreads.Select(id => $"{ThreadPkField} eq {id}")) + ")");
+        }
+
         // Fix round 6 (F1): an external caller lists only EXPLICITLY Open threads. The clause is part of the query's
         // $filter, so $top, the over-fetch row and the keyset next-page token are all computed over visible threads.
-        if (await _identityResolver.IsExternalAsync(callerSystemUserId, ct))
+        if (isExternal)
             clauses.Add(CommunicationOpenThreadGate.OpenOnlyThreadFilterClause);
         if (!string.IsNullOrWhiteSpace(search))
         {
@@ -1495,7 +1534,8 @@ public sealed class CommunicationThreadReadService
     private static ThreadMessageDto BuildDto(
         ParsedMessage parsed,
         CommunicationAccessDecision decision,
-        IReadOnlyDictionary<Guid, IReadOnlyList<ThreadAttachmentRef>> attachmentsByMessage)
+        IReadOnlyDictionary<Guid, IReadOnlyList<ThreadAttachmentRef>> attachmentsByMessage,
+        IReadOnlyDictionary<(string Table, Guid Id), string?>? contextNames = null)
         => new(
             MessageId: parsed.MessageId,
             Body: parsed.Body,
@@ -1520,7 +1560,12 @@ public sealed class CommunicationThreadReadService
             Attachments: attachmentsByMessage.TryGetValue(parsed.MessageId, out var atts)
                 ? atts
                 : Array.Empty<ThreadAttachmentRef>(),
-            CreatedByContactId: parsed.CreatedByContactId);
+            CreatedByContactId: parsed.CreatedByContactId,
+            // fm task 056: shown only for a record the caller's own read returned (contextNames holds only those).
+            PrivateContext: parsed.PrivateContext is { } context && contextNames is not null
+                && contextNames.TryGetValue(context, out var contextName)
+                    ? new MessagePrivateContext(context.Table, context.Id, contextName)
+                    : null);
 
     private sealed record VisibleMessage(Guid ThreadId, ThreadMessageDto Dto);
 
@@ -1777,6 +1822,201 @@ public sealed class CommunicationThreadReadService
     private static readonly IReadOnlyDictionary<Guid, IReadOnlyList<ThreadAttachmentRef>> EmptyAttachments =
         new Dictionary<Guid, IReadOnlyList<ThreadAttachmentRef>>();
 
+    // ── private messages in a record's context (fm task 056) ───────────────────────────────────────
+    //
+    // A private message is a Direct message that also names ONE core record it is about (PrivateContextColumns). The reference
+    // decides where the message is SHOWN to its two participants; it never decides who reads it: every read here is
+    // impersonated, so row security decides who reads, and the filters below only narrow what is shown. These are the only
+    // reads of the reference columns (ArchTest PrivateContextColumnGuardTests).
+
+    /// <summary>The Web API value column of a Direct message's stamped recipient.</summary>
+    private const string DirectRecipientValue = "_" + DirectMessageRecipient.RecipientColumn + "_value";
+
+    /// <summary>Every typed regarding value column of <c>sprk_communication</c>. A message with any of them set is filed: an
+    /// ordinary record message, whose reference is ignored.</summary>
+    private static readonly IReadOnlyList<string> MessageRegardingValueColumns =
+        RegardingFieldMap.AllRegardingFields.Select(f => $"_{f}_value").ToArray();
+
+    /// <summary>Each referenced table and the Web API value column of its reference, in a fixed order.</summary>
+    private static readonly IReadOnlyList<(string Table, string ValueColumn)> PrivateContextValueColumns =
+        PrivateContextColumns.ColumnByTable
+            .OrderBy(c => c.Key, StringComparer.Ordinal)
+            .Select(c => (c.Key, $"_{c.Value}_value"))
+            .ToArray();
+
+    /// <summary>The columns the thread read adds so each message's reference can be shown: the references, the stamped
+    /// recipient and the typed regarding columns (a filed message shows none).</summary>
+    private static readonly IReadOnlyList<string> PrivateContextSelect =
+        PrivateContextValueColumns.Select(c => c.ValueColumn).Append(DirectRecipientValue).Concat(MessageRegardingValueColumns).ToArray();
+
+    /// <summary>Bound on the message scan of an <c>about</c> list (newest first).</summary>
+    private const int MaxAboutMessageScan = MaxRegardingScan;
+
+    /// <summary>Bound on the threads an <c>about</c> list names in its thread query.</summary>
+    private const int MaxAboutThreads = MaxDirectCandidatesPerRequest;
+
+    /// <summary>
+    /// The <c>about</c> query value as a (table, id) pair; <c>null</c> when absent. Parsed by
+    /// <see cref="PrivateContextColumns.TryParseAbout"/>; anything it refuses is a 400 before any read.
+    /// </summary>
+    private static (string Table, Guid Id)? ParseAbout(string? about)
+    {
+        if (about is null)
+            return null;
+        if (!PrivateContextColumns.TryParseAbout(about, out var table, out var id))
+            throw BadRequest("about must be '{table}:{id}' naming a sprk_matter, sprk_project or sprk_workassignment.");
+        return (table, id);
+    }
+
+    /// <summary>
+    /// The <c>$filter</c> of the caller's private messages about one record: the record's reference column names it, the
+    /// caller is the stamped sender or recipient, and every typed regarding column is null (a filed message is an ordinary
+    /// record message). Display narrowing only: the query that carries it is impersonated.
+    /// </summary>
+    internal static string AboutMessageFilter(string table, Guid recordId, Guid callerSystemUserId)
+    {
+        var clauses = new List<string>
+        {
+            $"_{PrivateContextColumns.ColumnByTable[table]}_value eq {recordId}",
+            $"({SentByValue} eq {callerSystemUserId} or {DirectRecipientValue} eq {callerSystemUserId})",
+        };
+        clauses.AddRange(MessageRegardingValueColumns.Select(c => $"{c} eq null"));
+        return string.Join(" and ", clauses);
+    }
+
+    /// <summary>
+    /// The per-row re-check of <see cref="AboutMessageFilter"/>. A column the row does not carry is unreadable, so the row is
+    /// not shown (fail closed).
+    /// </summary>
+    private static bool IsAboutForCaller(Dictionary<string, JsonElement> row, string table, Guid recordId, Guid callerSystemUserId)
+    {
+        var referenceColumn = $"_{PrivateContextColumns.ColumnByTable[table]}_value";
+        return TryGuid(row, referenceColumn) == recordId
+               && (TryGuid(row, SentByValue) == callerSystemUserId || TryGuid(row, DirectRecipientValue) == callerSystemUserId)
+               && CarriesNoTypedRegarding(row);
+    }
+
+    /// <summary>True only when the row carries every typed regarding column and each is null.</summary>
+    private static bool CarriesNoTypedRegarding(Dictionary<string, JsonElement> row) =>
+        MessageRegardingValueColumns.All(c => row.TryGetValue(c, out var v) && v.ValueKind == JsonValueKind.Null);
+
+    /// <summary>
+    /// The record a message row is about: exactly one reference set, every other reference read and null, and no typed
+    /// regarding. <c>null</c> for anything else, including a row that does not carry the columns (fail closed).
+    /// </summary>
+    private static (string Table, Guid Id)? PrivateContextOf(Dictionary<string, JsonElement> row)
+    {
+        (string Table, Guid Id)? found = null;
+        foreach (var (table, valueColumn) in PrivateContextValueColumns)
+        {
+            if (!row.TryGetValue(valueColumn, out var value))
+                return null;
+            if (value.ValueKind == JsonValueKind.Null)
+                continue;
+            if (found is not null || value.ValueKind != JsonValueKind.String
+                || !Guid.TryParse(value.GetString(), out var id) || id == Guid.Empty)
+            {
+                return null;
+            }
+
+            found = (table, id);
+        }
+
+        return found is not null && CarriesNoTypedRegarding(row) ? found : null;
+    }
+
+    /// <summary>
+    /// The display names of <paramref name="records"/> the caller may read: one IMPERSONATED read per table (batched by
+    /// <see cref="CommunicationOpenThreadGate.ChunkSize"/> ids), so a record the caller cannot read is absent from the answer.
+    /// Only records the read returned are in the result (the name may be null). A read that faults leaves that batch out, so
+    /// its messages show no reference; never an app-only fallback.
+    /// </summary>
+    private async Task<IReadOnlyDictionary<(string Table, Guid Id), string?>> ReadPrivateContextNamesAsync(
+        IReadOnlyList<(string Table, Guid Id)> records, Guid callerSystemUserId, CancellationToken ct)
+    {
+        var names = new Dictionary<(string Table, Guid Id), string?>();
+        foreach (var group in records.Distinct().GroupBy(r => r.Table, StringComparer.Ordinal))
+        {
+            var table = group.Key;
+            var idColumn = table + "id";
+            var nameColumn = RegardingNameFields.PrimaryNameField(table);
+            var select = nameColumn is null ? idColumn : $"{idColumn},{nameColumn}";
+            foreach (var chunk in group.Select(r => r.Id).Chunk(CommunicationOpenThreadGate.ChunkSize))
+            {
+                var idClause = string.Join(" or ", chunk.Select(id => $"{idColumn} eq {id}"));
+                var odata = $"$select={select}&$filter=({idClause})&$top={chunk.Length}";
+                try
+                {
+                    var rows = await _query.QueryAsync(
+                        PrivateContextColumns.EntitySetByTable[table], odata, callerSystemUserId, ct);
+                    foreach (var row in rows)
+                    {
+                        if (TryGuid(row, idColumn) is { } id && chunk.Contains(id))
+                            names[(table, id)] = nameColumn is null ? null : TryString(row, nameColumn);
+                    }
+                }
+                catch (OperationCanceledException) when (ct.IsCancellationRequested)
+                {
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(
+                        ex,
+                        "[THREAD-READ] The private-context records could not be read as the caller ({Table}, {Count} record(s)); their messages show no reference.",
+                        table, chunk.Length);
+                }
+            }
+        }
+
+        return names;
+    }
+
+    /// <summary>
+    /// The pair threads that hold at least one of the caller's private messages about one record, newest message first:
+    /// one IMPERSONATED message read (<see cref="AboutMessageFilter"/> plus the active clause, re-checked per row) through the
+    /// shared <see cref="ICommunicationAccessFilter"/>. Bounded by <see cref="MaxAboutMessageScan"/> messages and
+    /// <see cref="MaxAboutThreads"/> threads; the list result has no truncation flag, so a cut is logged.
+    /// </summary>
+    private async Task<IReadOnlyList<Guid>> ReadThreadsWithPrivateMessagesAboutAsync(
+        string table, Guid recordId, Guid callerSystemUserId, bool isExternal, CancellationToken ct)
+    {
+        var referenceColumn = $"_{PrivateContextColumns.ColumnByTable[table]}_value";
+        var select = string.Join(',', new[]
+        {
+            PkField, ThreadLookupValue, InternalOnlyField, PrivilegeField, SentByValue, DirectRecipientValue, referenceColumn,
+        }.Concat(MessageRegardingValueColumns));
+        var odata =
+            $"$select={select}&$filter={AboutMessageFilter(table, recordId, callerSystemUserId)} and {ActiveOnlyClause}" +
+            $"&$orderby={CreatedOnField} desc&$top={MaxAboutMessageScan}";
+        var rows = await _query.QueryAsync(CommunicationSet, odata, callerSystemUserId, ct);
+
+        var parsed = rows
+            .Where(r => IsAboutForCaller(r, table, recordId, callerSystemUserId))
+            .Select(ParseMessageRow)
+            .ToList();
+        var context = new CommunicationAccessContext(CallerSystemUserId: callerSystemUserId, IsInternalUser: !isExternal);
+        var visibleIds = _accessFilter.FilterMessages(context, parsed.Select(p => p.Entity).ToList()).Decisions
+            .Where(d => d.Decision.IsVisible)
+            .Select(d => d.Message.Id)
+            .ToHashSet();
+
+        var threads = parsed
+            .Where(p => visibleIds.Contains(p.MessageId) && p.ThreadId != Guid.Empty)
+            .Select(p => p.ThreadId)
+            .Distinct()
+            .ToList();
+
+        if (rows.Count >= MaxAboutMessageScan || threads.Count > MaxAboutThreads)
+        {
+            _logger.LogWarning(
+                "[LIST-THREADS] The private-message read for {Table} was bounded (messages read={Read}, threads={Threads}, scan cap={Cap}, thread cap={ThreadCap})",
+                table, rows.Count, threads.Count, MaxAboutMessageScan, MaxAboutThreads);
+        }
+
+        return threads.Take(MaxAboutThreads).ToList();
+    }
+
     // ── row parsing ─────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
@@ -1824,6 +2064,7 @@ public sealed class CommunicationThreadReadService
             SentAt = TryDateTimeOffset(row, SentAtField),
             CreatedOn = TryDateTimeOffset(row, CreatedOnField),
             InReplyTo = TryString(row, InReplyToField),
+            PrivateContext = PrivateContextOf(row),
             Entity = entity,
         };
     }
@@ -1865,6 +2106,7 @@ public sealed class CommunicationThreadReadService
         public DateTimeOffset? SentAt { get; init; }
         public DateTimeOffset? CreatedOn { get; init; }
         public string? InReplyTo { get; init; }
+        public (string Table, Guid Id)? PrivateContext { get; init; }
         public required Entity Entity { get; init; }
     }
 
