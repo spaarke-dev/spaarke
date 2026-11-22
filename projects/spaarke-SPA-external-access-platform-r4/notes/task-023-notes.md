@@ -174,13 +174,13 @@ Not measured with the full two-worktree procedure. Reason: the whole BFF change 
 2. `pwsh scripts/Apply-ExternalRecordDocumentsGridConfiguration.ps1 -DataverseUrl <dev> -WhatIf`, then without `-WhatIf`, then `-Verify -RequireRow`.
 3. The SPA that mounts the grid (023c).
 
-Rollback: DELETE the `sprk_gridconfiguration` row by id `286be8b4-f96f-4d5a-b1d5-82fd83ca9693` (nothing references it until the SPA with the grid is deployed; roll the SPA back first if it is). Admission with no row is harmless: the config load misses and the grid falls back to defaults.
+Rollback: DELETE the `sprk_gridconfiguration` row by id `286be8b4-f96f-4d5a-b1d5-82fd83ca9693` (nothing references it until the SPA with the grid is deployed; roll the SPA back first if it is). Admission with no row reads nothing (a not-found, not a widening). Correction (023c review): the grid does NOT fall back to defaults; with no readable row it shows its configuration error and the Documents list shows no rows and no Upload. So the row must exist wherever the SPA with the grid is deployed (D-28 #2963).
 
 ### Uncertain / for the main session
 
 - `configJson` wrapper: the repo file wraps `configJson` with id/name/entity so one file defines the whole row; the worklist precedent hard-codes name and entity in the script. If the bare `sprk_configjson` file is preferred, it is a small change to the script and the test's path expressions.
 - `rowOpen: formDialog`, `refresh` off and `exportExcel` off are my reading of "host-fed grid"; 023c should confirm against the final 023a seam (whether the grid's own Refresh re-calls `rowSource`).
-- `sprk_summary` is not in the repo's `sprk_Document/Entity.xml` snapshot (the BFF DTO reads it, so it exists live). The script and tests do not check it against a schema; `-Verify` does not run the FetchXML (it would read document rows).
+- Correction (023c review): there is no Dataverse column `sprk_summary`. The BFF reads `sprk_filesummary` (`ExternalDataService.cs:158`, `:1024`) and the record-route DTO publishes it under the JSON name `sprk_summary` (`ExternalProjectDtos.cs:173`). The layout cell is named after the DTO key the SPA's rows carry, so it renders without entity metadata. A host on the FetchXML path would need `sprk_filesummary`, which is also not on the documents module's `ReadableColumns`. The script and tests do not check it against a schema; `-Verify` does not run the FetchXML (it would read document rows).
 - The apply script was never run against an environment; its apply paths were exercised only against a stubbed `az` and `Invoke-RestMethod`.
 - Not done by design: POML status, TASK-INDEX, `current-task.md`, commit, push.
 
@@ -206,3 +206,33 @@ Fresh detached worktrees at short paths: `C:\wt23m` = origin/master `bc4565a1b5`
   - PDBs included.
 - **Result:** master 40.603 MB, 191 files; branch 40.603 MB, 191 files. Delta 0.000 MB, file counts match, well under the 60 MB ceiling.
 - **Packages:** none added, so the CVE check is unchanged.
+
+## Task 023c — Documents list on the shared grid (2026-11-22)
+
+**Rigor** FULL; implementer sonnet (POML: sonnet @ xhigh), review opus (one adversarial pass), main session opus.
+
+**What changed**
+- `DocumentLibrary.tsx` renders the list through `<ExternalDataGrid configId={RECORD_DOCUMENTS_GRID}>` (`286be8b4-…`) with `rowSource` (the existing record-route list, one page, `hasMore: false`, `truncated` forwarded), `rowSourceKey` (bumped after upload/delete), `rowActions`, `onRecordAction`, `onRecordOpen`, `truncateWithTooltip`, `rowNoun`. One list read per load; `canCreate` comes from the same response. Projects, matters, work assignments and service requests all use it; ProjectPage too.
+- Actions: Download + Version history hidden only when `hasFile === false` (FR-15); Delete only on the caller's own rows AND when the list's write verdict (`uploadAllowed`, the one that shows Upload) is yes. Hidden, never disabled.
+- ProjectPage now passes `onOpenDocument` through `useOpenRecord`, so a name opens the Document record there as in the record template.
+- D-23 #2928: one `readFromParents` (DocumentLibrary.tsx) serves download and `DocumentPreview`.
+- Removed: the hand-rolled Fluent table, the D-12 width classes (`DocumentLibrary.columns.test.tsx` deleted with them), the SPA `TruncatedListNotice` for this list (the grid's notice with `rowNoun` replaces it and says "1 document").
+- `saveBlobAs` moved to `components/saveBlobAs.ts` (the grid-mount guard refuses `createElement` in a file that mounts the grid); `useAmbientTheme` extracted from `GridWidgetBody.tsx` so both grids share it.
+
+**Shared DataGrid changes in this task (constraint said none — deviation, owner sign-off asked in the PR)**
+1. `3fb134c217`: no selection checkboxes when `selectionMode: 'none'`. Fluent renders an explicitly passed `selectionCell` even when the grid is not selectable, so every such grid (the external workspace widgets and this one) showed dead "Select row" boxes and a header select-all that only fed the footer count. Single/multi grids unchanged. Test `DataGrid.selectionCell.test.tsx` (fails before).
+2. Configuration-load error: the banner says "This list could not be loaded. Try again later." with Try again (the existing `refresh`); the technical detail goes to `console.error`, never the page. `fetchConfigRecord` now warns when the read fails. Test `DataGrid.configLoadError.test.tsx`.
+
+**Review (one adversarial pass, opus)** — findings and outcome
+- F1 config error showed developer text → fixed (2 above). F4 View-only caller saw Delete → fixed. F1 ProjectPage names were dead link-buttons → fixed (opener). F2 wrong comments → fixed. F2 test gaps (summary tooltip, resize) and an invented `sprk_summary` metadata attribute in the harness → fixed. Notes corrected: no row does NOT fall back to defaults; there is no Dataverse column `sprk_summary` (the DTO's JSON name for `sprk_filesummary`).
+- Filed: D-26 #2961 row actions name no row for screen readers (needs a shared `ariaLabel(record)` option); D-27 #2962 workforce role with Create but not Delete is offered Delete (needs a ceiling-aware `canDelete`); D-28 #2963 the config row is not applied by Deploy-Release / provisioning; D-29 #2964 eight sign-in/Teams SPA test files time out in a full run (pass alone; no CI runs the SPA suite). D-25 #2960 follow-on adoption (Invoices section, Events, invoice Files).
+- Known limits (K2): focus return after closing a Document record relies on the stored trigger (Safari/Firefox on macOS do not focus a button on click; fails safe to the dialog); a delete re-reads the list (a failed re-read shows the load-failed banner); no download spinner (a second click during a download is ignored); Delete is hidden where Upload shows only from the `/me` level because the list omitted `canCreate` (old BFF only; fails closed).
+- Declared deviations accepted: static action labels (D-26), the grid footer's "Rows: N" replaces "N documents", the summary is a truncated cell with tooltip (no popover), the empty-state text is the configuration's until task 024.
+
+**Verification**
+- Shared lib: jest DataGrid 19 suites / 172 tests; tsc clean; client-lint ui-components ok.
+- SPA: tsc clean; `npm run build` ok; full vitest 1917/1933 with 16 failures all in the eight D-29 files, which pass 452/452 alone; new/changed tests fail before the fixes and pass after.
+- ArchTests `ExternalSpaGridViewSelectorGuard` 231/231. ADR check (021 Fluent v9 + tokens, 012 additive/callbacks/tests, 051 lazy scroll kept, 028 no bearer headers): clean.
+- Not verifiable here: the live 1000px layout and the configuration row (task 028 applies it, owner go; E2E there).
+
+rework: fix-round-1 task 023c

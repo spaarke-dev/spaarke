@@ -25,6 +25,8 @@ import { FluentProvider, webLightTheme } from '@fluentui/react-components';
 
 const { bffApiCall } = vi.hoisted(() => ({ bffApiCall: vi.fn() }));
 
+vi.mock('../src/services/gridDataverseClient', async () => (await import('./documentsGridHarness')).gridClientModule());
+
 vi.mock('../src/auth/bff-client', async () => {
   const actual = await vi.importActual<typeof import('../src/auth/bff-client')>('../src/auth/bff-client');
   return { ...actual, bffApiCall, getExternalUserContext: () => bffApiCall('/api/v1/external/me') };
@@ -512,7 +514,7 @@ describe('fail closed: no answer = not offered, nothing said', () => {
 
 describe('empty states point at the section action (task 009)', () => {
   it(
-    'a matter whose lists may create and are empty: Documents, Messages and Events each say "above", never toolbar or to-do',
+    'a matter whose lists may create and are empty: Messages and Events say "above", Documents says the shared grid empty state; none mentions toolbar or to-do',
     async () => {
       installNet('matter', { ...all(may()), me: meOf({ writeAccessPerRecord: true }) });
       const dialog = await openRecord('matter');
@@ -521,12 +523,14 @@ describe('empty states point at the section action (task 009)', () => {
       const sectionText = async (section: RecordSectionId, text: RegExp): Promise<string> =>
         (await within(within(dialog).getByTestId(`record-section-${section}`)).findByText(text)).textContent ?? '';
       const texts = {
-        documents: await sectionText('documents', /^No documents have been uploaded/),
+        // Since task 023c the Documents empty state is the shared grid's ("No documents on this record yet."), which does not
+        // point at the section's Upload; task 024 replaces it. It must still never mislead.
+        documents: await sectionText('documents', /^No documents on this record yet/),
         messages: await sectionText('messages', /^No messages yet/),
         tasksEvents: await sectionText('tasksEvents', /^No events have been added/),
       };
       for (const [section, text] of Object.entries(texts)) {
-        expect({ section, says: /\babove\b/.test(text) }).toEqual({ section, says: true });
+        if (section !== 'documents') expect({ section, says: /\babove\b/.test(text) }).toEqual({ section, says: true });
         expect({ section, misleads: /toolbar|to-?do/i.test(text) }).toEqual({ section, misleads: false });
       }
     },
@@ -633,7 +637,7 @@ describe('project: "Your access" is the /me level; a create needs the level and 
 
       await waitFor(() => expect(actionsOf(dialog)).toEqual(['refresh', 'copyLink', 'newMessage']));
       // Every list has answered: the documents empty state and the event row.
-      await within(dialog).findByText(/No documents have been uploaded/);
+      await within(dialog).findByText(/No documents on this record yet/);
       await within(dialog).findByText('Hearing');
       expect(actionsOf(dialog)).toEqual(['refresh', 'copyLink', 'newMessage']);
       for (const name of [/^upload/i, /^add to-do/i, /^add event/i, /^create event/i, /^add task/i]) {

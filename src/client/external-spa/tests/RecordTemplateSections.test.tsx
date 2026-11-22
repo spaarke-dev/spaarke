@@ -42,46 +42,51 @@ vi.mock('@spaarke/ui-components/utils/themeStorage', () => ({
   resolveCodePageTheme: () => null,
   setupCodePageThemeListener: () => () => undefined,
 }));
-vi.mock('../src/services/gridDataverseClient', () => ({ gridDataverseClient: {} }));
+// The Documents list's grid (task 023c) is the REAL grid over a stub client serving its committed configuration; the stand-in
+// below is every other (widget) grid.
+vi.mock('../src/services/gridDataverseClient', async () => (await import('./documentsGridHarness')).gridClientModule());
 
 // The shared grid: reports its rows through `onRecordsLoaded` and opens one through `onRecordOpen` when its primary-name
 // button is clicked — the two callbacks the real grid fires (DataGrid.tsx).
 vi.mock('../src/widgets/ExternalDataGrid', async () => {
   const R = await import('react');
+  const { documentsGridOr } = await import('./documentsGridHarness');
   return {
-    ExternalDataGrid: (props: {
-      configId: string;
-      onRecordsLoaded?: (rows: ReadonlyArray<Record<string, unknown>>) => void;
-      onRecordOpen?: (id: string, row: Record<string, unknown>, ctx: Record<string, unknown>) => void;
-    }) => {
-      const spec = gridSpecs[props.configId];
-      const { onRecordsLoaded } = props;
-      R.useEffect(() => {
-        onRecordsLoaded?.(spec.rows);
-      }, [onRecordsLoaded, spec.rows]);
-      return R.createElement(
-        'ul',
-        { 'data-testid': 'fake-grid' },
-        spec.rows.map(row =>
-          R.createElement(
-            'li',
-            { key: String(row[spec.idAttribute]) },
+    ExternalDataGrid: await documentsGridOr(
+      (props: {
+        configId: string;
+        onRecordsLoaded?: (rows: ReadonlyArray<Record<string, unknown>>) => void;
+        onRecordOpen?: (id: string, row: Record<string, unknown>, ctx: Record<string, unknown>) => void;
+      }) => {
+        const spec = gridSpecs[props.configId];
+        const { onRecordsLoaded } = props;
+        R.useEffect(() => {
+          onRecordsLoaded?.(spec.rows);
+        }, [onRecordsLoaded, spec.rows]);
+        return R.createElement(
+          'ul',
+          { 'data-testid': 'fake-grid' },
+          spec.rows.map(row =>
             R.createElement(
-              'button',
-              {
-                onClick: () =>
-                  props.onRecordOpen?.(String(row[spec.idAttribute]), row, {
-                    configId: props.configId,
-                    entityName: spec.entityName,
-                    selectedIds: [],
-                  }),
-              },
-              String(row[spec.nameAttribute])
+              'li',
+              { key: String(row[spec.idAttribute]) },
+              R.createElement(
+                'button',
+                {
+                  onClick: () =>
+                    props.onRecordOpen?.(String(row[spec.idAttribute]), row, {
+                      configId: props.configId,
+                      entityName: spec.entityName,
+                      selectedIds: [],
+                    }),
+                },
+                String(row[spec.nameAttribute])
+              )
             )
           )
-        )
-      );
-    },
+        );
+      }
+    ),
   };
 });
 
@@ -383,6 +388,7 @@ describe.each(CASES)('$label grid', c => {
     // Messages section into the New message dialog that its section header opens. So the record modal holds no input at all (a
     // stray input anywhere fails), and for an entity with a thread the dialog the section header opens holds exactly one
     // textbox - a textarea - which is not inside the Messages section (it is its own child dialog).
+    // The Documents grid (task 023c) is configured with selectionMode: none, so it draws no selection checkboxes either.
     const inputs = Array.from(dialog.querySelectorAll('input, textarea, select, [role="textbox"]'));
     expect(inputs).toHaveLength(0);
     expect(dialog.querySelectorAll('input[type="file"]')).toHaveLength(0);
@@ -720,7 +726,7 @@ describe('sections', () => {
     fireEvent.click(gridRow(c, 1));
     const dialog = await screen.findByRole('dialog');
 
-    await within(within(dialog).getByTestId('record-detail-documents')).findByText('No Documents');
+    await within(within(dialog).getByTestId('record-detail-documents')).findByText('No documents on this record yet.');
     expect(within(dialog).getByText('No invoices for this record.')).toBeTruthy();
     await within(dialog).findByText(/No events yet/);
     // Task 012: one Events list (a Task is an event type): no separate Tasks list, no to-do read.
@@ -904,7 +910,11 @@ describe('sections', () => {
     fireEvent.click(gridRow(c, 1));
     const dialog = await screen.findByRole('dialog');
     await within(dialog).findByText('Only one');
-    expect(within(dialog).getByTestId('truncated-list-notice').textContent).toContain('This list is incomplete');
+    // The shared grid's own notice (task 023c) replaces the SPA's: singular noun for one row, and it is the only notice.
+    expect(within(dialog).getByTestId('datagrid-truncated-notice').textContent).toContain(
+      'This list is incomplete: only 1 document could be shown'
+    );
+    expect(within(dialog).queryByTestId('truncated-list-notice')).toBeNull();
   });
 
   it('says a rollup failed instead of showing an empty list', async () => {
@@ -923,7 +933,7 @@ describe('sections', () => {
     fireEvent.click(gridRow(c, 1));
     const dialog = await screen.findByRole('dialog');
     await within(dialog).findByText(/Failed to load documents/);
-    expect(within(dialog).queryByText('No Documents')).toBeNull();
+    expect(within(dialog).queryByText('No documents on this record yet.')).toBeNull();
   });
 });
 

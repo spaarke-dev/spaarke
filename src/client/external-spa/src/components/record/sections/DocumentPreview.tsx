@@ -16,8 +16,7 @@
  * bytes are discarded when `blob.size` is over it (`BlobTooLargeError`). An oversize body is never rendered.
  *
  * PARENTS. A document can be filed to several records, so the content route is asked per parent in the BFF's order and moves
- * on only on a 403, the rule of `downloadDocumentFromParents` (DocumentLibrary.tsx; that function saves the file, so this
- * mirrors its loop for a read. Task 023 reworks DocumentLibrary and may hoist the shared loop).
+ * on only on a 403: the one loop the download shares, `readFromParents` (DocumentLibrary.tsx; R4 task 023c, D-23 #2928).
  *
  * LIFETIME. The object URL is revoked when the section unmounts and whenever the shown document (or its parents) changes
  * (record paging); an in-flight read is aborted then too. A late answer for a document no longer shown is dropped.
@@ -27,9 +26,8 @@
 import * as React from 'react';
 import { makeStyles, MessageBar, MessageBarBody, Spinner, Text, tokens } from '@fluentui/react-components';
 import { documentContentPath, type DocumentRoot } from '../../../api/web-api-client';
-import { ApiError } from '../../../types';
 import { BlobTooLargeError, bffApiBlob } from '../../../auth/bff-client';
-import { downloadFailureLogText, downloadFailureMessage } from '../../DocumentLibrary';
+import { downloadFailureLogText, downloadFailureMessage, readFromParents } from '../../DocumentLibrary';
 
 /** Largest file shown inline: 25 MB (owner 2026-11-09). A file of exactly this size is previewed. */
 export const PREVIEW_MAX_BYTES = 26_214_400;
@@ -90,28 +88,15 @@ type PreviewState =
   | { status: 'too-large'; key: string }
   | { status: 'error'; key: string; message: string };
 
-/** Reads the document's bytes through the first parent that allows it: moves on only on 403, any other failure stops. */
-async function readDocumentFromParents(
+/** Reads the document's bytes through the first parent that allows it (`readFromParents`: on only on 403, any other failure stops). */
+function readDocumentFromParents(
   parents: PreviewFile['parents'],
   documentId: string,
   signal: AbortSignal
 ): Promise<Blob> {
-  let lastRefusal: unknown = new Error('No parent record to read the document through.');
-  for (const parent of parents) {
-    try {
-      return await bffApiBlob(
-        documentContentPath(parent.root, parent.id, documentId),
-        { signal },
-        {
-          maxBytes: PREVIEW_MAX_BYTES,
-        }
-      );
-    } catch (err) {
-      if (!(err instanceof ApiError) || err.statusCode !== 403) throw err;
-      lastRefusal = err;
-    }
-  }
-  throw lastRefusal;
+  return readFromParents(parents, parent =>
+    bffApiBlob(documentContentPath(parent.root, parent.id, documentId), { signal }, { maxBytes: PREVIEW_MAX_BYTES })
+  );
 }
 
 const useStyles = makeStyles({

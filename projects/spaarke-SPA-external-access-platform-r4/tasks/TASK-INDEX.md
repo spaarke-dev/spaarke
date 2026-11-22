@@ -30,7 +30,7 @@
 | 023 | Documents with no file + Documents on shared DataGrid (FR-15, FR-16) — split 2026-11-22 into 023a/b/c (owner: shared grid on all record types, B+C+D) | 2 | 🚫 [cancelled] | 018, 022 | — | — |
 | 023a | Shared DataGrid: host row source, row-actions column, truncate-with-tooltip (design notes/task-023-design.md) | 2 | ✅ [done] | none | Group E | opus / high |
 | 023b | External record documents grid configuration + BFF read admission (uac-r2 review) | 2 | ✅ [done] | none | Group E | sonnet / high |
-| 023c | Documents list on the shared grid, all record types + D-23 hoist (FR-15, FR-16) | 2 | 🔲 [open] | 023a, 023b | — | sonnet / xhigh |
+| 023c | Documents list on the shared grid, all record types + D-23 hoist (FR-15, FR-16) | 2 | ✅ [done] | 023a, 023b | — | sonnet / xhigh |
 | 021 | Invoice Files section; remove invoice upload/versions (FR-13) — gated on ebilling routes | 2 | ✅ [done] | 018, 020, 023 | — | sonnet / high |
 | 024 | Shared EmptyState everywhere (FR-17) | 2 | 🔲 [open] | 018, 023c | — | sonnet / high |
 | 028 | P2 deploy (SPA dev) + E2E | 2 | 🔲 [open] | 018, 020, 021, 022, 023c, 024 | — (live) | sonnet / high |

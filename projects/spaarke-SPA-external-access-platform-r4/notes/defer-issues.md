@@ -339,7 +339,7 @@ This under-lists, which fails closed.
 
 **Why it matters.** A change to the parent rule in one copy only makes Preview and Download disagree on which parent serves the file.
 
-**Fix.** Task 023 hoists one `readFromParents(parents, read)` helper used by both (task 022 could not edit `DocumentLibrary.tsx`).
+**Fix.** Task 023 hoists one `readFromParents(parents, read)` helper used by both (task 022 could not edit `DocumentLibrary.tsx`). **Done in task 023c** (2026-11-22): `readFromParents` in `DocumentLibrary.tsx`, used by `downloadDocumentFromParents` and `DocumentPreview`; the 023c PR closes #2928.
 
 ## D-24 — Shared DataGrid: a failed FetchXML page load shows an empty list (#2939)
 
@@ -348,3 +348,44 @@ This under-lists, which fails closed.
 **Why it matters.** Every grid on the FetchXML path (34 consumers) tells a user whose load failed that there are no records, with no retry prompt.
 
 **Fix.** Reuse task 023a's row-error banner for the FetchXML path, with a must-fire / must-not-fire test pair. It was kept out of 023a because it changes visible behaviour for every existing grid. Status: Open.
+
+## D-25 — Move the record Invoices section, Events list and invoice Files onto the shared grid seams (#2960)
+
+**What.** R4 task 023c put the external record Documents list on the shared DataGrid through the new host seams (rowSource, rowActions, truncateWithTooltip, rowNoun; task 023a). The record Invoices section, the Events list and the invoice Files list still use hand-rolled Fluent tables, so they lack column resize and ellipsis + tooltip, and each keeps its own width rules.
+
+**Why it matters.** Long names and summaries in those lists stay truncated with no way to read them, and columns overlap at narrow widths, the same faults #2490 fixed for Documents.
+
+**Fix.** One grid configuration per list (like config/external-record-documents.gridconfiguration.json plus its apply script and BFF id admission), rows from the existing record routes as rowSource, actions as rowActions. Status: Open. Issue: https://github.com/spaarke-dev/spaarke/issues/2960 (board Type=Idea).
+
+## D-26 — Shared grid row actions do not name their row for screen readers (#2961)
+
+**What.** The shared DataGrid row-actions column (RowActionsCell.tsx, R4 task 023a) labels each button with the static action label. In the external Documents list every row has "Download", "Version history" and "Delete" buttons with the same accessible name. Before task 023c they were "Download <document name>".
+
+**Why it matters.** A screen-reader user moving by buttons, or reading the buttons list, hears N identical "Download, button" entries and cannot tell which document each acts on.
+
+**Fix.** Let DataGridRowAction take an optional ariaLabel(record) function (the tooltip keeps the short label); the Documents list passes "Download <name>". Additive, with a must-fire / must-not-fire test. Status: Open. Issue: https://github.com/spaarke-dev/spaarke/issues/2961 (board Type=Bug).
+
+## D-27 — External Documents: Delete is offered to a workforce user whose role cannot delete documents (#2962)
+
+**What.** The external Documents list shows Delete on the caller's own rows when the list grants write (canCreate). For a workforce caller the server also applies the workforce role ceiling per privilege (WorkforceRoleCeilingGate), so a role with Create but not Delete on sprk_document gets a Delete that the server refuses.
+
+**Why it matters.** An offered action answers 403, which breaks the R4 rule that no action the UI offers may answer 403 (FR-07).
+
+**Fix.** The documents list answers a ceiling-aware canDelete beside canCreate; the SPA shows Delete only when it is true. Needs UAC review (uac-r2). Status: Open. Issue: https://github.com/spaarke-dev/spaarke/issues/2962 (board Type=Bug).
+
+## D-28 — The external record Documents grid configuration is not applied by the release or provisioning path (#2963)
+
+**What.** Since R4 task 023c the external record Documents list needs grid configuration 286be8b4-f96f-4d5a-b1d5-82fd83ca9693 in Dataverse. It is applied by scripts/Apply-ExternalRecordDocumentsGridConfiguration.ps1, which nothing runs automatically. Deploy-Release.ps1 already runs Apply-WorklistGridConfiguration.ps1 for the worklist grid, but not this one.
+
+**Why it matters.** In any environment where the row was not applied by hand (a newly provisioned customer), every record's Documents section shows a load error and no Upload.
+
+**Fix.** Add the apply + -Verify -RequireRow step to Deploy-Release.ps1 next to the worklist one, and to the customer provisioning run. Status: Open. Issue: https://github.com/spaarke-dev/spaarke/issues/2963 (board Type=Bug).
+
+## D-29 — external-spa test suite: eight sign-in and Teams test files time out in a full run (#2964)
+
+**What.** In a full vitest run of src/client/external-spa, tests in invite-code, workforce-auth, workforce-home-auth, no-mock-identity, teams-home-auth, teams-real-msal, InvoiceSubmitPage and DocumentUploadPage.externalUpload intermittently fail after about 86 s. The same eight files pass 452/452 when run on their own. Seen twice on 2026-11-22 (R4 task 023c); not established whether it predates 023c. No CI workflow runs this suite (deploy-external-spa.yml only builds).
+
+**Why it matters.** A full local run is red for reasons unrelated to the change under test, so a real failure in those files can be dismissed as the known flake, and nothing in CI catches it.
+
+**Fix.** Find the slow shared setup (likely dynamic MSAL/app imports under worker contention): raise those files' timeout or isolate them (poolOptions / sequence), then add the suite to a CI job. Status: Open. Issue: https://github.com/spaarke-dev/spaarke/issues/2964 (board Type=Bug).
+

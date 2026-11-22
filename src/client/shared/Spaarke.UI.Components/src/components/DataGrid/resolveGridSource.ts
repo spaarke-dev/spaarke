@@ -38,8 +38,10 @@ export async function fetchConfigRecord(
       return null;
     }
     return parsed;
-  } catch {
-    // configId not found, OR Xrm threw — graceful fallthrough.
+  } catch (err) {
+    // configId not found, OR Xrm threw — graceful fallthrough (logged, so a failed read is not mistaken for "no config").
+    // eslint-disable-next-line no-console
+    console.warn(`[DataGrid] sprk_gridconfiguration read failed for configId=${configId}:`, err);
     return null;
   }
 }
