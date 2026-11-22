@@ -15,7 +15,7 @@
 | Field | Value |
 |---|---|
 | **Status** | Open |
-| **Urgency** | soon (every first H13 after a BFF deploy on S1; workaround: resume) |
+| **Urgency** | now (every H13 within ~30–45 min of a BFF deploy on S1 fails; workaround: wait for the plan CPU to settle, then resume) |
 | **Filed** | 2026-11-22 |
 | **Source** | ACME upgrade run `3b6f7b65`: H13 failed `h13-extended-validation-inconclusive` (keyless-proof: no answer within 90 s) |
 | **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2970 |
@@ -27,7 +27,14 @@ H9 finished the swap at 19:22:07Z, and the new production BFF process had starte
 - the `openai-chat` probe timed out after 36 s, over its 30 s cap, although the OpenAI call itself returned 200 in 1.5 s at 19:24:17Z;
 - the BFF answered at 19:24:40Z, logged as 499.
 
-H13 had given up at `KeylessProofTimeout` (90 s), so the run failed. The isolation census that followed took 45 s and returned Isolated. The owner chose to resume against the warm BFF (2026-11-22).
+H13 had given up at `KeylessProofTimeout` (90 s), so the run failed. The isolation census that followed took 45 s and returned Isolated. The owner chose to resume (2026-11-22).
+
+**Second attempt and corrected cause.** The resume at 19:33:53Z failed the same way: the BFF took 119 s, and `openai-chat` sent its request only 42 ms before its 30 s limit. Redis GETs took 19–20 s and the BFF logged `RedisTimeoutException` with nothing in flight. The process was not cold; the plan was saturated. `sprk-acme-prod-plan` is S1 with 1 worker, running both BFF slots. Its CPU:
+- 24–30% average 15:00–16:30Z;
+- 89–93% for 16:45–17:15Z after the first H9 deploy and swap, back to 32–40% from 17:30Z;
+- 97% at 19:15Z and 85% at 19:30Z after the second, with memory peaking at 97%.
+
+So for about 30–45 minutes after each deploy and swap, every call to the BFF is slow, while `/healthz` still answers in about 2 s. A `/healthz` warm-up check would not catch it.
 
 **Entry-points**
 
@@ -37,9 +44,8 @@ H13 had given up at `KeylessProofTimeout` (90 s), so the run failed. The isolati
 
 **Suggested fix**
 
-- Wait for a warm BFF before the keyless-proof call: `/healthz` fast several times in a row, or the process a few minutes old, within a ceiling.
-- Retry a keyless-proof timeout once after a delay before reporting Inconclusive.
-- Keep the 90 s per-call limit, so a BFF that is really stuck is still reported.
+- H13: treat a keyless-proof timeout as transient, and retry with backoff over up to about 45 minutes before reporting Inconclusive. Keep the 90 s per-call limit, so a BFF that is really stuck is still reported.
+- Stamp sizing: an S1 plan with one worker running both BFF slots saturates for about 30–45 minutes after every deploy. Decide whether stamps need a larger plan, or whether the staging slot should stop after a successful swap. This needs an owner decision; it affects the NFR-04 cost envelope.
 
 **Estimated effort**: 2–3 h with tests.
 
