@@ -50,7 +50,9 @@ namespace Sprk.Bff.Api.Services.Access;
 /// Direct-team message in id order (the backstop that survives a restart). A capped run logs it and carries the rest. A carry past
 /// <see cref="MaxDirectCarried"/> holds the watermark, as a listing or sweep fault does, so the dropped messages are listed again;
 /// a listed message this instance finished after its latest listed change is then skipped (#2731), so a held window re-lists
-/// without re-working what is done, and the carry drains. Writes are
+/// without re-working what is done, and the carry drains. A
+/// capped listing moves the watermark to its last row's (<c>modifiedon</c>, id) key, so rows sharing one instant past the cap are
+/// listed by the next runs (#2745). Writes are
 /// on, like the secure mirror; there is no report-only switch on this job, and no new setting. When the Direct team is not
 /// configured the pass does nothing; when it cannot be resolved it writes nothing and the run is not a success.</para>
 /// </remarks>
@@ -92,6 +94,11 @@ public sealed partial class SecureChildShareReconciliationJob : IScheduledJob
     // sibling jobs keep theirs (ADR-052 §5). A restart loses them; the rolling sweep then reaches every Direct message again.
     private readonly object _directGate = new();
     private DateTimeOffset? _directWatermark;
+
+    // #2745: per listed table, the last row id its listing read AT the watermark's instant (a capped listing that stopped there).
+    // The next listing of that table goes on past (watermark, id), so more changed rows than the cap sharing one modifiedon (stored
+    // to the second: a bulk write) are all listed. Set and cleared only with the watermark; a held run keeps both.
+    private readonly Dictionary<string, Guid> _directAfterId = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<Guid> _directPending = new();
     private Guid? _directSweepCursor;
 
@@ -335,7 +342,8 @@ public sealed partial class SecureChildShareReconciliationJob : IScheduledJob
     /// <summary>
     /// Task 198 Part C — the Direct-team messages: carried, recently changed (the message or a content row), then the rolling
     /// sweep; at most <see cref="MaxDirectMessagesPerRun"/>, each through <see cref="DirectMessageParticipantShares.ReconcileAsync"/>.
-    /// Fix round 1 R4: the listings are ordered by <c>modifiedon</c> and a capped listing moves the watermark only to its last row;
+    /// Fix round 1 R4: the listings are ordered by <c>modifiedon</c> and a capped listing moves the watermark only to its last row
+    /// (#2745: keyed by that row's id per table, so the next listing goes on past it even at the same instant);
     /// <see cref="DirectSweepReserve"/> of every run is the sweep's; a message incomplete <see cref="MaxDirectAttempts"/> runs in a
     /// row is backed off for <see cref="DirectBackoff"/> (an error log each time), so it cannot fill the budget. #2731: the recent
     /// messages are worked oldest change first across every table; the carry keeps the incomplete, then the backed-off, then the
@@ -362,6 +370,7 @@ public sealed partial class SecureChildShareReconciliationJob : IScheduledJob
         Guid? sweepAfter;
         Dictionary<Guid, (int Failures, DateTimeOffset? RetryAt)> attempts;
         Dictionary<Guid, DateTimeOffset> finishedAt;
+        Dictionary<string, Guid> afterIds;
         lock (_directGate)
         {
             // #2709: the first run's window start is stored before anything can fail. A run that holds the watermark (a
@@ -373,6 +382,7 @@ public sealed partial class SecureChildShareReconciliationJob : IScheduledJob
             sweepAfter = _directSweepCursor;
             attempts = new Dictionary<Guid, (int, DateTimeOffset?)>(_directAttempts);
             finishedAt = new Dictionary<Guid, DateTimeOffset>(_directFinishedAt);
+            afterIds = new Dictionary<string, Guid>(_directAfterId, StringComparer.OrdinalIgnoreCase);
         }
 
         // The Direct team, by its RESOLVED id only (K3: a refusal carries no id and lists nothing).
@@ -412,7 +422,7 @@ public sealed partial class SecureChildShareReconciliationJob : IScheduledJob
         // latest change decides whether a message this instance already finished needs working again (below).
         var firstChange = new Dictionary<Guid, DateTimeOffset>();
         var lastChange = new Dictionary<Guid, DateTimeOffset>();
-        var horizons = new List<DateTimeOffset?>();
+        var cappedAt = new List<(string Table, DateTimeOffset? Horizon, Guid LastId)>();
         string? failure = null;
         try
         {
@@ -420,7 +430,8 @@ public sealed partial class SecureChildShareReconciliationJob : IScheduledJob
             listings.AddRange(DirectMessageParticipantShares.ContentRows.Select(c => (c.Table, (string?)c.MessageLookup)));
             foreach (var (table, messageLookup) in listings)
             {
-                var (rows, horizon, capped) = await ListAsync(dataverse, table, messageLookup, team, since, ct).ConfigureAwait(false);
+                var (rows, horizon, lastId, capped) = await ListAsync(dataverse, table, messageLookup, team, since,
+                    afterIds.TryGetValue(table, out var afterId) ? afterId : null, ct).ConfigureAwait(false);
                 foreach (var (id, changedAt) in rows)
                 {
                     // A row without modifiedon (Dataverse always returns it) is the earliest change for ordering and the latest
@@ -434,7 +445,7 @@ public sealed partial class SecureChildShareReconciliationJob : IScheduledJob
                 }
 
                 if (capped)
-                    horizons.Add(horizon);
+                    cappedAt.Add((table, horizon, lastId));
             }
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
@@ -445,11 +456,11 @@ public sealed partial class SecureChildShareReconciliationJob : IScheduledJob
         }
 
         var recent = firstChange.OrderBy(c => c.Value).ThenBy(c => c.Key).Select(c => c.Key).ToList();
-        var listingCapped = horizons.Count > 0;
+        var listingCapped = cappedAt.Count > 0;
         if (listingCapped)
         {
             _logger.LogWarning("[DIRECT-SHARES] run={RunId}: {Capped} recent-changes listing(s) reached the cap of {Cap}; the watermark " +
-                "moves at most to the last row listed, so the rest is listed by the next runs.", runId, horizons.Count,
+                "moves at most to the last row listed, so the rest is listed by the next runs.", runId, cappedAt.Count,
                 MaxDirectListedPerTable);
         }
 
@@ -580,27 +591,32 @@ public sealed partial class SecureChildShareReconciliationJob : IScheduledJob
             }
         }
 
-        DateTimeOffset? watermark = null;
+        // The watermark moves with its key: per listed table, the last row id already listed at the watermark's instant (#2745).
+        (DateTimeOffset At, Dictionary<string, Guid> AfterIds)? watermark = null;
         if (failure is null && !carryOverflow)
         {
             if (!listingCapped)
             {
-                watermark = startedAt - DirectOverlap;
+                watermark = (startedAt - DirectOverlap, new Dictionary<string, Guid>(StringComparer.OrdinalIgnoreCase));
             }
-            else if (horizons.All(h => h is not null))
+            else if (cappedAt.All(c => c.Horizon is not null))
             {
-                // The capped listings were read oldest change first: everything before the earliest last-row is listed.
-                var horizon = horizons.Min()!.Value;
-                if (horizon <= since)
+                // The capped listings were read in (modifiedon, id) order: everything before the earliest last row is listed, and
+                // at that instant, each listing that stopped there listed every row up to its last row's id. #2745: the next runs
+                // list on from that key, so more rows than the cap sharing one instant are all listed (stepping one tick past the
+                // instant left the rest to the sweep).
+                var horizon = cappedAt.Min(c => c.Horizon!.Value);
+                var nextAfterIds = new Dictionary<string, Guid>(StringComparer.OrdinalIgnoreCase);
+                if (horizon == since)
                 {
-                    // Every listed row of a capped listing carries the window's own start: listing again would return the
-                    // same rows. Step past it; the rolling sweep reaches the rows that share that instant.
-                    horizon = since.AddTicks(1);
-                    _logger.LogWarning("[DIRECT-SHARES] run={RunId}: a capped listing did not move past {Since:o}; the watermark steps " +
-                        "past it, and the sweep reaches the rows changed at that instant.", runId, since);
+                    // The watermark does not move, so a key this run listed from still holds (that listing went past it).
+                    foreach (var (table, afterId) in afterIds)
+                        nextAfterIds[table] = afterId;
                 }
 
-                watermark = horizon;
+                foreach (var (table, _, lastId) in cappedAt.Where(c => c.Horizon == horizon))
+                    nextAfterIds[table] = lastId;
+                watermark = (horizon, nextAfterIds);
             }
         }
 
@@ -619,9 +635,13 @@ public sealed partial class SecureChildShareReconciliationJob : IScheduledJob
                 _directFinishedAt[id] = startedAt;
             foreach (var id in incomplete)
                 _directFinishedAt.Remove(id);
-            if (watermark is { } next)
+            if (watermark is { } moved)
             {
+                var next = moved.At;
                 _directWatermark = next;
+                _directAfterId.Clear();
+                foreach (var (table, afterId) in moved.AfterIds)
+                    _directAfterId[table] = afterId;
 
                 // Every change listed from here on is at or after the watermark, so an entry finished within the overlap of it
                 // can no longer skip anything.
@@ -668,13 +688,15 @@ public sealed partial class SecureChildShareReconciliationJob : IScheduledJob
     /// <summary>
     /// The Direct-team messages changed since <paramref name="since"/>, each with the row's <c>modifiedon</c> (null when the row
     /// carries none): the messages themselves (<paramref name="messageLookup"/> null), or the messages a content table's changed
-    /// rows name — oldest change first, at most
-    /// <see cref="MaxDirectListedPerTable"/> rows. <c>Capped</c> when the cap was reached; <c>Horizon</c> is then the last listed
-    /// row's <c>modifiedon</c> (null when it carries none). A fault propagates (the caller holds the window).
+    /// rows name — in (<c>modifiedon</c>, row id) order, at most <see cref="MaxDirectListedPerTable"/> rows. #2745: with
+    /// <paramref name="afterId"/>, the rows changed AT <paramref name="since"/> are listed only past that row id (this table's
+    /// rows up to it were listed by an earlier run). <c>Capped</c> when the cap was reached; <c>Horizon</c> is then the last
+    /// listed row's <c>modifiedon</c> (null when it carries none) and <c>LastId</c> its own row id. A fault propagates (the
+    /// caller holds the window).
     /// </summary>
-    private static async Task<(List<(Guid Id, DateTimeOffset? ChangedAt)> Rows, DateTimeOffset? Horizon, bool Capped)> ListAsync(
+    private static async Task<(List<(Guid Id, DateTimeOffset? ChangedAt)> Rows, DateTimeOffset? Horizon, Guid LastId, bool Capped)> ListAsync(
         Spaarke.Dataverse.IGenericEntityService dataverse, string table, string? messageLookup, Guid team, DateTimeOffset since,
-        CancellationToken ct)
+        Guid? afterId, CancellationToken ct)
     {
         var query = new Microsoft.Xrm.Sdk.Query.QueryExpression(table)
         {
@@ -686,6 +708,16 @@ public sealed partial class SecureChildShareReconciliationJob : IScheduledJob
         };
         query.Criteria.AddCondition("owningteam", Microsoft.Xrm.Sdk.Query.ConditionOperator.Equal, team);
         query.Criteria.AddCondition("modifiedon", Microsoft.Xrm.Sdk.Query.ConditionOperator.GreaterEqual, since.UtcDateTime);
+        if (afterId is { } after)
+        {
+            // #2745: the key set (modifiedon, id) — within modifiedon >= since, (modifiedon > since) OR (id > after): the same rows
+            // as (modifiedon > since) OR (modifiedon = since AND id > after), with no equality test on a date-time.
+            var past = new Microsoft.Xrm.Sdk.Query.FilterExpression(Microsoft.Xrm.Sdk.Query.LogicalOperator.Or);
+            past.AddCondition("modifiedon", Microsoft.Xrm.Sdk.Query.ConditionOperator.GreaterThan, since.UtcDateTime);
+            past.AddCondition(table + "id", Microsoft.Xrm.Sdk.Query.ConditionOperator.GreaterThan, after);
+            query.Criteria.AddFilter(past);
+        }
+
         query.AddOrder("modifiedon", Microsoft.Xrm.Sdk.Query.OrderType.Ascending);
         query.AddOrder(table + "id", Microsoft.Xrm.Sdk.Query.OrderType.Ascending);
         var rows = ((await dataverse.RetrieveMultipleAsync(query, ct).ConfigureAwait(false))?.Entities
@@ -703,6 +735,6 @@ public sealed partial class SecureChildShareReconciliationJob : IScheduledJob
         DateTimeOffset? horizon = capped && rows[^1].GetAttributeValue<DateTime?>("modifiedon") is { } last
             ? new DateTimeOffset(DateTime.SpecifyKind(last, DateTimeKind.Utc))
             : null;
-        return (listed, horizon, capped);
+        return (listed, horizon, capped ? rows[^1].Id : Guid.Empty, capped);
     }
 }
