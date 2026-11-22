@@ -17,9 +17,10 @@ namespace Spaarke.ArchTests;
 /// <para><b>Ratchet.</b> A client file that contains the literal <c>ManyToOneRelationships</c> must be either the shared
 /// implementation or a named entry in <see cref="Baseline"/>. A NEW file that contains it fails the build (a new copy: call
 /// <c>discoverNavProps</c> instead). A baseline file that no longer contains it also fails (the baseline is stale: delete
-/// the entry), so the list can only shrink. The baseline holds the copies that exist today and were filed as follow-up,
-/// each with the reason it was not folded in with the three that were (<c>ConnectionsWriteHandler</c>,
-/// <c>ResolverWriteHandler</c>, <c>useInlineTodoCreate</c>; <c>discoverTodoNavProps</c> now delegates too).</para>
+/// the entry), so the list can only shrink. #2803/#2804 folded in <c>ConnectionsWriteHandler</c>,
+/// <c>ResolverWriteHandler</c> and <c>useInlineTodoCreate</c> (<c>discoverTodoNavProps</c> delegates too); #2909 folded in
+/// the LegalWorkspace <c>matterService</c>, Notepad <c>discoverMemoNavProps</c> and <c>CreateProjectWizard</c>. The one
+/// entry left is a copy that cannot import a module, with its reason.</para>
 ///
 /// <para><b>Scope.</b> Every <c>.ts</c> / <c>.tsx</c> / <c>.js</c> file under <c>src/client</c> and <c>src/solutions</c>,
 /// excluding tests, mocks, declaration files, installed packages and build output, and the committed PCF solution
@@ -40,20 +41,17 @@ public sealed class NavPropDiscoveryRatchetTests
     ];
 
     /// <summary>
-    /// Known private copies, each filed as follow-up. May shrink, never grow: a new copy is a new failure, not a new
+    /// Known private copies, each with the reason it stays. May shrink, never grow: a new copy is a new failure, not a new
     /// entry (call <c>discoverNavProps</c>). Remove an entry in the change that removes its copy; the guard fails on a
     /// stale entry.
     /// </summary>
     private static readonly IReadOnlyDictionary<string, string> Baseline = new Dictionary<string, string>(StringComparer.Ordinal)
     {
-        ["src/client/shared/Spaarke.UI.Components/src/components/CreateProjectWizard/CreateProjectWizard.tsx"] =
-            "org-URL-prefixed project metadata query inside the wizard; filed as follow-up #2909 (ADR-012 reuse)",
+        // Permanent (#2909): a ribbon web resource is a plain script with no module system, so it cannot import the
+        // TS package. Its copy follows the shared rules (lowercased logical name, a warning on an empty result), and
+        // secureChildRibbonScript.test.ts pins both. Its SpaarkeMaster twin (src/dataverse/**) is outside this scan.
         ["src/client/webresources/js/sprk_secure_child_ribbon.js"] =
-            "plain-JS ribbon web resource, cannot import the TS package; filed as follow-up #2909 (ADR-012 reuse)",
-        ["src/solutions/LegalWorkspace/src/components/CreateMatter/matterService.ts"] =
-            "matter wizard's column-keyed map-form copy; filed as follow-up #2909 (ADR-012 reuse)",
-        ["src/solutions/Notepad/src/hooks/discoverMemoNavProps.ts"] =
-            "Notepad memo-host copy; filed as follow-up #2909 (ADR-012 reuse)",
+            "plain-JS ribbon web resource with no module system, cannot import the TS package; aligned with discoverNavProps (#2909)",
     };
 
     private static readonly string[] ExcludedSegments =
