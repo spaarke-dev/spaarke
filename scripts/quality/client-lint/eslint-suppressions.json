@@ -1419,11 +1419,6 @@
       "count": 1
     }
   },
-  "src/solutions/LegalWorkspace/src/hooks/useKanbanColumns.ts": {
-    "@typescript-eslint/no-unnecessary-condition": {
-      "count": 3
-    }
-  },
   "src/solutions/LegalWorkspace/src/hooks/useMattersList.ts": {
     "@typescript-eslint/no-unnecessary-condition": {
       "count": 1
