@@ -10,6 +10,44 @@
 
 ## Open (in priority order)
 
+### ISS-033 — H9 gives up on a slot swap after 10 min while ACME's swap takes 11, then retries into the still-running swap
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | now (every BFF deploy to a stamp on S1) |
+| **Filed** | 2026-11-22 |
+| **Source** | ACME upgrade run `3b6f7b65`: H9 failed `scheduled-jobs-slot-guard-failed` (409 "prepared for swap") after `slot-swap-infra-fault` |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2949 |
+
+**Description**
+
+On 2026-11-22 H9 deployed the BFF to `sprk-acme-prod-api` staging (push deploy ended 16:48:58Z) and called the staging → production swap at 16:53:49Z. Azure applied production's settings to staging and started warmup.
+
+`ArmSlotSwapper` waits `SlotSwapTimeout` (10 min), then reports `slot-swap-infra-fault`. The run auto-retried H9 at about 17:03:51Z, while the swap was still running. H9's first step (the slot-sticky `Scheduling__RunScheduledJobs=false` write on staging) got 409 "The slot cannot be changed because its configuration settings have been prepared for swap". The run failed.
+
+The swap completed at 17:04:53Z (about 11 min; the BFF needs about 220 s to start on S1, T186 L48). Production then served H9's deployment, and both slots were healthy. So H9's work had succeeded, yet the run recorded it as failed. A resume reruns the deploy and swap, and hits the same 10-minute ceiling.
+
+Same shape as ISS-032 (H6): a fixed wait shorter than the Azure operation, then a retry that collides with the operation still in flight.
+
+**Entry-points**
+
+- `src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/BffDeploy/BffDeployOptions.cs:84` (`SlotSwapTimeout` = 10 min; its doc says swaps take 30–90 s)
+- `src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/BffDeploy/ArmSlotSwapper.cs:94-130`
+- `src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/BffDeploy/ArmSlotStickyAppSettingWriter.cs` (the 409 on the retry)
+
+**Suggested fix**
+
+On a swap timeout, do not report a failure while Azure is still swapping. Poll the site's `slotSwapStatus.timestampUtc` (and the activity log) until the swap completes or fails, within a ceiling that covers `WEBSITES_CONTAINER_START_TIME_LIMIT` plus warmup (≥ 30 min).
+
+At the start of H9, if a swap is in flight on the site (the staging config is "prepared for swap"), wait for it instead of writing to the slot.
+
+When the swap completes with production healthy and serving the expected deployment, H9 succeeds without redeploying.
+
+**Estimated effort**: 3–5 h with tests
+**Blockers**: none
+**Related**: ISS-032; T186 L46/L48
+
 ### ISS-032 — H6 misjudges a long SpaarkeMaster upgrade: 60-minute timeout, no in-flight check, async-op status trusted over the import result
 
 | Field | Value |
