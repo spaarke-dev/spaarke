@@ -324,6 +324,45 @@ public sealed class ExternalInvoiceFileRoutesTests
         host.Timeline.Should().NotContain("first-byte", "no byte of a Procedure source is read for an external caller");
     }
 
+    // ebilling-r1 task 124 review fix round 1 (F-E): the cases above carry TWO defects at once (Procedure purpose AND a Procedure Version
+    // parent), so a mutation that let IsFirmFile admit the purpose alone still passed every route case, because the parent-kind check
+    // refused the same row. These carry ONE defect each, through the route. NOTE what they do and do not pin: the store has a second,
+    // independent layer (StoredFileService.PathIsOwn re-derives the blob path from the typed purpose and parent, and a purpose whose parent
+    // kind differs is never servable), so a row with a single defect is refused at the route even if IsFirmFile were weakened. The route
+    // cases therefore pin the END-TO-END refusal; the two IsFirmFile checks are each pinned on their own at the decision point, by
+    // IsFirmFile_RefusesAProcedureSourceRow_AndAdmitsTheInvoicePdf (purpose-only and parent-kind-only rows), which fails under the
+    // matching mutation of IsFirmFile (recorded in notes/124-retire-procedure-library-key.md, "Review fix round 1").
+    public static TheoryData<string, string> SingleDefectProcedureFiles => new()
+    {
+        { "contact", "procedure-purpose-on-the-invoice" }, { "flagged-systemuser", "procedure-purpose-on-the-invoice" },
+        { "contact", "invoice-pdf-purpose-on-a-procedure-version" }, { "flagged-systemuser", "invoice-pdf-purpose-on-a-procedure-version" },
+    };
+
+    [Theory(DisplayName = "Task 124 must-fire (one defect each): a Procedure-purpose file under the invoice, and an Invoice-PDF-purpose file under a Procedure Version, are neither listed nor served")]
+    [MemberData(nameof(SingleDefectProcedureFiles))]
+    public async Task ProcedureSourceFile_EachCheckRefusesOnItsOwn(string caller, string defect)
+    {
+        await using var host = await Host.StartAsync();
+        host.CallerIs(caller);
+        var file = defect switch
+        {
+            // Refused by PURPOSE only: the parent is the route's invoice, the file is firm-visible, Servable, no source.
+            "procedure-purpose-on-the-invoice" => host.SeedFirmFile(
+                purpose: StoredFilePurpose.ProcedureSource, firmVisible: true, name: "billing-guidelines.pdf", parent: InvoiceParent(Invoice)),
+            // Refused by PARENT KIND only: the parent's id is the route's invoice id, the purpose is Invoice PDF, firm-visible, Servable, no source.
+            "invoice-pdf-purpose-on-a-procedure-version" => host.SeedFirmFile(
+                purpose: StoredFilePurpose.InvoicePdf, firmVisible: true, name: "billing-guidelines.pdf",
+                parent: new StoredFileParent(StoredFileParentKind.ProcedureVersion, Invoice)),
+            _ => throw new ArgumentOutOfRangeException(nameof(defect), defect, null),
+        };
+
+        var unknown = await Shape(await host.GetAsync(ContentUrl(Invoice, Guid.NewGuid())));
+        (await Shape(await host.GetAsync(ContentUrl(Invoice, file)))).Should().Be(unknown);
+        (await Ids(await host.GetAsync(ListUrl(Invoice)))).Should().BeEmpty();
+        host.AuditEvents.Should().BeEmpty();
+        host.Timeline.Should().NotContain("first-byte", "no byte of the file is read for an external caller");
+    }
+
     [Fact(DisplayName = "Task 124: IsFirmFile refuses a Procedure source row whatever else it claims; the firm's own Invoice PDF passes (control)")]
     public void IsFirmFile_RefusesAProcedureSourceRow_AndAdmitsTheInvoicePdf()
     {
@@ -339,10 +378,15 @@ public sealed class ExternalInvoiceFileRoutesTests
         var procedure = Row(StoredFilePurpose.ProcedureSource, new(StoredFileParentKind.ProcedureVersion, Invoice));
         var invoiceKindUnderProcedurePurpose = Row(StoredFilePurpose.ProcedureSource, InvoiceParent(Invoice));
         var noParent = procedure with { Parent = null };
+        // Review fix round 1 (F-E): ONE defect each, so each check is pinned on its own. The purpose is right and only the parent KIND is wrong
+        // (the parent id is the route's invoice id); and, above, the parent is the invoice and only the purpose is wrong.
+        var invoicePdfUnderAProcedureVersion = Row(StoredFilePurpose.InvoicePdf, new(StoredFileParentKind.ProcedureVersion, Invoice));
 
         ExternalInvoiceSubmissionAuthorizationFilter.IsFirmFile(procedure, Invoice).Should().BeFalse();
         ExternalInvoiceSubmissionAuthorizationFilter.IsFirmFile(invoiceKindUnderProcedurePurpose, Invoice).Should().BeFalse();
         ExternalInvoiceSubmissionAuthorizationFilter.IsFirmFile(noParent, Invoice).Should().BeFalse();
+        ExternalInvoiceSubmissionAuthorizationFilter.IsFirmFile(invoicePdfUnderAProcedureVersion, Invoice).Should().BeFalse(
+            "the parent KIND is checked on its own: a Procedure Version whose id equals the invoice id is not the invoice");
         ExternalInvoiceSubmissionAuthorizationFilter.IsFirmFile(Row(StoredFilePurpose.InvoicePdf, InvoiceParent(Invoice)), Invoice)
             .Should().BeTrue("the control: the detector is not a blanket refusal");
     }
