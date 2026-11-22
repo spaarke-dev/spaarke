@@ -108,3 +108,14 @@ Console on dev (master `fe150ac35a`), 1440x900. Nothing recorded, saved or sent:
 | Cancel with choices → "Discard unrecorded choices?"; Keep deciding keeps the draft | PASS |
 | Next record / Previous record keep each item's draft (by design, DecisionWizard.tsx:413-415) | PASS |
 | Focus after Keep deciding / Cancel / Discard (decision wizard and rule wizard) | FAIL: focus on body, not the opener. Task 202 |
+
+Further checks the same evening:
+
+| Check | Result |
+|---|---|
+| Worklist narrative ("241 notifications across 3 categories") | FAIL (wording/truth): past-due sent as a third category; DI-161 #2952 |
+| Do lane: Show items, open an Overdue To Do ("3 of 49"): What was found, Mark complete (excludes Reschedule/Reassign), Reschedule (date + reason required; blank or spaces reason blocks Next) | PASS |
+| Reschedule to a past date (2020-01-01) | Accepted, no message, by UI and BFF (`RescheduleExecutor.PreflightAsync` checks format only). Owner question: allow or refuse? |
+| Cancel with choices → discard check; Discard closes, nothing written | PASS |
+| Ontology admin → Classification table at 1440x900 | Guidance column ~120 px, rows ~220 px tall: added to task 201 |
+| Classification → Edit (inline) focus | Focus stays on Edit; Cancel drops it to body: added to task 202 |

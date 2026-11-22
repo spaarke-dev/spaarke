@@ -21,6 +21,7 @@
 (1) Worklist → Decision wizard → focus Cancel → Cancel → "Discard unrecorded choices?" → Keep deciding: focus sits on the confirm's Close button, the confirm unmounts, focus falls to body (expected: the wizard's Cancel button).
 (2) Ontology admin → New rule (focused) → Cancel with nothing typed: the wizard closes, focus is on body (expected: "New rule").
 (3) Same after "Discard" in the rule wizard's confirm, and after "Discard and close" in the Decision wizard.
+(4) Not a modal, same class, in scope here: Ontology admin → Classification → a triage category's "Edit" opens an inline form above the table but focus stays on the row's Edit button; Cancel unmounts the form and focus falls to body. Expected: open moves focus to the form's first field (Name); Cancel/Save return focus to that row's Edit button (or the table if the row is gone). Use the same helper.
 `SprkModal.tsx` has no focus-restore code, and Fluent v9 `Dialog` only restores focus to a `DialogTrigger` or a `useRestoreFocusTarget` element; SprkModal hosts open it from state, so neither applies. A keyboard or screen-reader user is put at the top of the page after every modal. Owner: "continue testing and fixing".</prompt>
   <role>SPAARKE frontend developer. Expert in React 16-19, Fluent UI v9 Dialog and tabster, accessibility, and `@spaarke/ui-components` SprkModal.</role>
   <goal>When a SprkModal goes from open to closed (open=false or unmount), keyboard focus returns to the element that had focus when it opened, if that element is still connected, focusable (not disabled, not inside an `[inert]` subtree) and focus is currently lost (on `body`, on nothing, or on a node inside the closing surface or already removed). A host or user that moved focus somewhere meaningful outside the modal wins. Works for nested modals (confirm over wizard returns to the wizard's button) and in an iframe host (use the modal's own `ownerDocument`).</goal>
@@ -66,6 +67,7 @@
   <acceptance-criteria>
     <criterion testable="true">Test (a), (b), (c) pass and fail on origin/master.</criterion>
     <criterion testable="true">Negative tests in step 3 pass.</criterion>
+    <criterion testable="true">Test: triage category Edit moves focus to the Name field; Cancel returns it to that row's Edit button. Fails on origin/master.</criterion>
     <criterion testable="true">Existing tests unmodified and passing; typecheck; client-lint; builds as stated.</criterion>
     <criterion testable="false">Main session verifies on dev after the Console auto-deploys: the three dev paths in the prompt end on the opener.</criterion>
   </acceptance-criteria>
