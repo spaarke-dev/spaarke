@@ -52,6 +52,13 @@ public sealed record ThreadAttachmentRef(
 /// external-plane post; null for every other row. Server-side only (<c>JsonIgnore</c>, so the internal thread wire
 /// contract is unchanged) — the external endpoint turns it into a boolean <c>isMine</c> and never exposes the id.
 /// </param>
+/// <param name="PrivateContext">
+/// fm task 056: the record a private message is about, as the VIEWER may see it; <c>null</c> otherwise. Set only by the
+/// thread read (<see cref="CommunicationThreadReadService.ReadThreadAsync"/>), and only when the message names one core
+/// record, carries no typed regarding (a filed message is an ordinary record message), and the viewer's own read of that
+/// record returns it. A record the viewer cannot read, or a read that faults, gives <c>null</c>: never a name the viewer
+/// cannot read.
+/// </param>
 public sealed record ThreadMessageDto(
     Guid MessageId,
     string? Body,
@@ -70,7 +77,17 @@ public sealed record ThreadMessageDto(
     bool IsInternalOnly,
     bool IsPrivate,
     IReadOnlyList<ThreadAttachmentRef> Attachments,
-    [property: System.Text.Json.Serialization.JsonIgnore] Guid? CreatedByContactId = null);
+    [property: System.Text.Json.Serialization.JsonIgnore] Guid? CreatedByContactId = null,
+    MessagePrivateContext? PrivateContext = null);
+
+/// <summary>
+/// fm task 056: the core record a private message is about (<see cref="ThreadMessageDto.PrivateContext"/>).
+/// <see cref="Name"/> is the record's display name read as the viewer; null when the record has none.
+/// </summary>
+/// <param name="EntityType">The record's table: <c>sprk_matter</c>, <c>sprk_project</c> or <c>sprk_workassignment</c>.</param>
+/// <param name="Id">The record's id.</param>
+/// <param name="Name">The record's display name, read as the viewer.</param>
+public sealed record MessagePrivateContext(string EntityType, Guid Id, string? Name);
 
 /// <summary>
 /// Thread-read endpoint result: the access-filtered, ordered message list for a thread (task 050 / FR-11).

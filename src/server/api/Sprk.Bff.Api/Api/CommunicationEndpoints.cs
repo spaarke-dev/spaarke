@@ -219,7 +219,7 @@ public static class CommunicationEndpoints
         group.MapGet("/threads/{threadId:guid}/messages", GetThreadMessagesAsync)
             .AddEndpointFilter<CommunicationAuthorizationFilter>()
             .WithName("GetThreadMessages")
-            .WithDescription("Read a thread's messages for the polling timeline (access-filtered; impersonated). Optional ?since=<iso8601> and ?top=<n>.")
+            .WithDescription("Read a thread's messages for the polling timeline (access-filtered; impersonated). Optional ?since=<iso8601>, ?top=<n> and ?about=<table>:<id> (only the caller's private messages about that matter, project or work assignment; malformed is a 400). Each message carries privateContext, the record it is about as the caller may read it, or null.")
             .Produces<ThreadReadResult>(StatusCodes.Status200OK)
             .Produces<ProblemDetails>(StatusCodes.Status400BadRequest)
             .Produces<ProblemDetails>(StatusCodes.Status403Forbidden);
@@ -246,7 +246,7 @@ public static class CommunicationEndpoints
         group.MapGet("/threads", ListThreadsAsync)
             .AddEndpointFilter<CommunicationAuthorizationFilter>()
             .WithName("ListThreads")
-            .WithDescription("List all threads the caller may see (incl. record-less Direct threads); impersonated + access-filtered by Dataverse row-level security; no membership-union. Optional ?search=, ?top=, ?pageToken=, ?kind=all|direct (direct: the caller's own strict 1:1 Direct threads, each with counterpartName; any other kind is a 400).")
+            .WithDescription("List all threads the caller may see (incl. record-less Direct threads); impersonated + access-filtered by Dataverse row-level security; no membership-union. Optional ?search=, ?top=, ?pageToken=, ?kind=all|direct (direct: the caller's own strict 1:1 Direct threads, each with counterpartName; any other kind is a 400), ?about=<table>:<id> with kind=direct only (the pair threads holding one of the caller's private messages about that record; malformed or with another kind is a 400).")
             .Produces<ThreadListResult>(StatusCodes.Status200OK)
             .Produces<ProblemDetails>(StatusCodes.Status400BadRequest)
             .Produces<ProblemDetails>(StatusCodes.Status403Forbidden);
@@ -900,10 +900,13 @@ public static class CommunicationEndpoints
         HttpContext context,
         [FromQuery] string? since,
         [FromQuery] int? top,
+        [FromQuery] string? about,
         CancellationToken ct)
     {
         var sinceValue = ParseSince(since);
-        var result = await readService.ReadThreadAsync(threadId, context.User, sinceValue, top, ct);
+        // fm task 056: ?about={table}:{id} narrows to the caller's private messages about that record (the service parses it;
+        // malformed is a 400).
+        var result = await readService.ReadThreadAsync(threadId, context.User, sinceValue, top, ct, about);
         return TypedResults.Ok(result);
     }
 
@@ -975,9 +978,12 @@ public static class CommunicationEndpoints
         [FromQuery] int? top,
         [FromQuery] string? pageToken,
         [FromQuery] string? kind,
+        [FromQuery] string? about,
         CancellationToken ct)
     {
-        var result = await readService.ListThreadsAsync(context.User, search, top, pageToken, ct, kind);
+        // fm task 056: ?about={table}:{id} (with kind=direct only) lists the caller's pair threads holding a private message
+        // about that record (the service parses it; malformed or with another kind is a 400).
+        var result = await readService.ListThreadsAsync(context.User, search, top, pageToken, ct, kind, about);
         return TypedResults.Ok(result);
     }
 
