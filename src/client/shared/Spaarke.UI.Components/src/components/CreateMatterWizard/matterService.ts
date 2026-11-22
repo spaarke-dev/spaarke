@@ -478,16 +478,9 @@ export async function searchContacts(dataService: IDataService, nameFilter: stri
   }
 }
 
-/**
- * Search contacts and return as ILookupItem[] (for LookupField compatibility).
- */
-export async function searchContactsAsLookup(dataService: IDataService, nameFilter: string): Promise<ILookupItem[]> {
-  const contacts = await searchContacts(dataService, nameFilter);
-  return contacts.map(c => ({
-    id: c.sprk_contactid,
-    name: c.sprk_name + (c.sprk_email ? ` (${c.sprk_email})` : ''),
-  }));
-}
+// Contact lookup for LookupField: re-exported from the canonical shared implementation
+// (services/userLookup: active contacts only, matches name or email) instead of a second copy (#2866).
+export { searchContactsAsLookup } from '../../services/userLookup';
 
 // ---------------------------------------------------------------------------
 // Matter Type search helper

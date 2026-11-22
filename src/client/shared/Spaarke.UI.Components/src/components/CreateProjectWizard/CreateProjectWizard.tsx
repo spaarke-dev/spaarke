@@ -53,6 +53,7 @@ import { fileProjectUnderMatter } from '../../utils/adapters/bffChildWriteAdapte
 import { EMAIL_NOT_SENT_NO_SERVER, sendComposedEmail } from '../EmailComposer/composeOnlySend';
 import type { IEmailComposeHandlers } from '../EmailComposer/composeOnlySend';
 import { createWebApiFromDataService } from '../../utils/adapters/dataServiceWebApiAdapter';
+import { searchContactsAsLookup, searchUsersAsLookup } from '../../services/userLookup';
 
 // ---------------------------------------------------------------------------
 // Association wiring helpers
@@ -110,33 +111,7 @@ async function associateProjectWithAccount(
 // Search helper functions (use IDataService instead of IWebApi)
 // ---------------------------------------------------------------------------
 
-async function searchContactsAsLookup(dataService: IDataService, query: string): Promise<ILookupItem[]> {
-  if (!query || query.trim().length < 2) return [];
-  const safeFilter = query.trim().replace(/'/g, "''");
-  const options =
-    `?$select=contactid,fullname,emailaddress1` +
-    `&$filter=contains(fullname,'${safeFilter}')` +
-    `&$orderby=fullname asc&$top=10`;
-  const result = await dataService.retrieveMultipleRecords('contact', options);
-  return result.entities.map(e => ({
-    id: e['contactid'] as string,
-    name: (e['fullname'] as string) + (e['emailaddress1'] ? ` (${e['emailaddress1']})` : ''),
-  }));
-}
-
-async function searchUsersAsLookup(dataService: IDataService, query: string): Promise<ILookupItem[]> {
-  if (!query || query.trim().length < 2) return [];
-  const safeFilter = query.trim().replace(/'/g, "''");
-  const options =
-    `?$select=systemuserid,fullname,internalemailaddress` +
-    `&$filter=contains(fullname,'${safeFilter}') and isdisabled eq false` +
-    `&$orderby=fullname asc&$top=10`;
-  const result = await dataService.retrieveMultipleRecords('systemuser', options);
-  return result.entities.map(e => ({
-    id: e['systemuserid'] as string,
-    name: (e['fullname'] as string) + (e['internalemailaddress'] ? ` (${e['internalemailaddress']})` : ''),
-  }));
-}
+// Contact and user search: the shared services/userLookup implementations (#2866).
 
 async function searchMatterTypesAsLookup(dataService: IDataService, query: string): Promise<ILookupItem[]> {
   if (!query || query.trim().length < 1) return [];

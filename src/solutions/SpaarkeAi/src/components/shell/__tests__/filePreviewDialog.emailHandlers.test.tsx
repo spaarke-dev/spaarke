@@ -39,6 +39,7 @@ jest.mock('@spaarke/ui-components', () => ({
   },
   createXrmEmailComposeHandlers: (...args: unknown[]) =>
     (createXrmEmailComposeHandlersMock as unknown as (...a: unknown[]) => unknown)(...args),
+  createXrmDataService: jest.fn(() => ({})),
   createXrmNavigationService: jest.fn(() => ({ openRecord: jest.fn(), openRecordModal: jest.fn() })),
   getXrm: jest.fn(() => undefined),
   // Task 197: the real helper (React-free, no Xrm), not a stub, so the test sees the real conversion.
@@ -56,7 +57,7 @@ jest.mock('../../../../../LegalWorkspace/src/components/FilePreview/filePreviewS
   copyDocumentLink: jest.fn(),
   setWorkspaceFlag: jest.fn(),
 }));
-jest.mock('../../../../../LegalWorkspace/src/components/CreateMatter/matterService', () => ({ searchUsersAsLookup: jest.fn() }));
+jest.mock('@spaarke/ui-components/services/userLookup', () => ({ searchUsersAsLookup: jest.fn() }));
 jest.mock('../../../../../LegalWorkspace/src/services/authInit', () => ({ authenticatedFetch: authenticatedFetchMock }));
 jest.mock('../../../../../LegalWorkspace/src/config/runtimeConfig', () => ({ getBffBaseUrl: () => 'https://test-bff.example.com' }));
 

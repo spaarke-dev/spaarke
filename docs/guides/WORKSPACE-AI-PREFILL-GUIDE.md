@@ -542,12 +542,12 @@ options.AddPolicy("ai-stream", partition =>
 
 ```
 Client (Vite SPA):
-src/solutions/LegalWorkspace/src/
-├── components/CreateMatter/
+src/client/shared/Spaarke.UI.Components/src/
+├── components/CreateMatterWizard/
 │   ├── CreateRecordStep.tsx      # Step 2 form with pre-fill trigger
 │   ├── AiFieldTag.tsx            # Sparkle "AI" badge
 │   ├── formTypes.ts              # IAiPrefillRequest/Response types
-│   └── LookupField.tsx           # Lookup with isAiPrefilled prop
+│   └── (LookupField: components/LookupField/DataverseLookupField.tsx, isAiPrefilled prop)
 
 BFF (ASP.NET Core):
 src/server/api/Sprk.Bff.Api/
