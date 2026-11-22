@@ -4,7 +4,7 @@
     <title>Ontology admin Rules list: the Rule cell clips the rule code and name (fixed 44 px row, too narrow a column)</title>
     <phase>12 Create-wizard lookups and composer (185 dev check fixes)</phase>
     <gate>startable</gate>
-    <status>pending</status>
+    <status>in-progress</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .tsx in the shared UI library (Console ships it).</rigor-reason>
     <model-tier>sonnet</model-tier>
