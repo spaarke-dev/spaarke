@@ -240,6 +240,28 @@ public class FieldMappingPushDocumentSourceTests
     public void DocumentOwnershipParentColumn_IsFixedByTheTargetTable(string target, string lookups, string? expected) =>
         FieldMappingEndpoints.DocumentOwnershipParentColumn(target, lookups.Split(',')).Should().Be(expected);
 
+    /// <summary>
+    /// fm task 056: a citation (<c>RecordOwnershipResolver.IsCitation</c>) never files a row, so it is never the parent lookup and
+    /// is not counted. Synthetic relationship metadata over an existing citation pair: <c>sprk_procedureassignment.sprk_excludedpolicy</c>
+    /// cites a <c>sprk_policy</c>; beside one non-citation lookup to <c>sprk_policy</c> that one resolves, and two non-citation
+    /// lookups are still ambiguous (the existing 409's count).
+    /// </summary>
+    [Theory]
+    [InlineData("sprk_excludedpolicy,sprk_regardingpolicy", "sprk_regardingpolicy", 1)]
+    [InlineData("sprk_regardingpolicy,sprk_excludedpolicy", "sprk_regardingpolicy", 1)]
+    [InlineData("sprk_excludedpolicy,sprk_regardingpolicy,sprk_otherpolicy", null, 2)]
+    [InlineData("sprk_excludedpolicy", null, 0)]
+    public void ResolveParentLookup_LeavesCitationsOut_BeforeCounting(string policyLookups, string? expected, int expectedMatches)
+    {
+        var relationships = policyLookups.Split(',')
+            .Select(column => Row(("ReferencingAttribute", column), ("ReferencedEntity", "sprk_policy")))
+            .Append(Row(("ReferencingAttribute", "sprk_regardingmatter"), ("ReferencedEntity", "sprk_matter")))
+            .ToList();
+
+        FieldMappingEndpoints.ResolveParentLookup(relationships, "sprk_policy", "sprk_procedureassignment")
+            .Should().Be((expected, expectedMatches));
+    }
+
     public static TheoryData<string> RefusedDocumentShapes => new() { "no-read", "external-hidden", "external-narrowing-faults" };
 
     [Theory(DisplayName = "043 AC5: a document the caller cannot read, or one the narrowing does not show to an external caller, is the push's uniform 404 - nothing read or written")]

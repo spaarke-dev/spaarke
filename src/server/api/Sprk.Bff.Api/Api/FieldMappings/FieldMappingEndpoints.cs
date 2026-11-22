@@ -1155,6 +1155,8 @@ public static class FieldMappingEndpoints
     /// <see cref="DocumentOwnershipParentColumn"/> (<c>sprk_analysis</c> has three: <c>sprk_documentid</c>,
     /// <c>sprk_outputfileid</c>, <c>sprk_regardingdocument</c>). Every other source, and a target that defines no such column,
     /// keeps the 409. <c>Matches</c> stays the number of lookups found, so the 409's wording is unchanged.</para>
+    /// <para>fm task 056: lookups that cite (<see cref="Sprk.Bff.Api.Services.Dataverse.RecordOwnershipResolver.IsCitation"/>) are
+    /// left out before counting; they never file a row, so they never name its parent. <c>Matches</c> counts the rest.</para>
     /// </remarks>
     internal static (string? Attribute, int Matches) ResolveParentLookup(
         IEnumerable<Dictionary<string, System.Text.Json.JsonElement>> relationships,
@@ -1171,6 +1173,9 @@ public static class FieldMappingEndpoints
                 : null)
             .Where(a => !string.IsNullOrWhiteSpace(a) && IsLogicalName(a!))
             .Select(a => a!)
+            // A citation names a record without filing the row under it, so it is never the parent lookup (fm task 056: a
+            // private message's context reference is one, beside the typed regarding lookup to the same table).
+            .Where(a => !Sprk.Bff.Api.Services.Dataverse.RecordOwnershipResolver.IsCitation(targetEntity, a))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
 
