@@ -17,7 +17,13 @@
 import * as React from 'react';
 import { makeStyles, tokens, Spinner, MessageBar, MessageBarBody } from '@fluentui/react-components';
 import { authenticatedFetch } from '@spaarke/auth';
-import { readByRegarding, cleanGuid, type IRegardingReadResultDto, getXrm } from '@spaarke/ui-components';
+import {
+  readByRegarding,
+  cleanGuid,
+  type IRegardingReadResultDto,
+  getXrm,
+  subscribeConversationPanelOpen,
+} from '@spaarke/ui-components';
 import { IInputs } from './generated/ManifestTypes';
 import { initializeAuth, resolveDataverseUrl } from './authInit';
 import { resolveRegardingContext } from './hostContext';
@@ -195,6 +201,22 @@ export const CommunicationConversationPanelApp: React.FC<ICommunicationConversat
       setModalOpen(true);
     }
   }, [authReady, regardingContext]);
+
+  // #2908: the communications grid on the same form asks for this modal ("+ New Message") through
+  // `openConversationPanel` (`@spaarke/ui-components`). A request for this record opens the modal; one that arrives
+  // before auth and the regarding read are ready opens it as soon as they are. Requests for other records are ignored.
+  const [openRequested, setOpenRequested] = React.useState(false);
+  React.useEffect(() => {
+    if (!hostEntityName || !hostRecordId) return undefined;
+    return subscribeConversationPanelOpen({ entityType: hostEntityName, id: hostRecordId }, () =>
+      setOpenRequested(true)
+    );
+  }, [hostEntityName, hostRecordId]);
+  React.useEffect(() => {
+    if (!openRequested || !authReady || !regardingContext) return;
+    setOpenRequested(false);
+    openModalDefault();
+  }, [openRequested, authReady, regardingContext, openModalDefault]);
 
   // Session-local "New" affordance (UAT §A3): there is no persisted per-user
   // last-seen watermark for threads (documented KNOWN LIMITATION in

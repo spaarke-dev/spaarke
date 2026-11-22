@@ -14,6 +14,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as vm from 'vm';
+import { parseComposeRegarding } from '../../../components/EmailComposer/openEmailCompose';
 
 const SCRIPT = fs.readFileSync(
   path.join(__dirname, '..', '..', '..', '..', '..', '..', 'webresources', 'js', 'sprk_secure_child_ribbon.js'),
@@ -105,23 +106,25 @@ function harness(options: {
           ok: true,
           json: () =>
             Promise.resolve({
-              value: options.noRelationships ? [] : [
-                {
-                  ReferencingAttribute: 'sprk_matter',
-                  ReferencingEntityNavigationPropertyName: 'sprk_Matter',
-                  ReferencedEntity: 'sprk_matter',
-                },
-                {
-                  ReferencingAttribute: 'sprk_project',
-                  ReferencingEntityNavigationPropertyName: 'sprk_Project',
-                  ReferencedEntity: 'sprk_project',
-                },
-                {
-                  ReferencingAttribute: 'sprk_invoice',
-                  ReferencingEntityNavigationPropertyName: 'sprk_Invoice',
-                  ReferencedEntity: 'sprk_invoice',
-                },
-              ],
+              value: options.noRelationships
+                ? []
+                : [
+                    {
+                      ReferencingAttribute: 'sprk_matter',
+                      ReferencingEntityNavigationPropertyName: 'sprk_Matter',
+                      ReferencedEntity: 'sprk_matter',
+                    },
+                    {
+                      ReferencingAttribute: 'sprk_project',
+                      ReferencingEntityNavigationPropertyName: 'sprk_Project',
+                      ReferencedEntity: 'sprk_project',
+                    },
+                    {
+                      ReferencingAttribute: 'sprk_invoice',
+                      ReferencingEntityNavigationPropertyName: 'sprk_Invoice',
+                      ReferencedEntity: 'sprk_invoice',
+                    },
+                  ],
             }),
         });
       }
@@ -274,6 +277,36 @@ describe('sprk_secure_child_ribbon.js — which "New" a subgrid shows (task 147 
   });
 });
 
+describe('sprk_secure_child_ribbon.js — "New Email" on a communications subgrid (#2908)', () => {
+  it('opens the email composer (sprk_emailpage) "Related to" the host, never the retired Communication page', async () => {
+    const h = harness({ flag: true });
+    h.ribbon.newChild(formOf('sprk_matter', HOST_ID, 'Acme v Beta & Co'), null, 'sprk_communication');
+    for (let i = 0; i < 10 && h.pages.length === 0; i++) await flush();
+
+    expect(h.pages).toHaveLength(1);
+    expect(h.pages[0].name).toBe('sprk_emailpage');
+    const data = new URLSearchParams(h.pages[0].data);
+    expect(data.get('compose')).toBe('new');
+    // The composer reads exactly what the shared launcher writes (parseComposeRegarding / composeRegardingParams).
+    expect(parseComposeRegarding(data)).toEqual({ entityType: 'sprk_matter', id: HOST_ID, name: 'Acme v Beta & Co' });
+    expect(h.posts).toEqual([]);
+    expect(h.forms).toEqual([]);
+  });
+
+  it('an unsaved host opens nothing and asks to save first', async () => {
+    const h = harness({ flag: true });
+    h.ribbon.newChild(
+      { data: { entity: { getId: () => '', getEntityName: () => 'sprk_matter' } } },
+      null,
+      'sprk_communication'
+    );
+    await flush();
+
+    expect(h.pages).toEqual([]);
+    expect(h.alerts[0]?.text).toContain('Save this record first');
+  });
+});
+
 describe('sprk_secure_child_ribbon.js — the BFF-backed "New <thing>"', () => {
   it('opens the table wizard filed under the host (entityType, entityId, recordName)', async () => {
     const h = harness({ flag: true });
@@ -362,7 +395,11 @@ describe('sprk_secure_child_ribbon.js — the BFF-backed "New <thing>"', () => {
 describe('sprk_secure_child_ribbon.js — nav-prop discovery follows the shared discoverNavProps (#2909)', () => {
   it('lowercases a mixed-case host name for the metadata reads and the lookup match, and still files the row under the host', async () => {
     const h = harness({ flag: true });
-    h.ribbon.newChild(formOf('sprk_Matter'), { getRelationship: () => ({ attributeName: 'sprk_Matter' }) }, 'sprk_budget');
+    h.ribbon.newChild(
+      formOf('sprk_Matter'),
+      { getRelationship: () => ({ attributeName: 'sprk_Matter' }) },
+      'sprk_budget'
+    );
     for (let i = 0; i < 10 && h.forms.length === 0 && h.alerts.length === 0; i++) await flush();
 
     expect(h.metadataUrls.length).toBeGreaterThan(0);
@@ -377,7 +414,11 @@ describe('sprk_secure_child_ribbon.js — nav-prop discovery follows the shared 
 
   it('warns, naming the table, when the relationship list is empty, and creates nothing (must fire)', async () => {
     const h = harness({ flag: true, noRelationships: true });
-    h.ribbon.newChild(formOf('sprk_matter'), { getRelationship: () => ({ attributeName: 'sprk_matter' }) }, 'sprk_budget');
+    h.ribbon.newChild(
+      formOf('sprk_matter'),
+      { getRelationship: () => ({ attributeName: 'sprk_matter' }) },
+      'sprk_budget'
+    );
     for (let i = 0; i < 10 && h.alerts.length === 0; i++) await flush();
 
     expect(h.warnings.some(w => w.includes('zero entries') && w.includes('sprk_budget'))).toBe(true);
@@ -388,7 +429,11 @@ describe('sprk_secure_child_ribbon.js — nav-prop discovery follows the shared 
 
   it('does not warn when relationships are found (must not fire)', async () => {
     const h = harness({ flag: true });
-    h.ribbon.newChild(formOf('sprk_matter'), { getRelationship: () => ({ attributeName: 'sprk_matter' }) }, 'sprk_budget');
+    h.ribbon.newChild(
+      formOf('sprk_matter'),
+      { getRelationship: () => ({ attributeName: 'sprk_matter' }) },
+      'sprk_budget'
+    );
     for (let i = 0; i < 10 && h.forms.length === 0; i++) await flush();
 
     expect(h.forms).toHaveLength(1);

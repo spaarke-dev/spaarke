@@ -42,7 +42,18 @@
  */
 import * as React from "react";
 import { createRoot } from "react-dom/client";
-import { DataGridPageShell, type HostFilterCondition } from "@spaarke/ui-components";
+import { Add20Regular } from "@fluentui/react-icons";
+import {
+  DataGridPageShell,
+  cleanGuid,
+  getXrm,
+  openConversationPanel,
+  openEmailCompose,
+  type CommandBarAction,
+  type ComposeRegarding,
+  type DataGridHostCommand,
+  type HostFilterCondition,
+} from "@spaarke/ui-components";
 
 const CONFIG_ID = "e1826c4c-9575-f111-ab0e-7ced8ddc4a05";
 
@@ -134,10 +145,86 @@ const hostFilters: HostFilterCondition[] | undefined =
 // global/launcher entry point (no envelope at all) shows the back arrow.
 const isRecordScoped = regardingEnvelope.kind !== "none";
 
+// ── "+ New Email" / "+ New Message" (#2908) ─────────────────────────────────
+// The grid never offers the platform "+ New" (the OOB sprk_communication form). In its place:
+//   - "New Email" opens the sprk_emailpage composer (the same surface as everywhere else), "Related to" the host
+//     record when the grid sits on a record form;
+//   - "New Message" (record form only) opens, in place, the Messages modal of the CommunicationConversationPanel
+//     already on the form. When the form has no panel, it says so; it never reloads the page or opens another surface.
+
+/** The built-in commands this page does not offer. Module scope, so the array is stable. */
+const HIDDEN_BUILT_IN_COMMANDS: ReadonlyArray<CommandBarAction> = ["create-form"];
+
+/**
+ * The record whose form hosts this grid: its table, id and display name, read from the form context. Only for a
+ * valid envelope, and only when the form's id is the id the envelope scopes to (otherwise undefined: nothing is
+ * attached to a record the grid does not show).
+ */
+function resolveHostRecord(): ComposeRegarding | undefined {
+  if (regardingEnvelope.kind !== "valid") return undefined;
+  const scopedId = cleanGuid(String(regardingEnvelope.hostFilters[0]?.value ?? "")).toLowerCase();
+  try {
+    // `any` view: the typed XrmPageLike does not declare `data.entity`.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const entity = (getXrm("page") as any)?.Page?.data?.entity;
+    const entityType = String(entity?.getEntityName?.() ?? "").toLowerCase();
+    const id = cleanGuid(String(entity?.getId?.() ?? "")).toLowerCase();
+    if (!entityType || !id || id !== scopedId) return undefined;
+    const name = entity?.getPrimaryAttributeValue?.();
+    return { entityType, id, name: typeof name === "string" && name ? name : undefined };
+  } catch {
+    return undefined;
+  }
+}
+
+function newEmail(): void {
+  const regarding = resolveHostRecord();
+  if (regardingEnvelope.kind === "valid" && !regarding) {
+    // eslint-disable-next-line no-console
+    console.warn("[sprk_communicationspage] Could not read the host record; the new email opens without \"Related to\".");
+  }
+  void openEmailCompose({ mode: "new", regarding });
+}
+
+function alertNewMessage(text: string): void {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const xrm = getXrm("navigation") as any;
+  if (typeof xrm?.Navigation?.openAlertDialog === "function") {
+    void xrm.Navigation.openAlertDialog({ title: "New Message", text });
+  } else {
+    window.alert(text);
+  }
+}
+
+function newMessage(): void {
+  const host = resolveHostRecord();
+  if (!host) {
+    // eslint-disable-next-line no-console
+    console.warn("[sprk_communicationspage] Could not read the host record; the Messages modal cannot open.");
+    alertNewMessage("Messages could not be opened for this record. Reload the page and try again.");
+    return;
+  }
+  if (openConversationPanel({ entityType: host.entityType, id: host.id }) === "no-panel") {
+    alertNewMessage(
+      "This form has no Messages panel, so a message cannot be started from here. Ask your administrator to add the Messages panel to this form."
+    );
+  }
+}
+
+/** "New Message" needs a host record, so it is offered only on a record form with a valid envelope. */
+const HOST_COMMANDS: ReadonlyArray<DataGridHostCommand> = [
+  { id: "new-email", label: "New Email", icon: <Add20Regular />, onInvoke: newEmail },
+  ...(regardingEnvelope.kind === "valid"
+    ? [{ id: "new-message", label: "New Message", icon: <Add20Regular />, onInvoke: newMessage }]
+    : []),
+];
+
 const App: React.FC = () => (
   <DataGridPageShell
     configId={CONFIG_ID}
     additionalHostFilters={hostFilters}
+    hostCommands={HOST_COMMANDS}
+    hiddenBuiltInCommands={HIDDEN_BUILT_IN_COMMANDS}
     onBack={isRecordScoped ? undefined : () => window.close()}
   />
 );

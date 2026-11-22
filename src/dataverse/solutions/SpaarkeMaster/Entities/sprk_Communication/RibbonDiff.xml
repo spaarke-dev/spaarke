@@ -178,12 +178,12 @@
     </LocLabel>
     <LocLabel Id="sprk.SecureChild.sprk_communication.New.LabelText">
       <Titles>
-        <Title description="New Message" languagecode="1033" />
+        <Title description="New Email" languagecode="1033" />
       </Titles>
     </LocLabel>
     <LocLabel Id="sprk.SecureChild.sprk_communication.New.ToolTipDescription">
       <Titles>
-        <Title description="Add a Message to this secure record (saved by Spaarke so it stays as private as the record)" languagecode="1033" />
+        <Title description="Write an email related to this secure record (sent and saved by Spaarke so it stays as private as the record)" languagecode="1033" />
       </Titles>
     </LocLabel>
   </LocLabels>

@@ -327,7 +327,7 @@ LegalWorkspace uses the package component through an 89-line shim. That leaves t
 
 | Field | Value |
 |---|---|
-| **Status** | Open |
+| **Status** | Done on merge of the `work/def-008-grid-new-email-message` PR. On the owner's spec, the communications grid offers "New Email", which opens the composer "Related to" the host, and "New Message", which opens the form's Messages modal, and no longer the OOB form. The secure-ribbon command became "New Email". CommunicationPage was moved to `docs/archive/code-pages/`. |
 | **Urgency** | next-round |
 | **Filed** | 2026-11-18 |
 | **Source** | DEF-003 execution (#2803, PR #2906): the "delete only if nothing imports or deploys it" check |

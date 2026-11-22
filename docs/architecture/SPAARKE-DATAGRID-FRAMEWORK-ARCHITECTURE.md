@@ -232,6 +232,8 @@ Rules (the placement and collision behaviour is fixed, not configurable):
 - **Identity.** Pass a referentially stable array (`useMemo`); the item list is rebuilt when its identity changes.
 - Not a substitute for `onCreateNew` (which re-routes the built-in New) or the handler registry (which gives a configured `custom` item its behaviour): use those when the item is authored in the configuration record.
 
+**Hiding built-ins (`hiddenBuiltInCommands`, added 2026-11-22, #2908).** A host that replaces a built-in with its own host commands removes the built-in with `hiddenBuiltInCommands`, for example `['create-form']`. This overrides the configuration for that host only, so other hosts that share the configuration record are unaffected. A configured `custom` item is never removed this way, and the hidden ids stay reserved: a host command still cannot take one. Example: the communications grid (`src/solutions/sprk_communicationspage`) hides `create-form`, which opens the OOB `sprk_communication` form. In its place it adds "New Email", which opens the `sprk_emailpage` composer through `openEmailCompose`, "Related to" the host record. On a record form it also adds "New Message", which opens the form's `CommunicationConversationPanel` Messages modal in place through `openConversationPanel`. When the form has no panel, the button says so; it never reloads the page. The communications workspace widget shares the same configuration record and keeps its own command bar.
+
 ---
 
 ## 6.6. Membership filter — `behavior.membershipFilter` (added 2026-07-22 by spaarkeai-assistant-enhancements-r1 task 050)
