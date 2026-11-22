@@ -48,6 +48,8 @@ public class PrivateContextColumnGuardTests
         (Bff + "Services/Communication/Access/PrivateMessageSendGate.cs", false, "the send path's writer: sets the reference once, at create"),
         (Bff + "Services/Communication/CommunicationThreadReadService.cs", true, "the per-viewer reader: the impersonated about reads and privateContext"),
         (Bff + "Services/Dataverse/ParentLineage.cs", true, "BffOwnedCommunicationColumns: the columns are refused to every generic writer"),
+        (Bff + "Services/Ai/Membership/MembershipFieldDiscoveryService.cs", true,
+            "DiscoverLookupsTargetingAsync never returns the columns on sprk_communication, so includeRelated never reads by them"),
     };
 
     /// <summary>The registry source files the scan checks by name (rule 1, the parts not read at run time).</summary>
@@ -143,7 +145,8 @@ public class PrivateContextColumnGuardTests
             Assert.NotEmpty(Namings(path, files.Single(f => f.File == path).Lines, aliases));
 
         Assert.True(problems.Count == 0,
-            "Only the send-path writer, the per-viewer reader, the column definition and the BFF-owned column list may name the " +
+            "Only the send-path writer, the per-viewer reader, the column definition, the BFF-owned column list and the " +
+            "membership-discovery exclusion may name the " +
             "private-context columns (fm task 056, design note §3.4); see this guard's maintenance note:\n" + string.Join("\n", problems));
     }
 
