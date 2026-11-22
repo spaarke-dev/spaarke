@@ -26,8 +26,8 @@ namespace Sprk.Bff.Api.Infrastructure.ExternalAccess;
 /// <see cref="ExternalMarkerKind.Never"/> hides; <see cref="ExternalOwnRule.Communication065"/> is THE task 065 rule
 /// (<see cref="CommunicationOpenThreadGate.ReadVisibleCommunicationIdsAsync"/>); <see cref="ExternalOwnRule.ThreadOpen"/> is its
 /// thread half (<see cref="CommunicationOpenThreadGate.ReadOpenThreadIdsAsync"/>); <see cref="ExternalOwnRule.DocumentNarrowing"/>
-/// is task 188's narrowing through its app-only seam (<see cref="AppOnlyDocumentNarrowing"/>), plus a legacy Procedure Library
-/// document (its drive is <see cref="Readers.ProcedureLibraryDriveId"/>, the rule <c>RuleSetService</c> applies) hides;
+/// is task 188's narrowing through its app-only seam (<see cref="AppOnlyDocumentNarrowing"/>; a Procedure file is a Stored File, a
+/// hard-deny table, never a document: ebilling-r1 task 124 removed the legacy Procedure Library drive step);
 /// <see cref="ExternalOwnRule.InvoiceSource"/> is ebilling (a′) (<see cref="InvoiceDecider"/>, bound to
 /// <c>ExternalInvoiceVisibility.DecideAsync</c>). Each rule is called, never re-implemented.</item>
 /// <item><b>Taint closure</b> (owner Q3, round 114): no lineage parent, through ANY registry lookup or a Signal's or Decision
@@ -74,9 +74,6 @@ internal static class ExternalVisibility
     /// <summary>The deepest filing the walk follows: the secure-child lineage walk's own bound.</summary>
     internal const int MaxLineageDepth = SecureChildShareSynchronizer.MaxLineageDepth;
 
-    /// <summary>A document's drive (<c>sprk_graphdriveid</c>), read to find a legacy Procedure Library document.</summary>
-    internal const string DriveColumn = "sprk_graphdriveid";
-
     /// <summary>Log event name of the decision summary and of a fault (counts and codes only).</summary>
     internal const string LogEvent = "sdap.external.visibility";
 
@@ -106,8 +103,6 @@ internal static class ExternalVisibility
     /// <param name="Documents">Task 188's narrowing through its app-only seam (a hide decision only).</param>
     /// <param name="RootFlags">The effective root flags (Restricted through filing).</param>
     /// <param name="Invoices">ebilling (a′), caller-less.</param>
-    /// <param name="ProcedureLibraryDriveId"><c>Finance:ProcedureLibraryContainerId</c>; <c>null</c> or blank: the environment has
-    /// no Procedure Library, so no document is one.</param>
     /// <param name="Logger">For the summary and the fault line (counts and codes only).</param>
     internal sealed record Readers(
         IGenericEntityService Entities,
@@ -115,7 +110,6 @@ internal static class ExternalVisibility
         AppOnlyDocumentNarrowing Documents,
         EffectiveRootFlagReader RootFlags,
         InvoiceDecider Invoices,
-        string? ProcedureLibraryDriveId,
         ILogger Logger);
 
     /// <summary>
@@ -418,8 +412,6 @@ internal static class ExternalVisibility
             {
                 var table = SecureChildLineage.Children[group.Key];
                 var columns = table.LineageColumns.ToList();
-                if (table.External.Rule == ExternalOwnRule.DocumentNarrowing)
-                    columns.Add(DriveColumn);
                 var ids = group.Select(n => n.Id).ToList();
                 var chunks = await CommunicationOpenThreadGate.ReadChunksAsync(ids, (chunk, c) =>
                 {
@@ -511,16 +503,7 @@ internal static class ExternalVisibility
                     Set(node, ExternalVisibilityVerdict.Hidden, ExternalVisibilityReason.ThreadNotOpen);
             }
 
-            // 4. DocumentNarrowing: a legacy Procedure Library document (any document reached), then task 188 (documents reached
-            //    in full).
-            var library = readers.ProcedureLibraryDriveId;
-            foreach (var node in NodesOf(ExternalOwnRule.DocumentNarrowing, fullOnly: false))
-            {
-                if (!string.IsNullOrWhiteSpace(library) && _rows.TryGetValue(node, out var row) && row is not null
-                    && string.Equals(row.GetAttributeValue<string>(DriveColumn)?.Trim(), library.Trim(), StringComparison.OrdinalIgnoreCase))
-                    Set(node, ExternalVisibilityVerdict.Hidden, ExternalVisibilityReason.ProcedureLibraryDocument);
-            }
-
+            // 4. DocumentNarrowing: task 188 (documents reached in full).
             var documents = NodesOf(ExternalOwnRule.DocumentNarrowing, fullOnly: true);
             if (documents.Count > 0)
             {
@@ -633,9 +616,6 @@ internal enum ExternalVisibilityReason
 
     /// <summary>A document task 188's narrowing hides.</summary>
     DocumentHidden,
-
-    /// <summary>A legacy Procedure Library document (its drive is the Procedure Library container).</summary>
-    ProcedureLibraryDocument,
 
     /// <summary>An invoice ebilling (a′) hides.</summary>
     InvoiceHidden,

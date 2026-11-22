@@ -3,7 +3,7 @@
 //   - Path:     `tests/integration/data-mutation/DocumentContainer/**`
 //   - Justification: #2159 review round 1, slice 4 — the relocator's terminal outcomes (B5: a file over 250 MB, a ledger
 //     owing MaxLedgerEntries moves), the shared lock-wait budget of a re-file's descendant releases, and the #2151 home
-//     rule's two boundaries (A4: only the document's OWN pointer, and only a file IN the declared home). Each pins a
+//     rule (A4, removed by ebilling-r1 task 124: a leftover Procedure Library key declares no home). Each pins a
 //     write or derivation contract.
 //
 // Doubles are module boundaries only (ADR-038 §4): the REAL RecordContainerResolver and relocator over task 166's
@@ -308,13 +308,13 @@ public class RelocationTerminalAndHomeRuleTests
     }
 
     // ═════════════════════════════════════════════════════════════════════════════════════════════════════════════
-    // A4 — the #2151 home rule's boundaries
+    // A4 — the #2151 home rule: removed by ebilling-r1 task 124 (EB-D-163). A leftover Procedure Library key declares no home.
     // ═════════════════════════════════════════════════════════════════════════════════════════════════════════════
 
     private const string ProcedureLibraryKey = "Finance:ProcedureLibraryContainerId";
 
-    [Fact(DisplayName = "A4 must not fire: with a home configured, an unfiled bound document in its business unit's container still derives to the business unit (in place)")]
-    public async Task AHome_DoesNotClaimAnUnfiledDocumentInItsBusinessUnitsContainer()
+    [Fact(DisplayName = "A4 control: with a leftover key, an unfiled bound document in its business unit's container derives to the business unit (in place)")]
+    public async Task ALeftoverKey_DoesNotChangeAnUnfiledDocumentInItsBusinessUnitsContainer()
     {
         var world = R.Env(strict: true, homeKey: ProcedureLibraryKey);
         world.Rows[("sprk_document", T.DocumentId)] = R.Doc(T.DocumentId, null, T.CustomerAContainer);
@@ -323,13 +323,13 @@ public class RelocationTerminalAndHomeRuleTests
         var derivation = await rig.Resolver.DeriveDocumentContainersAsync(T.DocumentId);
         var outcome = await rig.Relocator.RelocateIfMisplacedAsync(T.DocumentId, apply: true, RelocationPurpose.Refile);
 
-        derivation.DeclaredHome.Should().BeFalse(derivation.Reason);
+        derivation.Unfiled.Should().BeTrue(derivation.Reason);
         derivation.PrimaryContainer.Should().Be(T.CustomerAContainer);
         outcome.State.Should().Be(RelocationState.InPlace, outcome.Detail);
     }
 
-    [Fact(DisplayName = "A4 must fire: a document unfiled IN the declared home derives to the home (the rule's own case)")]
-    public async Task AnUnfiledDocumentInTheHome_DerivesToTheHome()
+    [Fact(DisplayName = "A4 must-not-fire: a document unfiled IN the container a leftover key names derives to its business unit, not to that container")]
+    public async Task AnUnfiledDocumentInTheLeftoverKeysContainer_DerivesToItsBusinessUnit()
     {
         var world = R.Env(strict: true, homeKey: ProcedureLibraryKey);
         world.Rows[("sprk_document", T.DocumentId)] = R.Doc(T.DocumentId, null, R.ProcedureLibrary);
@@ -337,12 +337,13 @@ public class RelocationTerminalAndHomeRuleTests
 
         var derivation = await rig.Resolver.DeriveDocumentContainersAsync(T.DocumentId);
 
-        derivation.DeclaredHome.Should().BeTrue(derivation.Reason);
-        derivation.PrimaryContainer.Should().Be(R.ProcedureLibrary);
+        derivation.Unfiled.Should().BeTrue(derivation.Reason);
+        derivation.PrimaryContainer.Should().Be(T.CustomerAContainer);
+        derivation.Allows(R.ProcedureLibrary).Should().BeFalse();
     }
 
-    [Fact(DisplayName = "A4 must not fire: a CHILD of a home document derives through its parent's business unit, never the parent's home")]
-    public async Task AChildOfAHomeDocument_DerivesThroughItsParentsBusinessUnit()
+    [Fact(DisplayName = "A4 must-not-fire: a CHILD of a document in the leftover key's container derives through its parent's business unit")]
+    public async Task AChildOfADocumentInTheLeftoverKeysContainer_DerivesThroughItsParentsBusinessUnit()
     {
         var parent = Guid.Parse("00000000-0000-4000-8000-0000000a4001");
         var world = R.Env(strict: true, homeKey: ProcedureLibraryKey);
@@ -355,7 +356,6 @@ public class RelocationTerminalAndHomeRuleTests
         var derivation = await rig.Resolver.DeriveDocumentContainersAsync(T.DocumentId);
 
         derivation.Decided.Should().BeTrue(derivation.Reason);
-        derivation.DeclaredHome.Should().BeFalse(derivation.Reason);
         derivation.PrimaryContainer.Should().Be(T.CustomerAContainer, "its parent's owning business unit's container");
     }
 }

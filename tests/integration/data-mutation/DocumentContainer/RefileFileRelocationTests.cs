@@ -35,7 +35,6 @@ public class RefileFileRelocationTests
     internal const string Item = T.Item;
     internal const string ProcedureLibrary = "b!ebilling-procedure-library";
     private const string ProcedureLibraryKey = "Finance:ProcedureLibraryContainerId";
-    private const string EbillingOutputKey = "Finance:EbillingOutputContainerId";
     internal const string SecondSecureContainer = "b!secure-matter-two-own-container";
     internal const string Bound = DocumentPointerBinding.BoundItemIdColumn;
 
@@ -44,7 +43,7 @@ public class RefileFileRelocationTests
     // ── The pointer world ───────────────────────────────────────────────────────────────────────────────────────────
 
     /// <summary><see cref="T.Environment"/> — two business units' containers, a secure matter S and a plain matter — plus a
-    /// second secure matter S2, with the strict rule and any declared home as asked. An item it does not list was uploaded
+    /// second secure matter S2, with the strict rule and one extra setting as asked (task 124: only a retired key is ever passed). An item it does not list was uploaded
     /// by the BFF identity (a relocation copy, or a record-keyed upload) — #2159 B9's proof of a BFF-placed file.</summary>
     internal static World Env(bool strict = false, string? homeKey = null, string? home = ProcedureLibrary)
     {
@@ -326,38 +325,40 @@ public class RefileFileRelocationTests
     }
 
     // ═════════════════════════════════════════════════════════════════════════════════════════════════════════════
-    // #2151 — declared home containers of unfiled documents
+    // #2151 — declared home containers of unfiled documents: REMOVED by ebilling-r1 task 124 (EB-D-163) with the only key that
+    // named one, Finance:ProcedureLibraryContainerId. No setting declares a home any more; these are the must-not-fire controls.
     // ═════════════════════════════════════════════════════════════════════════════════════════════════════════════
 
-    [Fact(DisplayName = "#2151: an unfiled document the BFF placed in a declared home is served by the strict rule and stays put")]
-    public async Task DeclaredHome_UnfiledAndBound_IsServedUnderStrict_AndNotMoved()
+    [Fact(DisplayName = "124 must-not-fire: a leftover Finance:ProcedureLibraryContainerId declares no home — an unfiled bound document in that container is refused under strict, reported and never moved")]
+    public async Task LeftoverProcedureLibraryKey_IsNotAHome_UnfiledDocumentIsRefused_AndNotMoved()
     {
         var world = Env(strict: true, homeKey: ProcedureLibraryKey);
         world.Rows[("sprk_document", T.DocumentId)] = Doc(T.DocumentId, null, ProcedureLibrary);
         var rig = new T.Rig(world);
 
         (await rig.Resolver.IsDocumentPointerContainerAllowedAsync(T.DocumentId, ProcedureLibrary, Item))
-            .Should().BeTrue("the declared home is this unfiled document's derived container");
+            .Should().BeFalse("no setting declares a home, so the container is not this unfiled document's derived container");
+        (await rig.Resolver.DeriveDocumentContainersAsync(T.DocumentId)).AllowedContainers.Should().Equal(T.CustomerAContainer);
         var outcome = await RefileAsync(rig, T.DocumentId, isolated: false);
 
-        outcome.State.Should().Be(RelocationState.InPlace);
-        world.Updates.Should().BeEmpty();
+        outcome.State.Should().BeOneOf(RelocationState.UnfiledHomeUnknown, RelocationState.SourceUnverified);
+        world.Updates.Should().BeEmpty("it is not pulled into the business unit's container");
         rig.Steps.Should().BeEmpty();
     }
 
-    [Fact(DisplayName = "#2151: the interim rule serves a BFF-uploaded file in a declared home (through the strict test it already applies)")]
-    public async Task DeclaredHome_UnderTheInterimRule_ABffUploadedFileIsServed()
+    [Fact(DisplayName = "124 must-not-fire: under the interim rule a leftover Finance:ProcedureLibraryContainerId serves nothing in that container")]
+    public async Task LeftoverProcedureLibraryKey_UnderTheInterimRule_ServesNothing()
     {
         var world = Env(strict: false, homeKey: ProcedureLibraryKey);
         world.Rows[("sprk_document", T.DocumentId)] = Doc(T.DocumentId, null, ProcedureLibrary);
         world.Items[(ProcedureLibrary, Item)] = new SpeItemCreator("guidelines.pdf", null, T.BffApplication, 10, "h");
         var rig = new T.Rig(world);
 
-        (await rig.Resolver.IsDocumentPointerContainerAllowedAsync(T.DocumentId, ProcedureLibrary, Item)).Should().BeTrue();
+        (await rig.Resolver.IsDocumentPointerContainerAllowedAsync(T.DocumentId, ProcedureLibrary, Item)).Should().BeFalse();
     }
 
-    [Fact(DisplayName = "#2151 / D-145: the same document FILED under a record moves into the record's container")]
-    public async Task DeclaredHome_OnceFiledUnderARecord_MovesToTheRecordsContainer()
+    [Fact(DisplayName = "124 control: the same document FILED under a record still moves into the record's container (D-145)")]
+    public async Task LeftoverProcedureLibraryKey_OnceFiledUnderARecord_MovesToTheRecordsContainer()
     {
         var world = Env(strict: true, homeKey: ProcedureLibraryKey);
         world.Rows[("sprk_document", T.DocumentId)] = Doc(T.DocumentId, T.PlainMatter, ProcedureLibrary);
@@ -369,56 +370,7 @@ public class RefileFileRelocationTests
         rig.DriveOf(T.DocumentId).Should().Be(T.CustomerA1Container);
     }
 
-    [Theory(DisplayName = "#2151: a file in a declared home whose pointer is NOT the bound item is no home — refused under strict, never moved")]
-    [InlineData(null)]
-    [InlineData("01ANOTHERITEM")]
-    public async Task DeclaredHome_WithoutTheBoundItem_IsNotAHome(string? bound)
-    {
-        var world = Env(strict: true, homeKey: ProcedureLibraryKey);
-        world.Rows[("sprk_document", T.DocumentId)] = Doc(T.DocumentId, null, ProcedureLibrary, bound: bound);
-        var rig = new T.Rig(world);
-
-        (await rig.Resolver.IsDocumentPointerContainerAllowedAsync(T.DocumentId, ProcedureLibrary, Item))
-            .Should().BeFalse("only a file the BFF placed there is at home");
-        (await rig.Resolver.DeriveDocumentContainersAsync(T.DocumentId)).DeclaredHome.Should().BeFalse();
-        var outcome = await RefileAsync(rig, T.DocumentId, isolated: false);
-
-        outcome.State.Should().BeOneOf(RelocationState.UnfiledHomeUnknown, RelocationState.SourceUnverified);
-        world.Updates.Should().BeEmpty("it is not pulled into the business unit's container");
-    }
-
-    [Fact(DisplayName = "#2151: a blank home key declares no home")]
-    public void DeclaredHomes_ABlankKeyAddsNoHome()
-    {
-        var blank = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
-        {
-            [ProcedureLibraryKey] = "   ",
-            [EbillingOutputKey] = "",
-        }).Build();
-        var one = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
-        {
-            [ProcedureLibraryKey] = $" {ProcedureLibrary} ",
-            [EbillingOutputKey] = " ",
-        }).Build();
-
-        RecordContainerResolver.DeclaredUnfiledHomesFrom(blank).Should().BeEmpty();
-        RecordContainerResolver.DeclaredUnfiledHomesFrom(null).Should().BeEmpty();
-        RecordContainerResolver.DeclaredUnfiledHomesFrom(one).Should().Equal(ProcedureLibrary);
-    }
-
-    [Fact(DisplayName = "092 must-not-fire: the retired Finance:EbillingOutputContainerId declares no home, even when it still holds a value")]
-    public void DeclaredHomes_TheRetiredOutputKeyDeclaresNothing()
-    {
-        var retired = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
-        {
-            [EbillingOutputKey] = "b!ebilling-output-files",
-        }).Build();
-
-        RecordContainerResolver.DeclaredUnfiledHomesFrom(retired).Should().BeEmpty();
-        RecordContainerResolver.DeclaredUnfiledHomeContainerKeys.Should().Equal(ProcedureLibraryKey);
-    }
-
-    [Fact(DisplayName = "#2151: with no home configured (master today) an unfiled document's derivation is unchanged")]
+    [Fact(DisplayName = "124: with no setting an unfiled document's derivation is the business unit's (unchanged)")]
     public async Task DeclaredHomes_Unset_DerivationIsTheBusinessUnits()
     {
         var world = Env(strict: true);
@@ -789,8 +741,8 @@ public class RefileFileRelocationTests
         result.Success.Should().BeTrue("a held row is the guard working, not an unfinished move");
     }
 
-    [Fact(DisplayName = "#2151: the job leaves an unfiled, modified document in the Procedure Library where it is")]
-    public async Task TheJob_LeavesADeclaredHomeDocumentInPlace()
+    [Fact(DisplayName = "124 must-not-fire: with a leftover Finance:ProcedureLibraryContainerId the job reports an unfiled document in that container as an unknown home and moves nothing")]
+    public async Task TheJob_ALeftoverProcedureLibraryKey_DeclaresNoHome_TheDocumentIsReportedAndLeft()
     {
         var pointer = Env(strict: true, homeKey: ProcedureLibraryKey);
         pointer.Rows[("sprk_document", T.DocumentId)] = Doc(T.DocumentId, null, ProcedureLibrary);
@@ -799,10 +751,10 @@ public class RefileFileRelocationTests
 
         var (_, refile, _) = await harness.RunAsync();
 
-        refile.GetProperty("inPlace").GetInt32().Should().Be(1);
+        refile.GetProperty("inPlace").GetInt32().Should().Be(0);
+        refile.GetProperty("unfiledHomeUnknown").GetInt32().Should().Be(1);
         refile.GetProperty("moved").GetInt32().Should().Be(0);
-        pointer.Updates.Should().BeEmpty();
-        rig.Locks.Released.Should().BeEmpty("a document in place never reaches the relocator");
+        pointer.Updates.Should().BeEmpty("it is never pulled into the business unit's container");
     }
 
     [Fact(DisplayName = "#2159: a document already in place never spends the relocation budget")]
