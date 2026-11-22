@@ -450,23 +450,29 @@ export const ConversationWorkspace: React.FC<ConversationWorkspaceProps> = ({
   // — New-conversation create flow (item 5a / item 9) —
   // The ＋ affordance is enabled when the shell can start a create (its own modal
   // via `navigationService`, or a host-owned surface via `onCreateThread`).
-  const canCreateThread = !!navigationService || !!onCreateThread;
+  // fm task 055 (review F5): the host's `onCreateThread` surface starts a record-anchored conversation, so in the
+  // Messages view only the shell's own new-direct-message modal can create — the ＋ shows there only with
+  // `navigationService`, and the host callback fires only in All.
+  const canCreateThread = messagesView ? !!navigationService : !!navigationService || !!onCreateThread;
 
   const handleOpenNewThread = React.useCallback(() => {
+    if (messagesView) {
+      if (navigationService) setNewDirectOpen(true);
+      return;
+    }
     // Notify the host (optional), and open the built-in modal when the shell owns
     // the create surface.
     onCreateThread?.();
-    if (!navigationService) return;
-    if (messagesView) setNewDirectOpen(true);
-    else setNewThreadOpen(true);
+    if (navigationService) setNewThreadOpen(true);
   }, [onCreateThread, navigationService, messagesView]);
 
+  // fm task 055 (review F1): the create modals close themselves on success (onDismiss). The shell does not close them here,
+  // because both call back BEFORE a first-message send failure is shown, and that warning must stay visible.
   const handleThreadCreated = React.useCallback(
     (threadId: string) => {
       // find-or-create returned a thread — select it immediately (the right pane
       // renders straight off `selectedThreadId`, so the conversation shows before
       // the list refresh completes) and re-fetch the list so the row appears.
-      setNewThreadOpen(false);
       setSelectedThreadId(threadId);
       onThreadSelected?.(threadId);
       setReloadToken(t => t + 1);
@@ -489,7 +495,7 @@ export const ConversationWorkspace: React.FC<ConversationWorkspaceProps> = ({
   const handleConversationStarted = React.useCallback(
     (threadId: string, counterpartName: string) => {
       // The pair's thread (new or reused) — select it now and show it named by the person until the list re-fetch lands.
-      setNewDirectOpen(false);
+      // The modal closes itself on success (see handleThreadCreated).
       setAllRows(prev =>
         prev.some(r => r.threadId === threadId)
           ? prev

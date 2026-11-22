@@ -55,6 +55,7 @@ public class CommunicationListDirectThreadsSeamTests
     };
 
     private string? _lastThreadQuery;
+    private readonly List<string> _threadQueries = new();
     private bool _namesFault;
 
     public CommunicationListDirectThreadsSeamTests()
@@ -109,9 +110,24 @@ public class CommunicationListDirectThreadsSeamTests
         var rows = threadIds
             .Select((id, i) => ThreadRow(id, "Direct Conversation", ThreadTypeDirect, created.AddMinutes(-i)))
             .ToArray();
+        // Answers like Dataverse for these rows: newest first, after the keyset cursor (createdon values are distinct here),
+        // at most $top rows.
         _query.Setup(q => q.QueryAsync(ThreadSet, It.IsAny<string>(), Caller, It.IsAny<CancellationToken>()))
-              .Callback<string, string?, Guid, CancellationToken>((_, odata, _, _) => _lastThreadQuery = odata)
-              .ReturnsAsync(rows);
+              .ReturnsAsync((string _, string? odata, Guid _, CancellationToken _) =>
+              {
+                  _lastThreadQuery = odata;
+                  _threadQueries.Add(odata!);
+                  var after = System.Text.RegularExpressions.Regex.Match(odata!, @"createdon lt ([^ )]+)");
+                  var top = int.Parse(System.Text.RegularExpressions.Regex.Match(odata!, @"\$top=(\d+)").Groups[1].Value);
+                  IEnumerable<Dictionary<string, JsonElement>> page = rows;
+                  if (after.Success)
+                  {
+                      var bound = DateTimeOffset.Parse(after.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture);
+                      page = page.Where(r => DateTimeOffset.Parse(r["createdon"].GetString()!, System.Globalization.CultureInfo.InvariantCulture) < bound);
+                  }
+
+                  return (IReadOnlyList<Dictionary<string, JsonElement>>)page.Take(top).ToList();
+              });
     }
 
     /// <summary>A Direct thread as <c>POST /threads/direct</c> creates it: owned by <paramref name="owner"/>, Open, no regarding,
@@ -198,7 +214,7 @@ public class CommunicationListDirectThreadsSeamTests
     public static TheoryData<string> NotAStrictPair() => new()
     {
         "extra-user-share", "team-share", "zero-mask-extra-share", "no-share", "private", "no-privacy",
-        "typed-regarding", "team-owned", "record-anchored-type",
+        "typed-regarding", "team-owned", "record-anchored-type", "default-thread",
     };
 
     [Theory]
@@ -237,6 +253,9 @@ public class CommunicationListDirectThreadsSeamTests
             case "record-anchored-type":
                 row["sprk_threadtype"] = new OptionSetValue(ThreadTypeRecordAnchored);
                 break;
+            case "default-thread": // the per-user master thread, which the send path does not treat as 1:1
+                row["sprk_isdefaultthread"] = true;
+                break;
         }
 
         var control = Pair(owner: Caller, other: Bob);
@@ -245,6 +264,52 @@ public class CommunicationListDirectThreadsSeamTests
         var result = await ListDirect();
 
         result.Threads.Select(t => t.ThreadId).Should().Equal(new[] { control }, variant + " is not a strict pair");
+    }
+
+    // ── Filling the page (review F2): rows left out never leave the page short while older pairs exist ─────────────────────
+
+    [Fact]
+    public async Task ListThreads_WhenTheFirstQueryPageKeepsNothing_ReadsFurtherPages_AndResumesWithoutSkippingOrRepeating()
+    {
+        // Newest first: three pairs the caller is not in, then three of the caller's own.
+        var rows = new[]
+        {
+            Pair(owner: Alice, other: Bob), Pair(owner: Bob, other: Alice), Pair(owner: Alice, other: Bob),
+            Pair(owner: Caller, other: Alice), Pair(owner: Bob, other: Caller), Pair(owner: Caller, other: Bob),
+        };
+        ImpersonatedRows(rows);
+
+        var first = await ListDirect(top: 2);
+
+        first.Threads.Select(t => t.ThreadId).Should().Equal(rows[3], rows[4]);
+        first.HasMore.Should().BeTrue();
+        first.NextPageToken.Should().NotBeNull();
+
+        var second = await Sut().ListThreadsAsync(Principal(), null, 2, first.NextPageToken, CancellationToken.None, kind: "direct");
+
+        second.Threads.Select(t => t.ThreadId).Should().Equal(rows[5]);
+        second.HasMore.Should().BeFalse();
+        second.NextPageToken.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task ListThreads_PastTheCandidateBound_ReturnsWhatItKept_WithACursorAfterTheLastRowRead()
+    {
+        // 210 newer rows the caller is not in, then one of the caller's own: one request reads at most 200 candidates.
+        var theirs = Enumerable.Range(0, 210).Select(_ => Pair(owner: Alice, other: Bob)).ToList();
+        var mine = Pair(owner: Caller, other: Alice);
+        ImpersonatedRows(theirs.Append(mine).ToArray());
+
+        var first = await ListDirect(top: 50);
+
+        first.Threads.Should().BeEmpty();
+        first.HasMore.Should().BeTrue("rows remain after the bound, so the page is not the end of the list");
+        _threadQueries.Should().HaveCount(4, "4 query pages of 50 reach the 200-candidate bound");
+
+        var second = await Sut().ListThreadsAsync(Principal(), null, 50, first.NextPageToken, CancellationToken.None, kind: "direct");
+
+        second.Threads.Select(t => t.ThreadId).Should().Equal(mine);
+        second.HasMore.Should().BeFalse();
     }
 
     // ── Faults: narrower, never wider ────────────────────────────────────────────────────────────────────────────────────────

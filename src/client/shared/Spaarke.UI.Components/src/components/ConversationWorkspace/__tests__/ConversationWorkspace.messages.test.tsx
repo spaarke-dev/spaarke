@@ -160,3 +160,98 @@ describe('ConversationWorkspace — Messages view (fm task 055)', () => {
     expect(await screen.findByRole('dialog', { name: /New message/i })).toBeInTheDocument();
   });
 });
+
+/** The list double above, plus the create endpoints answering and the first-message send failing (500). */
+function makeSendFailingFetch() {
+  const list = makeFetch();
+  return throwingAuthenticatedFetch(async (url: string, init?: RequestInit) => {
+    const post = (init?.method ?? 'GET').toUpperCase() === 'POST';
+    if (post && url.endsWith('/api/communications/threads/direct')) {
+      return jsonResponse({ threadId: 'pair-9', callerSystemUserId: 'me', otherParticipantSystemUserId: 'carol-1' });
+    }
+    if (post && url.endsWith('/api/communications/threads')) {
+      return jsonResponse({ threadId: 'thread-new' });
+    }
+    if (url.includes('/api/communications/send')) {
+      return jsonResponse({ title: 'Error', status: 500, detail: 'send failed' }, 500);
+    }
+    return (list as unknown as (u: string, i?: RequestInit) => Promise<Response>)(url, init);
+  });
+}
+
+describe('ConversationWorkspace — create modals keep a send-failure warning (fm task 055, review F1)', () => {
+  it('the new-direct-message modal stays open with its warning when the first message fails, and the pair is selected', async () => {
+    const navigationService = {
+      openLookup: jest.fn().mockResolvedValue([{ id: '{CAROL-1}', name: 'Carol Chen', entityType: 'systemuser' }]),
+    } as unknown as INavigationService;
+    const { renderConversation } = renderWorkspace({ navigationService }, makeSendFailingFetch());
+    await screen.findByText('Acme Matter');
+    openMessages();
+    await screen.findByText('Alice Archer');
+
+    fireEvent.click(screen.getByRole('button', { name: 'New message' }));
+    await screen.findByRole('dialog', { name: /New message/i });
+    fireEvent.click(screen.getByRole('button', { name: 'Select To' }));
+    await screen.findByText('Carol Chen');
+    fireEvent.change(screen.getByRole('textbox', { name: 'Message' }), { target: { value: 'Hi Carol' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Start' }));
+
+    expect(await screen.findByText(/couldn't be sent/i)).toBeInTheDocument();
+    expect(screen.getByRole('dialog', { name: /New message/i })).toBeInTheDocument();
+    await waitFor(() =>
+      expect(renderConversation).toHaveBeenLastCalledWith(expect.objectContaining({ threadId: 'pair-9' }))
+    );
+  });
+
+  it('the record-anchored modal stays open with its warning when the first message fails, and the thread is selected', async () => {
+    const navigationService = {
+      openLookup: jest.fn().mockResolvedValue([{ id: '{REC-99}', name: 'Picked Matter', entityType: 'sprk_matter' }]),
+    } as unknown as INavigationService;
+    const { renderConversation } = renderWorkspace({ navigationService }, makeSendFailingFetch());
+    await screen.findByText('Acme Matter');
+
+    fireEvent.click(screen.getByRole('button', { name: 'New thread' }));
+    await screen.findByRole('dialog', { name: /New conversation/i });
+    fireEvent.click(screen.getByRole('button', { name: /select record/i }));
+    await waitFor(() => expect(navigationService.openLookup as jest.Mock).toHaveBeenCalled());
+    fireEvent.change(screen.getByRole('textbox', { name: 'Message' }), { target: { value: 'Hello there' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Create' }));
+
+    expect(await screen.findByText(/couldn't be sent — try again in the thread/i)).toBeInTheDocument();
+    expect(screen.getByRole('dialog', { name: /New conversation/i })).toBeInTheDocument();
+    await waitFor(() =>
+      expect(renderConversation).toHaveBeenLastCalledWith(expect.objectContaining({ threadId: 'thread-new' }))
+    );
+  });
+});
+
+describe('ConversationWorkspace — host create surface and the Messages view (fm task 055, review F5)', () => {
+  it('with only a host onCreateThread, All enables the ＋ and calls the host; in Messages the ＋ is disabled', async () => {
+    const onCreateThread = jest.fn();
+    renderWorkspace({ onCreateThread });
+    await screen.findByText('Acme Matter');
+
+    fireEvent.click(screen.getByRole('button', { name: 'New thread' }));
+    expect(onCreateThread).toHaveBeenCalledTimes(1);
+
+    openMessages();
+    await screen.findByText('Alice Archer');
+    expect(screen.getByRole('button', { name: 'New message' })).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: 'New message' }));
+    expect(onCreateThread).toHaveBeenCalledTimes(1);
+  });
+
+  it('with both, the Messages ＋ opens the direct modal and does not call the host', async () => {
+    const onCreateThread = jest.fn();
+    const navigationService = { openLookup: jest.fn().mockResolvedValue([]) } as unknown as INavigationService;
+    renderWorkspace({ onCreateThread, navigationService });
+    await screen.findByText('Acme Matter');
+    openMessages();
+    await screen.findByText('Alice Archer');
+
+    fireEvent.click(screen.getByRole('button', { name: 'New message' }));
+
+    expect(await screen.findByRole('dialog', { name: /New message/i })).toBeInTheDocument();
+    expect(onCreateThread).not.toHaveBeenCalled();
+  });
+});
