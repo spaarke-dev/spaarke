@@ -189,7 +189,10 @@ public sealed record ThreadListItem(
     // (RegardingFieldMap). Lets the message-pane "open associated record" affordance navigate to it. Both null for a
     // record-less Direct thread.
     string? RegardingEntityType = null,
-    Guid? RegardingId = null);
+    Guid? RegardingId = null,
+    // fm task 055: on the Messages list (kind=direct) only, the other participant's full name, so each 1:1 conversation is
+    // shown by the person it is with (every pair thread is named "Direct Conversation"). Null on the all-threads list.
+    string? CounterpartName = null);
 
 /// <summary>
 /// List-all-threads result (R3 task 003 / FR-16 / Success Criterion 5): a paged, name-searchable list of ALL threads

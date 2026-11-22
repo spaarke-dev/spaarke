@@ -91,6 +91,15 @@ export interface IThreadListProps {
    * hide the delete affordance entirely (e.g. a read-only host).
    */
   onDeleteThread?: (threadId: string) => void;
+  /**
+   * Optional content rendered under the header, above the rows (fm task 055: the shell's All / Messages switch). Omit to
+   * render nothing there.
+   */
+  subHeader?: React.ReactNode;
+  /** Accessible name and tooltip of the ＋ control. Default "New thread". */
+  createLabel?: string;
+  /** Text shown when the list is empty. Default "No threads yet.". */
+  emptyText?: string;
   className?: string;
 }
 
@@ -345,6 +354,9 @@ export const ThreadList: React.FC<IThreadListProps> = ({
   titleAccessory,
   onTogglePin,
   onDeleteThread,
+  subHeader,
+  createLabel = 'New thread',
+  emptyText = 'No threads yet.',
   className,
 }) => {
   const styles = useStyles();
@@ -412,17 +424,19 @@ export const ThreadList: React.FC<IThreadListProps> = ({
         {titleAccessory && <span className={styles.titleAccessory}>{titleAccessory}</span>}
         <span className={styles.headerSpacer} />
         {/* ＋ create control right-aligned (item 6). */}
-        <Tooltip content="New thread" relationship="label">
+        <Tooltip content={createLabel} relationship="label">
           <Button
             appearance="subtle"
             size="small"
             icon={<AddRegular />}
-            aria-label="New thread"
+            aria-label={createLabel}
             onClick={() => onCreateThread?.()}
             disabled={!onCreateThread}
           />
         </Tooltip>
       </div>
+
+      {subHeader}
 
       {status === 'loading' && (
         <div className={styles.centeredState} role="status" aria-live="polite">
@@ -438,7 +452,7 @@ export const ThreadList: React.FC<IThreadListProps> = ({
 
       {status === 'ready' && rows.length === 0 && (
         <div className={styles.centeredState}>
-          <Text>No threads yet.</Text>
+          <Text>{emptyText}</Text>
         </div>
       )}
 

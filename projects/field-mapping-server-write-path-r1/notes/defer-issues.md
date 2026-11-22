@@ -332,3 +332,13 @@ Two-write rule: every entry here has a GitHub issue, and every issue has an entr
 | **Class** | Outside this project (messaging-r3's `CommunicationArrivedProducer`) |
 | **Failure** | The thread read names `RegardingFieldMap.AllRegardingFields`, which includes `sprk_regardingreportcard`, a column the thread table lacks. The read faults, and the fan-out treats every thread as private (narrower, never wider). |
 | **Status** | Filed and reported; fix is `ThreadResolver.ThreadRegardingColumns`, owned by the fan-out's owner. |
+
+## DI-035 — The conversation workspace thread list shows only the first page (no lazy-scroll)
+
+| Field | Value |
+|---|---|
+| **Found** | 2026-11-22, task 055 adversarial review |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2936 |
+| **Class** | Pre-existing (messaging-r3's `ConversationWorkspace`), not caused by 055 |
+| **Failure** | The all-mode list loads one `listThreads` page (default 50) and ignores `nextPageToken`, in All and now in Messages. ADR-051 requires infinite lazy-scroll. The server already pages, and `kind=direct` fills each page server-side. |
+| **Status** | Filed and reported. |

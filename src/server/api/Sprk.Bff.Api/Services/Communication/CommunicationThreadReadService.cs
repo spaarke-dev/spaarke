@@ -170,6 +170,25 @@ public sealed class CommunicationThreadReadService
     private const int MaxThreads = 200;         // bound the by-regarding thread fan (R2 task 010)
     private const int DefaultThreadListPage = 50;  // list-all-threads default page size (R3 task 003 / FR-16)
     private const int MaxThreadListPage = 200;     // list-all-threads page-size ceiling (mirrors MaxThreads)
+    // fm task 055: the Messages list (kind=direct) reads each candidate row's shape app-only (a thread retrieve plus a full
+    // share read), so its page is capped lower than the all-threads list.
+    private const int MaxDirectThreadListPage = 50;
+    // fm task 055 (review F2): the Messages page is filled from further candidate pages when rows are left out. No further
+    // query page is read once this many candidate rows have been read; the answer then carries a cursor that resumes after
+    // the last row read. A multiple of DirectCandidateQueryPage, so a request reads at most this many.
+    private const int MaxDirectCandidatesPerRequest = 200;
+    // fm task 055 (UAC-r2 review F3): candidate rows per impersonated query in the Messages list, fixed whatever the
+    // caller's `top` (which sets only how many rows are kept), so a small `top` cannot turn the bound into one query per row.
+    private const int DirectCandidateQueryPage = MaxDirectThreadListPage;
+    // fm task 055 (review F3): candidate rows checked at once (each check is two app-only reads).
+    private const int MaxPairChecksInFlight = 8;
+
+    /// <summary>The list kinds GET /threads accepts: <c>all</c> (the default) and <c>direct</c> (the Messages list).</summary>
+    public const string ThreadListKindAll = "all";
+    public const string ThreadListKindDirect = "direct";
+    private const int ThreadTypeDirectValue = 100000001;
+    internal const string DirectListRowsFaultedEventCode = "thread_list.direct_rows_faulted";
+    private static readonly EventId DirectListRowsFaultedEvent = new(5423, DirectListRowsFaultedEventCode);
     private const int MaxRegardingScan = 500;   // bound the by-regarding message scan across threads (R2 task 010)
     private const int MaxQueryScan = 200;       // bound the filtered-query message scan (R2 task 011)
 
@@ -188,6 +207,8 @@ public sealed class CommunicationThreadReadService
     private readonly ICallerSystemUserResolver _callerResolver;
     private readonly ISystemUserIdentityResolver _identityResolver;
     private readonly ILogger<CommunicationThreadReadService> _logger;
+    private readonly Spaarke.Dataverse.IGenericEntityService? _entities;
+    private readonly Sprk.Bff.Api.Services.Access.IDataverseRecordShareService? _recordShares;
 
     public CommunicationThreadReadService(
         IImpersonatedCommunicationQuery query,
@@ -195,8 +216,15 @@ public sealed class CommunicationThreadReadService
         ICallerSystemUserResolver callerResolver,
         ISystemUserIdentityResolver identityResolver,
         ILogger<CommunicationThreadReadService> logger,
-        IAppOnlyCommunicationQuery? appOnlyQuery = null)
+        IAppOnlyCommunicationQuery? appOnlyQuery = null,
+        Spaarke.Dataverse.IGenericEntityService? entities = null,
+        Sprk.Bff.Api.Services.Access.IDataverseRecordShareService? recordShares = null)
     {
+        // fm task 055: the Direct-pair check of the Messages list (kind=direct). Optional so the existing compositions and
+        // tests construct the service unchanged; the list refuses kind=direct (503) when either is absent, never a wider list.
+        // CommunicationModule registers both, so DI always supplies them.
+        _entities = entities;
+        _recordShares = recordShares;
         _query = query ?? throw new ArgumentNullException(nameof(query));
         // Optional so the impersonated-only callers and their tests construct the service unchanged. Only
         // ReadRegardingAppOnlyAsync uses it, and it refuses (throws) when the seam is absent — never an impersonated or
@@ -861,14 +889,35 @@ public sealed class CommunicationThreadReadService
         string? search,
         int? top,
         string? pageToken,
-        CancellationToken ct)
+        CancellationToken ct,
+        string? kind = null)
     {
+        var directOnly = ParseThreadListKind(kind);
+        if (directOnly && (_entities is null || _recordShares is null))
+        {
+            // Fail closed: without the pair check the Messages list is not served at all (never a wider list).
+            throw new SdapProblemException(
+                code: "THREAD_LIST_UNAVAILABLE",
+                title: "Service Unavailable",
+                detail: "Your messages could not be listed. Try again.",
+                statusCode: 503);
+        }
+
         var callerSystemUserId = await ResolveCallerOrThrowAsync(caller, ct);
         var pageSize = NormalizeThreadListPageSize(top);
+        if (directOnly)
+            pageSize = Math.Min(pageSize, MaxDirectThreadListPage);
 
         // Build the filter: NO regarding scoping (record-less inclusion) + optional name search + keyset cursor.
         // Active-only (round-8): deactivated (soft-deleted) threads must drop out of the list.
         var clauses = new List<string> { ActiveOnlyClause };
+        if (directOnly)
+        {
+            // fm task 055: the Messages list — Direct-typed threads with no typed regarding lookup. The lookups are the
+            // thread's own (ThreadRegardingFields), never RegardingFieldMap.All: the thread table lacks one of those columns.
+            clauses.Add($"{ThreadTypeField} eq {ThreadTypeDirectValue}");
+            clauses.AddRange(ThreadRegardingFields.Select(x => $"_{x.RegardingField}_value eq null"));
+        }
         // Fix round 6 (F1): an external caller lists only EXPLICITLY Open threads. The clause is part of the query's
         // $filter, so $top, the over-fetch row and the keyset next-page token are all computed over visible threads.
         if (await _identityResolver.IsExternalAsync(callerSystemUserId, ct))
@@ -884,18 +933,6 @@ public sealed class CommunicationThreadReadService
             clauses.Add($"contains({ThreadNameField},'{searchLiteral}')");
         }
 
-        var cursor = DecodePageToken(pageToken);
-        if (cursor is { } c)
-        {
-            // COMPOSITE keyset cursor over (createdon, sprk_communicationthreadid) — createdon alone is NOT unique
-            // (Dataverse createdon is second-granular; bulk/seed/rapid creation ties routinely), so a createdon-only
-            // `lt` cursor would silently DROP tied rows past the page cut (a user loses visibility of their own
-            // threads — breaks FR-16 "list ALL"). The tuple comparison keeps paging stable AND lossless.
-            var v = FormatOData(c.CreatedOn);
-            clauses.Add(
-                $"({CreatedOnField} lt {v} or ({CreatedOnField} eq {v} and {ThreadPkField} lt {c.ThreadId}))");
-        }
-
         // PinnedField added (task 041 / FR-24) so the all-mode thread list can mark/sort pinned threads.
         // round-8.4 item 3: also project the typed regarding lookups (RegardingFieldMap) so each row can carry its
         // associated record for the message-pane "open record" affordance. Lookups read back as `_{field}_value`.
@@ -903,13 +940,36 @@ public sealed class CommunicationThreadReadService
         var select = string.Join(
             ',',
             new[] { ThreadPkField, ThreadNameField, ThreadTypeField, CreatedOnField, PinnedField }.Concat(regardingValueCols));
-        var filterPart = clauses.Count > 0 ? $"&$filter={string.Join(" and ", clauses)}" : string.Empty;
-        // Deterministic total order on the composite key so paging is stable + non-overlapping; over-fetch one row
-        // to detect whether a further page exists without a second COUNT query.
-        var odata =
-            $"$select={select}{filterPart}&$orderby={CreatedOnField} desc,{ThreadPkField} desc&$top={pageSize + 1}";
 
-        var rows = await _query.QueryAsync(ThreadSet, odata, callerSystemUserId, ct);
+        // The query for one page of `size` rows starting after `at` (the first page when null).
+        string PageQuery(ThreadPageCursor? at, int size)
+        {
+            var pageClauses = new List<string>(clauses);
+            if (at is { } c)
+            {
+                // COMPOSITE keyset cursor over (createdon, sprk_communicationthreadid) — createdon alone is NOT unique
+                // (Dataverse createdon is second-granular; bulk/seed/rapid creation ties routinely), so a createdon-only
+                // `lt` cursor would silently DROP tied rows past the page cut (a user loses visibility of their own
+                // threads — breaks FR-16 "list ALL"). The tuple comparison keeps paging stable AND lossless.
+                var v = FormatOData(c.CreatedOn);
+                pageClauses.Add(
+                    $"({CreatedOnField} lt {v} or ({CreatedOnField} eq {v} and {ThreadPkField} lt {c.ThreadId}))");
+            }
+
+            var filterPart = pageClauses.Count > 0 ? $"&$filter={string.Join(" and ", pageClauses)}" : string.Empty;
+            // Deterministic total order on the composite key so paging is stable + non-overlapping; over-fetch one row
+            // to detect whether a further page exists without a second COUNT query.
+            return $"$select={select}{filterPart}&$orderby={CreatedOnField} desc,{ThreadPkField} desc&$top={size + 1}";
+        }
+
+        var cursor = DecodePageToken(pageToken);
+        if (directOnly)
+        {
+            return await ListCallersDirectPairsAsync(
+                at => PageQuery(at, DirectCandidateQueryPage), cursor, pageSize, callerSystemUserId, ct);
+        }
+
+        var rows = await _query.QueryAsync(ThreadSet, PageQuery(cursor, pageSize), callerSystemUserId, ct);
 
         // Fix round 3e: the page is the first pageSize rows (the over-fetch row only says a further page exists). A row whose typed
         // regarding columns were not all returned has an UNKNOWN anchor, so it is withheld from the list, the same way a row with no
@@ -921,22 +981,8 @@ public sealed class CommunicationThreadReadService
             _logger.LogWarning("[LIST-THREADS] {Withheld} thread row(s) did not carry every regarding column; withheld (unknown anchor).", withheld);
 
         var items = page
-            .Where(r => ResolveRegardingFromRow(r).Known)
-            .Select(r =>
-            {
-                var (regType, regId, _) = ResolveRegardingFromRow(r);
-                return new ThreadListItem(
-                    ThreadId: TryGuid(r, ThreadPkField) ?? Guid.Empty,
-                    Name: TryString(r, ThreadNameField),
-                    ThreadType: TryInt(r, ThreadTypeField),
-                    CreatedOn: TryDateTimeOffset(r, CreatedOnField),
-                    // Pre-existing rows read sprk_ispinned back as null (task 040 DefaultValue does not backfill) —
-                    // TryBool returns null for that case, so the ?? false normalizes it to unpinned (task 041 caveat).
-                    IsPinned: TryBool(r, PinnedField) ?? false,
-                    RegardingEntityType: regType,
-                    RegardingId: regId);
-            })
-            .Where(t => t.ThreadId != Guid.Empty)
+            .Select(ToThreadListItem)
+            .OfType<ThreadListItem>()
             .ToList();
 
         var hasMore = rows.Count > pageSize;
@@ -956,6 +1002,221 @@ public sealed class CommunicationThreadReadService
             callerSystemUserId, !string.IsNullOrWhiteSpace(search), items.Count, hasMore);
 
         return new ThreadListResult(items, items.Count, nextToken, hasMore);
+    }
+
+    /// <summary>
+    /// One thread row as a list item; <c>null</c> when its regarding anchor is unknown (a typed regarding column was not
+    /// returned) or it has no readable thread id. Such a row is withheld from the list.
+    /// </summary>
+    private static ThreadListItem? ToThreadListItem(Dictionary<string, JsonElement> r)
+    {
+        var (regType, regId, known) = ResolveRegardingFromRow(r);
+        if (!known || TryGuid(r, ThreadPkField) is not { } id || id == Guid.Empty)
+            return null;
+
+        return new ThreadListItem(
+            ThreadId: id,
+            Name: TryString(r, ThreadNameField),
+            ThreadType: TryInt(r, ThreadTypeField),
+            CreatedOn: TryDateTimeOffset(r, CreatedOnField),
+            // Pre-existing rows read sprk_ispinned back as null (task 040 DefaultValue does not backfill) —
+            // TryBool returns null for that case, so the ?? false normalizes it to unpinned (task 041 caveat).
+            IsPinned: TryBool(r, PinnedField) ?? false,
+            RegardingEntityType: regType,
+            RegardingId: regId);
+    }
+
+    /// <summary>
+    /// <c>null</c>, blank or <c>all</c> → the all-threads list (false); <c>direct</c> → the Messages list (true). Any other value
+    /// is a 400, never a silent fallback to the wider list.
+    /// </summary>
+    private static bool ParseThreadListKind(string? kind)
+    {
+        if (string.IsNullOrWhiteSpace(kind) || string.Equals(kind.Trim(), ThreadListKindAll, StringComparison.OrdinalIgnoreCase))
+            return false;
+        if (string.Equals(kind.Trim(), ThreadListKindDirect, StringComparison.OrdinalIgnoreCase))
+            return true;
+        throw new SdapProblemException(
+            code: "VALIDATION_ERROR",
+            title: "Validation Error",
+            detail: "kind must be 'all' or 'direct'.",
+            statusCode: 400);
+    }
+
+    /// <summary>
+    /// fm task 055, the Messages list: keeps a row only when the one Direct-pair shape rule
+    /// (<see cref="DirectMessageRecipient.ReadStrictPairShapeAsync"/>) reads it a strict 1:1 pair AND the caller is its owner or
+    /// its other participant, compared by id. Row-level security alone is not the membership answer: a reader with wider thread
+    /// Read sees other people's pairs. Runs only on rows the impersonated query returned. A row whose shape read faults is
+    /// dropped (narrower, never wider); the count is logged once at Warning, and when every candidate faulted the call is a 503
+    /// rather than an empty list. Each kept row carries <c>CounterpartName</c>, the other participant's full name, read only for
+    /// the pair's ids after the membership check; a fault of that read leaves the names empty.
+    /// <para>A per-user master thread (<c>IsDefaultThread</c>) is not a 1:1 conversation and is left out, as the send path
+    /// treats it (<c>DirectMessageOwnerStep.IsOneToOneThreadAsync</c>).</para>
+    /// <para><b>Filling the page (review F2).</b> Rows are left out after the query, so one query page can keep few or none.
+    /// The list therefore reads further pages, in the query's order, until <paramref name="pageSize"/> rows are kept, the rows
+    /// run out, or <see cref="MaxDirectCandidatesPerRequest"/> candidate rows have been read. Each query asks for
+    /// <see cref="DirectCandidateQueryPage"/> rows (plus one), whatever <paramref name="pageSize"/> is. The next-page token resumes after
+    /// the last row read (the last kept row when the page filled), so no row is skipped or repeated across requests. Each
+    /// query page's rows are checked up to <see cref="MaxPairChecksInFlight"/> at once (review F3); the order kept is the
+    /// query's.</para>
+    /// </summary>
+    private async Task<ThreadListResult> ListCallersDirectPairsAsync(
+        Func<ThreadPageCursor?, string> pageQuery,
+        ThreadPageCursor? cursor,
+        int pageSize,
+        Guid callerSystemUserId,
+        CancellationToken ct)
+    {
+        var kept = new List<(ThreadListItem Item, Guid Counterpart)>();
+        var read = 0;
+        var checkedRows = 0;
+        var faulted = 0;
+        ThreadPageCursor? next = null;
+
+        while (true)
+        {
+            var rows = await _query.QueryAsync(ThreadSet, pageQuery(cursor), callerSystemUserId, ct);
+            var batch = rows.Take(DirectCandidateQueryPage).ToList();
+            var items = batch.Select(ToThreadListItem).ToList();
+            var shapes = await ReadPairShapesAsync(items, ct);
+
+            var stoppedAt = -1;
+            for (var i = 0; i < batch.Count; i++)
+            {
+                read++;
+                if (items[i] is not { } item || shapes[i] is not { } shape)
+                    continue;
+
+                checkedRows++;
+                if (shape.Reason == DirectPairShapeReason.ParticipantReadFault)
+                {
+                    faulted++;
+                    continue;
+                }
+
+                if (!shape.IsStrictPair || shape.IsDefaultThread || shape.OwnerId is not { } owner || shape.OtherId is not { } other)
+                    continue;
+
+                if (callerSystemUserId == owner)
+                    kept.Add((item, other));
+                else if (callerSystemUserId == other)
+                    kept.Add((item, owner));
+                else
+                    continue;
+
+                if (kept.Count == pageSize)
+                {
+                    stoppedAt = i;
+                    break;
+                }
+            }
+
+            // Rows remain after the last one read when the page filled mid-batch or the query over-fetched a further row.
+            var lastRead = stoppedAt >= 0 ? stoppedAt : batch.Count - 1;
+            var rowsRemain = (stoppedAt >= 0 && stoppedAt < batch.Count - 1) || rows.Count > DirectCandidateQueryPage;
+            next = rowsRemain && lastRead >= 0 ? CursorOf(batch[lastRead]) : null;
+            // No cursor (no further rows, or the boundary row has no createdon): no further page is claimed.
+            if (next is null || kept.Count == pageSize || read >= MaxDirectCandidatesPerRequest)
+                break;
+
+            cursor = next;
+        }
+
+        if (faulted > 0)
+        {
+            _logger.LogWarning(
+                DirectListRowsFaultedEvent,
+                "{EventCode}: {Faulted} of {Candidates} Direct thread row(s) could not be checked and were left out of the list",
+                DirectListRowsFaultedEventCode, faulted, checkedRows);
+
+            if (kept.Count == 0 && faulted == checkedRows)
+            {
+                throw new SdapProblemException(
+                    code: "THREAD_LIST_UNAVAILABLE",
+                    title: "Service Unavailable",
+                    detail: "Your messages could not be listed. Try again.",
+                    statusCode: 503);
+            }
+        }
+
+        var names = await ReadFullNamesAsync(kept.Select(k => k.Counterpart).Distinct().ToList(), ct);
+        var threads = kept
+            .Select(k => k.Item with { CounterpartName = names.TryGetValue(k.Counterpart, out var n) ? n : null })
+            .ToList();
+        var nextToken = next is { } c ? EncodePageToken(c.CreatedOn, c.ThreadId) : null;
+
+        _logger.LogDebug(
+            "[LIST-THREADS] caller={Caller} kind=direct read={Read} returned={Returned} hasMore={HasMore} (impersonated set, pair-checked)",
+            callerSystemUserId, read, threads.Count, nextToken is not null);
+
+        return new ThreadListResult(threads, threads.Count, nextToken, nextToken is not null);
+    }
+
+    /// <summary>The paging cursor of one thread row; <c>null</c> when the row has no createdon or thread id.</summary>
+    private static ThreadPageCursor? CursorOf(Dictionary<string, JsonElement> row) =>
+        TryDateTimeOffset(row, CreatedOnField) is { } created && TryGuid(row, ThreadPkField) is { } id && id != Guid.Empty
+            ? new ThreadPageCursor(created, id)
+            : null;
+
+    /// <summary>
+    /// The Direct-pair shape of each candidate, in order, read up to <see cref="MaxPairChecksInFlight"/> at once; <c>null</c>
+    /// for a row with no list item. <see cref="DirectMessageRecipient.ReadStrictPairShapeAsync"/> answers a fault as a shape
+    /// (it throws only on cancellation).
+    /// </summary>
+    private async Task<DirectPairShape?[]> ReadPairShapesAsync(IReadOnlyList<ThreadListItem?> items, CancellationToken ct)
+    {
+        using var gate = new SemaphoreSlim(MaxPairChecksInFlight);
+        var reads = items.Select(async item =>
+        {
+            if (item is null)
+                return (DirectPairShape?)null;
+
+            await gate.WaitAsync(ct).ConfigureAwait(false);
+            try
+            {
+                return await DirectMessageRecipient.ReadStrictPairShapeAsync(_entities!, _recordShares!, item.ThreadId, ct)
+                    .ConfigureAwait(false);
+            }
+            finally
+            {
+                gate.Release();
+            }
+        }).ToArray();
+        return await Task.WhenAll(reads).ConfigureAwait(false);
+    }
+
+    /// <summary>The full names of <paramref name="systemUserIds"/> in one app-only read; empty on a fault (names are display only).</summary>
+    private async Task<IReadOnlyDictionary<Guid, string>> ReadFullNamesAsync(IReadOnlyList<Guid> systemUserIds, CancellationToken ct)
+    {
+        if (systemUserIds.Count == 0)
+            return new Dictionary<Guid, string>();
+
+        try
+        {
+            var query = new Microsoft.Xrm.Sdk.Query.QueryExpression("systemuser")
+            {
+                ColumnSet = new Microsoft.Xrm.Sdk.Query.ColumnSet("fullname"),
+                TopCount = systemUserIds.Count,
+                NoLock = true,
+            };
+            query.Criteria.AddCondition(
+                "systemuserid", Microsoft.Xrm.Sdk.Query.ConditionOperator.In, systemUserIds.Cast<object>().ToArray());
+            var rows = (await _entities!.RetrieveMultipleAsync(query, ct))?.Entities;
+            return rows?
+                .Where(r => systemUserIds.Contains(r.Id) && !string.IsNullOrWhiteSpace(r.GetAttributeValue<string>("fullname")))
+                .ToDictionary(r => r.Id, r => r.GetAttributeValue<string>("fullname"))
+                ?? new Dictionary<Guid, string>();
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "[LIST-THREADS] The Direct counterpart names could not be read; the rows are listed without them.");
+            return new Dictionary<Guid, string>();
+        }
     }
 
     private static int NormalizeThreadListPageSize(int? top)

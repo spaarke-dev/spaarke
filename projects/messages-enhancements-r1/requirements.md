@@ -4,6 +4,8 @@
 > **Captured**: 2026-11-09, from a design discussion in field-mapping-server-write-path-r1 (task 054) with the owner and
 > unified-access-control-r2 (UAC-r2).
 > **Predecessors**: `projects/messaging-communication-app-r1`, `-r2`, `-r3` (the messaging and conversation module).
+> **Moved out (owner, 2026-11-20):** MR-1 and MR-2 are built in field-mapping-server-write-path-r1 (MR-2 = task 055,
+> MR-1 = task 056). Do not build them here; this project keeps MR-3 and MR-4.
 
 ## 1. Purpose
 
@@ -36,6 +38,8 @@ There is no "private, but in the context of a record" today: a message is either
 ## 3. Requirements
 
 ### MR-1 Private 1:1 message in a record's context (owner, 2026-11-09)
+
+> **Moved** to field-mapping-server-write-path-r1 task 056 (owner, 2026-11-20). The text below is kept as the requirement it starts from.
 
 **Need.** A user can send another user a private message *about* a Matter (or another core record):
 - it shows in that record's context for the two participants only;
@@ -74,6 +78,10 @@ There is no "private, but in the context of a record" today: a message is either
 **Open question.** Context on the message (UAC-r2's recommendation: one pair thread can then mix contexts) or on the thread (it changes `ThreadResolver`'s pair-reuse key)?
 
 ### MR-2 Start a private chat from the UI
+
+> **Moved** to field-mapping-server-write-path-r1 task 055 (owner, 2026-11-20): the Messages view and "New message" in
+> `ConversationWorkspace`, and the Direct participant rule on `POST /threads/direct`. #670 (the endpoint does not say whether
+> the thread was created or found) stays open and is not part of 055.
 
 - The server endpoint `POST /api/communications/threads/direct` exists (`CommunicationEndpoints.cs`), but no screen calls it; the "New thread" dialog creates record-anchored threads only. Add an explicit "message a person" entry point in the conversation surfaces.
 - The endpoint has no name or description and does not say whether the thread was created or found (#670).

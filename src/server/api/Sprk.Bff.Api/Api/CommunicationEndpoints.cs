@@ -36,6 +36,13 @@ namespace Sprk.Bff.Api.Api;
 /// </remarks>
 public static class CommunicationEndpoints
 {
+    /// <summary>fm task 055: POST /threads/direct could not read the other participant; nothing was created (503).</summary>
+    internal const string DirectParticipantUnreadEventCode = "direct_thread.participant_unread";
+    /// <summary>fm task 055: POST /threads/direct named someone who cannot be a Direct participant; nothing was created (400).</summary>
+    internal const string DirectParticipantRefusedEventCode = "direct_thread.participant_refused";
+    private static readonly EventId DirectParticipantUnreadEvent = new(5421, DirectParticipantUnreadEventCode);
+    private static readonly EventId DirectParticipantRefusedEvent = new(5422, DirectParticipantRefusedEventCode);
+
     /// <summary>
     /// Job type for processing incoming email notifications from Graph webhooks.
     /// </summary>
@@ -239,7 +246,7 @@ public static class CommunicationEndpoints
         group.MapGet("/threads", ListThreadsAsync)
             .AddEndpointFilter<CommunicationAuthorizationFilter>()
             .WithName("ListThreads")
-            .WithDescription("List all threads the caller may see (incl. record-less Direct threads); impersonated + access-filtered by Dataverse row-level security; no membership-union. Optional ?search=, ?top=, ?pageToken=.")
+            .WithDescription("List all threads the caller may see (incl. record-less Direct threads); impersonated + access-filtered by Dataverse row-level security; no membership-union. Optional ?search=, ?top=, ?pageToken=, ?kind=all|direct (direct: the caller's own strict 1:1 Direct threads, each with counterpartName; any other kind is a 400).")
             .Produces<ThreadListResult>(StatusCodes.Status200OK)
             .Produces<ProblemDetails>(StatusCodes.Status400BadRequest)
             .Produces<ProblemDetails>(StatusCodes.Status403Forbidden);
@@ -554,6 +561,8 @@ public static class CommunicationEndpoints
         StartDirectThreadRequest request,
         IDirectThreadAccessService directThreadAccess,
         ICallerSystemUserResolver callerResolver,
+        IGenericEntityService entities,
+        ILogger<CommunicationService> logger,
         HttpContext context,
         CancellationToken ct)
     {
@@ -582,6 +591,50 @@ public static class CommunicationEndpoints
                 code: "VALIDATION_ERROR",
                 title: "Validation Error",
                 detail: "Cannot start a direct thread with yourself.",
+                statusCode: 400);
+        }
+
+        // fm task 055: the other participant must be a person who can be a Direct message's participant — the Direct
+        // participant rule the outbound pair routing applies (enabled, not an application user). Checked before the thread is
+        // found or created, so a refused request creates and shares nothing. A read that does not complete refuses (503).
+        IReadOnlyDictionary<Guid, ParticipantEligibility> eligibility;
+        try
+        {
+            eligibility = await DirectMessageRecipient.ReadEligibilityAsync(
+                entities, new[] { request.OtherParticipantSystemUserId }, ct);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(
+                DirectParticipantUnreadEvent,
+                ex,
+                "{EventCode}: the other participant of a direct thread request could not be read; nothing was created",
+                DirectParticipantUnreadEventCode);
+            throw new SdapProblemException(
+                code: "DIRECT_PARTICIPANT_UNREAD",
+                title: "Service Unavailable",
+                detail: "The other participant could not be checked. Try again.",
+                statusCode: 503);
+        }
+
+        if (!eligibility.TryGetValue(request.OtherParticipantSystemUserId, out var answer)
+            || answer != ParticipantEligibility.Eligible)
+        {
+            // One neutral answer for a missing, disabled or application user (UAC-r2 condition b): the response never says
+            // which. An existing pair thread with a participant who is now disabled is refused the same way, so its id is not
+            // returned.
+            logger.LogInformation(
+                DirectParticipantRefusedEvent,
+                "{EventCode}: a direct thread request named a participant who cannot take part; nothing was created",
+                DirectParticipantRefusedEventCode);
+            throw new SdapProblemException(
+                code: "VALIDATION_ERROR",
+                title: "Validation Error",
+                detail: "The other participant must be an active internal user.",
                 statusCode: 400);
         }
 
@@ -921,9 +974,10 @@ public static class CommunicationEndpoints
         [FromQuery] string? search,
         [FromQuery] int? top,
         [FromQuery] string? pageToken,
+        [FromQuery] string? kind,
         CancellationToken ct)
     {
-        var result = await readService.ListThreadsAsync(context.User, search, top, pageToken, ct);
+        var result = await readService.ListThreadsAsync(context.User, search, top, pageToken, ct, kind);
         return TypedResults.Ok(result);
     }
 

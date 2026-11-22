@@ -467,12 +467,17 @@ public class CommunicationListThreadsSeamTests
         // shared 2-rule filter, the caller resolver, a logger) PLUS the #675/ISS-006 ISystemUserIdentityResolver —
         // the sanctioned per-caller internal/external source that replaced the hardcoded IsInternalUser:true — PLUS the
         // optional IAppOnlyCommunicationQuery (spaarke-SPA-external-access-platform-r3 task 033: the external-plane read,
-        // used only by ReadRegardingAppOnlyAsync after the external endpoint gates the record; 6 total).
+        // used only by ReadRegardingAppOnlyAsync after the external endpoint gates the record), PLUS the optional
+        // IGenericEntityService and IDataverseRecordShareService (field-mapping-server-write-path-r1 task 055: the Messages
+        // list, kind=direct, reads each returned row's Direct-pair shape and keeps only the caller's own pairs; they narrow the
+        // impersonated set and never add a row to it — CommunicationListDirectThreadsSeamTests pins that; 8 total).
         // The substantive guard is that NONE of the banned membership/grant UNION seam types creep into the ctor — a
         // reintroduced union path would show up as one of those, not as the identity resolver.
         var ctorParamTypeNames = typeof(CommunicationThreadReadService).GetConstructors().Single()
             .GetParameters().Select(p => p.ParameterType.Name).ToList();
-        ctorParamTypeNames.Should().HaveCount(6);
+        ctorParamTypeNames.Should().HaveCount(8);
+        ctorParamTypeNames.Should().Contain(new[] { "IGenericEntityService", "IDataverseRecordShareService" },
+            "task 055's Direct-pair check of the Messages list is the only other sanctioned addition");
         ctorParamTypeNames.Should().Contain("IAppOnlyCommunicationQuery",
             "task 033 adds the external-plane app-only seam; it is the only other sanctioned addition");
         foreach (var banned in bannedSeamTypeNames)
