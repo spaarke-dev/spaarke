@@ -173,8 +173,9 @@ public sealed class CommunicationThreadReadService
     // fm task 055: the Messages list (kind=direct) reads each candidate row's shape app-only (a thread retrieve plus a full
     // share read), so its page is capped lower than the all-threads list.
     private const int MaxDirectThreadListPage = 50;
-    // fm task 055 (review F2): the Messages page is filled from further candidate pages when rows are left out, up to this many
-    // candidate rows per request; past it the answer carries a cursor that resumes after the last row read.
+    // fm task 055 (review F2): the Messages page is filled from further candidate pages when rows are left out. No further
+    // query page is read once this many candidate rows have been read (a request reads fewer than this plus one page size);
+    // the answer then carries a cursor that resumes after the last row read.
     private const int MaxDirectCandidatesPerRequest = 200;
     // fm task 055 (review F3): candidate rows checked at once (each check is two app-only reads).
     private const int MaxPairChecksInFlight = 8;

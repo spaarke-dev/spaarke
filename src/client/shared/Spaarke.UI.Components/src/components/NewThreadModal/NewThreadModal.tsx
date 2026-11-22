@@ -229,6 +229,9 @@ export const NewThreadModal: React.FC<INewThreadModalProps> = ({
   const [submitting, setSubmitting] = React.useState(false);
   const [associationError, setAssociationError] = React.useState<string | undefined>(undefined);
   const [notice, setNotice] = React.useState<INotice | undefined>(undefined);
+  // Set once the thread exists but its first message failed: Create would make a second thread, so it is locked and
+  // Cancel reads Done (fm task 055 re-check; the shell now leaves this modal open to show the warning).
+  const [threadCreated, setThreadCreated] = React.useState(false);
 
   // Re-seed the picker if the host's regarding changes while the modal is open.
   React.useEffect(() => {
@@ -260,6 +263,7 @@ export const NewThreadModal: React.FC<INewThreadModalProps> = ({
     setSubmitting(false);
     setAssociationError(undefined);
     setNotice(undefined);
+    setThreadCreated(false);
   }, [regarding]);
 
   // Wired to both the × and the Cancel button (FormModal's `onClose`) — in-flight guard preserved verbatim.
@@ -328,6 +332,7 @@ export const NewThreadModal: React.FC<INewThreadModalProps> = ({
           text: "Conversation created, but the first message couldn't be sent — try again in the thread.",
           intent: 'warning',
         });
+        setThreadCreated(true);
         setSubmitting(false);
         return;
       }
@@ -347,6 +352,8 @@ export const NewThreadModal: React.FC<INewThreadModalProps> = ({
       title={title}
       size="md"
       submitLabel={submitting ? 'Creating…' : 'Create'}
+      submitDisabled={threadCreated}
+      cancelLabel={threadCreated ? 'Done' : 'Cancel'}
       busy={submitting}
       uiScale={uiScale}
     >
