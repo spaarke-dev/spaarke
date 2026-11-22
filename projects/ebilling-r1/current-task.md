@@ -51,4 +51,4 @@
   - At most 4, each with a named model.
   - A worktree agent starts on master, so its brief names the base sha.
   - Remove agent worktrees with `scripts/worktree/Remove-WorktreeSafe.ps1`. The 132ui, 130g and 134 agent worktrees have been removed.
-- **Clean-up:** a human should delete C:\wt131a and C:\wt131b.
+- **Clean-up:** a human should delete C:\wt131a and C:\wt131b. The 124 fix-round agent worktree `C:\code_files\spaarke\.claude\worktrees\agent-accb6a7742c6a7c1b` is clean but locked by the desktop app; remove it with Remove-WorktreeSafe.ps1 once the lock is gone.
