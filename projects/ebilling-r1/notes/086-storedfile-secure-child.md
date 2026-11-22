@@ -258,7 +258,7 @@ The "Noticed, not changed" bullet in the port review (the dead pre-086 branch of
 
 ## Live reads and census, 2026-11-22 (read only, spaarkedev1)
 
-Run by the main session. Nothing was written. The dev BFF carries 086 and its review fix: the deployed build `5ae2804884` (2026-11-18) contains `53f3f6b724` and `af6e1a7de1`.
+Run by the main session. Nothing was written. The dev BFF carries 086 and its review fix: the live build is `c8ab2cba9e`, deployed 2026-11-20 with uac-r2's 30-minute gate PASS (`5ae2804884` is uac-r2's rollback); both contain `53f3f6b724` and `af6e1a7de1` (uac-r2 checked by ancestry).
 
 **Pre-deploy count (pending item 1, live step 6).**
 - `sprk_storedfile` has 12 rows with `sprk_invoice` set (all active).
@@ -285,3 +285,13 @@ Run by the main session. Nothing was written. The dev BFF carries 086 and its re
 - uac-r2 answered the port and agreed the access-review dispositions on 2026-11-03. Its sign-off on 086 as a whole was requested on 2026-11-22 with these results.
 
 `Ebilling:StoredFileReconcileEnabled` stays `false` (HARD RULE). uac-r2's gate decides when it flips.
+
+**uac-r2 sign-off, 2026-11-22:** 086 as a whole is signed off from the uac-r2 side.
+- Its 2026-11-03 gate items are met: the deploy carrying 089a + 086 (`c8ab2cba9e`) passed uac-r2's gate.
+- NFR-05 is met for 086: the remaining findings are a known dev artifact that uac-r2 owns, they do not arise in production, and none names `sprk_storedfile`.
+- The pre-deploy count is 0, so no backfill is needed.
+- The two adversarial passes are accepted with the 2026-11-03 dispositions. K-P1, K1 and #2560 stay with uac-r2 task 191.
+
+Still open:
+1. Criterion 6: the owner confirms that the 2026-11-03 and 2026-11-22 `-Verify` records stand in for the missing `-Apply` outputs.
+2. `Ebilling:StoredFileReconcileEnabled` stays `false`. Flipping it needs this project's own hard rule (F4 merged and DEF-044 fixed, per FinanceModule) and the owner's explicit go on the app setting, sent through uac-r2. No agent flips it.
