@@ -204,9 +204,9 @@ export const CommunicationConversationPanelApp: React.FC<ICommunicationConversat
     [hostEntityName, hostRecordId]
   );
   const reportOpenRequestFailed = React.useCallback((reason: string) => {
-    // `any` view: the typed XrmContext does not declare openAlertDialog.
+    // The nearest frame that can open an alert (the typed XrmContext does not declare openAlertDialog).
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const xrm = getXrm('navigation') as any;
+    const xrm: any = getXrm((x: any) => typeof x.Navigation?.openAlertDialog === 'function');
     void xrm?.Navigation?.openAlertDialog?.({ title: 'Messages', text: `Messages could not be opened. ${reason}` });
   }, []);
   useConversationPanelOpenRequest({

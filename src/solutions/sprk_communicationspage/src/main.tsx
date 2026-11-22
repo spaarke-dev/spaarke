@@ -187,8 +187,9 @@ function newEmail(): void {
 }
 
 function alertNewMessage(text: string): void {
+  // The nearest frame that can open an alert (the typed XrmContext does not declare openAlertDialog).
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const xrm = getXrm("navigation") as any;
+  const xrm: any = getXrm((x: any) => typeof x.Navigation?.openAlertDialog === "function");
   if (typeof xrm?.Navigation?.openAlertDialog === "function") {
     void xrm.Navigation.openAlertDialog({ title: "New Message", text });
   } else {
