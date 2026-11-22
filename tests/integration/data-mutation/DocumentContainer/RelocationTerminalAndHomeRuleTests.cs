@@ -2,7 +2,7 @@
 //   - Category: `data-mutation`
 //   - Path:     `tests/integration/data-mutation/DocumentContainer/**`
 //   - Justification: #2159 review round 1, slice 4 — the relocator's terminal outcomes (B5: a file over 250 MB, a ledger
-//     owing MaxLedgerEntries moves), the shared lock-wait budget of a re-file's descendant releases, and the #2151 home
+//     owing MaxLedgerEntries moves), the shared lock-wait budget of a re-file's descendant releases, and the #2151 home-rule
 //     rule (A4, removed by ebilling-r1 task 124: a leftover Procedure Library key declares no home). Each pins a
 //     write or derivation contract.
 //

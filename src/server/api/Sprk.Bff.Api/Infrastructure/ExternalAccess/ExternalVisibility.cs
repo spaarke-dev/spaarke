@@ -98,7 +98,7 @@ internal static class ExternalVisibility
     internal delegate Task<InvoiceVisibilityResult> InvoiceDecider(IReadOnlyCollection<Guid> invoiceIds, CancellationToken ct);
 
     /// <summary>What the predicate reads through. Every reader must be the BFF's app-only one.</summary>
-    /// <param name="Entities">Lineage rows by id (their lookups and core pair; a document's drive) and the record-type catalog.</param>
+    /// <param name="Entities">Lineage rows by id (their lookups and core pair) and the record-type catalog.</param>
     /// <param name="Query">The external plane's OData reader, for the 065 rule and the thread privacy read; a failed read THROWS.</param>
     /// <param name="Documents">Task 188's narrowing through its app-only seam (a hide decision only).</param>
     /// <param name="RootFlags">The effective root flags (Restricted through filing).</param>

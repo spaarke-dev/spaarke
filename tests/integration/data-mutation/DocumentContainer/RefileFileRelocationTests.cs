@@ -4,7 +4,7 @@
 //   - Justification: #2159 / #2151 — a re-filed document's file follows its derived container through the ONE
 //     DocumentContainerRelocator (purpose Refile), driven by SecureChildReconciliationJob's recent-changes cadence. Each
 //     test pins a write contract: what is moved, and what is NEVER moved (out of isolation, an unbound source, a file
-//     already in place, an unfiled document's declared or unknown home), with the job's cap, cursor and carry.
+//     already in place, an unfiled document's unknown home), with the job's cap, cursor and carry.
 //
 // Doubles are module boundaries only (ADR-038 §4), the same as DocumentContainerRelocatorTests and
 // MakeSecureFileRelocationTests: the REAL RecordContainerResolver and relocator over task 166's document-pointer world,
@@ -310,7 +310,7 @@ public class RefileFileRelocationTests
         rig.Steps.Should().BeEmpty();
     }
 
-    [Fact(DisplayName = "#2151 seam: an UNFILED document in a non-business-unit container that is no declared home is reported and left")]
+    [Fact(DisplayName = "#2151 seam: an UNFILED document in a non-business-unit container is reported and left")]
     public async Task Refile_UnfiledInAContainerOfNoBusinessUnit_IsUnfiledHomeUnknown()
     {
         var world = Env();
