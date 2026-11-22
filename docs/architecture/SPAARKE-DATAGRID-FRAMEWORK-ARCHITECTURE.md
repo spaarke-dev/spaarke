@@ -2,6 +2,7 @@
 
 > **Status**: R1 shipped (Phase A–C). Phase D (EventsPage migration) + Phase E (SemanticSearch migration) + Phase F (legacy retirement) in progress.
 > **Established**: 2026-06 (project `spaarke-datagrid-framework-r1`)
+> **Last Reviewed**: 2026-11-22 (command bar section only, for `hiddenBuiltInCommands`, #2908; the rest was not re-checked)
 > **Audience**: Developers consuming the framework, makers authoring configuration records.
 > **Operational guide**: [`DATAGRID-FRAMEWORK-CONFIGURATION-GUIDE.md`](../guides/DATAGRID-FRAMEWORK-CONFIGURATION-GUIDE.md)
 > **Supersedes**: [`universal-dataset-grid-architecture.md`](universal-dataset-grid-architecture.md) (PCF — retires in Phase F)
@@ -244,6 +245,8 @@ Three more optional, generic seams (`DataGrid.tsx`; `useHostRowSource.ts`, `RowA
 | `truncateWithTooltip` / `display.truncateWithTooltip` | `boolean` | Opt-in. Text cells (the primary-name link and every cell not drawn by an `overrides.columnRenderers` entry) ellipsise; a cell whose content overflows shows the full text in a Fluent `Tooltip` on hover, or when the cell receives keyboard focus (focus lands on the gridcell in `composite` mode; a cell that fits never shows one) (`relationship="inaccessible"` — the full text is in the DOM). The prop, when set, wins over the configuration. Default off. |
 
 Why a callback and not a fetch: data fetching stays with the host (ADR-012). The first consumer is the external SPA's record Documents list, whose rows come from an authorised record route rather than the module FetchXML path (`projects/spaarke-SPA-external-access-platform-r4/notes/task-023-design.md`). Note: the configuration's `secondaryActions` list is still not rendered by the grid; `rowActions` is the host-side per-row seam.
+
+**Hiding built-ins (`hiddenBuiltInCommands`, added 2026-11-22, #2908).** A host that replaces a built-in with its own host commands removes the built-in with `hiddenBuiltInCommands`, for example `['create-form']`. This overrides the configuration for that host only, so other hosts that share the configuration record are unaffected. A configured `custom` item is never removed this way, and the hidden ids stay reserved: a host command still cannot take one. Example: the communications grid (`src/solutions/sprk_communicationspage`) hides `create-form`, which opens the OOB `sprk_communication` form. In its place it adds "New Email", which opens the `sprk_emailpage` composer through `openEmailCompose`, "Related to" the host record. On a record form it also adds "New Message", which opens the form's `CommunicationConversationPanel` Messages modal in place through `openConversationPanel`. When no panel answers, the button says so; it never reloads the page. Other hosts that reference the same configuration record keep the built-in "+ New".
 
 ---
 

@@ -7,7 +7,8 @@
  * so a reviewer can confirm/correct a filing without reading raw JSON.
  *
  * Ported verbatim from the converged prototype
- * `code-pages/CommunicationPage/src/components/provenance.ts` (W4 pivot — task 042).
+ * `code-pages/CommunicationPage/src/components/provenance.ts` (W4 pivot — task 042; that page was
+ * archived 2026-11-22 at `docs/archive/code-pages/CommunicationPage/`).
  */
 
 export interface ProvenanceContributor {

@@ -52,7 +52,7 @@ import { XrmDataverseClient } from '../../services/XrmDataverseClient';
 import { OOB_MODAL_SIZES } from '../../utils/adapters/oobModalSizes';
 import { cleanGuid } from '../../utils/guid';
 import { getXrm } from '../../utils/xrmContext';
-import type { DataGridConfiguration, MembershipFilter } from '../../types/DataGridConfiguration';
+import type { CommandBarAction, DataGridConfiguration, MembershipFilter } from '../../types/DataGridConfiguration';
 import { fetchConfigRecord, resolveSource } from './resolveGridSource';
 import {
   DataGridContextProvider,
@@ -251,6 +251,13 @@ export interface DataGridProps {
    * over the configuration's `display.truncateWithTooltip`; when absent, the configuration decides (default off).
    */
   truncateWithTooltip?: boolean;
+
+  /**
+   * OPTIONAL — built-in actions this HOST does not offer, whatever the configuration says (e.g. `['create-form']`
+   * when the host adds its own create commands through `hostCommands`). Forwarded to the command bar; see
+   * `CommandBarProps.hiddenBuiltInCommands`. Pass a stable array. Absent = unchanged.
+   */
+  hiddenBuiltInCommands?: ReadonlyArray<CommandBarAction>;
 
   /** OPTIONAL — escape-hatch overrides for column renderers, badge map, filter chip allowlist. */
   overrides?: DataGridOverrides;
@@ -815,6 +822,7 @@ export const DataGrid: React.FC<DataGridProps> = props => {
     rowNoun,
     rowActions,
     truncateWithTooltip: truncateWithTooltipProp,
+    hiddenBuiltInCommands,
     overrides,
     pageSize: pageSizeOverride,
     availableViewsAllowlist: availableViewsAllowlistOverride,
@@ -1666,6 +1674,7 @@ export const DataGrid: React.FC<DataGridProps> = props => {
             onCommandInvoke={handleCommandInvoke}
             onCreateNew={onCreateNew}
             hostCommands={hostCommands}
+            hiddenBuiltInCommands={hiddenBuiltInCommands}
           />
         </div>
 
