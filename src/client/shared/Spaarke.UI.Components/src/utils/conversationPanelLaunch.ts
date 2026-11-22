@@ -15,8 +15,10 @@
  * SecurityError), so a request always comes from the Dataverse origin. The listener still checks the payload shape
  * (a logical name and a GUID) and ignores anything else.
  *
- * Plain DOM, no React and no imports, so PCF controls (React 16/17) and code pages (React 19) can both use it.
+ * Plain DOM, no React; its only import is `./guid`. PCF controls (React 16/17) deep-import
+ * `@spaarke/ui-components/dist/utils/conversationPanelLaunch`; code pages (React 19) use the main barrel.
  */
+import { normalizeRecordRef } from './guid';
 
 /** Event name; the payload is a {@link ConversationPanelOpenRequest} in `CustomEvent.detail`. */
 export const CONVERSATION_PANEL_OPEN_EVENT = 'spaarke:conversation-panel:open';
@@ -37,16 +39,9 @@ export interface ConversationPanelOpenRequest extends ConversationPanelHost {
 /** What {@link openConversationPanel} did: `opened`, or `no-panel` when no panel on the page took the request. */
 export type ConversationPanelOpenResult = 'opened' | 'no-panel';
 
-const GUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
-const LOGICAL_NAME = /^[a-z][a-z0-9_]*$/;
-
 /** Validate and normalize a host. Fields are `unknown`: the listener also feeds it untrusted event payloads. */
 function normalizeHost(host: { entityType?: unknown; id?: unknown }): ConversationPanelHost | undefined {
-  if (typeof host.entityType !== 'string' || typeof host.id !== 'string') return undefined;
-  const entityType = host.entityType.trim().toLowerCase();
-  const id = host.id.replace(/[{}]/g, '').trim().toLowerCase();
-  if (!LOGICAL_NAME.test(entityType) || !GUID.test(id)) return undefined;
-  return { entityType, id };
+  return normalizeRecordRef(host.entityType, host.id);
 }
 
 /** The top window when it can be reached (same origin), else this window. */

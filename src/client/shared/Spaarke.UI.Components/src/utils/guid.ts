@@ -24,3 +24,21 @@ export function cleanGuid(id: string | null | undefined): string {
   if (!id) return '';
   return id.replace(/[{}]/g, '').trim().toLowerCase();
 }
+
+const BARE_GUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+const LOGICAL_NAME = /^[a-z][a-z0-9_]*$/;
+
+/**
+ * Validate and normalize a record reference that comes from an untrusted source: a URL parameter, an event payload or a
+ * plain-JS caller (#2908: the compose envelope's "Related to" record and the conversation-panel open request).
+ *
+ * Returns the table's logical name (lower-case) and the bare-lowercase GUID, or `undefined` unless both are strings
+ * of the right shape. One validator, so every caller agrees on which references are valid.
+ */
+export function normalizeRecordRef(entityType: unknown, id: unknown): { entityType: string; id: string } | undefined {
+  if (typeof entityType !== 'string' || typeof id !== 'string') return undefined;
+  const normalizedType = entityType.trim().toLowerCase();
+  const normalizedId = cleanGuid(id);
+  if (!LOGICAL_NAME.test(normalizedType) || !BARE_GUID.test(normalizedId)) return undefined;
+  return { entityType: normalizedType, id: normalizedId };
+}

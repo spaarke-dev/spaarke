@@ -150,7 +150,7 @@ const isRecordScoped = regardingEnvelope.kind !== "none";
 //   - "New Email" opens the sprk_emailpage composer (the same surface as everywhere else), "Related to" the host
 //     record when the grid sits on a record form;
 //   - "New Message" (record form only) opens, in place, the Messages modal of the CommunicationConversationPanel
-//     already on the form. When the form has no panel, it says so; it never reloads the page or opens another surface.
+//     already on the form. When no panel answers, it says so; it never reloads the page or opens another surface.
 
 /** The built-in commands this page does not offer. Module scope, so the array is stable. */
 const HIDDEN_BUILT_IN_COMMANDS: ReadonlyArray<CommandBarAction> = ["create-form"];
@@ -204,9 +204,11 @@ function newMessage(): void {
     alertNewMessage("Messages could not be opened for this record. Reload the page and try again.");
     return;
   }
+  // "no-panel" means no panel answered: the form may have none, its panel may not be ready (or not loaded on this
+  // tab), or it may be an older panel build. Say only what is known.
   if (openConversationPanel({ entityType: host.entityType, id: host.id }) === "no-panel") {
     alertNewMessage(
-      "This form has no Messages panel, so a message cannot be started from here. Ask your administrator to add the Messages panel to this form."
+      "The Messages panel did not respond, so a message cannot be started from here. Open Messages from the panel on this record's form."
     );
   }
 }

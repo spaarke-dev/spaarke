@@ -17,19 +17,14 @@
 import * as React from 'react';
 import { makeStyles, tokens, Spinner, MessageBar, MessageBarBody } from '@fluentui/react-components';
 import { authenticatedFetch } from '@spaarke/auth';
-import {
-  readByRegarding,
-  cleanGuid,
-  type IRegardingReadResultDto,
-  getXrm,
-  subscribeConversationPanelOpen,
-} from '@spaarke/ui-components';
+import { readByRegarding, cleanGuid, type IRegardingReadResultDto, getXrm } from '@spaarke/ui-components';
 import { IInputs } from './generated/ManifestTypes';
 import { initializeAuth, resolveDataverseUrl } from './authInit';
 import { resolveRegardingContext } from './hostContext';
 import { buildPreviewModel } from './previewModel';
 import { ConversationPreview } from './ConversationPreview';
 import { ConversationModal } from './ConversationModal';
+import { useConversationPanelOpenRequest } from './useConversationPanelOpenRequest';
 import { getMsalClientId, getBffApiAppId, getApiBaseUrl, getTenantId } from '../../shared/utils/environmentVariables';
 
 const POLL_INTERVAL_MS = 5000;
@@ -202,21 +197,26 @@ export const CommunicationConversationPanelApp: React.FC<ICommunicationConversat
     }
   }, [authReady, regardingContext]);
 
-  // #2908: the communications grid on the same form asks for this modal ("+ New Message") through
-  // `openConversationPanel` (`@spaarke/ui-components`). A request for this record opens the modal; one that arrives
-  // before auth and the regarding read are ready opens it as soon as they are. Requests for other records are ignored.
-  const [openRequested, setOpenRequested] = React.useState(false);
-  React.useEffect(() => {
-    if (!hostEntityName || !hostRecordId) return undefined;
-    return subscribeConversationPanelOpen({ entityType: hostEntityName, id: hostRecordId }, () =>
-      setOpenRequested(true)
-    );
-  }, [hostEntityName, hostRecordId]);
-  React.useEffect(() => {
-    if (!openRequested || !authReady || !regardingContext) return;
-    setOpenRequested(false);
-    openModalDefault();
-  }, [openRequested, authReady, regardingContext, openModalDefault]);
+  // #2908: the communications grid on the same form asks for this modal ("+ New Message"). Taken only when the modal
+  // can open (see useConversationPanelOpenRequest); a request taken while auth loads opens it once auth is ready.
+  const openRequestHost = React.useMemo(
+    () => (hostEntityName && hostRecordId ? { entityType: hostEntityName, id: hostRecordId } : undefined),
+    [hostEntityName, hostRecordId]
+  );
+  const reportOpenRequestFailed = React.useCallback((reason: string) => {
+    // `any` view: the typed XrmContext does not declare openAlertDialog.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const xrm = getXrm('navigation') as any;
+    void xrm?.Navigation?.openAlertDialog?.({ title: 'Messages', text: `Messages could not be opened. ${reason}` });
+  }, []);
+  useConversationPanelOpenRequest({
+    host: openRequestHost,
+    canOpen: !!regardingContext && !authError,
+    ready: authReady && !!regardingContext,
+    failure: authError,
+    onOpen: openModalDefault,
+    onFailed: reportOpenRequestFailed,
+  });
 
   // Session-local "New" affordance (UAT §A3): there is no persisted per-user
   // last-seen watermark for threads (documented KNOWN LIMITATION in

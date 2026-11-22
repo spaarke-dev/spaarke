@@ -28,7 +28,8 @@
 import { getXrm } from '../../utils/xrmContext';
 import { EMAIL_PAGE_WEBRESOURCE_NAME } from './openEmailRecord';
 import { OOB_MODAL_SIZES } from '../../utils/adapters/oobModalSizes';
-import { cleanGuid } from '../../utils/guid';
+import { cleanGuid, normalizeRecordRef } from '../../utils/guid';
+import type { ISendEmailDialogRegarding } from './wrappers/SendEmailDialog';
 
 /** Compose entry points. `new` needs no source; the rest require a source communication. */
 export type OpenEmailComposeMode = 'new' | 'reply' | 'replyAll' | 'forward';
@@ -50,32 +51,25 @@ export interface OpenEmailComposeOptions {
   regarding?: ComposeRegarding;
 }
 
-/** A "Related to" record carried in the compose envelope. */
-export interface ComposeRegarding {
-  /** Dataverse logical name of an ADR-024 regarding-family table, e.g. `sprk_matter`. */
-  entityType: string;
-  /** Record GUID, with or without braces. */
-  id: string;
-  /** Display name for the chip. */
-  name?: string;
-}
+/**
+ * A "Related to" record carried in the compose envelope: the composer's own regarding shape (`SendEmailDialog`'s
+ * `regarding` prop), so the two cannot drift.
+ */
+export type ComposeRegarding = ISendEmailDialogRegarding;
 
 const REGARDING_TYPE_PARAM = 'regardingType';
 const REGARDING_ID_PARAM = 'regardingId';
 const REGARDING_NAME_PARAM = 'regardingName';
-const LOGICAL_NAME = /^[a-z][a-z0-9_]*$/;
-const GUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 /** Validate and normalize a "Related to" record. Fields are `unknown`: plain-JS callers can pass anything. */
 function normalizeRegarding(
   regarding: { entityType?: unknown; id?: unknown; name?: unknown } | undefined
 ): ComposeRegarding | undefined {
-  if (!regarding || typeof regarding.entityType !== 'string' || typeof regarding.id !== 'string') return undefined;
-  const entityType = regarding.entityType.trim().toLowerCase();
-  const id = cleanGuid(regarding.id).toLowerCase();
-  if (!LOGICAL_NAME.test(entityType) || !GUID.test(id)) return undefined;
+  if (!regarding) return undefined;
+  const ref = normalizeRecordRef(regarding.entityType, regarding.id);
+  if (!ref) return undefined;
   const name = typeof regarding.name === 'string' ? regarding.name.trim() : '';
-  return name ? { entityType, id, name } : { entityType, id };
+  return name ? { ...ref, name } : ref;
 }
 
 /**
