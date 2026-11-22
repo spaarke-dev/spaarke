@@ -371,7 +371,7 @@ public class RefileFileRelocationTests
     }
 
     [Fact(DisplayName = "124: with no setting an unfiled document's derivation is the business unit's (unchanged)")]
-    public async Task DeclaredHomes_Unset_DerivationIsTheBusinessUnits()
+    public async Task NoHomeIsDeclared_DerivationIsTheBusinessUnits()
     {
         var world = Env(strict: true);
         world.Rows[("sprk_document", T.DocumentId)] = Doc(T.DocumentId, null, ProcedureLibrary);
