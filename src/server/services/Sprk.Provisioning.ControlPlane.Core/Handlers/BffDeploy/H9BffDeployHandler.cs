@@ -524,6 +524,18 @@ public sealed class H9BffDeployHandler : IProvisioningHandler
                 cancellationToken).ConfigureAwait(false);
         }
 
+        // ISS-033: the writer already waited SlotSwapTimeout for a swap in flight on the site. A swap stuck that long
+        // (for example a swap with preview never completed or cancelled) needs an operator, so this is a quarantine,
+        // not a retry into the same refusal.
+        if (guardResult is SlotStickyAppSettingResult.SlotSwapInProgress swapInProgress)
+        {
+            return await FailAsync(run, etag, FailureClass.QuarantineRequired,
+                BffDeployRejectionCodes.SlotSwapInProgress,
+                $"A slot swap is still in flight on '{appServiceName}' — zip-deploy BLOCKED; nothing deployed. " +
+                $"{swapInProgress.Diagnostic}",
+                cancellationToken).ConfigureAwait(false);
+        }
+
         if (guardResult is SlotStickyAppSettingResult.Failure guardFailure)
         {
             return await FailAsync(run, etag, FailureClass.RetryableWithCleanup,
@@ -660,6 +672,21 @@ public sealed class H9BffDeployHandler : IProvisioningHandler
                     AppServiceName: appServiceName,
                     SourceSlotName: stagingSlotName,
                     TargetSlotName: "production"),
+                cancellationToken).ConfigureAwait(false);
+        }
+        catch (TimeoutException ex)
+        {
+            // ISS-033: the swap was accepted, and Azure keeps swapping after we stop waiting, so the slots are NOT
+            // known to be unchanged and production may already serve the new build. A retry is still right: its
+            // slot guard (step 8) waits for this swap to finish before it writes to the slot or redeploys.
+            _logger.LogError(ex,
+                "H9 slot swap did not complete within {Timeout}: runId={RunId} customerId={CustomerId}",
+                _options.SlotSwapTimeout, envelope.RunId, envelope.CustomerId);
+            return await FailAsync(run, etag, FailureClass.RetryableWithCleanup,
+                BffDeployRejectionCodes.SlotSwapTimeout,
+                $"The {stagingSlotName} → production swap on '{appServiceName}' did not complete within " +
+                $"{_options.SlotSwapTimeout} ({ex.Message}). Azure may still be swapping, so production may already serve " +
+                "the new build. A retry's slot guard waits for that swap to finish before redeploying.",
                 cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)

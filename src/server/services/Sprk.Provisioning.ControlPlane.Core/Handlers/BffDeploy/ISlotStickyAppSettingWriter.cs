@@ -89,4 +89,12 @@ public abstract record SlotStickyAppSettingResult
     /// nothing on a swap).
     /// </summary>
     public sealed record Failure(string Diagnostic) : SlotStickyAppSettingResult;
+
+    /// <summary>
+    /// ARM refused the slot for longer than <see cref="BffDeployOptions.SlotSwapTimeout"/>, because a swap is
+    /// in flight on the site ("configuration settings have been prepared for swap"). The guard is NOT confirmed.
+    /// A swap stuck that long, for example a swap with preview that was never completed or cancelled, needs an
+    /// operator (ISS-033).
+    /// </summary>
+    public sealed record SlotSwapInProgress(string Diagnostic) : SlotStickyAppSettingResult;
 }
