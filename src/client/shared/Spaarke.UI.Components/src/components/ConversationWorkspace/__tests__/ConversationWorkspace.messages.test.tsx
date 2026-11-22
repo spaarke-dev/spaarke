@@ -193,11 +193,14 @@ describe('ConversationWorkspace — create modals keep a send-failure warning (f
     await screen.findByRole('dialog', { name: /New message/i });
     fireEvent.click(screen.getByRole('button', { name: 'Select To' }));
     await screen.findByText('Carol Chen');
-    fireEvent.change(screen.getByRole('textbox', { name: 'Message' }), { target: { value: 'Hi Carol' } });
+    fireEvent.change(await screen.findByRole('textbox', { name: 'Message' }), { target: { value: 'Hi Carol' } });
     fireEvent.click(screen.getByRole('button', { name: 'Start' }));
 
     expect(await screen.findByText(/couldn't be sent/i)).toBeInTheDocument();
-    expect(screen.getByRole('dialog', { name: /New message/i })).toBeInTheDocument();
+    // A failed submit must hand focus back to the message box: otherwise Fluent's focus manager marks the open dialog
+    // aria-hidden and the warning is invisible to assistive technology (the dialog is still mounted and on screen).
+    expect(await screen.findByRole('dialog', { name: /New message/i })).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole('textbox', { name: 'Message' })).toHaveFocus());
     await waitFor(() =>
       expect(renderConversation).toHaveBeenLastCalledWith(expect.objectContaining({ threadId: 'pair-9' }))
     );
@@ -214,11 +217,14 @@ describe('ConversationWorkspace — create modals keep a send-failure warning (f
     await screen.findByRole('dialog', { name: /New conversation/i });
     fireEvent.click(screen.getByRole('button', { name: /select record/i }));
     await waitFor(() => expect(navigationService.openLookup as jest.Mock).toHaveBeenCalled());
-    fireEvent.change(screen.getByRole('textbox', { name: 'Message' }), { target: { value: 'Hello there' } });
+    fireEvent.change(await screen.findByRole('textbox', { name: 'Message' }), { target: { value: 'Hello there' } });
     fireEvent.click(screen.getByRole('button', { name: 'Create' }));
 
     expect(await screen.findByText(/couldn't be sent — try again in the thread/i)).toBeInTheDocument();
-    expect(screen.getByRole('dialog', { name: /New conversation/i })).toBeInTheDocument();
+    // A failed submit must hand focus back to the message box: otherwise Fluent's focus manager marks the open dialog
+    // aria-hidden and the warning is invisible to assistive technology (the dialog is still mounted and on screen).
+    expect(await screen.findByRole('dialog', { name: /New conversation/i })).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole('textbox', { name: 'Message' })).toHaveFocus());
     await waitFor(() =>
       expect(renderConversation).toHaveBeenLastCalledWith(expect.objectContaining({ threadId: 'thread-new' }))
     );

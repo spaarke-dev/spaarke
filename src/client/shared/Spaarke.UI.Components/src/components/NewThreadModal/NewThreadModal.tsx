@@ -229,6 +229,14 @@ export const NewThreadModal: React.FC<INewThreadModalProps> = ({
   const [submitting, setSubmitting] = React.useState(false);
   const [associationError, setAssociationError] = React.useState<string | undefined>(undefined);
   const [notice, setNotice] = React.useState<INotice | undefined>(undefined);
+  // A submit disables its button while it runs, which drops focus out of the dialog; Fluent's focus manager (tabster)
+  // then marks the still-open dialog aria-hidden, so the notice below is not exposed to assistive technology. Return
+  // focus to the message box when a notice appears (also where the user retypes after a refusal).
+  const bodyRef = React.useRef<HTMLTextAreaElement>(null);
+  React.useEffect(() => {
+    if (notice) bodyRef.current?.focus();
+  }, [notice]);
+
   // Set once the thread exists but its first message failed: Create would make a second thread, so it is locked and
   // Cancel reads Done (fm task 055 re-check; the shell now leaves this modal open to show the warning).
   const [threadCreated, setThreadCreated] = React.useState(false);
@@ -398,6 +406,7 @@ export const NewThreadModal: React.FC<INewThreadModalProps> = ({
             className={styles.messageTextarea}
             value={body}
             onChange={(_e, data) => setBody(data.value)}
+            ref={bodyRef}
             disabled={submitting}
             resize="none"
             aria-label="Message"

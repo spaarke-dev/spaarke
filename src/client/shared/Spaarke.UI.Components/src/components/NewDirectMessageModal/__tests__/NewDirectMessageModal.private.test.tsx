@@ -176,6 +176,7 @@ describe('NewDirectMessageModal - private mode (fm task 056b)', () => {
       expect(onConversationStarted).not.toHaveBeenCalled();
       expect(onError).toHaveBeenCalledTimes(1);
       expect(screen.getByRole('dialog', { name: 'Send privately' })).toBeInTheDocument();
+      expect(screen.getByRole('textbox', { name: 'Message' })).toHaveFocus();
       // The server's own words are never shown for the coded refusals.
       expect(screen.queryByText('server detail')).not.toBeInTheDocument();
     }

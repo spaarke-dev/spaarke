@@ -138,6 +138,14 @@ export const NewDirectMessageModal: React.FC<INewDirectMessageModalProps> = ({
   const [submitting, setSubmitting] = React.useState(false);
   const [personError, setPersonError] = React.useState<string | undefined>(undefined);
   const [notice, setNotice] = React.useState<INotice | undefined>(undefined);
+  // A submit disables its button while it runs, which drops focus out of the dialog; Fluent's focus manager (tabster)
+  // then marks the still-open dialog aria-hidden, so the notice below is not exposed to assistive technology. Return
+  // focus to the message box when a notice appears (also where the user retypes after a refusal).
+  const bodyRef = React.useRef<HTMLTextAreaElement>(null);
+  React.useEffect(() => {
+    if (notice) bodyRef.current?.focus();
+  }, [notice]);
+
   const [bodyError, setBodyError] = React.useState<string | undefined>(undefined);
   // Private mode: the pair's thread for the chosen person, kept after the first start so a retry (after a refusal) does
   // not call find-or-create again.
@@ -323,6 +331,7 @@ export const NewDirectMessageModal: React.FC<INewDirectMessageModalProps> = ({
           className={styles.messageTextarea}
           value={body}
           onChange={(_e, data) => setBody(data.value)}
+          ref={bodyRef}
           disabled={submitting}
           resize="none"
           aria-label="Message"
