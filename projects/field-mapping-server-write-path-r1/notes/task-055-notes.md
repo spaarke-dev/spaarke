@@ -41,3 +41,17 @@ Branch `task/fm-055` from `work/field-mapping-server-write-path-r1` (aa3214b7eb)
 ## Known limits
 
 - A Direct thread can still be renamed by its owner from the message pane, which renames it for both; the Messages view shows the other person's name, not the thread name.
+- The owner of a Direct thread can delete (deactivate) it from either view, which removes it for both participants. This is the existing thread delete, unchanged by 055.
+- **Systemuser status oracle (UAC-r2 condition 1b).** `POST /threads/direct` answers 400 for a missing, disabled or application user and 200 for an active person, so a caller who can send the request learns whether an id is an active internal person. The 400 text is one neutral sentence for all three, and the log records only the event code (`direct_thread.participant_refused`, 5422), not which.
+- **Cost of the Messages list (UAC-r2 condition 2c).** Per candidate row: one app-only thread retrieve and one full share read (`GetPrincipalAccessOrThrowAsync`). The page is capped at 50, so at most 100 reads plus one systemuser name query per page.
+
+## Implementation (2026-11-22)
+
+| Commit | What |
+|---|---|
+| ab12e0901d | Server: participant rule in `StartDirectThreadAsync` (events 5421 unread / 5422 refused); `kind` on `GET /threads`; `KeepCallersDirectPairsAsync` + `ReadFullNamesAsync` (event 5423); `ThreadListItem.CounterpartName`. |
+| 314a98dd99 | Tests: `DirectThreadContractTests` (HTTP, real pipeline, find-or-create mocked) and `CommunicationListDirectThreadsSeamTests`; the list seam guard now names the two narrowing-only dependencies. Must-fire checked by breaking each rule in source (9 failures), then restored. |
+| f130c7a361 | Client: `listThreads` `kind` + `counterpartName`; `INTERNAL_USER_LOOKUP_FILTERS`; `NewDirectMessageModal`; All / Messages switch in `ConversationWorkspace`; `ThreadList` `subHeader` / `createLabel` / `emptyText`. RTL tests; must-fire checked (dropping `kind`, dropping the view-switch reset). |
+
+- Hosts need no change: both all-mode hosts already pass `navigationService`. The record-mode PCF shows no switch and mounts no new modal; it already imports `DataverseLookupField`, `FormModal` and `TabList` through the main barrel, so no new dependency reaches it and no PCF rebuild is needed for 055.
+- Deploy (UAC-r2 runs dev deploys): BFF, then the bundles that carry `@spaarke/ui-components` all-mode hosts (`sprk_communicationconversationpage`, `sprk_spaarkeai` for the workspace widget).
