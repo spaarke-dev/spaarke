@@ -10,6 +10,46 @@
 
 ## Open (in priority order)
 
+### ISS-032 — H6 misjudges a long SpaarkeMaster upgrade: 60-minute timeout, no in-flight check, async-op status trusted over the import result
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | now (every SpaarkeMaster upgrade of a stamp) |
+| **Filed** | 2026-11-22 |
+| **Source** | ACME upgrade to SpaarkeMaster 1.3.2.1, run `3b6f7b65`: H6 failed `import-timeout`; the import then succeeded |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2942 |
+
+**Description**
+
+On 2026-11-22 H6 started a managed StageAndUpgrade of SpaarkeMaster 1.3.0.0 → 1.3.2.1 on ACME at 15:24Z. What happened:
+- **16:24:38Z:** H6's `ImportTimeout` (60 min) expired and the run failed `import-timeout`.
+- **16:24:41Z:** Dataverse suspended the StageAndUpgrade async operation (`428c1ad0`) and retried it.
+- **16:26:47Z:** the retry failed with "Cannot start another [Import] … previous [Import] running". The import blocking it was its own first attempt. The async operation ended statecode 3 / statuscode 31 (Failed).
+- **16:37:31Z:** the first attempt finished. Solution history shows `Import/InlineUpgrade Completed Success`, and 1.3.2.1 was installed with no import failures. The whole import took 73 minutes.
+
+Three defects, all in the import wait:
+1. **The timeout is too short.** 60 min is less than a real SpaarkeMaster upgrade takes on a stamp (73 min here).
+2. **No check for an import in flight.** H6 starts StageAndUpgrade without checking for an import already in progress (an open solution-history entry or an incomplete import job). A resume after a timeout would have collided with the running import.
+3. **The wrong completion signal.** H6 trusts the async operation's status. Here the async operation reported Failed while the import succeeded. Had H6 still been polling at 16:29Z, it would have returned `ReportedByDataverse` and quarantined a successful upgrade.
+
+**Entry-points**
+
+- `src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/SolutionImport/DataverseWebApiSolutionImporter.cs` — `PollImportAsync` (~line 603) and the import start (~line 383)
+- `src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/SolutionImport/SolutionImportOptions.cs:33` (`ImportTimeout` = 60 min)
+
+**Suggested fix**
+
+Make the import job and solution history the completion signal: the import job's `completedon` and result XML, and the `msdyn_solutionhistory` entry's status and result. Treat the async operation's status as advisory.
+
+Before starting an import, look for an open SpaarkeMaster solution-history entry or an incomplete import job. If one exists, wait for it instead of starting a second import.
+
+Raise the default `ImportTimeout` to at least 120 min. On a timeout, record the import-job id, so that a resume can find that import and keep waiting on it.
+
+**Estimated effort**: 4–6 h with tests
+**Blockers**: none
+**Related**: ISS-031; ebilling PR #2935 (the 1.3.2.0 package defect that preceded this); `notes/acme-1.3.2.0-upgrade-plan.md`
+
 ### ISS-031 — No upgrade run can start: CreateRun (REG-07) refuses a Ready registry row and nothing moves it back
 
 | Field | Value |
