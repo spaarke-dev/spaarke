@@ -1533,6 +1533,15 @@ direction 2026-09-09.
 `TrackingFieldTrio/index.ts:805`. It has no dependency on any of the above and should be scheduled on
 its own.
 
+### 2026-11-22 — post-wrap-up, filed from the #1821 follow-ups (SecureChild reconciliation jobs)
+
+Filed by the #1821 follow-up session during the adversarial review of PR #2957 (#2745, #2746). uac-r2 owns it. Its
+siblings #2745 and #2746 (PR #2957) and #2750 (PR #2958) are being fixed in scope, so they are not deferred.
+
+| ID | Title | GitHub Issue |
+|---|---|---|
+| D-2959 | Direct share pass: a capped listing moves the watermark to its horizon with no overlap, so a row stamped before the horizon but committed after the read waits for the rolling sweep. Not only a late grant: the pass also revokes (Restricted or tainted parent, non-participant shares), so a missed change can also delay a revoke. Proposed fix: bound the capped watermark by `startedAt - DirectOverlap`, the `WatermarkAfter` rule PR #2958 adds to the sibling job, and key it (#2745) only at an instant older than that | https://github.com/spaarke-dev/spaarke/issues/2959 |
+
 ### 2026-10-28 — filed from the ebilling 086/098 reviews
 
 | ID | Title | GitHub Issue |
