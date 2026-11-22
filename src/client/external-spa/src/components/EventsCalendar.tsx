@@ -43,7 +43,6 @@
 import * as React from 'react';
 import {
   makeStyles,
-  shorthands,
   tokens,
   Text,
   Spinner,
@@ -59,6 +58,7 @@ import {
   MessageBarActions,
 } from '@fluentui/react-components';
 import { AddRegular, CalendarEmptyRegular, DeleteRegular } from '@fluentui/react-icons';
+import { EmptyState } from '@spaarke/ui-components/components/EmptyState';
 import { FormModal } from '@spaarke/ui-components/components/SprkModal';
 import { parseDueDate } from '@spaarke/ui-components/utils/dateLocal';
 import {
@@ -125,25 +125,9 @@ const useStyles = makeStyles({
     minHeight: '180px',
     gap: tokens.spacingHorizontalM,
   },
-  emptyState: {
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'center',
-    justifyContent: 'center',
-    minHeight: '120px',
-    gap: tokens.spacingVerticalM,
-    backgroundColor: tokens.colorNeutralBackground2,
-    borderRadius: tokens.borderRadiusMedium,
-    padding: tokens.spacingHorizontalXL,
-    ...shorthands.border('1px', 'dashed', tokens.colorNeutralStroke2),
-  },
-  emptyStateIcon: {
-    fontSize: '40px',
+  // The shared EmptyState leaves the icon's colour to its caller (R4 task 024, FR-17).
+  emptyIcon: {
     color: tokens.colorNeutralForeground4,
-  },
-  emptyStateText: {
-    color: tokens.colorNeutralForeground3,
-    textAlign: 'center',
   },
   eventList: {
     display: 'flex',
@@ -970,19 +954,18 @@ export const EventsCalendar: React.FC<EventsCalendarProps> = ({
           )}
 
           {claimsNothing ? null : events.length === 0 ? (
-            <div className={styles.emptyState}>
-              <CalendarEmptyRegular className={styles.emptyStateIcon} />
-              <Text size={400} weight="semibold">
-                No events yet
-              </Text>
-              <Text size={300} className={styles.emptyStateText}>
-                {canAddEvent
+            <EmptyState
+              size="compact"
+              icon={<CalendarEmptyRegular className={styles.emptyIcon} />}
+              heading="No events yet"
+              description={
+                canAddEvent
                   ? ownCreateButton
                     ? `No events have been added to this ${noun}. Use the ${CREATE_TEXT.create} button to add the first event.`
                     : `No events have been added to this ${noun}. Use Add event above to add the first event.`
-                  : `No events have been added to this ${noun} yet.`}
-              </Text>
-            </div>
+                  : `No events have been added to this ${noun} yet.`
+              }
+            />
           ) : (
             <div className={styles.eventList}>
               {events.map((event, index) => (

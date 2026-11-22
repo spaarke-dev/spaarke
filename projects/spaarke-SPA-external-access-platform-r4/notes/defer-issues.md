@@ -389,3 +389,11 @@ This under-lists, which fails closed.
 
 **Fix.** Find the slow shared setup (likely dynamic MSAL/app imports under worker contention): raise those files' timeout or isolate them (poolOptions / sequence), then add the suite to a CI job. Status: Open. Issue: https://github.com/spaarke-dev/spaarke/issues/2964 (board Type=Bug).
 
+
+## D-30 — External SPA: move the remaining hand-rolled empty states onto the shared EmptyState (#2975)
+
+**What.** R4 task 024 (FR-17) moved the record lists (Documents, Events, Messages, Invoices, version history) onto the shared EmptyState from @spaarke/ui-components. Empty states outside FR-17's named files are still hand-rolled: OutsideCounselDashboard.tsx defines its own local EmptyState component (a copy of the shared one), and ContactsOrganizations.tsx, IssuedGrantsList.tsx, shell/NotificationBell.tsx, shell/QuickStartPane.tsx, shell/WidgetLibraryModal.tsx and shell/PortalWorkspaceShell.tsx each draw their own.
+
+**Why it matters.** The same "no items" state looks different from page to page in the external SPA, and some of these do not announce the state to assistive tech (no role="status"), so a screen-reader user is not told a list is empty. The local copy in OutsideCounselDashboard.tsx duplicates a shared component and drifts from it.
+
+**Fix.** Replace each with EmptyState (size compact for lists and panels), keeping wording and any action-conditional hint; delete the local copy and its emptyState* styles. Keep loading, error and truncated states as they are. Status: Open. Issue: https://github.com/spaarke-dev/spaarke/issues/2975 (board Type=Idea).

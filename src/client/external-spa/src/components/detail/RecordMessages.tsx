@@ -58,6 +58,7 @@ import {
   Textarea,
 } from '@fluentui/react-components';
 import { SendRegular } from '@fluentui/react-icons';
+import { EmptyState } from '@spaarke/ui-components/components/EmptyState';
 import { FormModal } from '@spaarke/ui-components/components/SprkModal';
 import { sanitizeEmailHtml } from '@spaarke/ui-components/utils/sanitizeEmailHtml';
 import {
@@ -81,10 +82,11 @@ import { createRightOf } from '../record/recordAccess';
 
 const UNKNOWN_SENDER = 'Unknown sender';
 const OWN_SENDER = 'You';
-const EMPTY_TEXT = 'No messages yet. Write the first one below.';
-const EMPTY_TEXT_DIALOG = 'No messages yet. Use New message above to write the first one.';
-/** Template, New message not offered: the section's read-only line (task 006) says why. */
-const EMPTY_TEXT_READ_ONLY = 'No messages yet.';
+/** The empty thread (shared `EmptyState`, R4 task 024): the heading, then a hint only when a way to post is offered. */
+const EMPTY_HEADING = 'No messages yet';
+const EMPTY_HINT = 'Write the first one below.';
+const EMPTY_HINT_DIALOG = 'Use New message above to write the first one.';
+// Template, New message not offered: no hint; the section's read-only line (task 006) says why.
 const LOAD_FAILED = 'The existing messages could not be loaded just now.';
 const NOT_AVAILABLE = 'Messages are not available for this record.';
 const DENIED_TEXT = 'You do not have permission to view messages on this record.';
@@ -157,7 +159,8 @@ const useStyles = makeStyles({
     lineHeight: tokens.lineHeightBase400,
     margin: 0,
   },
-  empty: {
+  // "Not available for this record" is not an empty thread (task 024 keeps it as it was).
+  unavailable: {
     color: tokens.colorNeutralForeground3,
     backgroundColor: tokens.colorNeutralBackground2,
     borderRadius: tokens.borderRadiusMedium,
@@ -518,7 +521,7 @@ const MessageThread: React.FC<MessageThreadProps> = ({
       {thread.status === 'access' && <BffAccessState failure={thread.failure} deniedMessage={DENIED_TEXT} />}
 
       {thread.status === 'unavailable' && (
-        <div className={styles.empty} role="status" data-testid="record-messages-unavailable">
+        <div className={styles.unavailable} role="status" data-testid="record-messages-unavailable">
           {NOT_AVAILABLE}
         </div>
       )}
@@ -553,8 +556,12 @@ const MessageThread: React.FC<MessageThreadProps> = ({
         <>
           <TruncatedListNotice truncated={thread.truncated} shown={thread.messages.length} noun="messages" />
           {thread.messages.length === 0 && !thread.truncated ? (
-            <div className={styles.empty} role="status" data-testid="record-messages-empty">
-              {composeInDialog ? (offered ? EMPTY_TEXT_DIALOG : EMPTY_TEXT_READ_ONLY) : EMPTY_TEXT}
+            <div data-testid="record-messages-empty">
+              <EmptyState
+                size="compact"
+                heading={EMPTY_HEADING}
+                description={composeInDialog ? (offered ? EMPTY_HINT_DIALOG : undefined) : EMPTY_HINT}
+              />
             </div>
           ) : (
             <ul className={styles.list} aria-label="Message thread" data-testid="record-messages-list">

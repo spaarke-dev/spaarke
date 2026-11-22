@@ -367,6 +367,8 @@ describe("the grid's own incomplete-list and empty states replace the SPA's", ()
       const notice = await screen.findByTestId('datagrid-truncated-notice', undefined, LOAD);
       expect(notice.textContent).toContain('could not be loaded just now');
       expect(notice.textContent).toContain('does not mean there are none');
+      // Task 024: the empty state never claims "none" for a cut-short list.
+      expect(screen.queryByText('No Documents')).toBeNull();
     },
     SLOW
   );
@@ -382,13 +384,61 @@ describe("the grid's own incomplete-list and empty states replace the SPA's", ()
     SLOW
   );
 
+  // Task 024 (FR-17): the empty list is the shared EmptyState (through the grid's `emptyState` option), and its hint names
+  // Upload only when Upload is offered (hide, don't disable).
+  const emptyStateText = async (): Promise<string> => {
+    const heading = await screen.findByText('No Documents', undefined, LOAD);
+    const region = heading.closest('[role="status"]');
+    expect(region?.getAttribute('data-size')).toBe('compact');
+    return region?.textContent ?? '';
+  };
+
   it(
-    'a complete empty list shows the configured empty state and no incomplete-list notice',
+    'a complete empty list shows the shared empty state, naming Upload when it is offered, and no incomplete-list notice',
     async () => {
       listReturns({ value: [] });
-      renderLibrary();
-      expect(await screen.findByText('No documents on this record yet.', undefined, LOAD)).toBeTruthy();
+      renderLibrary({ canUpload: true });
+      expect(await emptyStateText()).toContain(
+        'No documents have been uploaded to this matter yet. Use the Upload button to add your first document.'
+      );
       expect(screen.queryByTestId('datagrid-truncated-notice')).toBeNull();
+      // The configuration's own message is replaced, not shown beside it.
+      expect(screen.queryByText('No documents on this record yet.')).toBeNull();
+    },
+    SLOW
+  );
+
+  it(
+    'must-not-fire pair: with Upload not offered, the empty state names no action',
+    async () => {
+      listReturns({ value: [], canCreate: false });
+      renderLibrary({ canUpload: false });
+      const text = await emptyStateText();
+      expect(text).toContain('No documents have been uploaded to this matter yet.');
+      expect(text).not.toMatch(/Upload/);
+      expect(screen.queryByRole('button', { name: /Upload Document/ })).toBeNull();
+    },
+    SLOW
+  );
+
+  it(
+    'in the record template (section Upload), the hint points "above" only when the list grants the upload',
+    async () => {
+      listReturns({ value: [], canCreate: true });
+      renderLibrary({ onCreateActionChange: () => undefined });
+      expect(await emptyStateText()).toContain('Use Upload above to add your first document.');
+    },
+    SLOW
+  );
+
+  it(
+    'must-not-fire pair: in the record template with the upload not granted, the hint names no action',
+    async () => {
+      listReturns({ value: [], canCreate: false });
+      renderLibrary({ onCreateActionChange: () => undefined });
+      const text = await emptyStateText();
+      expect(text).toContain('No documents have been uploaded to this matter yet.');
+      expect(text).not.toMatch(/Upload|above/);
     },
     SLOW
   );

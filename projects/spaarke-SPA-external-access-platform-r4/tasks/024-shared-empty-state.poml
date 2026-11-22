@@ -4,7 +4,7 @@
     <title>Shared EmptyState in DocumentLibrary, EventsCalendar, SmartTodo and every template section (FR-17)</title>
     <phase>2 Invoices and documents</phase>
     <gate>after 018 and 023</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .tsx code across several SPA components</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -117,7 +117,9 @@
     <criterion testable="true">SPA build passes; all SPA tests pass.</criterion>
   </acceptance-criteria>
 
-  <notes>Spec FR-17. Design §6 anchors drifted: DocumentLibrary.tsx:1025 → :1048, EventsCalendar.tsx:723 → :734, SmartTodo.tsx:833 → :856.</notes>
+  <notes>Spec FR-17. Design §6 anchors drifted: DocumentLibrary.tsx:1025 → :1048, EventsCalendar.tsx:723 → :734, SmartTodo.tsx:833 → :856.
+    Completed 2026-11-22: Documents (via a new additive DataGrid mptyState host option), version history, Events, Messages and the record Invoices section use the shared EmptyState with action hints only when offered; SmartTodo and RecordDetailModal no longer exist. Shared-grid defect fixed in passing: a host row source no longer counts as empty before page 1 answers (no empty-state flash / live-region announcement). One adversarial pass: no F1/F3/F4; two F2 fixed (template must-not-fire tests, framework doc row). Filed D-30 #2975 (remaining hand-rolled empty states outside FR-17). Details: notes/task-024-notes.md.
+    rework: fix-round-1 task 024</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

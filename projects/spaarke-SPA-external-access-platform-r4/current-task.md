@@ -7,10 +7,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | **023c** ✅ — Documents list on the shared grid for project / matter / WA / service request + ProjectPage; D-23 `readFromParents` (#2928). Notes: `notes/task-023-notes.md` "Task 023c". 023a/023b ✅ merged (#2941). |
-| **Step** | 023c merged as `6a907a5cd4` (squash, owner go 2026-11-22 incl. sign-off on the two shared-grid fixes: selection cell, config-error text). Required checks Router + Client lint passed. |
-| **Status** | Branch has the pre-squash history; merge origin/master before the next PR (conflicts will be only in R4 project files: keep the branch side). Nothing from 023a/b/c is deployed; the grid config row is not in Dataverse. PR #2937 (quality alerts) merged. |
-| **Next Action** | Task 024 (shared EmptyState everywhere, FR-17) via task-execute, then 028 (P2 deploy + E2E: apply grid config 286be8b4 with owner go, grid PATCH 3ff4102c, BFF deploy via uac-r2, SPA deploy of the approved SHA). |
+| **Task** | **024** 🔄 — shared EmptyState (FR-17). Task file `tasks/024-shared-empty-state.poml`; notes `notes/task-024-notes.md`. Rigor FULL. |
+| **Step** | Code + tests done (uncommitted): DocumentLibrary (grid `emptyState` + version history), EventsCalendar, RecordMessages, InvoicesSection; shared DataGrid `emptyState` option + `useHostRowSource` no-empty-flash fix + `DataGrid.emptyState.test.tsx`. Running: full SPA vitest, one adversarial review. Then: SPA build, Step 10 status, merge origin/master, PR (owner sign-off on the 2 shared-grid changes). |
+| **Status** | 023a/b/c merged (#2941 `9461dc0bb3`, #2971 `6a907a5cd4`). Branch has the pre-squash history; merging origin/master conflicts only in R4 project files (keep the branch side). Nothing from 023/024 is deployed. |
+| **Next Action** | Finish 024 → PR; then 028 (P2 deploy + E2E), which waits for uac-r2's live notice of a dev BFF containing #2941. |
 | **Side** | #1906b → ebilling-r1; #2866 later. |
 
 ## Owner questions open
@@ -25,7 +25,7 @@
 - Grid PATCH 3ff4102c; BFF deploy via uac-r2 first (owner go per exact SHA); then SPA deploy of the SHA the owner approved.
 
 ## Live state
-- **Dev BFF** `5ae2804884` (uac-r2 deploy). Rollback `326781c50f`. `/healthz/catalog` 503 until ebilling seeds EB-D-256 (not a regression).
+- **Dev BFF** `c8ab2cba9e` (uac-r2 deploy 2026-11-20; corrected by uac-r2 2026-11-22). Rollback `5ae2804884`. Neither has #2941. uac-r2: #2941 rides its next deploy (fm task 055 from master, or a master candidate if 055 isn't on master when 024 is ready — tell uac-r2 then); it pings before the swap and sends a live notice with the SHA after its 30-min gate. Grid config row, PATCH and SPA deploy wait for that notice. `/healthz/catalog` 503 until ebilling seeds EB-D-256 (not a regression).
 - **Dev SPA** master `2963d1565b` (live 2026-11-19). Rollback = redeploy `ea7ba661d6`, then `ed3a5c2752`.
 - Nothing from 023a/b/c is deployed; the grid config row is not in Dataverse.
 

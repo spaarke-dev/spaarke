@@ -90,6 +90,10 @@ export function useHostRowSource({
   const [hasMore, setHasMore] = React.useState<boolean>(false);
   const [truncated, setTruncated] = React.useState<boolean>(false);
   const [error, setError] = React.useState<Error | null>(null);
+  // Whether page 1 for the current key has answered (rows or an error). Until it has, the list is loading, not empty:
+  // the render in which the grid turns the source on comes BEFORE the effect that starts the read, and calling that
+  // render "empty" would flash (and announce, through the empty state's live region) "no records" (R4 task 024).
+  const [settled, setSettled] = React.useState<boolean>(false);
 
   // Latest callback, read per request (an inline host callback must not reload the grid every render).
   const sourceRef = React.useRef<DataGridRowSource | undefined>(rowSource);
@@ -133,6 +137,7 @@ export function useHostRowSource({
           const pageTruncated = result?.truncated === true;
           setTruncated(prev => (mode === 'reset' ? pageTruncated : prev || pageTruncated));
           setIsLoading(false);
+          setSettled(true);
         },
         (err: unknown) => {
           if (controller.signal.aborted || requestIdRef.current !== myRequestId) return;
@@ -140,6 +145,7 @@ export function useHostRowSource({
           // Stop paging: with hasMore left true the sentinel would re-request the failing page in a loop.
           setHasMore(false);
           setIsLoading(false);
+          setSettled(true);
         }
       );
     },
@@ -155,6 +161,7 @@ export function useHostRowSource({
     setHasMore(false);
     setTruncated(false);
     setError(null);
+    setSettled(false);
     if (enabled) {
       loadPage('reset');
     } else {
@@ -166,10 +173,13 @@ export function useHostRowSource({
     };
   }, [loadPage, enabled, rowSourceKey]);
 
+  // A source that is on but whose page 1 has not answered yet is loading (see `settled`).
+  const loading = isLoading || (enabled && rowSource !== undefined && !settled);
+
   const fetchNextPage = React.useCallback(() => {
-    if (isLoading || !hasMore) return;
+    if (loading || !hasMore) return;
     loadPage('next');
-  }, [isLoading, hasMore, loadPage]);
+  }, [loading, hasMore, loadPage]);
 
   const reset = React.useCallback(() => {
     pageRef.current = 0;
@@ -179,5 +189,5 @@ export function useHostRowSource({
     loadPage('reset');
   }, [loadPage]);
 
-  return { records, isLoading, hasMore, truncated, error, fetchNextPage, reset };
+  return { records, isLoading: loading, hasMore, truncated, error, fetchNextPage, reset };
 }

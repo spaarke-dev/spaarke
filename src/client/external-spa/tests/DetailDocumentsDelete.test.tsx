@@ -421,7 +421,7 @@ describe('DocumentLibrary on each record type', () => {
       renderInTheme(<DocumentLibrary root="matters" recordId={MATTER} canUpload={false} canDownload />);
       // The list has answered (a row, or the grid's empty state) before the absence of Upload means anything.
       if (rows.length > 0) await documentRow('Mine.pdf');
-      else await screen.findByText('No documents on this record yet.', undefined, { timeout: 15000 });
+      else await screen.findByText('No Documents', undefined, { timeout: 15000 });
       expect(screen.queryByRole('button', { name: /Upload Document/ })).toBeNull();
       // Reading is still possible: the rows (and download) remain.
       if (rows.length > 0) expect(docAction(screen, 'Mine.pdf', 'Download')).toBeTruthy();
@@ -628,7 +628,7 @@ describe('delete own document', () => {
       fireEvent.click(deleteDoc('Mine.pdf')!);
       fireEvent.click(within(await confirmDialog()).getByRole('button', { name: 'Delete' }));
 
-      await screen.findByText('No documents on this record yet.', undefined, { timeout: 15000 });
+      await screen.findByText('No Documents', undefined, { timeout: 15000 });
       expect(await reachableButton(/Upload Document/)).toBeTruthy();
     },
     SLOW
@@ -1119,7 +1119,7 @@ describe('the record detail view', () => {
       installDetailNet('matter', emptyNet({ documents: [], documentsCanCreate: false }));
       const dialog = await openDetail('matter');
       const docs = await within(dialog).findByTestId('record-detail-documents');
-      await within(docs).findByText('No documents on this record yet.', undefined, SLOW);
+      await within(docs).findByText('No Documents', undefined, SLOW);
       expect(within(dialog).queryByRole('button', { name: 'Upload documents' })).toBeNull();
     },
     SLOW
@@ -1467,7 +1467,7 @@ describe('service request: who sees Delete', () => {
       installDetailNet('sr', emptyNet(over as Partial<DetailNet>));
       const dialog = await openDetail('sr');
       const docs = await within(dialog).findByTestId('record-detail-documents');
-      await within(docs).findByText('No documents on this record yet.', undefined, SLOW);
+      await within(docs).findByText('No Documents', undefined, SLOW);
       await new Promise(resolve => setTimeout(resolve, 100));
       expect(within(dialog).queryByRole('button', { name: 'Delete request' })).toBeNull();
       expect(within(dialog).queryByTestId('service-request-actions')).toBeNull();
@@ -1642,7 +1642,7 @@ describe('service request: closed (owner decision 2026-10-12)', () => {
       installDetailNet('sr', emptyNet({ record: { ...requestedByMe, ...closedColumns } }));
       const dialog = await openDetail('sr');
       const docs = await within(dialog).findByTestId('record-detail-documents');
-      await within(docs).findByText('No documents on this record yet.', undefined, SLOW);
+      await within(docs).findByText('No Documents', undefined, SLOW);
       await new Promise(resolve => setTimeout(resolve, 100));
       expect(within(dialog).queryByRole('button', { name: 'Delete request' })).toBeNull();
       expect(within(dialog).queryByTestId('service-request-actions')).toBeNull();
