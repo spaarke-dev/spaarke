@@ -3,10 +3,12 @@
 // KEEP-path classification (ADR-038 section 2 path #1, security-auth): the test asserts an AUTHORIZATION decision for an external
 // caller, read from the REAL app's endpoint table. Compiled into Sprk.Bff.Api.Tests by the existing tests/integration/auth glob.
 //
-// History: this class lived in ProcedureLibraryCiamDenyTests.cs beside two tests that proved a Procedure Library SPE document
-// streamed no bytes to a firm user. Task 124 retired the Procedure Library container (a Procedure file is now a Stored File in the
-// Finance file store), so those two went; the Stored File deny proof is ExternalInvoiceFileRoutesTests.ProcedureSourceFile_IsNeverListedOrServedToAnExternalCaller
-// and the file-store route census guard (ExternalDocumentNarrowingGuardTests / ExternalFileStoreRouteCensusTests). This one is a general route fact and stays.
+// History: this class lived in ProcedureLibraryCiamDenyTests.cs beside two tests that proved a document in an underived container
+// streams no bytes to a firm user. Task 124 retired the Procedure Library container (a Procedure file is now a Stored File in the
+// Finance file store) and removed that file; those two tests are general rules that never depended on the container, so review fix
+// round 1 restored them as ExternalDownloadUnderivedContainerDenyTests.cs. The Stored File deny proof is
+// ExternalInvoiceFileRoutesTests.ProcedureSourceFile_IsNeverListedOrServedToAnExternalCaller and the file-store route census guard
+// (ExternalDocumentNarrowingGuardTests / ExternalFileStoreRouteCensusTests). This one is a general route fact.
 
 using FluentAssertions;
 using Microsoft.AspNetCore.Authorization;
@@ -62,7 +64,7 @@ public sealed class CiamSearchRouteTests : IClassFixture<CustomWebAppFactory>
                  || r.StartsWith("/api/v1/external/", StringComparison.OrdinalIgnoreCase),
             "a CIAM token authenticates only on the external group (not on the workforce /api/v1/external-access group)");
         ciamRoutes.Should().NotContain(r => r.Contains("search", StringComparison.OrdinalIgnoreCase),
-            "the external group has no content or RAG search route (D-63)");
+            "the external group has no content or RAG search route (D-63); the module-data route can still return sprk_documentname for a document filed under a firm-readable record, which is DEF-015 and not asserted here");
         searchRoutes.Should().OnlyContain(s => !s.Anonymous && !s.AdmitsCiam,
             "every search route is authenticated on the workforce scheme, which rejects CIAM tokens");
     }
