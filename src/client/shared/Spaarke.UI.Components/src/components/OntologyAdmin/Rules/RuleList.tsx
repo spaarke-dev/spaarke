@@ -53,10 +53,21 @@ export interface RuleListProps {
   onNewRule?: () => void;
 }
 
-// Column widths as percentages of the table. The Fluent Table is a native fixed-layout table here (display: table, table-layout: fixed), so
-// the width on a header cell sets the column and a flex-grow ratio does nothing: the columns were all equal and the Rule column got
-// ~120 px. Order: rule, lane, on/off, version, open items, last fired, action rate. Sums to 100.
-const COLUMN_WIDTH = ['29%', '8%', '10%', '7%', '9%', '17%', '20%'] as const;
+// Column widths. The Fluent Table is a native fixed-layout table here (display: table, table-layout: fixed): the width on a header cell
+// sets the column, a flex-grow ratio does nothing, and a column with no width takes what the others leave. Columns that hold a fixed
+// piece of content (a word, a badge, a number, a date) get a PIXEL width: the widest of header word / content (14 px; 12 px for the
+// badges and small text) plus the cell's 16 px horizontal padding. A percentage starved them when the pane is narrow (the Console
+// centre pane is ~600 px wide at 1280x720): "Version" overlapped "Open items" and "Decide" broke mid-word (task 201 fix round 1).
+// The Rule column has NO width, so it takes everything the others leave and is always the widest. The fixed columns total 480 px, so
+// the table never overflows its pane from 560 px; Rule is 80 px there, 120 px at 600, 200 px at 680 and 620 px at 1100.
+//   Lane 64          "Decide" ~42 px + 16
+//   On / Off 76      "Retired" badge ~52 px (12 px text + 2 x 6 px badge padding), header "On / Off" ~52 px, + 16, rounded up
+//   Version 72       header "Version" ~50 px + 16, rounded up
+//   Open items 76    header wraps to "Open / items" (~38 px); "Could not be read" wraps on its spaces
+//   Last fired 88    "10/15/2026," / "9:30:00 AM" ~64 px at 12 px + 16; the header wraps over three lines
+//   Action rate 104  "Needs a look" badge ~82 px, header word "Action rate" ~76 px, + 16
+// Order: rule, lane, on/off, version, open items, last fired, action rate. Rule is `undefined`: no width.
+const COLUMN_WIDTH_PX = [undefined, 64, 76, 72, 76, 88, 104] as const;
 
 const useStyles = makeStyles({
   root: {
@@ -76,30 +87,42 @@ const useStyles = makeStyles({
     cursor: 'pointer',
     ':hover': { backgroundColor: tokens.colorNeutralBackground1Hover },
   },
-  col0: { width: COLUMN_WIDTH[0] },
-  col1: { width: COLUMN_WIDTH[1] },
-  col2: { width: COLUMN_WIDTH[2] },
-  col3: { width: COLUMN_WIDTH[3] },
-  col4: { width: COLUMN_WIDTH[4] },
-  col5: { width: COLUMN_WIDTH[5] },
-  col6: { width: COLUMN_WIDTH[6] },
+  // The Rule column has no width on purpose: it takes the rest of the table.
+  col1: { width: `${COLUMN_WIDTH_PX[1]}px` },
+  col2: { width: `${COLUMN_WIDTH_PX[2]}px` },
+  col3: { width: `${COLUMN_WIDTH_PX[3]}px` },
+  col4: { width: `${COLUMN_WIDTH_PX[4]}px` },
+  col5: { width: `${COLUMN_WIDTH_PX[5]}px` },
+  col6: { width: `${COLUMN_WIDTH_PX[6]}px` },
   retired: {
     color: tokens.colorNeutralForeground3,
   },
   // The cell stays a normal table cell: Fluent gives it a 44 px height that a table row treats as a minimum. Never put `display: flex` or
   // `overflow: hidden` on the cell itself (that made the height hard and clipped a two-line name, task 201). Rows grow to fit, with
-  // vertical padding from the spacing tokens, and a long unbroken code wraps.
+  // vertical padding from the spacing tokens. No `overflowWrap` here: on every cell it broke badges and single words mid-word (fix
+  // round 1); only the Rule stack (`ruleStack`) carries it.
   cell: {
-    overflowWrap: 'anywhere',
     paddingTop: tokens.spacingVerticalS,
     paddingBottom: tokens.spacingVerticalS,
   },
-  // Stacks the code over the name (or the action rate over its badge) INSIDE the cell.
+  // A cell holding one short word or a badge, in a column whose width fits it: never wraps.
+  nowrap: {
+    whiteSpace: 'nowrap',
+  },
+  // Stacks the action rate over its badge INSIDE the cell.
   stack: {
     display: 'flex',
     flexDirection: 'column',
     rowGap: tokens.spacingVerticalXXS,
     minWidth: 0,
+  },
+  // The code over the name INSIDE the Rule cell: the one place a long unbroken code must wrap mid-word.
+  ruleStack: {
+    display: 'flex',
+    flexDirection: 'column',
+    rowGap: tokens.spacingVerticalXXS,
+    minWidth: 0,
+    overflowWrap: 'anywhere',
   },
   muted: {
     color: tokens.colorNeutralForeground3,
@@ -189,7 +212,7 @@ export const RuleList: React.FC<RuleListProps> = ({ service, onOpen, onNewRule }
           <Table aria-label="Rules">
             <TableHeader>
               <TableRow>
-                <TableHeaderCell className={styles.col0}>Rule</TableHeaderCell>
+                <TableHeaderCell>Rule</TableHeaderCell>
                 <TableHeaderCell className={styles.col1}>Lane</TableHeaderCell>
                 <TableHeaderCell className={styles.col2}>On / Off</TableHeaderCell>
                 <TableHeaderCell className={styles.col3}>Version</TableHeaderCell>
@@ -210,8 +233,8 @@ export const RuleList: React.FC<RuleListProps> = ({ service, onOpen, onNewRule }
                   onClick={() => onOpen(rule.policyId)}
                   data-testid={`rule-row-${rule.code}`}
                 >
-                  <TableCell className={mergeClasses(styles.col0, styles.cell)}>
-                    <div className={styles.stack} data-stack>
+                  <TableCell className={styles.cell}>
+                    <div className={styles.ruleStack} data-stack>
                       <Link as="button" aria-label={`Open ${rule.code}`} data-testid={`rule-open-${rule.code}`}>
                         <Text weight="semibold">{rule.code}</Text>
                       </Link>
@@ -220,13 +243,16 @@ export const RuleList: React.FC<RuleListProps> = ({ service, onOpen, onNewRule }
                       </Text>
                     </div>
                   </TableCell>
-                  <TableCell className={mergeClasses(styles.col1, styles.cell)} data-testid="rule-lane">
+                  <TableCell className={mergeClasses(styles.col1, styles.cell, styles.nowrap)} data-testid="rule-lane">
                     <Text>{rule.lane}</Text>
                   </TableCell>
-                  <TableCell className={mergeClasses(styles.col2, styles.cell)}>
+                  <TableCell className={mergeClasses(styles.col2, styles.cell, styles.nowrap)}>
                     <StatusBadge label={rule.state} tone={stateTone(rule.state)} />
                   </TableCell>
-                  <TableCell className={mergeClasses(styles.col3, styles.cell)} data-testid="rule-version">
+                  <TableCell
+                    className={mergeClasses(styles.col3, styles.cell, styles.nowrap)}
+                    data-testid="rule-version"
+                  >
                     <Text>{rule.versionNumber === null ? '-' : `v${rule.versionNumber}`}</Text>
                   </TableCell>
                   <TableCell className={mergeClasses(styles.col4, styles.cell)} data-testid="rule-open-items">

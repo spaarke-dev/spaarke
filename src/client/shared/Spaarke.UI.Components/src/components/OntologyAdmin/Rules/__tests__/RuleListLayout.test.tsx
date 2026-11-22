@@ -93,13 +93,63 @@ describe('RuleList layout (task 201)', () => {
     }
   );
 
-  it('gives the Rule column the largest share of the width', async () => {
+  // Fix round 1: percentage widths starved the fixed-content columns at the Console's ~600 px centre pane (Version overlapped Open items,
+  // Decide broke mid-word). Fixed-content columns carry a PIXEL width sized to their content + 16 px padding; Rule has none and takes the rest.
+  const MIN_PX = [
+    ['Lane', 1, 64],
+    ['On / Off', 2, 76],
+    ['Version', 3, 72],
+    ['Open items', 4, 76],
+    ['Last fired', 5, 88],
+    ['Action rate', 6, 104],
+  ] as const;
+
+  it.each(MIN_PX)('the %s column has a pixel width of at least %i px', async (_label, index, min) => {
     renderList();
     await screen.findByTestId(`rule-row-${LONG_CODE}`);
     const headers = screen.getAllByRole('columnheader');
-    const widths = headers.map(widthOf);
-    expect(widths).toHaveLength(7);
-    expect(widths.every(w => !Number.isNaN(w))).toBe(true);
-    expect(widths[0]).toBe(Math.max(...widths));
+    expect(headers).toHaveLength(7);
+    const raw = getComputedStyle(headers[index]).width;
+    expect(raw).toMatch(/px$/);
+    expect(parseFloat(raw)).toBeGreaterThanOrEqual(min);
+    // the body cell carries the same width as its header
+    const cell = screen.getByTestId(`rule-row-${LONG_CODE}`).querySelectorAll('td, [role="cell"]')[index];
+    expect(getComputedStyle(cell).width).toBe(raw);
+  });
+
+  it('gives the Rule column no fixed width, so it takes all the width the fixed columns leave', async () => {
+    renderList();
+    await screen.findByTestId(`rule-row-${LONG_CODE}`);
+    const headers = screen.getAllByRole('columnheader');
+    const raw = getComputedStyle(headers[0]).width;
+    expect(raw).not.toMatch(/(px|%)$/);
+    const fixed = headers.slice(1).map(widthOf);
+    expect(fixed.every(w => !Number.isNaN(w))).toBe(true);
+    // the fixed columns total 480 px, so the table needs no more than ~560 px for the Rule column to keep 80 px
+    expect(fixed.reduce((a, b) => a + b, 0)).toBeLessThanOrEqual(480);
+  });
+
+  it('breaks words mid-word only inside the Rule stack, never on a cell', async () => {
+    renderList();
+    const row = await screen.findByTestId(`rule-row-${LONG_CODE}`);
+    const cells = Array.from(row.querySelectorAll('td, [role="cell"]'));
+    expect(cells).toHaveLength(7);
+    for (const cell of cells) {
+      expect(getComputedStyle(cell).overflowWrap).not.toBe('anywhere');
+    }
+    const ruleStack = cells[0].querySelector('[data-stack]') as HTMLElement;
+    expect(getComputedStyle(ruleStack).overflowWrap).toBe('anywhere');
+    // the Action rate stack (rate + badge) does not break mid-word
+    const rateStack = cells[6].querySelector('[data-stack]') as HTMLElement;
+    expect(getComputedStyle(rateStack).overflowWrap).not.toBe('anywhere');
+  });
+
+  it('keeps the short one-word and badge columns on one line', async () => {
+    renderList();
+    const row = await screen.findByTestId(`rule-row-${LONG_CODE}`);
+    const cells = Array.from(row.querySelectorAll('td, [role="cell"]'));
+    for (const index of [1, 2, 3]) {
+      expect(getComputedStyle(cells[index]).whiteSpace).toBe('nowrap');
+    }
   });
 });

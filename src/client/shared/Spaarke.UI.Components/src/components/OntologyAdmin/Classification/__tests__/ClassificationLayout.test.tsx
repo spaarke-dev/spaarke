@@ -61,17 +61,49 @@ describe('ClassificationArea table layout (task 201)', () => {
     expect(row).toHaveTextContent(GUIDANCE.slice(0, 100));
   });
 
-  it('gives the Guidance column the largest share of the width', async () => {
+  // Fix round 1: percentage widths starved the fixed-content columns at the Console's ~600 px centre pane (Edit, 10%, was narrower than the
+  // small button's 64 px min-width; the switch did not fit). Fixed-content columns carry a PIXEL width sized to content + 16 px padding.
+  const MIN_PX = [
+    ['Category', 0, 88],
+    ['On / Off', 1, 104],
+    ['Read by', 3, 72],
+    ['Last 30 days', 4, 72],
+    ['Recall', 5, 104],
+    ['Edit', 6, 80],
+  ] as const;
+
+  it.each(MIN_PX)('the %s column has a pixel width of at least %i px', async (_label, index, min) => {
+    renderArea();
+    const row = await screen.findByTestId('classification-row-c1');
+    const headers = screen.getAllByRole('columnheader');
+    expect(headers).toHaveLength(7);
+    const raw = getComputedStyle(headers[index]).width;
+    expect(raw).toMatch(/px$/);
+    expect(parseFloat(raw)).toBeGreaterThanOrEqual(min);
+    expect(getComputedStyle(row.querySelectorAll('td, [role="cell"]')[index]).width).toBe(raw);
+  });
+
+  it('gives the Guidance column no fixed width, so it takes all the width the fixed columns leave', async () => {
     renderArea();
     await screen.findByTestId('classification-row-c1');
     const headers = screen.getAllByRole('columnheader');
-    const guidance = headers.findIndex(h => h.textContent === 'Guidance');
-    expect(guidance).toBeGreaterThanOrEqual(0);
-    expect(Number.isNaN(widthOf(headers[guidance]))).toBe(false);
-    const others = headers
-      .filter((_h, i) => i !== guidance)
-      .map(widthOf)
-      .filter(w => !Number.isNaN(w));
-    expect(widthOf(headers[guidance])).toBeGreaterThan(Math.max(...others));
+    expect(headers[2]).toHaveTextContent('Guidance');
+    expect(getComputedStyle(headers[2]).width).not.toMatch(/(px|%)$/);
+    const fixed = headers.filter((_h, i) => i !== 2).map(widthOf);
+    expect(fixed.every(w => !Number.isNaN(w))).toBe(true);
+    // 520 px of fixed columns: nothing overflows from a 560 px table
+    expect(fixed.reduce((a, b) => a + b, 0)).toBeLessThanOrEqual(520);
+  });
+
+  it('breaks words mid-word only in the Guidance cell, never on every cell', async () => {
+    renderArea();
+    const row = await screen.findByTestId('classification-row-c1');
+    const cells = Array.from(row.querySelectorAll('td, [role="cell"]'));
+    expect(cells).toHaveLength(7);
+    cells.forEach((cell, index) => {
+      const wrap = getComputedStyle(cell).overflowWrap;
+      if (index === 2) expect(wrap).toBe('anywhere');
+      else expect(wrap).not.toBe('anywhere');
+    });
   });
 });

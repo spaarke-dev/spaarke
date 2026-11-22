@@ -56,3 +56,61 @@ because no column width was set), Classification 1 failed (Guidance width `NaN`)
   (`overflowWrap: anywhere`) but the Edit button (min-width 64 px) could spill if the table is under ~640 px.
 
 rework: none task 201
+
+## Fix round 1 (review findings F1 widths, F1 wrapping scope)
+
+Real table width in the Console: centre pane is 50% of the window (min 320 px) minus 2 x 16 px padding: ~600 px at 1280x720, ~680 px at
+1440x900. Designed for 560-1100 px. Cells have 8 px horizontal padding each side, so a column needs content + 16 px.
+
+### Widths (pixels for fixed-content columns; the wide text column has none and takes the rest)
+
+Rules (fixed total 480 px): Lane 64 ("Decide" ~42 px + 16), On / Off 76 ("Retired" badge ~52 px, header ~52 px, + 16), Version 72 (header
+~50 px + 16), Open items 76 (header wraps "Open / items", "Could not be read" wraps on spaces), Last fired 88 (date/time lines ~64 px at
+12 px + 16; header wraps), Action rate 104 ("Needs a look" badge ~82 px, header word ~76 px, + 16). Rule: no width.
+Rule column width = table width - 480: 80 px at 560, 120 at 600, 200 at 680, 620 at 1100.
+
+Triage categories (fixed total 520 px): Category 88, On / Off 104 (Fluent Switch measured from its styles: 56 px track box + label
+4 + ~20 + 8 = ~88, + 16), Read by 72, Last N days 72, Recall 104 ("Set too small" badge ~82 px + 16), Edit 80 (small Button min-width
+64 px + 16). Guidance: no width. Guidance = table width - 520: 40 px at 560, 80 at 600, 160 at 680, 280 at 800, 580 at 1100.
+
+Text widths are estimates (Segoe UI 14 px semibold ~7.2 px/char, 12 px ~5.8 px/char) from arithmetic, not measured in a browser.
+
+### Minimum table width at which nothing overflows (target <= 560)
+
+- Now: Rules 480 px of fixed columns, so no fixed column overflows from 496 px (Rule keeps >= 16 px); the Rule column is useful (>= 120 px)
+  from 600 px. Triage 520 px of fixed columns, no overflow from 536 px; Guidance is cramped (80 px) at 600 and reads well from ~680 (160).
+- master (percentages): needs width >= content/percent for the tightest column: Rules Version 66 px / 7% = ~943 px, Open items 88 / 9% =
+  ~978 px, Lane 58 / 8% = ~725 px; so ~980 px. Triage Edit 80 / 10% = 800 px, switch ~104 / 11% = ~945 px; so ~945 px.
+  So the overflow floor drops from ~980 / ~945 px to 496 / 536 px.
+- Trade-off, unresolved: the Triage table has seven columns and ~520 px of them cannot shrink (switch, Edit button, badges). At the
+  default centre pane (~600 px) Guidance gets ~80 px and its 140-character preview wraps to many short lines (the full text is in the tooltip).
+  Percent widths gave Guidance more at 600 px but overflowed the others. Options for the owner: a shorter preview (~60 chars), moving
+  Read by under the category name at narrow widths, or letting the pane resize. Not done: outside this finding's scope.
+
+### Wrapping scope
+
+`overflowWrap: 'anywhere'` removed from the shared Rules `cell`. It is now on `ruleStack` (the code/name div inside the Rule cell) only;
+the Action rate stack has none. Classification: removed from the shared `col2` class (which also styled the header); it is on a new
+`guidance` class on the Guidance body cell only, plus the `rules` stack of rule codes in Read by (a long unbroken rule code in a 56 px
+content width would spill into Last N days; this is a stack div, same class of fix). Lane, On / Off, Version cells are `white-space:
+nowrap` (their widths fit the content). Cell keeps only the vertical token padding.
+
+### Tests changed (new files from round 0, extended; existing tests untouched)
+
+- `RuleListLayout.test.tsx`: replaced "Rule header has the largest width" with: each fixed column has a px computed width >= its minimum
+  (Lane 64, On/Off 76, Version 72, Open items 76, Last fired 88, Action rate 104) and the body cell has the same width; Rule header has no
+  px/% width and the fixed total is <= 480; `overflow-wrap: anywhere` is on the Rule stack and on no cell and not the Action rate stack;
+  Lane/On-Off/Version cells are nowrap. The clipping checks (cell computed `display` is `table-cell`, not hidden, stack not clipped) kept.
+- `ClassificationLayout.test.tsx`: replaced "Guidance has the largest width" with px minimums (Category 88, On/Off 104, Read by 72, Last N days
+  72, Recall 104, Edit 80 - the Edit column >= 80 as the 64 px button + padding), Guidance has no width and fixed total <= 520, and
+  `overflow-wrap: anywhere` is on the Guidance cell only.
+- Before/after: against origin/master components 19 of 21 fail (the two content-render tests pass); against the previous tip a4a37d7111
+  16 of 21 fail; with this change 21 of 21 pass.
+
+### Results (fix round 1)
+
+- `npx jest src/components/OntologyAdmin`: 10 suites, 242 tests pass.
+- `npx tsc --noEmit` (Spaarke.UI.Components): exit 0.
+- `client-lint check --package ui-components`: ok.
+- `npm run build` in `src/solutions/SpaarkeAi`: completed (ribbon build complete, no error output).
+- Unverified: no browser measurement; widths are arithmetic from Fluent styles. Main session to check 1280x720 and 1440x900 on dev.

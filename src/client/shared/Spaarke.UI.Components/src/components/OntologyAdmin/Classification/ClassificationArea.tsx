@@ -67,10 +67,20 @@ interface Notice {
 
 const GUIDANCE_PREVIEW_LENGTH = 140;
 
-// Column widths as percentages of the table. The Fluent Table is a native fixed-layout table, so with no widths every column is equal
-// and Guidance (a ~140-character preview) got ~120 px and wrapped into a dozen lines (task 201). Order: category, on/off, guidance,
-// read by, last N days, recall, edit. Sums to 100.
-const COLUMN_WIDTH = ['12%', '11%', '38%', '9%', '7%', '13%', '10%'] as const;
+// Column widths. The Fluent Table is a native fixed-layout table (the width on a header cell sets the column; a column with no width
+// takes what the others leave). Columns with fixed-size content get a PIXEL width: the widest of header / content plus the cell's 16 px
+// horizontal padding. Percentages starved them in a ~600 px pane (the Console centre pane at 1280x720): the small Edit button
+// (min-width 64 px) spilled out of its 10% cell and the On/Off switch did not fit (task 201 fix round 1). Guidance has NO width, so it
+// takes everything left over. The fixed columns total 520 px: nothing overflows from 560 px (Guidance is 40 px there, 80 at 600, 160 at
+// 680, 280 at 800, 580 at 1100; it wraps, with the full text in the tooltip).
+//   Category 88   "Category" header ~58 px + 16; a name wraps on its spaces
+//   On / Off 104  Fluent Switch: 56 px track box + label (4 + ~20 + 8 px) ~ 88 px, + 16
+//   Read by 72    rule codes wrap anywhere inside it; "No rule" ~46 px, header "Read by" ~50 px, + 16
+//   Last N days 72  header wraps to "Last 30 / days" (~50 px) + 16; a number is shorter
+//   Recall 104    "Set too small" badge ~82 px + 16; the detail text wraps on its spaces
+//   Edit 80       small Button min-width 64 px + 16
+// Order: category, on/off, guidance, read by, last N days, recall, edit. Guidance is `undefined`: no width.
+const COLUMN_WIDTH_PX = [88, 104, undefined, 72, 72, 104, 80] as const;
 
 const useStyles = makeStyles({
   root: { display: 'flex', flexDirection: 'column', rowGap: tokens.spacingVerticalM, minWidth: 0 },
@@ -83,16 +93,19 @@ const useStyles = makeStyles({
   },
   muted: { color: tokens.colorNeutralForeground3 },
   cellStack: { display: 'flex', flexDirection: 'column', rowGap: tokens.spacingVerticalXXS },
-  rules: { display: 'flex', flexDirection: 'column', rowGap: tokens.spacingVerticalXXS },
+  // The rule codes inside the Read by cell: a long unbroken code wraps mid-word rather than spilling into the next column.
+  rules: { display: 'flex', flexDirection: 'column', rowGap: tokens.spacingVerticalXXS, overflowWrap: 'anywhere' },
   badgeRow: { display: 'flex', alignItems: 'center', columnGap: tokens.spacingHorizontalS, flexWrap: 'wrap' },
   numeric: { textAlign: 'right' },
-  col0: { width: COLUMN_WIDTH[0] },
-  col1: { width: COLUMN_WIDTH[1] },
-  col2: { width: COLUMN_WIDTH[2], overflowWrap: 'anywhere' },
-  col3: { width: COLUMN_WIDTH[3] },
-  col4: { width: COLUMN_WIDTH[4] },
-  col5: { width: COLUMN_WIDTH[5] },
-  col6: { width: COLUMN_WIDTH[6] },
+  col0: { width: `${COLUMN_WIDTH_PX[0]}px` },
+  col1: { width: `${COLUMN_WIDTH_PX[1]}px` },
+  // The Guidance column has no width on purpose: it takes the rest of the table.
+  col3: { width: `${COLUMN_WIDTH_PX[3]}px` },
+  col4: { width: `${COLUMN_WIDTH_PX[4]}px` },
+  col5: { width: `${COLUMN_WIDTH_PX[5]}px` },
+  col6: { width: `${COLUMN_WIDTH_PX[6]}px` },
+  // The guidance preview is free text: a long unbroken word wraps rather than spilling. Only this body cell carries it.
+  guidance: { overflowWrap: 'anywhere' },
 });
 
 const messageOf = (err: unknown, fallback: string): string =>
@@ -318,7 +331,7 @@ export const ClassificationArea: React.FC<ClassificationAreaProps> = ({ service 
             <TableRow>
               <TableHeaderCell className={styles.col0}>Category</TableHeaderCell>
               <TableHeaderCell className={styles.col1}>On / Off</TableHeaderCell>
-              <TableHeaderCell className={styles.col2}>Guidance</TableHeaderCell>
+              <TableHeaderCell>Guidance</TableHeaderCell>
               <TableHeaderCell className={styles.col3}>Read by</TableHeaderCell>
               <TableHeaderCell className={mergeClasses(styles.col4, styles.numeric)}>
                 Last {data.volumeWindowDays} days
@@ -384,7 +397,7 @@ const CategoryRow: React.FC<CategoryRowProps> = ({ category, floor, busy, formOp
           data-testid={`classification-toggle-${category.id}`}
         />
       </TableCell>
-      <TableCell className={styles.col2}>
+      <TableCell className={styles.guidance}>
         {guidance === '' ? (
           <Text className={styles.muted}>No guidance</Text>
         ) : (
