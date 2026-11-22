@@ -70,3 +70,32 @@ committed (refreshed after deploy). The Console (`src/solutions/SpaarkeAi`, `npm
 - Real platform ordering on dev (does the pane move focus after the promise resolves?). Per the task's escalation
   clause the main session verifies on dev; the helper defers one tick after settle.
 - Office add-in jest (`EmailView`): `office-addins` has no `node_modules` in this worktree.
+
+## Review fix round (2026-11-22)
+
+Three review findings, all in `EmailComposer.tsx`, still one helper.
+
+1. **Cross-frame timing.** In Find Similar -> Document Relationship Viewer iframe -> Email, the parent PCF (React 16)
+   lifts `inert` from its yielding SprkModal in a passive effect that can run after the 0 ms timer, and `focus()`
+   inside an inert frame fails silently. The helper now verifies the landing and retries: up to 10 attempts, 50 ms
+   apart (`LOOKUP_FOCUS_MAX_ATTEMPTS` / `LOOKUP_FOCUS_RETRY_MS`). It stops at unmount (timer cleared in the unmount
+   cleanup), as soon as focus is inside the composer or on the target, and when focus is on some other element than
+   where our previous attempt left it that is not `body`/null (a host that deliberately focused something is not
+   fought). The first attempt always runs (focus outside the composer on the grid link is the normal case).
+2. **Pre-existing F1.** `runDocumentLink` and `runRecordSearch` had no `.catch`; a rejecting `onLookupRecord` was an
+   unhandled rejection. Both now end in `.catch(err => console.warn('[EmailComposer] record lookup failed:', err))`
+   (same shape as `handleAddRelationship`; client-lint accepts it).
+3. **ownerDocument.** The helper captures `rootRef.current?.ownerDocument` (and its `defaultView`) when the lookup
+   starts (after unmount the ref is null) and uses it for `activeElement` and `setTimeout`/`clearTimeout`, falling
+   back to the globals. `closeFailureNotice` (not part of task 199) still uses the globals.
+
+New tests in `EmailComposer.lookupFocus.test.tsx` (now 14; the original 9 are unchanged): first focus swallowed once
+-> focus lands on a later attempt; retry stops when focus moves to a non-body element outside the composer; gives up
+after 10 attempts; Link documents and record search rejections are logged (no unhandled rejection) and focus still
+returns. Against the previous `EmailComposer.tsx` (fec1af6): 4 failed (swallowed-once, gives-up-after-10, both
+rejection tests), 10 passed (the stop-on-other-element test passes trivially on a one-shot helper; it fails when the
+stop rule is removed, checked by mutation).
+
+Checks: filtered jest (EmailComposer, DocumentEmailWizard, DecisionWizard, WizardFollowOns, SprkModal) 69 suites, 840
+tests passed; `tsc --noEmit` clean; client-lint ui-components ok. PCF versions unchanged (1.3.24 / 1.0.66 / 1.1.91).
+Real-iframe `inert` timing remains unverified outside jest (needs the dev check).

@@ -168,4 +168,108 @@ describe('EmailComposer: focus returns to the lookup trigger (task 199)', () => 
       error.mockRestore();
     }
   });
+
+  // Cross-frame timing: the parent PCF lifts `inert` from its yielding modal after the first tick, so the
+  // first focus() on the trigger is swallowed. The helper verifies and retries on a short bounded schedule.
+  it('first focus attempt swallowed (inert frame): a later attempt lands focus on the To button', async () => {
+    renderComposer({ onLookupRecipients: pane(outside, [contact]) });
+    const trigger = toButton();
+    const focusSpy = jest.spyOn(trigger, 'focus').mockImplementationOnce(() => undefined);
+    try {
+      fireEvent.click(trigger);
+
+      await waitFor(() => expect(document.activeElement).toBe(trigger));
+      expect(focusSpy.mock.calls.length).toBeGreaterThanOrEqual(2); // the swallowed one plus a retry
+    } finally {
+      focusSpy.mockRestore();
+    }
+  });
+
+  it('stops retrying when focus moves to another element outside the composer (not body)', async () => {
+    renderComposer({ onLookupRecipients: pane(outside, [contact]) });
+    const trigger = toButton();
+    const other = document.createElement('button');
+    other.textContent = 'host chose this';
+    document.body.appendChild(other);
+    const focusSpy = jest.spyOn(trigger, 'focus').mockImplementation(() => undefined); // always swallowed
+    try {
+      fireEvent.click(trigger);
+      await waitFor(() => expect(focusSpy).toHaveBeenCalledTimes(1));
+
+      other.focus(); // a host deliberately focuses something else
+      await act(async () => {
+        await new Promise(r => window.setTimeout(r, 300));
+      });
+
+      expect(focusSpy).toHaveBeenCalledTimes(1);
+      expect(document.activeElement).toBe(other);
+    } finally {
+      focusSpy.mockRestore();
+      other.remove();
+    }
+  });
+
+  it('gives up after the bounded number of attempts when focus never lands', async () => {
+    renderComposer({ onLookupRecipients: pane(outside, [contact]) });
+    const trigger = toButton();
+    const focusSpy = jest.spyOn(trigger, 'focus').mockImplementation(() => undefined);
+    try {
+      fireEvent.click(trigger);
+      await waitFor(() => expect(focusSpy.mock.calls.length).toBe(10), { timeout: 2000 });
+      await act(async () => {
+        await new Promise(r => window.setTimeout(r, 150));
+      });
+      expect(focusSpy).toHaveBeenCalledTimes(10);
+    } finally {
+      focusSpy.mockRestore();
+    }
+  });
+
+  // F1: onLookupRecord rejecting must not be an unhandled rejection; focus still returns.
+  it('Link documents: onLookupRecord rejects -> logged, not unhandled, focus returns to Attach', async () => {
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const onLookupRecord = jest.fn().mockImplementation(async () => {
+      outside.focus();
+      throw new Error('lookup blew up');
+    });
+    renderComposer({ onLookupRecord, attachmentSources: [] });
+    try {
+      const attach = screen.getByRole('button', { name: 'Attach' });
+      fireEvent.click(attach);
+      fireEvent.click(await screen.findByRole('menuitem', { name: 'Link documents' }));
+
+      await waitFor(() =>
+        expect(warn).toHaveBeenCalledWith('[EmailComposer] record lookup failed:', expect.any(Error))
+      );
+      await waitFor(() => expect(document.activeElement).toBe(attach));
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('Record search: onLookupRecord rejects -> logged, not unhandled, focus returns to the toolbar button', async () => {
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const onLookupRecord = jest.fn().mockImplementation(async () => {
+      outside.focus();
+      throw new Error('lookup blew up');
+    });
+    renderComposer({
+      onLookupRecord,
+      recordLookupCatalog: [
+        { logicalName: 'sprk_matter', displayName: 'Matter' },
+      ] as unknown as IEmailComposerProps['recordLookupCatalog'],
+    });
+    try {
+      const trigger = screen.getByRole('button', { name: 'Insert record link' });
+      fireEvent.click(trigger);
+      fireEvent.click(await screen.findByRole('menuitem', { name: 'Matter' }));
+
+      await waitFor(() =>
+        expect(warn).toHaveBeenCalledWith('[EmailComposer] record lookup failed:', expect.any(Error))
+      );
+      await waitFor(() => expect(document.activeElement).toBe(trigger));
+    } finally {
+      warn.mockRestore();
+    }
+  });
 });
