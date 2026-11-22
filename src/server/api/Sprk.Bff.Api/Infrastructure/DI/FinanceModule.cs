@@ -28,10 +28,9 @@ public static class FinanceModule
         //           VelocitySpikePct, FinanceSummaryCacheTtlMinutes
         // task 061 fail-fast sweep: canonical AddOptions chain with ValidateOnStart. No member is required (all have
         // safe defaults).
-        // ebilling-r1 task 028: the eBilling container id (Procedure Library) is format-checked only ([RegularExpression], b!…) —
-        // empty passes, so no stamp fails to boot and IOptionsDriftTests demands no key. It must also be distinct from the
-        // email/archive containers (FinanceOptionsValidator; fails start-up naming both keys). Task 092 retired the second key
-        // (Finance:EbillingOutputContainerId): export files are Stored Files in Finance:FileStore.
+        // ebilling-r1 tasks 092 and 124 retired both eBilling SPE container keys (Finance:EbillingOutputContainerId and
+        // Finance:ProcedureLibraryContainerId): every eBilling file is a Stored File in Finance:FileStore, so FinanceOptionsValidator
+        // checks only the file store and IOptionsDriftTests demands no container key.
         services.AddSingleton<Microsoft.Extensions.Options.IValidateOptions<FinanceOptions>, FinanceOptionsValidator>();
         services.AddOptions<FinanceOptions>()
             .Bind(configuration.GetSection(FinanceOptions.SectionName))

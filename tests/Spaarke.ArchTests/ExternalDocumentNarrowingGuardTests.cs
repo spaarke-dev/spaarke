@@ -765,11 +765,11 @@ public class ExternalDocumentNarrowingGuardTests
 
     // ── detector ─────────────────────────────────────────────────────────────────────────────────────────────────
 
-    private sealed record ScanResult(IReadOnlyDictionary<string, HashSet<string>> Surfaces, IReadOnlySet<string> Reaches);
+    internal sealed record ScanResult(IReadOnlyDictionary<string, HashSet<string>> Surfaces, IReadOnlySet<string> Reaches, IReadOnlyDictionary<string, HashSet<string>> Calls);
 
     private static ScanResult Scan(IEnumerable<Type> types) => Scan(types, IsNarrowing, SurfacePrimitive);
 
-    private static ScanResult Scan(IEnumerable<Type> types, Func<MethodBase, bool> isNarrowing, Func<MethodBase, string?> surfacePrimitive)
+    internal static ScanResult Scan(IEnumerable<Type> types, Func<MethodBase, bool> isNarrowing, Func<MethodBase, string?> surfacePrimitive)
     {
         var surfaces = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
         var calls = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
@@ -806,7 +806,7 @@ public class ExternalDocumentNarrowingGuardTests
             }
         }
 
-        return new ScanResult(surfaces, reaches);
+        return new ScanResult(surfaces, reaches, calls);
     }
 
     /// <summary>
@@ -827,7 +827,7 @@ public class ExternalDocumentNarrowingGuardTests
 
     private static readonly Regex CompilerPrefix = new(@"^<+([^<>]+)>", RegexOptions.Compiled);
 
-    private static string Normalize(string name) => CompilerPrefix.Match(name) is { Success: true } m ? m.Groups[1].Value : name;
+    internal static string Normalize(string name) => CompilerPrefix.Match(name) is { Success: true } m ? m.Groups[1].Value : name;
 
     private static bool IsNarrowing(MethodBase method) =>
         method.DeclaringType is { } declaring

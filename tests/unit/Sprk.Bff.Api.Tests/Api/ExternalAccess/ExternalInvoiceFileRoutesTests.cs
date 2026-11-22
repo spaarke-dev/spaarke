@@ -296,6 +296,101 @@ public sealed class ExternalInvoiceFileRoutesTests
         host.AuditEvents.Should().BeEmpty();
     }
 
+    // ebilling-r1 task 124 (EB-D-163): the Procedure Library container is retired; a Procedure document is a Stored File (purpose
+    // Procedure source, parent its Procedure Version) in the Finance file store. These replace the old "a Procedure Library document
+    // streams no bytes" proof. The file is seeded as firm-visible on purpose: the filter and the re-check must refuse it by purpose and
+    // parent, not by a flag the writer happens never to set. The fake Dataverse returns every Stored File row whatever the query
+    // asks, so the re-check (IsFirmFile) is what these exercise; the query's own filters are pinned by TheStoredFileQuery_IsFilteredByTheStore.
+    public static TheoryData<string, bool> ProcedureSourceFiles => new()
+    {
+        { "contact", false }, { "contact", true }, { "flagged-systemuser", false }, { "flagged-systemuser", true },
+    };
+
+    [Theory(DisplayName = "Task 124 must-fire: a Procedure source file, even marked firm-visible, is not listed and its content is the unknown file's 404 with no byte read")]
+    [MemberData(nameof(ProcedureSourceFiles))]
+    public async Task ProcedureSourceFile_IsNeverListedOrServedToAnExternalCaller(string caller, bool versionIdEqualsTheInvoiceId)
+    {
+        await using var host = await Host.StartAsync();
+        host.CallerIs(caller);
+        var version = versionIdEqualsTheInvoiceId ? Invoice : Guid.NewGuid();
+        var file = host.SeedFirmFile(
+            purpose: StoredFilePurpose.ProcedureSource, firmVisible: true, name: "billing-guidelines.pdf",
+            parent: new StoredFileParent(StoredFileParentKind.ProcedureVersion, version));
+
+        var unknown = await Shape(await host.GetAsync(ContentUrl(Invoice, Guid.NewGuid())));
+        (await Shape(await host.GetAsync(ContentUrl(Invoice, file)))).Should().Be(unknown);
+        (await Ids(await host.GetAsync(ListUrl(Invoice)))).Should().BeEmpty();
+        host.AuditEvents.Should().BeEmpty();
+        host.Timeline.Should().NotContain("first-byte", "no byte of a Procedure source is read for an external caller");
+    }
+
+    // ebilling-r1 task 124 review fix round 1 (F-E): the cases above carry TWO defects at once (Procedure purpose AND a Procedure Version
+    // parent), so a mutation that let IsFirmFile admit the purpose alone still passed every route case, because the parent-kind check
+    // refused the same row. These carry ONE defect each, through the route. NOTE what they do and do not pin: the store has a second,
+    // independent layer (StoredFileService.PathIsOwn re-derives the blob path from the typed purpose and parent, and a purpose whose parent
+    // kind differs is never servable), so a row with a single defect is refused at the route even if IsFirmFile were weakened. The route
+    // cases therefore pin the END-TO-END refusal; the two IsFirmFile checks are each pinned on their own at the decision point, by
+    // IsFirmFile_RefusesAProcedureSourceRow_AndAdmitsTheInvoicePdf (purpose-only and parent-kind-only rows), which fails under the
+    // matching mutation of IsFirmFile (recorded in notes/124-retire-procedure-library-key.md, "Review fix round 1").
+    public static TheoryData<string, string> SingleDefectProcedureFiles => new()
+    {
+        { "contact", "procedure-purpose-on-the-invoice" }, { "flagged-systemuser", "procedure-purpose-on-the-invoice" },
+        { "contact", "invoice-pdf-purpose-on-a-procedure-version" }, { "flagged-systemuser", "invoice-pdf-purpose-on-a-procedure-version" },
+    };
+
+    [Theory(DisplayName = "Task 124 must-fire (one defect each): a Procedure-purpose file under the invoice, and an Invoice-PDF-purpose file under a Procedure Version, are neither listed nor served")]
+    [MemberData(nameof(SingleDefectProcedureFiles))]
+    public async Task ProcedureSourceFile_EachCheckRefusesOnItsOwn(string caller, string defect)
+    {
+        await using var host = await Host.StartAsync();
+        host.CallerIs(caller);
+        var file = defect switch
+        {
+            // Refused by PURPOSE only: the parent is the route's invoice, the file is firm-visible, Servable, no source.
+            "procedure-purpose-on-the-invoice" => host.SeedFirmFile(
+                purpose: StoredFilePurpose.ProcedureSource, firmVisible: true, name: "billing-guidelines.pdf", parent: InvoiceParent(Invoice)),
+            // Refused by PARENT KIND only: the parent's id is the route's invoice id, the purpose is Invoice PDF, firm-visible, Servable, no source.
+            "invoice-pdf-purpose-on-a-procedure-version" => host.SeedFirmFile(
+                purpose: StoredFilePurpose.InvoicePdf, firmVisible: true, name: "billing-guidelines.pdf",
+                parent: new StoredFileParent(StoredFileParentKind.ProcedureVersion, Invoice)),
+            _ => throw new ArgumentOutOfRangeException(nameof(defect), defect, null),
+        };
+
+        var unknown = await Shape(await host.GetAsync(ContentUrl(Invoice, Guid.NewGuid())));
+        (await Shape(await host.GetAsync(ContentUrl(Invoice, file)))).Should().Be(unknown);
+        (await Ids(await host.GetAsync(ListUrl(Invoice)))).Should().BeEmpty();
+        host.AuditEvents.Should().BeEmpty();
+        host.Timeline.Should().NotContain("first-byte", "no byte of the file is read for an external caller");
+    }
+
+    [Fact(DisplayName = "Task 124: IsFirmFile refuses a Procedure source row whatever else it claims; the firm's own Invoice PDF passes (control)")]
+    public void IsFirmFile_RefusesAProcedureSourceRow_AndAdmitsTheInvoicePdf()
+    {
+        StoredFileRow Row(StoredFilePurpose purpose, StoredFileParent parent) => new()
+        {
+            FileId = Guid.NewGuid(),
+            Purpose = purpose,
+            Parent = parent,
+            FirmVisible = true,
+            Status = StoredFileStatus.Servable,
+        };
+
+        var procedure = Row(StoredFilePurpose.ProcedureSource, new(StoredFileParentKind.ProcedureVersion, Invoice));
+        var invoiceKindUnderProcedurePurpose = Row(StoredFilePurpose.ProcedureSource, InvoiceParent(Invoice));
+        var noParent = procedure with { Parent = null };
+        // Review fix round 1 (F-E): ONE defect each, so each check is pinned on its own. The purpose is right and only the parent KIND is wrong
+        // (the parent id is the route's invoice id); and, above, the parent is the invoice and only the purpose is wrong.
+        var invoicePdfUnderAProcedureVersion = Row(StoredFilePurpose.InvoicePdf, new(StoredFileParentKind.ProcedureVersion, Invoice));
+
+        ExternalInvoiceSubmissionAuthorizationFilter.IsFirmFile(procedure, Invoice).Should().BeFalse();
+        ExternalInvoiceSubmissionAuthorizationFilter.IsFirmFile(invoiceKindUnderProcedurePurpose, Invoice).Should().BeFalse();
+        ExternalInvoiceSubmissionAuthorizationFilter.IsFirmFile(noParent, Invoice).Should().BeFalse();
+        ExternalInvoiceSubmissionAuthorizationFilter.IsFirmFile(invoicePdfUnderAProcedureVersion, Invoice).Should().BeFalse(
+            "the parent KIND is checked on its own: a Procedure Version whose id equals the invoice id is not the invoice");
+        ExternalInvoiceSubmissionAuthorizationFilter.IsFirmFile(Row(StoredFilePurpose.InvoicePdf, InvoiceParent(Invoice)), Invoice)
+            .Should().BeTrue("the control: the detector is not a blanket refusal");
+    }
+
     [Fact(DisplayName = "A file whose scan has no verdict is listed as Checking, and its content is 409 file_scan_pending with no bytes")]
     public async Task Pending_IsChecking_And409()
     {
@@ -706,10 +801,10 @@ public sealed class ExternalInvoiceFileRoutesTests
         public Guid SeedFirmFile(
             Guid? invoice = null, bool firmVisible = true, StoredFilePurpose purpose = StoredFilePurpose.InvoicePdf,
             StoredFileStatus status = StoredFileStatus.Servable, Guid? sourceDocument = null, Guid? sourceCommunication = null,
-            IDictionary<string, string>? tags = null, string name = "invoice.pdf")
+            IDictionary<string, string>? tags = null, string name = "invoice.pdf", StoredFileParent? parent = null)
         {
             var file = Guid.NewGuid();
-            var row = Rig.SeedFile(file, InvoiceParent(invoice ?? Invoice), Pdf, status, purpose, sourceDocument, tags);
+            var row = Rig.SeedFile(file, parent ?? InvoiceParent(invoice ?? Invoice), Pdf, status, purpose, sourceDocument, tags);
             row[StoredFileSchema.FirmVisible] = firmVisible;
             row[StoredFileSchema.Name] = name;
             row[StoredFileSchema.SizeBytes] = Pdf.Length;

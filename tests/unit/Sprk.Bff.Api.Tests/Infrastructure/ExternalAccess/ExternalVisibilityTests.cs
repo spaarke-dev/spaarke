@@ -27,8 +27,6 @@ public sealed class ExternalVisibilityTests
     private const int Restricted = 100000002;
     private const int Open = 100000000;
     private const int Private = 100000001;
-    private const string Library = "b!procedure-library-drive";
-
     private readonly World _world = new();
 
     private Task<ExternalVisibilityResult> Decide(params (string Table, Guid Id)[] rows) =>
@@ -254,35 +252,26 @@ public sealed class ExternalVisibilityTests
         result.For("sprk_document", visible).Verdict.Should().Be(ExternalVisibilityVerdict.Visible);
     }
 
-    [Fact]
-    public async Task ALegacyProcedureLibraryDocument_IsHidden_ByItsDrive()
+    // ebilling-r1 task 124 (EB-D-163) retired the legacy Procedure Library drive step with Finance:ProcedureLibraryContainerId: a Procedure
+    // file is a Stored File (a hard-deny table), never a document. A document's visibility is its filing and task 188's narrowing; its
+    // drive is not read. Must-not-fire controls for what the step used to decide.
+    [Fact(DisplayName = "124: a document's drive decides nothing; its visibility is its filing and task 188, and an attachment follows its parent")]
+    public async Task ADocumentsDrive_IsNotRead_AndAnAttachmentFollowsItsParent()
     {
         var matter = _world.Root();
-        var library = _world.Document(matter: matter, drive: Library.ToUpperInvariant());
-        var other = _world.Document(matter: matter, drive: "b!some-matter-container");
+        var anyDrive = _world.Document(matter: matter, drive: "b!any-container");
+        var attachment = _world.Document(parent: anyDrive);
+        var hiddenParent = _world.Document(permission: Restricted, matter: matter, drive: "b!any-container");
+        var hiddenAttachment = _world.Document(parent: hiddenParent);
 
-        var result = await Decide(("sprk_document", library), ("sprk_document", other));
+        var result = await Decide(
+            ("sprk_document", anyDrive), ("sprk_document", attachment),
+            ("sprk_document", hiddenParent), ("sprk_document", hiddenAttachment));
 
-        result.For("sprk_document", library).Reason.Should().Be(ExternalVisibilityReason.ProcedureLibraryDocument);
-        result.For("sprk_document", other).Verdict.Should().Be(ExternalVisibilityVerdict.Visible);
-    }
-
-    [Fact]
-    public async Task WithNoProcedureLibraryConfigured_NoDocumentIsOne()
-    {
-        _world.LibraryDrive = null;
-        var document = _world.Document(matter: _world.Root(), drive: Library);
-
-        (await DecideOne("sprk_document", document)).Verdict.Should().Be(ExternalVisibilityVerdict.Visible);
-    }
-
-    [Fact]
-    public async Task AnAttachmentUnderAProcedureLibraryDocument_IsHidden()
-    {
-        var parent = _world.Document(matter: _world.Root(), drive: Library);
-        var attachment = _world.Document(parent: parent);
-
-        (await DecideOne("sprk_document", attachment)).Reason.Should().Be(ExternalVisibilityReason.ProcedureLibraryDocument);
+        result.For("sprk_document", anyDrive).Verdict.Should().Be(ExternalVisibilityVerdict.Visible);
+        result.For("sprk_document", attachment).Verdict.Should().Be(ExternalVisibilityVerdict.Visible);
+        result.For("sprk_document", hiddenParent).Reason.Should().Be(ExternalVisibilityReason.DocumentHidden);
+        result.For("sprk_document", hiddenAttachment).Verdict.Should().Be(ExternalVisibilityVerdict.Hidden);
     }
 
     // ── The document chain: task 188's three hops ──────────────────────────────────────────────────────────────
@@ -942,8 +931,6 @@ public sealed class ExternalVisibilityTests
 
         public Dictionary<Guid, InvoiceHiddenReason> InvoiceReasons { get; } = new();
 
-        public string? LibraryDrive { get; set; } = Library;
-
         /// <summary>A table (SDK), an entity set (OData) or <c>rootflags</c> whose reads throw.</summary>
         public string? Fault { get; set; }
 
@@ -984,7 +971,6 @@ public sealed class ExternalVisibilityTests
                 },
                 (ids, ct) => Task.FromResult(new InvoiceVisibilityResult(
                     ids, ids.Where(InvoiceReasons.ContainsKey).ToDictionary(id => id, id => InvoiceReasons[id]), faulted: false)),
-                LibraryDrive,
                 NullLogger.Instance);
         }
 
