@@ -496,9 +496,10 @@ public static class OperationAccessPolicy
     }
 
     /// <summary>
-    /// Converts AccessRights flags to human-readable string.
+    /// Converts AccessRights flags to a human-readable string ("Read, Write, ..."; "None" when empty).
+    /// Display only. Public so the permissions endpoint shows the same text instead of keeping its own copy.
     /// </summary>
-    private static string GetAccessRightsDescription(AccessRights rights)
+    public static string GetAccessRightsDescription(AccessRights rights)
     {
         if (rights == AccessRights.None)
         {

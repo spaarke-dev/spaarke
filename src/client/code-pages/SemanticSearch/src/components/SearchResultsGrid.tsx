@@ -36,6 +36,7 @@ import {
   type TableRowId,
   type TableColumnSizingOptions,
 } from '@fluentui/react-components';
+import { dataGridCellStyle, dataGridHeaderCellStyle } from '@spaarke/ui-components/components/DataGrid/cellStyles';
 import type { IDatasetColumn } from '../hooks/useSearchViewDefinitions';
 import type { IDatasetRecord } from '../adapters/searchResultAdapter';
 import type { SearchDomain } from '../types';
@@ -185,38 +186,11 @@ const useStyles = makeStyles({
     height: '1px',
     width: '100%',
   },
-  // Cell + header styles aligned with the @spaarke/ui-components DataGrid
-  // framework (see src/client/shared/Spaarke.UI.Components/src/components/
-  // DataGrid/DataGrid.tsx — `cell` + `headerCell` styles). Same Segoe UI 14px
-  // family + token sizes + Power Apps OOB row heights, so the SemanticSearch
-  // grid renders identically to InvoicesPage / EventsPage / KPI grids.
-  // Task 035 UAT alignment pass (2026-06-04).
-  cell: {
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
-    minHeight: '38px',
-    paddingTop: tokens.spacingVerticalXS,
-    paddingBottom: tokens.spacingVerticalXS,
-    paddingLeft: tokens.spacingHorizontalM,
-    paddingRight: tokens.spacingHorizontalM,
-    fontFamily: "'Segoe UI', 'Segoe UI Web', Arial, sans-serif",
-    fontSize: tokens.fontSizeBase300,
-    fontWeight: tokens.fontWeightRegular,
-    color: tokens.colorNeutralForeground1,
-  },
-  headerCell: {
-    minHeight: '41px',
-    paddingTop: tokens.spacingVerticalS,
-    paddingBottom: tokens.spacingVerticalS,
-    paddingLeft: tokens.spacingHorizontalM,
-    paddingRight: tokens.spacingHorizontalM,
-    fontFamily: "'Segoe UI', 'Segoe UI Web', Arial, sans-serif",
-    fontSize: tokens.fontSizeBase300,
-    fontWeight: tokens.fontWeightSemibold,
-    backgroundColor: tokens.colorNeutralBackground2,
-    color: tokens.colorNeutralForeground1,
-  },
+  // Cell + header styles come from the @spaarke/ui-components DataGrid framework itself, so this
+  // grid renders like InvoicesPage / EventsPage / KPI grids and cannot drift from them (#2866;
+  // the hand-copied header had kept an older Background2 / Foreground1 header).
+  cell: dataGridCellStyle,
+  headerCell: dataGridHeaderCellStyle,
 });
 
 // Stable identity for "no hidden columns" — keeps useMemo deps stable when

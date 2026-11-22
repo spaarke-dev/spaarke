@@ -20,6 +20,7 @@
 // ─── Foundation (task 001) ───
 export { dataGridTokens } from './tokens';
 export type { DataGridTokens } from './tokens';
+export { dataGridCellStyle, dataGridHeaderCellStyle } from './cellStyles';
 
 // ─── Core DataGrid (task 003) ───
 export { DataGrid, default as DataGridDefault } from './DataGrid';

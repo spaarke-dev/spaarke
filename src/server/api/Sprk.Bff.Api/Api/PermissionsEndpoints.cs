@@ -341,31 +341,8 @@ public static class PermissionsEndpoints
             CanCheckIn = OperationAccessPolicy.HasRequiredRights(rights, "driveitem.checkin"),
 
             // Raw access rights (for debugging/advanced scenarios)
-            AccessRights = GetAccessRightsDescription(rights),
+            AccessRights = OperationAccessPolicy.GetAccessRightsDescription(rights),
             CalculatedAt = snapshot.CachedAt
         };
-    }
-
-    /// <summary>
-    /// Converts AccessRights flags to human-readable string.
-    /// </summary>
-    private static string GetAccessRightsDescription(AccessRights rights)
-    {
-        if (rights == AccessRights.None)
-        {
-            return "None";
-        }
-
-        var parts = new List<string>();
-
-        if (rights.HasFlag(AccessRights.Read)) parts.Add("Read");
-        if (rights.HasFlag(AccessRights.Write)) parts.Add("Write");
-        if (rights.HasFlag(AccessRights.Delete)) parts.Add("Delete");
-        if (rights.HasFlag(AccessRights.Create)) parts.Add("Create");
-        if (rights.HasFlag(AccessRights.Append)) parts.Add("Append");
-        if (rights.HasFlag(AccessRights.AppendTo)) parts.Add("AppendTo");
-        if (rights.HasFlag(AccessRights.Share)) parts.Add("Share");
-
-        return string.Join(", ", parts);
     }
 }

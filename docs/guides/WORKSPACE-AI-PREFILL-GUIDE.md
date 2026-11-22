@@ -83,7 +83,7 @@ await initAuth({
 
 | Component | Location | Purpose |
 |-----------|----------|---------|
-| **CreateRecordStep.tsx** | `src/solutions/LegalWorkspace/src/components/CreateMatter/` | Step 2 form with AI pre-fill trigger on mount |
+| **CreateRecordStep.tsx** | `src/client/shared/Spaarke.UI.Components/src/components/CreateMatterWizard/` | Step 2 form with AI pre-fill trigger on mount |
 | **AiFieldTag.tsx** | Same directory | Sparkle "AI" badge for pre-filled fields |
 | **formTypes.ts** | Same directory | `IAiPrefillRequest`, `IAiPrefillResponse`, `IAiPrefillFields` |
 | **WorkspaceMatterEndpoints.cs** | `src/server/api/Sprk.Bff.Api/Api/Workspace/` | `POST /api/workspace/matters/pre-fill` endpoint |

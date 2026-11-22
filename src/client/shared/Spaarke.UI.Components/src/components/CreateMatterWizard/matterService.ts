@@ -38,6 +38,7 @@ import { createRecordViaBffWithWarnings } from '../../utils/adapters/bffChildWri
 import { cleanGuid, discoverNavProps, toNavPropMap } from '../../services/PolymorphicResolverService';
 import { sendComposedEmail } from '../EmailComposer/composeOnlySend';
 import type { IComposedEmail } from '../EmailComposer/composeOnlySend';
+import { createWebApiFromDataService } from '../../utils/adapters/dataServiceWebApiAdapter';
 
 // ---------------------------------------------------------------------------
 // Contact type (used by contact search results)
@@ -146,24 +147,7 @@ export class MatterService {
     this._bffBaseUrl = bffBaseUrl;
     // EntityCreationService expects IWebApiWithCreate which has createRecord returning { id: string }.
     // Wrap IDataService to adapt createRecord return type.
-    const webApiAdapter = {
-      createRecord: async (entityName: string, data: Record<string, unknown>) => {
-        const id = await dataService.createRecord(entityName, data);
-        return { id };
-      },
-      retrieveRecord: (entityName: string, id: string, options?: string) =>
-        dataService.retrieveRecord(entityName, id, options),
-      retrieveMultipleRecords: (entityName: string, options?: string) =>
-        dataService.retrieveMultipleRecords(entityName, options),
-      updateRecord: async (entityName: string, id: string, data: Record<string, unknown>) => {
-        await dataService.updateRecord(entityName, id, data);
-        return { id };
-      },
-      deleteRecord: async (entityName: string, id: string) => {
-        await dataService.deleteRecord(entityName, id);
-        return { id };
-      },
-    };
+    const webApiAdapter = createWebApiFromDataService(dataService);
     this._entityService = new EntityCreationService(webApiAdapter, authenticatedFetch, bffBaseUrl);
   }
 
@@ -721,36 +705,9 @@ export async function searchOrganizationsAsLookup(
 // User search helper (for the Send Email follow-on -- lookup systemuser table)
 // ---------------------------------------------------------------------------
 
-/**
- * Search systemuser records by name fragment.
- * Returns up to 10 active users as ILookupItem.
- * Name format: "Full Name (email)" for disambiguation.
- */
-export async function searchUsersAsLookup(dataService: IDataService, nameFilter: string): Promise<ILookupItem[]> {
-  if (!nameFilter || nameFilter.trim().length < 2) {
-    return [];
-  }
-
-  const safeFilter = nameFilter.trim().replace(/'/g, "''");
-  const query =
-    `?$select=systemuserid,fullname,internalemailaddress` +
-    `&$filter=contains(fullname,'${safeFilter}') and isdisabled eq false` +
-    `&$orderby=fullname asc` +
-    `&$top=10`;
-
-  console.info('[MatterService] searchUsers query:', 'systemuser', query);
-  try {
-    const result = await dataService.retrieveMultipleRecords('systemuser', query);
-    console.info('[MatterService] searchUsers results:', result.entities.length);
-    return result.entities.map(e => ({
-      id: e['systemuserid'] as string,
-      name: (e['fullname'] as string) + (e['internalemailaddress'] ? ` (${e['internalemailaddress']})` : ''),
-    }));
-  } catch (err) {
-    console.error('[MatterService] searchUsers error:', err);
-    throw err;
-  }
-}
+// Re-exported from the canonical shared implementation (services/userLookup) rather
+// than kept as a second copy here (#2866). Existing imports from this module keep working.
+export { searchUsersAsLookup } from '../../services/userLookup';
 
 function buildFallbackSummary(matterName: string, matterType: string, practiceArea: string): IAiDraftSummaryResponse {
   const type = matterType || 'general';

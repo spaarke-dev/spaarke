@@ -44,6 +44,7 @@ import type { IDataService, INavigationService } from '../../types/serviceInterf
 import type { AuthenticatedFetchFn } from '../../services/EntityCreationService';
 import { sendComposedEmail } from '../EmailComposer/composeOnlySend';
 import type { IEmailComposeHandlers } from '../EmailComposer/composeOnlySend';
+import { createWebApiFromDataService } from '../../utils/adapters/dataServiceWebApiAdapter';
 
 // ---------------------------------------------------------------------------
 // Props
@@ -330,16 +331,7 @@ const TodoWizardDialog: React.FC<ICreateTodoWizardProps> = ({
 
   // Adapt IDataService to the webApi shape that CreateRecordWizard expects
   const webApiAdapter = React.useMemo(
-    () => ({
-      createRecord: async (entityName: string, data: Record<string, unknown>) => {
-        const id = await dataService.createRecord(entityName, data);
-        return { id };
-      },
-      retrieveRecord: (entityName: string, id: string, options?: string) =>
-        dataService.retrieveRecord(entityName, id, options),
-      retrieveMultipleRecords: (entityName: string, options?: string, _maxPageSize?: number) =>
-        dataService.retrieveMultipleRecords(entityName, options),
-    }),
+    () => createWebApiFromDataService(dataService),
     [dataService]
   );
 
