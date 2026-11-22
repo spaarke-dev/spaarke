@@ -174,9 +174,12 @@ public sealed class CommunicationThreadReadService
     // share read), so its page is capped lower than the all-threads list.
     private const int MaxDirectThreadListPage = 50;
     // fm task 055 (review F2): the Messages page is filled from further candidate pages when rows are left out. No further
-    // query page is read once this many candidate rows have been read (a request reads fewer than this plus one page size);
-    // the answer then carries a cursor that resumes after the last row read.
+    // query page is read once this many candidate rows have been read; the answer then carries a cursor that resumes after
+    // the last row read. A multiple of DirectCandidateQueryPage, so a request reads at most this many.
     private const int MaxDirectCandidatesPerRequest = 200;
+    // fm task 055 (UAC-r2 review F3): candidate rows per impersonated query in the Messages list, fixed whatever the
+    // caller's `top` (which sets only how many rows are kept), so a small `top` cannot turn the bound into one query per row.
+    private const int DirectCandidateQueryPage = MaxDirectThreadListPage;
     // fm task 055 (review F3): candidate rows checked at once (each check is two app-only reads).
     private const int MaxPairChecksInFlight = 8;
 
@@ -938,8 +941,8 @@ public sealed class CommunicationThreadReadService
             ',',
             new[] { ThreadPkField, ThreadNameField, ThreadTypeField, CreatedOnField, PinnedField }.Concat(regardingValueCols));
 
-        // The query for one page starting after `at` (the first page when null).
-        string PageQuery(ThreadPageCursor? at)
+        // The query for one page of `size` rows starting after `at` (the first page when null).
+        string PageQuery(ThreadPageCursor? at, int size)
         {
             var pageClauses = new List<string>(clauses);
             if (at is { } c)
@@ -956,14 +959,17 @@ public sealed class CommunicationThreadReadService
             var filterPart = pageClauses.Count > 0 ? $"&$filter={string.Join(" and ", pageClauses)}" : string.Empty;
             // Deterministic total order on the composite key so paging is stable + non-overlapping; over-fetch one row
             // to detect whether a further page exists without a second COUNT query.
-            return $"$select={select}{filterPart}&$orderby={CreatedOnField} desc,{ThreadPkField} desc&$top={pageSize + 1}";
+            return $"$select={select}{filterPart}&$orderby={CreatedOnField} desc,{ThreadPkField} desc&$top={size + 1}";
         }
 
         var cursor = DecodePageToken(pageToken);
         if (directOnly)
-            return await ListCallersDirectPairsAsync(PageQuery, cursor, pageSize, callerSystemUserId, ct);
+        {
+            return await ListCallersDirectPairsAsync(
+                at => PageQuery(at, DirectCandidateQueryPage), cursor, pageSize, callerSystemUserId, ct);
+        }
 
-        var rows = await _query.QueryAsync(ThreadSet, PageQuery(cursor), callerSystemUserId, ct);
+        var rows = await _query.QueryAsync(ThreadSet, PageQuery(cursor, pageSize), callerSystemUserId, ct);
 
         // Fix round 3e: the page is the first pageSize rows (the over-fetch row only says a further page exists). A row whose typed
         // regarding columns were not all returned has an UNKNOWN anchor, so it is withheld from the list, the same way a row with no
@@ -1049,7 +1055,8 @@ public sealed class CommunicationThreadReadService
     /// treats it (<c>DirectMessageOwnerStep.IsOneToOneThreadAsync</c>).</para>
     /// <para><b>Filling the page (review F2).</b> Rows are left out after the query, so one query page can keep few or none.
     /// The list therefore reads further pages, in the query's order, until <paramref name="pageSize"/> rows are kept, the rows
-    /// run out, or <see cref="MaxDirectCandidatesPerRequest"/> candidate rows have been read. The next-page token resumes after
+    /// run out, or <see cref="MaxDirectCandidatesPerRequest"/> candidate rows have been read. Each query asks for
+    /// <see cref="DirectCandidateQueryPage"/> rows (plus one), whatever <paramref name="pageSize"/> is. The next-page token resumes after
     /// the last row read (the last kept row when the page filled), so no row is skipped or repeated across requests. Each
     /// query page's rows are checked up to <see cref="MaxPairChecksInFlight"/> at once (review F3); the order kept is the
     /// query's.</para>
@@ -1070,7 +1077,7 @@ public sealed class CommunicationThreadReadService
         while (true)
         {
             var rows = await _query.QueryAsync(ThreadSet, pageQuery(cursor), callerSystemUserId, ct);
-            var batch = rows.Take(pageSize).ToList();
+            var batch = rows.Take(DirectCandidateQueryPage).ToList();
             var items = batch.Select(ToThreadListItem).ToList();
             var shapes = await ReadPairShapesAsync(items, ct);
 
@@ -1107,7 +1114,7 @@ public sealed class CommunicationThreadReadService
 
             // Rows remain after the last one read when the page filled mid-batch or the query over-fetched a further row.
             var lastRead = stoppedAt >= 0 ? stoppedAt : batch.Count - 1;
-            var rowsRemain = (stoppedAt >= 0 && stoppedAt < batch.Count - 1) || rows.Count > pageSize;
+            var rowsRemain = (stoppedAt >= 0 && stoppedAt < batch.Count - 1) || rows.Count > DirectCandidateQueryPage;
             next = rowsRemain && lastRead >= 0 ? CursorOf(batch[lastRead]) : null;
             // No cursor (no further rows, or the boundary row has no createdon): no further page is claimed.
             if (next is null || kept.Count == pageSize || read >= MaxDirectCandidatesPerRequest)

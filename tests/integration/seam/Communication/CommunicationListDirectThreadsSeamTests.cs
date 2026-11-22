@@ -312,6 +312,40 @@ public class CommunicationListDirectThreadsSeamTests
         second.HasMore.Should().BeFalse();
     }
 
+    [Fact]
+    public async Task ListThreads_WithTopOne_ReadsCandidatesInFixedBatchesOf50_NotOneQueryPerRow()
+    {
+        // UAC-r2 review F3: `top` sets how many rows are kept, never the candidate query size.
+        var theirs = Enumerable.Range(0, 120).Select(_ => Pair(owner: Alice, other: Bob)).ToList();
+        ImpersonatedRows(theirs.ToArray());
+
+        var page = await ListDirect(top: 1);
+
+        page.Threads.Should().BeEmpty();
+        page.HasMore.Should().BeFalse("all 120 candidates were read and none is the caller's");
+        _threadQueries.Should().HaveCount(3, "120 candidates in batches of 50");
+        _threadQueries.Should().OnlyContain(q => q.Contains("$top=51", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task ListThreads_WithTopOne_PastTheCandidateBound_StopsAt200_WithACursor()
+    {
+        var theirs = Enumerable.Range(0, 210).Select(_ => Pair(owner: Alice, other: Bob)).ToList();
+        var mine = Pair(owner: Caller, other: Alice);
+        ImpersonatedRows(theirs.Append(mine).ToArray());
+
+        var first = await ListDirect(top: 1);
+
+        first.Threads.Should().BeEmpty();
+        first.HasMore.Should().BeTrue();
+        _threadQueries.Should().HaveCount(4, "4 batches of 50 reach the 200-candidate bound");
+
+        var second = await Sut().ListThreadsAsync(Principal(), null, 1, first.NextPageToken, CancellationToken.None, kind: "direct");
+
+        second.Threads.Select(t => t.ThreadId).Should().Equal(mine);
+        second.HasMore.Should().BeFalse();
+    }
+
     // ── Faults: narrower, never wider ────────────────────────────────────────────────────────────────────────────────────────
 
     [Fact]
