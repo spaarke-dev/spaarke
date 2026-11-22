@@ -30,7 +30,7 @@ namespace Sprk.Bff.Api.Tests.DataMutation.ChildAccessPermission;
 /// (app-only and caller), the one update-side check <see cref="RecordTableRules.RefuseFixedAfterCreateColumns"/> (every
 /// update path, a confirmed proposal written as its user included), the create service's caller column policy
 /// (<see cref="RecordCreationService.CallerBlockedColumnRefusal"/>, except the "for" person the server stamps itself), and the
-/// field-mapping push (the rule is skipped). <c>scripts/Set-ThreadFlagFieldSecurity.ps1</c> secures the same five columns.
+/// field-mapping push (the rule is skipped). <c>scripts/Set-ThreadFlagFieldSecurity.ps1</c> secures the same eight columns (task 056b added the three private-context references).
 /// Must fire: each column, in its plain, case-variant, <c>@odata.bind</c> and <c>_{column}_value</c> forms. Must not fire:
 /// neighbouring names, the same names on other tables, a server-stamped "for" person, and the typed thread-filing writer.
 /// </summary>
@@ -47,6 +47,9 @@ public class CommunicationBffOwnedColumnRefusalTests
         ("sprk_communication", "sprk_sentby"),
         ("sprk_communication", "sprk_directrecipient"),
         ("sprk_communication", "sprk_communicationthread"),
+        ("sprk_communication", PrivateContextColumns.Matter),
+        ("sprk_communication", PrivateContextColumns.Project),
+        ("sprk_communication", PrivateContextColumns.WorkAssignment),
     ];
 
     private readonly Mock<IFieldMappingDataverseService> _writes = new();
@@ -89,6 +92,15 @@ public class CommunicationBffOwnedColumnRefusalTests
             .And.Contain(Sprk.Bff.Api.Services.Ai.Handlers.EmailDraftToolHandler.SenderLookupColumn);
     }
 
+    [Fact]
+    public void ThePrivateContextReferences_AreInTheOwnedSet_ThroughTheirOwnConstants()
+    {
+        // fm task 056b: one source of truth with the writer and reader of the references (PrivateContextColumns).
+        PrivateContextColumns.All.Should().HaveCount(3);
+        InheritedAccessPermission.BffOwnedCommunicationColumns["sprk_communication"].Should().Contain(PrivateContextColumns.All);
+        InheritedAccessPermission.BffOwnedCommunicationColumns["sprk_communicationthread"].Should().NotContain(PrivateContextColumns.All);
+    }
+
     [Theory]
     [MemberData(nameof(EveryForm))]
     public void AnOwnedColumn_InAnyForm_IsRefusedForEveryIdentity(string table, string key, string column)
@@ -124,6 +136,9 @@ public class CommunicationBffOwnedColumnRefusalTests
     [InlineData("sprk_communication", "xsprk_sentby")]
     [InlineData("sprk_communication", "sprk_directrecipients")]
     [InlineData("sprk_communication", "sprk_communicationthreadname")]
+    [InlineData("sprk_communication", "sprk_privatecontextmattername")]
+    [InlineData("sprk_communication", "sprk_privatecontext")]
+    [InlineData("sprk_communicationthread", "sprk_privatecontextmatter")]
     [InlineData("sprk_communication", "sprk_subject")]
     [InlineData("sprk_communication", "sprk_regardingmatter")]
     [InlineData("sprk_communication", "sprk_threadtype")]
@@ -266,6 +281,9 @@ public class CommunicationBffOwnedColumnRefusalTests
     [InlineData("sprk_communication", "sprk_sentby")]
     [InlineData("sprk_communication", "sprk_directrecipient")]
     [InlineData("sprk_communication", "SPRK_CommunicationThread")]
+    [InlineData("sprk_communication", "sprk_privatecontextmatter")]
+    [InlineData("sprk_communication", "SPRK_PrivateContextProject")]
+    [InlineData("sprk_communication", "sprk_privatecontextworkassignment")]
     [InlineData("sprk_communicationthread", "sprk_isdefaultthread")]
     public async Task APushRule_TargetingAnOwnedColumn_IsSkipped_AndTheOtherColumnsArePushed(string table, string target)
     {
@@ -356,8 +374,14 @@ public class CommunicationBffOwnedColumnRefusalTests
         ["sprk_communicationthread"] = "sprk_CommunicationThread",
     };
 
-    /// <summary>Exists only live (added by <c>scripts/Set-DirectRecipientSchema.ps1</c>); not defined in the solution source.</summary>
-    private const string LiveOnlyColumn = "sprk_directrecipient";
+    /// <summary>
+    /// Exist only live, not in the solution source: <c>sprk_directrecipient</c> (added by <c>scripts/Set-DirectRecipientSchema.ps1</c>)
+    /// and the three private-context references (added by <c>scripts/Set-PrivateContextSchema.ps1</c>, task 056b).
+    /// </summary>
+    private static readonly IReadOnlySet<string> LiveOnlyColumns = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+    {
+        "sprk_directrecipient", PrivateContextColumns.Matter, PrivateContextColumns.Project, PrivateContextColumns.WorkAssignment,
+    };
 
     [Fact]
     public void TheSolutionSource_SecuresEveryOwnedColumnItDefines()
@@ -367,7 +391,7 @@ public class CommunicationBffOwnedColumnRefusalTests
         foreach (var (table, column) in Owned)
         {
             var secured = SolutionSecured(File.ReadAllText(SolutionEntityPath(table)));
-            if (column == LiveOnlyColumn)
+            if (LiveOnlyColumns.Contains(column))
             {
                 // Known limit: a live-only column; Set-ThreadFlagFieldSecurity.ps1 -Verify after each SpaarkeMaster import.
                 if (secured.TryGetValue(column, out var exported))

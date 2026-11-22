@@ -1,9 +1,9 @@
 # Pester 5.7.1. Run: Import-Module Pester -RequiredVersion 5.7.1 -Force; Invoke-Pester tests/scripts/Set-ThreadFlagFieldSecurity.Tests.ps1
 # CI: .github/workflows/ci-standalone-checks.yml, job owner-teams-script-tests (ubuntu-latest).
 # field-mapping-server-write-path-r1 task 054b: scripts/Set-ThreadFlagFieldSecurity.ps1 over a mocked Dataverse (every write
-# is a test failure). Pins precondition (p0): each of the five columns must exist before anything else is read or written,
+# is a test failure). Pins precondition (p0): each of the eight columns must exist before anything else is read or written,
 # in every mode; a missing sprk_directrecipient names scripts/Set-DirectRecipientSchema.ps1 -Apply and exits 1.
-# Must not fire: with all five columns present the script passes (p0) and goes on to the profile reads.
+# Must not fire: with all eight columns present the script passes (p0) and goes on to the profile reads.
 
 BeforeAll {
     $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..' '..')).Path
@@ -19,7 +19,7 @@ BeforeAll {
     function Reset-World {
         $global:SetThreadFlagFieldSecurityTest_Columns = @{
             sprk_communicationthread = @('sprk_communicationthreadid', 'sprk_name', 'sprk_threadtype', 'sprk_isdefaultthread')
-            sprk_communication       = @('sprk_communicationid', 'sprk_name', 'sprk_sentby', 'sprk_directrecipient', 'sprk_communicationthread')
+            sprk_communication       = @('sprk_communicationid', 'sprk_name', 'sprk_sentby', 'sprk_directrecipient', 'sprk_communicationthread', 'sprk_privatecontextmatter', 'sprk_privatecontextproject', 'sprk_privatecontextworkassignment')
         }
         $global:SetThreadFlagFieldSecurityTest_Reads = [System.Collections.Generic.List[string]]::new()
     }
@@ -73,6 +73,26 @@ Describe 'Set-ThreadFlagFieldSecurity.ps1 precondition (p0): every target column
         @($global:SetThreadFlagFieldSecurityTest_Reads | Where-Object { $_ -notmatch '/organizations\?|/Attributes\?' }) | Should -BeNullOrEmpty
     }
 
+    It 'refuses with exit 1 and names Set-PrivateContextSchema.ps1 -Apply when <Column> is missing (<Mode>) (task 056b)' -ForEach @(
+        foreach ($c in @('sprk_privatecontextmatter', 'sprk_privatecontextproject', 'sprk_privatecontextworkassignment')) {
+            foreach ($m in @(@{ Mode = 'dry run'; Extra = @{} }, @{ Mode = 'Apply'; Extra = @{ Apply = $true } }, @{ Mode = 'Verify'; Extra = @{ Verify = $true } })) {
+                @{ Column = $c; Mode = $m.Mode; Extra = $m.Extra }
+            }
+        }
+    ) {
+        $global:SetThreadFlagFieldSecurityTest_Columns['sprk_communication'] = @($global:SetThreadFlagFieldSecurityTest_Columns['sprk_communication'] | Where-Object { $_ -ne $Column })
+
+        $r = Invoke-Script $Extra
+
+        $r.Thrown | Should -BeNullOrEmpty
+        $r.ExitCode | Should -Be 1
+        $r.Output | Should -Match "sprk_communication\.$Column does not exist"
+        $r.Output | Should -Match 'Set-PrivateContextSchema\.ps1 -Apply'
+        $r.Output | Should -Not -Match 'Set-DirectRecipientSchema'
+        $r.Output | Should -Match 'Nothing was written'
+        @($global:SetThreadFlagFieldSecurityTest_Reads | Where-Object { $_ -notmatch '/organizations\?|/Attributes\?' }) | Should -BeNullOrEmpty
+    }
+
     It 'refuses with exit 1 when one of the solution columns is missing, naming it' {
         $global:SetThreadFlagFieldSecurityTest_Columns['sprk_communicationthread'] = @('sprk_communicationthreadid', 'sprk_isdefaultthread')
 
@@ -84,7 +104,7 @@ Describe 'Set-ThreadFlagFieldSecurity.ps1 precondition (p0): every target column
         $r.Output | Should -Not -Match 'Set-DirectRecipientSchema'
     }
 
-    It 'passes (p0) and goes on to the profile reads when all five columns exist (must not fire)' {
+    It 'passes (p0) and goes on to the profile reads when all eight columns exist (must not fire)' {
         $r = Invoke-Script @{ Verify = $true }
 
         $r.Thrown | Should -Be $global:SetThreadFlagFieldSecurityTest_PastP0
