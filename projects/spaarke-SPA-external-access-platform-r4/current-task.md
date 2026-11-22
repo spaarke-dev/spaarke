@@ -1,15 +1,15 @@
 # Current Task State
 
-> **Last Updated**: 2026-11-22 (023a+023b done, committed `e157b54a62`, master merged `25c0fe0eb3`, PR #2941 open)
+> **Last Updated**: 2026-11-22 (023a+023b in PR #2941, auto-merge armed at `40503456ef`; 023c in progress, NOT pushed until #2941 merges)
 > **Format**: CURRENT state only. Each checkpoint REWRITES this file. Target ≤ 10 KB.
 
 ## Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
 |-------|-------|
-| **Task** | **023a** (shared DataGrid: rowSource/rowSourceKey, rowActions wiring onRecordAction, opt-in truncate-tooltip) + **023b** (config `286be8b4-f96f-4d5a-b1d5-82fd83ca9693` `config/external-record-documents.gridconfiguration.json`, `scripts/Apply-ExternalRecordDocumentsGridConfiguration.ps1`, BFF id admission in `OutsideCounselGridConfigurationIds`, test `ExternalRecordDocumentsGridConfigurationTests`). Design APPROVED 2026-11-22 ("Yes, Dataverse record"; grid-owner props approved). 023 = 🚫 split. 023c (SPA Documents on shared grid, all roots + D-23) after these |
-| **Step** | 023a+023b ✅ (POML+index, drift clean). Verified: jest DataGrid 16/160, external-spa tsc, BFF tests 173, ArchTests 2724/2724, publish size 40.603 MB both sides (delta 0). Review F-findings fixed; D-24 #2939 filed (pre-existing). K not done: `useHostRowSource` in CAPABILITY-INDEX row 31 needs a `.claude` edit with owner approval |
-| **Status** | **PR #2941** (bound; branch → master) open, CI running. uac-r2 asked for the BFF gate review 2026-11-22 (no reply yet). #2938 (def-008) also edits `DataGrid.tsx` additively — second to merge resolves. Earlier: 016 🔄 (owner retest 3–7); 020/022 ✅ merged `4c2d26939d`; dev SPA `2963d1565b` |
+| **Task** | **023c** — Documents list on the shared grid for project/matter/WA/service-request + ProjectPage; D-23 `readFromParents` hoist (#2928). POML FULL, sonnet @ xhigh; design `notes/task-023-design.md` §3.2. 023a/023b ✅ (PR #2941) |
+| **Step** | Step 8: implementer agent (sonnet) running the code + tests. Then: review its report, verify (SPA tsc, full jest, `npm run build`, client-lint ui-components, ArchTest `ExternalSpaGridViewSelectorGuard`), Step 9.5 (code-review + adr-check + one adversarial pass), notes, file follow-on adoption DEF + issue, close #2928 |
+| **Status** | 023c uncommitted. **Do NOT push until PR #2941 has merged** (pushing would add 023c to that PR; auto-merge is pinned to `40503456ef`). After it merges: merge origin/master, commit 023c, open its own PR. #2938 merged into the branch at `40503456ef` (both sides kept). Earlier: 016 🔄 (owner retest 3–7); dev SPA `2963d1565b` |
 | **Side** | Quality alerts: worktree `C:\code_files\spaarke-wt-quality-alert-fixes`, branch `fix/quality-alerts-1906-2934`, **PR #2937** (bound to this session; nightly 5-shard sync + `TestShardFilterSyncGuardTests`; #1906a version tests via `helpers/scriptVersion.ts`). Not merged — owner merge go needed. #1906b → ebilling-r1; #2866 later |
 | **Next Action** | Watch #2941 CI; uac-r2 verdict; owner merge go. Then 023c (SPA Documents on the shared grid, all roots + D-23; closes #2928; file adoption follow-on as DEF) → 024 → 028 (apply script -WhatIf/apply/-Verify with owner go, rollback = delete row; grid PATCH 3ff4102c; BFF deploy via uac-r2 first). Open owner wording Q: show "The client is reviewing this invoice." beyond Information field? |
 

@@ -43,9 +43,9 @@
  * wrapper's own file and any use of `<ExternalDataGrid>` here other than as a JSX tag.
  */
 import * as React from 'react';
-import { makeStyles, webLightTheme, type Theme } from '@fluentui/react-components';
-import { resolveCodePageTheme, setupCodePageThemeListener } from '@spaarke/ui-components/utils/themeStorage';
+import { makeStyles } from '@fluentui/react-components';
 import { gridDataverseClient } from '../services/gridDataverseClient';
+import { useAmbientTheme } from './useAmbientTheme';
 import { ExternalDataGrid } from './ExternalDataGrid';
 import { getRecordDetailEntity } from '../components/detail/RecordDetailFields';
 import { RecordTemplateModal } from '../components/record/RecordTemplateModal';
@@ -92,13 +92,6 @@ export type GridOverrides = React.ComponentProps<typeof ExternalDataGrid>['overr
 
 /** The props of a grid widget body: the registry's `WidgetBodyProps` plus the optional host commands. */
 export type GridWidgetBodyProps = WidgetBodyProps & { hostCommands?: GridHostCommands };
-
-/** Resolves + live-tracks the ambient light/dark/Teams theme (same source as the app shell). */
-function useAmbientTheme(): Theme {
-  const [theme, setTheme] = React.useState<Theme>(() => resolveCodePageTheme() ?? webLightTheme);
-  React.useEffect(() => setupCodePageThemeListener(next => setTheme(next ?? webLightTheme)), []);
-  return theme;
-}
 
 /**
  * Builds a widget-body component bound to one `sprk_gridconfiguration` record id. The returned

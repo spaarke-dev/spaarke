@@ -22,6 +22,8 @@ import { FluentProvider, webLightTheme } from '@fluentui/react-components';
 
 const h = vi.hoisted(() => ({ bffApiCall: vi.fn() }));
 
+vi.mock('../src/services/gridDataverseClient', async () => (await import('./documentsGridHarness')).gridClientModule());
+
 vi.mock('../src/auth/bff-client', async () => {
   const actual = await vi.importActual<typeof import('../src/auth/bff-client')>('../src/auth/bff-client');
   return {
@@ -202,6 +204,13 @@ const expectFocusOnRow = (entity: string, id: string): Promise<void> =>
     expect(document.activeElement).toBe(row);
   }, WAIT);
 
+/** Waits for the focus to be back on a document's name button (the grid's Name cell; the trigger the opener stored). */
+const expectFocusOnDocumentName = (name: string): Promise<void> =>
+  waitFor(() => {
+    const button = screen.getByRole('button', { name });
+    expect(document.activeElement).toBe(button);
+  }, WAIT);
+
 // ---------------------------------------------------------------------------
 // Invoices
 // ---------------------------------------------------------------------------
@@ -310,7 +319,7 @@ describe('a document name opens the document record over the matter', () => {
     'the name is a link-style button; the document opens on top with its own actions, and Close returns focus to it',
     async () => {
       const parent = await openMatter();
-      const name = await within(parent).findByRole('button', { name: 'Open document Contract.pdf' }, WAIT);
+      const name = await within(parent).findByRole('button', { name: 'Contract.pdf' }, WAIT);
       expect(name.tagName).toBe('BUTTON');
 
       const child = await openChild(name, 'Document Contract.pdf');
@@ -323,7 +332,7 @@ describe('a document name opens the document record over the matter', () => {
 
       fireEvent.click(within(child).getAllByRole('button', { name: 'Close' })[0]);
       await waitFor(() => expect(dialogTitles()).toEqual(['Matter MAT-1']), WAIT);
-      await expectFocusOnRow('sprk_document', DOC_FILE);
+      await expectFocusOnDocumentName('Contract.pdf');
     },
     SLOW
   );
@@ -332,29 +341,29 @@ describe('a document name opens the document record over the matter', () => {
     'opening and closing a document leaves the Documents grid as it was: the sort is kept and the list is not read again',
     async () => {
       const parent = await openMatter();
-      await within(parent).findByRole('button', { name: 'Open document Contract.pdf' }, WAIT);
+      await within(parent).findByRole('button', { name: 'Contract.pdf' }, WAIT);
       const order = (): string[] =>
-        Array.from(document.querySelectorAll<HTMLElement>('[data-child-record^="sprk_document:"]')).map(
-          el => el.getAttribute('aria-label') ?? ''
-        );
+        within(parent)
+          .getAllByRole('button', { name: /^(Contract\.pdf|Draft note)$/ })
+          .map(el => el.textContent ?? '');
 
       // The grid starts in the list's order; sorting by Name twice (descending) puts "Draft note" first.
-      expect(order()).toEqual(['Open document Contract.pdf', 'Open document Draft note']);
+      expect(order()).toEqual(['Contract.pdf', 'Draft note']);
       const header = within(parent).getByRole('columnheader', { name: /Name/ });
       fireEvent.click(header);
       fireEvent.click(header);
-      await waitFor(() => expect(order()).toEqual(['Open document Draft note', 'Open document Contract.pdf']), WAIT);
+      await waitFor(() => expect(order()).toEqual(['Draft note', 'Contract.pdf']), WAIT);
       const readsBefore = matterDocumentReads();
 
-      const name = within(parent).getByRole('button', { name: 'Open document Contract.pdf' });
+      const name = within(parent).getByRole('button', { name: 'Contract.pdf' });
       const child = await openChild(name, 'Document Contract.pdf');
       fireEvent.click(within(child).getAllByRole('button', { name: 'Close' })[0]);
       await waitFor(() => expect(dialogTitles()).toEqual(['Matter MAT-1']), WAIT);
-      await expectFocusOnRow('sprk_document', DOC_FILE);
+      await expectFocusOnDocumentName('Contract.pdf');
       await settle(300);
 
       // Not remounted: the sort is kept and no second documents read happened.
-      expect(order()).toEqual(['Open document Draft note', 'Open document Contract.pdf']);
+      expect(order()).toEqual(['Draft note', 'Contract.pdf']);
       expect(matterDocumentReads()).toBe(readsBefore);
     },
     SLOW
@@ -364,7 +373,7 @@ describe('a document name opens the document record over the matter', () => {
     'a document with no file still opens its record (FR-15): Information shown, no Download offered',
     async () => {
       const parent = await openMatter();
-      const name = await within(parent).findByRole('button', { name: 'Open document Draft note' }, WAIT);
+      const name = await within(parent).findByRole('button', { name: 'Draft note' }, WAIT);
       const child = await openChild(name, 'Document Draft note');
       await within(child).findByTestId('record-template-columns', undefined, WAIT);
       expect(within(child).getByTestId('record-preview-no-file')).toBeTruthy();
@@ -380,7 +389,7 @@ describe('a document name opens the document record over the matter', () => {
 
 describe('rows stay as they were where no child may open', () => {
   it(
-    'the Project page DocumentLibrary (no opener): names are plain text, not buttons',
+    'the Project page DocumentLibrary (no opener): a name click opens nothing and no row carries an opener marker',
     async () => {
       h.bffApiCall.mockImplementation(async (path: string) => {
         if (/\/documents(\?|$)/.test(path)) return { value: DOCS };
@@ -395,6 +404,10 @@ describe('rows stay as they were where no child may open', () => {
       expect(screen.getByText('Draft note')).toBeTruthy();
       expect(screen.queryByRole('button', { name: /Open document/ })).toBeNull();
       expect(document.querySelector('[data-child-record]')).toBeNull();
+      // The grid draws the name as its link; with no opener the click is a no-op (the grid's Xrm default must not run).
+      fireEvent.click(screen.getByRole('button', { name: 'Contract.pdf' }));
+      await settle(400);
+      expect(screen.queryByRole('dialog')).toBeNull();
     },
     SLOW
   );
@@ -426,7 +439,7 @@ describe('rows stay as they were where no child may open', () => {
     async () => {
       const parent = await openMatter();
       expect(await within(parent).findByRole('button', { name: /^Open invoice INV-501/ }, WAIT)).toBeTruthy();
-      expect(await within(parent).findByRole('button', { name: 'Open document Contract.pdf' }, WAIT)).toBeTruthy();
+      expect(await within(parent).findByRole('button', { name: 'Contract.pdf' }, WAIT)).toBeTruthy();
       expect(within(parent).getByRole('group', { name: 'Record navigation' })).toBeTruthy();
     },
     SLOW

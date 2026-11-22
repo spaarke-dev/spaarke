@@ -43,48 +43,53 @@ vi.mock('@spaarke/ui-components/utils/themeStorage', () => ({
   resolveCodePageTheme: () => null,
   setupCodePageThemeListener: () => () => undefined,
 }));
-vi.mock('../src/services/gridDataverseClient', () => ({ gridDataverseClient: {} }));
+// The Documents list's grid (task 023c) is the REAL grid over a stub client serving its committed configuration; the stand-in
+// below is every other (widget) grid.
+vi.mock('../src/services/gridDataverseClient', async () => (await import('./documentsGridHarness')).gridClientModule());
 
 // The shared grid, as in RecordTemplateSections.test.tsx: reports its rows and opens one through `onRecordOpen`.
 vi.mock('../src/widgets/ExternalDataGrid', async () => {
   const R = await import('react');
+  const { documentsGridOr } = await import('./documentsGridHarness');
   return {
-    ExternalDataGrid: (props: {
-      configId: string;
-      onRecordsLoaded?: (rows: ReadonlyArray<Record<string, unknown>>) => void;
-      onRecordOpen?: (id: string, row: Record<string, unknown>, ctx: Record<string, unknown>) => void;
-    }) => {
-      const spec = gridSpecs[props.configId];
-      const { onRecordsLoaded } = props;
-      R.useEffect(() => {
-        gridMounts.count += 1;
-      }, []);
-      R.useEffect(() => {
-        onRecordsLoaded?.(spec.rows);
-      }, [onRecordsLoaded, spec.rows]);
-      return R.createElement(
-        'ul',
-        { 'data-testid': 'fake-grid' },
-        spec.rows.map(row =>
-          R.createElement(
-            'li',
-            { key: String(row[spec.idAttribute]) },
+    ExternalDataGrid: await documentsGridOr(
+      (props: {
+        configId: string;
+        onRecordsLoaded?: (rows: ReadonlyArray<Record<string, unknown>>) => void;
+        onRecordOpen?: (id: string, row: Record<string, unknown>, ctx: Record<string, unknown>) => void;
+      }) => {
+        const spec = gridSpecs[props.configId];
+        const { onRecordsLoaded } = props;
+        R.useEffect(() => {
+          gridMounts.count += 1;
+        }, []);
+        R.useEffect(() => {
+          onRecordsLoaded?.(spec.rows);
+        }, [onRecordsLoaded, spec.rows]);
+        return R.createElement(
+          'ul',
+          { 'data-testid': 'fake-grid' },
+          spec.rows.map(row =>
             R.createElement(
-              'button',
-              {
-                onClick: () =>
-                  props.onRecordOpen?.(String(row[spec.idAttribute]), row, {
-                    configId: props.configId,
-                    entityName: spec.entityName,
-                    selectedIds: [],
-                  }),
-              },
-              String(row[spec.nameAttribute])
+              'li',
+              { key: String(row[spec.idAttribute]) },
+              R.createElement(
+                'button',
+                {
+                  onClick: () =>
+                    props.onRecordOpen?.(String(row[spec.idAttribute]), row, {
+                      configId: props.configId,
+                      entityName: spec.entityName,
+                      selectedIds: [],
+                    }),
+                },
+                String(row[spec.nameAttribute])
+              )
             )
           )
-        )
-      );
-    },
+        );
+      }
+    ),
   };
 });
 
@@ -109,6 +114,7 @@ import ProjectsWidgetBody from '../src/widgets/ProjectsWidget';
 import ServiceRequestsWidgetBody from '../src/widgets/ServiceRequestsWidget';
 import WorkAssignmentsWidgetBody from '../src/widgets/WorkAssignmentsWidget';
 import DocumentsWidgetBody from '../src/widgets/DocumentsWidget';
+import { documentRow, rowAction } from './documentsGridHarness';
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -165,6 +171,22 @@ const deleteCalls = (): unknown[][] =>
 
 /** The Delete action of a named row (undefined-safe). */
 const deleteButton = (aria: string): HTMLElement | null => screen.queryByRole('button', { name: aria });
+
+type Scope = Pick<typeof screen, 'queryByRole'>;
+/** A row action (Download, Version history, Delete) of the document row whose Name cell shows docName; null if the row or the action is absent. */
+const docAction = (scope: Scope, docName: string, label: string): HTMLElement | null => {
+  const row = scope.queryByRole('button', { name: docName })?.closest<HTMLElement>('[role="row"]');
+  return row ? rowAction(row, label) : null;
+};
+/** Waits for the Delete row action of a document (the identity read behind it may still be in flight). */
+const findDeleteDoc = (docName: string, scope: Scope): Promise<HTMLElement> =>
+  waitFor(() => {
+    const button = deleteDoc(docName, scope);
+    if (!button) throw new Error(`no Delete on ${docName} yet`);
+    return button;
+  }, SLOW);
+/** The Delete row action of a document in the Documents grid. */
+const deleteDoc = (docName: string, scope: Scope = screen): HTMLElement | null => docAction(scope, docName, 'Delete');
 
 function renderInTheme(ui: React.ReactElement) {
   return render(<FluentProvider theme={webLightTheme}>{ui}</FluentProvider>);
@@ -344,11 +366,11 @@ describe('DocumentLibrary on each record type', () => {
       bffApiBlob.mockResolvedValue(new Blob(['bytes']));
 
       renderInTheme(<DocumentLibrary root={root} recordId={id} canUpload canDownload />);
-      await screen.findByText('Mine.pdf');
+      await documentRow('Mine.pdf');
       expect(bffApiCall.mock.calls[0][0]).toBe(`/api/v1/external/${root}/${id}/documents`);
 
       // Download: the record's own content route, then the bytes are handed to the browser.
-      fireEvent.click(screen.getByRole('button', { name: 'Download Mine.pdf' }));
+      fireEvent.click(docAction(screen, 'Mine.pdf', 'Download')!);
       await waitFor(() => expect(createObjectURL).toHaveBeenCalledTimes(1));
       expect(bffApiBlob).toHaveBeenCalledWith(`/api/v1/external/${root}/${id}/documents/${guid(901)}/content`);
 
@@ -381,7 +403,7 @@ describe('DocumentLibrary on each record type', () => {
       renderInTheme(
         <DocumentLibrary root="servicerequests" recordId={SERVICE_REQUEST} canUpload={false} canDownload />
       );
-      await screen.findByText('Mine.pdf');
+      await documentRow('Mine.pdf');
       expect(bffApiCall.mock.calls.map(c => c[0])).toEqual([
         `/api/v1/external/servicerequests/${SERVICE_REQUEST}/documents`,
       ]);
@@ -397,10 +419,12 @@ describe('DocumentLibrary on each record type', () => {
     async (_label, rows) => {
       bffApiCall.mockImplementation(async () => ({ value: rows }));
       renderInTheme(<DocumentLibrary root="matters" recordId={MATTER} canUpload={false} canDownload />);
-      await waitFor(() => expect(screen.queryByText(/Loading documents/)).toBeNull());
+      // The list has answered (a row, or the grid's empty state) before the absence of Upload means anything.
+      if (rows.length > 0) await documentRow('Mine.pdf');
+      else await screen.findByText('No documents on this record yet.', undefined, { timeout: 15000 });
       expect(screen.queryByRole('button', { name: /Upload Document/ })).toBeNull();
       // Reading is still possible: the rows (and download) remain.
-      if (rows.length > 0) expect(screen.getByRole('button', { name: 'Download Mine.pdf' })).toBeTruthy();
+      if (rows.length > 0) expect(docAction(screen, 'Mine.pdf', 'Download')).toBeTruthy();
     },
     SLOW
   );
@@ -441,7 +465,7 @@ describe('DocumentLibrary on each record type', () => {
         ...(canCreate === undefined ? {} : { canCreate }),
       }));
       renderInTheme(<DocumentLibrary root="matters" recordId={MATTER} canDownload />);
-      await screen.findByText('Mine.pdf');
+      await documentRow('Mine.pdf');
       expect(screen.queryByRole('button', { name: /Upload Document/ }) !== null).toBe(shown);
     },
     SLOW
@@ -452,7 +476,7 @@ describe('DocumentLibrary on each record type', () => {
     async () => {
       bffApiCall.mockImplementation(async () => ({ value: [doc(1, 'Mine.pdf')], canCreate: true }));
       renderInTheme(<DocumentLibrary root="matters" recordId={MATTER} canUpload={false} canDownload />);
-      await screen.findByText('Mine.pdf');
+      await documentRow('Mine.pdf');
       expect(screen.queryByRole('button', { name: /Upload Document/ })).toBeNull();
     },
     SLOW
@@ -463,7 +487,7 @@ describe('DocumentLibrary on each record type', () => {
     async () => {
       bffApiCall.mockImplementation(async () => ({ value: [doc(1, 'Mine.pdf')], canCreate: true }));
       renderInTheme(<DocumentLibrary projectId={PROJECT} accessLevel={AccessLevel.ViewOnly} />);
-      await screen.findByText('Mine.pdf');
+      await documentRow('Mine.pdf');
       expect(screen.queryByRole('button', { name: /Upload Document/ })).toBeNull();
     },
     SLOW
@@ -478,7 +502,7 @@ describe('DocumentLibrary on each record type', () => {
       bffApiCall.mockImplementation(async () => ({ value: [] }));
       renderInTheme(<DocumentLibrary {...(props as { projectId: string })} />);
       expect(await screen.findByText('Documents cannot be loaded: no record was given.')).toBeTruthy();
-      expect(screen.queryByText(/Loading documents/)).toBeNull();
+      expect(screen.queryByRole('grid')).toBeNull();
       expect(bffApiCall).not.toHaveBeenCalled();
     },
     SLOW
@@ -489,9 +513,10 @@ describe('DocumentLibrary on each record type', () => {
     async () => {
       bffApiCall.mockImplementation(async () => ({ value: mixedDocs() }));
       renderInTheme(<DocumentLibrary root="matters" recordId={MATTER} canUpload={false} canDownload={false} />);
-      await screen.findByText('Mine.pdf');
-      expect(screen.queryAllByRole('button', { name: /^Delete / })).toHaveLength(0);
-      expect(screen.queryAllByRole('button', { name: /^Download / })).toHaveLength(0);
+      await documentRow('Mine.pdf');
+      expect(screen.queryAllByRole('button', { name: 'Delete' })).toHaveLength(0);
+      expect(screen.queryAllByRole('button', { name: 'Download' })).toHaveLength(0);
+      expect(screen.queryAllByRole('button', { name: 'Version history' })).toHaveLength(0);
     },
     SLOW
   );
@@ -503,12 +528,17 @@ describe('DocumentLibrary on each record type', () => {
 
 describe('delete own document', () => {
   function installList(rows: DocRow[], onDelete?: () => unknown): void {
+    // The list is the server's: a delete that the server accepts (no throw) is gone from the next read, which is what the
+    // grid's re-read (rowSourceKey bump) shows.
+    const live = [...rows];
     bffApiCall.mockImplementation(async (path: string, options?: RequestInit) => {
       if (options?.method === 'DELETE') {
-        if (onDelete) return onDelete();
-        return undefined; // 204
+        const answer = onDelete ? onDelete() : undefined; // a refusal throws; otherwise 204
+        const at = live.findIndex(d => d.sprk_documentid === path.split('/').pop());
+        if (at >= 0) live.splice(at, 1);
+        return answer;
       }
-      if (/\/documents$/.test(path)) return { value: rows };
+      if (/\/documents$/.test(path)) return { value: [...live] };
       throw new Error(`unexpected BFF call ${path}`);
     });
   }
@@ -521,13 +551,13 @@ describe('delete own document', () => {
     async () => {
       installList(mixedDocs());
       renderLibrary();
-      await screen.findByText('Mine.pdf');
+      await documentRow('Mine.pdf');
 
-      expect(deleteButton('Delete Mine.pdf')).not.toBeNull();
-      expect(deleteButton('Delete Theirs.pdf')).toBeNull();
-      expect(deleteButton('Delete ByStaff.pdf')).toBeNull();
-      expect(deleteButton('Delete Unstamped.pdf')).toBeNull();
-      expect(screen.getAllByRole('button', { name: /^Delete / })).toHaveLength(1);
+      expect(deleteDoc('Mine.pdf')).not.toBeNull();
+      expect(deleteDoc('Theirs.pdf')).toBeNull();
+      expect(deleteDoc('ByStaff.pdf')).toBeNull();
+      expect(deleteDoc('Unstamped.pdf')).toBeNull();
+      expect(screen.getAllByRole('button', { name: 'Delete' })).toHaveLength(1);
     },
     SLOW
   );
@@ -537,11 +567,11 @@ describe('delete own document', () => {
     async () => {
       installList(mixedDocs().map((d, i) => (i === 2 ? { ...d, _sprk_createdbyperson_value: SYSTEM_USER } : d)));
       renderLibrary(asSystemUser);
-      await screen.findByText('Mine.pdf');
+      await documentRow('Mine.pdf');
 
-      expect(deleteButton('Delete ByStaff.pdf')).not.toBeNull();
-      expect(deleteButton('Delete Mine.pdf')).toBeNull(); // a contact stamp, and this systemuser has no linked contact
-      expect(screen.getAllByRole('button', { name: /^Delete / })).toHaveLength(1);
+      expect(deleteDoc('ByStaff.pdf')).not.toBeNull();
+      expect(deleteDoc('Mine.pdf')).toBeNull(); // a contact stamp, and this systemuser has no linked contact
+      expect(screen.getAllByRole('button', { name: 'Delete' })).toHaveLength(1);
     },
     SLOW
   );
@@ -551,9 +581,9 @@ describe('delete own document', () => {
     async () => {
       installList(mixedDocs());
       renderLibrary();
-      await screen.findByText('Mine.pdf');
+      await documentRow('Mine.pdf');
 
-      fireEvent.click(deleteButton('Delete Mine.pdf')!);
+      fireEvent.click(deleteDoc('Mine.pdf')!);
       const dialog = await confirmDialog();
       expect(within(dialog).getByText(/Delete "Mine\.pdf"\?/)).toBeTruthy();
       expect(deleteCalls()).toHaveLength(0);
@@ -571,9 +601,9 @@ describe('delete own document', () => {
     async () => {
       installList(mixedDocs());
       renderLibrary();
-      await screen.findByText('Mine.pdf');
+      await documentRow('Mine.pdf');
 
-      fireEvent.click(deleteButton('Delete Mine.pdf')!);
+      fireEvent.click(deleteDoc('Mine.pdf')!);
       const dialog = await confirmDialog();
       const confirm = within(dialog).getByRole('button', { name: 'Delete' });
       fireEvent.click(confirm);
@@ -593,12 +623,12 @@ describe('delete own document', () => {
     async () => {
       installList([doc(1, 'Mine.pdf', { _sprk_createdbycontact_value: ME })]);
       renderLibrary();
-      await screen.findByText('Mine.pdf');
+      await documentRow('Mine.pdf');
 
-      fireEvent.click(deleteButton('Delete Mine.pdf')!);
+      fireEvent.click(deleteDoc('Mine.pdf')!);
       fireEvent.click(within(await confirmDialog()).getByRole('button', { name: 'Delete' }));
 
-      await screen.findByText('No Documents');
+      await screen.findByText('No documents on this record yet.', undefined, { timeout: 15000 });
       expect(await reachableButton(/Upload Document/)).toBeTruthy();
     },
     SLOW
@@ -617,9 +647,9 @@ describe('delete own document', () => {
         throw new ApiError(status, problem(status, body));
       });
       renderLibrary();
-      await screen.findByText('Mine.pdf');
+      await documentRow('Mine.pdf');
 
-      fireEvent.click(deleteButton('Delete Mine.pdf')!);
+      fireEvent.click(deleteDoc('Mine.pdf')!);
       fireEvent.click(within(await confirmDialog()).getByRole('button', { name: 'Delete' }));
 
       const error = await screen.findByTestId('delete-own-error');
@@ -628,7 +658,7 @@ describe('delete own document', () => {
       expect(screen.queryByText(/^Delete document$/)).toBeNull(); // the dialog closed
       expect(deleteCalls()).toHaveLength(1);
       // The next attempt is possible: the action is still there.
-      expect(await reachableButton('Delete Mine.pdf')).toBeTruthy();
+      await waitFor(() => expect(deleteDoc('Mine.pdf')).not.toBeNull());
     },
     SLOW
   );
@@ -640,9 +670,9 @@ describe('delete own document', () => {
         throw new TypeError('Failed to fetch');
       });
       renderLibrary();
-      await screen.findByText('Mine.pdf');
+      await documentRow('Mine.pdf');
 
-      fireEvent.click(deleteButton('Delete Mine.pdf')!);
+      fireEvent.click(deleteDoc('Mine.pdf')!);
       fireEvent.click(within(await confirmDialog()).getByRole('button', { name: 'Delete' }));
       const error = await screen.findByTestId('delete-own-error');
       expect(error.textContent).toMatch(/could not be deleted/);
@@ -661,9 +691,9 @@ describe('delete own document', () => {
         throw new ApiError(401, '');
       });
       renderLibrary();
-      await screen.findByText('Mine.pdf');
+      await documentRow('Mine.pdf');
 
-      fireEvent.click(deleteButton('Delete Mine.pdf')!);
+      fireEvent.click(deleteDoc('Mine.pdf')!);
       fireEvent.click(within(await confirmDialog()).getByRole('button', { name: 'Delete' }));
 
       expect(await screen.findByTestId('bff-access-signin')).toBeTruthy();
@@ -884,8 +914,16 @@ interface DetailNet {
 
 function installDetailNet(key: GridKey, net: DetailNet): void {
   const g = GRID[key];
+  // The documents are the server's: one it accepts a delete of (no throw) is gone from the next read, which is what the grid's
+  // re-read (rowSourceKey bump) shows.
+  const liveDocuments = [...net.documents];
   bffApiCall.mockImplementation(async (path: string, options?: RequestInit) => {
-    if (options?.method === 'DELETE') return net.onDelete ? net.onDelete(path) : undefined;
+    if (options?.method === 'DELETE') {
+      const answer = net.onDelete ? net.onDelete(path) : undefined;
+      const at = liveDocuments.findIndex(d => d.sprk_documentid === path.split('/').pop());
+      if (at >= 0) liveDocuments.splice(at, 1);
+      return answer;
+    }
     if (path === '/api/v1/external/me') {
       if (!net.me) throw new ApiError(500, 'boom');
       return { email: 'me@example.test', ...net.me };
@@ -898,8 +936,8 @@ function installDetailNet(key: GridKey, net: DetailNet): void {
     }
     if (/\/documents$/.test(path)) {
       return net.documentsCanCreate === undefined
-        ? { value: net.documents }
-        : { value: net.documents, canCreate: net.documentsCanCreate };
+        ? { value: [...liveDocuments] }
+        : { value: [...liveDocuments], canCreate: net.documentsCanCreate };
     }
     if (/\/events$/.test(path)) return { value: net.events };
     if (/\/messages$/.test(path)) {
@@ -959,20 +997,24 @@ describe('the record detail view', () => {
       );
       const dialog = await openDetail('project');
       const docs = await within(dialog).findByTestId('record-detail-documents');
-      await within(docs).findByText('Mine.pdf');
+      await within(docs).findByText('Mine.pdf', undefined, SLOW);
       const events = within(dialog).getByTestId('record-detail-events');
       await within(events).findByText('My call');
 
       expect(await within(dialog).findByRole('button', { name: 'Upload documents' })).toBeTruthy();
       // Delete appears exactly on the caller's rows - once the identity read (/me) has returned.
-      await waitFor(() => expect(within(dialog).getAllByRole('button', { name: /^Delete / })).toHaveLength(2));
-      expect(within(dialog).getByRole('button', { name: 'Delete Mine.pdf' })).toBeTruthy();
+      await waitFor(() =>
+        expect(within(dialog).getAllByRole('button', { name: /^Delete( event .*)?$/ })).toHaveLength(2)
+      );
+      expect(deleteDoc('Mine.pdf', within(dialog))!).toBeTruthy();
       expect(within(dialog).getByRole('button', { name: 'Delete event My call' })).toBeTruthy();
       expect(
         within(dialog).queryAllByRole('button', {
-          name: /^Delete (event )?(Their call|Theirs\.pdf|ByStaff\.pdf|Unstamped\.pdf)$/,
+          name: /^Delete event Their call$/,
         })
       ).toHaveLength(0);
+      for (const other of ['Theirs.pdf', 'ByStaff.pdf', 'Unstamped.pdf'])
+        expect(deleteDoc(other, within(dialog))).toBeNull();
 
       // No message has a Delete action.
       const messages = within(dialog).getByTestId('record-detail-messages');
@@ -994,11 +1036,11 @@ describe('the record detail view', () => {
       );
       const dialog = await openDetail('project');
       const docs = await within(dialog).findByTestId('record-detail-documents');
-      await within(docs).findByText('Mine.pdf');
+      await within(docs).findByText('Mine.pdf', undefined, SLOW);
 
-      await waitFor(() => expect(within(docs).queryAllByRole('button', { name: /^Delete / })).toHaveLength(1));
+      await waitFor(() => expect(within(docs).queryAllByRole('button', { name: 'Delete' })).toHaveLength(1));
       expect(within(dialog).queryByRole('button', { name: 'Upload documents' })).toBeNull();
-      expect(within(docs).getByRole('button', { name: 'Download Theirs.pdf' })).toBeTruthy();
+      expect(docAction(within(docs), 'Theirs.pdf', 'Download')).toBeTruthy();
     },
     SLOW
   );
@@ -1009,10 +1051,10 @@ describe('the record detail view', () => {
       installDetailNet('project', emptyNet({ me: null, documents: mixedDocs() }));
       const dialog = await openDetail('project');
       const docs = await within(dialog).findByTestId('record-detail-documents');
-      await within(docs).findByText('Mine.pdf');
+      await within(docs).findByText('Mine.pdf', undefined, SLOW);
       await new Promise(resolve => setTimeout(resolve, 50));
 
-      expect(within(dialog).queryAllByRole('button', { name: /^Delete / })).toHaveLength(0);
+      expect(within(dialog).queryAllByRole('button', { name: 'Delete' })).toHaveLength(0);
       expect(within(dialog).queryByRole('button', { name: 'Upload documents' })).toBeNull();
     },
     SLOW
@@ -1024,10 +1066,10 @@ describe('the record detail view', () => {
       installDetailNet('matter', emptyNet({ documents: mixedDocs(), documentsCanCreate: true }));
       const dialog = await openDetail('matter');
       const docs = await within(dialog).findByTestId('record-detail-documents');
-      await within(docs).findByText('Mine.pdf');
+      await within(docs).findByText('Mine.pdf', undefined, SLOW);
 
       expect(await within(dialog).findByRole('button', { name: 'Upload documents' })).toBeTruthy();
-      await waitFor(() => expect(within(docs).queryAllByRole('button', { name: /^Delete / })).toHaveLength(1));
+      await waitFor(() => expect(within(docs).queryAllByRole('button', { name: 'Delete' })).toHaveLength(1));
       expect(bffApiCall.mock.calls.map(c => String(c[0]))).toContain(`/api/v1/external/matters/${MATTER}/documents`);
     },
     SLOW
@@ -1039,11 +1081,11 @@ describe('the record detail view', () => {
       installDetailNet('matter', emptyNet({ documents: mixedDocs(), documentsCanCreate: false }));
       const dialog = await openDetail('matter');
       const docs = await within(dialog).findByTestId('record-detail-documents');
-      await within(docs).findByText('Mine.pdf');
+      await within(docs).findByText('Mine.pdf', undefined, SLOW);
 
       expect(within(dialog).queryByRole('button', { name: 'Upload documents' })).toBeNull();
-      expect(within(docs).getByRole('button', { name: 'Download Theirs.pdf' })).toBeTruthy();
-      await waitFor(() => expect(within(docs).queryAllByRole('button', { name: /^Delete / })).toHaveLength(1));
+      expect(docAction(within(docs), 'Theirs.pdf', 'Download')).toBeTruthy();
+      await waitFor(() => expect(within(docs).queryAllByRole('button', { name: 'Delete' })).toHaveLength(1));
     },
     SLOW
   );
@@ -1054,14 +1096,14 @@ describe('the record detail view', () => {
       installDetailNet('wa', emptyNet({ documents: mixedDocs(), documentsCanCreate: false }));
       const viewOnly = await openDetail('wa');
       const docs = await within(viewOnly).findByTestId('record-detail-documents');
-      await within(docs).findByText('Mine.pdf');
+      await within(docs).findByText('Mine.pdf', undefined, SLOW);
       expect(within(viewOnly).queryByRole('button', { name: 'Upload documents' })).toBeNull();
       cleanup();
 
       installDetailNet('wa', emptyNet({ documents: mixedDocs(), documentsCanCreate: true }));
       const collaborate = await openDetail('wa');
       const docs2 = await within(collaborate).findByTestId('record-detail-documents');
-      await within(docs2).findByText('Mine.pdf');
+      await within(docs2).findByText('Mine.pdf', undefined, SLOW);
       expect(await within(collaborate).findByRole('button', { name: 'Upload documents' })).toBeTruthy();
     },
     SLOW
@@ -1073,7 +1115,7 @@ describe('the record detail view', () => {
       installDetailNet('matter', emptyNet({ documents: [], documentsCanCreate: false }));
       const dialog = await openDetail('matter');
       const docs = await within(dialog).findByTestId('record-detail-documents');
-      await within(docs).findByText(/No documents have been uploaded to this matter yet\.$/);
+      await within(docs).findByText('No documents on this record yet.', undefined, SLOW);
       expect(within(dialog).queryByRole('button', { name: 'Upload documents' })).toBeNull();
     },
     SLOW
@@ -1085,7 +1127,7 @@ describe('the record detail view', () => {
       installDetailNet('matter', emptyNet({ documents: mixedDocs(), documentsCanCreate: undefined }));
       const dialog = await openDetail('matter');
       const docs = await within(dialog).findByTestId('record-detail-documents');
-      await within(docs).findByText('Mine.pdf');
+      await within(docs).findByText('Mine.pdf', undefined, SLOW);
       expect(within(dialog).queryByRole('button', { name: 'Upload documents' })).toBeNull();
     },
     SLOW
@@ -1104,8 +1146,8 @@ describe('the record detail view', () => {
       );
       const dialog = await openDetail('project');
       const docs = await within(dialog).findByTestId('record-detail-documents');
-      await within(docs).findByText('Mine.pdf');
-      await waitFor(() => expect(within(docs).queryAllByRole('button', { name: /^Delete / })).toHaveLength(1));
+      await within(docs).findByText('Mine.pdf', undefined, SLOW);
+      await waitFor(() => expect(within(docs).queryAllByRole('button', { name: 'Delete' })).toHaveLength(1));
       expect(within(dialog).queryByRole('button', { name: 'Upload documents' })).toBeNull();
     },
     SLOW
@@ -1131,12 +1173,12 @@ describe('the record detail view', () => {
       );
       const dialog = await openDetail('project');
       const docs = await within(dialog).findByTestId('record-detail-documents');
-      await within(docs).findByText('Mine.pdf');
+      await within(docs).findByText('Mine.pdf', undefined, SLOW);
       // /me has returned once the caller's own Delete shows.
-      await waitFor(() => expect(within(docs).queryAllByRole('button', { name: /^Delete / })).toHaveLength(1));
+      await waitFor(() => expect(within(docs).queryAllByRole('button', { name: 'Delete' })).toHaveLength(1));
 
       expect(within(dialog).queryByRole('button', { name: 'Upload documents' }) !== null).toBe(offered);
-      expect(within(docs).getByRole('button', { name: 'Download Theirs.pdf' })).toBeTruthy();
+      expect(docAction(within(docs), 'Theirs.pdf', 'Download')).toBeTruthy();
     },
     SLOW
   );
@@ -1147,11 +1189,11 @@ describe('the record detail view', () => {
       installDetailNet('sr', emptyNet({ documents: mixedDocs() }));
       const dialog = await openDetail('sr');
       const docs = await within(dialog).findByTestId('record-detail-documents');
-      await within(docs).findByText('Mine.pdf');
-      await waitFor(() => expect(within(dialog).queryAllByRole('button', { name: /^Delete / })).toHaveLength(1));
+      await within(docs).findByText('Mine.pdf', undefined, SLOW);
+      await waitFor(() => expect(within(dialog).queryAllByRole('button', { name: 'Delete' })).toHaveLength(1));
 
       // The only Delete in the whole dialog is the caller's own document: nothing deletes the request or a message.
-      expect(within(dialog).getByRole('button', { name: 'Delete Mine.pdf' })).toBeTruthy();
+      expect(deleteDoc('Mine.pdf', within(dialog))!).toBeTruthy();
       expect(within(dialog).queryAllByRole('button', { name: /delete|remove/i })).toHaveLength(1);
 
       const calls = bffApiCall.mock.calls.map(c => String(c[0]));
@@ -1176,7 +1218,7 @@ describe('the record detail view', () => {
       );
       const dialog = await openDetail('sr');
       const docs = await within(dialog).findByTestId('record-detail-documents');
-      await within(docs).findByText('Theirs.pdf');
+      await within(docs).findByText('Theirs.pdf', undefined, SLOW);
       await new Promise(resolve => setTimeout(resolve, 50));
 
       expect(within(dialog).queryAllByRole('button', { name: /delete|remove/i })).toHaveLength(0);
@@ -1215,11 +1257,11 @@ describe('the record detail view', () => {
       );
       const dialog = await openDetail('matter');
       const docs = await within(dialog).findByTestId('record-detail-documents');
-      await within(docs).findByText('Mine.pdf');
-      await waitFor(() => expect(within(docs).queryAllByRole('button', { name: /^Delete / })).toHaveLength(2));
+      await within(docs).findByText('Mine.pdf', undefined, SLOW);
+      await waitFor(() => expect(within(docs).queryAllByRole('button', { name: 'Delete' })).toHaveLength(2));
 
       // The confirmation appears on top of the detail view; nothing is sent until Delete is pressed.
-      fireEvent.click(within(docs).getByRole('button', { name: 'Delete Mine.pdf' }));
+      fireEvent.click(deleteDoc('Mine.pdf', within(docs))!);
       const confirm = await confirmDialog();
       expect(deleteCalls()).toHaveLength(0);
       fireEvent.click(within(confirm).getByRole('button', { name: 'Delete' }));
@@ -1229,7 +1271,7 @@ describe('the record detail view', () => {
 
       // The detail dialog is reachable again once the confirmation has closed (tabster lifts its aria-hidden on a debounce).
       refuse = true;
-      fireEvent.click(await within(docs).findByRole('button', { name: 'Delete Mine too.pdf' }, SLOW));
+      fireEvent.click(await findDeleteDoc('Mine too.pdf', within(docs)));
       fireEvent.click(within(await confirmDialog()).getByRole('button', { name: 'Delete' }));
       expect((await within(dialog).findByTestId('delete-own-error', undefined, SLOW)).textContent).toMatch(
         /cannot delete this document/
@@ -1253,16 +1295,16 @@ describe('the record detail view', () => {
       );
       const dialog = await openDetail('matter');
       const docs = await within(dialog).findByTestId('record-detail-documents');
-      await waitFor(() => expect(within(docs).queryAllByRole('button', { name: /^Delete / })).toHaveLength(2));
+      await waitFor(() => expect(within(docs).queryAllByRole('button', { name: 'Delete' })).toHaveLength(2));
 
       // First confirmation: Cancel sends nothing and closes it.
-      fireEvent.click(within(docs).getByRole('button', { name: 'Delete Mine.pdf' }));
+      fireEvent.click(deleteDoc('Mine.pdf', within(docs))!);
       fireEvent.click(within(await confirmDialog()).getByRole('button', { name: 'Cancel' }));
       await waitFor(() => expect(screen.queryByText(/^Delete document$/)).toBeNull());
       expect(deleteCalls()).toHaveLength(0);
 
       // Second confirmation, same detail view: found by role (not aria-hidden), and Delete works.
-      fireEvent.click(await within(docs).findByRole('button', { name: 'Delete Mine.pdf' }, SLOW));
+      fireEvent.click(await findDeleteDoc('Mine.pdf', within(docs)));
       fireEvent.click(within(await confirmDialog()).getByRole('button', { name: 'Delete' }));
       await waitFor(() => expect(within(docs).queryByText('Mine.pdf')).toBeNull());
       expect(deleteCalls().map(c => c[0])).toEqual([`/api/v1/external/documents/${guid(901)}`]);
@@ -1285,13 +1327,13 @@ describe('the record detail view', () => {
       );
       const dialog = await openDetail('matter');
       const docs = await within(dialog).findByTestId('record-detail-documents');
-      await waitFor(() => expect(within(docs).queryAllByRole('button', { name: /^Delete / })).toHaveLength(2));
+      await waitFor(() => expect(within(docs).queryAllByRole('button', { name: 'Delete' })).toHaveLength(2));
 
-      fireEvent.click(within(docs).getByRole('button', { name: 'Delete Mine.pdf' }));
+      fireEvent.click(deleteDoc('Mine.pdf', within(docs))!);
       fireEvent.click(within(await confirmDialog()).getByRole('button', { name: 'Delete' }));
       await waitFor(() => expect(within(docs).queryByText('Mine.pdf')).toBeNull());
 
-      fireEvent.click(await within(docs).findByRole('button', { name: 'Delete Mine too.pdf' }, SLOW));
+      fireEvent.click(await findDeleteDoc('Mine too.pdf', within(docs)));
       fireEvent.click(within(await confirmDialog()).getByRole('button', { name: 'Delete' }));
       await waitFor(() => expect(within(docs).queryByText('Mine too.pdf')).toBeNull());
 
@@ -1325,15 +1367,15 @@ describe('the record detail view', () => {
       renderInTheme(<Host />);
       const dialog = await screen.findByRole('dialog');
       await within(dialog).findByTestId('record-detail-fields');
-      await within(dialog).findByText('Mine.pdf');
-      await waitFor(() => expect(within(dialog).queryAllByRole('button', { name: /^Delete / })).toHaveLength(1));
+      await within(dialog).findByText('Mine.pdf', undefined, SLOW);
+      await waitFor(() => expect(within(dialog).queryAllByRole('button', { name: 'Delete' })).toHaveLength(1));
 
       fireEvent.click(within(dialog).getByRole('button', { name: 'Next record' }));
       await within(dialog).findByText('2 of 2');
       await within(dialog).findByTestId('record-detail-fields');
-      await within(dialog).findByText('Mine.pdf');
+      await within(dialog).findByText('Mine.pdf', undefined, SLOW);
       // Delete is still offered on the second record: the identity from the one read is kept.
-      await waitFor(() => expect(within(dialog).queryAllByRole('button', { name: /^Delete / })).toHaveLength(1));
+      await waitFor(() => expect(within(dialog).queryAllByRole('button', { name: 'Delete' })).toHaveLength(1));
 
       expect(bffApiCall.mock.calls.filter(c => c[0] === '/api/v1/external/me')).toHaveLength(1);
     },
@@ -1413,7 +1455,7 @@ describe('service request: who sees Delete', () => {
       installDetailNet('sr', emptyNet(over as Partial<DetailNet>));
       const dialog = await openDetail('sr');
       const docs = await within(dialog).findByTestId('record-detail-documents');
-      await within(docs).findByText(/No documents have been uploaded/);
+      await within(docs).findByText('No documents on this record yet.', undefined, SLOW);
       await new Promise(resolve => setTimeout(resolve, 100));
       expect(within(dialog).queryByRole('button', { name: 'Delete request' })).toBeNull();
       expect(within(dialog).queryByTestId('service-request-actions')).toBeNull();
@@ -1588,7 +1630,7 @@ describe('service request: closed (owner decision 2026-10-12)', () => {
       installDetailNet('sr', emptyNet({ record: { ...requestedByMe, ...closedColumns } }));
       const dialog = await openDetail('sr');
       const docs = await within(dialog).findByTestId('record-detail-documents');
-      await within(docs).findByText(/No documents have been uploaded/);
+      await within(docs).findByText('No documents on this record yet.', undefined, SLOW);
       await new Promise(resolve => setTimeout(resolve, 100));
       expect(within(dialog).queryByRole('button', { name: 'Delete request' })).toBeNull();
       expect(within(dialog).queryByTestId('service-request-actions')).toBeNull();

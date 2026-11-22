@@ -4,7 +4,7 @@
     <title>Documents list on the shared DataGrid for every record type + D-23 hoist (FR-15, FR-16, #2490, #2928)</title>
     <phase>2 Invoices and documents</phase>
     <gate>after 023a is in the branch; 023b's configuration must be live before the 028 deploy</gate>
-    <status>not-started</status>
+    <status>in-progress</status>
     <rigor>FULL</rigor>
     <rigor-reason>Multi-file rework of DocumentLibrary.tsx (.tsx) used by the record template and ProjectPage</rigor-reason>
     <model-tier>sonnet</model-tier>

@@ -3,7 +3,9 @@
  *
  * The shared `DocumentLibrary` on the record's task 031 route (`/api/v1/external/{root}/{id}/documents`): list, download,
  * version history, upload (gated by `uploadOverride` below) and delete-own (the creator stamp against `/me`). Download
- * needs only Read, which opening the record already required. The props, the requests and the texts are R3's.
+ * needs only Read, which opening the record already required. The props, the requests and the texts are R3's. Since R4
+ * task 023c the list itself is the shared grid (`RECORD_DOCUMENTS_GRID`), with Download / Version history / Delete as its
+ * row actions.
  *
  * Refresh (or Try again) remounts the library, which re-reads the list.
  *
@@ -63,7 +65,7 @@ export interface RecordDocumentListProps {
   /** Report an upload in flight, so the record modal holds. */
   onBusyChange?: (busy: boolean) => void;
   /** Open a document's record over the shown record (the Documents section only; see OPEN above). */
-  onOpenDocument?: (documentId: string, trigger: HTMLElement) => void;
+  onOpenDocument?: (documentId: string, trigger: HTMLElement | null) => void;
 }
 
 /** The R3 documents block: `DocumentLibrary` with R3's props, under R3's test id. Used by the Documents section. */
@@ -108,7 +110,7 @@ export const DocumentsSection: React.FC<RecordSectionContext> = ({
   const openDocument = React.useMemo(
     () =>
       openChild
-        ? (documentId: string, trigger: HTMLElement): void => openChild('sprk_document', documentId, trigger)
+        ? (documentId: string, trigger: HTMLElement | null): void => openChild('sprk_document', documentId, trigger)
         : undefined,
     [openChild]
   );

@@ -10,6 +10,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { act, render, screen, waitFor } from '@testing-library/react';
 import { FluentProvider, webLightTheme } from '@fluentui/react-components';
 import { AccessLevel } from '../src/types';
+import { documentRow, rowAction } from './documentsGridHarness';
 
 const { bffApiCall } = vi.hoisted(() => ({ bffApiCall: vi.fn() }));
 
@@ -17,6 +18,8 @@ vi.mock('../src/auth/bff-client', async () => {
   const actual = await vi.importActual<typeof import('../src/auth/bff-client')>('../src/auth/bff-client');
   return { ...actual, bffApiCall, bffApiBlob: vi.fn() };
 });
+
+vi.mock('../src/services/gridDataverseClient', async () => (await import('./documentsGridHarness')).gridClientModule());
 
 import { EventsCalendar } from '../src/components/EventsCalendar';
 import { DocumentLibrary } from '../src/components/DocumentLibrary';
@@ -165,8 +168,9 @@ describe('per-record write access: DocumentLibrary download and version history 
     answerDocuments(false);
     inFluent(<DocumentLibrary projectId={PROJECT} accessLevel={AccessLevel.ViewOnly} writeAccessPerRecord />);
 
-    expect(await screen.findByRole('button', { name: 'Download Brief.pdf' })).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'View version history for Brief.pdf' })).toBeTruthy();
+    const row = await documentRow('Brief.pdf');
+    expect(rowAction(row, 'Download')).toBeTruthy();
+    expect(rowAction(row, 'Version history')).toBeTruthy();
   });
 
   it('the same holds on a matter list', async () => {
@@ -175,23 +179,23 @@ describe('per-record write access: DocumentLibrary download and version history 
       <DocumentLibrary root="matters" recordId="m-036" accessLevel={AccessLevel.ViewOnly} writeAccessPerRecord />
     );
 
-    expect(await screen.findByRole('button', { name: 'Download Brief.pdf' })).toBeTruthy();
+    expect(rowAction(await documentRow('Brief.pdf'), 'Download')).toBeTruthy();
   });
 
   it('every other caller keeps the level rule: a ViewOnly contact is not offered download (unchanged)', async () => {
     answerDocuments(true);
     inFluent(<DocumentLibrary projectId={PROJECT} accessLevel={AccessLevel.ViewOnly} />);
-    await screen.findByText('Brief.pdf');
+    const row = await documentRow('Brief.pdf');
 
-    expect(screen.queryByRole('button', { name: 'Download Brief.pdf' })).toBeNull();
-    expect(screen.queryByRole('button', { name: 'View version history for Brief.pdf' })).toBeNull();
+    expect(rowAction(row, 'Download')).toBeNull();
+    expect(rowAction(row, 'Version history')).toBeNull();
   });
 
   it('every other caller keeps the level rule: a Collaborate contact is offered download (unchanged)', async () => {
     answerDocuments(false);
     inFluent(<DocumentLibrary projectId={PROJECT} accessLevel={AccessLevel.Collaborate} />);
 
-    expect(await screen.findByRole('button', { name: 'Download Brief.pdf' })).toBeTruthy();
+    expect(rowAction(await documentRow('Brief.pdf'), 'Download')).toBeTruthy();
   });
 
   it('a host that says canDownload=false still wins', async () => {
@@ -204,8 +208,8 @@ describe('per-record write access: DocumentLibrary download and version history 
         writeAccessPerRecord
       />
     );
-    await screen.findByText('Brief.pdf');
+    const row = await documentRow('Brief.pdf');
 
-    expect(screen.queryByRole('button', { name: 'Download Brief.pdf' })).toBeNull();
+    expect(rowAction(row, 'Download')).toBeNull();
   });
 });
