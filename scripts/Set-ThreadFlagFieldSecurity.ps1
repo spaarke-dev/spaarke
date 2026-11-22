@@ -219,7 +219,10 @@ if ($missingColumns.Count -gt 0) {
     if (@($missingColumns | Where-Object { $_ -like 'sprk_communication.sprk_privatecontext*' }).Count -gt 0) {
         Write-Host '  Run scripts/Set-PrivateContextSchema.ps1 -Apply on this environment, then re-run this script.' -ForegroundColor Red
     }
-    if ($Verify -or $Apply) {
+    # The DirectMessage:* binding rule is 054b's: it applies while a 054b column is missing. An environment missing only the
+    # fm task 056 private-context columns may already run Direct messages; it is told only to run the 056 schema script.
+    $missingBefore056 = @($missingColumns | Where-Object { $_ -notlike 'sprk_communication.sprk_privatecontext*' })
+    if (($Verify -or $Apply) -and $missingBefore056.Count -gt 0) {
         Write-Host "PRECONDITION NOT MET: leave DirectMessage:BusinessUnitName and DirectMessage:OwnerTeamName UNSET on $EnvironmentUrl (fm task 054b binding rule)." -ForegroundColor Red
     }
     exit 1
