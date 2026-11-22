@@ -1,16 +1,17 @@
 # Current Task State
 
-> **Last Updated**: 2026-11-20 (Phase 2 wave 4 running: 020 + 022 in parallel; 016 waits on owner retest items 3–7)
+> **Last Updated**: 2026-11-22 (task 023 split into 023a/b/c; 023a+023b coded, reviewed, fix round running; nothing committed)
 > **Format**: CURRENT state only. Each checkpoint REWRITES this file. Target ≤ 10 KB.
 
 ## Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
 |-------|-------|
-| **Task** | **Wave 4 (P2) done: 020** Review detail (FR-11; FR-12 already on master from ebilling) and **022** inline document preview (FR-14) — owner go 2026-11-20 "Yes, start Phase 2". Also open: **016** (owner retest items 3–7) |
-| **Step** | Both ✅ in POML + index (drift check clean). Build, full SPA vitest (1908 + 2 new), ArchTests 2724/2724, adr-check clean, one adversarial review: F3 fixed (streamed size cap), F2 filed as D-23 #2928 → task 023. Notes: `notes/task-020-notes.md`, `task-022-notes.md` |
-| **Status** | 016 🔄 (items 1–2, 8 pass); 020 ✅; 022 ✅ — PR #2929 squash-merged to master as `4c2d26939d` (2026-11-21, owner go "Yes, merge when green"; CI 31 pass / 0 fail). Not deployed: dev SPA stays `2963d1565b` until task 028 |
-| **Next Action** | Wave 5: 023 (fold in D-23) → 024 → 028 (P2 deploy + E2E; grid PATCH for 3ff4102c with owner approval; any env needs 082c-2 first). Owner wording question: show "The client is reviewing this invoice." beyond the Information field? |
+| **Task** | **023a** (shared DataGrid: rowSource/rowSourceKey, rowActions wiring onRecordAction, opt-in truncate-tooltip) + **023b** (config `286be8b4-f96f-4d5a-b1d5-82fd83ca9693` `config/external-record-documents.gridconfiguration.json`, `scripts/Apply-ExternalRecordDocumentsGridConfiguration.ps1`, BFF id admission in `OutsideCounselGridConfigurationIds`, test `ExternalRecordDocumentsGridConfigurationTests`). Design APPROVED 2026-11-22 ("Yes, Dataverse record"; grid-owner props approved). 023 = 🚫 split. 023c (SPA Documents on shared grid, all roots + D-23) after these |
+| **Step** | Code done by agents; adr-check clean; ONE adversarial review done (opus). Findings: F2 x3 (More-actions Space toggles row selection; tooltip not on keyboard focus; truncated notice `1 rows` + fixed noun) + K items → **fix agent RUNNING** (shared DataGrid only). F4 allow-list rule exception → DONE by main session (`ExternalAccessModule.cs` comment); STILL TODO: same note in `LiveDerivedAllowLists` comment of `tests/integration/auth/UnifiedAccessControl/ExternalModuleColumnAllowListTests.cs` ~:757. F4 publish-size: MUST measure (fresh master vs branch, short paths, Compress-Archive Optimal, PDBs incl., file counts match) — not done. F6 filed: D-24 #2939 (FetchXML page error shows empty list), board Type=Bug, in defer-issues.md. K: add useHostRowSource to CAPABILITY-INDEX row 31 needs `.claude` edit (owner approval) — not done |
+| **Status** | Uncommitted in this worktree: 023a/023b code+tests+docs, POMLs 023a/b/c, TASK-INDEX (023 🚫, 023a/b/c 🔲; drift clean), design + notes files, D-24 entry. Not yet: POML/index status → ✅ for 023a/023b. Earlier: 016 🔄 (owner retest 3–7); 020/022 ✅ merged `4c2d26939d`; dev SPA `2963d1565b` |
+| **Side** | Quality alerts: worktree `C:\code_files\spaarke-wt-quality-alert-fixes`, branch `fix/quality-alerts-1906-2934`, **PR #2937** (bound to this session; nightly 5-shard sync + `TestShardFilterSyncGuardTests`; #1906a version tests via `helpers/scriptVersion.ts`). Not merged — owner merge go needed. #1906b → ebilling-r1; #2866 later |
+| **Next Action** | When fix agent reports: verify (`npx jest src/components/DataGrid`, tsc, build), finish the two TODOs above (test comment; publish-size measurement), set 023a/023b ✅ (POML+index+drift), commit on the branch (message file, `git commit -F`), push, open PR for 023a+023b → ask uac-r2 to review the BFF piece (peer msg ≠ owner approval); owner merge go. Then 023c → 024 → 028 (028: run apply script -WhatIf/apply/-Verify with owner go + rollback = delete row; grid PATCH 3ff4102c; BFF deploy via uac-r2 first). Open owner wording Q: show "The client is reviewing this invoice." beyond Information field? |
 
 ## Task 015 outcome (for 016's E2E)
 - Add event: Event Type required (options = `creatableEventTypes`), Due Date required by type, Priority, Assigned To ("Me" first), Description. Add event hidden when no type is offered.

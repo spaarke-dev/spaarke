@@ -51,6 +51,15 @@ export type { SidePaneFilterMessage, SidePaneFilterTranslator, SidePaneSpec } fr
 export { useLazyLoad } from './useLazyLoad';
 export type { UseLazyLoadOptions, UseLazyLoadResult } from './useLazyLoad';
 
+// ─── Host options (R4 task 023a): host row source, row-actions column, truncate-with-tooltip ───
+export type {
+  DataGridRowSource,
+  DataGridRowSourceRequest,
+  DataGridRowSourceResult,
+  DataGridRowNoun,
+} from './useHostRowSource';
+export type { DataGridRowAction } from './RowActionsCell';
+
 export {
   resolveConfig,
   parseLayoutColumns,

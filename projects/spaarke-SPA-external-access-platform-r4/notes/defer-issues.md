@@ -340,3 +340,11 @@ This under-lists, which fails closed.
 **Why it matters.** A change to the parent rule in one copy only makes Preview and Download disagree on which parent serves the file.
 
 **Fix.** Task 023 hoists one `readFromParents(parents, read)` helper used by both (task 022 could not edit `DocumentLibrary.tsx`).
+
+## D-24 — Shared DataGrid: a failed FetchXML page load shows an empty list (#2939)
+
+**Where.** `src/client/shared/Spaarke.UI.Components/src/components/DataGrid/DataGrid.tsx`: `useLazyLoad`'s `error` is never read (~:1149), so a failed row page renders "No records". Found by the task 023a implementer, 2026-11-22.
+
+**Why it matters.** Every grid on the FetchXML path (34 consumers) tells a user whose load failed that there are no records, with no retry prompt.
+
+**Fix.** Reuse task 023a's row-error banner for the FetchXML path, with a must-fire / must-not-fire test pair. It was kept out of 023a because it changes visible behaviour for every existing grid. Status: Open.

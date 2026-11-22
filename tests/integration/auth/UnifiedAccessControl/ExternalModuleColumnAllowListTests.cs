@@ -758,6 +758,9 @@ public sealed class ExternalModuleColumnAllowListTests : IClassFixture<ExternalA
     /// Each module's list as task 157 derived it from LIVE data (2026-10-01): (a) sprk_gridconfiguration
     /// columns (FetchXML attributes/conditions/orders, layoutXml cells, configjson column keys), (c) scope
     /// attributes, (d) EntityDefinitions primary id + primary name. Nothing else.
+    /// Exception to (a): grid 286be8b4 ("External record documents", spaarke-SPA-external-access-platform-r4 task 023b) has a
+    /// layout-only <c>sprk_summary</c> cell whose rows come from the record route, so <c>sprk_summary</c> is deliberately NOT
+    /// in the sprk_document list below. Do not add it when re-deriving from that grid.
     /// </summary>
     private static readonly IReadOnlyDictionary<string, string[]> LiveDerivedAllowLists = new Dictionary<string, string[]>
     {

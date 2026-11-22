@@ -466,7 +466,8 @@ Every override in one place, with defaults and comments. Copy this as your start
     "title": "Custom Header Title",        // Override savedquery name in header. Default: savedquery name.
     "icon": "Calendar20Regular",           // Fluent v9 icon in header. Default: no icon.
     "densityDefault": "comfortable",       // "comfortable" | "compact". Default: "comfortable".
-    "emptyStateMessage": "No records."     // Custom "no results" message. Default: framework localized fallback.
+    "emptyStateMessage": "No records.",    // Custom "no results" message. Default: framework localized fallback.
+    "truncateWithTooltip": true            // Ellipsis + full-text tooltip on overflowing text cells. Default: false.
   },
 
   // ─── FILTER CHIPS (optional — default is auto-derive) ──────────────────────
