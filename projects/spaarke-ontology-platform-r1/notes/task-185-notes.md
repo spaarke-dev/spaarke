@@ -65,3 +65,15 @@ The deploy log has the entry, the hashes and the D-126 clobber check (`notes/dep
 - **A7 rule wizard:** PASS.
 - Still open in 185: the A2/B5 Create Matter follow-on (needs the owner's F12 check during a repro) and the owner questions (invoice `lockedRecord`, section A requests, AI draft retry).
 
+
+## Browser check by the main session (built-in browser, owner signed in), 2026-11-22
+Nothing sent, nothing created: every draft and wizard was cancelled.
+- **197 Console Send Email:** opens in rich text; Attach button beside Attachments in rich AND plain mode, menu = Add files, Link documents; the email toolbar has no paperclip. Plain → rich toggle keeps typed `<b>` literal and the line break. PASS.
+- **195 template render (Console):** "Thank you for registering with us" applied: subject clean, body finished text with fallbacks ("Valued Customer", "No Address Provided"), no XSL, `]]>` or `{!…}`. PASS. Cosmetic: "Dear Valued Customer ," (space before the comma, from the template itself).
+- **AI draft:** Draft with AI inserted a sentence into the body (no "unavailable"). PASS.
+- **A2/B5 Create Matter (Console):** Matter Type / Practice Area / Assigned Attorney / Paralegal / Outside Counsel / Event Type / Assigned To are all side-pane buttons (`BUTTON`, also after clearing a value); the lookup opens above the wizard. Send Email follow-on is the new composer (`[data-testid="send-email-followon-step"]` present), rich text, Attach button, no toolbar paperclip, pre-fill intact. No wizard errors in the console. PASS (closes the A2/B5 F12 question).
+- **Matter form PCFs:** Documents shows v1.1.89, Tracking v1.0.65.
+- **Email documents from the matter form (Documents → open file preview → ⋮ → Email):** Confirm → Summary (readable, once) → Compose: rich text, pre-fill intact, Attach beside "Attachments (1)", no paperclip. PASS for 197.
+- **NEW DEFECT (this path only):** clicking To opens the Dataverse lookup pane, but the page cannot be used: every point over the pane hits a Fluent `DialogSurface__backdrop` in a `FluentProvider` portal at z-index 1000000 (`document.elementFromPoint`). Search, Add, Cancel and ✕ do nothing; the user is stuck until the wizard is closed some other way. The file preview dialog stays open underneath the Email wizard; its backdrop is the only one in the DOM, so the wizard yields (193) but the preview's backdrop does not. The C1 path the owner passed (Semantic Search toolbar → Email documents) has no preview underneath. Not yet diagnosed in code.
+- **Not tested:** budget inquiry composer (160/190/192): "Ask outside counsel" has 0 items and the 176 Signal is closed, so it needs new test data (owner). C3. A7 (owner passed 11-18).
+- Console noise (not ours): UCI `[storage]` "Entity 'sprk_invoice' With Id … Does Not Exist" for several deleted invoices.
