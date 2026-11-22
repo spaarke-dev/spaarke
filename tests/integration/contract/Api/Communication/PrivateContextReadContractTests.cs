@@ -1,6 +1,8 @@
 using System.Net;
 using System.Text.Json;
 using FluentAssertions;
+using Moq;
+using Spaarke.Dataverse;
 using Sprk.Bff.Api.Services.Communication.Access;
 using Sprk.Bff.Api.Services.Communication.Engine;
 using Xunit;
@@ -27,6 +29,11 @@ public class PrivateContextReadContractTests : IClassFixture<CommunicationRecord
     {
         _host = host;
         _host.Reset();
+        // The schema scripts have run: sprk_communication has the reference and stamped-recipient columns.
+        _host.Entities
+            .Setup(e => e.GetColumnMetadataAsync("sprk_communication", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(PrivateContextColumns.All.Append(DirectMessageRecipient.RecipientColumn)
+                .ToDictionary(c => c, c => new ColumnMetadata(c, "Lookup", true, true, null), StringComparer.OrdinalIgnoreCase));
     }
 
     private Task<HttpResponseMessage> Get(string url) =>
