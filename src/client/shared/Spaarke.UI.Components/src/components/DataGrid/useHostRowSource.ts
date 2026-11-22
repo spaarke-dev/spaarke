@@ -113,7 +113,8 @@ export function useHostRowSource({
       setIsLoading(true);
       setError(null);
 
-      let pending: Promise<DataGridRowSourceResult>;
+      // The host's function is outside our types: it may resolve to nothing at runtime, so the page is read defensively.
+      let pending: Promise<DataGridRowSourceResult | null | undefined>;
       try {
         pending = Promise.resolve(source({ page: targetPage, pageSize, signal: controller.signal }));
       } catch (err) {

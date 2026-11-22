@@ -1348,7 +1348,9 @@ export const DataGrid: React.FC<DataGridProps> = props => {
           columnId: ROW_ACTIONS_COLUMN_ID,
           renderHeaderCell: () => <span className={styles.visuallyHidden}>Actions</span>,
           renderCell: item => {
-            const recordId = String(item[resolved.primaryIdAttribute] ?? item._rowId ?? '');
+            // A row may lack the primary-id column at runtime (index access is not checked), so fall back to _rowId.
+            const primaryId: unknown = item[resolved.primaryIdAttribute];
+            const recordId = String(primaryId ?? item._rowId);
             return (
               <RowActionsCell
                 actions={rowActions}
@@ -1589,8 +1591,8 @@ export const DataGrid: React.FC<DataGridProps> = props => {
   const rowNounOne = rowNoun?.one || 'row';
   const rowNounOther = rowNoun?.other || 'rows';
   // An incomplete list with no rows, or a failed load, is not "no records": the notice / banner says so instead.
-  const isEmpty =
-    !isLoadingRows && records.length === 0 && !loadState.isLoading && !hostRowsError && !hostRowsTruncated;
+  // (loadState.isLoading is always false here: the configuration-loading state returned above.)
+  const isEmpty = !isLoadingRows && records.length === 0 && !hostRowsError && !hostRowsTruncated;
   const selectedCount = selectedRowIds.size;
   const totalCount = records.length;
   const visibleTitle = resolved.display.title ?? loadState.savedQuery?.name ?? '';
