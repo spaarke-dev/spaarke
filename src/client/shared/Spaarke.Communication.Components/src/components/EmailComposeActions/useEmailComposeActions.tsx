@@ -32,7 +32,7 @@
  */
 import * as React from 'react';
 import { SendEmailDialog } from '@spaarke/ui-components';
-import type { IAttachmentItem } from '@spaarke/ui-components';
+import type { ComposeRegarding, IAttachmentItem } from '@spaarke/ui-components';
 import {
   deriveComposerFields,
   buildQuotedThread,
@@ -64,6 +64,8 @@ interface DialogState {
    * appended below it (never a whole-body replace). Undefined for the toolbar's manual actions.
    */
   bodyOverride?: string;
+  /** New email only: the "Related to" seed (#2908), passed to the composer's `regarding`. */
+  regarding?: ComposeRegarding;
 }
 
 /**
@@ -109,8 +111,10 @@ export function useEmailComposeActions(deps: EmailComposeActionsDeps): UseEmailC
       // STILL appended below it in `composerFields` (see `deriveComposerFields`). Never a whole-body replace.
       const bodyOverride = options?.bodyOverride;
       if (!communicationId) {
-        // New — not record-scoped, nothing to read; open immediately (fully empty, or an AI-drafted body).
-        setDialogState({ mode, communicationId: undefined, prefill: null, bodyOverride });
+        // New — not record-scoped, nothing to read; open immediately (fully empty, or an AI-drafted body),
+        // optionally "Related to" the host record the caller names (#2908).
+        const regarding = mode === 'compose' ? options?.regarding : undefined;
+        setDialogState({ mode, communicationId: undefined, prefill: null, bodyOverride, regarding });
         return;
       }
       // Load the source record BEFORE opening the dialog. `initial*` props seed the
@@ -256,6 +260,7 @@ export function useEmailComposeActions(deps: EmailComposeActionsDeps): UseEmailC
       defaultSendMode="user"
       fromMailbox={fromMailbox}
       associations={isRecordScoped ? associations : undefined}
+      regarding={isRecordScoped ? undefined : dialogState?.regarding}
       initialAttachments={isRecordScoped ? dialogState?.initialAttachments : undefined}
       initialQuotedThread={initialQuotedThread}
       titleOverride={titleOverride}

@@ -192,8 +192,9 @@ const documentId = params.get("documentId") ?? "";
 src/solutions/{Page}/                       # React Code Pages — where new pages go (bundled React 19)
 src/client/
 ├── pcf/{Control}/                          # Field-bound PCF controls (platform React 16.14.0)
-├── code-pages/                             # Four older code pages (CommunicationPage,
-│                                           #   DocumentRelationshipViewer, PlaybookBuilder, SemanticSearch)
+├── code-pages/                             # Three older code pages (DocumentRelationshipViewer,
+│                                           #   PlaybookBuilder, SemanticSearch); CommunicationPage retired
+│                                           #   2026-11-22 to docs/archive/code-pages/ (#2908)
 ├── shared/                                 # Shared TS packages (@spaarke/ui-components, @spaarke/auth, …)
 └── office-addins/                          # Office add-ins (React 19)
 

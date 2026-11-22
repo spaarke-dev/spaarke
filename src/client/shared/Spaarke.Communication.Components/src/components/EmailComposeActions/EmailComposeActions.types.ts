@@ -15,6 +15,7 @@
 import type * as React from 'react';
 import type {
   AuthenticatedFetchFn,
+  ComposeRegarding,
   IDataService,
   INavigationService,
   ILookupItem,
@@ -181,6 +182,12 @@ export interface OpenComposerOptions {
    * reply/forward); only this entry point injects an AI draft.
    */
   bodyOverride?: string;
+  /**
+   * New email only (`mode === 'compose'`): the record the email starts "Related to" (#2908). Passed to the
+   * composer's `regarding`, which adds it as an association chip that the send files the email under. Ignored for
+   * reply / reply all / forward, whose associations come from the source email.
+   */
+  regarding?: ComposeRegarding;
 }
 
 export interface UseEmailComposeActionsResult {

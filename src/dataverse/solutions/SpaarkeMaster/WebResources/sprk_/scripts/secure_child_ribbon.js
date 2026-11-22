@@ -14,7 +14,8 @@
  *     filed under the host record:
  *       sprk_todo -> To Do wizard, sprk_event -> Event wizard, sprk_invoice -> Invoice wizard,
  *       sprk_reportcard -> Report Card wizard, sprk_document -> Document Upload wizard,
- *       sprk_communication -> the Communication page in compose mode (sent through the BFF),
+ *       sprk_communication -> "New Email": the email composer (sprk_emailpage) "Related to" the host, sent through the BFF
+ *       (#2908; it replaced the retired Communication page),
  *       sprk_budget, sprk_kpiassessment -> POST /api/v1/child-records/{table} (no wizard of their own),
  *       then the new row opens.
  *     sprk_billingevent is NOT served: ebilling-r1 task 096b (EB-D-201; before it 164a-1, uac-r2 Q6) - an invoice line's new
@@ -52,7 +53,7 @@ Spaarke.SecureChild = Spaarke.SecureChild || {};
 Spaarke.SecureChild.Ribbon = Spaarke.SecureChild.Ribbon || {};
 
 (function (ns) {
-    ns.VERSION = "1.0.1";
+    ns.VERSION = "1.0.2";
 
     var LOG = "[SecureChild.Ribbon v" + ns.VERSION + "]";
 
@@ -108,7 +109,8 @@ Spaarke.SecureChild.Ribbon = Spaarke.SecureChild.Ribbon || {};
         "sprk_kpiassessment"];
 
     var DIALOG_OPTIONS = { target: 2, width: { value: 60, unit: "%" }, height: { value: 70, unit: "%" } };
-    var COMPOSE_OPTIONS = { target: 2, width: { value: 85, unit: "%" }, height: { value: 85, unit: "%" } };
+    // The email composer's size: openEmailCompose uses the OOB create-form modal size (70% x 80%).
+    var COMPOSE_OPTIONS = { target: 2, width: { value: 70, unit: "%" }, height: { value: 80, unit: "%" } };
 
     function cleanId(id) {
         return String(id || "").replace(/[{}]/g, "").toLowerCase();
@@ -358,9 +360,14 @@ Spaarke.SecureChild.Ribbon = Spaarke.SecureChild.Ribbon || {};
                         "Upload Documents", DIALOG_OPTIONS, selectedControl, primaryControl);
                 }
                 if (childTable === "sprk_communication") {
-                    return openPage("sprk_communicationpage",
-                        "mode=compose&associatedTo=" + encodeURIComponent(host.entity + ":" + host.id) + bff,
-                        "New Message", COMPOSE_OPTIONS, selectedControl, primaryControl);
+                    // #2908: the email composer (sprk_emailpage, the page openEmailCompose opens), "Related to" the host.
+                    // The parameter names mirror composeRegardingParams in @spaarke/ui-components (this script cannot
+                    // import it). The composer sends through the BFF.
+                    return openPage("sprk_emailpage",
+                        "compose=new&regardingType=" + encodeURIComponent(String(host.entity).toLowerCase()) +
+                        "&regardingId=" + encodeURIComponent(host.id) +
+                        "&regardingName=" + encodeURIComponent(hostName(primaryControl)),
+                        "New Email", COMPOSE_OPTIONS, selectedControl, primaryControl);
                 }
                 if (ns.CREATE_THEN_OPEN[childTable]) {
                     return createThenOpen(childTable, host, primaryControl, selectedControl);

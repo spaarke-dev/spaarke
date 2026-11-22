@@ -40,6 +40,9 @@ module.exports = {
     // (task 070 / FR-08) exercises the actual Fluent Dialog envelope.
     '^@spaarke/ui-components/dist/pcf-safe$':
       '<rootDir>/CommunicationConversationPanel/__tests__/pcfSafeShim.ts',
+    // #2908: the deep dist import of the open-request launcher maps to its REAL source (plain DOM, no React).
+    '^@spaarke/ui-components/dist/utils/conversationPanelLaunch$':
+      '<rootDir>/../../shared/Spaarke.UI.Components/src/utils/conversationPanelLaunch.ts',
   },
   setupFilesAfterEnv: ['<rootDir>/jest.setup.ts'],
   transform: {

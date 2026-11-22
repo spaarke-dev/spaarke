@@ -2,6 +2,7 @@
 
 > **Status**: R1 shipped (Phase A–C). Phase D (EventsPage migration) + Phase E (SemanticSearch migration) + Phase F (legacy retirement) in progress.
 > **Established**: 2026-06 (project `spaarke-datagrid-framework-r1`)
+> **Last Reviewed**: 2026-11-22 (command bar section only, for `hiddenBuiltInCommands`, #2908; the rest was not re-checked)
 > **Audience**: Developers consuming the framework, makers authoring configuration records.
 > **Operational guide**: [`DATAGRID-FRAMEWORK-CONFIGURATION-GUIDE.md`](../guides/DATAGRID-FRAMEWORK-CONFIGURATION-GUIDE.md)
 > **Supersedes**: [`universal-dataset-grid-architecture.md`](universal-dataset-grid-architecture.md) (PCF — retires in Phase F)
@@ -231,6 +232,8 @@ Rules (the placement and collision behaviour is fixed, not configurable):
 - **Observer.** `onCommandInvoke` fires first for a host command, as for every command; no built-in handler runs for it.
 - **Identity.** Pass a referentially stable array (`useMemo`); the item list is rebuilt when its identity changes.
 - Not a substitute for `onCreateNew` (which re-routes the built-in New) or the handler registry (which gives a configured `custom` item its behaviour): use those when the item is authored in the configuration record.
+
+**Hiding built-ins (`hiddenBuiltInCommands`, added 2026-11-22, #2908).** A host that replaces a built-in with its own host commands removes the built-in with `hiddenBuiltInCommands`, for example `['create-form']`. This overrides the configuration for that host only, so other hosts that share the configuration record are unaffected. A configured `custom` item is never removed this way, and the hidden ids stay reserved: a host command still cannot take one. Example: the communications grid (`src/solutions/sprk_communicationspage`) hides `create-form`, which opens the OOB `sprk_communication` form. In its place it adds "New Email", which opens the `sprk_emailpage` composer through `openEmailCompose`, "Related to" the host record. On a record form it also adds "New Message", which opens the form's `CommunicationConversationPanel` Messages modal in place through `openConversationPanel`. When no panel answers, the button says so; it never reloads the page. Other hosts that reference the same configuration record keep the built-in "+ New".
 
 ---
 
