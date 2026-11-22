@@ -50,7 +50,7 @@ namespace Sprk.Bff.Api.Services.Access;
 /// Direct-team message in id order (the backstop that survives a restart). A capped run logs it and carries the rest. A carry past
 /// <see cref="MaxDirectCarried"/> holds the watermark, as a listing or sweep fault does, so the dropped messages are listed again;
 /// a listed message this instance finished after its latest listed change is then skipped (#2731), so a held window re-lists
-/// without re-working what is done, and the carry drains. A
+/// without re-working what is done, and the carry drains; a run that drops messages from its carry is not a success (#2746). A
 /// capped listing moves the watermark to its last row's (<c>modifiedon</c>, id) key, so rows sharing one instant past the cap are
 /// listed by the next runs (#2745). Writes are
 /// on, like the secure mirror; there is no report-only switch on this job, and no new setting. When the Direct team is not
@@ -220,6 +220,9 @@ public sealed partial class SecureChildShareReconciliationJob : IScheduledJob
                       ? ""
                       : $"; Direct messages: {direct.Status}, {direct.Incomplete} not complete, {direct.BackedOff} backed off" +
                         (direct.ListingCapped ? ", a recent-changes listing capped" : "") +
+                        (direct.CarryDropped > 0
+                            ? $", {direct.CarryDropped} dropped from a full carry ({direct.CarryDroppedUnlisted} not listed this run)"
+                            : "") +
                         (direct.Failure is null ? "" : $" ({direct.Failure})"))
                   + (external.Ok
                       ? ""
@@ -262,6 +265,9 @@ public sealed partial class SecureChildShareReconciliationJob : IScheduledJob
                     listingCapped = direct.ListingCapped,
                     backedOff = direct.BackedOff,
                     sweepPassComplete = direct.SweepPassComplete,
+                    // #2746: a carry past its cap: the messages it dropped, and those this run did not list (sweep only).
+                    carryDropped = direct.CarryDropped,
+                    carryDroppedUnlisted = direct.CarryDroppedUnlisted,
                     incompleteMessages = direct.IncompleteIds.Take(50).ToArray(),
                     failure = direct.Failure,
                 },
@@ -328,15 +334,25 @@ public sealed partial class SecureChildShareReconciliationJob : IScheduledJob
         public int BackedOff { get; init; }
 
         public bool SweepPassComplete { get; init; }
+
+        /// <summary>#2746: messages dropped by a carry past <see cref="MaxDirectCarried"/> this run (the watermark is held).</summary>
+        public int CarryDropped { get; init; }
+
+        /// <summary>#2746: of <see cref="CarryDropped"/>, the messages this run did not list — reached only by the sweep, unless a
+        /// later run lists them.</summary>
+        public int CarryDroppedUnlisted { get; init; }
+
         public IReadOnlyList<Guid> IncompleteIds { get; init; } = [];
         public string? Failure { get; init; }
 
         /// <summary>
         /// Nothing undecided: not configured, unavailable (no lookup registered), or a pass that finished every message it tried,
-        /// listed every changed row (no capped listing) and holds no backed-off message.
+        /// listed every changed row (no capped listing), holds no backed-off message and dropped none from its carry (#2746).
+        /// A run that is not OK reports <c>Success = false</c>; the scheduler retries only a run that throws, so the next tick
+        /// is the retry.
         /// </summary>
         public bool Ok => Status is StatusNotConfigured or StatusUnavailable
-            || (Status == StatusOk && Incomplete == 0 && Failure is null && !ListingCapped && BackedOff == 0);
+            || (Status == StatusOk && Incomplete == 0 && Failure is null && !ListingCapped && BackedOff == 0 && CarryDropped == 0);
     }
 
     /// <summary>
@@ -571,11 +587,14 @@ public sealed partial class SecureChildShareReconciliationJob : IScheduledJob
         // changes (recent is worked oldest first), which the held window lists again.
         var carry = incomplete.Concat(deferred).Concat(leftOver).Distinct().ToList();
         var carryOverflow = carry.Count > MaxDirectCarried;
+        var carryDropped = 0;
+        var unlisted = 0;
         if (carryOverflow)
         {
             // A dropped message this run did not list (one carried in) is reached only by the sweep — certainly so when the listing
             // was complete; when it faulted or was capped, the next runs may still list it.
-            var unlisted = carry.Skip(MaxDirectCarried).Count(id => !firstChange.ContainsKey(id));
+            carryDropped = carry.Count - MaxDirectCarried;
+            unlisted = carry.Skip(MaxDirectCarried).Count(id => !firstChange.ContainsKey(id));
             if (failure is null && !listingCapped)
             {
                 _logger.LogWarning("[DIRECT-SHARES] run={RunId}: {Carry} messages to carry, past the cap of {Cap}; the watermark is held, so " +
@@ -680,6 +699,8 @@ public sealed partial class SecureChildShareReconciliationJob : IScheduledJob
             ListingCapped = listingCapped,
             BackedOff = deferred.Count,
             SweepPassComplete = sweepPassComplete,
+            CarryDropped = carryDropped,
+            CarryDroppedUnlisted = unlisted,
             IncompleteIds = incomplete,
             Failure = failure,
         };
