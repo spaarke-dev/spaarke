@@ -91,3 +91,20 @@ Nothing sent or saved: every composer and wizard was cancelled or discarded.
   - Wording nit: a network failure is described as "on this page".
   - Closing the composer with a typed draft discards it without asking. The rule wizard asks first.
 - Viewport note: at the pane's 918 px width the Console's New rule modal is cramped. That is below the 1280 floor, so the tests ran at 1440×900.
+
+### Worklist decision review and Ontology admin, main session, 2026-11-22 (evening)
+
+Console on dev (master `fe150ac35a`), 1440x900. Nothing recorded, saved or sent: every wizard was cancelled or discarded.
+
+| Check | Result |
+|---|---|
+| Worklist → Start review opens the decision wizard at "1 of 192" | PASS |
+| What was found: sentence, evidence ("No evidence was recorded"), "How this was determined" plain + formal lines | PASS, wording defect DI-159 #2950 ("where state is 0") |
+| Create budget: amount validation (letters, negative), end before start, Next disabled until required fields | PASS |
+| Create budget Category choices | Placeholder labels "Budget Category 0..4" in the shipped option set: DI-160 #2951 |
+| Assign Task: "What it does" text | Says "the person above" for a field below: DI-159 #2950 |
+| Next steps: Add To Do card adds a step; Confirm lists Taken / Skipped / Next steps, "Recorded as: a judgement" | PASS |
+| Add To Do "Assigned to" lookup: side pane opens above the dimmed wizard, pick returns | PASS; focus then on body (task 200 class) |
+| Cancel with choices → "Discard unrecorded choices?"; Keep deciding keeps the draft | PASS |
+| Next record / Previous record keep each item's draft (by design, DecisionWizard.tsx:413-415) | PASS |
+| Focus after Keep deciding / Cancel / Discard (decision wizard and rule wizard) | FAIL: focus on body, not the opener. Task 202 |

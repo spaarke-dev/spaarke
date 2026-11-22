@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="202" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>SprkModal returns keyboard focus to the element that opened it when it closes (wizards and nested confirms)</title>
+    <phase>12 Create-wizard lookups and composer (185 dev check fixes)</phase>
+    <gate>startable</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies SprkModal.tsx in the shared UI library: every modal in every host; PCF bumps where bundles change.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Located a11y defect with a stated fix shape; same focus-restore class as 199/200 (reuse their helper).</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>185-fixes</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Runs after 199 and 200 in the shared build worktree C:\t198; reuses their helper.</parallel-reason>
+    <deps>199, 200 (for the shared focus helper; do not fork it)</deps>
+    <tags>react, fluent-ui, frontend, pcf, testing, a11y</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+  <prompt>Found by the main session's browser check on dev, 2026-11-22, Console at 1440x900 (SprkModal as on master `fe150ac35a`). Every close of a SprkModal leaves `document.activeElement` on `&lt;body&gt;` of the Console frame instead of the element that opened it:
+(1) Worklist → Decision wizard → focus Cancel → Cancel → "Discard unrecorded choices?" → Keep deciding: focus sits on the confirm's Close button, the confirm unmounts, focus falls to body (expected: the wizard's Cancel button).
+(2) Ontology admin → New rule (focused) → Cancel with nothing typed: the wizard closes, focus is on body (expected: "New rule").
+(3) Same after "Discard" in the rule wizard's confirm, and after "Discard and close" in the Decision wizard.
+`SprkModal.tsx` has no focus-restore code, and Fluent v9 `Dialog` only restores focus to a `DialogTrigger` or a `useRestoreFocusTarget` element; SprkModal hosts open it from state, so neither applies. A keyboard or screen-reader user is put at the top of the page after every modal. Owner: "continue testing and fixing".</prompt>
+  <role>SPAARKE frontend developer. Expert in React 16-19, Fluent UI v9 Dialog and tabster, accessibility, and `@spaarke/ui-components` SprkModal.</role>
+  <goal>When a SprkModal goes from open to closed (open=false or unmount), keyboard focus returns to the element that had focus when it opened, if that element is still connected, focusable (not disabled, not inside an `[inert]` subtree) and focus is currently lost (on `body`, on nothing, or on a node inside the closing surface or already removed). A host or user that moved focus somewhere meaningful outside the modal wins. Works for nested modals (confirm over wizard returns to the wizard's button) and in an iframe host (use the modal's own `ownerDocument`).</goal>
+  <context>
+    <background>
+- `src/client/shared/Spaarke.UI.Components/src/components/SprkModal/SprkModal.tsx` (master): wraps Fluent `Dialog`; has the task-198 `inert` effect and `useSidePaneLayering`; no restore. Capture the opener when `open` becomes true BEFORE Fluent's `useFocusFirstElement` moves focus (capture during render on the false→true transition, or in a layout effect that runs before the child effect; prove ordering in a test), and restore after close with `setTimeout(0)` so Fluent/tabster finish first.
+- Do not restore while `hidden` or yielding to a side pane (task 198); those keep the modal open. Do not restore across a `hidden` toggle.
+- Nested case: the confirm is opened from a button inside the wizard surface. While the confirm is open the wizard is `aria-hidden` (Fluent modalizer), not `inert`; after the confirm closes the button is focusable again. Check the order: the restore must run after the wizard's surface is interactive again.
+- Reuse the focus-restore helper that tasks 199/200 add (EmailComposer / DataverseLookupField). If it does not fit, generalise it in place; do not write a second one.
+- Consumers that already return focus themselves (grep `.focus()` after a modal closes in `SprkModal` consumers, e.g. EmailComposer `closeFailureNotice`) must not end with focus in a different place than today.
+    </background>
+    <relevant-files>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/SprkModal/SprkModal.tsx</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/SprkModal/__tests__/ (new focusRestore test file)</file>
+      <file role="read">src/client/shared/Spaarke.UI.Components/src/components/SprkModal/presets/ConfirmModal.tsx</file>
+      <file role="read">src/client/shared/Spaarke.UI.Components/src/components/DecisionWizard/DecisionWizard.tsx (~497-524, ConfirmModal mounted only while asked)</file>
+      <file role="read">src/client/shared/Spaarke.UI.Components/src/components/OntologyAdmin/RuleWizard/RuleWizard.tsx (~780-800, ConfirmModal always mounted)</file>
+      <file role="modify">PCFs whose bundle changes (version bump + build:prod)</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="CLAUDE.md §11">No new prop or component. One shared helper (199/200's).</constraint>
+    <constraint source="project">Only focus after close changes. Open behaviour, first-element focus, dismiss handling, the 198 yield behaviour and `hidden` stay as today; existing SprkModal, preset, a11y, sidePaneLayering, DecisionWizard and RuleWizard tests pass unmodified.</constraint>
+    <constraint source="project">PCFs whose bundle changes get a version bump and build:prod (list old → new). Console builds. No deploy in this task.</constraint>
+    <constraint source="CLAUDE.md project §6">client-lint ratchet before pushing.</constraint>
+    <constraint source="ADR-038">Filtered jest; tests assert where focus ends and fail on master.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>docs/standards/MODAL-DESIGN-SYSTEM.md</file>
+      <file>.claude/adr/ADR-050-canonical-modal-shell.md</file>
+    </files>
+  </knowledge>
+  <steps mode="directional">
+    <step order="1">Failing tests first: (a) button opens a SprkModal, Cancel closes it → focus on the button; (b) ConfirmModal opened from a button inside a SprkModal, Keep (cancel) → focus on that button; (c) same with a conditionally mounted ConfirmModal (DecisionWizard shape). Show they fail on master.</step>
+    <step order="2">Implement with the shared helper.</step>
+    <step order="3">Negative tests: opener removed or disabled → no throw, focus not forced; host moved focus to another element outside the modal before close → not moved; `hidden` toggle and yield on/off → no restore.</step>
+    <step order="4">Filtered jest (SprkModal/**, presets, DecisionWizard, RuleWizard, WizardShell, EmailComposer), typecheck, client-lint; bump/build PCFs whose bundle changes; build the Console.</step>
+    <step order="5">Notes in notes/task-202-notes.md (cause, ordering evidence, fail-before, versions).</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion testable="true">Test (a), (b), (c) pass and fail on origin/master.</criterion>
+    <criterion testable="true">Negative tests in step 3 pass.</criterion>
+    <criterion testable="true">Existing tests unmodified and passing; typecheck; client-lint; builds as stated.</criterion>
+    <criterion testable="false">Main session verifies on dev after the Console auto-deploys: the three dev paths in the prompt end on the opener.</criterion>
+  </acceptance-criteria>
+  <escalation>
+    <trigger>If Fluent/tabster moves focus after the setTimeout(0) restore in a way only observable on dev, STOP after the tests and report; the main session verifies on dev.</trigger>
+  </escalation>
+  <execution>
+    <protocol>Run through task-execute. Fresh branch from origin/master; PR to master.</protocol>
+  </execution>
+</task>

@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="201" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>Ontology admin Rules list: the Rule cell clips the rule code and name (fixed 44 px row, too narrow a column)</title>
+    <phase>12 Create-wizard lookups and composer (185 dev check fixes)</phase>
+    <gate>startable</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .tsx in the shared UI library (Console ships it).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Located layout defect, one file, styles only.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>185-fixes</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Runs after 199/200 in the shared build worktree C:\t198.</parallel-reason>
+    <deps>none</deps>
+    <tags>react, fluent-ui, frontend, testing</tags>
+    <estimated-effort>1 hour</estimated-effort>
+  </metadata>
+  <prompt>Found by the main session's browser check on dev, 2026-11-22, Console → Ontology admin → Rules at 1440×900. The Rule cell (`RuleList.tsx` col0, `cell` + `stack`) holds the rule-code button over the rule name. Fluent `TableCell` keeps a fixed 44 px height and `cell` has `overflow: hidden`, so a two-line name is cut (measured: cell clientHeight 44, scrollHeight 64, width 120 px). On screen the code and the next row's text overlap or vanish ("Fee or scope change with no budget revision in 30 days" shows two cut lines). Owner approved fixing what testing finds.</prompt>
+  <role>SPAARKE frontend developer, Fluent UI v9.</role>
+  <goal>Every Rules row shows the full rule code and the full rule name (wrapping is fine), with no overlap, at 1280×720 through 2560×1440 and in the narrow Workspace pane; the other columns keep their content. Rows grow to fit.</goal>
+  <context>
+    <background>
+- `src/client/shared/Spaarke.UI.Components/src/components/OntologyAdmin/Rules/RuleList.tsx` ~56-100: `COLUMN_GROW` ratios, `cell { overflow: hidden; textOverflow: ellipsis }`, `stack` column flex. Rows ~195-235.
+- Fix shape: let the row/cell height be auto with vertical padding (override Fluent's fixed TableCell/TableRow height for this table), keep `overflow: hidden` only where an ellipsis is intended (single-line cells), give the Rule column a larger share or a sensible min-width, and let the name wrap (`overflowWrap: anywhere` for long codes).
+- Classification tab may use the same pattern; check `OntologyAdmin/**` for the same `cell` + `stack` clip and fix it the same way if present.
+    </background>
+  </context>
+  <constraints>
+    <constraint source="project">Styles only; no behaviour change. Existing RuleList tests pass unmodified.</constraint>
+    <constraint source="ADR-021">Fluent tokens for spacing; dark mode unaffected.</constraint>
+    <constraint source="ADR-038">A test that pins the contract jsdom can see (the Rule cell does not carry a fixed height / overflow-hidden clip on the stack; full name text rendered), noting that jsdom cannot measure layout.</constraint>
+    <constraint source="CLAUDE.md project §6">client-lint before pushing. Console builds.</constraint>
+  </constraints>
+  <steps mode="directional">
+    <step order="1">Write the style-contract test first; show it fails on origin/master.</step>
+    <step order="2">Change the RuleList styles (auto row height, Rule column share/min-width, wrapping); same for any OntologyAdmin list with the same clip.</step>
+    <step order="3">Filtered jest (OntologyAdmin/**), typecheck, client-lint, Console build.</step>
+    <step order="4">Notes in notes/task-201-notes.md.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion testable="true">Test: the Rule cell's stack is not clipped by a fixed height (style contract) and renders the full code and name.</criterion>
+    <criterion testable="false">Main session verifies on dev after the Console auto-deploys: no clipping at 1440×900 and 1280×720.</criterion>
+    <criterion testable="true">Existing tests unmodified and passing; typecheck; client-lint; Console build.</criterion>
+  </acceptance-criteria>
+  <execution>
+    <protocol>Run through task-execute. Fresh branch from origin/master; PR to master.</protocol>
+  </execution>
+</task>
