@@ -172,6 +172,10 @@ export const SprkModal: React.FC<SprkModalProps> = ({
   // While yielding to a side pane the surface is `inert`: Tab and Enter cannot reach Save / Cancel / × behind the
   // lookup (pointer-events alone blocks only the mouse). Set as a DOM attribute — React 16/17 do not know `inert`.
   const surfaceInert = yieldToSidePane && !hidden;
+  // ORDER MATTERS (task 198): keep this a `useEffect` in this (parent) component. Fluent's Dialog re-runs its
+  // focus-first-element effect when `modalType` changes; as a child effect it runs BEFORE this one, so when yielding
+  // ends the surface is still `inert` and that focus() is a no-op. Removing `inert` first (e.g. a useLayoutEffect)
+  // would pull focus into this modal, under the host's wizard. Pinned by sidePaneLayering.test.tsx.
   React.useEffect(() => {
     const el = surfaceRef.current;
     if (!el) return;
@@ -191,7 +195,13 @@ export const SprkModal: React.FC<SprkModalProps> = ({
   // `alert` is intentionally blocking; otherwise `nonBlocking` maps to Fluent's
   // `non-modal` (no backdrop, no focus trap) so a page-level lookup pane opened
   // over the modal stays interactive (see `nonBlocking` prop doc).
-  const modalType = dismiss === 'alert' ? 'alert' : nonBlocking ? 'non-modal' : 'modal';
+  // While yielding to a side pane EVERY modal is `non-modal`, alert included (task 198): the `modal` Dialog's
+  // full-window `.fui-DialogSurface__backdrop` is not covered by the surface's `pointer-events: none`, and (z-index
+  // of the PCF portal) it sits above the platform's lookup pane when the pane could not be layered over the modal
+  // ('dock' / 'pending'), eating every click in it. Only `modalType` changes: the Dialog, its surface and the body
+  // stay mounted (the backdrop is a sibling of the surface in the same portal), and the blocking behaviour returns
+  // when the flag clears.
+  const modalType = surfaceInert ? 'non-modal' : dismiss === 'alert' ? 'alert' : nonBlocking ? 'non-modal' : 'modal';
   const hasFooter = Boolean(footer || footerStart);
 
   // Browse guard (`nav.onBeforeNavigate`): without one, navigate synchronously; with one, navigate only
@@ -213,12 +223,9 @@ export const SprkModal: React.FC<SprkModalProps> = ({
       reportGuardFailure(err);
       return;
     }
-    void Promise.resolve(verdict).then(
-      allowed => {
-        if (allowed) nav.onNavigate(dir);
-      },
-      reportGuardFailure
-    );
+    void Promise.resolve(verdict).then(allowed => {
+      if (allowed) nav.onNavigate(dir);
+    }, reportGuardFailure);
   };
 
   return (
