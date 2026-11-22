@@ -172,6 +172,10 @@ export const SprkModal: React.FC<SprkModalProps> = ({
   // While yielding to a side pane the surface is `inert`: Tab and Enter cannot reach Save / Cancel / × behind the
   // lookup (pointer-events alone blocks only the mouse). Set as a DOM attribute — React 16/17 do not know `inert`.
   const surfaceInert = yieldToSidePane && !hidden;
+  // ORDER MATTERS (task 198): keep this a `useEffect` in this (parent) component. Fluent's Dialog re-runs its
+  // focus-first-element effect when `modalType` changes; as a child effect it runs BEFORE this one, so when yielding
+  // ends the surface is still `inert` and that focus() is a no-op. Removing `inert` first (e.g. a useLayoutEffect)
+  // would pull focus into this modal, under the host's wizard. Pinned by sidePaneLayering.test.tsx.
   React.useEffect(() => {
     const el = surfaceRef.current;
     if (!el) return;

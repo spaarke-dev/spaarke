@@ -21,7 +21,12 @@ was not needed, so the focus-trap-pull-back test was not written.
 Side effects, judged acceptable:
 - Fluent `useFocusFirstElement(open, modalType)` re-runs when `modalType` changes, so focus moves to the dialog's first
   focusable at the instant yielding starts and again when it ends (before: unchanged). While yielding the surface is `inert`
-  and the platform pane takes focus when it opens; after the pick, focus returns to the first focusable instead of body.
+  and the platform pane takes focus when it opens. When yielding ends, Fluent's focus() lands while the surface is
+  still `inert` (Fluent's child effect runs before SprkModal's inert-removal effect), so in a real browser it is a no-op
+  and focus stays where the composer / platform put it. jsdom ignores `inert`, so there focus does move; the test pins
+  the ordering instead (review F2, fixed in the main session). At yield START focus briefly enters the preview before
+  `inert` is set and then drops to body (K4, harmless). Draft PR #1293 also touches SprkModal.tsx (stale since
+  2026-10-05, non-overlapping hunks): checked, not a conflict.
 - `aria-modal` is false and role is `dialog` (not `alertdialog`) while yielding only.
 - Body scroll lock is released while yielding (non-modal), restored after.
 - While yielding the (non-inert, un-blocked) page behind the dimmed modal can receive clicks, as with every nonBlocking

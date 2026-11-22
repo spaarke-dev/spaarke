@@ -271,4 +271,31 @@ describe('SprkModal yieldToSidePane — a blocking modal gives up its backdrop (
     expect(surface).not.toHaveAttribute('inert');
     expect(surface.style.pointerEvents).toBe('');
   });
+  it('when yielding ends, any focus() Fluent calls inside the surface happens while it is still inert (a no-op in browsers)', () => {
+    stubPaneAppearing('auto');
+    const withButton = (y: boolean) => (
+      <SprkModal open onClose={noop} title="Preview" yieldToSidePane={y}>
+        <button>Inside</button>
+      </SprkModal>
+    );
+    const { rerender } = renderWithProviders(withButton(true));
+    act(() => {
+      jest.advanceTimersByTime(300);
+    });
+    const surface = screen.getByRole('dialog');
+    const calls: boolean[] = [];
+    const realFocus = HTMLElement.prototype.focus;
+    const spy = jest.spyOn(HTMLElement.prototype, 'focus').mockImplementation(function (this: HTMLElement, ...args) {
+      if (surface.contains(this)) calls.push(surface.hasAttribute('inert'));
+      return realFocus.apply(this, args);
+    });
+    try {
+      rerender(withButton(false));
+    } finally {
+      spy.mockRestore();
+    }
+    expect(calls.length).toBeGreaterThan(0); // Fluent did try to move focus in, so the ordering is what is tested
+    expect(calls.every(inertAtCall => inertAtCall)).toBe(true);
+    expect(surface).not.toHaveAttribute('inert');
+  });
 });
