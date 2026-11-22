@@ -1,7 +1,8 @@
 # Task 056a — Private messages in a record's context: design note
 
-> Status: **draft for UAC-r2 review and owner answers** (2026-11-22). No code until UAC-r2 approves this note and the
-> owner's answers are recorded in `notes/decisions.md` (POML 056 gate).
+> Status (2026-11-22): **UAC-r2 approved the access parts on conditions C1–C6**, now written into this note. The owner's
+> answers to Q0–Q6 are still needed. No code until UAC-r2 has checked C1–C6 in this revision and the owner's answers are
+> recorded in `notes/decisions.md` (POML 056 gate).
 > Issue: #2923. Starts from: MR-1 in `projects/messages-enhancements-r1/requirements.md`, which holds UAC-r2's access
 > rules of 2026-11-09. This note keeps those rules and states how the current code meets them.
 > Code references were mapped on 2026-11-22 from `work/field-mapping-server-write-path-r1` at 89c9efb43b; line numbers drift.
@@ -73,18 +74,30 @@ UAC-r2's ownership files (POML 056 escalation trigger 1).
    - The recipient is checked as the named principal (`CallerRecordAccessProbe.GetPrincipalRightsAppOnlyOrUnknownAsync`,
      `RetrievePrincipalAccess` for that systemuser). An unanswered check refuses.
    - Precedent: `AssignTaskRecipientGate`.
-   - **UAC-r2 question U1.** MR-1 says "checked as each user (an impersonated probe, never app-only)". The recipient
-     check uses the app identity to ask Dataverse for **the recipient's** rights, not the app's. Is
-     `RetrievePrincipalAccess` acceptable here, as in `AssignTaskRecipientGate`? Or do you require a `CallerId`
-     impersonated read as the recipient? No helper does that today.
-2. **Restricted record.** A participant flagged external is refused (the existing Restricted rule,
-   `InternalShareEndpoints.IsBarredOnRestricted`). A flag that cannot be read refuses.
+   - **U1, accepted by UAC-r2.** `RetrievePrincipalAccess` for the named systemuser is Dataverse's answer for that
+     principal. No `CallerId`-impersonated read is needed.
+   - **C1 (No Access wall).** Dataverse's rights answer can lag a No Access entry until the share reconcile removes the
+     share. So when the record is secure, or files under a secure parent, BOTH participants must also pass
+     `SecureShareNoAccessGuard.CheckRecordAndSecureParentsAsync`. Walled or Unverifiable gives the neutral refusal. The
+     guard is reused as is, not forked (callers today: `InternalUserShareCore`, `GrantAccessNotifier`).
+2. **Restricted record (C2).**
+   - A participant flagged external is refused (`InternalShareEndpoints.IsBarredOnRestricted`).
+   - Both participants are checked.
+   - The flag checked is the record's **effective** Restricted flag through its filing (`EffectiveRootFlags`, round
+     84), not only its own stored value.
+   - An effective flag or an external flag that cannot be read refuses.
 3. **One neutral refusal** for every case: the record is secure, it is Restricted, the recipient cannot read it, or a
    check fault. Configuration problems keep their existing distinct codes: 409 for configuration, 503 for a fault. The
    sender learns only that a private message about this record cannot go to this person.
-4. **Later loss of Read.** A participant who later loses Read on the record still reads the message, because it is
-   theirs. The record reference (name, number, link) is resolved **as the viewer** and hidden when they cannot read the
-   record.
+4. **After the send (C6; the owner answers this explicitly, Q2.4).** None of these take the message from either
+   participant:
+   - the record later becoming Restricted;
+   - a later No Access entry;
+   - a participant losing Read on the record.
+
+   The message is the pair's own correspondence. It has no filing parent, so UAC-r2 task 198 revokes nothing on it. The
+   record reference (name, number, link) is resolved **as the viewer** and hidden from a viewer who can no longer read
+   the record. Recommendation: accept.
 
 Secure records need no extra rule. The message is never filed, so the 2026-11-09 rule ("participants keep their shares
 when a Direct message is filed, except on secure or Restricted targets") does not come into play until someone files it
@@ -129,8 +142,14 @@ pair. Grants: UAC-r2 task 198.
   (UAC-r2's file).
   - The per-viewer read (§3.3) selects only rows with **no** filing lookup. A filed message therefore shows as an
     ordinary record message, and its reference is ignored.
-  - **UAC-r2 question U2:** do you agree to leaving the reference on filing, given that rule? The alternative is a named
-    edit in `RefileAsync` that clears it.
+  - **U2, agreed by UAC-r2, on C3.**
+    - The `about` reads stay caller-impersonated, so row security decides who reads. The sender/recipient and no-filing
+      filters only narrow what is displayed.
+    - The reference columns stay field-secured, so readers of a filed message cannot read the reference.
+- **Unfiling.** `PATCH /filing` can also unfile a message (054 piece 3b: every unfile path follows one rule). An unfiled
+  private message is again an eligible Direct message and goes back to the Direct team under 3b's rule. Its reference
+  is still there, and the impersonated read keeps that safe: only the pair read the row, so only the pair see the
+  reference.
 - **A standalone Direct message cannot gain a reference later.** The reference is written once, at create, by the BFF.
 
 ### Q6. Where private messages surface
@@ -163,6 +182,14 @@ pair. Grants: UAC-r2 task 198.
 - **Why three typed columns, not one polymorphic lookup or a text id.** Typed lookups get Dataverse referential
   integrity and field security per column, and they match the repo's pattern. A free-text id would bypass field
   security on the target.
+- **Relationship cascade (C4).** Each lookup creates a 1:N relationship from matter, project or work assignment to
+  `sprk_communication`.
+  - Its cascade is Assign, Share, Unshare and Reparent = **NoCascade** (referential), and Delete = **RemoveLink**. A
+    cascading Share or Reparent would push the record's shares onto private messages.
+  - The schema script sets this. Its `-Verify` reads the relationship metadata back and fails when any of those
+    cascades is Cascade, with a must-fire control.
+  - The relationship's navigation is hidden from the record forms. This is cosmetic only, since row security already
+    limits it to the pair.
 - **Live order** (owner's go for each environment): create the columns → `Set-ThreadFlagFieldSecurity.ps1 -Apply` /
   `-Verify` → BFF. A BFF that finds the columns missing refuses a private send, 409 with the script named, as 054 does
   for `sprk_directrecipient`.
@@ -202,6 +229,22 @@ pair. Grants: UAC-r2 task 198.
    - the schema script.
 
    The scan follows constant aliases to a fixed point, as `ThreadFlagUpdateWriterGuardTests` does.
+3. **More selectors (C5).** The registry guard also asserts the three columns are absent from:
+   - `CoreAncestorResolver`'s ancestor map for `sprk_communication` (the external plane selects by core-ancestor
+     stamps);
+   - the communication scope in `Tier2ScopeFilterInjector` and `ExternalModuleRegistry`.
+
+   Covered by derivation, nothing more to add:
+   - Task 198's grant and revoke select by the Direct-team owner, the content rows and
+     `DirectMessageParticipantShares.FilingColumns`. `FilingColumns` is derived from
+     `SecureChildLineage.Children[sprk_communication].LineageColumns`, not a literal list, so rule 1 covers it.
+   - Runtime metadata discovery of lookups: `MembershipFieldDiscoveryService` keeps only lookups whose targets are
+     identity tables (systemuser, team, account, contact). The three columns target core records, so it ignores them.
+     056b adds a must-fire check that it does not return them.
+   - The field-mapping relationship read (`FieldMappingEndpoints.ReadManyToOneRelationshipsAsync`) only lists choices
+     for an admin. A mapped write into the columns is refused for every identity, the push included, once they join
+     `BffOwnedCommunicationColumns` (`ParentLineage.RefuseBffOwnedCommunicationColumn`). 056b adds a must-fire test that
+     a Copy rule targeting one writes nothing on create or push.
 
 ### 3.5 UI (Spaarke.UI.Components)
 
@@ -236,17 +279,22 @@ pair. Grants: UAC-r2 task 198.
 
 No ADR conflict found.
 
+**Known limit carried.** A private message is a Direct message, so #2959 applies to it as to any other: a capped
+Direct listing in `SecureChildShareReconciliationJob` moves its watermark to the horizon with no overlap. That is UAC-r2's
+code, and it is open.
+
 ## 5. Questions
 
 | # | For | Question | Recommendation |
 |---|---|---|---|
 | Q0 | owner | "In the record's thread": shown in the record's conversation, or stored in the record's thread row? | Shown there, stored in the pair's Direct thread (§1) |
 | Q1 | owner | What other readers see | Nothing |
-| Q2 | owner | Secure and Restricted records | Allowed if both participants read the record; external participants refused on Restricted; one neutral refusal |
+| Q2 | owner | Secure and Restricted records | Allowed if both participants read the record and pass the No Access check; external participants refused on an effectively Restricted record; one neutral refusal |
+| Q2.4 | owner | After the send: does a later Restricted flag, No Access entry or lost Read take the message from either participant? | No. It stays theirs, and the record reference is hidden from a viewer who cannot read the record (C6) |
 | Q3 | owner | Recipient cannot read the record | Refuse, offer "Send as a direct message instead" |
 | Q4 | owner | Ownership | Direct team + the stamped pair, unchanged |
 | Q5 | owner | Filing later | Explicit, confirmed, context record suggested; no reference added to an existing message |
 | Q6 | owner | Where it surfaces | Record conversation view (pair only, per counterpart) and the Messages view |
-| U1 | UAC-r2 | Recipient check: `RetrievePrincipalAccess` acceptable, or impersonated read required? | `RetrievePrincipalAccess`, unanswered refuses |
-| U2 | UAC-r2 | Reference left as is on filing, with the reader excluding filed rows? | Yes; no edit in `RefileAsync` |
-| U3 | UAC-r2 | Do the §3.4 guards cover task 198's grant and revoke, and anything else of yours that reads by column? | Your call |
+| U1 | UAC-r2 | Recipient check | **Answered:** `RetrievePrincipalAccess` accepted, with C1 (the No Access wall) |
+| U2 | UAC-r2 | Reference left as is on filing | **Answered:** agreed, with C3 (impersonated reads; columns field-secured) |
+| U3 | UAC-r2 | Guard coverage | **Answered:** covered, with C4 (relationship cascade) and C5 (more selectors) |
