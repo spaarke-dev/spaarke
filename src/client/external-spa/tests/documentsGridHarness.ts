@@ -55,7 +55,8 @@ export const documentsGridClient = {
         sprk_documentname: { attributeType: 'String', isPrimaryName: true, displayName: 'Document Name' },
         sprk_documenttype: { attributeType: 'String', displayName: 'Document Type' },
         createdon: { attributeType: 'DateTime', displayName: 'Created On' },
-        sprk_summary: { attributeType: 'Memo', displayName: 'Summary' },
+        // No `sprk_summary`: live sprk_document metadata has none (the real column is `sprk_filesummary`). The AI Summary
+        // column is a layout cell only; its values come from the host's rows (the record route's DTO).
       },
     };
   },

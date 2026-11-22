@@ -32,6 +32,7 @@ import {
   createTableColumn,
   MessageBar,
   MessageBarBody,
+  Button,
   Spinner,
   Text,
   Link,
@@ -608,7 +609,14 @@ const useStyles = makeStyles({
     color: tokens.colorPaletteRedForeground1,
     backgroundColor: tokens.colorPaletteRedBackground1,
   },
+  // The configuration-load banner: the sentence and its Try again button side by side.
+  errorBannerWithAction: {
+    columnGap: tokens.spacingHorizontalM,
+  },
 });
+
+/** What the grid says when its configuration could not be loaded (the detail goes to the console, not the page). */
+const CONFIG_LOAD_FAILED_TEXT = 'This list could not be loaded. Try again later.';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helper — pretty-print arbitrary cell value into a string
@@ -995,6 +1003,14 @@ export const DataGrid: React.FC<DataGridProps> = props => {
     showViewSelector,
     externalHost,
   ]);
+
+  // The technical reason the configuration did not load goes to the console, once per failure (the banner says only
+  // CONFIG_LOAD_FAILED_TEXT).
+  React.useEffect(() => {
+    if (!loadState.error) return;
+    // eslint-disable-next-line no-console
+    console.error(`[DataGrid] configuration did not load (configId=${configId}):`, loadState.error);
+  }, [loadState.error, configId]);
 
   // Once we have metadata, resolve the full configuration.
   const resolved: ResolvedConfig | null = React.useMemo(() => {
@@ -1575,10 +1591,15 @@ export const DataGrid: React.FC<DataGridProps> = props => {
   }
 
   if (loadState.error || !loadState.entityMetadata || !resolved) {
+    // End users get one sentence they can act on; the technical detail (a missing source, a server message from a metadata
+    // read) stays in the console (logged once per failure by the effect above), never in the page.
     return (
       <div className={mergeClasses(styles.root, className)} role="alert">
-        <div className={styles.errorBanner}>
-          <Text size={300}>{loadState.error?.message ?? 'DataGrid configuration could not be resolved.'}</Text>
+        <div className={mergeClasses(styles.errorBanner, styles.errorBannerWithAction)}>
+          <Text size={300}>{CONFIG_LOAD_FAILED_TEXT}</Text>
+          <Button size="small" appearance="secondary" onClick={refresh}>
+            Try again
+          </Button>
         </div>
       </div>
     );

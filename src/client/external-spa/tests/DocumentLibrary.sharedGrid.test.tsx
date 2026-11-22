@@ -155,15 +155,18 @@ describe('column sizing and truncation (replaces the D-12 width classes)', () =>
     canDownload = true
   ): Promise<HTMLElement> {
     Object.defineProperty(HTMLElement.prototype, 'clientWidth', { configurable: true, get: () => containerWidth });
+    // A writer (canCreate: true), so a caller's Delete is on offer: it is the third action button.
     listReturns({
       value: [
         row(1, NAME_COL, {
           sprk_documenttype: 'Engagement letter (signed counterpart)',
           sprk_summary: 'S'.repeat(120),
+          _sprk_createdbycontact_value: ME,
         }),
       ],
+      canCreate: true,
     });
-    renderLibrary({ caller, canUpload: false, canDownload });
+    renderLibrary({ caller, canUpload: true, canDownload });
     const body = await documentRow(NAME_COL);
     return body.closest('[role="grid"]') as HTMLElement;
   }
@@ -270,6 +273,58 @@ describe('column sizing and truncation (replaces the D-12 width classes)', () =>
   );
 
   it(
+    'the data columns are resizable (a resize handle each) and the actions column is not',
+    async () => {
+      const grid = await renderAt(1000);
+      const headers = within(grid).getAllByRole('columnheader');
+      const handles = (h: HTMLElement): number => h.querySelectorAll('.fui-TableResizeHandle').length;
+      const byName = (label: string): HTMLElement => headers.find(h => h.textContent === label) as HTMLElement;
+      for (const label of ['Name', 'Type', 'Date Added', 'AI Summary']) {
+        expect(handles(byName(label))).toBe(1);
+      }
+      expect(handles(byName('Actions'))).toBe(0);
+    },
+    SLOW
+  );
+
+  it(
+    'a summary that does not fit ends in an ellipsis wrapper and shows its full text in a tooltip when its cell is focused',
+    async () => {
+      stubOverflow();
+      const LONG_SUMMARY =
+        'This agreement sets out the scope of the engagement and the fees payable, with a long tail.';
+      listReturns({ value: [row(1, 'Brief.pdf', { sprk_summary: LONG_SUMMARY })] });
+      renderLibrary();
+      const body = await documentRow('Brief.pdf');
+      const cell = within(body).getByText(LONG_SUMMARY).closest('[role="gridcell"]') as HTMLElement;
+      expect(cell.querySelector('[data-truncate-cell]')).not.toBeNull();
+
+      expect(screen.queryByRole('tooltip')).toBeNull();
+      fireEvent.focusIn(cell);
+      const tooltip = await screen.findByRole('tooltip', undefined, LOAD);
+      expect(tooltip.textContent).toBe(LONG_SUMMARY);
+    },
+    SLOW
+  );
+
+  it(
+    'must-not-fire pair: a short summary that fits shows no tooltip when its cell is focused',
+    async () => {
+      stubOverflow();
+      listReturns({ value: [row(1, 'Brief.pdf', { sprk_summary: 'A short summary.' })] });
+      renderLibrary();
+      const body = await documentRow('Brief.pdf');
+      const cell = within(body).getByText('A short summary.').closest('[role="gridcell"]') as HTMLElement;
+      expect(cell.querySelector('[data-truncate-cell]')).not.toBeNull();
+
+      fireEvent.focusIn(cell);
+      await new Promise(resolve => setTimeout(resolve, 600));
+      expect(screen.queryByRole('tooltip')).toBeNull();
+    },
+    SLOW
+  );
+
+  it(
     'must-not-fire pair: a short name that fits shows no tooltip when its cell is focused',
     async () => {
       stubOverflow();
@@ -362,16 +417,59 @@ describe('row actions follow the caller (hide, never disable)', () => {
   ];
 
   it(
-    'a View-only caller (no Create, no delete right): no Upload, no Delete on any row, but Download and Version history remain',
+    'a View-only caller who is signed in (canCreate: false) sees no Upload and no Delete, even on a row they created, but keeps Download and Version history',
     async () => {
       listReturns({ value: docs(), canCreate: false });
-      renderLibrary({ canUpload: false, caller: null });
+      renderLibrary({ caller: asContact });
 
       const mine = await documentRow('Mine.pdf');
       expect(screen.queryByRole('button', { name: /Upload Document/ })).toBeNull();
+      expect(rowAction(mine, 'Delete')).toBeNull();
       expect(screen.queryAllByRole('button', { name: 'Delete' })).toHaveLength(0);
       expect(rowAction(mine, 'Download')).toBeTruthy();
       expect(rowAction(mine, 'Version history')).toBeTruthy();
+    },
+    SLOW
+  );
+
+  it(
+    'must-not-fire pair: a caller who may create (canCreate: true) sees Delete on the row they created, and only that row',
+    async () => {
+      listReturns({ value: docs(), canCreate: true });
+      renderLibrary({ caller: asContact });
+
+      const mine = await documentRow('Mine.pdf');
+      const theirs = await documentRow('Theirs.pdf');
+      expect(await screen.findByRole('button', { name: /Upload Document/ }, LOAD)).toBeTruthy();
+      expect(rowAction(mine, 'Delete')).toBeTruthy();
+      expect(rowAction(theirs, 'Delete')).toBeNull();
+    },
+    SLOW
+  );
+
+  it(
+    'a caller who may create but is not the creator of the row (a document someone else created) sees no Delete on it',
+    async () => {
+      listReturns({ value: [row(2, 'Theirs.pdf', { _sprk_createdbycontact_value: SOMEONE })], canCreate: true });
+      renderLibrary({ caller: asContact });
+
+      const theirs = await documentRow('Theirs.pdf');
+      expect(await screen.findByRole('button', { name: /Upload Document/ }, LOAD)).toBeTruthy();
+      expect(rowAction(theirs, 'Delete')).toBeNull();
+      expect(rowAction(theirs, 'Download')).toBeTruthy();
+    },
+    SLOW
+  );
+
+  it(
+    'no caller identity: no Delete on any row, whatever the list says',
+    async () => {
+      listReturns({ value: docs(), canCreate: true });
+      renderLibrary({ canUpload: true, caller: null });
+
+      const mine = await documentRow('Mine.pdf');
+      expect(rowAction(mine, 'Delete')).toBeNull();
+      expect(screen.queryAllByRole('button', { name: 'Delete' })).toHaveLength(0);
     },
     SLOW
   );

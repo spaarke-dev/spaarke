@@ -4,7 +4,7 @@
     <title>Documents list on the shared DataGrid for every record type + D-23 hoist (FR-15, FR-16, #2490, #2928)</title>
     <phase>2 Invoices and documents</phase>
     <gate>after 023a is in the branch; 023b's configuration must be live before the 028 deploy</gate>
-    <status>in-progress</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Multi-file rework of DocumentLibrary.tsx (.tsx) used by the record template and ProjectPage</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -77,7 +77,7 @@
     <criterion testable="true">SPA build and all SPA tests pass; ExternalSpaGridViewSelectorGuardTests passes.</criterion>
   </acceptance-criteria>
 
-  <notes>Split from task 023 by owner decision 2026-11-22.</notes>
+  <notes>Split from task 023 by owner decision 2026-11-22. Completed 2026-11-22: see notes/task-023-notes.md "Task 023c". Shared-grid deviation (selection cell, config-error text) flagged for owner sign-off in the PR. Filed D-25..D-29 (#2960-#2964). rework: fix-round-1 task 023c</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

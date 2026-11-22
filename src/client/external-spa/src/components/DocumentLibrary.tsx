@@ -1,5 +1,5 @@
 /**
- * DocumentLmbrary component — Document management for the Project page Documents tab AND the record detaml view
+ * DocumentLibrary component — Document management for the Project page Documents tab AND the record detail view
  * (task 054: project, matter, work assignment, service request - the task 031 routes).
  *
  * ROOT (task 054). `root` + `recordId` pick the task 031 routes (`/api/v1/external/{projects|matters|workassignments|
@@ -15,9 +15,10 @@
  * list already passed the Read the download routes need), and a project's Upload follows its list's `canCreate` alone.
  * This is only what is SHOWN: the server decides, and a refused upload shows its 403 as an error.
  *
- * DELETE-OWN (task 054, FR-26). With a `caller` identity, a row the caller created (creator stamp = the signed-in
- * principal) shows Delete, which asks first (shared ConfirmModal). 204 removes the row; a 403 / 409 / 503 / 500 shows a
- * message and the row stays. Without `caller` there is no Delete.
+ * DELETE-OWN (task 054, FR-26). With a `caller` identity AND the same write verdict that shows Upload, a row the caller
+ * created (creator stamp = the signed-in principal) shows Delete, which asks first (shared ConfirmModal). 204 removes the
+ * row; a 403 / 409 / 503 / 500 shows a message and the row stays. Without `caller`, or for a View-only caller, there is no
+ * Delete.
  *
  * Displays the record's documents on the SHARED grid (`<ExternalDataGrid configId={RECORD_DOCUMENTS_GRID}>`, R4 task 023c,
  * FR-16): the grid takes its columns, resize, ellipsis + tooltip and lazy scroll from the "External record documents" grid
@@ -335,8 +336,6 @@ export function downloadFailureMessage(err: unknown): string {
 export function downloadFailureLogText(err: unknown): string {
   return err instanceof ApiError ? `HTTP ${err.statusCode}` : 'no HTTP status (network or client error)';
 }
-
-// AiSummaryCell is now rendered inline using AiSummaryPopover from @spaarke/ui-components.
 
 // ---------------------------------------------------------------------------
 // Version history panel sub-component
@@ -671,11 +670,12 @@ export type DocumentLibraryProps = DocumentLibraryTarget & {
   /** Called with `true` while an upload is in flight and `false` otherwise (and on unmount), so the host can hold. */
   onBusyChange?: (busy: boolean) => void;
   /**
-   * Record template only (task 013, owner 2026-11-14). When given, a click on a document's name calls this with the
-   * document's id and the control that was activated (focus returns to it when the record opened over this one closes;
-   * null when focus is on no control); a document with no file (`hasFile === false`) is still opened (FR-15: its record
-   * shows Information only). Omit it everywhere else (the Project page): the name is then not an opener, and a click does
-   * nothing.
+   * Opens the document's record (task 013, owner 2026-11-14; the Project page too since the task 023c review). A click on
+   * a document's name calls this with the document's id and the control that was activated (focus returns to it when the
+   * record opened over this one closes; null when focus is on no control); a document with no file (`hasFile === false`)
+   * is still opened (FR-15: its record shows Information only). The record template passes its child-record opener, the
+   * Project page the shell's `useOpenRecord`. With none, the name is still the grid's link (the shared grid has no
+   * plain-text name) and a click does nothing; no host in the app omits it where a Documents list can be shown.
    */
   onOpenDocument?: (documentId: string, trigger: HTMLElement | null) => void;
 };
@@ -694,7 +694,8 @@ const DOCUMENT_NOUN = { one: 'document', other: 'documents' } as const;
  * - The list is the shared grid (`RECORD_DOCUMENTS_GRID`) over the record route's list read (`getDocuments` /
  *   `getRecordDocuments`), one page; the grid shows the loading, error, empty and incomplete-list states
  * - Columns (the grid configuration): Name, Type, Date Added, AI Summary; resize, ellipsis and tooltip are the grid's
- * - Row actions: Download and Version history (not on a row with `hasFile === false`), Delete (the caller's own rows only)
+ * - Row actions: Download and Version history (not on a row with `hasFile === false`), Delete (the caller's own rows, and
+ *   only for a caller who may upload)
  * - Upload button: Collaborate and Full Access only (on the Project page; the record template offers its own)
  * - Version history dialog via BFF API GET /api/v1/external/{root}/{id}/documents/{documentId}/versions
  *
@@ -838,8 +839,10 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
   // Hide, don't disable (FR-06): an action is in the list only when the caller may use it at all, and `isVisible` hides it on
   // the rows it does not apply to. R3 ISS-011 (#1886): a document with no file stays listed but offers neither Download nor
   // Version history (both would answer 409 no_file_attached). Only an explicit false hides them: a BFF that does not send
-  // `hasFile` is an old BFF, and its rows keep today's behaviour (FR-15). Delete is only on a row the caller created (the
-  // server re-checks; a refusal is shown as an error).
+  // `hasFile` is an old BFF, and its rows keep today's behaviour (FR-15). Delete is in the list only for a caller whose
+  // write verdict is a known yes (`uploadAllowed`, the verdict that shows Upload: a View-only caller is offered no delete
+  // the server would refuse), and `isVisible` shows it only on a row the caller created (the server re-checks; a refusal
+  // is shown as an error).
   const rowActions = React.useMemo(() => {
     const hasFile = (row: Record<string, unknown>): boolean => row.hasFile !== false;
     return [
@@ -849,7 +852,7 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
             { id: ACTION_VERSIONS, label: 'Version history', icon: <HistoryRegular />, isVisible: hasFile },
           ]
         : []),
-      ...(caller
+      ...(caller && uploadAllowed
         ? [
             {
               id: ACTION_DELETE,
@@ -860,7 +863,7 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
           ]
         : []),
     ];
-  }, [canActOnDocuments, caller]);
+  }, [canActOnDocuments, caller, uploadAllowed]);
 
   const handleRecordAction = React.useCallback<DocumentsRecordAction>(
     (actionId, _recordId, row) => {
@@ -883,8 +886,9 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
     [handleDownload, askDelete]
   );
 
-  // The name is the grid's primary-name link. The record template opens the document's record over this one; anywhere else
-  // there is no opener, and the grid's own default (Xrm navigation) must not run in this Xrm-free host, so the click is a no-op.
+  // The name is the grid's primary-name link. The record template opens the document's record over this one and the Project
+  // page through the shell's opener. With no opener the click is a no-op: the grid cannot draw the name as plain text, and
+  // its own default (Xrm navigation) must not run in this Xrm-free host, so a handler is always passed.
   const handleRecordOpen = React.useCallback<DocumentsRecordOpen>(
     documentId => {
       if (!onOpenDocument) return;

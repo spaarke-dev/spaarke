@@ -21,8 +21,10 @@
  *
  * OPEN (task 013, owner 2026-11-14). In the record template a document's name opens that document's record in a child modal
  * over this record (`useChildRecordOpener`; `RecordDocumentList.onOpenDocument`); it names no section to re-read, since a document record cannot
- * change this list and a re-read would remount the library and lose the grid's sort. Inside a child record there is no opener,
- * so names stay plain text (one child level only); the Project page never passes it.
+ * change this list and a re-read would remount the library and lose the grid's sort. Inside a child record there is no
+ * opener (one child level only; no child template lists a Documents section, so this does not arise), and a name's click
+ * would do nothing: the shared grid always draws the name as a link. The Project page, outside any template, opens the
+ * document through the shell's opener (`useOpenRecord`) instead.
  */
 import * as React from 'react';
 import type { CallerIdentity } from '../../../api/delete-own';

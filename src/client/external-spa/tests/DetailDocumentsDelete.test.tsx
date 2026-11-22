@@ -1025,7 +1025,7 @@ describe('the record detail view', () => {
   );
 
   it(
-    "Project, ViewOnly: no Upload; downloads and the caller's own Delete remain",
+    'Project, ViewOnly: no Upload and no Delete (not even on their own row); downloads remain',
     async () => {
       installDetailNet(
         'project',
@@ -1038,9 +1038,11 @@ describe('the record detail view', () => {
       const docs = await within(dialog).findByTestId('record-detail-documents');
       await within(docs).findByText('Mine.pdf', undefined, SLOW);
 
-      await waitFor(() => expect(within(docs).queryAllByRole('button', { name: 'Delete' })).toHaveLength(1));
+      await waitFor(() => expect(docAction(within(docs), 'Theirs.pdf', 'Download')).toBeTruthy());
+      // The list has answered and /me has settled: give a late Delete the chance to show (hide, never disable).
+      await new Promise(resolve => setTimeout(resolve, 100));
+      expect(within(docs).queryAllByRole('button', { name: 'Delete' })).toHaveLength(0);
       expect(within(dialog).queryByRole('button', { name: 'Upload documents' })).toBeNull();
-      expect(docAction(within(docs), 'Theirs.pdf', 'Download')).toBeTruthy();
     },
     SLOW
   );
@@ -1076,7 +1078,7 @@ describe('the record detail view', () => {
   );
 
   it(
-    'Matter, a ViewOnly reader (canCreate false): no Upload; downloads and the own-row Delete remain',
+    'Matter, a ViewOnly reader (canCreate false): no Upload and no Delete (not even on their own row); downloads remain',
     async () => {
       installDetailNet('matter', emptyNet({ documents: mixedDocs(), documentsCanCreate: false }));
       const dialog = await openDetail('matter');
@@ -1085,7 +1087,9 @@ describe('the record detail view', () => {
 
       expect(within(dialog).queryByRole('button', { name: 'Upload documents' })).toBeNull();
       expect(docAction(within(docs), 'Theirs.pdf', 'Download')).toBeTruthy();
-      await waitFor(() => expect(within(docs).queryAllByRole('button', { name: 'Delete' })).toHaveLength(1));
+      // The list has answered and /me has settled: give a late Delete the chance to show (hide, never disable).
+      await new Promise(resolve => setTimeout(resolve, 100));
+      expect(within(docs).queryAllByRole('button', { name: 'Delete' })).toHaveLength(0);
     },
     SLOW
   );
@@ -1134,7 +1138,7 @@ describe('the record detail view', () => {
   );
 
   it(
-    "Project: the level from /me still decides Upload; the list's canCreate does not override it",
+    "Project: the level from /me still decides Upload and Delete; the list's canCreate does not override it",
     async () => {
       installDetailNet(
         'project',
@@ -1147,7 +1151,9 @@ describe('the record detail view', () => {
       const dialog = await openDetail('project');
       const docs = await within(dialog).findByTestId('record-detail-documents');
       await within(docs).findByText('Mine.pdf', undefined, SLOW);
-      await waitFor(() => expect(within(docs).queryAllByRole('button', { name: 'Delete' })).toHaveLength(1));
+      // The list has answered and /me has settled: give a late Delete the chance to show (hide, never disable).
+      await new Promise(resolve => setTimeout(resolve, 100));
+      expect(within(docs).queryAllByRole('button', { name: 'Delete' })).toHaveLength(0);
       expect(within(dialog).queryByRole('button', { name: 'Upload documents' })).toBeNull();
     },
     SLOW
@@ -1157,7 +1163,7 @@ describe('the record detail view', () => {
     [true, true],
     [false, false],
   ])(
-    'Project, per-record caller (task 036 fix round 2, F3): the list canCreate=%s decides Upload (offered: %s) over a ViewOnly level',
+    'Project, per-record caller (task 036 fix round 2, F3): the list canCreate=%s decides Upload and own-row Delete (offered: %s) over a ViewOnly level',
     async (canCreate, offered) => {
       installDetailNet(
         'project',
@@ -1174,8 +1180,14 @@ describe('the record detail view', () => {
       const dialog = await openDetail('project');
       const docs = await within(dialog).findByTestId('record-detail-documents');
       await within(docs).findByText('Mine.pdf', undefined, SLOW);
-      // /me has returned once the caller's own Delete shows.
-      await waitFor(() => expect(within(docs).queryAllByRole('button', { name: 'Delete' })).toHaveLength(1));
+      // /me has returned once the caller's own Delete shows (canCreate true); with canCreate false there is none to wait for.
+      if (offered)
+        await waitFor(() => expect(within(docs).queryAllByRole('button', { name: 'Delete' })).toHaveLength(1));
+      else {
+        // The list has answered and /me has settled: give a late Delete the chance to show (hide, never disable).
+        await new Promise(resolve => setTimeout(resolve, 100));
+        expect(within(docs).queryAllByRole('button', { name: 'Delete' })).toHaveLength(0);
+      }
 
       expect(within(dialog).queryByRole('button', { name: 'Upload documents' }) !== null).toBe(offered);
       expect(docAction(within(docs), 'Theirs.pdf', 'Download')).toBeTruthy();
