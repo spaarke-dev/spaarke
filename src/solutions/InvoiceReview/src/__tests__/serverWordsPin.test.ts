@@ -119,7 +119,7 @@ describe('the request bodies: `note` is the server\'s member name on every decis
 
   it('approve, reject and return, add and remove adjustment, override and blocked return, line decisions and corrections carry Note', () => {
     expect(recordMembers(finance('InvoiceApprovalEndpoints.cs'), 'InvoiceApprovalRequest')).toEqual(['Note']);
-    expect(recordMembers(finance('InvoiceRejectReturnEndpoints.cs'), 'InvoiceDecisionRequest')).toEqual(['Reason', 'Note']);
+    expect(recordMembers(finance('InvoiceRejectReturnEndpoints.cs'), 'InvoiceDecisionRequest')).toEqual(['Reason', 'Note', 'NoticeSubject', 'NoticeProse']);
     expect(recordMembers(finance('InvoiceAdjustmentEndpoints.cs'), 'AddAdjustmentRequest')).toEqual(['AdjustmentId', 'Method', 'Value', 'Reason', 'RuleId', 'Note']);
     expect(recordMembers(finance('InvoiceAdjustmentEndpoints.cs'), 'RemoveAdjustmentRequest')).toEqual(['Note']);
     expect(recordMembers(overrideSource(), 'BlockedDecisionRequest')).toEqual(['Reason', 'Note']);
