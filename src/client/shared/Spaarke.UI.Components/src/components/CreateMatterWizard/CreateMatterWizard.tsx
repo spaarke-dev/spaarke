@@ -57,6 +57,7 @@ import { cleanGuid } from '../../utils/guid';
 import { getXrm } from '../../utils/xrmContext';
 import { ProjectFilingChoice, readProjectFiling, type ProjectFiling } from './projectFilingChoice';
 import type { IEmailComposeHandlers } from '../EmailComposer/composeOnlySend';
+import { createWebApiFromDataService } from '../../utils/adapters/dataServiceWebApiAdapter';
 
 // ---------------------------------------------------------------------------
 // Dataverse client URL helper
@@ -816,24 +817,7 @@ export const CreateMatterWizard: React.FC<ICreateMatterWizardProps> = ({
 
   // Adapt IDataService to the IWebApi shape that CreateRecordWizard expects
   const webApiAdapter = React.useMemo(
-    () => ({
-      createRecord: async (entityName: string, data: Record<string, unknown>) => {
-        const id = await dataService.createRecord(entityName, data);
-        return { id };
-      },
-      retrieveRecord: (entityName: string, id: string, options?: string) =>
-        dataService.retrieveRecord(entityName, id, options),
-      retrieveMultipleRecords: (entityName: string, options?: string, _maxPageSize?: number) =>
-        dataService.retrieveMultipleRecords(entityName, options),
-      updateRecord: async (entityName: string, id: string, data: Record<string, unknown>) => {
-        await dataService.updateRecord(entityName, id, data);
-        return { id };
-      },
-      deleteRecord: async (entityName: string, id: string) => {
-        await dataService.deleteRecord(entityName, id);
-        return { id };
-      },
-    }),
+    () => createWebApiFromDataService(dataService),
     [dataService]
   );
 

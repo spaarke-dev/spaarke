@@ -61,6 +61,7 @@ import {
   type DataGridParentContext,
 } from '../../hooks/useDataGridContext';
 import { dataGridTokens } from './tokens';
+import { dataGridCellStyle, dataGridHeaderCellStyle } from './cellStyles';
 import {
   resolveConfig,
   resolveEffectiveAvailableViews,
@@ -461,34 +462,9 @@ const useStyles = makeStyles({
     height: '1px',
     width: '100%',
   },
-  cell: {
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
-    // Power Apps OOB body row height ≈ 38px.
-    minHeight: '38px',
-    paddingTop: tokens.spacingVerticalXS,
-    paddingBottom: tokens.spacingVerticalXS,
-    paddingLeft: tokens.spacingHorizontalM,
-    paddingRight: tokens.spacingHorizontalM,
-    fontFamily: "'Segoe UI', 'Segoe UI Web', Arial, sans-serif",
-    fontSize: tokens.fontSizeBase300,
-    fontWeight: tokens.fontWeightRegular,
-    color: tokens.colorNeutralForeground1,
-  },
-  headerCell: {
-    // Power Apps OOB header row height ≈ 41px.
-    minHeight: '41px',
-    paddingTop: tokens.spacingVerticalS,
-    paddingBottom: tokens.spacingVerticalS,
-    paddingLeft: tokens.spacingHorizontalM,
-    paddingRight: tokens.spacingHorizontalM,
-    fontFamily: "'Segoe UI', 'Segoe UI Web', Arial, sans-serif",
-    fontSize: tokens.fontSizeBase300,
-    fontWeight: tokens.fontWeightSemibold,
-    backgroundColor: dataGridTokens.header.background,
-    color: dataGridTokens.header.foreground,
-  },
+  // Shared with SearchResultsGrid (SemanticSearch) via ./cellStyles (#2866).
+  cell: dataGridCellStyle,
+  headerCell: dataGridHeaderCellStyle,
   primaryNameLink: {
     color: dataGridTokens.primaryNameLink.color,
     fontWeight: dataGridTokens.primaryNameLink.fontWeight,
