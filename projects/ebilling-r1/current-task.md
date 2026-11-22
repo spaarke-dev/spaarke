@@ -1,6 +1,6 @@
 # Current Task State
 
-> **Last Updated:** 2026-11-21 (134 complete). Session `ebilling-r1` (Claude Desktop) is the only writer to this worktree.
+> **Last Updated:** 2026-11-22 (050b complete). Session `ebilling-r1` (Claude Desktop) is the only writer to this worktree.
 > Older detail: `notes/handoff-history/current-task-2026-11-20a.md` (the previous state, verbatim), plus `-2026-11-16a`, `-15a` and `-13a`.
 
 ## Owner mode
@@ -10,7 +10,7 @@
 
 ## Quick recovery
 
-- **Active task:** none. 134 closed 2026-11-21. Next is the first open, ungated task in `tasks/TASK-INDEX.md` (050b), run through task-execute.
+- **Active task:** none. 050b closed 2026-11-22. Next open build tasks: 123, 124, 117 (see Open work), run through task-execute.
 - **Held for the PR to master:** spa-r4 reviews 134's external-spa diff (`git diff 19866f6606 5f7195b9eb -- src/client/external-spa`). Owner chose "Merge, review later" on 2026-11-21. spa-r4's session is not running; send it the diff when it is.
 - **096 gate:** word-add-in-r1 slice C (PR #2927, merge 148ec4dec0) is live on dev since 2026-11-21. 096 still waits for one add-in release after it (POML gate), then removes `POST /api/office/quickcreate/invoice` and the Invoice target of `/api/office/save`.
 - **Waiting on the owner:** the OK to redeploy the Invoice Review page to dev (checklist M2).
@@ -19,6 +19,7 @@
 
 ## Recently done (detail in the notes and git)
 
+- **050b ✅** merged into work 18b02cbdcf (branch `task/ebilling-050b`, tip b0be013e48). Deleted the legacy extraction path, `OutputOrchestratorService` and the `finance.extraction.*` metrics. One Opus review: no F1/F3, five F2 fixed in round 1. Closed #1918, #1919; reopened #2263 (Optimistic-mode defect, now off every live path). Notes: `notes/050b-retire-legacy-extraction.md`; checklist section P. Send the PR to ontology-r1 at the master PR (POML). The agent worktree has been removed.
 - **134 ✅** merged into work 5f7195b9eb (branch `task/ebilling-134`, tip b29a9e7c9a). Outcome section in the invoice record modal plus the same report on the submit result screen; print through a body-level portal (EB-D-254). Opus review (F1 print truncation, F4 reason code: fixed) and uac-r2 PASS. Notes: `notes/134-spa-invoice-outcome.md`; checklist section O. A first post-merge vitest run had 16 failures under heavy machine load; the rerun passed 1881/0.
 - **130g ✅** merged into work 6b84fb1db1. Notes: `notes/130g-firm-view-notice-prose.md`.
 - **132ui ✅** merged into work 04718b3224. ISS-041 #2930 filed. Checklist M2 waits for the page deploy.
@@ -26,7 +27,7 @@
 
 ## Open work
 
-- **Build:** 050b, 123, 124, 117, 096 (gated, see above), 121 (waits for uac-r2 191).
+- **Build:** 123, 124, 117, 096 (gated, see above), 121 (waits for uac-r2 191).
 - **Partly done:**
   - 086.
   - 164: the live `-Apply` needs the owner's go.

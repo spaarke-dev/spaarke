@@ -162,3 +162,11 @@ Both are merged into the work branch. Sign in to the external portal as a law-fi
 - [ ] With eBilling switched off, the Outcome section is not shown.
 - [ ] Open one of your firm's invoices that a reviewer Rejected or Returned **with** a notice (M2). The page shows the message the reviewer sent, as plain text, without the subject and without the internal reason or note.
 - [ ] An invoice rejected or returned **without** a notice (send off or Skip), an invoice the checks rejected automatically, and an In Review or Approved invoice show no message line.
+
+## P. Legacy extraction removed (task 050b): after the next dev BFF deploy that carries it
+
+Merged into the work branch 2026-11-22 (18b02cbdcf). Nothing visible changes; this is a regression check.
+- [ ] Submit an invoice from the Create Invoice wizard: it is read and coded as before (In Review, lines filled).
+- [ ] In Invoice Review, **Confirm** an invoice document from the review queue: it still creates the invoice through the submission (as 050a).
+- [ ] The BFF starts with no warnings about `Finance:InvoiceExtractionPlaybookId` or `Finance:ExtractionDeploymentName` (both keys are gone).
+- Owner choice, no test: the old **FinanceExtraction** (PB-013) playbook rows in dev Dataverse are now unused. Leave them, or tell me to deactivate them (a live change).

@@ -60,7 +60,7 @@ To begin: `work on task 001`. Wave W0-1 (001, 002, 003) and W2-1 (040, 041) have
 | 048 | ✅ [done] | AI code-set mapping proposals (admin-confirmed) | STANDARD | sonnet / high | P2-C | 047 |
 | 049 | ✅ [done] | `InvoiceSubmissionProcessing` job | FULL | opus / high | none | 014, 016, 043, 044, 046, 047, 072, 073 |
 | 050a | 🟡 [implemented, on master; owner questions in notes §9 items 2–4 open] | Redirect the review-confirm route into the submission operation (D-134) | FULL | opus / high | none | 042, 049 |
-| 050b | 🔲 [open] | Retire the legacy extraction path (deletion) | STANDARD | sonnet / high | none | 042, 049, 050a |
+| 050b | ✅ [done] | Retire the legacy extraction path (deletion) | STANDARD | sonnet / high | none | 042, 049, 050a |
 | 051 | ✅ [done] | SPA submission UI (shared wizard component) | STANDARD | sonnet / high | P2-D | 044 |
 | 052 | ✅ [done; browser ui-tests deferred to 112, notes/052-createinvoicewizard-rewire.md] | `CreateInvoiceWizard` rewired to the internal entry point | STANDARD | sonnet / high | P4-C | 044, 051, 105 |
 | 053 | 🔲 [open; steps 2-3 done on dev 2026-11-03, notes/053-wp2-deploy.md] | Deploy WP2 to dev | STANDARD | sonnet / high | none (deploy) | 042, 043, 044, 045, 046, 047, 048, 049, 050a, 050b, 051, 054 |
