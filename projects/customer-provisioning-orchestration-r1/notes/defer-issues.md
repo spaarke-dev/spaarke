@@ -10,11 +10,44 @@
 
 ## Open (in priority order)
 
-### ISS-033 — H9 gives up on a slot swap after 10 min while ACME's swap takes 11, then retries into the still-running swap
+### ISS-034 — H13 keyless-proof times out against a BFF still warming up after H9's swap
 
 | Field | Value |
 |---|---|
 | **Status** | Open |
+| **Urgency** | soon (every first H13 after a BFF deploy on S1; workaround: resume) |
+| **Filed** | 2026-11-22 |
+| **Source** | ACME upgrade run `3b6f7b65`: H13 failed `h13-extended-validation-inconclusive` (keyless-proof: no answer within 90 s) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2970 |
+
+**Description**
+
+H9 finished the swap at 19:22:07Z, and the new production BFF process had started at 19:20:36Z. H13 called `POST /api/platform/keyless-proof` at 19:23:02Z. ACME's App Insights shows the call took 98.5 s in all:
+- the request waited 33 s before the endpoint ran (19:23:35Z);
+- the `openai-chat` probe timed out after 36 s, over its 30 s cap, although the OpenAI call itself returned 200 in 1.5 s at 19:24:17Z;
+- the BFF answered at 19:24:40Z, logged as 499.
+
+H13 had given up at `KeylessProofTimeout` (90 s), so the run failed. The isolation census that followed took 45 s and returned Isolated. The owner chose to resume against the warm BFF (2026-11-22).
+
+**Entry-points**
+
+- `src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/E2EAcceptance/E2EValidationRunner.cs:413-457`
+- `src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/E2EAcceptance/H13AcceptanceOptions.cs:50`
+- `src/server/api/Sprk.Bff.Api/Infrastructure/Diagnostics/KeylessProbeRunner.cs:29`
+
+**Suggested fix**
+
+- Wait for a warm BFF before the keyless-proof call: `/healthz` fast several times in a row, or the process a few minutes old, within a ceiling.
+- Retry a keyless-proof timeout once after a delay before reporting Inconclusive.
+- Keep the 90 s per-call limit, so a BFF that is really stuck is still reported.
+
+**Estimated effort**: 2–3 h with tests.
+
+### ISS-033 — H9 gives up on a slot swap after 10 min while ACME's swap takes 11, then retries into the still-running swap
+
+| Field | Value |
+|---|---|
+| **Status** | Fixed — PR #2956 merged `c39114e7c6` 2026-11-22 (30-min swap wait; slot guard waits out a swap in flight); verified on ACME (H9 passed on resume) |
 | **Urgency** | now (every BFF deploy to a stamp on S1) |
 | **Filed** | 2026-11-22 |
 | **Source** | ACME upgrade run `3b6f7b65`: H9 failed `scheduled-jobs-slot-guard-failed` (409 "prepared for swap") after `slot-swap-infra-fault` |
