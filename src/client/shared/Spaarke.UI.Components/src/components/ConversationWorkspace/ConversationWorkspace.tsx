@@ -53,12 +53,21 @@
  * Direct conversations (`listThreads({ kind: 'direct' })`, decided server-side) and names each row by the other person
  * (`counterpartName`); its ＋ opens `<NewDirectMessageModal />` (one internal user + an optional first message). All is
  * today's list and its ＋ keeps `<NewThreadModal />`. Record mode shows no switch.
+ *
+ * --- Private messages in a record (fm task 056) ---
+ * In record mode on a matter, project or work assignment, with a `navigationService`, the thread pane gains "Send
+ * privately…": the `<NewDirectMessageModal />` person picker with the record fixed as context. The list also gains one
+ * "Private · you and {name}" entry per counterpart (`listThreads({ about })`, caller-filtered server-side). An entry stands
+ * for the pair's Direct thread but is never mixed into a record thread: opening it reads that thread narrowed to the
+ * messages about the record (`IConversationRendererProps.about`), with an "Open full conversation" link
+ * (`onOpenFullConversation`) to the whole pair thread. Without a `regarding` the shell shows none of this.
  */
 import * as React from 'react';
 import { Tab, TabList, Text, makeStyles, mergeClasses, tokens } from '@fluentui/react-components';
 import { CommentMultipleRegular } from '@fluentui/react-icons';
 import type { AuthenticatedFetchFn } from '../../services/EntityCreationService';
 import type { INavigationService } from '../../types/serviceInterfaces';
+import { isPrivateContextEntityType } from '../../services/communicationApi';
 import {
   deactivateThread,
   getThreadUnreadCount,
@@ -83,6 +92,8 @@ export interface IConversationWorkspaceRegarding {
   /** Logical entity name (e.g. `sprk_matter`, `contact`) — one of the 11 ADR-024 families. */
   entityType: string;
   id: string;
+  /** Optional display name, used in the "Send privately" dialog ("About {name}"). */
+  name?: string;
 }
 
 /** Props handed to the injected `renderConversation` seam for the currently-selected thread. */
@@ -100,6 +111,13 @@ export interface IConversationRendererProps {
    * affordance. Undefined for a record-less Direct thread (or when the list row doesn't carry regarding).
    */
   regarding?: IConversationWorkspaceRegarding;
+  /**
+   * Set when the selected entry is a record's "Private · you and …" entry (fm task 056): the record the private messages
+   * are about. Forward it to `<ConversationView about={…} />` so the read is narrowed to them.
+   */
+  about?: IConversationWorkspaceRegarding;
+  /** Set with `about`: switches the pane to the pair's whole conversation. Forward it to `<ConversationView onOpenFullConversation={…} />`. */
+  onOpenFullConversation?: () => void;
   authenticatedFetch: AuthenticatedFetchFn;
   bffBaseUrl?: string;
   /**
@@ -181,6 +199,9 @@ export interface ConversationWorkspaceProps {
   /** Optional className applied to the root layout container. */
   className?: string;
 }
+
+/** Prefix of a private entry's list-row id, so it never collides with the pair thread's own id. */
+const PRIVATE_ROW_PREFIX = 'private:';
 
 // ---------------------------------------------------------------------------
 // Styles
@@ -319,6 +340,7 @@ export const ConversationWorkspace: React.FC<ConversationWorkspaceProps> = ({
   // after a create so the new/reused thread appears.
   const [newThreadOpen, setNewThreadOpen] = React.useState(false);
   const [newDirectOpen, setNewDirectOpen] = React.useState(false);
+  const [sendPrivatelyOpen, setSendPrivatelyOpen] = React.useState(false);
   const [reloadToken, setReloadToken] = React.useState(0);
 
   const client = React.useMemo<IThreadListApiClientOptions>(
@@ -333,6 +355,13 @@ export const ConversationWorkspace: React.FC<ConversationWorkspaceProps> = ({
   const messagesView = !regarding && view === 'messages';
   // The list scope: a change of record or of view re-selects the first row of the new list.
   const regardingKey = entityType && recordId ? `${entityType}:${recordId}` : messagesView ? 'messages' : undefined;
+  // Private messages (fm task 056) exist only for a matter, project or work assignment record.
+  const privateRecord = !!entityType && !!recordId && isPrivateContextEntityType(entityType);
+  const canSendPrivately = privateRecord && !!navigationService;
+  // The record's "Private · you and …" entries: one pair thread per counterpart, from the `about` list.
+  const [privateRows, setPrivateRows] = React.useState<IThreadListItemDto[]>([]);
+  // True while the selected thread is shown as a private entry (narrowed to messages about the record).
+  const [privateSelected, setPrivateSelected] = React.useState(false);
 
   // — Thread list load (regarding-scoped vs. all-mode) —
   // The thread-list text filter was removed in the Teams-style redesign (task
@@ -370,6 +399,26 @@ export const ConversationWorkspace: React.FC<ConversationWorkspaceProps> = ({
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [entityType, recordId, messagesView, pageSize, client, reloadToken]);
+
+  // — The record's private entries (fm task 056). A failure here must not break the record's own list. —
+  React.useEffect(() => {
+    if (!privateRecord || !entityType || !recordId) {
+      setPrivateRows([]);
+      return undefined;
+    }
+    let cancelled = false;
+    listThreads({ top: pageSize, about: { entityType, id: recordId } }, client)
+      .then(result => {
+        if (!cancelled) setPrivateRows(result.threads);
+      })
+      .catch(err => {
+        console.warn('ConversationWorkspace: the private-entries list failed to load', err);
+        if (!cancelled) setPrivateRows([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [privateRecord, entityType, recordId, pageSize, client, reloadToken]);
 
   // No thread-list text filter anymore (task 062 / §B4) — the visible set is
   // exactly the loaded, access-filtered set for the current scope.
@@ -423,6 +472,7 @@ export const ConversationWorkspace: React.FC<ConversationWorkspaceProps> = ({
     if (regardingChanged) {
       prevRegardingKeyRef.current = regardingKey;
       const next = allRows[0]?.threadId;
+      setPrivateSelected(false);
       setSelectedThreadId(next);
       onThreadSelected?.(next);
       return;
@@ -440,12 +490,53 @@ export const ConversationWorkspace: React.FC<ConversationWorkspaceProps> = ({
   }, [listStatus, allRows, regardingKey, initialThreadId]);
 
   const handleSelectThread = React.useCallback(
-    (threadId: string) => {
+    (rowId: string) => {
+      // A private entry selects its pair thread, narrowed to the messages about the record (fm task 056).
+      const isPrivateEntry = rowId.startsWith(PRIVATE_ROW_PREFIX);
+      const threadId = isPrivateEntry ? rowId.slice(PRIVATE_ROW_PREFIX.length) : rowId;
+      setPrivateSelected(isPrivateEntry);
       setSelectedThreadId(threadId);
       onThreadSelected?.(threadId);
     },
     [onThreadSelected]
   );
+
+  const handleSendPrivately = React.useCallback(() => setSendPrivatelyOpen(true), []);
+
+  // The private dialog sent (or, on the "send as a direct message instead" fallback, sent plainly). A private send selects
+  // the record's private entry for that pair, showing it before the list re-fetch lands; a plain fallback adds nothing to
+  // the record's list. The modal closes itself on success.
+  const handlePrivateSent = React.useCallback(
+    (threadId: string, counterpartName: string, sentPrivately?: boolean) => {
+      if (sentPrivately) {
+        setPrivateRows(prev =>
+          prev.some(r => r.threadId === threadId)
+            ? prev
+            : [
+                {
+                  threadId,
+                  name: null,
+                  threadType: 100000001,
+                  createdOn: null,
+                  isPinned: false,
+                  regardingEntityType: null,
+                  regardingId: null,
+                  counterpartName,
+                },
+                ...prev,
+              ]
+        );
+        setPrivateSelected(true);
+        setSelectedThreadId(threadId);
+        onThreadSelected?.(threadId);
+      }
+      setReloadToken(t => t + 1);
+    },
+    [onThreadSelected]
+  );
+
+  // "Open full conversation": the same pair thread, no longer narrowed.
+  const handleOpenFullConversation = React.useCallback(() => setPrivateSelected(false), []);
 
   // — New-conversation create flow (item 5a / item 9) —
   // The ＋ affordance is enabled when the shell can start a create (its own modal
@@ -473,6 +564,7 @@ export const ConversationWorkspace: React.FC<ConversationWorkspaceProps> = ({
       // find-or-create returned a thread — select it immediately (the right pane
       // renders straight off `selectedThreadId`, so the conversation shows before
       // the list refresh completes) and re-fetch the list so the row appears.
+      setPrivateSelected(false);
       setSelectedThreadId(threadId);
       onThreadSelected?.(threadId);
       setReloadToken(t => t + 1);
@@ -513,6 +605,7 @@ export const ConversationWorkspace: React.FC<ConversationWorkspaceProps> = ({
               ...prev,
             ]
       );
+      setPrivateSelected(false);
       setSelectedThreadId(threadId);
       onThreadSelected?.(threadId);
       setReloadToken(t => t + 1);
@@ -590,8 +683,16 @@ export const ConversationWorkspace: React.FC<ConversationWorkspaceProps> = ({
     // Pinned threads float to the top (FR-24). Array.prototype.sort is spec-guaranteed stable (ES2019+), so within
     // the pinned/unpinned groups the existing order — server createdon-desc (all-mode) or server order
     // (record-mode) — and the word filter's already-narrowed set are both preserved untouched.
-    return [...mapped].sort((a, b) => Number(!!b.isPinned) - Number(!!a.isPinned));
-  }, [visibleRows, unreadCounts, messagesView]);
+    const sorted = [...mapped].sort((a, b) => Number(!!b.isPinned) - Number(!!a.isPinned));
+    // The record's private entries follow its own threads, one per counterpart (fm task 056). Read-only rows: pin and
+    // delete would act on the whole pair conversation.
+    const privateEntries: IThreadListRow[] = privateRows.map(r => ({
+      threadId: `${PRIVATE_ROW_PREFIX}${r.threadId}`,
+      name: `Private · you and ${r.counterpartName ?? 'a colleague'}`,
+      readOnly: true,
+    }));
+    return [...sorted, ...privateEntries];
+  }, [visibleRows, unreadCounts, messagesView, privateRows]);
 
   const rightPane = selectedThreadId ? (
     renderConversation ? (
@@ -600,7 +701,11 @@ export const ConversationWorkspace: React.FC<ConversationWorkspaceProps> = ({
         // Selected thread's display name for the message-pane header (round-8.4 item 3b).
         threadName: (() => {
           const row = allRows.find(r => r.threadId === selectedThreadId);
-          return (messagesView && row?.counterpartName) || row?.name || undefined;
+          if (row) return (messagesView && row.counterpartName) || row.name || undefined;
+          // Not one of the record's own threads: a private entry's pair thread (narrowed or opened in full).
+          const who = privateRows.find(r => r.threadId === selectedThreadId)?.counterpartName;
+          if (!who) return undefined;
+          return privateSelected ? `Private · you and ${who}` : who;
         })(),
         // Selected thread's associated record for the message-pane "open record" affordance (round-8.4 item 3).
         regarding: (() => {
@@ -609,6 +714,8 @@ export const ConversationWorkspace: React.FC<ConversationWorkspaceProps> = ({
             ? { entityType: row.regardingEntityType, id: row.regardingId }
             : undefined;
         })(),
+        about: privateSelected && regarding ? regarding : undefined,
+        onOpenFullConversation: privateSelected ? handleOpenFullConversation : undefined,
         authenticatedFetch,
         bffBaseUrl,
         // Relocated mark-as-read (item 5c): clear THIS thread's list badge when
@@ -644,9 +751,12 @@ export const ConversationWorkspace: React.FC<ConversationWorkspaceProps> = ({
               rows={threadListRows}
               status={listStatus}
               errorMessage={errorMessage}
-              selectedThreadId={selectedThreadId}
+              selectedThreadId={
+                selectedThreadId && privateSelected ? `${PRIVATE_ROW_PREFIX}${selectedThreadId}` : selectedThreadId
+              }
               onSelectThread={handleSelectThread}
               onCreateThread={canCreateThread ? handleOpenNewThread : undefined}
+              onSendPrivately={canSendPrivately ? handleSendPrivately : undefined}
               onCollapse={toggleCollapse}
               titleAccessory={threadsHeaderAccessory}
               onTogglePin={handleTogglePin}
@@ -691,6 +801,19 @@ export const ConversationWorkspace: React.FC<ConversationWorkspaceProps> = ({
           navigationService={navigationService}
           onThreadCreated={handleThreadCreated}
           regarding={regarding ? { entityType: regarding.entityType, id: regarding.id } : undefined}
+          onError={onError}
+        />
+      )}
+      {/* "Send privately…" (fm task 056): the same person picker, with the record fixed as context. */}
+      {navigationService && canSendPrivately && regarding && (
+        <NewDirectMessageModal
+          open={sendPrivatelyOpen}
+          onDismiss={() => setSendPrivatelyOpen(false)}
+          authenticatedFetch={authenticatedFetch}
+          bffBaseUrl={bffBaseUrl}
+          navigationService={navigationService}
+          privateContext={{ entityType: regarding.entityType, id: regarding.id, name: regarding.name }}
+          onConversationStarted={handlePrivateSent}
           onError={onError}
         />
       )}

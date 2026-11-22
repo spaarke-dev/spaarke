@@ -12,6 +12,14 @@
  * posted on the conversation through the existing send path (`sendCommunication`, the same request the message pane
  * sends); a send failure is non-fatal: the conversation exists, so it is selected and a warning stays on screen.
  *
+ * ── PRIVATE MODE (fm task 056) ──
+ * With `privateContext` the modal is the record's "Send privately…" dialog: the same person picker, with the record fixed
+ * as context and a first message REQUIRED. Submit is `startDirectThread` then `sendCommunication` with `privateContext`. The
+ * server may refuse the send (403 recipient / sender access, 503 check unavailable, 409 columns missing, 400): the
+ * owner's wording is shown (`privateSendRefusalMessage`), the dialog stays open, and the pair's thread id is kept for the
+ * chosen person so a retry never starts a second conversation. A recipient refusal also offers "Send as a direct message
+ * instead", which re-sends the same text to the same pair thread WITHOUT the record context.
+ *
  * Differs from `NewThreadModal` (record-anchored: a name and a required record, `createRecordThread`); the two share only
  * the `FormModal` shell and the message box (fm task 055 notes, §11).
  *
@@ -19,7 +27,16 @@
  * Fluent v9 tokens only (ADR-021).
  */
 import * as React from 'react';
-import { Textarea, Text, MessageBar, MessageBarBody, makeStyles, tokens } from '@fluentui/react-components';
+import {
+  Button,
+  Textarea,
+  Text,
+  MessageBar,
+  MessageBarActions,
+  MessageBarBody,
+  makeStyles,
+  tokens,
+} from '@fluentui/react-components';
 
 import { FormModal } from '../SprkModal/presets/FormModal';
 import { DataverseLookupField } from '../LookupField/DataverseLookupField';
@@ -27,7 +44,11 @@ import { INTERNAL_USER_LOOKUP_FILTERS } from '../LookupField/lookupFilters';
 import type { ILookupItem } from '../../types/LookupTypes';
 import type { INavigationService } from '../../types/serviceInterfaces';
 import type { AuthenticatedFetchFn } from '../../services/EntityCreationService';
-import { sendCommunication } from '../../services/communicationApi';
+import {
+  isPrivateRecipientRefusal,
+  privateSendRefusalMessage,
+  sendCommunication,
+} from '../../services/communicationApi';
 import { startDirectThread, type IThreadListApiClientOptions } from '../../services/communicationThreadListApi';
 
 export interface INewDirectMessageModalProps {
@@ -43,9 +64,16 @@ export interface INewDirectMessageModalProps {
   navigationService: INavigationService;
   /**
    * The conversation's thread id and the person's display name. The shell selects the thread. Also fired when the
-   * conversation was started but its first message failed to send (non-fatal).
+   * conversation was started but its first message failed to send (non-fatal). `sentPrivately` is true only when a
+   * private message about the record went out (private mode); it is false for the plain Direct flow and for the
+   * "send as a direct message instead" fallback.
    */
-  onConversationStarted: (threadId: string, counterpartName: string) => void;
+  onConversationStarted: (threadId: string, counterpartName: string, sentPrivately?: boolean) => void;
+  /**
+   * Private mode (fm task 056): the record the message is about. `name` is shown when the host knows it; otherwise the
+   * dialog says "this {record kind}". Valid only for the three core record types the server accepts.
+   */
+  privateContext?: { entityType: string; id: string; name?: string };
   /** Fired on any failure: start (fatal) or first-message send (non-fatal). */
   onError?: (error: Error) => void;
   /** Title override. Default "New message". */
@@ -77,7 +105,15 @@ const useStyles = makeStyles({
 interface INotice {
   text: string;
   intent: 'error' | 'warning';
+  /** Private mode, recipient refusal only: offer "Send as a direct message instead". */
+  offerDirect?: boolean;
 }
+
+const RECORD_KIND_LABEL: Record<string, string> = {
+  sprk_matter: 'matter',
+  sprk_project: 'project',
+  sprk_workassignment: 'work assignment',
+};
 
 function toError(err: unknown, fallback: string): Error {
   return err instanceof Error ? err : new Error(fallback);
@@ -91,7 +127,8 @@ export const NewDirectMessageModal: React.FC<INewDirectMessageModalProps> = ({
   navigationService,
   onConversationStarted,
   onError,
-  title = 'New message',
+  privateContext,
+  title,
   uiScale,
 }) => {
   const styles = useStyles();
@@ -101,6 +138,12 @@ export const NewDirectMessageModal: React.FC<INewDirectMessageModalProps> = ({
   const [submitting, setSubmitting] = React.useState(false);
   const [personError, setPersonError] = React.useState<string | undefined>(undefined);
   const [notice, setNotice] = React.useState<INotice | undefined>(undefined);
+  const [bodyError, setBodyError] = React.useState<string | undefined>(undefined);
+  // Private mode: the pair's thread for the chosen person, kept after the first start so a retry (after a refusal) does
+  // not call find-or-create again.
+  const pairRef = React.useRef<{ personId: string; threadId: string } | undefined>(undefined);
+  const isPrivate = !!privateContext;
+  const effectiveTitle = title ?? (isPrivate ? 'Send privately' : 'New message');
 
   // The host owns `open` and may unmount this modal while a request is in flight; only local setState is gated.
   const mountedRef = React.useRef(true);
@@ -121,7 +164,9 @@ export const NewDirectMessageModal: React.FC<INewDirectMessageModalProps> = ({
     setBody('');
     setSubmitting(false);
     setPersonError(undefined);
+    setBodyError(undefined);
     setNotice(undefined);
+    pairRef.current = undefined;
   }, []);
 
   const handleCancel = React.useCallback(() => {
@@ -132,10 +177,15 @@ export const NewDirectMessageModal: React.FC<INewDirectMessageModalProps> = ({
 
   const handleSubmit = React.useCallback(async () => {
     setPersonError(undefined);
+    setBodyError(undefined);
     setNotice(undefined);
 
     if (!person) {
       setPersonError('Choose the person to message.');
+      return;
+    }
+    if (privateContext && !body.trim()) {
+      setBodyError('Write the message to send.');
       return;
     }
 
@@ -143,7 +193,12 @@ export const NewDirectMessageModal: React.FC<INewDirectMessageModalProps> = ({
 
     let threadId: string;
     try {
-      threadId = (await startDirectThread({ otherParticipantSystemUserId: person.id }, client)).threadId;
+      const kept = pairRef.current;
+      threadId =
+        privateContext && kept && kept.personId === person.id
+          ? kept.threadId
+          : (await startDirectThread({ otherParticipantSystemUserId: person.id }, client)).threadId;
+      if (privateContext) pairRef.current = { personId: person.id, threadId };
     } catch (err) {
       const error = toError(err, 'The conversation could not be started.');
       onError?.(error);
@@ -154,6 +209,36 @@ export const NewDirectMessageModal: React.FC<INewDirectMessageModalProps> = ({
     }
 
     const text = body.trim();
+    if (privateContext) {
+      try {
+        await sendCommunication(
+          {
+            communicationType: 'message',
+            threadId,
+            body: text,
+            bodyFormat: 'text',
+            privateContext: { entityType: privateContext.entityType, id: privateContext.id },
+          },
+          client
+        );
+      } catch (sendErr) {
+        // A refusal keeps the dialog open with the owner's wording. The pair thread (new or reused) is NOT handed to the
+        // host: nothing was sent, and the record's thread list must not gain an entry for it.
+        onError?.(toError(sendErr, 'The private message could not be sent.'));
+        if (!mountedRef.current) return;
+        setNotice({
+          text: privateSendRefusalMessage(sendErr),
+          intent: 'error',
+          offerDirect: isPrivateRecipientRefusal(sendErr),
+        });
+        setSubmitting(false);
+        return;
+      }
+      onConversationStarted(threadId, person.name, true);
+      if (mountedRef.current) resetState();
+      onDismiss();
+      return;
+    }
     if (text) {
       try {
         await sendCommunication({ communicationType: 'message', threadId, body: text, bodyFormat: 'text' }, client);
@@ -173,6 +258,30 @@ export const NewDirectMessageModal: React.FC<INewDirectMessageModalProps> = ({
     onConversationStarted(threadId, person.name);
     if (mountedRef.current) resetState();
     onDismiss();
+  }, [person, body, client, privateContext, onConversationStarted, resetState, onDismiss, onError]);
+
+  // Recipient refusal only: send the same text to the same pair thread as an ordinary Direct message (no record context).
+  const handleSendDirectInstead = React.useCallback(async () => {
+    const kept = pairRef.current;
+    const text = body.trim();
+    if (!person || !kept || kept.personId !== person.id || !text) return;
+    setNotice(undefined);
+    setSubmitting(true);
+    try {
+      await sendCommunication(
+        { communicationType: 'message', threadId: kept.threadId, body: text, bodyFormat: 'text' },
+        client
+      );
+    } catch (err) {
+      onError?.(toError(err, 'The message could not be sent.'));
+      if (!mountedRef.current) return;
+      setNotice({ text: toError(err, 'The message could not be sent.').message, intent: 'error' });
+      setSubmitting(false);
+      return;
+    }
+    onConversationStarted(kept.threadId, person.name, false);
+    if (mountedRef.current) resetState();
+    onDismiss();
   }, [person, body, client, onConversationStarted, resetState, onDismiss, onError]);
 
   return (
@@ -180,12 +289,17 @@ export const NewDirectMessageModal: React.FC<INewDirectMessageModalProps> = ({
       open={open}
       onClose={handleCancel}
       onSubmit={handleSubmit}
-      title={title}
+      title={effectiveTitle}
       size="md"
-      submitLabel={submitting ? 'Starting…' : 'Start'}
+      submitLabel={isPrivate ? (submitting ? 'Sending…' : 'Send') : submitting ? 'Starting…' : 'Start'}
       busy={submitting}
       uiScale={uiScale}
     >
+      {privateContext && (
+        <Text>
+          {`About ${privateContext.name ?? `this ${RECORD_KIND_LABEL[privateContext.entityType] ?? 'record'}`}. Only you and the person you choose can read this message.`}
+        </Text>
+      )}
       <DataverseLookupField
         label="To"
         required
@@ -212,13 +326,29 @@ export const NewDirectMessageModal: React.FC<INewDirectMessageModalProps> = ({
           disabled={submitting}
           resize="none"
           aria-label="Message"
-          placeholder="Optional — add a first message, or open the conversation empty."
+          placeholder={
+            isPrivate
+              ? 'Write your private message.'
+              : 'Optional — add a first message, or open the conversation empty.'
+          }
         />
       </div>
+      {bodyError && (
+        <Text role="alert" className={styles.errorText}>
+          {bodyError}
+        </Text>
+      )}
 
       {notice && (
         <MessageBar intent={notice.intent} role={notice.intent === 'error' ? 'alert' : 'status'}>
           <MessageBarBody>{notice.text}</MessageBarBody>
+          {notice.offerDirect && (
+            <MessageBarActions>
+              <Button size="small" onClick={() => void handleSendDirectInstead()} disabled={submitting}>
+                Send as a direct message instead
+              </Button>
+            </MessageBarActions>
+          )}
         </MessageBar>
       )}
     </FormModal>
