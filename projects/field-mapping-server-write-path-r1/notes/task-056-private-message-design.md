@@ -1,8 +1,8 @@
 # Task 056a — Private messages in a record's context: design note
 
 > Status (2026-11-22): **UAC-r2 approved the access parts on conditions C1–C6**, now written into this note. The owner's
-> answers to Q0–Q6 are still needed. No code until UAC-r2 has checked C1–C6 in this revision and the owner's answers are
-> recorded in `notes/decisions.md` (POML 056 gate).
+> answers are in (`notes/decisions.md`, 2026-11-22): all as recommended, except Q2.4 (either behaviour allowed; the
+> easier one, no revoke, is kept) and Q3 (the refusal text is the owner's). No code until UAC-r2 has checked this revision.
 > Issue: #2923. Starts from: MR-1 in `projects/messages-enhancements-r1/requirements.md`, which holds UAC-r2's access
 > rules of 2026-11-09. This note keeps those rules and states how the current code meets them.
 > Code references were mapped on 2026-11-22 from `work/field-mapping-server-write-path-r1` at 89c9efb43b; line numbers drift.
@@ -86,10 +86,17 @@ UAC-r2's ownership files (POML 056 escalation trigger 1).
    - The flag checked is the record's **effective** Restricted flag through its filing (`EffectiveRootFlags`, round
      84), not only its own stored value.
    - An effective flag or an external flag that cannot be read refuses.
-3. **One neutral refusal** for every case: the record is secure, it is Restricted, the recipient cannot read it, or a
-   check fault. Configuration problems keep their existing distinct codes: 409 for configuration, 503 for a fault. The
-   sender learns only that a private message about this record cannot go to this person.
-4. **After the send (C6; the owner answers this explicitly, Q2.4).** None of these take the message from either
+3. **One refusal for every recipient-side cause.** The text is the owner's: "Recipient does not have required record
+   access".
+   - It covers the recipient not reading the record, the No Access wall, and an external recipient on a Restricted
+     record. It never says which.
+   - The sender learns only that this person lacks access to this record. That is what any refusal of this send tells
+     them, and nothing about the record's flags.
+   - A sender who fails their own Read check gets "You do not have required record access".
+   - A check that cannot be answered gives 503 "try again". Configuration problems keep their existing 409.
+4. **After the send (C6, Q2.4).** The owner allows either behaviour ("not required if easier to remove access"), so the
+   easier one is chosen: nothing revokes. Removing access would need new machinery that watches record and user access
+   changes. None of these take the message from either
    participant:
    - the record later becoming Restricted;
    - a later No Access entry;
@@ -97,7 +104,7 @@ UAC-r2's ownership files (POML 056 escalation trigger 1).
 
    The message is the pair's own correspondence. It has no filing parent, so UAC-r2 task 198 revokes nothing on it. The
    record reference (name, number, link) is resolved **as the viewer** and hidden from a viewer who can no longer read
-   the record. Recommendation: accept.
+   the record.
 
 Secure records need no extra rule. The message is never filed, so the 2026-11-09 rule ("participants keep their shares
 when a Direct message is filed, except on secure or Restricted targets") does not come into play until someone files it
@@ -105,10 +112,10 @@ when a Direct message is filed, except on secure or Restricted targets") does no
 
 ### Q3. A recipient who cannot read the record
 
-**Recommendation: refuse the send**, with the neutral message from Q2.3.
+**Owner (2026-11-22): refuse the send** with "Recipient does not have required record access" (Q2.3).
 
-- The client then offers "Send as a direct message instead". That sends the same text with no context reference
-  through the existing Direct path.
+- **Optional:** the client offers "Send as a direct message instead". That sends the same text with no context
+  reference through the existing Direct path. It is built only if it is a small addition in 056b.
 - Rejected: allowing the message and hiding the reference from the recipient. The sender would believe they are
   discussing the record with someone who cannot see it. That is the case MR-1 rule 2 refuses.
 
@@ -285,13 +292,13 @@ code, and it is open.
 
 ## 5. Questions
 
-| # | For | Question | Recommendation |
+| # | For | Question | Answer (owner 2026-11-22; UAC-r2) |
 |---|---|---|---|
 | Q0 | owner | "In the record's thread": shown in the record's conversation, or stored in the record's thread row? | Shown there, stored in the pair's Direct thread (§1) |
 | Q1 | owner | What other readers see | Nothing |
-| Q2 | owner | Secure and Restricted records | Allowed if both participants read the record and pass the No Access check; external participants refused on an effectively Restricted record; one neutral refusal |
-| Q2.4 | owner | After the send: does a later Restricted flag, No Access entry or lost Read take the message from either participant? | No. It stays theirs, and the record reference is hidden from a viewer who cannot read the record (C6) |
-| Q3 | owner | Recipient cannot read the record | Refuse, offer "Send as a direct message instead" |
+| Q2 | owner | Secure and Restricted records | Allowed if both participants read the record and pass the No Access check; external participants refused on an effectively Restricted record; one refusal text for the recipient-side causes |
+| Q2.4 | owner | After the send: does a later Restricted flag, No Access entry or lost Read take the message from either participant? | Either is acceptable (owner); the easier is kept: no. It stays theirs, and the record reference is hidden from a viewer who cannot read the record (C6) |
+| Q3 | owner | Recipient cannot read the record | Refuse with "Recipient does not have required record access"; the "Send as a direct message instead" offer only if small |
 | Q4 | owner | Ownership | Direct team + the stamped pair, unchanged |
 | Q5 | owner | Filing later | Explicit, confirmed, context record suggested; no reference added to an existing message |
 | Q6 | owner | Where it surfaces | Record conversation view (pair only, per counterpart) and the Messages view |
