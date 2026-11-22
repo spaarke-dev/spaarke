@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="198" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>A blocking SprkModal that yields to a lookup side pane must not leave its backdrop over the pane (file preview → Email → To lookup is unclickable)</title>
+    <phase>12 Create-wizard lookups and composer (185 dev check fixes)</phase>
+    <gate>startable</gate>
+    <status>in-progress</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .tsx in the shared UI library (SprkModal, used by every modal); PCF version bump.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Located defect with a stated fix and an existing test file to extend.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>185-fixes</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>No other open task touches SprkModal.</parallel-reason>
+    <deps>none</deps>
+    <tags>react, fluent-ui, frontend, pcf, testing</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+  <prompt>Found by the main session's browser check on dev, 2026-11-22 (notes/task-185-notes.md, "Browser check by the main session"). Path: Matter form → Documents (SemanticSearchControl PCF 1.1.89) → open a file preview → ⋮ → Email → Compose → click To. The Dataverse "Lookup Records" pane opens at the right edge, but nothing in it can be clicked. `document.elementFromPoint` over the pane returns `div.fui-DialogSurface__backdrop` inside the PCF portal's `div.fui-FluentProvider` (z-index 1000000, pointer-events auto, rgba(0,0,0,0.4)). It is the still-open preview dialog's backdrop. Owner: "Fix it now".</prompt>
+  <role>SPAARKE frontend developer. Expert in React 16-19, Fluent UI v9 Dialog, and the shared `@spaarke/ui-components` SprkModal.</role>
+  <goal>While any SprkModal yields to a side pane (`yieldToSidePane` true and not `hidden`), nothing the modal renders (surface or backdrop) takes pointer input or keyboard focus away from the side pane, whether the layering hook ends in 'under', 'dock' or 'pending'. When yielding ends, the modal is exactly as before (blocking modals block again, backdrop back, content and state not remounted).</goal>
+  <context>
+    <background>
+- Root cause: `SprkModal.tsx` (origin/master ~174-245). While yielding it sets the SURFACE to `pointer-events: none` + `inert` (SIDE_PANE_DIM_STYLE / SIDE_PANE_DOCK_STYLE) and `useSidePaneLayering` may lower the modal's page layer under the pane. But the blocking Dialog (`modalType='modal'`, no `nonBlocking`) also renders `.fui-DialogSurface__backdrop`, which is never touched. When layering ends in 'dock' (the pane's page layer has no numeric z-index above 1, as on this path) or is still 'pending', the full-window backdrop at the PCF portal z-index stays above the pane and eats every click.
+- Every existing yield test (`__tests__/sidePaneLayering.test.tsx`) renders `nonBlocking` (no backdrop), so the gap was never covered. The only blocking modal that yields today is the file preview: `SemanticSearchControl.tsx` (~1867-1895) passes `yieldToSidePane={wizardLookupOpen || findSimilarLookupOpen}` to `FilePreviewDialog` → `RichFilePreviewDialog` (~256, ~274) → `PreviewModal` → `SprkModal`. Check `FindSimilarViewerDialog` (~264) and `AccessGrantModal` (~3305) too: whether they are blocking when they yield.
+- Preferred fix: while yielding, render the Dialog `non-modal` (no backdrop, no Fluent focus trap; Fluent's own doc for the case a page-level pane must stay interactive, as the `nonBlocking` prop already does). Condition: a test proves toggling `yieldToSidePane` on and off does NOT remount the body (a child with a mount counter / internal state keeps its count and state) and the surface element is the same node. If switching `modalType` on an open Dialog remounts content or replays the open animation in a way that breaks the tests, fall back to: keep `modal` and give the DialogSurface `backdrop` slot `style={{ pointerEvents: 'none' }}` while yielding; then also verify (test) that Fluent's focus trap does not pull focus back from an element outside the dialog that the user focuses (an input appended to body). Record which path you took and why in the notes.
+- `dismiss === 'alert'` keeps its alert behaviour when NOT yielding. Decide whether an alert that yields should also stop blocking (no host does this today; keep it consistent with the goal) and note it.
+- Do not change the layering hook's 'under'/'dock' decision or the dim/dock styles; they already work for non-blocking modals and are owner-tested.
+    </background>
+    <relevant-files>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/SprkModal/SprkModal.tsx</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/SprkModal/__tests__/sidePaneLayering.test.tsx</file>
+      <file role="modify">src/client/pcf/SemanticSearchControl/ (version bump + build:prod only)</file>
+      <file role="read">src/client/shared/Spaarke.UI.Components/src/components/SprkModal/sidePaneLayering.ts</file>
+      <file role="read">src/client/shared/Spaarke.UI.Components/src/components/SprkModal/SprkModal.types.ts (yieldToSidePane / nonBlocking / hidden prop docs: update the yieldToSidePane doc to state the backdrop behaviour)</file>
+      <file role="read">src/client/shared/Spaarke.UI.Components/src/components/FilePreview/RichFilePreviewDialog.tsx</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/SprkModal/__tests__/sidePaneLayering.test.tsx (stubPaneAppearing, renderWithProviders)</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="CLAUDE.md §11">No new component, hook or prop. This is a modification of existing SprkModal behaviour.</constraint>
+    <constraint source="project">Only yielding behaviour changes. A modal that is not yielding renders exactly as today (same modalType, backdrop, dismiss handling). Existing SprkModal, preset and a11y tests pass unmodified.</constraint>
+    <constraint source="project">PCF hosts: bump and `npm run build:prod` SemanticSearchControl (the defect host) and any other PCF whose bundle hosts a BLOCKING modal that yields; list them in the notes with old → new versions. Do not bump PCFs whose only yielding modals are already `nonBlocking`. No deploy in this task (owner approves deploys; the main session runs /pcf-deploy).</constraint>
+    <constraint source="CLAUDE.md project §6">Run `node scripts/quality/client-lint/client-lint.mjs check` (root npm install) before pushing.</constraint>
+    <constraint source="ADR-038">Filtered jest runs only; tests assert the user-visible contract (pointer reaches the pane, no remount), not implementation trivia.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>docs/standards/MODAL-DESIGN-SYSTEM.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-050-canonical-modal-shell.md</file>
+    </files>
+  </knowledge>
+  <steps mode="directional">
+    <step order="1">Write the failing tests first (blocking SprkModal, no `nonBlocking`): run them on unchanged code and record that they fail.</step>
+    <step order="2">Implement the preferred fix (or the fallback, with the reason).</step>
+    <step order="3">Update the `yieldToSidePane` prop doc.</step>
+    <step order="4">Filtered jest for SprkModal (all its __tests__ and presets/__tests__), FilePreview, DocumentEmailWizard, FindSimilarViewer, AccessGrantModal; typecheck; client-lint ratchet.</step>
+    <step order="5">Bump and build:prod the PCF(s); notes in notes/task-198-notes.md (cause, path taken, test-fails-before evidence, PCF versions).</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion testable="true">Test: a blocking SprkModal (no `nonBlocking`) with `yieldToSidePane` and the layering stub ending in 'dock' (pane layer with no z-index): no element of the modal at the pane's position takes pointer events (no backdrop present, or its computed pointer-events is none). This test FAILS on origin/master code.</criterion>
+    <criterion testable="true">Test: same with layering 'under' (pane layer z 1000) and while 'pending' (before the pane appears).</criterion>
+    <criterion testable="true">Test: when `yieldToSidePane` returns to false, the blocking modal has its backdrop back and it takes pointer events; the body is not remounted (mount counter unchanged, child state kept) and the surface is the same DOM node.</criterion>
+    <criterion testable="true">Test: a non-yielding blocking modal and a non-yielding nonBlocking modal render as before (backdrop present / absent respectively).</criterion>
+    <criterion testable="true">Negative: `hidden` behaviour unchanged (existing tests pass unmodified).</criterion>
+    <criterion testable="true">All existing SprkModal / preset / a11y / FilePreview / DocumentEmailWizard tests pass unmodified; typecheck clean; client-lint ratchet passes; SemanticSearchControl version bumped (manifest + solution) and build:prod succeeds.</criterion>
+  </acceptance-criteria>
+  <escalation>
+    <trigger>If neither the non-modal switch nor the backdrop slot can be made to pass the no-remount test, STOP and report what Fluent does.</trigger>
+    <trigger>If another open PR is changing SprkModal.tsx, STOP and report.</trigger>
+  </escalation>
+  <execution>
+    <protocol>Run through task-execute. Fresh worktree from origin/master; PR to master.</protocol>
+  </execution>
+</task>
