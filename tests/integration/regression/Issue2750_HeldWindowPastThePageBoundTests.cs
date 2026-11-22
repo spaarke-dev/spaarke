@@ -122,6 +122,143 @@ public class Issue2750_HeldWindowPastThePageBoundTests
         done().Should().BeTrue("five roots a run, the roots past the carry listed again: 24 roots drain in a few runs");
     }
 
+    /// <summary>
+    /// Review F2: the re-file window is capped on its FIRST run and walked over several (the examination budget), and a later
+    /// run of the same window is not capped. The documents past the first cap whose ids sort before the cursor are not walked in
+    /// this window; the window must still move only to the first cap when it drains, so the next window lists them.
+    /// </summary>
+    [Fact]
+    public async Task ExecuteAsync_RefileWindowCappedOnItsFirstRunOnly_MovesOnlyToThatCap_AndMovesEveryDocument()
+    {
+        var harness = new Harness(this);
+        await harness.RunAsync(recentWrites: true, ordinaryWrites: false);
+
+        // Ids order the walk: the tie group's rows (17–22) and row 23 sort first (01–07), the rest after them (20–30).
+        var ids = Enumerable.Range(0, Rows)
+            .Select(i => OrderedId(i is >= 17 and <= 22 ? i - 16 : i == 23 ? 7 : 0x20 + i))
+            .ToArray();
+        _world.MaxRowsPerPage = 1; // the first run's listing is capped at 20 rows: the tie group's first three, not 4–7
+        for (var i = 0; i < Rows; i++)
+        {
+            harness.Pointer.Rows[("sprk_document", ids[i])] = R.Doc(ids[i], T.PlainMatter, T.CustomerBContainer);
+            _world.Add("sprk_document", ids[i],
+                ("owningteam", new EntityReference("team", SecureChildShareWorld.GeneralTeam)),
+                ("sprk_graphdriveid", T.CustomerBContainer));
+            _world.Modified("sprk_document", ids[i], At(i));
+        }
+
+        // The window starts well after the rows changed: when it drains, its start (less the overlap) is past every row, so
+        // only the first run's cap keeps the rows past it in the next window.
+        _time.Advance(TimeSpan.FromMinutes(5));
+        var first = await harness.RunAsync(recentWrites: true, ordinaryWrites: false, examinationBudget: "8");
+        Report(first, Pass.Refile).GetProperty("cappedAt").ValueKind.Should().Be(JsonValueKind.String);
+        Report(first, Pass.Refile).GetProperty("windowDrained").GetBoolean().Should().BeFalse("eight of twenty are examined");
+
+        _world.MaxRowsPerPage = null; // the window's later runs list every document: not capped
+        for (var run = 0; run < 6 && !ids.All(id => harness.Rig.DriveOf(id) == T.CustomerA1Container); run++)
+        {
+            _time.Advance(TimeSpan.FromMinutes(2));
+            await harness.RunAsync(recentWrites: true, ordinaryWrites: false, examinationBudget: "8");
+        }
+
+        ids.Where(id => harness.Rig.DriveOf(id) != T.CustomerA1Container).Should().BeEmpty(
+            "the documents past the first run's cap, behind the cursor, are listed by the next window and moved");
+    }
+
+    /// <summary>
+    /// Review F1-b: production shape (the carry holds more roots than a run walks), and more roots than the carry holds share
+    /// ONE change instant. The window must advance through the tie (a key set, not the instant alone) and reach every root.
+    /// </summary>
+    [Fact]
+    public async Task ExecuteAsync_OrdinaryMovesTiePastTheCarryBoundary_AdvancesThroughTheTie_AndReachesEveryRoot()
+    {
+        var harness = new Harness(this, ordinaryCarryCap: 6);
+        await SweepCompleteAsync(harness, maxRoots: "2");
+        var events = ReassignedMatters(12, _ => (T0 + TimeSpan.FromMinutes(1)).UtcDateTime, firstId: 0x301);
+
+        var runs = 0;
+        while (!Moved(events) && runs < 15)
+        {
+            _time.Advance(TimeSpan.FromMinutes(2));
+            var run = await harness.RunAsync(recentWrites: true, ordinaryWrites: true, maxRoots: "2");
+            Report(run, Pass.OrdinaryMoves).GetProperty("failure").ValueKind.Should().Be(JsonValueKind.Null);
+            runs++;
+        }
+
+        Moved(events).Should().BeTrue("two roots a run through a tie of twelve past a carry of six reaches every root");
+    }
+
+    /// <summary>
+    /// Review F1-a: production shape (a carry of four, two roots a run, one owner write a run), the write cap reached while the
+    /// catch-up sweep runs. Run one: three reassigned records are listed and two swept ones reached; the write cap stops all but
+    /// one, and the four fill the carry exactly. Run two: the carried roots are no longer listed (the window moved past them)
+    /// and the sweep reaches two more the write cap stops. Carrying those swept roots AHEAD of the carried ones pushed a carried
+    /// root out of the carry — a root no listing and no sweep reaches again. Every reassigned record's children must follow it.
+    /// </summary>
+    [Fact]
+    public async Task ExecuteAsync_OrdinaryMovesWriteCapDuringTheSweep_WithAFullCarry_DropsNoRoot()
+    {
+        var harness = new Harness(this, ordinaryCarryCap: 4);
+        // Reassigned long ago (in no window): only the catch-up sweep reaches them. The ids order the sweep: these first.
+        var swept = ReassignedMatters(6, _ => SecureChildShareWorld.RecordsLastModified, firstId: 0x101);
+        // Reassigned just now: listed by the first run, after the swept ones in the carry's order.
+        var listed = ReassignedMatters(3, i => (T0 + TimeSpan.FromSeconds(i)).UtcDateTime, firstId: 0x201);
+
+        for (var run = 0; run < 30 && !(Moved(swept) && Moved(listed)); run++)
+        {
+            _time.Advance(TimeSpan.FromMinutes(2));
+            var report = Report(await harness.RunAsync(recentWrites: true, ordinaryWrites: true, maxRoots: "2", maxOrdinaryMoves: "1"),
+                Pass.OrdinaryMoves);
+            report.GetProperty("failure").ValueKind.Should().Be(JsonValueKind.Null);
+        }
+
+        using var scope = new FluentAssertions.Execution.AssertionScope();
+        swept.Where(id => _world.OwnerOf("sprk_event", id) != DataversePrincipalRef.Team(TeamB)).Should().BeEmpty(
+            "every record the sweep reached has its children moved, the ones the write cap stopped included");
+        listed.Where(id => _world.OwnerOf("sprk_event", id) != DataversePrincipalRef.Team(TeamB)).Should().BeEmpty(
+            "a carried root the window has moved past is never dropped from the carry");
+    }
+
+    private static Guid OrderedId(int n) => Guid.Parse($"00000000-0000-4000-8000-{n:x12}");
+
+    private async Task SweepCompleteAsync(Harness harness, string maxRoots)
+    {
+        for (var i = 0; i < 20; i++)
+        {
+            var run = await harness.RunAsync(recentWrites: true, ordinaryWrites: true, maxRoots: maxRoots);
+            if (Report(run, Pass.OrdinaryMoves).GetProperty("sweep").GetProperty("complete").GetBoolean())
+                return;
+            _time.Advance(TimeSpan.FromMinutes(2));
+        }
+
+        throw new InvalidOperationException("Test: the ordinary catch-up sweep did not complete.");
+    }
+
+    /// <summary><paramref name="count"/> ordinary matters reassigned to B, each with an event still owned by A; the event ids.</summary>
+    private List<Guid> ReassignedMatters(int count, Func<int, DateTime> modifiedAt, int? firstId = null)
+    {
+        if (!_world.Has("team", TeamB))
+            _world.Add("businessunit", BuB, ("name", "Litigation")).Team(TeamB, BuB, "Litigation", isDefault: true, teamType: 0);
+        var events = new List<Guid>();
+        for (var i = 0; i < count; i++)
+        {
+            var matter = firstId is { } first ? OrderedId(first + i) : Guid.NewGuid();
+            var evt = Guid.NewGuid();
+            _world.Add("sprk_matter", matter, ("owningteam", new EntityReference("team", TeamB)), ("sprk_issecure", false));
+            _world.Modified("sprk_matter", matter, modifiedAt(i));
+            _world.Add("sprk_event", evt,
+                ("owningteam", new EntityReference("team", SecureChildShareWorld.GeneralTeam)),
+                ("sprk_regardingmatter", new EntityReference("sprk_matter", matter)),
+                ("versionnumber", 1L));
+            events.Add(evt);
+        }
+
+        return events;
+    }
+
+    private bool Moved(IEnumerable<Guid> events) =>
+        events.All(id => _world.OwnerOf("sprk_event", id) == DataversePrincipalRef.Team(TeamB));
+
     // ── The world ──
 
     /// <summary>When the <paramref name="i"/>-th row changed: one second apart, except rows 17–22, which share one instant.
@@ -260,11 +397,15 @@ public class Issue2750_HeldWindowPastThePageBoundTests
         public T.Rig Rig { get; }
 
         /// <summary>A manual run: the secure catch-up stands aside, so only the recent-changes listing reaches the to-dos.</summary>
-        public async Task<JsonElement> RunAsync(bool recentWrites, bool ordinaryWrites, string? maxRoots = null)
+        public async Task<JsonElement> RunAsync(
+            bool recentWrites, bool ordinaryWrites, string? maxRoots = null, string? examinationBudget = null,
+            string? maxOrdinaryMoves = null)
         {
             _configuration[Job.RecentChangesWritesEnabledConfigKey] = recentWrites ? null : "false";
             _configuration[Job.OrdinaryMovesWritesEnabledConfigKey] = ordinaryWrites ? "true" : null;
             _configuration[Job.MaxRootsPerRunConfigKey] = maxRoots;
+            _configuration[Job.RefileExaminationBudgetConfigKey] = examinationBudget;
+            _configuration[Job.MaxOrdinaryMovesPerRunConfigKey] = maxOrdinaryMoves;
             var result = await _job.ExecuteAsync(
                 new JobRunContext(Guid.NewGuid(), "corr-2750", JobRunTrigger.ManualAdmin, new Dictionary<string, object>()),
                 CancellationToken.None);
