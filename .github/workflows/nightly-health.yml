@@ -2,7 +2,7 @@ name: nightly-health
 
 # Nightly health checks for the Spaarke repo. Runs on master, reports to a
 # tracking issue. Catches problems that the per-PR SDAP CI doesn't surface:
-#   - flake-hunt:    runs unit tests 3x (3 parallel runs, each split in 4 shards);
+#   - flake-hunt:    runs unit tests 3x (3 parallel runs, each split in 5 shards);
 #                    flags tests that didn't pass all 3 runs (intermittent failures
 #                    = flakes)
 #   - bundle-size:   builds key client artifacts; flags >10% size regressions
@@ -83,14 +83,19 @@ jobs:
   # LFS pointer fixtures; see below). So the job was cancelled at its cap every night (13 of the last
   # 30 nightly runs) and the analysis step never ran: a flake hunt that never
   # reports. Now each of the 3 runs is its own matrix leg, and each leg is further
-  # split into the same 4 namespace shards `ci-tier2-advisory.yml` uses for the PR
-  # run, so every leg has its own cap and a leg takes a few minutes less than a
-  # quarter of the suite. `flake-hunt` (below) downloads every TRX and runs the
-  # unchanged analysis.
+  # split into the same namespace shards `ci-tier2-advisory.yml` uses for the PR
+  # run, so every leg has its own cap. `flake-hunt` (below) downloads every TRX and
+  # runs the unchanged analysis.
   #
   # KEEP THE SHARD FILTERS IN SYNC with `full-unit-tests-shard` in
   # ci-tier2-advisory.yml and with `coverage-shard` below: `rest` is the complement
-  # of the other three, so a test in a new namespace always runs somewhere.
+  # of the named shards, so a test in a new namespace always runs somewhere.
+  #
+  # 2026-11-22 (quality-alert #2934 / #2067): the PR run split `api-ai-finance-external`
+  # out of `api-seam` on 2026-11-11, but these two matrices were not updated. api-seam
+  # here grew to ~10,500 tests (~29 min in run 44991863888) and hit the 30-min flake
+  # cap / 45-min coverage cap from 2026-11-19 on. Mirrored the five-shard split; in that
+  # run's TRX the three moved namespaces were ~41% of api-seam's test time.
   #
   # `lfs: true`: tests/fixtures/compose-corpus/*.docx are Git-LFS pointers
   # (.gitattributes). Without the smudge ~1,084 Compose seam tests failed on every
@@ -108,14 +113,16 @@ jobs:
       fail-fast: false
       matrix:
         run: [1, 2, 3]
-        shard: [api-office, api-insights-integration, api-seam, rest]
+        shard: [api-office, api-insights-integration, api-ai-finance-external, api-seam, rest]
         include:
           - shard: api-office
             filter: 'FullyQualifiedName~Sprk.Bff.Api.Tests.Api.Office.'
           - shard: api-insights-integration
             filter: 'FullyQualifiedName~Sprk.Bff.Api.Tests.Api.Insights.|FullyQualifiedName~Sprk.Bff.Api.Tests.Integration.'
+          - shard: api-ai-finance-external
+            filter: 'FullyQualifiedName~Sprk.Bff.Api.Tests.Api.Ai.|FullyQualifiedName~Sprk.Bff.Api.Tests.Api.Finance.|FullyQualifiedName~Sprk.Bff.Api.Tests.Api.ExternalAccess.'
           - shard: api-seam
-            filter: '(FullyQualifiedName~Sprk.Bff.Api.Tests.Api.|FullyQualifiedName~Sprk.Bff.Api.Tests.Seam.)&FullyQualifiedName!~Sprk.Bff.Api.Tests.Api.Office.&FullyQualifiedName!~Sprk.Bff.Api.Tests.Api.Insights.&FullyQualifiedName!~Sprk.Bff.Api.Tests.Integration.'
+            filter: '(FullyQualifiedName~Sprk.Bff.Api.Tests.Api.|FullyQualifiedName~Sprk.Bff.Api.Tests.Seam.)&FullyQualifiedName!~Sprk.Bff.Api.Tests.Api.Office.&FullyQualifiedName!~Sprk.Bff.Api.Tests.Api.Insights.&FullyQualifiedName!~Sprk.Bff.Api.Tests.Integration.&FullyQualifiedName!~Sprk.Bff.Api.Tests.Api.Ai.&FullyQualifiedName!~Sprk.Bff.Api.Tests.Api.Finance.&FullyQualifiedName!~Sprk.Bff.Api.Tests.Api.ExternalAccess.'
           - shard: rest
             filter: 'FullyQualifiedName!~Sprk.Bff.Api.Tests.Api.&FullyQualifiedName!~Sprk.Bff.Api.Tests.Seam.&FullyQualifiedName!~Sprk.Bff.Api.Tests.Integration.'
     steps:
@@ -193,7 +200,7 @@ jobs:
           set -euo pipefail
           mkdir -p flake-runs
 
-          # Parse the TRX files (3 runs x 4 shards); identify tests that PASSED in some
+          # Parse the TRX files (3 runs x 5 shards); identify tests that PASSED in some
           # runs and FAILED in others. The shards of one run are merged into that run.
           python3 <<'PY'
           import xml.etree.ElementTree as ET
@@ -204,7 +211,7 @@ jobs:
           from pathlib import Path
 
           EXPECTED_RUNS = 3
-          EXPECTED_SHARDS = 4
+          EXPECTED_SHARDS = 5  # KEEP IN SYNC with flake-hunt-run's shard list
 
           runs = {}
           shards_seen = defaultdict(set)
@@ -584,7 +591,7 @@ jobs:
   # SHARDED (2026-10-13). One `dotnet test --collect` over the whole solution ran
   # past its 30-minute cap every night (cancelled at 27+ min in the test step), so
   # the coverage number was never produced. The Sprk.Bff.Api.Tests suite is now split
-  # into the same 4 namespace shards as flake-hunt-run / ci-tier2-advisory.yml, and the
+  # into the same namespace shards as flake-hunt-run / ci-tier2-advisory.yml, and the
   # other test projects of Spaarke.sln run in a fifth shard. `coverage-observation`
   # merges every shard's Cobertura files (per source line, a line is covered when ANY
   # shard hit it) and reports the single number it always reported.
@@ -599,14 +606,16 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [api-office, api-insights-integration, api-seam, rest, other-projects]
+        shard: [api-office, api-insights-integration, api-ai-finance-external, api-seam, rest, other-projects]
         include:
           - shard: api-office
             filter: 'FullyQualifiedName~Sprk.Bff.Api.Tests.Api.Office.'
           - shard: api-insights-integration
             filter: 'FullyQualifiedName~Sprk.Bff.Api.Tests.Api.Insights.|FullyQualifiedName~Sprk.Bff.Api.Tests.Integration.'
+          - shard: api-ai-finance-external
+            filter: 'FullyQualifiedName~Sprk.Bff.Api.Tests.Api.Ai.|FullyQualifiedName~Sprk.Bff.Api.Tests.Api.Finance.|FullyQualifiedName~Sprk.Bff.Api.Tests.Api.ExternalAccess.'
           - shard: api-seam
-            filter: '(FullyQualifiedName~Sprk.Bff.Api.Tests.Api.|FullyQualifiedName~Sprk.Bff.Api.Tests.Seam.)&FullyQualifiedName!~Sprk.Bff.Api.Tests.Api.Office.&FullyQualifiedName!~Sprk.Bff.Api.Tests.Api.Insights.&FullyQualifiedName!~Sprk.Bff.Api.Tests.Integration.'
+            filter: '(FullyQualifiedName~Sprk.Bff.Api.Tests.Api.|FullyQualifiedName~Sprk.Bff.Api.Tests.Seam.)&FullyQualifiedName!~Sprk.Bff.Api.Tests.Api.Office.&FullyQualifiedName!~Sprk.Bff.Api.Tests.Api.Insights.&FullyQualifiedName!~Sprk.Bff.Api.Tests.Integration.&FullyQualifiedName!~Sprk.Bff.Api.Tests.Api.Ai.&FullyQualifiedName!~Sprk.Bff.Api.Tests.Api.Finance.&FullyQualifiedName!~Sprk.Bff.Api.Tests.Api.ExternalAccess.'
           - shard: rest
             filter: 'FullyQualifiedName!~Sprk.Bff.Api.Tests.Api.&FullyQualifiedName!~Sprk.Bff.Api.Tests.Seam.&FullyQualifiedName!~Sprk.Bff.Api.Tests.Integration.'
     steps:
@@ -636,7 +645,7 @@ jobs:
           mkdir -p coverage-results
           if [ "$SHARD" = "other-projects" ]; then
             # Every test project of Spaarke.sln that lives under tests\ except the big
-            # one (which the four shards above cover), so a new project added there is
+            # one (which the named shards above cover), so a new project added there is
             # picked up without editing this workflow. NOT covered: a test project outside
             # tests\ (today src/server/services/Sprk.Provisioning.ControlPlane.Tests);
             # widen the grep below if its coverage should be counted.

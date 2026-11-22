@@ -13,6 +13,7 @@
  */
 import * as fs from 'fs';
 import * as path from 'path';
+import { declaredScriptVersion } from './helpers/scriptVersion';
 
 const CLIENT_ROOT = path.resolve(__dirname, '../../../..');
 const RIBBON_SCRIPT = path.join(CLIENT_ROOT, 'webresources/js/sprk_access_ribbon.js');
@@ -37,8 +38,8 @@ function load(retrieveRecord: jest.Mock = jest.fn()) {
   win.Spaarke = { BffAuth: { getToken: jest.fn().mockResolvedValue(null) } };
   inject(ASSIGNED_ACCESS_SCRIPT);
   inject(RIBBON_SCRIPT);
-  expect(win.Spaarke.Access.Ribbon.VERSION).toBe('1.8.0'); // the real script ran
-  expect(win.Spaarke.AssignedAccess.Config.version).toBe('1.1.1');
+  expect(win.Spaarke.Access.Ribbon.VERSION).toBe(declaredScriptVersion(RIBBON_SCRIPT, 'VERSION')); // the real script ran
+  expect(win.Spaarke.AssignedAccess.Config.version).toBe(declaredScriptVersion(ASSIGNED_ACCESS_SCRIPT));
   return { ribbon: win.Spaarke.Access.Ribbon, assigned: win.Spaarke.AssignedAccess, retrieveRecord };
 }
 

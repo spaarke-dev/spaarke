@@ -535,6 +535,42 @@ The BFF URL normalizer is `normalizeBffBaseUrl()` in `src/client/shared/Spaarke.
 **Related**: ISS-006 (same review)
 
 ---
+
+### ISS-008 — Communications grid and email page glue for New Email / New Message has no tests
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | next-round |
+| **Filed** | 2026-11-22 |
+| **Source** | Code review of #2938 (DEF-008 / #2908), finding 4 |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2948 |
+
+**Description**
+
+#2908 added "+ New Email" and "+ New Message" to the communications grid page, and a "Related to" prefill to the email composer page. The shared `@spaarke/ui-components` code (`conversationPanelLaunch`, `normalizeRecordRef`, `parseComposeRegarding`) and the PCF hook (`useConversationPanelOpenRequest`) have tests. The page-level glue does not, because neither solution has a test runner.
+
+The page code has branches that no test covers. Examples:
+- the form id must equal the scoped id;
+- "New Message" is offered only on a record form;
+- the three outcomes of the record-scoping parser;
+- the composer reading the `compose`/`regarding*` parameters from the URL or the `data` envelope.
+
+A regression in any of these ships green. "New Email" would open with no "Related to", or "New Message" would show its "did not respond" alert where it should open. Only a hand check on DEV would catch it.
+
+**Entry-points**
+
+- `src/solutions/sprk_communicationspage/src/main.tsx`: `parseRegardingEnvelope` (85), `resolveHostRecord` (163), `newEmail` (180), `newMessage` (200), `HOST_COMMANDS` (218)
+- `src/solutions/EmailPage/src/main.tsx:181`, where `parseComposeRegarding` reads the top-level or `data` parameters
+- Neither solution's `package.json` has a `test` script. `src/solutions/ApExport` and `src/solutions/AllDocuments` do and can be copied.
+
+**Suggested fix**: move the page logic into small modules without changing behaviour. Add a Jest or Vitest setup copied from a solution that has one. Write tests that fail when each branch above is broken.
+
+**Estimated effort**: half a day to one day
+**Blockers**: none
+**Related**: DEF-008 (#2908), PR #2938, PR #2947
+
+---
 ## Closed
 
 ### ISS-001 — node-executor-authoring.md still names the renamed `ActionType` enum

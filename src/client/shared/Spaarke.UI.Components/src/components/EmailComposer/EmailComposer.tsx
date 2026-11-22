@@ -116,6 +116,10 @@ import { ComposerSendButton } from './subcomponents/ComposerSendButton';
 // catalog (which inserts a body LINK for every other type). Owner UAT 2026-07-24.
 const DOCUMENT_LOGICAL_NAME = 'sprk_document';
 
+/** Bounded retry for returning focus after a host lookup (task 199): up to 10 attempts, 50 ms apart. */
+const LOOKUP_FOCUS_MAX_ATTEMPTS = 10;
+const LOOKUP_FOCUS_RETRY_MS = 50;
+
 // "From:" sender option labels (owner UAT 2026-07-30, item 3). The engine has NO current-user
 // identity data source (context-agnostic, ADR-012), so the "user" option falls back to the
 // host-supplied `fromMailbox` address when present, else a generic "My mailbox" label — see the
@@ -627,6 +631,79 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
     [state.attachments.length]
   );
 
+  const mountedRef = React.useRef(true);
+  // The pending lookup focus-return timer (and the window that owns it), so unmount can cancel it.
+  const lookupFocusTimerRef = React.useRef<{ win: Window; id: number } | null>(null);
+  React.useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      const pending = lookupFocusTimerRef.current;
+      if (pending) pending.win.clearTimeout(pending.id);
+      lookupFocusTimerRef.current = null;
+    };
+  }, []);
+
+  // Focus return after a host lookup (task 199). The platform lookup pane hands focus back to whatever
+  // opened the surrounding dialog (a grid link behind the wizard) when it closes, so a keyboard user
+  // is lost. Once the lookup settles (pick, cancel or failure) take focus back to the button that started
+  // it, with the same deferred check as closeFailureNotice: the host clears its "yielding" state on
+  // resolve, so wait a tick; skip when the composer unmounted or focus is already inside it (a host or
+  // the user put it there on purpose); fall back to the composer root when the trigger is gone/disabled.
+  // Cross-frame: when the composer runs in an iframe (Find Similar -> Document Relationship Viewer -> Email)
+  // the parent PCF may lift `inert` from its yielding modal AFTER the first tick, and focus() on an element
+  // inside an inert frame fails silently. So verify the focus landed and retry on a short bounded schedule
+  // (LOOKUP_FOCUS_MAX_ATTEMPTS x LOOKUP_FOCUS_RETRY_MS), stopping at unmount, as soon as focus is inside the
+  // composer, or when it moved to some other real element since our last attempt (a host that deliberately
+  // focused something is not fought; body/null counts as "nobody has it"). The document and window come from
+  // the composer's own ownerDocument, not the globals, so an iframe-hosted composer uses its own frame.
+  // ONE helper for every lookup path (recipients, Link a record, Link documents, record search).
+  const withLookupFocusReturn = React.useCallback(
+    <T,>(trigger: HTMLElement | null | undefined, run: () => Promise<T>): Promise<T> => {
+      // Captured now: after unmount rootRef.current is null and the owner frame can no longer be derived.
+      const doc = rootRef.current?.ownerDocument ?? document;
+      const win = doc.defaultView ?? window;
+      const restore = () => {
+        let attempts = 0;
+        let seenAfterAttempt: Element | null = null; // what had focus right after our previous attempt
+        const schedule = (delayMs: number) => {
+          const previous = lookupFocusTimerRef.current;
+          if (previous) previous.win.clearTimeout(previous.id);
+          lookupFocusTimerRef.current = { win, id: win.setTimeout(step, delayMs) };
+        };
+        const step = () => {
+          lookupFocusTimerRef.current = null;
+          if (!mountedRef.current) return;
+          const root = rootRef.current;
+          if (!root) return;
+          const active = doc.activeElement;
+          if (root.contains(active)) return;
+          // Retry only: focus is somewhere other than where our last attempt left it, and not "nowhere".
+          if (attempts > 0 && active !== seenAfterAttempt && active && active !== doc.body) return;
+          const usable = trigger && trigger.isConnected && !(trigger as HTMLButtonElement).disabled;
+          const target = usable ? trigger : root;
+          target.focus();
+          attempts += 1;
+          seenAfterAttempt = doc.activeElement;
+          if (seenAfterAttempt === target || root.contains(seenAfterAttempt)) return;
+          if (attempts < LOOKUP_FOCUS_MAX_ATTEMPTS) schedule(LOOKUP_FOCUS_RETRY_MS);
+        };
+        schedule(0);
+      };
+      return run().then(
+        value => {
+          restore();
+          return value;
+        },
+        err => {
+          restore();
+          throw err;
+        }
+      );
+    },
+    []
+  );
+
   // "Link another record" → pick a record via the host polymorphic picker and APPEND it to the
   // in-memory "Related to" list (owner UAT 2026-07-31). No record exists yet in compose/reply/
   // forward, so associations are held in reducer state and ride the send payload; the user can add
@@ -634,24 +711,28 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
   // maps associations[0] as the primary regarding at send time (CLIENT-ONLY ordering). No
   // replace-confirm — adding is additive, not a single-primary swap.
   const onAddRelationship = props.onAddRelationship;
-  const handleAddRelationship = React.useCallback(() => {
-    if (!onAddRelationship) return;
-    setRelatedCollapsed(false);
-    void onAddRelationship()
-      .then(picked => {
-        if (!picked) return;
-        dispatch({
-          type: 'ADD_ASSOCIATION',
-          association: {
-            entityType: picked.entityType,
-            entityId: picked.id,
-            entityName: picked.name,
-            entityUrl: picked.url,
-          },
-        });
-      })
-      .catch(err => console.warn('[EmailComposer] add relationship failed:', err));
-  }, [onAddRelationship]);
+  const handleAddRelationship = React.useCallback(
+    (e: React.MouseEvent<HTMLButtonElement>) => {
+      if (!onAddRelationship) return;
+      const trigger = e.currentTarget;
+      setRelatedCollapsed(false);
+      void withLookupFocusReturn(trigger, onAddRelationship)
+        .then(picked => {
+          if (!picked) return;
+          dispatch({
+            type: 'ADD_ASSOCIATION',
+            association: {
+              entityType: picked.entityType,
+              entityId: picked.id,
+              entityName: picked.name,
+              entityUrl: picked.url,
+            },
+          });
+        })
+        .catch(err => console.warn('[EmailComposer] add relationship failed:', err));
+    },
+    [onAddRelationship, withLookupFocusReturn]
+  );
 
   // ── Attach-on-compose: local-file → Document resolution (task 042 / FR-20) ──
   // A picked local file (already passed the CHAT-ATTACHMENT-POLICY 25 MB + MIME
@@ -661,14 +742,6 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
   // Absent resolver → local picks stay display-only (pre-task-042 behavior).
   const [resolvingIds, setResolvingIds] = React.useState<ReadonlySet<string>>(() => new Set());
   const [uploadError, setUploadError] = React.useState<string | undefined>();
-  const mountedRef = React.useRef(true);
-  React.useEffect(() => {
-    mountedRef.current = true;
-    return () => {
-      mountedRef.current = false;
-    };
-  }, []);
-
   // The "Email not sent" / "Draft not saved" dialog (owner decision 2026-10-09: a failed send is
   // never silent). Transient UI state, not engine state. Non-null → the dialog is open.
   const [failureNotice, setFailureNotice] = React.useState<ISendFailureDescription | null>(null);
@@ -742,21 +815,32 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
   // a record now happens via the "Link another record" tile inside the "Related to" section (item 10).
   const canLinkRecord = !state.readOnly && !!props.onAddRelationship;
 
+  // The buttons whose menus start a record lookup; the menu item itself unmounts on close, so focus
+  // returns to the menu's trigger button (task 199).
+  const attachButtonRef = React.useRef<HTMLButtonElement>(null);
+  const recordSearchButtonRef = React.useRef<HTMLButtonElement>(null);
+
   const runDocumentLink = React.useCallback(() => {
-    if (!props.onLookupRecord) return;
-    void props.onLookupRecord(DOCUMENT_LOGICAL_NAME).then(picked => {
-      if (picked) handleRecordPicked(picked);
-    });
-  }, [props.onLookupRecord, handleRecordPicked]);
+    const onLookupRecord = props.onLookupRecord;
+    if (!onLookupRecord) return;
+    void withLookupFocusReturn(attachButtonRef.current, () => onLookupRecord(DOCUMENT_LOGICAL_NAME))
+      .then(picked => {
+        if (picked) handleRecordPicked(picked);
+      })
+      .catch(err => console.warn('[EmailComposer] record lookup failed:', err));
+  }, [props.onLookupRecord, handleRecordPicked, withLookupFocusReturn]);
 
   const runRecordSearch = React.useCallback(
     (logicalName: string) => {
-      if (!props.onLookupRecord) return;
-      void props.onLookupRecord(logicalName).then(picked => {
-        if (picked) handleRecordPicked(picked);
-      });
+      const onLookupRecord = props.onLookupRecord;
+      if (!onLookupRecord) return;
+      void withLookupFocusReturn(recordSearchButtonRef.current, () => onLookupRecord(logicalName))
+        .then(picked => {
+          if (picked) handleRecordPicked(picked);
+        })
+        .catch(err => console.warn('[EmailComposer] record lookup failed:', err));
     },
-    [props.onLookupRecord, handleRecordPicked]
+    [props.onLookupRecord, handleRecordPicked, withLookupFocusReturn]
   );
 
   // ── Template picker (Wave E) ───────────────────────────────────────────────
@@ -912,7 +996,7 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
     canAddLocal || canLinkDocument ? (
       <Menu positioning="below-start">
         <MenuTrigger disableButtonEnhancement>
-          <button type="button" className={styles.linkTile}>
+          <button type="button" className={styles.linkTile} ref={attachButtonRef}>
             <Attach20Regular />
             <span>Attach</span>
           </button>
@@ -936,7 +1020,7 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
           <Menu positioning="below-end">
             <MenuTrigger disableButtonEnhancement>
               <Tooltip content="Insert a link to a record" relationship="label">
-                <ToolbarButton icon={<SearchRegular />} aria-label="Insert record link" />
+                <ToolbarButton ref={recordSearchButtonRef} icon={<SearchRegular />} aria-label="Insert record link" />
               </Tooltip>
             </MenuTrigger>
             <MenuPopover>
@@ -1357,7 +1441,11 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
           value={state.to}
           onChange={recipients => dispatch({ type: 'SET_RECIPIENTS', field: 'to', value: recipients })}
           onSearch={props.onSearchRecipients}
-          onLookup={props.onLookupRecipients ? () => props.onLookupRecipients!('to') : undefined}
+          onLookup={
+            props.onLookupRecipients
+              ? trigger => withLookupFocusReturn(trigger, () => props.onLookupRecipients!('to'))
+              : undefined
+          }
           errorMessage={fieldErrors.to}
         />
         <RecipientField
@@ -1366,7 +1454,11 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
           value={state.cc}
           onChange={recipients => dispatch({ type: 'SET_RECIPIENTS', field: 'cc', value: recipients })}
           onSearch={props.onSearchRecipients}
-          onLookup={props.onLookupRecipients ? () => props.onLookupRecipients!('cc') : undefined}
+          onLookup={
+            props.onLookupRecipients
+              ? trigger => withLookupFocusReturn(trigger, () => props.onLookupRecipients!('cc'))
+              : undefined
+          }
         />
         {bccVisible ? (
           <RecipientField
@@ -1375,7 +1467,11 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
             value={state.bcc}
             onChange={recipients => dispatch({ type: 'SET_RECIPIENTS', field: 'bcc', value: recipients })}
             onSearch={props.onSearchRecipients}
-            onLookup={props.onLookupRecipients ? () => props.onLookupRecipients!('bcc') : undefined}
+            onLookup={
+              props.onLookupRecipients
+                ? trigger => withLookupFocusReturn(trigger, () => props.onLookupRecipients!('bcc'))
+                : undefined
+            }
           />
         ) : (
           !state.readOnly && (
