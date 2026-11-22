@@ -110,7 +110,7 @@ public static class CommunicationEndpoints
             .AddEndpointFilter<CommunicationAuthorizationFilter>()
             .AddCommunicationRecordAuthorizationFilter(CommunicationRecordRoute.Send)
             .WithName("SendCommunication")
-            .WithDescription("Send an email communication via Microsoft Graph API. The caller must be able to read every attached document, see the target thread and the inherit-from communication, and hold AppendTo on every association and copied regarding record (403 otherwise).")
+            .WithDescription("Send an email communication via Microsoft Graph API. The caller must be able to read every attached document, see the target thread and the inherit-from communication, and hold AppendTo on every association and copied regarding record (403 otherwise). A private message (privateContext, task 056) is a Message into the caller's own 1:1 Direct thread: an invalid shape is a 400; a sender or recipient without the required record access is a 403 (sdap.communication.private.sender_access / recipient_access); missing reference columns are a 409 (sdap.communication.private.columns_missing); a check that cannot be answered is a 503 (sdap.communication.private.check_unavailable). Nothing is sent on any of them.")
             .Produces<SendCommunicationResponse>(StatusCodes.Status200OK)
             .Produces<ProblemDetails>(StatusCodes.Status400BadRequest)
             .Produces<ProblemDetails>(StatusCodes.Status403Forbidden)
