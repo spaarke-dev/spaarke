@@ -80,6 +80,17 @@ export interface ConversationViewProps {
   onOpenRecord?: (entityType: string, id: string) => void;
 
   /**
+   * Private-entry mode (fm task 056): show only the messages of `threadId` that are privately about this record (the
+   * record's "Private · you and …" entry). The thread read carries `about`, a notice names the narrowing with an "Open
+   * full conversation" link (`onOpenFullConversation`), and a message typed here is sent privately about the same
+   * record, so it stays in this view. Omit for the whole thread.
+   */
+  about?: { entityType: string; id: string };
+
+  /** Shown with `about`: switch the host to the pair's whole conversation. Omit it and the link is not rendered. */
+  onOpenFullConversation?: () => void;
+
+  /**
    * The CALLER's own Dataverse `systemuserid` (GUID string). Mine/others
    * bubble alignment is `message.senderSystemUserId === currentUserSystemUserId`
    * — STRICTLY an identity comparison (FR-02/FR-18), never an email-string

@@ -75,6 +75,7 @@ import {
 } from '../CommunicationTimeline/CommunicationTimeline.reducer';
 import type { TimelineMessage } from '../CommunicationTimeline/CommunicationTimeline.types';
 import { deactivateMessage, sendTimelineMessage } from '../../services/communicationTimelineApi';
+import { privateSendRefusalMessage } from '../../services/communicationApi';
 import { renameThread } from '../../services/communicationThreadListApi';
 import type { AuthenticatedFetchFn } from '../../services/EntityCreationService';
 import { InternalOnlySwitch } from '../EmailComposer/subcomponents/InternalOnlySwitch';
@@ -198,6 +199,19 @@ const useStyles = makeStyles({
   errorCenterState: {
     color: tokens.colorPaletteRedForeground1,
     textAlign: 'center',
+  },
+  // fm task 056: the narrowing notice of a "Private · you and …" entry.
+  aboutBar: {
+    display: 'flex',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    columnGap: tokens.spacingHorizontalS,
+    paddingTop: tokens.spacingVerticalXS,
+    paddingBottom: tokens.spacingVerticalXS,
+    paddingLeft: tokens.spacingHorizontalM,
+    paddingRight: tokens.spacingHorizontalM,
+    color: tokens.colorNeutralForeground2,
+    backgroundColor: tokens.colorNeutralBackground2,
   },
   errorBar: {
     paddingTop: tokens.spacingVerticalXS,
@@ -441,6 +455,12 @@ interface ConversationComposeBarProps {
   authenticatedFetch: AuthenticatedFetchFn;
   bffBaseUrl?: string;
   /**
+   * fm task 056: set in a "Private · you and …" entry. A message typed there is sent privately about the same record (so it
+   * stays in the entry), with the server's refusals shown in their owner-approved wording. Its "Internal Only" tags are
+   * hidden: a private message is always internal.
+   */
+  privateContext?: { entityType: string; id: string };
+  /**
    * Forces an immediate out-of-band poll — invoked right after a successful
    * send (so the sender's message appears without waiting for the ~5s tick)
    * and by the manual refresh control. This is the core's `useThreadPoll`
@@ -462,6 +482,7 @@ const ConversationComposeBar: React.FC<ConversationComposeBarProps> = ({
   threadId,
   authenticatedFetch,
   bffBaseUrl,
+  privateContext,
   onRefresh,
 }) => {
   const styles = useComposeStyles();
@@ -498,7 +519,15 @@ const ConversationComposeBar: React.FC<ConversationComposeBarProps> = ({
     setErrorMessage(undefined);
     try {
       await sendTimelineMessage(
-        { communicationType: 'message', threadId, body: text, bodyFormat: 'text', isInternalOnly: internalOnly },
+        {
+          communicationType: 'message',
+          threadId,
+          body: text,
+          bodyFormat: 'text',
+          // A private message is always internal-only server-side; the tags are hidden there, so send no flag.
+          isInternalOnly: privateContext ? undefined : internalOnly,
+          privateContext,
+        },
         { authenticatedFetch, bffBaseUrl }
       );
       if (!mountedRef.current) return;
@@ -509,12 +538,14 @@ const ConversationComposeBar: React.FC<ConversationComposeBarProps> = ({
     } catch (err) {
       if (!mountedRef.current) return;
       setStatus('failed');
-      setErrorMessage(err instanceof Error ? err.message : 'Failed to send message.');
+      setErrorMessage(
+        privateContext ? privateSendRefusalMessage(err) : err instanceof Error ? err.message : 'Failed to send message.'
+      );
       // draft intentionally retained so the user can retry with one more Send.
     } finally {
       inFlightRef.current = false;
     }
-  }, [draft, internalOnly, threadId, authenticatedFetch, bffBaseUrl, onRefresh]);
+  }, [draft, internalOnly, threadId, privateContext, authenticatedFetch, bffBaseUrl, onRefresh]);
 
   const handleKeyDown = React.useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -531,14 +562,16 @@ const ConversationComposeBar: React.FC<ConversationComposeBarProps> = ({
     <div className={styles.wrapper} role="region" aria-label="Compose message">
       {/* Who can see the message (owner 2026-10-14): "External" | "Internal Only" tags above the input, so the
           choice is in view before typing. */}
-      <div className={styles.visibilityRow}>
-        <InternalOnlySwitch
-          variant="tags"
-          checked={internalOnly}
-          onChange={setInternalOnly}
-          disabled={status === 'sending'}
-        />
-      </div>
+      {!privateContext && (
+        <div className={styles.visibilityRow}>
+          <InternalOnlySwitch
+            variant="tags"
+            checked={internalOnly}
+            onChange={setInternalOnly}
+            disabled={status === 'sending'}
+          />
+        </div>
+      )}
       <div className={styles.inputRow}>
         <Textarea
           className={styles.input}
@@ -752,6 +785,8 @@ export const ConversationView = React.forwardRef<ConversationViewHandle, Convers
     onThreadRenamed,
     regarding,
     onOpenRecord,
+    about,
+    onOpenFullConversation,
     currentUserSystemUserId,
     authenticatedFetch,
     bffBaseUrl,
@@ -832,6 +867,7 @@ export const ConversationView = React.forwardRef<ConversationViewHandle, Convers
     authenticatedFetch,
     bffBaseUrl,
     pollIntervalMs,
+    about,
     sinceCursorRef,
     unreadSinceRef,
     onMessages: handleMessages,
@@ -1037,6 +1073,18 @@ export const ConversationView = React.forwardRef<ConversationViewHandle, Convers
   return (
     <div className={mergeClasses(styles.root, className)} role="region" aria-label="Conversation">
       <div ref={liveRegionRef} aria-live="polite" className={styles.visuallyHidden} />
+
+      {/* fm task 056: this is a record's "Private · you and …" entry, so only the messages about the record are shown. */}
+      {about && (
+        <div className={styles.aboutBar} role="note">
+          <Text size={200}>Showing only the private messages about this record.</Text>
+          {onOpenFullConversation && (
+            <Link as="button" type="button" onClick={onOpenFullConversation}>
+              Open full conversation
+            </Link>
+          )}
+        </div>
+      )}
 
       {/* Transient poll error while messages are already loaded — inline banner, list stays visible. */}
       {state.error && state.status === 'ready' && (
@@ -1380,6 +1428,7 @@ export const ConversationView = React.forwardRef<ConversationViewHandle, Convers
         threadId={threadId}
         authenticatedFetch={authenticatedFetch}
         bffBaseUrl={bffBaseUrl}
+        privateContext={about}
         onRefresh={pollNow}
       />
 

@@ -71,6 +71,13 @@ export interface IThreadAttachmentRefDto {
  * second query, no directory lookup, no access gate) — see the BFF doc
  * comment on `ThreadMessageDto` in `CommunicationThreadReadModels.cs`.
  */
+export interface IThreadMessagePrivateContextDto {
+  entityType: string;
+  id: string;
+  /** The record's name, resolved as the viewer. */
+  name: string;
+}
+
 export interface IThreadMessageDto {
   messageId: string;
   body: string | null;
@@ -104,6 +111,11 @@ export interface IThreadMessageDto {
   /** `sprk_isprivate` (FR-21) — display-only privacy marker; never gates (impersonation enforces private-thread visibility server-side). */
   isPrivate: boolean;
   attachments: IThreadAttachmentRefDto[];
+  /**
+   * The record this message is privately "about" (fm task 056). Null when the message has no reference, or when the
+   * viewer cannot read the record (the server resolves it as the viewer). Absent on servers that predate task 056.
+   */
+  privateContext?: IThreadMessagePrivateContextDto | null;
 }
 
 /**
@@ -231,6 +243,11 @@ export interface IReadThreadOptions {
   since?: string;
   /** Page size. Server default 100, cap 200. */
   top?: number;
+  /**
+   * Narrow the read to the messages that are privately about this record (fm task 056). Sent as
+   * `about={entityType}:{id}`. Used by the record's "Private · you and …" entries.
+   */
+  about?: { entityType: string; id: string };
 }
 
 export async function readThread(
@@ -248,6 +265,7 @@ export async function readThread(
   const params = new URLSearchParams();
   if (options.since) params.set('since', options.since);
   if (options.top) params.set('top', String(options.top));
+  if (options.about) params.set('about', `${options.about.entityType}:${options.about.id}`);
 
   const url = resolveThreadUrl(client.bffBaseUrl, threadId, 'messages', params);
   const response = await client.authenticatedFetch(url, { method: 'GET' });
