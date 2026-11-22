@@ -114,7 +114,7 @@ No test existed for `InvoiceExtractionJobHandler`, `InvoiceAnalysisService`, `Fi
 
 - `InvoiceLifecycleService.BuildInvoiceCreateRequest` (the create builder, 014) has exactly one caller: `Services/Finance/Submission/InvoiceSubmissionPersister.cs:679` (049). `grep -rn "BuildInvoiceCreateRequest(" src/server`: the interface, the implementation and that one call.
 - No `new Entity("sprk_invoice"...)` / `CreateAsync("sprk_invoice"...)` remains in `Services/Finance` outside the lifecycle service's row builder (`InvoiceLifecycleService.cs:460`, used by the above).
-- Other `sprk_invoice` create surfaces exist and pre-date this task (050a notes: kept on purpose in task 013): the generic `ChildRecordEndpoints` table, the chat `create_record` tool (`DataverseCreateRecordHandler` has an `IsInvoiceCreate` check; its behaviour was not examined), the decision route, and the Office QuickCreate type `QuickCreateEntityType.Invoice` (`QuickCreateRequest.cs:180`, behind `FinanceAuthorizationFilter.CreateInvoicePrivilege`). 050b changes none. **Question for the owner: should QuickCreate keep an Invoice entity type now that submission is the one creator (D-19)?** Not examined further here.
+- Other `sprk_invoice` create surfaces pre-date this task. The generic `ChildRecordEndpoints` invoice create was closed by 096b (`ChildRecordEndpoints.cs:71-76`); the chat `create_record` tool refuses invoices (`DataverseCreateRecordHandler.cs:340`, `:444`). The one left is Office QuickCreate (`OfficeService.cs` ~2202-2260, `QuickCreateEntityType.Invoice`), which EB-D-201 assigns to task 096 (still open, gated on one add-in release). So the negative criterion holds for every path 050b owns; the QuickCreate path is a known limit owned by 096, not an owner question.
 - `InvoiceExtractionJobHandler` never created `sprk_invoice` (it updated one); confirm creation went in 050a.
 
 ## 7. Publish size and CVE
@@ -153,10 +153,10 @@ Scratch worktrees (`C:\tmp\050b\mastersrc`, `basesrc`) removed with `scripts/wor
 ## 10. Orphans and things noticed (not fixed)
 
 1. **`DataverseUpdateHandler` instance service** and its `Optimistic` mode have no production injector now (section 5.2).
-2. `FinanceTelemetry.RecordExtractionStart / RecordExtractionSuccess / RecordExtractionFailure` (and their three OpenTelemetry instruments, `_extractionRequests`, `_extractionSuccesses`, `_extractionFailures`, `_extractionDuration`) have no caller. I left the metrics because removing instruments changes the exported meter and may sit on a dashboard; owner decision. File: `Telemetry/FinanceTelemetry.cs:177-226`.
+2. ~~`FinanceTelemetry` extraction metrics~~: removed in review fix round 1 (section 13).
 3. `FinancialCalculationToolHandler` is still registered twice (concrete + `IAiToolHandler` forwarding); the concrete registration was "needed by InvoiceExtractionJobHandler (direct injection)". The forwarding resolves the concrete type, so both stay; only the comment changed.
 4. `InvoiceExtractionToolHandler` (`Services/Ai/Handlers`, out of scope per POML) is untouched. Docs had pointed to a wrong path (`Services/Finance/Tools/InvoiceExtractionToolHandler.cs`); corrected in `finance-intelligence-architecture.md`.
-5. QuickCreate Invoice entity type (section 6) is a second `sprk_invoice` create surface.
+5. QuickCreate Invoice entity type (section 6): owned by task 096 (EB-D-201).
 6. The `docs/assessments/**` files that mention the handler are historical and untouched.
 
 ## 11. Deviations from the POML steps
@@ -175,3 +175,21 @@ Scratch worktrees (`C:\tmp\050b\mastersrc`, `basesrc`) removed with `scripts/wor
 - ADR-032: `NullInvoiceAi` still has a peer for every `IInvoiceAi` method; the Null peer of the deleted `IOutputOrchestratorService` went with it (no unconditional consumer remains); the DEF-FIN rows for the deleted handler went with it.
 - ADR-002 / D-19: no write path added or moved. CLAUDE.md section 11: no new surface (a deletion); the one new declaration is the moved `ConcurrencyMode` enum (an existing type, relocated).
 - BFF hygiene (section 10): publish size down, no new package, no new endpoint or DI registration; two registrations removed.
+
+## 13. Review fix round 1 (Opus adversarial review, 2026-11-22)
+
+One adversarial pass (Opus) over `86fc546a65..ef113f6c60`. No F1/F3 finding; no broken contract. Fixed:
+
+| # | Finding | Fix |
+|---|---|---|
+| 1 | `FinanceTelemetry` extraction instruments and `RecordExtraction*` methods had no caller after the handler went; the class doc still pointed operators at `finance.extraction.duration`. No dashboard or alert in `infra/`, `infrastructure/`, `deploy/`, `scripts/` or `.github/` uses the names. | Removed the four instruments, the three methods and the KQL hint; the class doc says `finance.extraction.*` is retired. |
+| 2 | ISS-002 (#1918) and ISS-003 (#1919) describe the legacy extraction path and were still Open. | Both set to Resolved in `defer-issues.md`; the completion commit closes #1918 and #1919. |
+| 3 | `finance-intelligence-user-guide.md` named a job-replay admin operation that does not exist. | Says there is no replay operation; a failed submission ends Failed and is submitted again (EB-D-165). |
+| 4 | `InvoiceReviewService.InvExtractionStatus` (`sprk_extractionstatus`) had no reader or writer, under a comment saying the persister writes it (050a leftover). | Constant deleted. |
+| 5 | `scripts/seed-data/playbooks.json` still said `OutputOrchestratorService` applies the PB-013 output mapping. | Both notes reworded as retired (string fields only; the JSON still parses). |
+| 7 | Section 6 was stale (096b closed the child-record create, the chat tool refuses invoices, EB-D-201 answered the QuickCreate question). | Section 6 rewritten. |
+| 8 | Nits: unused `using Sprk.Bff.Api.Services.Ai;` in `IDataverseUpdateHandler.cs`; leading blank line in `IInvoiceAi.cs`. | Removed. |
+
+Known limits, not fixed here:
+- **6** — #2263 (`DataverseUpdateHandler` Optimistic mode puts `versionnumber` in the PATCH body) was auto-closed by docs commit b32faae4, not by a fix. After 050b no production code injects `IDataverseUpdateHandler`, so the defect is off every real path, but nothing tracked it: #2263 is reopened with that context (owner of the handler code: uac-r2 guards name the class).
+- **9** — `InvoiceAiContractTests` does not check that the Null peer throws for `GenerateEmbeddingAsync` and `MatchCodeSetAsync` (pre-existing; the compiler still forces both members to exist). K3.

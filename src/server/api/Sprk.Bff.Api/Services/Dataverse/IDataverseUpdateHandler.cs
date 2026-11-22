@@ -1,5 +1,3 @@
-using Sprk.Bff.Api.Services.Ai;
-
 namespace Sprk.Bff.Api.Services.Dataverse;
 
 /// <summary>

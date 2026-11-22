@@ -1,4 +1,3 @@
-
 namespace Sprk.Bff.Api.Services.Ai.PublicContracts;
 
 /// <summary>

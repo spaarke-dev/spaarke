@@ -874,7 +874,7 @@ The deployment name misdescribes its model and the model retires 2027-04-14. eBi
 
 | Field | Value |
 |---|---|
-| **Status** | Open |
+| **Status** | Resolved 2026-11-22: task 050b deleted the legacy extraction path, so there is nothing left to run (#1918 closed) |
 | **Urgency** | next-round |
 | **Filed** | 2026-10-15 |
 | **Source** | ebilling-r1 task 001 (baseline; escalation trigger 1) |
@@ -904,7 +904,7 @@ None before 044: the path is replaced by Content Understanding + Actions (D-52) 
 
 | Field | Value |
 |---|---|
-| **Status** | Open |
+| **Status** | Resolved 2026-11-22: task 050b deleted the legacy extraction path and its output mapping (#1919 closed) |
 | **Urgency** | next-round (superseded by 050 deletion) |
 | **Filed** | 2026-10-15 |
 | **Source** | ebilling-r1 task 001 (baseline) |

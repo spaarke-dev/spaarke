@@ -916,7 +916,7 @@ Status: Active
 - If AI throttled: Implement retry with exponential backoff (or increase quota)
 - If document inaccessible: Check SPE permissions, verify container exists
 - If a read error: check the Content Understanding analyzer configuration (ebilling-r1 043); there is no extraction prompt schema any more
-- Manual workaround: replay the `InvoiceSubmissionProcessing` job for the submission via the admin operation
+- Manual workaround: there is no job-replay operation. A submission whose job failed ends Failed; submit the invoice again (another user may re-attempt after a Failed submission, EB-D-165)
 
 #### Issue 3: Finance Panel Not Updating
 

@@ -259,7 +259,6 @@ public class InvoiceReviewService : IInvoiceReviewService
     internal const string InvMatterValue = "_sprk_matter_value";
     internal const string InvVendorOrgValue = "_sprk_vendororg_value";
     internal const string InvName = "sprk_name";
-    internal const string InvExtractionStatus = "sprk_extractionstatus";
     internal const string InvInvoiceNumber = "sprk_invoicenumber";
 
     /// <summary>
