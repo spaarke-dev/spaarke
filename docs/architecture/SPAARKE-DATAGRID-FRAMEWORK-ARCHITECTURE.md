@@ -2,6 +2,7 @@
 
 > **Status**: R1 shipped (Phase A–C). Phase D (EventsPage migration) + Phase E (SemanticSearch migration) + Phase F (legacy retirement) in progress.
 > **Established**: 2026-06 (project `spaarke-datagrid-framework-r1`)
+> **Last Reviewed**: 2026-11-22 (command bar section only, for `hiddenBuiltInCommands`, #2908; the rest was not re-checked)
 > **Audience**: Developers consuming the framework, makers authoring configuration records.
 > **Operational guide**: [`DATAGRID-FRAMEWORK-CONFIGURATION-GUIDE.md`](../guides/DATAGRID-FRAMEWORK-CONFIGURATION-GUIDE.md)
 > **Supersedes**: [`universal-dataset-grid-architecture.md`](universal-dataset-grid-architecture.md) (PCF — retires in Phase F)
