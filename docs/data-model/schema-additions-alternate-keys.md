@@ -58,7 +58,6 @@ Which BFF services use each alternate key:
 | Alternate Key | Service / File | Method | Call Site |
 |---|---|---|---|
 | `sprk_playbookcode` | `PlaybookLookupService` | `GetByCodeAsync(string)` | `src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookLookupService.cs` |
-| `sprk_playbookcode` | `InvoiceExtractionJobHandler` | `_playbookLookup.GetByCodeAsync("PB-013")` | `src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/InvoiceExtractionJobHandler.cs:310` |
 | `sprk_actioncode` | `ActionLookupService` | `GetByCodeAsync(string)` | `src/server/api/Sprk.Bff.Api/Services/Ai/ActionLookupService.cs` |
 | `sprk_skillcode` | `SkillLookupService` | `GetByCodeAsync(string)` | `src/server/api/Sprk.Bff.Api/Services/Ai/SkillLookupService.cs` |
 | `sprk_toolcode` | `ToolLookupService` | `GetByCodeAsync(string)` | `src/server/api/Sprk.Bff.Api/Services/Ai/ToolLookupService.cs` |
@@ -93,11 +92,11 @@ Task<Entity> RetrieveByAlternateKeyAsync(
 
 ```csharp
 // 1. Inject the lookup service
-public class InvoiceExtractionJobHandler
+public class ExampleJobHandler
 {
     private readonly IPlaybookLookupService _playbookLookup;
 
-    public InvoiceExtractionJobHandler(IPlaybookLookupService playbookLookup)
+    public ExampleJobHandler(IPlaybookLookupService playbookLookup)
     {
         _playbookLookup = playbookLookup;
     }
