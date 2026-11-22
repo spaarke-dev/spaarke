@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Azure.Core;
 using FluentAssertions;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -49,6 +50,9 @@ public class Issue2750_HeldWindowPastThePageBoundTests
     private readonly FakeTimeProvider _time = new(T0);
     private readonly SecureChildShareWorld _world = R.JobWorld();
     private bool _ordinaryListingFaults;
+
+    /// <summary>The children whose owner writes fail (their root is left incomplete) until the test clears them.</summary>
+    private readonly HashSet<Guid> _failingWrites = new();
 
     public enum Pass
     {
@@ -190,10 +194,11 @@ public class Issue2750_HeldWindowPastThePageBoundTests
 
     /// <summary>
     /// Review F1-a: production shape (a carry of four, two roots a run, one owner write a run), the write cap reached while the
-    /// catch-up sweep runs. Run one: three reassigned records are listed and two swept ones reached; the write cap stops all but
-    /// one, and the four fill the carry exactly. Run two: the carried roots are no longer listed (the window moved past them)
-    /// and the sweep reaches two more the write cap stops. Carrying those swept roots AHEAD of the carried ones pushed a carried
-    /// root out of the carry — a root no listing and no sweep reaches again. Every reassigned record's children must follow it.
+    /// catch-up sweep runs. Swept roots S1–S6 sort before the listed L1–L3, so the sweep reaches the L roots last. When swept
+    /// roots the write cap stopped were CARRIED, ahead of the roots past the root cap: each run filled the carry exactly and the
+    /// cursor moved on (to S2, S4, then S6); in run five the sweep reached L1 and L2 (already moved) with the write cap spent,
+    /// carried them ahead of the overflow, and S6 fell out of the full carry with the cursor already at S6 — no listing and no
+    /// sweep reached it again. Every reassigned record's children must follow it.
     /// </summary>
     [Fact]
     public async Task ExecuteAsync_OrdinaryMovesWriteCapDuringTheSweep_WithAFullCarry_DropsNoRoot()
@@ -219,6 +224,102 @@ public class Issue2750_HeldWindowPastThePageBoundTests
             "a carried root the window has moved past is never dropped from the carry");
     }
 
+    /// <summary>
+    /// Review 2 F2 (a): two ordinary tables, and the matter listing capped at the page bound inside a tie — one matter at the
+    /// cap's instant read, one not. The first root left out of the carry is a PROJECT at that instant. The window must move to
+    /// the cap's instant plainly (inclusive), not resume at the project's key: that key would skip every matter of the instant,
+    /// the unread one included.
+    /// </summary>
+    [Fact]
+    public async Task ExecuteAsync_OrdinaryListingCappedInATie_FirstLeftOutAtTheCapInstant_ReachesTheUnreadRoot()
+    {
+        var harness = new Harness(this, ordinaryCarryCap: 18);
+        await SweepCompleteAsync(harness, maxRoots: "50");
+
+        // 21 matters (one a page: the listing reads 20 — M0–M18 and M19, not M20, which shares M19's instant) and a project at
+        // that instant. Two roots a run: M0, M1 are walked, M2–M19 fill the carry of 18, and the project is the first left out.
+        var start = _time.GetUtcNow().UtcDateTime;
+        DateTime At(int i) => start + TimeSpan.FromSeconds(Math.Min(i, 19));
+        var events = ReassignedMatters(21, At, firstId: 0x501);
+        events.AddRange(ReassignedMatters(1, _ => At(19), firstId: 0x601, table: "sprk_project", lookup: "sprk_regardingproject"));
+        _world.MaxRowsPerPage = 1;
+
+        _time.Advance(TimeSpan.FromMinutes(2));
+        var first = Report(await harness.RunAsync(recentWrites: true, ordinaryWrites: true, maxRoots: "2"), Pass.OrdinaryMoves);
+        first.GetProperty("cappedAt").GetDateTime().Should().Be(At(19), "the matter listing is capped inside the tie");
+        _world.MaxRowsPerPage = null;
+
+        for (var run = 0; run < 30 && !Moved(events); run++)
+        {
+            _time.Advance(TimeSpan.FromMinutes(2));
+            await harness.RunAsync(recentWrites: true, ordinaryWrites: true, maxRoots: "2");
+        }
+
+        Moved(events).Should().BeTrue("the matter at the cap's instant that the capped listing did not read is listed next run");
+    }
+
+    /// <summary>
+    /// Review 2 F2 (b): more roots that no listing reaches again than the carry holds — swept roots left incomplete, carried
+    /// while the cursor moved past them. The one left out of the full carry is behind the cursor: the sweep must start over
+    /// (reported as <c>sweep.reopened</c>) so it is reached once the writes succeed.
+    /// </summary>
+    [Fact]
+    public async Task ExecuteAsync_OrdinaryUnlistedRootsPastTheCarry_ReopensTheSweep_AndReachesEveryRoot()
+    {
+        var harness = new Harness(this, ordinaryCarryCap: 3);
+        // Reassigned long ago (in no window): only the sweep reaches them, one a run; their writes fail at first.
+        var swept = ReassignedMatters(4, _ => SecureChildShareWorld.RecordsLastModified, firstId: 0x701);
+        _failingWrites.UnionWith(swept);
+
+        // Runs 1–3 carry S1, S2, S3 (the carry is not past its cap, so the cursor moves on to S3); run 4 reaches S4: four roots
+        // no listing reaches again for a carry of three, and S3 — behind the cursor — is left out.
+        var reopened = false;
+        for (var run = 0; run < 4; run++)
+        {
+            _time.Advance(TimeSpan.FromMinutes(2));
+            var report = Report(await harness.RunAsync(recentWrites: true, ordinaryWrites: true, maxRoots: "1"), Pass.OrdinaryMoves);
+            reopened |= report.GetProperty("sweep").GetProperty("reopened").GetBoolean();
+        }
+
+        reopened.Should().BeTrue("four roots no listing reaches again were carried past a carry of three");
+        _failingWrites.Clear();
+        for (var run = 0; run < 150 && !Moved(swept); run++)
+        {
+            _time.Advance(TimeSpan.FromMinutes(2));
+            await harness.RunAsync(recentWrites: true, ordinaryWrites: true, maxRoots: "1");
+        }
+
+        Moved(swept).Should().BeTrue("the root left out of the carry, behind the cursor, is reached by the sweep started over");
+    }
+
+    /// <summary>
+    /// Review 2 F1 / F2 (c): a run that is only THROTTLED with a carry full of roots no listing reaches again — the first
+    /// carried root walked spends the write cap, so the rest are carried unread — holds its window (<c>windowHeld</c>) but
+    /// does not fail: the carried roots are walked first next run. Every root's children still move.
+    /// </summary>
+    [Fact]
+    public async Task ExecuteAsync_OrdinaryThrottledRunWithAFullUnlistedCarry_HoldsTheWindow_AndDoesNotFail()
+    {
+        var harness = new Harness(this, ordinaryCarryCap: 2);
+        await SweepCompleteAsync(harness, maxRoots: "50");
+        // Four reassigned records, three children each, at distinct instants; two roots and one owner write a run.
+        var start = _time.GetUtcNow().UtcDateTime;
+        var events = ReassignedMatters(4, i => start + TimeSpan.FromSeconds(i), firstId: 0x801, eventsEach: 3);
+
+        var held = false;
+        for (var run = 0; run < 40 && !Moved(events); run++)
+        {
+            _time.Advance(TimeSpan.FromMinutes(2));
+            var report = Report(await harness.RunAsync(recentWrites: true, ordinaryWrites: true, maxRoots: "2", maxOrdinaryMoves: "1"),
+                Pass.OrdinaryMoves);
+            report.GetProperty("failure").ValueKind.Should().Be(JsonValueKind.Null, "a run that is only throttled does not fail");
+            held |= report.TryGetProperty("windowHeld", out var windowHeld) && windowHeld.GetBoolean();
+        }
+
+        held.Should().BeTrue("a run's carry was full of roots no listing reaches again, so its window did not advance");
+        Moved(events).Should().BeTrue();
+    }
+
     private static Guid OrderedId(int n) => Guid.Parse($"00000000-0000-4000-8000-{n:x12}");
 
     private async Task SweepCompleteAsync(Harness harness, string maxRoots)
@@ -234,23 +335,32 @@ public class Issue2750_HeldWindowPastThePageBoundTests
         throw new InvalidOperationException("Test: the ordinary catch-up sweep did not complete.");
     }
 
-    /// <summary><paramref name="count"/> ordinary matters reassigned to B, each with an event still owned by A; the event ids.</summary>
-    private List<Guid> ReassignedMatters(int count, Func<int, DateTime> modifiedAt, int? firstId = null)
+    /// <summary>
+    /// <paramref name="count"/> ordinary records (matters unless <paramref name="table"/> says otherwise) reassigned to B, each
+    /// with <paramref name="eventsEach"/> events still owned by A; the event ids (each record's own ids when
+    /// <paramref name="firstId"/> is given, so the sweep and key order are fixed).
+    /// </summary>
+    private List<Guid> ReassignedMatters(
+        int count, Func<int, DateTime> modifiedAt, int? firstId = null, string table = "sprk_matter",
+        string lookup = "sprk_regardingmatter", int eventsEach = 1)
     {
         if (!_world.Has("team", TeamB))
             _world.Add("businessunit", BuB, ("name", "Litigation")).Team(TeamB, BuB, "Litigation", isDefault: true, teamType: 0);
         var events = new List<Guid>();
         for (var i = 0; i < count; i++)
         {
-            var matter = firstId is { } first ? OrderedId(first + i) : Guid.NewGuid();
-            var evt = Guid.NewGuid();
-            _world.Add("sprk_matter", matter, ("owningteam", new EntityReference("team", TeamB)), ("sprk_issecure", false));
-            _world.Modified("sprk_matter", matter, modifiedAt(i));
-            _world.Add("sprk_event", evt,
-                ("owningteam", new EntityReference("team", SecureChildShareWorld.GeneralTeam)),
-                ("sprk_regardingmatter", new EntityReference("sprk_matter", matter)),
-                ("versionnumber", 1L));
-            events.Add(evt);
+            var root = firstId is { } first ? OrderedId(first + i) : Guid.NewGuid();
+            _world.Add(table, root, ("owningteam", new EntityReference("team", TeamB)), ("sprk_issecure", false));
+            _world.Modified(table, root, modifiedAt(i));
+            for (var e = 0; e < eventsEach; e++)
+            {
+                var evt = Guid.NewGuid();
+                _world.Add("sprk_event", evt,
+                    ("owningteam", new EntityReference("team", SecureChildShareWorld.GeneralTeam)),
+                    (lookup, new EntityReference(table, root)),
+                    ("versionnumber", 1L));
+                events.Add(evt);
+            }
         }
 
         return events;
@@ -373,7 +483,7 @@ public class Issue2750_HeldWindowPastThePageBoundTests
                     ? throw new InvalidOperationException("Test: the reassigned ordinary records could not be listed.")
                     : Task.FromResult(world.Answer(query)));
 
-            var webApi = new SecureChildOrdinaryParentMoveTests.ConditionalOwnerWebApi(() => world);
+            var webApi = new FaultingOwnerWebApi(() => world, test._failingWrites);
             var services = new ServiceCollection();
             services.AddSingleton(entities.Object);
             services.AddScoped(_ => SecureChildShareWorld.ReconcilerOver(() => world, new FakeRecordShareTable(), webApi));
@@ -412,5 +522,40 @@ public class Issue2750_HeldWindowPastThePageBoundTests
             using var doc = JsonDocument.Parse(result.ResultJson!);
             return doc.RootElement.Clone();
         }
+    }
+
+    /// <summary>The ordinary pass's conditional owner write over the world; a write to a child in the failing set faults.</summary>
+    private sealed class FaultingOwnerWebApi : DataverseWebApiClient
+    {
+        private readonly SecureChildOrdinaryParentMoveTests.ConditionalOwnerWebApi _inner;
+        private readonly HashSet<Guid> _failing;
+
+        public FaultingOwnerWebApi(Func<SecureChildShareWorld> world, HashSet<Guid> failing)
+            : base(new ConfigurationBuilder()
+                    .AddInMemoryCollection(new Dictionary<string, string?> { ["Dataverse:ServiceUrl"] = "https://test.crm.dynamics.com" })
+                    .Build(),
+                NullLogger<DataverseWebApiClient>.Instance,
+                NoCredential.Instance)
+        {
+            _inner = new SecureChildOrdinaryParentMoveTests.ConditionalOwnerWebApi(world);
+            _failing = failing;
+        }
+
+        public override Task UpdateIfMatchAsync(
+            string entitySetName, Guid id, object entity, string etag, CancellationToken cancellationToken = default) =>
+            _failing.Contains(id)
+                ? throw new InvalidOperationException($"Test: the owner write to {entitySetName}({id}) failed.")
+                : _inner.UpdateIfMatchAsync(entitySetName, id, entity, etag, cancellationToken);
+    }
+
+    private sealed class NoCredential : TokenCredential
+    {
+        public static readonly NoCredential Instance = new();
+
+        public override AccessToken GetToken(TokenRequestContext requestContext, CancellationToken cancellationToken)
+            => throw new NotSupportedException("This double issues no HTTP.");
+
+        public override ValueTask<AccessToken> GetTokenAsync(TokenRequestContext requestContext, CancellationToken cancellationToken)
+            => throw new NotSupportedException("This double issues no HTTP.");
     }
 }

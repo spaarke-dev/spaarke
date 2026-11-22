@@ -768,6 +768,8 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
                     since = ordinary.Since.UtcDateTime,
                     // #2750: the window moved only to this instant (a listing capped at the page bound, or a full carry).
                     cappedAt = ordinary.CappedAt,
+                    // #2750: the window did not advance (the carry is full of roots no listing reaches again).
+                    windowHeld = ordinary.WindowHeld,
                     rootsListed = ordinary.RootsListed,
                     rootsInRun = ordinary.RootsInRun,
                     rootsOverflow = ordinary.RootsOverflow,
@@ -1035,6 +1037,12 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
         /// </summary>
         public bool SweepReopened { get; set; }
 
+        /// <summary>
+        /// #2750: the window did not advance this run — the carry is full of roots no listing reaches again (they are walked
+        /// first next run). A failure only when the run was not throttled.
+        /// </summary>
+        public bool WindowHeld { get; set; }
+
         /// <summary>Only a WRITING pass fails the run: a listing that failed, or a root left incomplete (not merely capped).</summary>
         public bool FailsTheRun => Writes && (Failure is not null || IncompleteRoots.Count > 0);
     }
@@ -1063,15 +1071,18 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
     /// <see cref="OrdinaryCarryCap"/>; #2750: the roots no listing reaches again are carried first and never left out for a
     /// listed root — past the cap the catch-up sweep starts over — and the window moves to the first listed root left out, as a
     /// key set (modifiedon, table, id), so it is listed again and roots sharing one instant still advance; a run that cannot
-    /// advance at all fails). A swept root the write cap stops holds the sweep cursor rather than being carried. A listing that
+    /// advance at all is reported — windowHeld — and fails unless it was only throttled). A swept root the write cap stops
+    /// holds the sweep cursor rather than being carried. A listing that
     /// reached the page bound is capped there, oldest change first, and the watermark moves only to the cap (#2750). Per instance, like every window of this job: a restart
     /// looks back <see cref="InitialRecentChangesLookback"/>.</para>
     /// <para><b>Catch-up sweep (F4-a).</b> Until this instance has walked every ordinary root once in the current mode, each
     /// run also walks the next <see cref="MaxRootsPerRunConfigKey"/> roots after a per-instance cursor (table, then id), so a
     /// reassignment older than the window (made before this pass existed, or carried by an instance that restarted) is found.
     /// A switch of <see cref="OrdinaryMovesWritesEnabledConfigKey"/> starts it over: a report-only cover never stands in for a
-    /// writing one. A root of the window that the write cap stops is carried; a carry past <see cref="OrdinaryCarryCap"/> holds
-    /// the cursor where it is.</para>
+    /// writing one. A root of the window left incomplete is carried; one that the write cap, the time slice or a full hand-off
+    /// carry stops holds the cursor just before it; a carry past <see cref="OrdinaryCarryCap"/> holds the cursor where it is.
+    /// #2750: when roots no listing reaches again are left out of a full carry, the sweep starts over (at once if it was
+    /// complete, otherwise when it reaches its end).</para>
     /// <para><b>Files (F1-a).</b> With writes on, every document of a root's walk that may move
     /// (<see cref="SecureChildReconcileReport.OrdinaryHandOffDocumentIds"/>: any owner, never one held in isolation or answered
     /// Secure) is handed to the re-file pass as a carried row, so it is examined and moved this run or later under the
@@ -1128,6 +1139,7 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
                 _ordinarySweepWrites = writes;
                 _ordinarySweepCursor = null;
                 _ordinarySweepComplete = false;
+                _ordinaryResweepPending = false;
             }
 
             sweepRuns = !_ordinarySweepComplete;
@@ -1348,12 +1360,23 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
 
                 if (unlisted.Count > OrdinaryCarryCap)
                 {
-                    _ordinarySweepComplete = false;
-                    _ordinarySweepCursor = null;
+                    // Started over at once when complete; otherwise when the current sweep reaches its end (the roots left
+                    // out may be behind its cursor), so a backlog that stays past the cap does not reset its progress every run.
+                    if (_ordinarySweepComplete)
+                    {
+                        _ordinarySweepComplete = false;
+                        _ordinarySweepCursor = null;
+                    }
+                    else
+                    {
+                        _ordinaryResweepPending = true;
+                    }
+
                     run.SweepReopened = true;
                     _logger.LogWarning(
                         "[SECURE-CHILD-RECONCILE] ordinary-moves run={RunId}: {Unlisted} roots to carry that no listing reaches " +
-                        "again exceed the carry of {Cap}; the {Left} left out are reached by the catch-up sweep, which starts over.",
+                        "again exceed the carry of {Cap}; the {Left} left out are reached by the catch-up sweep, which starts over " +
+                        "(now if it was complete, otherwise when it reaches its end).",
                         runId, unlisted.Count, OrdinaryCarryCap, unlisted.Count - OrdinaryCarryCap);
                 }
 
@@ -1370,17 +1393,24 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
                 _ordinaryMovesResumeAt = resumeAt is { } r && r.At == watermark.UtcDateTime ? resumeAt : null;
 
                 // The roots left out start at the first root this run listed: the next run lists exactly the same roots,
-                // so the window cannot advance (the carry is full of roots no listing reaches again). Never a silent success.
+                // so the window did not advance (the carry is full of roots no listing reaches again). Never a silent
+                // success: reported (windowHeld) and logged. A run that was only throttled — the write cap, the time slice,
+                // a full hand-off carry — is not a failure (its carried roots are walked first next run); one that was not
+                // throttled fails (a root left incomplete already fails it).
                 var firstListed = changed.Count == 0
                     ? ((DateTime At, string Table, Guid Id)?)null
                     : changed.Select(c => (At: AsUtc(c.ModifiedOn), c.Table, c.Id)).Min(OrdinaryKeyComparer.Instance);
                 if (leftOut.Count > 0 && firstListed is { } first0 && OrdinaryKeyComparer.Instance.Compare(leftOut[0], first0) == 0)
                 {
-                    run.Failure = "the carry is full of roots that no listing reaches again, so the window cannot advance this run";
+                    run.WindowHeld = true;
+                    var throttled = run.CapReached || run.TimeSliceReached || run.DeferredRoots.Count > 0;
+                    if (!throttled)
+                        run.Failure = "the carry is full of roots that no listing reaches again, so the window cannot advance this run";
                     _logger.LogWarning(
-                        "[SECURE-CHILD-RECONCILE] ordinary-moves run={RunId}: the window since {Since:o} cannot advance — all " +
-                        "{Cap} carried roots are roots no listing reaches again; they are walked first in the next runs.",
-                        runId, since, OrdinaryCarryCap);
+                        "[SECURE-CHILD-RECONCILE] ordinary-moves run={RunId}: the window since {Since:o} did not advance — all " +
+                        "{Cap} carried roots are roots no listing reaches again; they are walked first in the next runs " +
+                        "(throttled={Throttled}).",
+                        runId, since, OrdinaryCarryCap, throttled);
                 }
             }
 
@@ -1410,9 +1440,10 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
 
             run.ReportCursor = _ordinaryReportCursor is { } cursor ? $"{cursor.Table}:{cursor.Id:D}" : null;
 
-            // F4-a: the sweep moves past its window (a root of it the write cap stopped, or left incomplete, is carried
-            // above). Report-only it moves too: one report of every root, then it stops until the mode changes. A carry past
-            // OrdinaryCarryCap holds it where it is.
+            // F4-a: the sweep moves past its window (a root of it left incomplete is carried above; one the write cap, the
+            // time slice or a full hand-off carry stopped holds the cursor just before it, below). Report-only it moves too:
+            // one report of every root, then it stops until the mode changes. A carry past OrdinaryCarryCap holds it where
+            // it is.
             if (sweepRuns && (!writes || carry.Concat(overflow).Distinct().Count() <= OrdinaryCarryCap))
             {
                 // F1-a: a swept root whose documents did not all fit holds the cursor just before it (the carry is full:
@@ -1422,6 +1453,11 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
                 {
                     if (held > 0)
                         _ordinarySweepCursor = sweep.Rows[held - 1];
+                }
+                else if (sweep.ReachedEnd && _ordinaryResweepPending)
+                {
+                    _ordinaryResweepPending = false; // #2750: roots were left out behind the cursor: start again
+                    _ordinarySweepCursor = null;
                 }
                 else if (sweep.ReachedEnd)
                 {
@@ -2764,6 +2800,10 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
     private (string Table, Guid Id)? _ordinarySweepCursor;
     private bool _ordinarySweepComplete;
     private bool? _ordinarySweepWrites;
+
+    // #2750: roots that no listing reaches again were left out of a full carry while the sweep was under way (some may be
+    // behind its cursor): the sweep starts again when it reaches its end (the _accessPermissionResweepPending pattern).
+    private bool _ordinaryResweepPending;
 
     /// <summary>
     /// Task 147 r1: the most unplaced rows the job carries between runs. Beyond it the watermark does not move, so the whole
