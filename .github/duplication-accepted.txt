@@ -8,12 +8,15 @@
 # One pair per line, four fields separated by " | ":
 #   <repo path A> | <repo path B> | <record> | <reason>
 # - <record> is the issue that tracks removing the duplication (#1234) or the ADR that makes it
-#   deliberate (ADR-022). No record, no entry: this list is not a place to park a duplicate.
+#   deliberate (ADR-024). No record, no entry: this list is not a place to park a duplicate.
+# - The reason must not contain " | " (it would read as a fifth field and be reported malformed).
+# - An entry covers every cluster between its two files, not one cluster: keep the reason true
+#   for the whole pair.
 # - Delete the line when the duplication is gone. The sweep log lists entries that no longer match
 #   any pair, and malformed lines make the sweep report failing instead of being ignored.
 
 # --- Deliberate (no fix planned) ---
-src/client/pcf/CommunicationAttachments/CommunicationAttachments/CommunicationAttachmentsApp.tsx | src/client/shared/Spaarke.Communication.Components/src/components/EmailReadingHeader/EmailReadingAttachments.tsx | ADR-022 | The PCF runs on the React 16.14 platform library; the shared component is React 19. They cannot share the component across that boundary.
+# (none at present; the write-handler pair from #2866 dropped below the floor)
 
 # --- Tracked: e-billing page scaffolding (#2965) ---
 src/solutions/ApExport/src/main.tsx | src/solutions/RuleReview/src/main.tsx | #2965 | E-billing page bootstrap; one shared bootstrap planned.
@@ -41,3 +44,4 @@ src/client/pcf/CommunicationActions/CommunicationActions/CommunicationActionsApp
 src/client/pcf/CommunicationConnections/CommunicationConnections/CommunicationConnectionsApp.tsx | src/client/pcf/RegardingResolver/RegardingResolver/RegardingResolverApp.tsx | #2967 | Row styles copied for RegardingResolver parity; shared style objects planned.
 src/client/pcf/CommunicationConversationPanel/CommunicationConversationPanel/CommunicationConversationPanelApp.tsx | src/client/pcf/CommunicationMessageActions/CommunicationMessageActions/CommunicationMessageActionsApp.tsx | #2967 | Copied host-context helpers (record id / entity name); one PCF-safe helper planned.
 src/client/pcf/CommunicationConversationPanel/CommunicationConversationPanel/CommunicationConversationPanelApp.tsx | src/client/pcf/CommunicationTimelineRegarding/CommunicationTimelineRegarding/CommunicationTimelineRegardingApp.tsx | #2967 | Copied PCF auth bootstrap; one PCF-safe hook planned.
+src/client/pcf/CommunicationAttachments/CommunicationAttachments/CommunicationAttachmentsApp.tsx | src/client/shared/Spaarke.Communication.Components/src/components/EmailReadingHeader/EmailReadingAttachments.tsx | #2967 | Attachment preview/open logic copied from the PCF; one shared hook in communication-components planned.

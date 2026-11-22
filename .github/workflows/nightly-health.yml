@@ -1336,7 +1336,10 @@ jobs:
   # Observation only: jscpd runs with exitCode 0 and continue-on-error, and the
   # decide step always succeeds, so duplication never fails this workflow.
   # No baseline file: a cluster is NEW when either of its files landed on master in
-  # the last 7 days (`git log --since=7.days --first-parent -m`). It alerts only when a new cluster is at or above the
+  # the last 7 days (`git log --since=7.days --first-parent -m`). Reviewed pairs listed in
+  # .github/duplication-accepted.txt (each with its tracking issue or ADR) are skipped; a
+  # malformed line or a failed self-test of that filter reports failing (#2866).
+  # It alerts only when a new cluster is at or above the
   # floor (>= MIN_TOKENS tokens AND >= MIN_LINES lines) and its two files sit in
   # different top-level areas. Area = first 4 path segments under src/client/ and
   # src/server/ (src/client/pcf/MatterHeader, src/server/api/Sprk.Bff.Api), else the
@@ -1440,16 +1443,19 @@ jobs:
           }
 
           # Must-fire / must-not-fire controls for the two functions above, on synthetic data:
-          # a listed pair is dropped in reversed order, an unlisted pair is kept, and an entry
-          # with no record or the same file twice is reported as malformed.
+          # a listed pair (padded with spaces) is dropped in reversed order, an unlisted pair is
+          # kept, an entry with no record or the same file twice is reported as malformed, and
+          # an empty list keeps every pair (the NR==FNR hazard).
           selftest_accepted() {
             local d="$tmp/selftest"; mkdir -p "$d"
-            printf '%s\n' '# comment' '' 'x/a.ts | x/b.ts | #1 | why' 'x/c.ts | x/d.ts | no-record | why' 'x/e.ts | x/e.ts | ADR-1 | same file' > "$d/list"
+            printf '%s\n' '# comment' '' '  x/a.ts | x/b.ts  | #1 | why  ' 'x/c.ts | x/d.ts | no-record | why' 'x/e.ts | x/e.ts | ADR-1 | same file' > "$d/list"
             parse_accepted "$d/list" "$d/keys" "$d/bad"
             printf '%s\n' $'x/b.ts\t1\t9\tx/a.ts\t1\t9\t100\t10' $'x/a.ts\t1\t9\tx/c.ts\t1\t9\t100\t10' > "$d/pairs"
             drop_accepted "$d/keys" "$d/pairs" "$d/hit" "$d/kept"
+            : > "$d/none"; drop_accepted "$d/none" "$d/pairs" "$d/hit0" "$d/kept0"
             [ "$(wc -l < "$d/keys")" -eq 1 ] && [ "$(wc -l < "$d/bad")" -eq 2 ] \
-              && [ "$(cut -f1,4 "$d/hit")" = $'x/b.ts\tx/a.ts' ] && [ "$(cut -f1,4 "$d/kept")" = $'x/a.ts\tx/c.ts' ]
+              && [ "$(cut -f1,4 "$d/hit")" = $'x/b.ts\tx/a.ts' ] && [ "$(cut -f1,4 "$d/kept")" = $'x/a.ts\tx/c.ts' ] \
+              && [ "$(wc -l < "$d/kept0")" -eq 2 ] && [ ! -s "$d/hit0" ]
           }
 
           # --first-parent -m: list what LANDED on master this week, with each merge
@@ -1494,7 +1500,7 @@ jobs:
               parse_accepted "$ACCEPTED" "$tmp/accepted.keys" "$tmp/accepted.bad"
               if [ -s "$tmp/accepted.bad" ]; then
                 status=failing
-                summary+="- \`${ACCEPTED}\` has $(wc -l < "$tmp/accepted.bad") malformed line(s), not applied. Each entry needs \`<path A> | <path B> | <#issue or ADR-NNN> | <reason>\` with two different paths:"$'\n'
+                summary+="- \`${ACCEPTED}\` has $(wc -l < "$tmp/accepted.bad") malformed line(s); those lines were skipped and the other entries applied, so the pairs they meant to accept may be listed below. Each entry needs \`<path A> | <path B> | <#issue or ADR-NNN> | <reason>\` with two different paths:"$'\n'
                 while IFS= read -r l; do summary+="  - line ${l}"$'\n'; done < <(head -n 5 "$tmp/accepted.bad")
               fi
             fi
@@ -1513,9 +1519,14 @@ jobs:
             echo "Duplicates in report (jscpd defaults): ${total}"
             echo "At or above the floor (>= ${MIN_TOKENS} tokens and >= ${MIN_LINES} lines): ${n_floor}"
             echo "  ... of those, across different top-level areas: ${n_cross}"
-            echo "  ... ACCEPTED (pair listed in ${ACCEPTED}; skipped): ${n_acc}"
+            echo "  ... ACCEPTED (clusters whose file pair is listed in ${ACCEPTED}; skipped): ${n_acc}"
             echo "  ... NEW (a file changed in the last 7 days; these alert): ${n_new}"
             echo "  ... OLD (both files unchanged for > 7 days; these do NOT alert): ${n_old}"
+            if [ "$n_acc" -gt 0 ]; then
+              # An entry covers every cluster between its two files, so list what it skipped.
+              echo "Skipped accepted clusters (an entry covers every cluster between its two files):"
+              awk -F'\t' '{ print "  " $1 ":" $2 "-" $3 "  <->  " $4 ":" $5 "-" $6 "  (" $7 " tokens, " $8 " lines)" }' "$tmp/accepted-hit.tsv"
+            fi
             if [ "$n_stale" -gt 0 ]; then
               echo "Accepted entries that matched no pair at or above the floor (delete them from ${ACCEPTED}):"
               sed 's/\t/  <->  /; s/^/  /' "$tmp/accepted.stale"
