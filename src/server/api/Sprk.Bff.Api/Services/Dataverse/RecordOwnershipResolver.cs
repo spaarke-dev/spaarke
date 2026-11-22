@@ -60,6 +60,7 @@ using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
+using Sprk.Bff.Api.Services.Communication.Access;
 
 namespace Sprk.Bff.Api.Services.Dataverse;
 
@@ -2111,7 +2112,13 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
          // isolation). A rule set is filed under its Procedure or core record only; the document link is provenance, not parentage.
          // ebilling-r1 task 116: the column stays until Remove-EbillingSourceDocumentColumns.ps1 runs with -Delete (after this BFF is
          // deployed); rows can still hold it until then. Remove this entry in the same change as that -Delete run, not before.
-         ("sprk_ruleset", "sprk_sourcedocument")], CitationComparer.Instance);
+         ("sprk_ruleset", "sprk_sourcedocument"),
+         // task 056 (field-mapping-server-write-path-r1). A private message's context reference decides where its two participants
+         // see it, never filing, ownership or secure-if-any. It is deliberately NOT a Secure-only lookup, because both participants
+         // are checked at send.
+         ("sprk_communication", PrivateContextColumns.Matter),
+         ("sprk_communication", PrivateContextColumns.Project),
+         ("sprk_communication", PrivateContextColumns.WorkAssignment)], CitationComparer.Instance);
 
     /// <summary>True when <paramref name="column"/> of <paramref name="table"/> cites a record rather than files the row under it.</summary>
     public static bool IsCitation(string? table, string? column) =>

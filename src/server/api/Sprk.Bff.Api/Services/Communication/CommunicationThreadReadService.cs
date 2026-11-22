@@ -269,6 +269,14 @@ public sealed class CommunicationThreadReadService
         if (isExternal && !await IsThreadOpenForExternalAsync(threadId, callerSystemUserId, ct))
             return new ThreadReadResult(ThreadId: threadId, Name: null, Messages: Array.Empty<ThreadMessageDto>(), Count: 0);
 
+        // fm task 056: the reference and stamped-recipient columns are selected only where they exist (they are added by the
+        // schema scripts, not the base solution); a select naming a missing column fails the whole read. Without them the read
+        // is the one before 056 and every privateContext is null. An about narrowing cannot be answered without them: no
+        // private message can exist there, so it is the same empty page as "none visible".
+        var withPrivateContext = await PrivateContextColumnsPresentAsync(ct);
+        if (aboutRecord is not null && !withPrivateContext)
+            return new ThreadReadResult(ThreadId: threadId, Name: null, Messages: Array.Empty<ThreadMessageDto>(), Count: 0);
+
         // 1) Impersonated message read — Dataverse row-level security applies natively.
         var select = string.Join(',', new[]
         {
@@ -278,7 +286,7 @@ public sealed class CommunicationThreadReadService
             // annotation (the impersonated query requests annotations; ParseMessageRow reads it) — messaging-r3 2026-07-22.
             DirectionField, SentByValue, CreatedByValue,
             SentAtField, CreatedOnField, InReplyToField, InternalOnlyField, PrivilegeField, IsPrivateField,
-        }.Concat(PrivateContextSelect));
+        }.Concat(withPrivateContext ? PrivateContextSelect : Array.Empty<string>()));
         var filter = new StringBuilder($"{ThreadLookupValue} eq {threadId} and {ActiveOnlyClause}");
         if (since is { } s)
             filter.Append($" and {CreatedOnField} gt {FormatOData(s)}");
@@ -1849,6 +1857,39 @@ public sealed class CommunicationThreadReadService
     private static readonly IReadOnlyList<string> PrivateContextSelect =
         PrivateContextValueColumns.Select(c => c.ValueColumn).Append(DirectRecipientValue).Concat(MessageRegardingValueColumns).ToArray();
 
+    /// <summary>The environment-added <c>sprk_communication</c> columns the private-message reads need: the three references and
+    /// the stamped recipient. The base solution has none of them; the schema scripts add them.</summary>
+    private static readonly IReadOnlyList<string> PrivateContextReadColumns =
+        PrivateContextColumns.All.Append(DirectMessageRecipient.RecipientColumn).ToArray();
+
+    /// <summary>
+    /// Whether <see cref="PrivateContextReadColumns"/> exist on <c>sprk_communication</c>, through the private-message send gate's
+    /// column-presence check (<see cref="PrivateMessageSendGate.CommunicationColumnsPresentAsync"/>; a yes is remembered per
+    /// connection). Anything other than a yes is false, including no entity service, no metadata answer and a fault: a read
+    /// never fails because of this question, it reads without the columns.
+    /// </summary>
+    private async Task<bool> PrivateContextColumnsPresentAsync(CancellationToken ct)
+    {
+        if (_entities is null)
+            return false;
+
+        try
+        {
+            return await PrivateMessageSendGate.CommunicationColumnsPresentAsync(_entities, PrivateContextReadColumns, ct) == true;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "[THREAD-READ] Whether the private-message columns exist on sprk_communication could not be read; reading without them.");
+            return false;
+        }
+    }
+
     /// <summary>Bound on the message scan of an <c>about</c> list (newest first).</summary>
     private const int MaxAboutMessageScan = MaxRegardingScan;
 
@@ -1981,6 +2022,10 @@ public sealed class CommunicationThreadReadService
     private async Task<IReadOnlyList<Guid>> ReadThreadsWithPrivateMessagesAboutAsync(
         string table, Guid recordId, Guid callerSystemUserId, bool isExternal, CancellationToken ct)
     {
+        // Where the columns do not exist no private message can either: no thread qualifies (an empty list, never a failed one).
+        if (!await PrivateContextColumnsPresentAsync(ct))
+            return Array.Empty<Guid>();
+
         var referenceColumn = $"_{PrivateContextColumns.ColumnByTable[table]}_value";
         var select = string.Join(',', new[]
         {

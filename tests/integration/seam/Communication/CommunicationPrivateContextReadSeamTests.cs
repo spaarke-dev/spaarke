@@ -68,6 +68,14 @@ public class CommunicationPrivateContextReadSeamTests
     private readonly Mock<IDataverseRecordShareService> _shares = new();
     private readonly Dictionary<Guid, DataverseEntity> _threadEntities = new();
     private readonly Dictionary<Guid, List<DataversePrincipalAccess>> _threadShares = new();
+
+    /// <summary>The environment-added columns the private-message reads need (the schema scripts create them).</summary>
+    private static readonly string[] SchemaScriptColumns =
+        PrivateContextColumns.All.Append(DirectMessageRecipient.RecipientColumn).ToArray();
+
+    private readonly HashSet<string> _communicationColumns =
+        new(SchemaScriptColumns.Append("sprk_communicationid").Append("sprk_body"), StringComparer.OrdinalIgnoreCase);
+
     private DateTimeOffset _clock = new(2026, 11, 22, 9, 0, 0, TimeSpan.Zero);
 
     public CommunicationPrivateContextReadSeamTests()
@@ -83,6 +91,11 @@ public class CommunicationPrivateContextReadSeamTests
         _entities
             .Setup(e => e.RetrieveMultipleAsync(It.Is<Microsoft.Xrm.Sdk.Query.QueryExpression>(q => q.EntityName == "systemuser"), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new EntityCollection());
+        // The published metadata of sprk_communication: by default the schema scripts have run (every private-message column exists).
+        _entities
+            .Setup(e => e.GetColumnMetadataAsync("sprk_communication", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => _communicationColumns.ToDictionary(
+                c => c, c => new ColumnMetadata(c, "Lookup", true, true, null), StringComparer.OrdinalIgnoreCase));
 
         _dataverse.AddRecord("sprk_matters", "sprk_matterid", Matter, "sprk_mattername", "Acme v. Widget", Alice, Bob, Carol, Dave);
         _dataverse.AddRecord("sprk_matters", "sprk_matterid", OtherMatter, "sprk_mattername", "Other matter", Alice, Bob, Carol, Dave);
@@ -364,6 +377,104 @@ public class CommunicationPrivateContextReadSeamTests
         _dataverse.Calls.Should().NotContain(c => c.Set == "sprk_matters" || c.Set == "sprk_projects" || c.Set == "sprk_workassignments");
     }
 
+    // ── an environment where the schema scripts have not run (the columns do not exist) ──────────────────────────────────────
+
+    /// <summary>The environment before the schema scripts: the columns are absent from the metadata and from every row, so a
+    /// read that selects them is refused as Dataverse refuses it (the emulator throws on an unknown column).</summary>
+    private void WithoutTheSchemaScriptColumns()
+    {
+        _communicationColumns.ExceptWith(SchemaScriptColumns);
+        _dataverse.RemoveColumnsFromMessages(SchemaScriptColumns.Select(c => $"_{c}_value"));
+    }
+
+    [Fact]
+    public async Task ReadThread_WhereThePrivateMessageColumnsDoNotExist_ReadsWithoutThem_AndEveryPrivateContextIsNull()
+    {
+        var pair = Pair(owner: Alice, other: Bob);
+        var first = DirectMessage(pair, from: Alice, to: Bob);
+        var second = DirectMessage(pair, from: Bob, to: Alice);
+        WithoutTheSchemaScriptColumns();
+
+        var result = await ReadThread(Alice, pair);
+
+        result.Messages.Select(m => m.MessageId).Should().Equal(first, second);
+        result.Messages.Should().OnlyContain(m => m.PrivateContext == null);
+        var select = Param(_dataverse.Calls.Single(c => c.Set == "sprk_communications").OData, "$select");
+        foreach (var column in SchemaScriptColumns)
+            select.Should().NotContain(column);
+        _dataverse.Calls.Should().NotContain(c => c.Set == "sprk_matters" || c.Set == "sprk_projects" || c.Set == "sprk_workassignments");
+    }
+
+    [Fact]
+    public async Task ReadThread_WhenThePresenceCheckFaultsOrHasNoAnswer_ReadsWithoutTheColumns()
+    {
+        var pair = Pair(owner: Alice, other: Bob);
+        var message = DirectMessage(pair, from: Alice, to: Bob);
+        WithoutTheSchemaScriptColumns();
+        _entities
+            .Setup(e => e.GetColumnMetadataAsync("sprk_communication", It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new HttpRequestException("metadata read faulted"));
+
+        var faulted = await ReadThread(Alice, pair);
+
+        _entities
+            .Setup(e => e.GetColumnMetadataAsync("sprk_communication", It.IsAny<CancellationToken>()))
+            .ReturnsAsync((IReadOnlyDictionary<string, ColumnMetadata>)null!);
+        var unanswered = await ReadThread(Alice, pair);
+
+        faulted.Messages.Select(m => m.MessageId).Should().Equal(message);
+        unanswered.Messages.Select(m => m.MessageId).Should().Equal(message);
+    }
+
+    [Fact]
+    public async Task ReadThread_About_WhereTheColumnsDoNotExist_IsAnEmptyPage_WithNoMessageRead()
+    {
+        var pair = Pair(owner: Alice, other: Bob);
+        DirectMessage(pair, from: Alice, to: Bob);
+        WithoutTheSchemaScriptColumns();
+
+        var result = await ReadThread(Alice, pair, $"sprk_matter:{Matter}");
+
+        result.Messages.Should().BeEmpty();
+        result.Count.Should().Be(0);
+        _dataverse.Calls.Should().NotContain(c => c.Set == "sprk_communications");
+    }
+
+    [Fact]
+    public async Task ListThreads_About_WhereTheColumnsDoNotExist_IsAnEmptyList_WithNoRead()
+    {
+        var pair = Pair(owner: Alice, other: Bob);
+        DirectMessage(pair, from: Alice, to: Bob);
+        WithoutTheSchemaScriptColumns();
+
+        var result = await ListAbout(Alice, $"sprk_matter:{Matter}");
+
+        result.Threads.Should().BeEmpty();
+        result.HasMore.Should().BeFalse();
+        _dataverse.Calls.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ReadThread_ThePresenceOfTheColumns_IsReadOnceAndRemembered_ButTheirAbsenceIsAskedAgain()
+    {
+        var pair = Pair(owner: Alice, other: Bob);
+        DirectMessage(pair, from: Alice, to: Bob);
+
+        await ReadThread(Alice, pair);
+        await ReadThread(Bob, pair);
+        _entities.Verify(e => e.GetColumnMetadataAsync("sprk_communication", It.IsAny<CancellationToken>()), Times.Once);
+
+        // A fresh connection (another entity service) in an environment without the columns asks on every read, so the columns
+        // are used as soon as the schema script has run.
+        var fresh = new CommunicationPrivateContextReadSeamTests();
+        var freshPair = fresh.Pair(owner: Alice, other: Bob);
+        fresh.DirectMessage(freshPair, from: Alice, to: Bob);
+        fresh.WithoutTheSchemaScriptColumns();
+        await fresh.ReadThread(Alice, freshPair);
+        await fresh.ReadThread(Alice, freshPair);
+        fresh._entities.Verify(e => e.GetColumnMetadataAsync("sprk_communication", It.IsAny<CancellationToken>()), Times.Exactly(2));
+    }
+
     // ── 400s, before any read ───────────────────────────────────────────────────────────────────────────────────────────────
 
     public static TheoryData<string> MalformedAbout() => new()
@@ -539,6 +650,15 @@ internal sealed class RowSecurityEmulator : IImpersonatedCommunicationQuery
     public void AddThread(Dictionary<string, JsonElement> row, params Guid[] readers) => Add("sprk_communicationthreads", row, readers);
 
     public void AddMessage(Dictionary<string, JsonElement> row, params Guid[] readers) => Add("sprk_communications", row, readers);
+
+    /// <summary>Drops <paramref name="columns"/> from every message row, as in an environment where they were never created.</summary>
+    public void RemoveColumnsFromMessages(IEnumerable<string> columns)
+    {
+        var drop = columns.ToList();
+        foreach (var (row, _) in _sets.TryGetValue("sprk_communications", out var rows) ? rows : new())
+            foreach (var column in drop)
+                row.Remove(column);
+    }
 
     public void AddRecord(string set, string idColumn, Guid id, string nameColumn, string name, params Guid[] readers) =>
         Add(set, new Dictionary<string, JsonElement>

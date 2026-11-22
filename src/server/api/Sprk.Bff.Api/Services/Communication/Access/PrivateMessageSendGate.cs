@@ -115,10 +115,11 @@ internal class PrivateMessageSendGate
     private const string IsExternalColumn = "sprk_isexternal";
 
     /// <summary>
-    /// The entity services whose metadata showed every reference column. Keyed by connection (one in production), so a missing
-    /// column is asked again on the next send and a test's own connection never sees another's answer.
+    /// Per entity service, the <c>sprk_communication</c> columns its metadata has shown to exist. Keyed by connection (one in
+    /// production), so a missing column is asked again on the next question and a test's own connection never sees another's answer.
     /// </summary>
-    private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<IGenericEntityService, object> ColumnsConfirmedOn = new();
+    private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<IGenericEntityService, System.Collections.Concurrent.ConcurrentDictionary<string, byte>>
+        ColumnsConfirmedOn = new();
 
     private readonly CallerRecordAccessProbe _probe;
     private readonly SecureShareNoAccessGuard _noAccessGuard;
@@ -397,19 +398,36 @@ internal class PrivateMessageSendGate
     /// Whether every reference column exists on <c>sprk_communication</c> (published metadata). A yes is remembered for this
     /// connection; a no is asked again on the next send.
     /// </summary>
-    internal virtual async Task<bool?> ReferenceColumnsPresentAsync(CancellationToken ct)
+    internal virtual Task<bool?> ReferenceColumnsPresentAsync(CancellationToken ct) =>
+        CommunicationColumnsPresentAsync(_entities, PrivateContextColumns.All, ct);
+
+    /// <summary>
+    /// Whether every one of <paramref name="columns"/> exists on <c>sprk_communication</c> (published metadata, read through
+    /// <paramref name="entities"/>): <c>true</c>, <c>false</c>, or <c>null</c> when the metadata gave no answer. A yes is remembered
+    /// per connection and column; a no is asked again next time, so a column added later is seen without a restart. A fault
+    /// propagates; the caller decides what an unanswered question means. The one column-presence check of the private-message
+    /// send and reads (fm task 056).
+    /// </summary>
+    internal static async Task<bool?> CommunicationColumnsPresentAsync(
+        IGenericEntityService entities, IReadOnlyCollection<string> columns, CancellationToken ct)
     {
-        if (ColumnsConfirmedOn.TryGetValue(_entities, out _))
+        ArgumentNullException.ThrowIfNull(entities);
+        ArgumentNullException.ThrowIfNull(columns);
+
+        if (ColumnsConfirmedOn.TryGetValue(entities, out var confirmed) && columns.All(confirmed.ContainsKey))
             return true;
 
-        var columns = await _entities.GetColumnMetadataAsync(CommunicationTable, ct).ConfigureAwait(false);
-        if (columns is null)
+        var metadata = await entities.GetColumnMetadataAsync(CommunicationTable, ct).ConfigureAwait(false);
+        if (metadata is null)
             return null;
 
-        if (!PrivateContextColumns.All.All(columns.ContainsKey))
+        if (!columns.All(metadata.ContainsKey))
             return false;
 
-        ColumnsConfirmedOn.AddOrUpdate(_entities, new object());
+        var remembered = ColumnsConfirmedOn.GetValue(
+            entities, _ => new System.Collections.Concurrent.ConcurrentDictionary<string, byte>(StringComparer.OrdinalIgnoreCase));
+        foreach (var column in columns)
+            remembered.TryAdd(column, 0);
         return true;
     }
 

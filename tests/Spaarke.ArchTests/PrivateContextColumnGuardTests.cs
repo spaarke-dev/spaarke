@@ -28,6 +28,8 @@ namespace Spaarke.ArchTests;
 /// send path's writer (<c>PrivateMessageSendGate.cs</c>) may be present or absent. Line comments are stripped; collections that
 /// hold a column (for example <c>ParentLineage.BffOwnedCommunicationColumns</c>) are not aliases, so code that uses such a set
 /// generically does not name the columns.</para>
+/// <para><b>Rule 3, citations.</b> Each column is a citation of <c>sprk_communication</c>
+/// (<c>RecordOwnershipResolver.IsCitation</c>), so every parent derivation that applies that one predicate leaves it out.</para>
 /// <para><b>Limits.</b> A column name built at run time from pieces, a block comment and a <c>using static</c> import of an alias's
 /// type are not seen. Files outside <c>src/server</c> (scripts, tests) are not scanned.</para>
 /// <para><b>Controls.</b> <see cref="AllowList_MustFireAndMustNotFire"/> and <see cref="Registries_MustFireAndMustNotFire"/> run the
@@ -50,6 +52,8 @@ public class PrivateContextColumnGuardTests
         (Bff + "Services/Dataverse/ParentLineage.cs", true, "BffOwnedCommunicationColumns: the columns are refused to every generic writer"),
         (Bff + "Services/Ai/Membership/MembershipFieldDiscoveryService.cs", true,
             "DiscoverLookupsTargetingAsync never returns the columns on sprk_communication, so includeRelated never reads by them"),
+        (Bff + "Services/Dataverse/RecordOwnershipResolver.cs", true,
+            "CitationLookups: the columns are citations, so no parent derivation (ownership, secure-if-any, reparent) reads them"),
     };
 
     /// <summary>The registry source files the scan checks by name (rule 1, the parts not read at run time).</summary>
@@ -216,6 +220,29 @@ public class PrivateContextColumnGuardTests
         Assert.DoesNotContain(dirty, p => p.StartsWith("endpoints/Endpoints.cs:1", StringComparison.Ordinal));
         Assert.Equal(4, clean.Count);
         Assert.DoesNotContain(clean, p => p.StartsWith("endpoints/", StringComparison.Ordinal));
+    }
+
+    // ── rule 3: every reference column is a citation ─────────────────────────────────────────────────────────────────────────
+
+    [Fact(DisplayName = "fm 056: every private-context column is a citation of sprk_communication, so no parent derivation reads it as a parent")]
+    public void EveryReferenceColumnIsACitation()
+    {
+        var notCitations = PrivateContextColumns.All
+            .Where(column => !RecordOwnershipResolver.IsCitation("sprk_communication", column))
+            .ToList();
+
+        Assert.True(notCitations.Count == 0,
+            "A private message's reference names a record without filing the message under it (fm task 056), so each reference " +
+            "column must be in RecordOwnershipResolver.CitationLookups for sprk_communication. Missing: " + string.Join(", ", notCitations));
+    }
+
+    [Fact(DisplayName = "fm 056 guard control: a filing lookup of sprk_communication and a reference column of another table are not citations")]
+    public void EveryReferenceColumnIsACitation_MustNotFireOnAFilingLookup()
+    {
+        Assert.False(RecordOwnershipResolver.IsCitation("sprk_communication", "sprk_regardingmatter"));
+        Assert.False(RecordOwnershipResolver.IsCitation("sprk_communication", "sprk_communicationthread"));
+        Assert.False(RecordOwnershipResolver.IsCitation("sprk_event", PrivateContextColumns.Matter),
+            "the citation is declared for sprk_communication only");
     }
 
     // ── the registry view ────────────────────────────────────────────────────────────────────────────────────────────────────

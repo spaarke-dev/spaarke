@@ -69,6 +69,8 @@ Describe 'Set-ThreadFlagFieldSecurity.ps1 precondition (p0): every target column
         $r.Output | Should -Match 'sprk_communication\.sprk_directrecipient does not exist'
         $r.Output | Should -Match 'Set-DirectRecipientSchema\.ps1 -Apply'
         $r.Output | Should -Match 'Nothing was written'
+        # 054b's binding rule applies while a 054b column is missing: -Apply and -Verify say to leave the Direct settings unset.
+        if ($Mode -ne 'dry run') { $r.Output | Should -Match 'leave DirectMessage:BusinessUnitName and DirectMessage:OwnerTeamName UNSET' }
         # Nothing past (p0) was read: no profile, view, form or column-security read.
         @($global:SetThreadFlagFieldSecurityTest_Reads | Where-Object { $_ -notmatch '/organizations\?|/Attributes\?' }) | Should -BeNullOrEmpty
     }
@@ -89,8 +91,24 @@ Describe 'Set-ThreadFlagFieldSecurity.ps1 precondition (p0): every target column
         $r.Output | Should -Match "sprk_communication\.$Column does not exist"
         $r.Output | Should -Match 'Set-PrivateContextSchema\.ps1 -Apply'
         $r.Output | Should -Not -Match 'Set-DirectRecipientSchema'
+        # An environment missing only the 056 columns may already run Direct messages: never told to leave DirectMessage:* unset.
+        $r.Output | Should -Not -Match 'DirectMessage:'
         $r.Output | Should -Match 'Nothing was written'
         @($global:SetThreadFlagFieldSecurityTest_Reads | Where-Object { $_ -notmatch '/organizations\?|/Attributes\?' }) | Should -BeNullOrEmpty
+    }
+
+    It 'names both scripts and the DirectMessage:* rule when sprk_directrecipient and a private-context column are both missing (<Mode>) (task 056b)' -ForEach @(
+        @{ Mode = 'Apply'; Extra = @{ Apply = $true } }
+        @{ Mode = 'Verify'; Extra = @{ Verify = $true } }
+    ) {
+        $global:SetThreadFlagFieldSecurityTest_Columns['sprk_communication'] = @('sprk_communicationid', 'sprk_name', 'sprk_sentby', 'sprk_communicationthread')
+
+        $r = Invoke-Script $Extra
+
+        $r.ExitCode | Should -Be 1
+        $r.Output | Should -Match 'Set-DirectRecipientSchema\.ps1 -Apply'
+        $r.Output | Should -Match 'Set-PrivateContextSchema\.ps1 -Apply'
+        $r.Output | Should -Match 'leave DirectMessage:BusinessUnitName and DirectMessage:OwnerTeamName UNSET'
     }
 
     It 'refuses with exit 1 when one of the solution columns is missing, naming it' {

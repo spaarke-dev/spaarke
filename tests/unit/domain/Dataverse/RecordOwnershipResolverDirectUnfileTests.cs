@@ -123,6 +123,41 @@ public class RecordOwnershipResolverDirectUnfileTests
         directory.Assignments.Should().BeEmpty();
     }
 
+    // ── fm task 056: a private message's context reference is a citation ─────────────────────────────────────────────────
+
+    [Fact]
+    public void ARowWithATypedRegardingAndAReferenceToAnotherMatter_HasTheRegardingAsItsOnlyParent()
+    {
+        var row = new Entity("sprk_communication", MessageId)
+        {
+            ["sprk_regardingmatter"] = new EntityReference("sprk_matter", MatterId),
+            [PrivateContextColumns.Matter] = new EntityReference("sprk_matter", OtherMatterId),
+        };
+        var onlyTheRegarding = new[] { new RecordOwnershipParent("sprk_matter", MatterId) };
+
+        RecordOwnershipContext.ParentsOf(row).Should().Equal(onlyTheRegarding);
+        RecordOwnershipContext.OrderedParentsOf(row).Should().Equal(onlyTheRegarding);
+        RecordOwnershipContext.SecureOnlyParentsOf(row).Should().BeEmpty();
+        RecordOwnershipResolver.OwnershipParentColumnsOf(row).Keys.Should().Equal("sprk_regardingmatter");
+    }
+
+    [Fact]
+    public async Task Unfile_OfAPrivateMessage_GoesToTheDirectTeam_NotToTheTeamOfTheRecordItIsAbout()
+    {
+        var directory = World().WithOrdinaryRoot("sprk_matter", OtherMatterId)
+            .WithMessageFiledUnder(MatterId, FakeDirectory.ChildBu, FakeDirectory.ChildTeam);
+        directory.Write("sprk_communication", MessageId, new Dictionary<string, object?>
+        {
+            [PrivateContextColumns.Matter] = new EntityReference("sprk_matter", OtherMatterId),
+        });
+
+        var resolution = await Resolver(directory, Resolved()).ReparentAsync(Unfile(), Applies(directory), CancellationToken.None);
+
+        resolution.Outcome.Should().Be(RecordOwnerOutcome.Unchanged);
+        resolution.DirectUnfile.Should().Be(new DirectUnfileDue(ThreadId, LeavesSecureOwner: false));
+        directory.Assignments.Should().BeEmpty("the reference never files the message under the record it is about");
+    }
+
     // ── Today's answer ───────────────────────────────────────────────────────────────────────────────────────────────────
 
     [Fact]
