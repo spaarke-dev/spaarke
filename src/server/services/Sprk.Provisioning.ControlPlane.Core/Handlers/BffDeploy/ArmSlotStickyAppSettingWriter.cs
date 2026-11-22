@@ -108,82 +108,107 @@ public sealed class ArmSlotStickyAppSettingWriter : ISlotStickyAppSettingWriter
             request.SubscriptionId, request.ResourceGroupName, request.AppServiceName));
         var timeout = _options.SlotSwapTimeout;
 
-        bool stickyNameAdded;
-        bool settingWritten;
+        var stickyNameAdded = false;
+        var settingWritten = false;
         IReadOnlyList<string> mirroredNames = [];
-        try
+        // ISS-033: while a swap is in flight on the site, ARM refuses every write to the slot with 409 "prepared for
+        // swap". Wait for the swap (it completes on its own) rather than fail into a retry that hits the same 409.
+        var swapWait = System.Diagnostics.Stopwatch.StartNew();
+        while (true)
         {
-            // (1) STICKY FIRST (see ISlotStickyAppSettingWriter): make the name
-            //     slot-sticky on the parent site before any value exists on the
-            //     slot, so no intermediate state lets a swap carry it.
-            //     Raw JSON, not SlotConfigNamesResource (T186 L43): on a site that
-            //     has never had a sticky name ARM answers `"id": null`, and the
-            //     SDK's SlotConfigNamesResourceData deserializer (1.5.0, the latest)
-            //     builds a ResourceIdentifier from it and throws
-            //     ArgumentNullException('resourceId') — so the typed GET can never
-            //     succeed on a new customer site.
-            var slotConfigNamesUri = new Uri(
-                ArmEndpoint, $"{siteResource.Id}/config/slotConfigNames?api-version={SlotConfigNamesApiVersion}");
-            var namesObject = await WithTimeoutAsync(
-                ct => SendSlotConfigNamesAsync(siteResource.Id, RequestMethod.Get, slotConfigNamesUri, null, ct),
-                timeout, cancellationToken).ConfigureAwait(false);
-            var namesProperties = namesObject["properties"] as JsonObject ?? new JsonObject();
-
-            var mergedNames = MergeStickyAppSettingNames(ReadStringArray(namesProperties["appSettingNames"]), request.SettingName);
-            stickyNameAdded = mergedNames.Changed;
-            if (stickyNameAdded)
+            try
             {
-                // The PUT replaces the whole object: only appSettingNames changes;
-                // connectionStringNames and azureStorageConfigNames go back exactly as read.
-                var putProperties = new JsonObject();
-                foreach (var property in namesProperties)
-                {
-                    putProperties[property.Key] = property.Value?.DeepClone();
-                }
-                putProperties["appSettingNames"] = new JsonArray(mergedNames.Names.Select(n => (JsonNode?)JsonValue.Create(n)).ToArray());
-                var putBody = new JsonObject { ["properties"] = putProperties };
-                await WithTimeoutAsync(
-                    ct => SendSlotConfigNamesAsync(siteResource.Id, RequestMethod.Put, slotConfigNamesUri, putBody, ct),
+                // (1) STICKY FIRST (see ISlotStickyAppSettingWriter): make the name
+                //     slot-sticky on the parent site before any value exists on the
+                //     slot, so no intermediate state lets a swap carry it.
+                //     Raw JSON, not SlotConfigNamesResource (T186 L43): on a site that
+                //     has never had a sticky name ARM answers `"id": null`, and the
+                //     SDK's SlotConfigNamesResourceData deserializer (1.5.0, the latest)
+                //     builds a ResourceIdentifier from it and throws
+                //     ArgumentNullException('resourceId') — so the typed GET can never
+                //     succeed on a new customer site.
+                var slotConfigNamesUri = new Uri(
+                    ArmEndpoint, $"{siteResource.Id}/config/slotConfigNames?api-version={SlotConfigNamesApiVersion}");
+                var namesObject = await WithTimeoutAsync(
+                    ct => SendSlotConfigNamesAsync(siteResource.Id, RequestMethod.Get, slotConfigNamesUri, null, ct),
                     timeout, cancellationToken).ConfigureAwait(false);
+                var namesProperties = namesObject["properties"] as JsonObject ?? new JsonObject();
+
+                var mergedNames = MergeStickyAppSettingNames(ReadStringArray(namesProperties["appSettingNames"]), request.SettingName);
+                if (mergedNames.Changed)
+                {
+                    stickyNameAdded = true;
+                    // The PUT replaces the whole object: only appSettingNames changes;
+                    // connectionStringNames and azureStorageConfigNames go back exactly as read.
+                    var putProperties = new JsonObject();
+                    foreach (var property in namesProperties)
+                    {
+                        putProperties[property.Key] = property.Value?.DeepClone();
+                    }
+                    putProperties["appSettingNames"] = new JsonArray(mergedNames.Names.Select(n => (JsonNode?)JsonValue.Create(n)).ToArray());
+                    var putBody = new JsonObject { ["properties"] = putProperties };
+                    await WithTimeoutAsync(
+                        ct => SendSlotConfigNamesAsync(siteResource.Id, RequestMethod.Put, slotConfigNamesUri, putBody, ct),
+                        timeout, cancellationToken).ConfigureAwait(false);
+                }
+
+                // (2) The slot's settings: production's non-sticky settings (what a swap carries into production),
+                //     the slot's own sticky settings, and the guard — read both, build, write back whole (T186 L46).
+                var productionSettings = await WithTimeoutAsync(
+                    ct => siteResource.GetApplicationSettingsAsync(ct), timeout, cancellationToken).ConfigureAwait(false);
+
+                var slotResponse = await WithTimeoutAsync(
+                    ct => siteResource.GetWebSiteSlotAsync(request.SlotName, ct), timeout, cancellationToken).ConfigureAwait(false);
+                var slotResource = slotResponse.Value;
+
+                var settingsResponse = await WithTimeoutAsync(
+                    ct => slotResource.GetApplicationSettingsSlotAsync(ct), timeout, cancellationToken).ConfigureAwait(false);
+
+                var staged = BuildStagingSettings(
+                    productionSettings.Value.Properties, settingsResponse.Value.Properties,
+                    mergedNames.Names, request.SettingName, request.SettingValue);
+                mirroredNames = staged.ChangedNames;
+                if (staged.ChangedNames.Count > 0)
+                {
+                    var update = new AppServiceConfigurationDictionary();
+                    foreach (var (key, value) in staged.Settings)
+                    {
+                        update.Properties[key] = value;
+                    }
+                    await WithTimeoutAsync(
+                        ct => slotResource.UpdateApplicationSettingsSlotAsync(update, ct),
+                        timeout, cancellationToken).ConfigureAwait(false);
+                    settingWritten = true;
+                }
+                break;
             }
-
-            // (2) The slot's settings: production's non-sticky settings (what a swap carries into production),
-            //     the slot's own sticky settings, and the guard — read both, build, write back whole (T186 L46).
-            var productionSettings = await WithTimeoutAsync(
-                ct => siteResource.GetApplicationSettingsAsync(ct), timeout, cancellationToken).ConfigureAwait(false);
-
-            var slotResponse = await WithTimeoutAsync(
-                ct => siteResource.GetWebSiteSlotAsync(request.SlotName, ct), timeout, cancellationToken).ConfigureAwait(false);
-            var slotResource = slotResponse.Value;
-
-            var settingsResponse = await WithTimeoutAsync(
-                ct => slotResource.GetApplicationSettingsSlotAsync(ct), timeout, cancellationToken).ConfigureAwait(false);
-
-            var staged = BuildStagingSettings(
-                productionSettings.Value.Properties, settingsResponse.Value.Properties,
-                mergedNames.Names, request.SettingName, request.SettingValue);
-            settingWritten = staged.ChangedNames.Count > 0;
-            mirroredNames = staged.ChangedNames;
-            if (settingWritten)
+            catch (RequestFailedException ex) when (IsSlotPreparedForSwap(ex))
             {
-                var update = new AppServiceConfigurationDictionary();
-                foreach (var (key, value) in staged.Settings)
+                if (swapWait.Elapsed >= _options.SlotSwapTimeout)
                 {
-                    update.Properties[key] = value;
+                    _logger.LogWarning(ex,
+                        "H9 slot-sticky app setting: a swap is still in flight after {Waited}: appService={AppService} slot={Slot}",
+                        swapWait.Elapsed, request.AppServiceName, request.SlotName);
+                    return new SlotStickyAppSettingResult.SlotSwapInProgress(
+                        $"ARM still refuses slot '{request.SlotName}' of App Service '{request.AppServiceName}' after " +
+                        $"{swapWait.Elapsed:hh\\:mm\\:ss} because a swap is in flight (HTTP 409: configuration settings have been " +
+                        "prepared for swap). Complete or cancel that swap (a swap with preview left half-way), then resume.");
                 }
-                await WithTimeoutAsync(
-                    ct => slotResource.UpdateApplicationSettingsSlotAsync(update, ct),
-                    timeout, cancellationToken).ConfigureAwait(false);
+
+                _logger.LogInformation(
+                    "H9 slot-sticky app setting: slot {Slot} of {AppService} is prepared for a swap in flight — waiting {Interval} (waited {Waited})",
+                    request.SlotName, request.AppServiceName, _options.SlotSwapInProgressPollInterval, swapWait.Elapsed);
+                await Task.Delay(_options.SlotSwapInProgressPollInterval, cancellationToken).ConfigureAwait(false);
             }
-        }
-        catch (RequestFailedException ex)
-        {
-            _logger.LogWarning(ex,
-                "H9 slot-sticky app setting failed: appService={AppService} slot={Slot} setting={SettingName} status={Status} errorCode={ErrorCode}",
-                request.AppServiceName, request.SlotName, request.SettingName, ex.Status, ex.ErrorCode);
-            return new SlotStickyAppSettingResult.Failure(
-                $"ARM rejected setting slot-sticky app setting '{request.SettingName}' on slot '{request.SlotName}' of " +
-                $"App Service '{request.AppServiceName}' (HTTP {ex.Status}, {ex.ErrorCode ?? "no-error-code"}): {ex.Message}");
+            catch (RequestFailedException ex)
+            {
+                _logger.LogWarning(ex,
+                    "H9 slot-sticky app setting failed: appService={AppService} slot={Slot} setting={SettingName} status={Status} errorCode={ErrorCode}",
+                    request.AppServiceName, request.SlotName, request.SettingName, ex.Status, ex.ErrorCode);
+                return new SlotStickyAppSettingResult.Failure(
+                    $"ARM rejected setting slot-sticky app setting '{request.SettingName}' on slot '{request.SlotName}' of " +
+                    $"App Service '{request.AppServiceName}' (HTTP {ex.Status}, {ex.ErrorCode ?? "no-error-code"}): {ex.Message}");
+            }
         }
 
         // Setting names + flags only — app-setting VALUES are never logged (they include Key Vault references).
@@ -195,6 +220,14 @@ public sealed class ArmSlotStickyAppSettingWriter : ISlotStickyAppSettingWriter
 
         return new SlotStickyAppSettingResult.Success(stickyNameAdded, settingWritten);
     }
+
+    /// <summary>
+    /// ARM's answer to any write on a slot while a swap is in flight on the site: 409 "The slot cannot be changed
+    /// because its configuration settings have been prepared for swap" (extended code 04081; seen live on
+    /// sprk-acme-prod-api, 2026-11-22). Any other 409 is a real conflict and is not waited on.
+    /// </summary>
+    internal static bool IsSlotPreparedForSwap(RequestFailedException ex)
+        => ex.Status == 409 && ex.Message.Contains("prepared for swap", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
     /// Pure merge of the site's sticky app-setting names: every existing name is
