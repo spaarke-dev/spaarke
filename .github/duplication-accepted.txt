@@ -1,0 +1,42 @@
+# Accepted cross-area duplication for the weekly duplication sweep
+# (.github/workflows/nightly-health.yml, job duplication-sweep). Added for #2866.
+#
+# The sweep alerts on a cross-area duplicate pair when either file changed on master in the last
+# 7 days. A pair listed here is skipped, in either order, so a pair that was reviewed does not
+# re-alert every time one of its files is edited. New pairs still alert.
+#
+# One pair per line, four fields separated by " | ":
+#   <repo path A> | <repo path B> | <record> | <reason>
+# - <record> is the issue that tracks removing the duplication (#1234) or the ADR that makes it
+#   deliberate (ADR-022). No record, no entry: this list is not a place to park a duplicate.
+# - Delete the line when the duplication is gone. The sweep log lists entries that no longer match
+#   any pair, and malformed lines make the sweep report failing instead of being ignored.
+
+# --- Deliberate (no fix planned) ---
+src/client/pcf/RegardingResolver/RegardingResolver/handlers/ResolverWriteHandler.ts | src/client/shared/Spaarke.Communication.Components/src/logic/connections/ConnectionsWriteHandler.ts | ADR-024 | Set-regarding clears and replaces one parent; Connections adds links without clearing. The shared selection shape and applyResolverFields are already delegated to ui-components; the remaining code is the divergent write path.
+src/client/pcf/CommunicationAttachments/CommunicationAttachments/CommunicationAttachmentsApp.tsx | src/client/shared/Spaarke.Communication.Components/src/components/EmailReadingHeader/EmailReadingAttachments.tsx | ADR-022 | The PCF runs on the React 16.14 platform library; the shared component is React 19. They cannot share the component across that boundary.
+
+# --- Tracked: e-billing page scaffolding (#2965) ---
+src/solutions/ApExport/src/main.tsx | src/solutions/RuleReview/src/main.tsx | #2965 | E-billing page bootstrap; one shared bootstrap planned.
+src/solutions/ApExport/src/main.tsx | src/solutions/InvoiceFiles/src/main.tsx | #2965 | E-billing page bootstrap; one shared bootstrap planned.
+src/solutions/InvoiceFiles/src/main.tsx | src/solutions/RecordProcedures/src/main.tsx | #2965 | E-billing page bootstrap; one shared bootstrap planned.
+src/solutions/InvoiceFiles/src/main.tsx | src/solutions/InvoiceReview/src/main.tsx | #2965 | E-billing page bootstrap; one shared bootstrap planned.
+src/solutions/ApExport/vite.config.ts | src/solutions/InvoiceFiles/vite.config.ts | #2965 | Byte-identical e-billing Vite configs; one shared config planned.
+src/solutions/ApExport/vite.config.ts | src/solutions/InvoiceReview/vite.config.ts | #2965 | Byte-identical e-billing Vite configs; one shared config planned.
+src/solutions/ApExport/vite.config.ts | src/solutions/RecordProcedures/vite.config.ts | #2965 | Byte-identical e-billing Vite configs; one shared config planned.
+src/solutions/InvoiceFiles/src/services/invoiceFilesApi.ts | src/solutions/RecordProcedures/src/services/recordProceduresApi.ts | #2965 | Duplicated toFailure / ApiFailure mapping; one e-billing API-error module planned.
+
+# --- Tracked: wizard code-page bootstrap (#2966) ---
+src/solutions/CreateMatterWizard/src/main.tsx | src/solutions/CreateProjectWizard/src/main.tsx | #2966 | CreateProjectWizard does not use useWizardPageBootstrap yet.
+src/solutions/CreateMatterWizard/src/main.tsx | src/solutions/CreateWorkAssignmentWizard/src/main.tsx | #2966 | CreateWorkAssignmentWizard does not use useWizardPageBootstrap yet.
+src/solutions/CreateMatterWizard/src/main.tsx | src/solutions/CreateTodoWizard/src/main.tsx | #2966 | CreateTodoWizard does not use useWizardPageBootstrap yet.
+src/solutions/CreateProjectWizard/src/main.tsx | src/solutions/CreateTodoWizard/src/main.tsx | #2966 | Neither page uses useWizardPageBootstrap yet.
+src/solutions/CreateTodoWizard/src/main.tsx | src/solutions/PlaybookLibrary/src/main.tsx | #2966 | Neither page uses a shared bootstrap yet.
+src/solutions/CreateEventWizard/src/main.tsx | src/solutions/CreateInvoiceWizard/src/main.tsx | #2966 | Mount code around useWizardPageBootstrap is still per page.
+src/solutions/CreateEventWizard/src/main.tsx | src/solutions/CreateReportCardWizard/src/main.tsx | #2966 | Mount code around useWizardPageBootstrap is still per page.
+src/solutions/CommunicationReconciliation/src/main.tsx | src/solutions/RuleReview/src/main.tsx | #2966 | Code-page auth bootstrap; check createCodePageAuthInitializer.
+
+# --- Tracked: Communication PCF boilerplate (#2967) ---
+src/client/pcf/CommunicationActions/CommunicationActions/CommunicationActionsApp.tsx | src/client/pcf/CommunicationMessageActions/CommunicationMessageActions/CommunicationMessageActionsApp.tsx | #2967 | Copied PCF auth bootstrap; one PCF-safe hook planned.
+src/client/pcf/CommunicationActions/CommunicationActions/CommunicationActionsApp.tsx | src/client/pcf/CommunicationTimeline/CommunicationTimeline/CommunicationTimelineApp.tsx | #2967 | Copied PCF auth bootstrap; one PCF-safe hook planned.
+src/client/pcf/CommunicationConnections/CommunicationConnections/CommunicationConnectionsApp.tsx | src/client/pcf/RegardingResolver/RegardingResolver/RegardingResolverApp.tsx | #2967 | Row styles copied for RegardingResolver parity; shared style objects planned.

@@ -1375,6 +1375,7 @@ jobs:
         env:
           REPORT: jscpd-report/jscpd-report.json
           INDEX: .claude/patterns/CAPABILITY-INDEX.md
+          ACCEPTED: .github/duplication-accepted.txt
           MIN_TOKENS: "100"
           MIN_LINES: "10"
           MAX_LISTED: "15"
@@ -1410,6 +1411,47 @@ jobs:
               END { if (!found) { if (dirhit!="") print dirhit; else if (foldhit!="") print foldhit } }' "$INDEX" 2>/dev/null | head -n 1
           }
 
+          # Accepted pairs (#2866): `$ACCEPTED` lists reviewed cross-area pairs as
+          # "<path A> | <path B> | <#issue or ADR-NNN> | <reason>". parse_accepted LIST KEYS BAD
+          # writes each valid entry as an order-free key "a<TAB>b" to KEYS and each malformed
+          # line to BAD, so a typo is reported instead of silently matching nothing.
+          parse_accepted() {
+            : > "$2"; : > "$3"
+            awk -v keys="$2" -v bad="$3" '
+              /^[[:space:]]*(#|$)/ { next }
+              {
+                n = split($0, f, / \| /)
+                for (i = 1; i <= n; i++) gsub(/^[[:space:]]+|[[:space:]]+$/, "", f[i])
+                if (n != 4 || f[1] == "" || f[2] == "" || f[1] == f[2] || f[3] !~ /^(#[0-9]+|ADR-[0-9]+)$/ || f[4] == "") {
+                  print FNR ": " $0 > bad; next
+                }
+                print ((f[1] < f[2]) ? f[1] "\t" f[2] : f[2] "\t" f[1]) > keys
+              }' "$1"
+          }
+
+          # drop_accepted KEYS PAIRS HIT KEPT: pairs whose two files form an accepted key
+          # (in either order) go to HIT, the rest to KEPT. FILENAME, not NR==FNR, so an
+          # empty KEYS file does not swallow PAIRS.
+          drop_accepted() {
+            : > "$3"
+            awk -F'\t' -v hit="$3" '
+              FILENAME == ARGV[1] { k[$1 "\t" $2] = 1; next }
+              { key = ($1 < $4) ? $1 "\t" $4 : $4 "\t" $1; if (key in k) print > hit; else print }' "$1" "$2" > "$4"
+          }
+
+          # Must-fire / must-not-fire controls for the two functions above, on synthetic data:
+          # a listed pair is dropped in reversed order, an unlisted pair is kept, and an entry
+          # with no record or the same file twice is reported as malformed.
+          selftest_accepted() {
+            local d="$tmp/selftest"; mkdir -p "$d"
+            printf '%s\n' '# comment' '' 'x/a.ts | x/b.ts | #1 | why' 'x/c.ts | x/d.ts | no-record | why' 'x/e.ts | x/e.ts | ADR-1 | same file' > "$d/list"
+            parse_accepted "$d/list" "$d/keys" "$d/bad"
+            printf '%s\n' $'x/b.ts\t1\t9\tx/a.ts\t1\t9\t100\t10' $'x/a.ts\t1\t9\tx/c.ts\t1\t9\t100\t10' > "$d/pairs"
+            drop_accepted "$d/keys" "$d/pairs" "$d/hit" "$d/kept"
+            [ "$(wc -l < "$d/keys")" -eq 1 ] && [ "$(wc -l < "$d/bad")" -eq 2 ] \
+              && [ "$(cut -f1,4 "$d/hit")" = $'x/b.ts\tx/a.ts' ] && [ "$(cut -f1,4 "$d/kept")" = $'x/a.ts\tx/c.ts' ]
+          }
+
           # --first-parent -m: list what LANDED on master this week, with each merge
           # commit diffed against its first parent. Without it, a branch whose own
           # commits are older than 7 days and lands by merge commit is invisible.
@@ -1442,16 +1484,42 @@ jobs:
               fi
             done < "$tmp/floor.tsv"
 
-            awk -F'\t' 'NR==FNR { c[$0]=1; next } ($1 in c) || ($4 in c)'    "$tmp/changed.txt" "$tmp/cross.tsv" > "$tmp/new.tsv"
-            awk -F'\t' 'NR==FNR { c[$0]=1; next } !(($1 in c) || ($4 in c))' "$tmp/changed.txt" "$tmp/cross.tsv" > "$tmp/old.tsv"
+            # Skip reviewed pairs listed in $ACCEPTED. A broken filter or a malformed list
+            # makes the sweep fail rather than pass quietly.
+            : > "$tmp/accepted.keys"; : > "$tmp/accepted.bad"
+            if ! selftest_accepted; then
+              status=failing
+              summary+="- The accepted-pairs filter failed its must-fire / must-not-fire self-test, so \`${ACCEPTED}\` was not applied. Fix \`parse_accepted\` / \`drop_accepted\` in this step."$'\n'
+            elif [ -f "$ACCEPTED" ]; then
+              parse_accepted "$ACCEPTED" "$tmp/accepted.keys" "$tmp/accepted.bad"
+              if [ -s "$tmp/accepted.bad" ]; then
+                status=failing
+                summary+="- \`${ACCEPTED}\` has $(wc -l < "$tmp/accepted.bad") malformed line(s), not applied. Each entry needs \`<path A> | <path B> | <#issue or ADR-NNN> | <reason>\` with two different paths:"$'\n'
+                while IFS= read -r l; do summary+="  - line ${l}"$'\n'; done < <(head -n 5 "$tmp/accepted.bad")
+              fi
+            fi
+            drop_accepted "$tmp/accepted.keys" "$tmp/cross.tsv" "$tmp/accepted-hit.tsv" "$tmp/kept.tsv"
+            # Entries that matched no pair at or above the floor: the duplication is gone (or
+            # below the floor), so the line can be deleted. Logged, not alerted.
+            awk -F'\t' 'FILENAME == ARGV[1] { h[($1 < $4) ? $1 "\t" $4 : $4 "\t" $1] = 1; next } !($0 in h)' \
+              "$tmp/accepted-hit.tsv" "$tmp/accepted.keys" > "$tmp/accepted.stale"
+
+            awk -F'\t' 'FILENAME == ARGV[1] { c[$0]=1; next } ($1 in c) || ($4 in c)'    "$tmp/changed.txt" "$tmp/kept.tsv" > "$tmp/new.tsv"
+            awk -F'\t' 'FILENAME == ARGV[1] { c[$0]=1; next } !(($1 in c) || ($4 in c))' "$tmp/changed.txt" "$tmp/kept.tsv" > "$tmp/old.tsv"
 
             n_floor="$(wc -l < "$tmp/floor.tsv")"; n_cross="$(wc -l < "$tmp/cross.tsv")"
+            n_acc="$(wc -l < "$tmp/accepted-hit.tsv")"; n_stale="$(wc -l < "$tmp/accepted.stale")"
             n_new="$(wc -l < "$tmp/new.tsv")"; n_old="$(wc -l < "$tmp/old.tsv")"
             echo "Duplicates in report (jscpd defaults): ${total}"
             echo "At or above the floor (>= ${MIN_TOKENS} tokens and >= ${MIN_LINES} lines): ${n_floor}"
             echo "  ... of those, across different top-level areas: ${n_cross}"
+            echo "  ... ACCEPTED (pair listed in ${ACCEPTED}; skipped): ${n_acc}"
             echo "  ... NEW (a file changed in the last 7 days; these alert): ${n_new}"
             echo "  ... OLD (both files unchanged for > 7 days; these do NOT alert): ${n_old}"
+            if [ "$n_stale" -gt 0 ]; then
+              echo "Accepted entries that matched no pair at or above the floor (delete them from ${ACCEPTED}):"
+              sed 's/\t/  <->  /; s/^/  /' "$tmp/accepted.stale"
+            fi
             if [ "$n_old" -gt 0 ]; then
               echo "First old cross-area clusters (logged only, not alerted):"
               head -n 10 "$tmp/old.tsv" | awk -F'\t' '{ print "  " $1 ":" $2 "-" $3 "  <->  " $4 ":" $5 "-" $6 "  (" $7 " tokens, " $8 " lines)" }'
@@ -1459,7 +1527,7 @@ jobs:
 
             if [ "$n_new" -gt 0 ]; then
               status=failing
-              summary="${n_new} new cross-area duplicate cluster(s) at or above the floor (>= ${MIN_TOKENS} tokens and >= ${MIN_LINES} lines) touched a file changed in the last 7 days:"$'\n\n'
+              summary+="${n_new} new cross-area duplicate cluster(s) at or above the floor (>= ${MIN_TOKENS} tokens and >= ${MIN_LINES} lines) touched a file changed in the last 7 days:"$'\n\n'
               i=0
               while IFS=$'\t' read -r a as ae b bs be tok lin; do
                 i=$((i+1))
@@ -1471,9 +1539,9 @@ jobs:
               if [ "$n_new" -gt "$MAX_LISTED" ]; then
                 summary+="- ... and $((n_new - MAX_LISTED)) more in the \`jscpd-report\` artifact."$'\n'
               fi
-              summary+=$'\n'"Extend the indexed component (\`.claude/patterns/CAPABILITY-INDEX.md\`) instead of keeping two copies, or record why both stay. This alert closes itself on the first weekly run with no new cluster. Full report: the \`jscpd-report\` artifact on the run linked above."$'\n'
+              summary+=$'\n'"Extend the indexed component (\`.claude/patterns/CAPABILITY-INDEX.md\`) instead of keeping two copies. When both copies must stay, add the pair to \`${ACCEPTED}\` with the issue or ADR that records why. This alert closes itself on the first weekly run with no new cluster. Full report: the \`jscpd-report\` artifact on the run linked above."$'\n'
             elif [ "$status" = "ok" ]; then
-              summary="No new cross-area duplication this week (floor >= ${MIN_TOKENS} tokens and >= ${MIN_LINES} lines). ${n_old} older cross-area cluster(s) above the floor, all in files unchanged for more than 7 days; ${total} duplicates at jscpd defaults in the \`jscpd-report\` artifact."
+              summary="No new cross-area duplication this week (floor >= ${MIN_TOKENS} tokens and >= ${MIN_LINES} lines). ${n_old} older cross-area cluster(s) above the floor, all in files unchanged for more than 7 days; ${n_acc} accepted pair(s) skipped (\`${ACCEPTED}\`); ${total} duplicates at jscpd defaults in the \`jscpd-report\` artifact."
             fi
           fi
 
