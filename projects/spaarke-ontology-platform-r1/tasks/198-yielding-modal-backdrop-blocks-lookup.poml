@@ -4,7 +4,7 @@
     <title>A blocking SprkModal that yields to a lookup side pane must not leave its backdrop over the pane (file preview → Email → To lookup is unclickable)</title>
     <phase>12 Create-wizard lookups and composer (185 dev check fixes)</phase>
     <gate>startable</gate>
-    <status>in-progress</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .tsx in the shared UI library (SprkModal, used by every modal); PCF version bump.</rigor-reason>
     <model-tier>sonnet</model-tier>
