@@ -1,6 +1,6 @@
 # Current Task State
 
-> **Last Updated**: 2026-11-22 (023a+023b merged as #2941 `9461dc0bb3`; 023c done and verified, being committed + PR'd)
+> **Last Updated**: 2026-11-22 (023a+023b merged #2941 `9461dc0bb3`; 023c merged #2971 `6a907a5cd4`; #2928 closed)
 > **Format**: CURRENT state only. Each checkpoint REWRITES this file. Target ≤ 10 KB.
 
 ## Quick Recovery (READ THIS FIRST)
@@ -8,13 +8,12 @@
 | Field | Value |
 |-------|-------|
 | **Task** | **023c** ✅ — Documents list on the shared grid for project / matter / WA / service request + ProjectPage; D-23 `readFromParents` (#2928). Notes: `notes/task-023-notes.md` "Task 023c". 023a/023b ✅ merged (#2941). |
-| **Step** | Verified: lib jest 19/172, lib tsc, client-lint ui-components ok, SPA tsc, SPA build, SPA full vitest 1917/1933 (16 failures all in the 8 D-29 flake files, which pass 452/452 alone), ArchTest `ExternalSpaGridViewSelectorGuard` 231/231. One adversarial pass (opus) done; all F findings fixed; POML + TASK-INDEX ✅; drift clean. |
-| **Status** | Local commits on the branch, NOT pushed: `3fb134c217` (shared grid: no selection checkboxes when selectionMode none) on top of the 023c WIP commit + master merge `add62afe26`. Uncommitted at checkpoint: the review-fix round (DocumentLibrary Delete gate, ProjectPage opener, DataGrid config-error banner + Try again, resolveGridSource warn, tests, notes, defer-issues D-23 done + D-25..D-29). |
-| **Next Action** | Commit the fix round (message file, `git commit -F`), push, open the 023c PR (body: "Closes #2928"; ask owner sign-off for the two shared-grid changes made in 023c — selection cell + config-error text — under the 2026-11-22 dataset-grid precedent; list D-25..D-29; K-limits). Then owner merge go. Then task 024 (shared EmptyState), then 028. |
-| **Side** | PR #2937 (quality alerts, worktree `C:\code_files\spaarke-wt-quality-alert-fixes`) still needs the owner's merge go. #1906b → ebilling-r1; #2866 later. |
+| **Step** | 023c merged as `6a907a5cd4` (squash, owner go 2026-11-22 incl. sign-off on the two shared-grid fixes: selection cell, config-error text). Required checks Router + Client lint passed. |
+| **Status** | Branch has the pre-squash history; merge origin/master before the next PR (conflicts will be only in R4 project files: keep the branch side). Nothing from 023a/b/c is deployed; the grid config row is not in Dataverse. PR #2937 (quality alerts) merged. |
+| **Next Action** | Task 024 (shared EmptyState everywhere, FR-17) via task-execute, then 028 (P2 deploy + E2E: apply grid config 286be8b4 with owner go, grid PATCH 3ff4102c, BFF deploy via uac-r2, SPA deploy of the approved SHA). |
+| **Side** | #1906b → ebilling-r1; #2866 later. |
 
 ## Owner questions open
-- Merge go for the 023c PR (once CI is green), with explicit sign-off on the two shared-grid changes in it.
 - Older: show "The client is reviewing this invoice." beyond the Information field?
 - K: add `useHostRowSource` to `.claude/patterns/CAPABILITY-INDEX.md` row 31 (needs a `.claude` edit with owner approval).
 
