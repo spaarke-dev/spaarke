@@ -1,6 +1,6 @@
 # Task 056a — Private messages in a record's context: design note
 
-> Status (2026-11-22): **UAC-r2 approved the access parts on conditions C1–C6**, now written into this note. The owner's
+> Status (2026-11-22): **056a APPROVED by UAC-r2 at 51419e7768**; 056b in progress (task/fm-056b). C1–C6 and UAC-r2's three wording clarifications are in this note. The owner's
 > answers are in (`notes/decisions.md`, 2026-11-22): all as recommended, except Q2.4 (either behaviour allowed; the
 > easier one, no revoke, is kept) and Q3 (the refusal text is the owner's). No code until UAC-r2 has checked this revision.
 > Issue: #2923. Starts from: MR-1 in `projects/messages-enhancements-r1/requirements.md`, which holds UAC-r2's access
@@ -72,28 +72,34 @@ UAC-r2's ownership files (POML 056 escalation trigger 1).
 1. **Both participants hold Read on the referenced record.**
    - The sender is checked as the caller (`CallerRecordAccessProbe.GetCallerRightsAsync`).
    - The recipient is checked as the named principal (`CallerRecordAccessProbe.GetPrincipalRightsAppOnlyOrUnknownAsync`,
-     `RetrievePrincipalAccess` for that systemuser). An unanswered check refuses.
+     `RetrievePrincipalAccess` for that systemuser). An unanswered check gives 503 (Q2.3); nothing is sent.
    - Precedent: `AssignTaskRecipientGate`.
    - **U1, accepted by UAC-r2.** `RetrievePrincipalAccess` for the named systemuser is Dataverse's answer for that
      principal. No `CallerId`-impersonated read is needed.
    - **C1 (No Access wall).** Dataverse's rights answer can lag a No Access entry until the share reconcile removes the
      share. So when the record is secure, or files under a secure parent, BOTH participants must also pass
-     `SecureShareNoAccessGuard.CheckRecordAndSecureParentsAsync`. Walled or Unverifiable gives the neutral refusal. The
+     `SecureShareNoAccessGuard.CheckRecordAndSecureParentsAsync`. Walled gives the refusal text; the guard's Unverifiable outcome gives 503 (Q2.3). The
      guard is reused as is, not forked (callers today: `InternalUserShareCore`, `GrantAccessNotifier`).
 2. **Restricted record (C2).**
    - A participant flagged external is refused (`InternalShareEndpoints.IsBarredOnRestricted`).
    - Both participants are checked.
    - The flag checked is the record's **effective** Restricted flag through its filing (`EffectiveRootFlags`, round
      84), not only its own stored value.
-   - An effective flag or an external flag that cannot be read refuses.
+   - An effective flag or an external flag that cannot be read gives 503 (Q2.3); nothing is sent.
 3. **One refusal for every recipient-side cause.** The text is the owner's: "Recipient does not have required record
    access".
    - It covers the recipient not reading the record, the No Access wall, and an external recipient on a Restricted
      record. It never says which.
    - The sender learns only that this person lacks access to this record. That is what any refusal of this send tells
      them, and nothing about the record's flags.
-   - A sender who fails their own Read check gets "You do not have required record access".
-   - A check that cannot be answered gives 503 "try again". Configuration problems keep their existing 409.
+   - **Sender side (UAC-r2 clarification, 2026-11-22).** C1 and C2 apply to the sender too. Every sender-side cause gives
+     "You do not have required record access". The causes are: no Read, walled, external on a Restricted record, and an
+     unknown or nonexistent record id (NFR-01: unknown and denied give the same answer).
+   - **Order.** The sender's checks run in full before any recipient check, so a sender who fails learns nothing about
+     the recipient's access. A test pins this order.
+   - **Unanswered checks.** A check that cannot be answered gives 503 "try again": a rights question with no answer, the
+     guard's Unverifiable outcome, or an unreadable flag. Walled is an answer and gives the refusal text. Either way
+     nothing is sent. Configuration problems keep their existing 409.
 4. **After the send (C6, Q2.4).** The owner allows either behaviour ("not required if easier to remove access"), so the
    easier one is chosen: nothing revokes. Removing access would need new machinery that watches record and user access
    changes. None of these take the message from either
