@@ -159,8 +159,8 @@ Document appears in Invoice Review Queue View
 Human Reviewer → Confirm or Reject
   ↓
 If Confirmed:
-  - Creates sprk_invoice record
-  - Enqueues InvoiceExtractionJobHandler
+  - Creates an Internal invoice submission (InvoiceSubmissionService; the submission job creates the sprk_invoice, ebilling-r1 050a, D-134)
+  - Enqueues InvoiceSubmissionProcessing (the legacy InvoiceExtractionJobHandler was deleted by ebilling-r1 050b)
   - Removes from review queue
 
 If Rejected:

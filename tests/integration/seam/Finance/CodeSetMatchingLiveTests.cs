@@ -73,7 +73,6 @@ public sealed class CodeSetMatchingLiveTests
             ModelTier = AiModelTier.Fast,
         });
         var ai = new InvoiceAi(
-            new Mock<IPlaybookService>(MockBehavior.Strict).Object,
             model,
             new ActionResolver(routing.Object, catalog.Object, NullLogger<ActionResolver>.Instance),
             new ActionRunner(model, new PromptSchemaRenderer(NullLogger<PromptSchemaRenderer>.Instance), NullLogger<ActionRunner>.Instance, Options.Create(options)),

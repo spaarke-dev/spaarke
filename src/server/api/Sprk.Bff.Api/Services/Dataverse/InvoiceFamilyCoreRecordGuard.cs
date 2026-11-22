@@ -4,7 +4,7 @@
 //   (1) Existing — CoreAncestorResolver derives stamps from rows already written and refuses only two DIFFERENT records of
 //       one root type; an invoice naming both a matter and a project derives two stamps. TodoRegardingBuilder refuses a
 //       second regarding lookup on a to-do / event, but throws, knows only its own host tables and writes the pair with
-//       an optional record type. InvoiceReviewService.BuildInvoiceCreateFields writes the resolver fields for a matter only.
+//       an optional record type. (InvoiceReviewService.BuildInvoiceCreateFields, which wrote the resolver fields for a matter only, went with ebilling-r1 050a.)
 //   (2) Extension — the tables and record-type rules are reused (CoreAncestorResolver.StampColumnFor for the
 //       sprk_regarding{core} names, RegardingRecordType for the name / number / URL). CoreAncestorResolver itself cannot
 //       be the guard: it derives from a stored row, while FR-05 must refuse BEFORE the write (ADR-002, one owner).

@@ -1461,8 +1461,6 @@ public class ExternalDocumentNarrowingGuardTests
         ["Sprk.Bff.Api.Services.Jobs.Handlers.AttachmentClassificationJobHandler::WriteClassificationToDataverseAsync"] =
             "Writes literal keys only: sprk_classification, sprk_classificationconfidence, sprk_invoicehintsjson, " +
             "sprk_mattersuggestionjson, sprk_mattersuggestedref, sprk_invoicereviewstatus.",
-        ["Sprk.Bff.Api.Services.Jobs.Handlers.InvoiceExtractionJobHandler::UpdateInvoiceExtractionStatusAsync"] =
-            "Writes the literal key sprk_extractionstatus only.",
     };
 
     /// <summary>
