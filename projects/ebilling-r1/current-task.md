@@ -1,6 +1,6 @@
 # Current Task State
 
-> **Last Updated:** 2026-11-22 (050b and 124 complete). Session `ebilling-r1` (Claude Desktop) is the only writer to this worktree.
+> **Last Updated:** 2026-11-22 (050b and 124 complete; 086 live reads done). Session `ebilling-r1` (Claude Desktop) is the only writer to this worktree.
 > Older detail: `notes/handoff-history/current-task-2026-11-20a.md` (the previous state, verbatim), plus `-2026-11-16a`, `-15a` and `-13a`.
 
 ## Owner mode
@@ -10,7 +10,7 @@
 
 ## Quick recovery
 
-- **Active task:** none. 050b and 124 closed 2026-11-22. Next open build tasks: 123, 117 (see Open work), run through task-execute.
+- **Active task:** 086 (non-live steps). Done 2026-11-22: the pre-deploy count (0 Stored Files on Secure records), role and creator-person -Verify PASS, live NFR-05 census (no sprk_storedfile finding; the pre-existing findings went to uac-r2 by message only). Waiting on: uac-r2 sign-off on 086 (asked 2026-11-22), and the owner confirming that the -Verify records stand in for the missing -Apply outputs (criterion 6). Then 086 closes, and 123 (gated on 086) becomes startable. Other open build: 117.
 - **Held for the PR to master:** spa-r4 reviews 134's external-spa diff (`git diff 19866f6606 5f7195b9eb -- src/client/external-spa`). Owner chose "Merge, review later" on 2026-11-21. spa-r4's session is not running; send it the diff when it is.
 - **096 gate:** word-add-in-r1 slice C (PR #2927, merge 148ec4dec0) is live on dev since 2026-11-21. 096 still waits for one add-in release after it (POML gate), then removes `POST /api/office/quickcreate/invoice` and the Invoice target of `/api/office/save`.
 - **Waiting on the owner:** the OK to redeploy the Invoice Review page to dev (checklist M2).
