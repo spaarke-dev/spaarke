@@ -83,7 +83,7 @@ await initAuth({
 
 | Component | Location | Purpose |
 |-----------|----------|---------|
-| **CreateRecordStep.tsx** | `src/solutions/LegalWorkspace/src/components/CreateMatter/` | Step 2 form with AI pre-fill trigger on mount |
+| **CreateRecordStep.tsx** | `src/client/shared/Spaarke.UI.Components/src/components/CreateMatterWizard/` | Step 2 form with AI pre-fill trigger on mount |
 | **AiFieldTag.tsx** | Same directory | Sparkle "AI" badge for pre-filled fields |
 | **formTypes.ts** | Same directory | `IAiPrefillRequest`, `IAiPrefillResponse`, `IAiPrefillFields` |
 | **WorkspaceMatterEndpoints.cs** | `src/server/api/Sprk.Bff.Api/Api/Workspace/` | `POST /api/workspace/matters/pre-fill` endpoint |
@@ -542,12 +542,12 @@ options.AddPolicy("ai-stream", partition =>
 
 ```
 Client (Vite SPA):
-src/solutions/LegalWorkspace/src/
-├── components/CreateMatter/
+src/client/shared/Spaarke.UI.Components/src/
+├── components/CreateMatterWizard/
 │   ├── CreateRecordStep.tsx      # Step 2 form with pre-fill trigger
 │   ├── AiFieldTag.tsx            # Sparkle "AI" badge
 │   ├── formTypes.ts              # IAiPrefillRequest/Response types
-│   └── LookupField.tsx           # Lookup with isAiPrefilled prop
+│   └── (LookupField: components/LookupField/DataverseLookupField.tsx, isAiPrefilled prop)
 
 BFF (ASP.NET Core):
 src/server/api/Sprk.Bff.Api/

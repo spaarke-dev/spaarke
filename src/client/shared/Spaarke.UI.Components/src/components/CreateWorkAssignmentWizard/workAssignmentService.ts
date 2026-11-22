@@ -48,6 +48,7 @@ export {
 } from '../CreateMatterWizard/matterService';
 import { sendComposedEmail } from '../EmailComposer/composeOnlySend';
 import type { IComposedEmail } from '../EmailComposer/composeOnlySend';
+import { createWebApiFromDataService } from '../../utils/adapters/dataServiceWebApiAdapter';
 
 // ---------------------------------------------------------------------------
 // Metadata discovery (same pattern as MatterService/EventService)
@@ -109,24 +110,7 @@ export class WorkAssignmentService {
     this._bffBaseUrl = bffBaseUrl;
     // EntityCreationService expects IWebApiWithCreate which has createRecord returning { id: string }.
     // Wrap IDataService to adapt createRecord return type.
-    const webApiAdapter = {
-      createRecord: async (entityName: string, data: Record<string, unknown>) => {
-        const id = await this._dataService.createRecord(entityName, data);
-        return { id };
-      },
-      retrieveRecord: (entityName: string, id: string, options?: string) =>
-        dataService.retrieveRecord(entityName, id, options),
-      retrieveMultipleRecords: (entityName: string, options?: string) =>
-        dataService.retrieveMultipleRecords(entityName, options),
-      updateRecord: async (entityName: string, id: string, data: Record<string, unknown>) => {
-        await this._dataService.updateRecord(entityName, id, data);
-        return { id };
-      },
-      deleteRecord: async (entityName: string, id: string) => {
-        await dataService.deleteRecord(entityName, id);
-        return { id };
-      },
-    };
+    const webApiAdapter = createWebApiFromDataService(this._dataService);
     this._entityService = new EntityCreationService(webApiAdapter, authenticatedFetch, bffBaseUrl);
   }
 

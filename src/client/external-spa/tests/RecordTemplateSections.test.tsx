@@ -726,7 +726,7 @@ describe('sections', () => {
     fireEvent.click(gridRow(c, 1));
     const dialog = await screen.findByRole('dialog');
 
-    await within(within(dialog).getByTestId('record-detail-documents')).findByText('No Documents');
+    await within(within(dialog).getByTestId('record-detail-documents')).findByText('No documents on this record yet.');
     expect(within(dialog).getByText('No invoices for this record.')).toBeTruthy();
     await within(dialog).findByText(/No events yet/);
     // Task 012: one Events list (a Task is an event type): no separate Tasks list, no to-do read.
@@ -933,7 +933,7 @@ describe('sections', () => {
     fireEvent.click(gridRow(c, 1));
     const dialog = await screen.findByRole('dialog');
     await within(dialog).findByText(/Failed to load documents/);
-    expect(within(dialog).queryByText('No Documents')).toBeNull();
+    expect(within(dialog).queryByText('No documents on this record yet.')).toBeNull();
   });
 });
 

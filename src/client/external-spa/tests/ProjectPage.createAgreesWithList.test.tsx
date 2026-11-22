@@ -113,7 +113,7 @@ async function overview(answer: ListAnswer): Promise<void> {
   } else if (answer === 'failed') {
     await screen.findByText(/Failed to load documents/);
   } else {
-    await screen.findByText('No Documents');
+    await screen.findByText('No documents on this record yet.');
   }
 }
 
