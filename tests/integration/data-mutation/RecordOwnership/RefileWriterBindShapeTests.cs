@@ -130,6 +130,84 @@ public sealed class RefileWriterBindShapeTests
         AssertMovedIntoSecure();
     }
 
+    // ── fm task 056 (owner, 2026-11-22, Q5): a private message is never filed, by any of these writers ─────────────────────
+
+    /// <summary>The ordinary communication, holding a private-context reference: a private message (the REAL resolver refuses
+    /// its filing, <see cref="RecordOwnerRefusal.PrivateMessageNotFileable"/>).</summary>
+    private void APrivateCommunication()
+    {
+        AnOrdinaryCommunication();
+        _world.Set("sprk_communication", Communication,
+            Sprk.Bff.Api.Services.Communication.Access.PrivateContextColumns.Matter, new EntityReference("sprk_matter", SecureMatter));
+    }
+
+    private void AssertNothingWrittenOrMoved()
+    {
+        _writes.Should().BeEmpty("the writer's write runs only inside the re-file core's change, which the refusal never reaches");
+        _world.OwnerOf("sprk_communication", Communication).Should().Be(General, "nothing moved");
+        _world.ValueOf<EntityReference>("sprk_communication", Communication, "sprk_regardingproject").Should().BeNull();
+    }
+
+    [Fact(DisplayName = "fm 056 Q5: an UpdateRecord node filing a private message is refused with the code and writes nothing")]
+    public async Task UpdateRecordActionCore_FilingAPrivateMessage_IsRefused_AndWritesNothing()
+    {
+        APrivateCommunication();
+
+        var act = () => Core().UpdateAsync(
+            new UpdateRecordActionInput(
+                "sprk_communication", Communication, FieldMappings: null,
+                LegacyFields: new Dictionary<string, string?> { [ProjectBind] = $"/sprk_projects({OrdinaryProject})" }, Lookups: null,
+                ImpersonateSystemUserId: ConfirmingUser),
+            CancellationToken.None);
+
+        (await act.Should().ThrowAsync<RecordOwnerUnresolvedException>()).Which.RefusalCode
+            .Should().Be(RecordOwnerRefusal.PrivateMessageNotFileable);
+        AssertNothingWrittenOrMoved();
+    }
+
+    [Fact(DisplayName = "fm 056 Q5: the output orchestrator's update filing a private message is refused with the code and writes nothing")]
+    public async Task DataverseUpdateHandler_FilingAPrivateMessage_IsRefused_AndWritesNothing()
+    {
+        APrivateCommunication();
+        _writesAs = null;
+
+        var act = () => Handler().UpdateAsync(
+            "sprk_communication", Communication,
+            new Dictionary<string, object?> { [ProjectBind] = $"/sprk_projects({OrdinaryProject})" },
+            ConcurrencyMode.None, maxRetries: 1, CancellationToken.None);
+
+        (await act.Should().ThrowAsync<RecordOwnerUnresolvedException>()).Which.RefusalCode
+            .Should().Be(RecordOwnerRefusal.PrivateMessageNotFileable);
+        AssertNothingWrittenOrMoved();
+    }
+
+    [Fact(DisplayName = "fm 056 Q5: a field-mapping push filing a private message counts it failed with the code and writes nothing")]
+    public async Task FieldMappingPush_FilingAPrivateMessage_IsFailedWithTheCode_AndWritesNothing()
+    {
+        APrivateCommunication();
+
+        var (updated, failed, _, errors, _) = await Push(ProjectBind, $"/sprk_projects({OrdinaryProject})", Scopes());
+
+        (updated, failed).Should().Be((0, 1));
+        errors.Should().ContainSingle().Which.Error.Should().Contain(RecordOwnerRefusal.PrivateMessageNotFileable);
+        AssertNothingWrittenOrMoved();
+    }
+
+    [Fact(DisplayName = "fm 056 Q5 must not fire: the same UpdateRecord node filing of an ordinary communication is written")]
+    public async Task UpdateRecordActionCore_FilingAnOrdinaryCommunication_IsWritten()
+    {
+        AnOrdinaryCommunication();
+
+        await Core().UpdateAsync(
+            new UpdateRecordActionInput(
+                "sprk_communication", Communication, FieldMappings: null,
+                LegacyFields: new Dictionary<string, string?> { [ProjectBind] = $"/sprk_projects({OrdinaryProject})" }, Lookups: null,
+                ImpersonateSystemUserId: ConfirmingUser),
+            CancellationToken.None);
+
+        _writes.Should().ContainSingle();
+    }
+
     // ── move OUT of Secure ────────────────────────────────────────────────────────────────────────────────────────
 
     [Fact(DisplayName = "#2091 r3: an UpdateRecord node (acting for a Full Access user) binding a communication's matter out of Secure re-owns it, and the to-do below is released")]

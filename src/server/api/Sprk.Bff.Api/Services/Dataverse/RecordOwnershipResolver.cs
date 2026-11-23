@@ -1748,6 +1748,15 @@ public static class RecordOwnerRefusal
     /// (2) Extension — one more code in the set every create and Repair already render. (3) Cost of doing nothing — a refused
     /// contact would carry a code naming the wrong cause, and the repair pass could not tell it from a refusal it need not retry.</remarks>
     public const string CustomerContactTeamUnresolved = "record_owner_customer_contact_team_unresolved";
+
+    /// <summary>
+    /// fm task 056 (owner, 2026-11-22, Q5): the change would file a private message (a communication holding a context reference)
+    /// or move it to another thread. A private message always stays between its two participants. Nothing was written. HTTP 409.
+    /// </summary>
+    /// <remarks>Component Justification (CLAUDE.md §11): (1) Existing — the codes above, none of which names this rule.
+    /// (2) Extension — one more code in the set every re-file writer already renders. (3) Cost of doing nothing — a refused filing
+    /// would carry a code naming an owner fault, which a client cannot tell from a retryable one.</remarks>
+    public const string PrivateMessageNotFileable = "sdap.communication.private.not_fileable";
 }
 
 /// <summary>
@@ -2642,6 +2651,46 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
 
         // #2143 round 6: a change that moves the message to a thread filed under other parents changes what it is filed under.
         changesAParent |= !threadBefore.ToHashSet().SetEquals(threadAfter);
+
+        // fm task 056 (owner, 2026-11-22, Q5): a private message — a communication holding a context reference
+        // (PrivateContextColumns) — always stays between its two participants: it is never filed and never moved to another
+        // thread, by any writer. Asked on the row read above, before anything is written. A reference column absent from
+        // metadata is absent from the row (it was read with every column), so no private message exists and the check passes.
+        if (string.Equals(request.EntityLogicalName.Trim(), "sprk_communication", StringComparison.OrdinalIgnoreCase)
+            && HoldsAPrivateContextReference(current)
+            && (changesAParent || movesALineageLookup || MovesAFilingLink(request, current)))
+        {
+            _logger.LogWarning(
+                "Refusing to re-file {Entity} {RecordId}: it is a private message, which is never filed or moved to another thread "
+                + "({Code}). The change was NOT written.",
+                request.EntityLogicalName, request.RecordId, RecordOwnerRefusal.PrivateMessageNotFileable);
+            return RecordOwnerResolution.Refused(
+                RecordOwnerRefusal.PrivateMessageNotFileable,
+                "a private message stays between its two participants: it is never filed to a record and never moved to another thread");
+        }
+
+        static bool HoldsAPrivateContextReference(Entity row) =>
+            Sprk.Bff.Api.Services.Communication.Access.PrivateContextColumns.All.Any(column =>
+                row.GetAttributeValue<EntityReference>(column) is { } reference && reference.Id != Guid.Empty);
+
+        // Any filing link the change sets, moves or clears: a typed regarding lookup (one that files under no ownership parent
+        // included, from ParentChanges or RegardingLinksSet), the ADR-024 pair's type, or the thread. A value equal to the one the
+        // row holds, or a clear of a column the row does not hold, moves nothing.
+        static bool MovesAFilingLink(RecordReparent change, Entity row)
+        {
+            static Guid Held(Entity on, string column) =>
+                on.GetAttributeValue<EntityReference>(
+                    Sprk.Bff.Api.Services.Access.SecureRootInheritance.NormalizeColumn(column))?.Id ?? Guid.Empty;
+
+            return change.ChangesARegardingLink(row)
+                || change.RegardingLinksSet.Any(link => link.Value.Id != Held(row, link.Key))
+                || change.ParentChanges.Any(link =>
+                    (RecordReparent.IsRegardingColumn(link.Key)
+                     || RecordReparent.IsThreadFilingColumn(change.EntityLogicalName, link.Key)
+                     || string.Equals(Sprk.Bff.Api.Services.Access.SecureRootInheritance.NormalizeColumn(link.Key),
+                         CoreAncestorResolver.RegardingRecordTypeColumn, StringComparison.OrdinalIgnoreCase))
+                    && (link.Value?.Id ?? Guid.Empty) != Held(row, link.Key));
+        }
 
         if (!changesAParent)
         {

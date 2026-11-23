@@ -141,8 +141,11 @@ public class RecordOwnershipResolverDirectUnfileTests
         RecordOwnershipResolver.OwnershipParentColumnsOf(row).Keys.Should().Equal("sprk_regardingmatter");
     }
 
+    /// <summary>Owner 2026-11-22 (Q5) superseded the earlier answer (an unfile to the Direct team): a private message is never
+    /// filed and its filing links are never changed, so the unfile is refused before anything is written and the reference never
+    /// files it under the record it is about (RecordOwnershipResolverPrivateMessageNeverFiledTests).</summary>
     [Fact]
-    public async Task Unfile_OfAPrivateMessage_GoesToTheDirectTeam_NotToTheTeamOfTheRecordItIsAbout()
+    public async Task Unfile_OfAPrivateMessage_IsRefused_AndNeverGoesToTheTeamOfTheRecordItIsAbout()
     {
         var directory = World().WithOrdinaryRoot("sprk_matter", OtherMatterId)
             .WithMessageFiledUnder(MatterId, FakeDirectory.ChildBu, FakeDirectory.ChildTeam);
@@ -150,11 +153,14 @@ public class RecordOwnershipResolverDirectUnfileTests
         {
             [PrivateContextColumns.Matter] = new EntityReference("sprk_matter", OtherMatterId),
         });
+        var applied = false;
 
-        var resolution = await Resolver(directory, Resolved()).ReparentAsync(Unfile(), Applies(directory), CancellationToken.None);
+        var resolution = await Resolver(directory, Resolved()).ReparentAsync(Unfile(), Applies(directory, () => applied = true),
+            CancellationToken.None);
 
-        resolution.Outcome.Should().Be(RecordOwnerOutcome.Unchanged);
-        resolution.DirectUnfile.Should().Be(new DirectUnfileDue(ThreadId, LeavesSecureOwner: false));
+        resolution.RefusalCode.Should().Be(RecordOwnerRefusal.PrivateMessageNotFileable);
+        resolution.DirectUnfile.Should().BeNull();
+        applied.Should().BeFalse();
         directory.Assignments.Should().BeEmpty("the reference never files the message under the record it is about");
     }
 

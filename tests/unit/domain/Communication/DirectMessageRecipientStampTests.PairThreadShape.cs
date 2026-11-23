@@ -171,6 +171,9 @@ public partial class DirectMessageRecipientStampTests
         _serviceLog.Entries.Should().ContainSingle(e => e.EventId.Name == RoutedCode).Which.Level.Should().Be(LogLevel.Information);
         _serviceLog.Entries.Should().Contain(e => e.Message.Contains("(outbound Direct pair thread)"));
         _serviceLog.Entries.Should().NotContain(e => e.Message.Contains("(respond-into-thread)"));
+        // fm task 056 Q5: the routed Direct join ASSIGNS the thread; it never re-files, so a private message's send never meets
+        // the re-file core's refusal.
+        _resolverOwnership.Reparents.Should().BeEmpty("a routed Direct join is an assign, never ReparentAsync");
     }
 
     // ── F1-b / F2-2: the filing is decided before any write, against the routed pair ────────────────────────────────────
