@@ -153,9 +153,10 @@ export interface InvoiceViewProps {
    */
   onBusyChange?: (busy: boolean) => void;
   /**
-   * The Matter, Project or Work Assignment the open email is already filed to ({@link invoiceFiledRecord} of the pane's
-   * email identity). Seeds the core record until the user picks one. Null or absent: not filed, not known yet, or filed
-   * to another kind of record.
+   * The Matter, Project or Work Assignment that the NEWEST saved copy of the open email is filed to
+   * ({@link invoiceFiledRecord} of the pane's email identity). It is not necessarily the record the server judges (the
+   * email's communication; task 135), so it only seeds the core record until the user picks one and is stated as a fact
+   * about the saved copy. Null or absent: not saved, not known yet, or filed to another kind of record.
    */
   filedRecord?: EntitySearchResult | null;
   /** The open email's latest submission (contract §11), read once when the view opens. Absent → nothing is shown. */
