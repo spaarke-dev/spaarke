@@ -1542,6 +1542,14 @@ siblings #2745 and #2746 (PR #2957) and #2750 (PR #2958) are being fixed in scop
 |---|---|---|
 | D-2959 | Direct share pass: a capped listing moves the watermark to its horizon with no overlap, so a row stamped before the horizon but committed after the read waits for the rolling sweep. Not only a late grant: the pass also revokes (Restricted or tainted parent, non-participant shares), so a missed change can also delay a revoke. Proposed fix: bound the capped watermark by `startedAt - DirectOverlap`, the `WatermarkAfter` rule PR #2958 adds to the sibling job, and key it (#2745) only at an instant older than that | https://github.com/spaarke-dev/spaarke/issues/2959 |
 
+### 2026-11-23 — filed from the #1821 follow-ups (mutation catch-up run 45178690788)
+
+Test-strength gaps, not a production defect. Survivors on the lines #2745/#2746/#2750 changed are covered in the #1821 session's own tests-only PR (uac-r2 reviews it); the rest are deferred here.
+
+| ID | Title | GitHub Issue |
+|---|---|---|
+| D-2989 | ~340 pre-#2958 mutation survivors in `SecureChildReconciliationJob.cs` (52.4% score) and `ChildAccessPermissionReconciler.cs` (51.0%) | https://github.com/spaarke-dev/spaarke/issues/2989 |
+
 ### 2026-11-22 — filed from the fm 056b review (private Direct messages)
 
 Accepted as a known limit of fm task 056b (approved at 2967cd5bd8). uac-r2 owns it.
