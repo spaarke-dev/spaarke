@@ -136,6 +136,59 @@ public class DirectMessageOwnerStepPrivateFilingTests
     }
 
     [Fact]
+    public async Task APrivateRowWithTheRegardingPair_HasThePairsDisplayColumnsCleared_InTheSameUpdate()
+    {
+        var row = Message(PrivateContextColumns.Matter,
+            (CoreAncestorResolver.RegardingRecordIdColumn, (object)OtherMatter.ToString()),
+            (CoreAncestorResolver.RegardingRecordTypeColumn, new EntityReference("sprk_recordtype_ref", RecordType)),
+            ("sprk_regardingrecordname", "Acme v. Example"),
+            ("sprk_regardingrecordnumber", "MAT-0042"),
+            ("sprk_regardingrecordurl", "https://example.invalid/main.aspx?etn=sprk_matter"));
+
+        (await ClearAsync(row)).Should().Be(PrivateFilingClearOutcome.Cleared);
+
+        var update = _updates.Should().ContainSingle("the display columns go in the same conditional update").Subject;
+        update.Version.Should().Be(Version.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        update.Fields.Keys.Should().BeEquivalentTo(new[]
+        {
+            CoreAncestorResolver.RegardingRecordIdColumn, CoreAncestorResolver.RegardingRecordTypeColumn,
+            "sprk_regardingrecordname", "sprk_regardingrecordnumber", "sprk_regardingrecordurl",
+        });
+        update.Fields.Values.Should().AllSatisfy(v => v.Should().Be(DBNull.Value));
+        _log.Entries.Should().ContainSingle(e => e.Level == LogLevel.Warning).Which.Message
+            .Should().NotContain("Acme").And.NotContain("MAT-0042", "the log names columns, never a value");
+    }
+
+    [Fact]
+    public async Task APrivateRowHoldingOnlyADisplayColumn_HasItCleared()
+    {
+        // A row whose pair an earlier clear removed still shows the record's name until its display columns go.
+        var row = Message(PrivateContextColumns.Project, ("sprk_regardingrecordname", (object)"Acme v. Example"));
+
+        DirectMessageOwnerStep.NeedsPrivateFilingClear(row).Should().BeTrue();
+        (await ClearAsync(row)).Should().Be(PrivateFilingClearOutcome.Cleared);
+        _updates.Should().ContainSingle().Which.Fields.Keys.Should().BeEquivalentTo(new[] { "sprk_regardingrecordname" });
+    }
+
+    [Fact]
+    public async Task AnOrdinaryDirectRow_WithDisplayColumns_IsLeftAlone()
+    {
+        var row = Message(reference: null, ("sprk_regardingrecordname", (object)"Acme v. Example"));
+
+        DirectMessageOwnerStep.NeedsPrivateFilingClear(row).Should().BeFalse();
+        (await ClearAsync(row)).Should().Be(PrivateFilingClearOutcome.NotPrivate);
+        _updates.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void TheDisplayColumns_AreTheOnesAPairChangeClears()
+    {
+        DirectMessageOwnerStep.PrivateDisplayColumns.Should().BeEquivalentTo(OwnedChildWrite.PairDisplayColumns);
+        DirectMessageOwnerStep.PrivateDisplayColumns.Should().BeEquivalentTo(
+            new[] { "sprk_regardingrecordname", "sprk_regardingrecordnumber", "sprk_regardingrecordurl" });
+    }
+
+    [Fact]
     public async Task AnOrdinaryDirectRow_WithAFilingLookup_IsLeftAlone()
     {
         var row = Message(reference: null, ("sprk_regardingmatter", new EntityReference("sprk_matter", OtherMatter)));
@@ -310,7 +363,22 @@ public class DirectMessageOwnerStepPrivateFilingTests
 
         var selection = await DirectMessageOwnerStep.PrivateFilingSelectionAsync(dataverse.Object, _log, CancellationToken.None);
 
-        selection.Should().BeEquivalentTo(PrivateContextColumns.All.Concat(DirectMessageOwnerStep.PrivateFilingColumns).Append("versionnumber"));
+        selection.Should().BeEquivalentTo(PrivateContextColumns.All.Concat(DirectMessageOwnerStep.PrivateFilingColumns).Append("versionnumber"),
+            "the display columns are not selected while any is absent: a select naming a missing column fails the whole read");
+    }
+
+    [Fact]
+    public async Task TheSelection_AlsoNamesThePairsDisplayColumns_WhenTheyExist()
+    {
+        var dataverse = new Mock<IGenericEntityService>();
+        dataverse.Setup(d => d.GetColumnMetadataAsync(Communication, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Columns(PrivateContextColumns.All.Concat(DirectMessageOwnerStep.PrivateFilingColumns)
+                .Concat(DirectMessageOwnerStep.PrivateDisplayColumns)));
+
+        var selection = await DirectMessageOwnerStep.PrivateFilingSelectionAsync(dataverse.Object, _log, CancellationToken.None);
+
+        selection.Should().BeEquivalentTo(PrivateContextColumns.All.Concat(DirectMessageOwnerStep.PrivateFilingColumns)
+            .Concat(DirectMessageOwnerStep.PrivateDisplayColumns).Append("versionnumber"));
     }
 
     private static IReadOnlyDictionary<string, ColumnMetadata> Columns(IEnumerable<string> names) =>
