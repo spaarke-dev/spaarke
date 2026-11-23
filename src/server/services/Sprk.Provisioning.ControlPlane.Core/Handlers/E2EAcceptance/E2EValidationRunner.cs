@@ -268,12 +268,16 @@ public sealed class E2EValidationRunner : IE2EValidationRunner
     /// slot swap answers nothing for tens of minutes). An attempt with any failure, or with every check decided, is the
     /// result; the waits start at <see cref="H13AcceptanceOptions.KeylessProofRetryInitialDelay"/> and double up to
     /// <see cref="H13AcceptanceOptions.KeylessProofRetryMaxDelay"/>. No wait is started that would end past the window.
+    /// There is no retry when an earlier check has already failed (the run fails whatever the proof answers), nor when the
+    /// BFF build has no keyless-proof route (404: a redeploy, not a wait, is the remedy).
     /// </summary>
     private async Task RunKeylessProofAsync(
         HttpClient httpClient, Uri bffBaseUri, E2EValidationRequest request,
         List<string> passed, List<string> failed, List<string> inconclusive, List<string> diagnostics,
         CancellationToken cancellationToken)
     {
+        // An earlier check (healthz, ping, CORS) has failed: the outcome is a Failure whatever the proof answers.
+        var verdictAlreadyFailed = failed.Count > 0;
         var started = UtcNow();
         var delay = _options.KeylessProofRetryInitialDelay;
         for (var attempt = 1; ; attempt++)
@@ -282,18 +286,18 @@ public sealed class E2EValidationRunner : IE2EValidationRunner
             var attemptFailed = new List<string>();
             var attemptInconclusive = new List<string>();
             var attemptDiagnostics = new List<string>();
-            await RunKeylessProofOnceAsync(
+            var worthRetrying = await RunKeylessProofOnceAsync(
                 httpClient, bffBaseUri, request,
                 attemptPassed, attemptFailed, attemptInconclusive, attemptDiagnostics, cancellationToken).ConfigureAwait(false);
 
             var elapsed = UtcNow() - started;
             var decided = attemptFailed.Count > 0 || attemptInconclusive.Count == 0;
-            if (decided || elapsed + delay > _options.KeylessProofRetryWindow)
+            if (decided || verdictAlreadyFailed || !worthRetrying || elapsed + delay > _options.KeylessProofRetryWindow)
             {
                 passed.AddRange(attemptPassed);
                 failed.AddRange(attemptFailed);
                 inconclusive.AddRange(attemptInconclusive);
-                if (!decided && attempt > 1)
+                if (!decided && worthRetrying && attempt > 1)
                 {
                     diagnostics.Add(
                         $"{CheckKeylessProof}: no verdict after {attempt} attempts over {elapsed:hh\\:mm\\:ss} " +
@@ -321,9 +325,10 @@ public sealed class E2EValidationRunner : IE2EValidationRunner
 
     /// <summary>
     /// Calls the customer BFF's keyless proof once as the L2 Worker identity and records one check per service. See the
-    /// file header for the fail-closed rule.
+    /// file header for the fail-closed rule. Returns false when the attempt's lack of a verdict will not change with time
+    /// (the route is missing from the deployed build).
     /// </summary>
-    private async Task RunKeylessProofOnceAsync(
+    private async Task<bool> RunKeylessProofOnceAsync(
         HttpClient httpClient, Uri bffBaseUri, E2EValidationRequest request,
         List<string> passed, List<string> failed, List<string> inconclusive, List<string> diagnostics,
         CancellationToken cancellationToken)
@@ -336,11 +341,11 @@ public sealed class E2EValidationRunner : IE2EValidationRunner
             case BffCall.Failed refusal:
                 failed.Add(CheckKeylessProof);
                 diagnostics.Add(refusal.Diagnostic);
-                return;
+                return false;
             case BffCall.Inconclusive noVerdict:
                 inconclusive.Add(CheckKeylessProof);
                 diagnostics.Add(noVerdict.Diagnostic);
-                return;
+                return noVerdict.Retryable;
         }
         var body = ((BffCall.Ok)call).Body;
 
@@ -353,7 +358,7 @@ public sealed class E2EValidationRunner : IE2EValidationRunner
         {
             failed.Add(CheckKeylessProof);
             diagnostics.Add($"{CheckKeylessProof}: the BFF's answer is not the keyless-proof shape ({ex.GetType().Name}).");
-            return;
+            return false;
         }
 
         passed.Add(CheckKeylessProof);
@@ -396,6 +401,7 @@ public sealed class E2EValidationRunner : IE2EValidationRunner
                 "openai-chat={Outcome} code={Code} status={Status}",
                 request.CustomerId, request.RunId, chat.Outcome, chat.Code, chat.StatusCode);
         }
+        return true;
     }
 
     // ------------------------------------------------------------------
@@ -414,7 +420,8 @@ public sealed class E2EValidationRunner : IE2EValidationRunner
         public sealed record Failed(string Diagnostic) : BffCall;
 
         /// <summary>No verdict (transport, timeout, throttling, gateway, a build without the route).</summary>
-        public sealed record Inconclusive(string Diagnostic) : BffCall;
+        /// <param name="Retryable">False when waiting cannot help (a build without the route: redeploy, then resume).</param>
+        public sealed record Inconclusive(string Diagnostic, bool Retryable = true) : BffCall;
     }
 
     /// <summary>
@@ -499,7 +506,8 @@ public sealed class E2EValidationRunner : IE2EValidationRunner
                     // No verdict on the stamp: the BFF build predates the route. Redeploy (H9), then resume.
                     return new BffCall.Inconclusive(
                         $"{label}: '{uri}' returned HTTP 404 -- the deployed BFF build has no {label} route. " +
-                        $"Deploy a build that contains task {routeTask} (H9), then resume.");
+                        $"Deploy a build that contains task {routeTask} (H9), then resume.",
+                        Retryable: false);
                 }
                 if (IsTransientStatus(response.StatusCode) && attempt == 1)
                 {

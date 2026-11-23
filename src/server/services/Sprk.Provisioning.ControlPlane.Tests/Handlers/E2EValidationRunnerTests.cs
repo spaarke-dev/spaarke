@@ -839,6 +839,76 @@ public sealed class E2EValidationRunnerTests
     }
 
     [Fact]
+    public async Task RunAsync_AnEarlierCheckFailed_TheKeylessProofIsNotRetried()
+    {
+        var calls = 0;
+        var waits = new List<TimeSpan>();
+        var handler = new FakeBffHttpMessageHandler(req =>
+        {
+            if (PathIs(req, E2EValidationRunner.HealthzPath) && req.Method == HttpMethod.Get)
+            {
+                return new HttpResponseMessage(HttpStatusCode.InternalServerError);
+            }
+            if (IsKeylessProof(req))
+            {
+                calls++;
+                throw new TaskCanceledException("simulated HttpClient timeout");
+            }
+            return HappyResponder(req);
+        });
+
+        var result = await BuildRunner(handler, waits: waits).RunAsync(BuildRequest(), CancellationToken.None);
+
+        result.Should().BeOfType<E2EValidationOutcome.Failure>()
+            .Which.ChecksFailed.Should().Contain(E2EValidationRunner.CheckBffHealthz);
+        calls.Should().Be(1, "the run fails on healthz whatever the proof answers, so waiting buys nothing");
+        waits.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task RunAsync_KeylessProofRouteMissing_IsNotRetried()
+    {
+        var calls = 0;
+        var waits = new List<TimeSpan>();
+        var handler = new FakeBffHttpMessageHandler(req =>
+        {
+            if (!IsKeylessProof(req))
+            {
+                return HappyResponder(req);
+            }
+            calls++;
+            return new HttpResponseMessage(HttpStatusCode.NotFound);
+        });
+
+        var result = await BuildRunner(handler, waits: waits).RunAsync(BuildRequest(), CancellationToken.None);
+
+        result.Should().BeOfType<E2EValidationOutcome.Inconclusive>()
+            .Which.Diagnostic.Should().Contain("404").And.NotContain("KeylessProofRetryWindow");
+        calls.Should().Be(1, "a build without the route needs a redeploy, not a wait");
+        waits.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task RunAsync_CancelledDuringAWait_StopsWithCancellation()
+    {
+        using var cts = new CancellationTokenSource();
+        var handler = new FakeBffHttpMessageHandler(req => IsKeylessProof(req)
+            ? throw new TaskCanceledException("simulated HttpClient timeout")
+            : HappyResponder(req));
+        var runner = BuildRunner(handler);
+        runner.WaitAsync = (_, ct) =>
+        {
+            cts.Cancel(); // the Worker shuts down during the wait
+            ct.ThrowIfCancellationRequested();
+            return Task.CompletedTask;
+        };
+
+        var act = () => runner.RunAsync(BuildRequest(), cts.Token);
+
+        await act.Should().ThrowAsync<OperationCanceledException>("the wait receives the caller's token");
+    }
+
+    [Fact]
     public async Task RunAsync_RetryWindowZero_MakesOneAttempt()
     {
         var waits = new List<TimeSpan>();
