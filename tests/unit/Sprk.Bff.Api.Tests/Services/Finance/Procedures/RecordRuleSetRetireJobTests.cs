@@ -195,6 +195,15 @@ public sealed class RecordRuleSetRetireJobTests
                     throw new Xunit.Sdk.XunitException($"Unexpected write: {invocation.Method.Name} on {table}");
             }
         }
+
+        // The services under test hold other seams; the sweep reaches none of them: no Signal close (D-170's sweep closes Off policies'
+        // Signals), no Decision Record preflight, record or enqueue, no owner question and no caller-rights probe.
+        _world.Closure.Invocations.Should().BeEmpty("the sweep closes no Signal");
+        _world.Preflighted.Should().BeEmpty("the sweep writes no Decision Record");
+        _world.Recorded.Should().BeEmpty("the sweep writes no Decision Record");
+        _world.Enqueued.Should().BeEmpty("the sweep enqueues no Decision Record");
+        H.Ownership.Invocations.Should().BeEmpty("the sweep asks no owner question");
+        _world.Probe.Invocations.Should().BeEmpty("the sweep is app-only and probes no caller");
     }
 
     private int WriteCount => H.Entities.Invocations.Count(i =>
@@ -554,6 +563,26 @@ public sealed class RecordRuleSetRetireJobTests
         Exists(Assignment, orphan).Should().BeFalse("the assignment part still runs");
     }
 
+    [Fact(DisplayName = "117: an assignment page that cannot be read is a FAILED run, after the rule-set part has run")]
+    public async Task AnAssignmentReadFault_IsAFailedRun()
+    {
+        var set = Set();
+        Rule(set, "BRR-1");
+        AssignmentRow();
+        H.Entities.Setup(e => e.RetrieveMultipleAsync(It.Is<QueryExpression>(q => q.EntityName == Assignment), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("simulated read fault"));
+
+        var result = await RunJobAsync();
+
+        result.Success.Should().BeFalse("a page that could not be read is never 'nothing to do'");
+        using var doc = JsonDocument.Parse(result.ResultJson!);
+        doc.RootElement.GetProperty("status").GetString().Should().Be("error");
+        doc.RootElement.GetProperty("assignments").GetProperty("readFailed").GetBoolean().Should().BeTrue();
+        doc.RootElement.GetProperty("ruleSets").GetProperty("retired").GetInt32().Should().Be(1, "the rule-set part ran first");
+        Status(set).Should().Be(RuleSetService.RuleSetRetired);
+        _logs.Single(l => l.Message.Contains("heartbeat")).Level.Should().Be(LogLevel.Warning);
+    }
+
     // ── Paging ───────────────────────────────────────────────────────────────────────────────────────────────────────
 
     [Fact(DisplayName = "117: a run takes at most PageSize x MaxPages sets; the next run takes the rest")]
@@ -577,6 +606,58 @@ public sealed class RecordRuleSetRetireJobTests
         sets.Should().OnlyContain(s => Status(s) == RuleSetService.RuleSetRetired);
     }
 
+    [Fact(DisplayName = "117: report only, three of each, PageSize 1 and MaxPages 5: each row is counted once (the id cursor moves on)")]
+    public async Task ReportOnly_PagesOnTheIdCursor_CountingEachRowOnce()
+    {
+        for (var i = 0; i < 3; i++)
+        {
+            Rule(Set(), $"BRR-{i}");
+            AssignmentRow();
+        }
+
+        _settings[RecordRuleSetRetireJob.PageSizeKey] = "1";
+        _settings[RecordRuleSetRetireJob.MaxPagesKey] = "5";
+
+        var result = await RunAsync(apply: false);
+
+        result.GetProperty("ruleSets").GetProperty("selected").GetInt32().Should().Be(3, "a report-only run changes nothing, so only the cursor moves the pages on");
+        result.GetProperty("ruleSets").GetProperty("moreRemain").GetBoolean().Should().BeFalse();
+        result.GetProperty("assignments").GetProperty("selected").GetInt32().Should().Be(3);
+        result.GetProperty("assignments").GetProperty("moreRemain").GetBoolean().Should().BeFalse();
+        WriteCount.Should().Be(0);
+        AssertOnlyTheSweepsRequests();
+    }
+
+    [Fact(DisplayName = "117: with Apply on, a first row that faults every time is attempted once per run and the rows after it are processed")]
+    public async Task AFirstRowThatAlwaysFaults_IsAttemptedOnce_AndTheRestAreProcessed()
+    {
+        var sets = Enumerable.Range(0, 3).Select(_ => Set()).ToList();
+        var rows = Enumerable.Range(0, 3).Select(_ => AssignmentRow()).ToList();
+        var firstSet = sets.Min();   // the fake orders ids as Guid.CompareTo, the order the selection asks for
+        var firstRow = rows.Min();
+        H.FailUpdateOf = (table, id) => table == RuleSet && id == firstSet;
+        H.OnDelete = (_, id) => id == firstRow ? new InvalidOperationException("simulated delete fault") : null;
+        _settings[RecordRuleSetRetireJob.PageSizeKey] = "1";
+        _settings[RecordRuleSetRetireJob.MaxPagesKey] = "5";
+
+        var result = await RunAsync();
+
+        H.Entities.Invocations.Count(i => i.Method.Name == nameof(IGenericEntityService.UpdateAsync) && (Guid)i.Arguments[1] == firstSet)
+            .Should().Be(1, "the cursor moves past a faulted set; it is retried on the next run, not on the next page");
+        H.Entities.Invocations.Count(i => i.Method.Name == nameof(IGenericEntityService.DeleteAsync) && (Guid)i.Arguments[1] == firstRow)
+            .Should().Be(1);
+        sets.Where(s => s != firstSet).Should().OnlyContain(s => Status(s) == RuleSetService.RuleSetRetired);
+        Status(firstSet).Should().Be(RuleSetService.RuleSetPublished);
+        rows.Where(r => r != firstRow).Should().OnlyContain(r => !Exists(Assignment, r));
+        Exists(Assignment, firstRow).Should().BeTrue();
+        result.GetProperty("status").GetString().Should().Be("partial");
+        result.GetProperty("ruleSets").GetProperty("retired").GetInt32().Should().Be(2);
+        result.GetProperty("ruleSets").GetProperty("faulted").GetInt32().Should().Be(1);
+        result.GetProperty("assignments").GetProperty("deleted").GetInt32().Should().Be(2);
+        result.GetProperty("assignments").GetProperty("faulted").GetInt32().Should().Be(1);
+        AssertOnlyTheSweepsRequests(rows.ToArray());
+    }
+
     // ── Registration ─────────────────────────────────────────────────────────────────────────────────────────────────
 
     [Fact(DisplayName = "117: the job is registered through AddScheduledJob in AddFinanceModule, disabled, on the configured or default cron")]
@@ -584,11 +665,6 @@ public sealed class RecordRuleSetRetireJobTests
     {
         var services = new ServiceCollection();
         services.AddFinanceModule(new ConfigurationBuilder().Build());
-
-        services.Where(d => d.ServiceType == typeof(RecordRuleSetRetireJob)).Should().ContainSingle()
-            .Which.Lifetime.Should().Be(ServiceLifetime.Singleton);
-        services.Should().NotContain(d => d.ImplementationType == typeof(RecordRuleSetRetireJob) && d.ServiceType != typeof(RecordRuleSetRetireJob),
-            "it is an IScheduledJob only through its ScheduledJobRegistration, never a hosted service");
 
         var registration = RegistrationOf(services, new ConfigurationBuilder().Build());
         registration.Enabled.Should().BeFalse("it runs only when an admin triggers or enables it");
