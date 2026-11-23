@@ -4,7 +4,7 @@
     <title>Shared side-pane lookup fields return keyboard focus to their button after the Dataverse lookup pane closes</title>
     <phase>12 Create-wizard lookups and composer (185 dev check fixes)</phase>
     <gate>startable</gate>
-    <status>in-progress</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .tsx in the shared UI library used by every create wizard, the rule wizard and PCF hosts.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -17,14 +17,14 @@
     <tags>react, fluent-ui, frontend, pcf, testing, a11y</tags>
     <estimated-effort>2-3 hours</estimated-effort>
   </metadata>
-  <prompt>Found by the main session's browser check on dev, 2026-11-22. Console → Ontology admin → New rule → Scope and noise → "Limit to one matter" (a `DataverseLookupField`, aria-label "Select Limit to one matter"): the side pane opens on top and the pick comes back ("Applies to: MAT-000113") — PASS — but afterwards `document.activeElement` is `<body>` of the Console frame, not the field's button. Same class as task 199 (composer). `DataverseLookupField` is the side-pane lookup in every create wizard (14 files use it), so a keyboard user loses their place after every lookup in every wizard. Owner: "continue testing and fixing".</prompt>
+  <prompt>Found by the main session's browser check on dev, 2026-11-22. Console → Ontology admin → New rule → Scope and noise → "Limit to one matter" (a `DataverseLookupField`, aria-label "Select Limit to one matter"): the side pane opens on top and the pick comes back ("Applies to: MAT-000113") — PASS — but afterwards `document.activeElement` is `&lt;body&gt;` of the Console frame, not the field's button. Same class as task 199 (composer). `DataverseLookupField` is the side-pane lookup in every create wizard (14 files use it), so a keyboard user loses their place after every lookup in every wizard. Owner: "continue testing and fixing".</prompt>
   <role>SPAARKE frontend developer. Expert in React 16-19, Fluent UI v9, accessibility, and `@spaarke/ui-components`.</role>
-  <goal>After `DataverseLookupField`'s `navigationService.openLookup` settles (pick, cancel or failure), keyboard focus is on the field's own control (the lookup button, or whichever button the field renders for its new value), when focus is not already inside the field's host dialog/form region on purpose (i.e. it is on `<body>`, or outside the closest `[role=dialog]` that contains the field). Same treatment for the other shared side-pane lookup triggers in `@spaarke/ui-components` that await `openLookup`/`lookupObjects` the same way (inventory them: `PolymorphicPicker`, `DecisionWizard/steps/ParameterFields`, `RecordHeader/lookupSearch`, others found by grep), using ONE shared helper — reuse task 199's helper if it fits.</goal>
+  <goal>After `DataverseLookupField`'s `navigationService.openLookup` settles (pick, cancel or failure), keyboard focus is on the field's own control (the lookup button, or whichever button the field renders for its new value), when focus is not already inside the field's host dialog/form region on purpose (i.e. it is on `&lt;body&gt;`, or outside the closest `[role=dialog]` that contains the field). Same treatment for the other shared side-pane lookup triggers in `@spaarke/ui-components` that await `openLookup`/`lookupObjects` the same way (inventory them: `PolymorphicPicker`, `DecisionWizard/steps/ParameterFields`, `RecordHeader/lookupSearch`, others found by grep), using ONE shared helper — reuse task 199's helper if it fits.</goal>
   <context>
     <background>
 - `src/client/shared/Spaarke.UI.Components/src/components/LookupField/DataverseLookupField.tsx` ~210-246: `handleOpenLookup` awaits `navigationService.openLookup`, calls `onChange`, and in `finally` resets `opening`/`isOpening`; there is no focus handling. `mounted` ref already exists for the unmount guard.
 - After `onChange` the field may render a different element (empty vs selected state), so focus the field's control AFTER the re-render (container ref + `setTimeout(0)`/rAF, then query the field's button), not a stale element ref.
-- The platform pane runs in the top document; in the Console the field is inside an iframe. Focus must be restored in the field's own document (`element.ownerDocument`); `document.activeElement` there is `<body>` after the pane closes.
+- The platform pane runs in the top document; in the Console the field is inside an iframe. Focus must be restored in the field's own document (`element.ownerDocument`); `document.activeElement` there is `&lt;body&gt;` after the pane closes.
 - Task 199 (EmailComposer, branch `fix/ontology-199-composer-lookup-focus`, may be merged by the time you start) solves the same thing for the composer; if it added a helper, reuse it; do not write a second one.
     </background>
     <relevant-files>
@@ -65,4 +65,5 @@
   <execution>
     <protocol>Run through task-execute. Fresh branch from origin/master; PR to master.</protocol>
   </execution>
+  <completion>Done 2026-11-23: PR #2988 merged to master (973d72b67e) after independent Opus review (merge; K-only: first-attempt takeover outside the region, late async host value, untested retry branch, stale committed bundles). Deployed to dev (deploy-log 2026-11-23): 6 PCFs (CommunicationActions 1.3.25, TrackingFieldTrio 1.0.67, SemanticSearchControl 1.1.92, RecordHeader 1.1.13.0, RegardingResolver 1.6.5, CommunicationConversationPanel 1.18.6) and 13 code pages; bundles recorded in chore PR #2995. Dev check 2026-11-23: rule wizard "Limit to one matter" cancel and pick both return focus to the field's control. Out-of-package triggers filed as DI-163 #2985. Notes: notes/task-200-notes.md.</completion>
 </task>

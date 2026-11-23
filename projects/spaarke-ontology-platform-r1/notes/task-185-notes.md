@@ -119,3 +119,19 @@ Further checks the same evening:
 | Cancel with choices → discard check; Discard closes, nothing written | PASS |
 | Ontology admin → Classification table at 1440x900 | Guidance column ~120 px, rows ~220 px tall: added to task 201 |
 | Classification → Edit (inline) focus | Focus stays on Edit; Cancel drops it to body: added to task 202 |
+
+## Dev checks after the 199 + 200 deploy, main session, 2026-11-23
+
+Deploy: `notes/deploy-log.md` 2026-11-23 (master `973d72b67e`). Nothing was saved or sent: the rule wizard was discarded and the composer closed.
+
+| Check | Result |
+|---|---|
+| Ontology admin → Rules at 1280x720 and 1440x900 (task 201) | PASS: rows 57 px, nothing clipped, no horizontal overflow |
+| Ontology admin → Classification at both sizes (task 201) | PASS: rows 44-139 px, nothing clipped; Guidance preview wraps to 2 lines; "POL-COMMIT-BUDGET" in Read by wraps at its hyphens (readable) |
+| Console → New rule → Scope → "Limit to one matter": focus the button, open, Cancel the pane (task 200) | PASS: focus back on "Select Limit to one matter"; top document focus in the Console frame |
+| Same, pick MAT-000113 → Add (task 200) | PASS: focus on "Clear Limit to one matter" (the control that replaced Select) |
+| Matter MAT-000113 → Tracking email icon → composer → To lookup → Cancel the pane (task 199, TrackingFieldTrio 1.0.67) | PASS: focus back on "Look up To recipients". The platform then focused "Email members" behind the dialog about 0.2 s later; the retry reclaimed it 4 ms after (the late hand-back known limit of 199 does not bite here) |
+| Composer Close (task 202 scope) | Focus falls to body, as expected until 202 ships |
+| Not checked | Find Similar → DRV → Email → To, and preview → Email → To (iframe and yielding-modal composer paths); a create-wizard code page lookup |
+
+Gotcha found: a Console tab that stayed open across the deploy kept the web resource URL token from 04:01Z and served the OLD bundle even after Ctrl+Shift+R and a frame reload (the server returns the old content for the old token). A new tab got the new token and the new code. Testers: open a new tab after a Console deploy.
