@@ -68,7 +68,7 @@ public sealed class RefileWriterBindShapeTests
     private readonly ITestOutputHelper _output;
 
     /// <summary>Who every write must be sent AS (MSCRMCallerID): the node and the push act for the confirming user; the
-    /// output orchestrator's update acts for nobody. The strict write mock refuses any other, so a writer that dropped its
+    /// update handler's write acts for nobody. The strict write mock refuses any other, so a writer that dropped its
     /// impersonation fails.</summary>
     private Guid? _writesAs = ConfirmingUser;
 
@@ -104,7 +104,7 @@ public sealed class RefileWriterBindShapeTests
         AssertMovedIntoSecure();
     }
 
-    [Fact(DisplayName = "#2091 r3: the output orchestrator's update binding a communication's matter to a secure matter re-owns it, and the to-do below is isolated")]
+    [Fact(DisplayName = "#2091 r3: the update handler's update binding a communication's matter to a secure matter re-owns it, and the to-do below is isolated")]
     public async Task DataverseUpdateHandler_ABindIntoASecureMatter_ReownsTheRow_AndIsolatesWhatIsFiledUnderIt()
     {
         AnOrdinaryCommunication();
@@ -152,7 +152,7 @@ public sealed class RefileWriterBindShapeTests
         _shares.MaskOf("sprk_todo", TodoUnderCommunication, DataversePrincipalRef.User(Sharee)).Should().BeNull();
     }
 
-    [Fact(DisplayName = "#2091 r3: the output orchestrator's update (acting for no person) binding a communication's matter out of Secure is refused and writes nothing")]
+    [Fact(DisplayName = "#2091 r3: the update handler's update (acting for no person) binding a communication's matter out of Secure is refused and writes nothing")]
     public async Task DataverseUpdateHandler_ABindOutOfASecureMatter_IsRefused_ForAWriterActingForNoPerson()
     {
         ASecureCommunication();
@@ -169,7 +169,7 @@ public sealed class RefileWriterBindShapeTests
 
     // ── a bind CLEAR ──────────────────────────────────────────────────────────────────────────────────────────────
 
-    [Fact(DisplayName = "#2091 r3: the output orchestrator's update clearing a communication's secure matter through its bind key is a parent change (refused: no person)")]
+    [Fact(DisplayName = "#2091 r3: the update handler's update clearing a communication's secure matter through its bind key is a parent change (refused: no person)")]
     public async Task DataverseUpdateHandler_ABindClearOutOfASecureMatter_IsAParentChange()
     {
         ASecureCommunication();
@@ -458,7 +458,7 @@ public sealed class RefileWriterBindShapeTests
         AssertNoStepButReStamped();
     }
 
-    [Fact(DisplayName = "#2091 r5: the output orchestrator's update that re-binds the parent the communication already holds runs no step after a re-file, and still re-stamps")]
+    [Fact(DisplayName = "#2091 r5: the update handler's update that re-binds the parent the communication already holds runs no step after a re-file, and still re-stamps")]
     public async Task DataverseUpdateHandler_ThatRebindsTheParentTheRowHolds_RunsNoStep_AndStillReStamps()
     {
         ASecureCommunication();
@@ -496,7 +496,7 @@ public sealed class RefileWriterBindShapeTests
         _world.OwnerOf("sprk_todo", TodoUnderCommunication).Should().Be(Secure);
     }
 
-    [Fact(DisplayName = "#2091 r5: the output orchestrator's update clearing a filing lookup the communication does not hold runs no step after a re-file")]
+    [Fact(DisplayName = "#2091 r5: the update handler's update clearing a filing lookup the communication does not hold runs no step after a re-file")]
     public async Task DataverseUpdateHandler_AClearOfAnEmptyFilingLookup_RunsNoStep()
     {
         ASecureCommunication();
@@ -548,7 +548,7 @@ public sealed class RefileWriterBindShapeTests
 
     // ── #2110 (ontology K3) / fm task 054b: a message's thread lookup is the BFF's own; a generic update naming it is refused ──
 
-    [Theory(DisplayName = "fm 054b: the output orchestrator's update re-binding the held matter AND naming the communication's thread is refused, and nothing is written")]
+    [Theory(DisplayName = "fm 054b: the update handler's update re-binding the held matter AND naming the communication's thread is refused, and nothing is written")]
     [InlineData("move")]
     [InlineData("held")]
     [InlineData("clear")]
@@ -650,7 +650,7 @@ public sealed class RefileWriterBindShapeTests
 
     // ── #2110 (ontology K1): the same matter with a parent REMOVED is a change ───────────────────────────────────────
 
-    [Fact(DisplayName = "#2110 (ontology K1): the output orchestrator's update re-binding the held matter AND removing the held project runs the step once")]
+    [Fact(DisplayName = "#2110 (ontology K1): the update handler's update re-binding the held matter AND removing the held project runs the step once")]
     public async Task DataverseUpdateHandler_TheHeldMatterWithTheProjectRemoved_RunsTheStepOnce_2110()
     {
         ASecureCommunication(alsoUnderOrdinaryProject: true);

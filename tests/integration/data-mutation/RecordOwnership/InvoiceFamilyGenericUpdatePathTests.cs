@@ -19,7 +19,7 @@ namespace Sprk.Bff.Api.Tests.Integration.DataMutation.RecordOwnership;
 
 /// <summary>
 /// ebilling-r1 DEF-022 (#2056; task 026 fix-round-2): the three generic update paths that do not write through
-/// <c>OwnedChildWrite</c> — the playbook update (<see cref="UpdateRecordActionCore"/>), the output orchestrator
+/// <c>OwnedChildWrite</c> — the playbook update (<see cref="UpdateRecordActionCore"/>), the update handler
 /// (<see cref="DataverseUpdateHandler"/>) and the field-mapping push — call <see cref="InvoiceFamilyCoreRecordGuard"/> before
 /// their write when it targets <c>sprk_invoice</c> / <c>sprk_billingevent</c> and touches a guarded lookup, and refuse with
 /// its stable code. A write that touches no guarded lookup, or another table, is unaffected and reads nothing for it.
@@ -272,7 +272,7 @@ public partial class InvoiceFamilyGenericUpdatePathTests
             writes[1].As.Should().BeNull("the person's write of the other columns comes first, then the application's");
     }
 
-    // ── The output orchestrator: DataverseUpdateHandler ────────────────────────────────────────────────────────────
+    // ── DataverseUpdateHandler (its orchestrator caller was deleted in ebilling-r1 050b) ────────────────────────────────────────────────────────────
 
     private DataverseUpdateHandler Handler(IGenericEntityService app)
     {

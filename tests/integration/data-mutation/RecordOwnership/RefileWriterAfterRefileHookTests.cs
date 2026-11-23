@@ -17,7 +17,7 @@ using Xunit;
 namespace Sprk.Bff.Api.Tests.Integration.DataMutation.RecordOwnership;
 
 /// <summary>
-/// GitHub #2091 — the playbook update node (<see cref="UpdateRecordActionCore"/>) and the output orchestrator's generic update
+/// GitHub #2091 — the playbook update node (<see cref="UpdateRecordActionCore"/>) and the update handler's generic update
 /// (<see cref="DataverseUpdateHandler"/>) are re-file writers: a write that moves a filing lookup of a lineage table runs the
 /// ONE step after a re-file, <see cref="Sprk.Bff.Api.Services.Access.SecureChildReconciler.AfterRefileAsync"/>, with whether
 /// the row was isolated read BEFORE the write — as the browser routes and the chat update tool do.
@@ -126,9 +126,9 @@ public sealed class RefileWriterAfterRefileHookTests
         AssertTheStepDidNotRun(readsAllowed: true);
     }
 
-    // ── DataverseUpdateHandler (the output orchestrator's generic update) ────────────────────────────────────────
+    // ── DataverseUpdateHandler (generic update) ────────────────────────────────────────
 
-    [Fact(DisplayName = "#2091: the output orchestrator's update moving a communication out of a secure matter runs AfterRefileAsync once, isolated-before read before the write")]
+    [Fact(DisplayName = "#2091: the update handler's update moving a communication out of a secure matter runs AfterRefileAsync once, isolated-before read before the write")]
     public async Task DataverseUpdateHandler_MovingAFilingLookup_RunsTheAfterRefileStepOnce_WithIsolationReadBeforeTheWrite()
     {
         await Handler().UpdateAsync(
@@ -140,7 +140,7 @@ public sealed class RefileWriterAfterRefileHookTests
         AssertTheStepRanOnceForTheCommunication();
     }
 
-    [Fact(DisplayName = "#2091: the output orchestrator's update writing no filing lookup does not run AfterRefileAsync (and reads no owner)")]
+    [Fact(DisplayName = "#2091: the update handler's update writing no filing lookup does not run AfterRefileAsync (and reads no owner)")]
     public async Task DataverseUpdateHandler_AWriteThatMovesNoFilingLookup_DoesNotRunTheStep()
     {
         await Handler().UpdateAsync(
@@ -152,7 +152,7 @@ public sealed class RefileWriterAfterRefileHookTests
         AssertTheStepDidNotRun(readsAllowed: false);
     }
 
-    [Fact(DisplayName = "#2091: the output orchestrator's update whose write fails does not run AfterRefileAsync")]
+    [Fact(DisplayName = "#2091: the update handler's update whose write fails does not run AfterRefileAsync")]
     public async Task DataverseUpdateHandler_AFailedWrite_DoesNotRunTheStep()
     {
         _failWrite = true;
@@ -182,7 +182,7 @@ public sealed class RefileWriterAfterRefileHookTests
         AssertTheWriteStoodAndNothingWasReleased();
     }
 
-    [Fact(DisplayName = "#2091 r3: the output orchestrator's update whose isolation read times out (not the caller's cancellation) still writes, and the step releases nothing")]
+    [Fact(DisplayName = "#2091 r3: the update handler's update whose isolation read times out (not the caller's cancellation) still writes, and the step releases nothing")]
     public async Task DataverseUpdateHandler_AnIsolationReadTimeout_IsAFault_TheWriteStands()
     {
         TheIsolationReadTimesOut();
@@ -212,7 +212,7 @@ public sealed class RefileWriterAfterRefileHookTests
         AssertTheStepRanOnceForTheCommunication();
     }
 
-    [Fact(DisplayName = "#2091 r4: the output orchestrator's update whose isolation read faults ONCE retries it, and the move out releases the row and what is filed under it")]
+    [Fact(DisplayName = "#2091 r4: the update handler's update whose isolation read faults ONCE retries it, and the move out releases the row and what is filed under it")]
     public async Task DataverseUpdateHandler_OneTransientIsolationReadFault_IsRetried_AndTheMoveOutReleases()
     {
         TheIsolationReadFaultsOnce();
@@ -243,7 +243,7 @@ public sealed class RefileWriterAfterRefileHookTests
         AssertTheWriteStoodAndNothingWasReleased();
     }
 
-    [Fact(DisplayName = "#2091 r5: the output orchestrator's update whose isolation read faults on the retry too still writes, and the step releases nothing")]
+    [Fact(DisplayName = "#2091 r5: the update handler's update whose isolation read faults on the retry too still writes, and the step releases nothing")]
     public async Task DataverseUpdateHandler_AnIsolationReadThatFaultsTwice_IsAFault_NothingIsReleased()
     {
         var faults = TheIsolationReadFaultsTwice();
@@ -283,7 +283,7 @@ public sealed class RefileWriterAfterRefileHookTests
 
     // ── #2091 round 4: a cleared TEXT column is no re-file; a cleared filing lookup is ───────────────────────────────
 
-    [Fact(DisplayName = "#2091 r4: the output orchestrator's update clearing a text column runs no step after a re-file (and reads no owner)")]
+    [Fact(DisplayName = "#2091 r4: the update handler's update clearing a text column runs no step after a re-file (and reads no owner)")]
     public async Task DataverseUpdateHandler_ANullTextColumn_RunsNoStep()
     {
         await Handler().UpdateAsync(
@@ -307,7 +307,7 @@ public sealed class RefileWriterAfterRefileHookTests
         AssertTheStepDidNotRun(readsAllowed: false);
     }
 
-    [Fact(DisplayName = "#2091 r4: the output orchestrator's update clearing a filing lookup runs the step after a re-file")]
+    [Fact(DisplayName = "#2091 r4: the update handler's update clearing a filing lookup runs the step after a re-file")]
     public async Task DataverseUpdateHandler_ANullFilingLookup_RunsTheStep()
     {
         await Handler().UpdateAsync(

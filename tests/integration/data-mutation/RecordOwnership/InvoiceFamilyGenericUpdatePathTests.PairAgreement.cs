@@ -11,7 +11,7 @@ namespace Sprk.Bff.Api.Tests.Integration.DataMutation.RecordOwnership;
 
 /// <summary>
 /// field-mapping-server-write-path-r1 task 045e (owner, 2026-11-13, #2772 "Refuse it"; FR-23 amended for the invoice family): on
-/// the playbook update and the output orchestrator, a write of an invoice-family row whose regarding pair names a record other
+/// the playbook update and the update handler, a write of an invoice-family row whose regarding pair names a record other
 /// than the row's core record (the core lookup written in the same request, else the stored one) is refused by the path's
 /// invoice-family guard, through the path's existing form (the guard's code-only refusal), and nothing is written. The
 /// field-mapping push asks the same guard, but never maps a pair (the mapping engine skips a rule aimed at it), so its pair moves
@@ -54,7 +54,7 @@ public partial class InvoiceFamilyGenericUpdatePathTests
     public static TheoryData<GenericPath, string> EveryPairWritingPathAndFamilyTable()
     {
         var data = new TheoryData<GenericPath, string>();
-        foreach (var path in new[] { GenericPath.PlaybookUpdate, GenericPath.OutputOrchestrator })
+        foreach (var path in new[] { GenericPath.PlaybookUpdate, GenericPath.UpdateHandler })
             foreach (var table in GenericPathFamilyTables)
                 data.Add(path, table);
         return data;
@@ -104,7 +104,7 @@ public partial class InvoiceFamilyGenericUpdatePathTests
 
     [Theory]
     [InlineData(GenericPath.PlaybookUpdate)]
-    [InlineData(GenericPath.OutputOrchestrator)]
+    [InlineData(GenericPath.UpdateHandler)]
     public async Task APairNamingAnotherRecord_WithTheCoreLookupReNamedInTheSameWrite_IsRefused(GenericPath path)
     {
         // The core lookup is written but names the record the row already names: nothing moves, 045d derives nothing, so the pair
@@ -117,7 +117,7 @@ public partial class InvoiceFamilyGenericUpdatePathTests
 
     [Theory]
     [InlineData(GenericPath.PlaybookUpdate)]
-    [InlineData(GenericPath.OutputOrchestrator)]
+    [InlineData(GenericPath.UpdateHandler)]
     public async Task AnExternalIdentifierFiledUnderAnInvoiceOnly_GivenAnotherInvoicesId_IsRefused_ItsKeyDoesNotMove(GenericPath path)
     {
         // D-68: the pair is a column of the external identifier's alternate key; it moves only with the row's own lookup.
@@ -136,7 +136,7 @@ public partial class InvoiceFamilyGenericUpdatePathTests
 
     [Theory]
     [InlineData(GenericPath.PlaybookUpdate)]
-    [InlineData(GenericPath.OutputOrchestrator)]
+    [InlineData(GenericPath.UpdateHandler)]
     public async Task AnExternalIdentifierUnderAMatter_GivenItsInvoicesId_IsRefused_ItsMatterDecides(GenericPath path)
     {
         var outcome = await RunAsync(path, "sprk_externalidentifier", FamilyRow, NoLookups, PairId(Invoice),
@@ -148,7 +148,7 @@ public partial class InvoiceFamilyGenericUpdatePathTests
 
     [Theory]
     [InlineData(GenericPath.PlaybookUpdate)]
-    [InlineData(GenericPath.OutputOrchestrator)]
+    [InlineData(GenericPath.UpdateHandler)]
     public async Task APairThePathsPlannerClears_IsDecidedAsWritten_AndRefused_NothingIsWritten(GenericPath path)
     {
         // The check decides the payload as it will be written, after the path's pair planner. A type-only write of the matter type
@@ -167,8 +167,8 @@ public partial class InvoiceFamilyGenericUpdatePathTests
     [Theory]
     [InlineData(GenericPath.PlaybookUpdate, true)]
     [InlineData(GenericPath.PlaybookUpdate, false)]
-    [InlineData(GenericPath.OutputOrchestrator, true)]
-    [InlineData(GenericPath.OutputOrchestrator, false)]
+    [InlineData(GenericPath.UpdateHandler, true)]
+    [InlineData(GenericPath.UpdateHandler, false)]
     public async Task AnInvoiceMovedWithAPairSent_IsRefusedCoreRecordFixed_NotForThePair(GenericPath path, bool agrees)
     {
         // Task 045g rule 1 is decided first: the pair a core-moving write sends — agreeing with the record the row would name,
@@ -184,7 +184,7 @@ public partial class InvoiceFamilyGenericUpdatePathTests
 
     [Theory]
     [InlineData(GenericPath.PlaybookUpdate)]
-    [InlineData(GenericPath.OutputOrchestrator)]
+    [InlineData(GenericPath.UpdateHandler)]
     public async Task AnAgreeingPairWithARecordUrlNamingAnotherRecord_IsRefused_AndNothingIsWritten(GenericPath path)
     {
         var sent = new Dictionary<string, object?>
@@ -214,9 +214,9 @@ public partial class InvoiceFamilyGenericUpdatePathTests
     [InlineData(GenericPath.PlaybookUpdate, MatterUrlForm.Canonical)]
     [InlineData(GenericPath.PlaybookUpdate, MatterUrlForm.AbsoluteOnAnotherHost)]
     [InlineData(GenericPath.PlaybookUpdate, MatterUrlForm.AnotherScheme)]
-    [InlineData(GenericPath.OutputOrchestrator, MatterUrlForm.Canonical)]
-    [InlineData(GenericPath.OutputOrchestrator, MatterUrlForm.AbsoluteOnAnotherHost)]
-    [InlineData(GenericPath.OutputOrchestrator, MatterUrlForm.AnotherScheme)]
+    [InlineData(GenericPath.UpdateHandler, MatterUrlForm.Canonical)]
+    [InlineData(GenericPath.UpdateHandler, MatterUrlForm.AbsoluteOnAnotherHost)]
+    [InlineData(GenericPath.UpdateHandler, MatterUrlForm.AnotherScheme)]
     public async Task AnAgreeingPairWithARecordUrlOfTheCoreRecord_IsWrittenWithTheCanonicalUrl(GenericPath path, MatterUrlForm form)
     {
         var sent = new Dictionary<string, object?> { ["sprk_regardingrecordid"] = Matter.ToString("D"), ["sprk_regardingrecordurl"] = MatterUrl(form) };
@@ -276,7 +276,7 @@ public partial class InvoiceFamilyGenericUpdatePathTests
 
     [Theory]
     [InlineData(GenericPath.PlaybookUpdate)]
-    [InlineData(GenericPath.OutputOrchestrator)]
+    [InlineData(GenericPath.UpdateHandler)]
     public async Task AnExternalIdentifierFiledUnderAnInvoiceOnly_GivenItsInvoicesPair_IsWritten_WithTheIdCanonical(GenericPath path)
     {
         // D-68: the row regards its invoice, so the invoice's pair agrees; it is never refused as naming no core record.
@@ -292,7 +292,7 @@ public partial class InvoiceFamilyGenericUpdatePathTests
 
     [Theory]
     [InlineData(GenericPath.PlaybookUpdate)]
-    [InlineData(GenericPath.OutputOrchestrator)]
+    [InlineData(GenericPath.UpdateHandler)]
     public async Task AnExternalIdentifierFiledUnderAnInvoiceOnly_GivenAMattersPair_IsRefused(GenericPath path)
     {
         var outcome = await RunAsync(path, "sprk_externalidentifier", FamilyRow, Lookups(PairType(CatalogRowOf("sprk_matter"))),
@@ -303,7 +303,7 @@ public partial class InvoiceFamilyGenericUpdatePathTests
 
     [Theory]
     [InlineData(GenericPath.PlaybookUpdate)]
-    [InlineData(GenericPath.OutputOrchestrator)]
+    [InlineData(GenericPath.UpdateHandler)]
     [InlineData(GenericPath.FieldMappingPush)]
     public async Task AWriteThatMovesTheCoreLookup_WithADisagreeingPair_IsWrittenWithTheDerivedPair(GenericPath path)
     {
@@ -318,7 +318,7 @@ public partial class InvoiceFamilyGenericUpdatePathTests
 
     [Theory]
     [InlineData(GenericPath.PlaybookUpdate)]
-    [InlineData(GenericPath.OutputOrchestrator)]
+    [InlineData(GenericPath.UpdateHandler)]
     [InlineData(GenericPath.FieldMappingPush)]
     public async Task AWriteThatMovesTheCoreLookup_WithoutAPair_IsWrittenWithTheDerivedPair(GenericPath path)
     {
@@ -345,7 +345,7 @@ public partial class InvoiceFamilyGenericUpdatePathTests
 
     [Theory]
     [InlineData(GenericPath.PlaybookUpdate)]
-    [InlineData(GenericPath.OutputOrchestrator)]
+    [InlineData(GenericPath.UpdateHandler)]
     public async Task ACatalogReadThatFaults_IsRefusedReadFailed_AndNothingIsWritten(GenericPath path)
     {
         _catalogAnswer = _ => throw new TimeoutException("socket 10.0.0.9 timed out");
@@ -360,7 +360,7 @@ public partial class InvoiceFamilyGenericUpdatePathTests
 
     [Theory]
     [InlineData(GenericPath.PlaybookUpdate)]
-    [InlineData(GenericPath.OutputOrchestrator)]
+    [InlineData(GenericPath.UpdateHandler)]
     public async Task AStoredRowReadThatFaults_WithAPairSent_IsRefusedReadFailed_AndNothingIsWritten(GenericPath path)
     {
         var app = new Mock<IGenericEntityService>(MockBehavior.Strict);

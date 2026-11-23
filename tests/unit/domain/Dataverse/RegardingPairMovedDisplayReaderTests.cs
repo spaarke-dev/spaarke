@@ -24,7 +24,7 @@ namespace Sprk.Bff.Api.Tests.Domain.Dataverse;
 /// (<c>sprk_regardingrecordname</c> / <c>number</c> / <c>url</c>) that the update planner derives for a pair the update itself
 /// moves (rule 3) are read as the person the write runs for. With no person they are cleared, never derived app-only. Rules 2
 /// and 4 follow a lookup the row holds and keep the app-only reader; the push passes its own caller reader for every rule.
-/// Each app-only caller (<see cref="KeepRegardingPairWholeAppOnlyAsync"/> itself, the output orchestrator
+/// Each app-only caller (<see cref="KeepRegardingPairWholeAppOnlyAsync"/> itself, the update handler
 /// <see cref="DataverseUpdateHandler"/> and the playbook core <see cref="UpdateRecordActionCore"/>) hands the planner the
 /// person, or its absence. The app-only entity service is STRICT with no setup for the regarded record: a read of it as the
 /// app fails the test.
@@ -281,7 +281,7 @@ public sealed class RegardingPairMovedDisplayReaderTests
         TheMatterWasNeverReadAsTheApp(entities);
     }
 
-    // ── The output orchestrator (DataverseUpdateHandler) hands the planner its person ─────────────────────────────────────
+    // ── DataverseUpdateHandler hands the planner its person ─────────────────────────────────────
 
     private static (DataverseUpdateHandler Handler, Func<Dictionary<string, object?>> Written) HandlerOver(
         IGenericEntityService entities, IImpersonatedCommunicationQuery? asPerson)
@@ -301,7 +301,7 @@ public sealed class RegardingPairMovedDisplayReaderTests
     [Theory]
     [InlineData(PersonRead.Forbidden)]
     [InlineData(PersonRead.NotFound)]
-    public async Task OutputOrchestrator_APersonWhoseReadIsRefused_HasTheMovedPairsDisplayCleared(PersonRead answer)
+    public async Task UpdateHandler_APersonWhoseReadIsRefused_HasTheMovedPairsDisplayCleared(PersonRead answer)
     {
         var entities = AppOnlyWorld();
         var (handler, written) = HandlerOver(entities.Object, PersonsQuery(answer).Object);
@@ -313,7 +313,7 @@ public sealed class RegardingPairMovedDisplayReaderTests
     }
 
     [Fact]
-    public async Task OutputOrchestrator_WithNoPerson_ClearsTheMovedPairsDisplay_AndNeverReadsTheRecord()
+    public async Task UpdateHandler_WithNoPerson_ClearsTheMovedPairsDisplay_AndNeverReadsTheRecord()
     {
         var entities = AppOnlyWorld();
         var query = new Mock<IImpersonatedCommunicationQuery>(MockBehavior.Strict);
@@ -327,7 +327,7 @@ public sealed class RegardingPairMovedDisplayReaderTests
     }
 
     [Fact]
-    public async Task OutputOrchestrator_APersonWhoMayRead_HasTheMovedPairsDisplayDerivedFromTheirRead()
+    public async Task UpdateHandler_APersonWhoMayRead_HasTheMovedPairsDisplayDerivedFromTheirRead()
     {
         var entities = AppOnlyWorld();
         var (handler, written) = HandlerOver(entities.Object, PersonsQuery(PersonRead.MayRead).Object);
@@ -339,7 +339,7 @@ public sealed class RegardingPairMovedDisplayReaderTests
     }
 
     [Fact]
-    public async Task OutputOrchestrator_APersonWithNoQueryRegistered_RefusesTheWrite()
+    public async Task UpdateHandler_APersonWithNoQueryRegistered_RefusesTheWrite()
     {
         var entities = AppOnlyWorld();
         var (handler, _) = HandlerOver(entities.Object, null);
