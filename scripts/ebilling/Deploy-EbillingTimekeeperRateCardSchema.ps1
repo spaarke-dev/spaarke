@@ -12,8 +12,8 @@
          sprk_effectivefrom / sprk_effectiveto (date only), the existing sprk_contact lookup relabelled "Linked contact",
          statuscode: value 1 "Active" -> "Approved" and an inserted "Pending" on statecode 0; value 2 stays "Inactive"
          on statecode 1. Value 1 is relabelled only when no timekeeper row sits at statuscode 1 (otherwise exit 2).
-      2  sprk_ratecard (user-owned): sprk_name, sprk_firm, optional core-record scope sprk_matter / sprk_project /
-         sprk_workassignment, sprk_sourcedocument (-> sprk_document), sprk_effectivefrom / sprk_effectiveto (date only),
+      2  sprk_ratecard (user-owned): sprk_name, sprk_firm, sprk_sourcedocument (-> sprk_document), sprk_effectivefrom /
+         sprk_effectiveto (date only), no core-record scope lookups (retired by task 193, see Remove-EbillingRateCardCoreLookups.ps1),
          statuscode: value 1 "Active" -> "Draft" (new table, no rows), inserted "Published" (statecode 0), value 2
          "Inactive" (statecode 1).
       3  sprk_ratecardrate (user-owned): sprk_name, sprk_ratecard (-> sprk_ratecard, parental cascade delete,
@@ -390,7 +390,7 @@ Write-Host "Environment: $EnvironmentUrl   Solution: $SolutionUniqueName   Mode:
 Write-Host ""
 
 try {
-    foreach ($ref in $TkTable, 'sprk_organization', 'sprk_matter', 'sprk_project', 'sprk_workassignment', 'sprk_document') {
+    foreach ($ref in $TkTable, 'sprk_organization', 'sprk_document') {
         if (-not (Get-DvOrNull "EntityDefinitions(LogicalName='$ref')?`$select=LogicalName" -Retries 4)) {
             throw "$ref does not exist in $EnvironmentUrl."
         }
@@ -428,12 +428,8 @@ try {
     Set-PrimaryNameRequired $CardTable 'sprk_name'
     Add-Lookup -Column 'sprk_firm' -SchemaName 'sprk_Firm' -RelSchema 'sprk_organization_ratecard_firm' -Target 'sprk_organization' `
         -Display 'Firm' -Description 'The law firm the rates apply to.' -DeleteBehavior 'Restrict'
-    Add-Lookup -Column 'sprk_matter' -SchemaName 'sprk_Matter' -RelSchema 'sprk_matter_ratecard_matter' -Target 'sprk_matter' `
-        -Display 'Matter' -Description 'Optional scope: the card applies to this matter only. At most one scope lookup is set (enforced by the rate import, task 078).'
-    Add-Lookup -Column 'sprk_project' -SchemaName 'sprk_Project' -RelSchema 'sprk_project_ratecard_project' -Target 'sprk_project' `
-        -Display 'Project' -Description 'Optional scope: the card applies to this project only. At most one scope lookup is set (enforced by the rate import, task 078).'
-    Add-Lookup -Column 'sprk_workassignment' -SchemaName 'sprk_WorkAssignment' -RelSchema 'sprk_workassignment_ratecard_workassignment' -Target 'sprk_workassignment' `
-        -Display 'Work Assignment' -Description 'Optional scope: the card applies to this work assignment only. At most one scope lookup is set (enforced by the rate import, task 078).'
+    # No core-record scope lookups: the card belongs to a Procedure Version (task 080, EB-D-148). The three core-record lookups it
+    # once had were retired by task 193 (Remove-EbillingRateCardCoreLookups.ps1); do not add them back.
     Add-Lookup -Column 'sprk_sourcedocument' -SchemaName 'sprk_SourceDocument' -RelSchema 'sprk_document_ratecard_sourcedocument' -Target 'sprk_document' `
         -Display 'Source Document' -Description 'The rate card document (Procedure Library) the rates were imported from.'
     Add-Column 'sprk_effectivefrom' (New-DateOnlyDef 'sprk_EffectiveFrom' 'Effective From' 'First day the card is in force.') 'DateTime'
@@ -484,7 +480,7 @@ try {
         Write-Host "  nothing changed - no publish" -ForegroundColor Yellow
     } else {
         Invoke-Dv -Path 'PublishXml' -Method POST -Body @{
-            ParameterXml = "<importexportxml><entities><entity>$TkTable</entity><entity>$CardTable</entity><entity>$RateTable</entity><entity>sprk_organization</entity><entity>sprk_matter</entity><entity>sprk_project</entity><entity>sprk_workassignment</entity><entity>sprk_document</entity></entities><optionsets><optionset>$GlobalChoice</optionset></optionsets></importexportxml>"
+            ParameterXml = "<importexportxml><entities><entity>$TkTable</entity><entity>$CardTable</entity><entity>$RateTable</entity><entity>sprk_organization</entity><entity>sprk_document</entity></entities><optionsets><optionset>$GlobalChoice</optionset></optionsets></importexportxml>"
         } | Out-Null
         Write-Host "  customizations published" -ForegroundColor Green
     }

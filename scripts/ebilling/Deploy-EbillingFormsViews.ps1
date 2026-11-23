@@ -95,9 +95,9 @@ $Spec = [ordered]@{
     }
     sprk_ratecard          = @{
         Form = 'Replace'; FormName = 'Information'
-        Sections = @(@{ Name = 'general'; Label = 'General'; Cols = 'sprk_name', 'sprk_firm', 'sprk_effectivefrom', 'sprk_effectiveto', 'sprk_matter', 'sprk_project', 'sprk_workassignment', 'ownerid' })
+        Sections = @(@{ Name = 'general'; Label = 'General'; Cols = 'sprk_name', 'sprk_firm', 'sprk_effectivefrom', 'sprk_effectiveto', 'ownerid' })
         Subgrids = @(@{ Name = 'rates'; Label = 'Rates'; Target = 'sprk_ratecardrate'; Relationship = 'sprk_ratecard_ratecardrate_ratecard' })
-        View = 'sprk_name', 'sprk_firm', 'sprk_matter', 'sprk_project', 'sprk_workassignment', 'sprk_effectivefrom', 'sprk_effectiveto'
+        View = 'sprk_name', 'sprk_firm', 'sprk_effectivefrom', 'sprk_effectiveto'
     }
     sprk_ratecardrate      = @{
         Form = 'Replace'; FormName = 'Information'

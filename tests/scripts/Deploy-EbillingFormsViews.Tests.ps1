@@ -38,8 +38,19 @@ Describe 'the forms spec no longer carries sprk_sourcedocument (116)' {
 
     It 'sprk_ratecard keeps its general section columns and the rates subgrid' {
         $general = @($script:Spec['sprk_ratecard'].Sections | Where-Object { $_.Name -eq 'general' })[0].Cols
-        $general | Should -Be @('sprk_name', 'sprk_firm', 'sprk_effectivefrom', 'sprk_effectiveto', 'sprk_matter', 'sprk_project', 'sprk_workassignment', 'ownerid')
+        $general | Should -Be @('sprk_name', 'sprk_firm', 'sprk_effectivefrom', 'sprk_effectiveto', 'ownerid')
         $script:Spec['sprk_ratecard'].Subgrids[0].Target | Should -Be 'sprk_ratecardrate'
+    }
+
+    # ebilling-r1 task 193: the card's three core-record lookups are retired (Remove-EbillingRateCardCoreLookups.ps1), so the form and the
+    # view must not name them: a re-run of this script would otherwise put them back on the form and fail on the missing columns.
+    It 'sprk_ratecard form and view name none of the three retired core-record lookups (193)' {
+        $general = @($script:Spec['sprk_ratecard'].Sections | Where-Object { $_.Name -eq 'general' })[0].Cols
+        foreach ($retired in 'sprk_matter', 'sprk_project', 'sprk_workassignment') {
+            $general | Should -Not -Contain $retired
+            @($script:Spec['sprk_ratecard'].View) | Should -Not -Contain $retired
+        }
+        @($script:Spec['sprk_ratecard'].View) | Should -Be @('sprk_name', 'sprk_firm', 'sprk_effectivefrom', 'sprk_effectiveto')
     }
     It 'sprk_ruleset has no section bound to sprk_notconverted, which nothing writes since 116 (fix round 1)' {
         @($script:Spec['sprk_ruleset'].Sections | ForEach-Object { $_.Name }) | Should -Not -Contain 'notconverted'
