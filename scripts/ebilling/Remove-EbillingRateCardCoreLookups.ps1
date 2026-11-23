@@ -281,6 +281,10 @@ function Get-DependencyList([string]$ObjectId, [int]$ComponentType) {
 }
 
 function Get-State {
+    # sprk_ratecard is user-owned: a count taken as a caller who cannot read every row is silently short. Checked once, before the first
+    # count, and only while a column still exists; when the caller is not shown to read every row, nothing is counted (NonNull stays
+    # $null = unknown) and Get-ApplyBlockers refuses.
+    $readGap = $null; $readChecked = $false
     $columns = @(foreach ($t in $Targets) {
         $c = [ordered]@{
             Column = $t.Column; Relationship = $t.Relationship; Referenced = $t.Referenced
@@ -290,8 +294,9 @@ function Get-State {
         $attr = Get-Attr $Table $t.Column 'LogicalName,AttributeType,MetadataId'
         if ($attr) {
             $c.AttributePresent = $true; $c.AttributeType = $attr.AttributeType; $c.AttributeId = $attr.MetadataId
+            if (-not $readChecked) { $readGap = Get-ReadAllRowsGap $Table; $readChecked = $true }
             # Rows of every state (no statecode filter). A count only; ids are never read.
-            $c.NonNull = Get-RowCountExact $EntitySet $IdColumn "_$($t.Column)_value ne null"
+            if (-not $readGap) { $c.NonNull = Get-RowCountExact $EntitySet $IdColumn "_$($t.Column)_value ne null" }
             $c.Dependencies = @(Get-DependencyList $attr.MetadataId 2)
         }
         $rel = Read-DvOrNull "RelationshipDefinitions(SchemaName='$($t.Relationship)')/Microsoft.Dynamics.CRM.OneToManyRelationshipMetadata?`$select=SchemaName,MetadataId,ReferencingEntity,ReferencingAttribute,ReferencedEntity"
@@ -322,10 +327,11 @@ function Get-State {
         if (Test-MentionsCoreLookup $g.sprk_configjson) { [pscustomobject]@{ Name = $g.sprk_name } }
     })
 
-    return [pscustomobject]@{ Columns = $columns; Forms = $forms; Views = $views; PersonalViews = $personal; GridConfigs = $grids }
+    return [pscustomobject]@{ Columns = $columns; Forms = $forms; Views = $views; PersonalViews = $personal; GridConfigs = $grids; ReadGap = $readGap }
 }
 
 function Write-State($State) {
+    if ($State.ReadGap) { Write-Host "read access     : $($State.ReadGap)" -ForegroundColor Red }
     foreach ($c in $State.Columns) {
         Write-Host "$Table.$($c.Column)" -ForegroundColor Cyan
         if (-not $c.AttributePresent) { Write-Host '  column         : not found (already removed)' -ForegroundColor Yellow }
@@ -367,11 +373,13 @@ function Get-ApplyBlockers($State) {
     $b = [System.Collections.Generic.List[string]]::new()
     # The forms and views this script cleans are expected dependents of a column; anything else is not.
     $known = @(@($State.Forms | ForEach-Object { $_.Id }) + @($State.Views | ForEach-Object { $_.Id }))
+    # Before any count is believed: the caller must be shown to read every row (nothing was counted when it is not).
+    if ($State.ReadGap) { $b.Add("${Table}: $($State.ReadGap)") }
     foreach ($c in $State.Columns) {
         $col = $c.Column
         if ($c.AttributePresent) {
             if ($c.AttributeType -ne 'Lookup') { $b.Add("$Table.$col is $($c.AttributeType), not a Lookup") }
-            if ($null -eq $c.NonNull) { $b.Add("$Table.${col}: the rate cards holding a value could not be counted") }
+            if ($null -eq $c.NonNull) { if (-not $State.ReadGap) { $b.Add("$Table.${col}: the rate cards holding a value could not be counted") } }   # with a read gap nothing was counted, and the gap is already a blocker
             elseif ($c.NonNull -gt 0) { $b.Add("$($c.NonNull) $Table row(s) hold a value in $col") }
             if (-not $c.RelationshipPresent) { $b.Add("$Table.$col exists but the relationship $($c.Relationship) was not found, so the column cannot be removed through it") }
             foreach ($d in @($c.Dependencies)) {

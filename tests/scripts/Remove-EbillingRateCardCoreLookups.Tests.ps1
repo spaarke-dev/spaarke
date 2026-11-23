@@ -40,6 +40,15 @@ BeforeAll {
     $missing = @($wantedVariables + $wantedFunctions | Where-Object { $_ -notin $found })
     if ($missing.Count -gt 0) { throw "Not found in the script: $($missing -join ', ')" }
 
+    # The caller-can-read-every-row check lives in the shared module (the source-document script uses it too): lifted from the module's own
+    # syntax tree and run against the same test double of Invoke-Dv.
+    $script:ModulePath = Join-Path $script:RepoRoot 'scripts' 'ebilling' 'EbillingSchema.psm1'
+    $moduleAst = [System.Management.Automation.Language.Parser]::ParseFile($script:ModulePath, [ref]$tokens, [ref]$errors)
+    if ($errors.Count -gt 0) { throw "The module does not parse: $($errors[0].Message)" }
+    $gapFunction = @($moduleAst.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Get-ReadAllRowsGap' }, $true))
+    if ($gapFunction.Count -ne 1) { throw 'Get-ReadAllRowsGap not found in EbillingSchema.psm1' }
+    $pieces.Add($gapFunction[0].Extent.Text)
+
     # The module's exception class is not exported by Import-Module: a test double with the same name and shape.
     class EscalationException : System.Exception {
         EscalationException([string]$message) : base($message) {}
@@ -97,6 +106,18 @@ BeforeAll {
             return $null
         }
         $d.Gets.Add($Path)
+        # The caller's identity and rights (Get-ReadAllRowsGap). $d.Who: Admin, Depth ($null = holds no Read privilege), Fault (a message = every call throws).
+        $w = $d.Who
+        if ($Path -eq 'WhoAmI' -or $Path -match '^systemusers\(|^privileges\?') {
+            if ($w.Fault) { throw $w.Fault }
+            if ($Path -eq 'WhoAmI') { return [pscustomobject]@{ UserId = 'u-1' } }
+            if ($Path -match 'systemuserroles_association') { return [pscustomobject]@{ value = @(if ($w.Admin) { [pscustomobject]@{ name = 'System Administrator' } }) } }
+            if ($Path -match '^privileges\?') { return [pscustomobject]@{ value = @([pscustomobject]@{ privilegeid = 'P-READ' }) } }
+            if ($Path -match 'RetrieveUserPrivileges') {
+                $held = @(if ($w.Depth) { [pscustomobject]@{ PrivilegeId = 'p-read'; Depth = $w.Depth } }; [pscustomobject]@{ PrivilegeId = 'p-other'; Depth = 'Global' })
+                return [pscustomobject]@{ RolePrivileges = $held }
+            }
+        }
         if ($Path -match '^systemforms\?') { return [pscustomobject]@{ value = @($d.Forms | ForEach-Object { [pscustomobject]$_ }) } }
         if ($Path -match '^savedqueries\?') { return [pscustomobject]@{ value = @($d.Views | ForEach-Object { [pscustomobject]$_ }) } }
         if ($Path -match '^userqueries\?') { return [pscustomobject]@{ value = @($d.Personal | ForEach-Object { [pscustomobject]$_ }) } }
@@ -170,6 +191,7 @@ BeforeAll {
             CollateralCalls = [System.Collections.Generic.List[object]]::new()
             ContextUrls = [System.Collections.Generic.List[string]]::new()
             ExtraDepsAfterEdit = @()
+            Who = @{ Admin = $true; Depth = 'Global'; Fault = $null }
         }
     }
 
@@ -181,7 +203,7 @@ BeforeAll {
                 RelationshipPresent = $true; RelationshipId = "rel-$($t.Column)"; RelReferencing = 'sprk_ratecard'; RelReferencingAttribute = $t.Column; RelReferenced = $t.Referenced; RelationshipDependencies = @()
             }
         }
-        $s = [pscustomobject]@{ Columns = @($cols); Forms = @(); Views = @(); PersonalViews = @(); GridConfigs = @() }
+        $s = [pscustomobject]@{ Columns = @($cols); Forms = @(); Views = @(); PersonalViews = @(); GridConfigs = @(); ReadGap = $null }
         foreach ($k in $Over.Keys) { $s.$k = $Over[$k] }
         return $s
     }
@@ -317,6 +339,103 @@ Describe 'Get-State (T2)' {
         $s = Get-State
         @($s.PersonalViews | ForEach-Object { $_.Name }) | Should -Be @('My cards')
         @($s.GridConfigs | ForEach-Object { $_.Name }) | Should -Be @('Cards grid')
+    }
+}
+
+Describe 'the caller must be shown to read every sprk_ratecard row before any count is believed (review pass 1, F1)' {
+    BeforeEach { $script:Dev = New-Dev; $script:Allow = $true }
+
+    It 'Get-ReadAllRowsGap: a System Administrator reads every row (no gap, and the privileges are not even asked for)' {
+        $script:Dev.Who.Admin = $true
+        Get-ReadAllRowsGap 'sprk_ratecard' | Should -BeNullOrEmpty
+        @($script:Dev.Gets | Where-Object { $_ -like '*RetrieveUserPrivileges*' }).Count | Should -Be 0
+    }
+
+    It 'Get-ReadAllRowsGap: a non-admin with organization (Global) Read reads every row, whatever case the privilege id comes in' {
+        $script:Dev.Who.Admin = $false; $script:Dev.Who.Depth = 'Global'
+        Get-ReadAllRowsGap 'sprk_ratecard' | Should -BeNullOrEmpty
+    }
+
+    It 'Get-ReadAllRowsGap: a non-admin below organization depth is a gap naming the depth (<Depth>)' -ForEach @(
+        @{ Depth = 'Deep' }, @{ Depth = 'Local' }, @{ Depth = 'Basic' }
+    ) {
+        $script:Dev.Who.Admin = $false; $script:Dev.Who.Depth = $Depth
+        $gap = Get-ReadAllRowsGap 'sprk_ratecard'
+        $gap | Should -BeLike "*Read depth on sprk_ratecard is '$Depth'*"
+    }
+
+    It 'Get-ReadAllRowsGap: a non-admin who holds no Read privilege on the table is a gap' {
+        $script:Dev.Who.Admin = $false; $script:Dev.Who.Depth = $null
+        Get-ReadAllRowsGap 'sprk_ratecard' | Should -BeLike "*'none found'*"
+    }
+
+    It 'Get-ReadAllRowsGap: a fault in the check is a gap, never a pass' {
+        $script:Dev.Who.Fault = '403 Forbidden'
+        $gap = Get-ReadAllRowsGap 'sprk_ratecard'
+        $gap | Should -BeLike '*the check failed (403 Forbidden)*'
+    }
+
+    It 'Get-State counts nothing when the caller cannot be shown to read every row: NonNull stays unknown and the gap is carried' {
+        $script:Dev.Who.Admin = $false; $script:Dev.Who.Depth = 'Local'
+        $s = Get-State
+        $s.ReadGap | Should -BeLike '*Local*'
+        @($s.Columns | ForEach-Object { $_.NonNull } | Where-Object { $null -ne $_ }).Count | Should -Be 0
+        @($script:Dev.Gets | Where-Object { $_ -like 'count *' }).Count | Should -Be 0
+    }
+
+    It 'Get-State counts as before for an admin, and asks the check once, not once per column' {
+        $s = Get-State
+        $s.ReadGap | Should -BeNullOrEmpty
+        @($script:Dev.Gets | Where-Object { $_ -like 'count *' }).Count | Should -Be 3
+        @($script:Dev.Gets | Where-Object { $_ -eq 'WhoAmI' }).Count | Should -Be 1
+    }
+
+    It 'Get-State does not check read rights when every column is already gone (nothing to count)' {
+        foreach ($k in @($script:Dev.Attr.Keys)) { $script:Dev.Attr[$k] = $false }
+        $script:Dev.Who.Fault = 'would fail'
+        (Get-State).ReadGap | Should -BeNullOrEmpty
+        @($script:Dev.Gets | Where-Object { $_ -eq 'WhoAmI' }).Count | Should -Be 0
+    }
+
+    It 'Get-ApplyBlockers: the gap is one blocker, and the per-column "could not be counted" noise is not repeated' {
+        $s = New-StateObj @{ ReadGap = 'cannot confirm every sprk_ratecard row can be read: test' }
+        foreach ($c in $s.Columns) { $c.NonNull = $null }
+        $b = @(Get-ApplyBlockers $s)
+        $b.Count | Should -Be 1
+        $b[0] | Should -BeLike 'sprk_ratecard: cannot confirm every sprk_ratecard row can be read*'
+    }
+
+    It '-Apply refuses (exit-2 exception, no count, no write) for a caller below organization depth' {
+        $script:Dev.Who.Admin = $false; $script:Dev.Who.Depth = 'Deep'
+        $e = Get-Refusal { Invoke-Retirement $true $false $false 'owner OK' }
+        $e | Should -Not -BeNullOrEmpty
+        $e.GetType().Name | Should -Be 'EscalationException'
+        $e.Message | Should -BeLike '*cannot confirm every sprk_ratecard row can be read*'
+        $e.Message | Should -BeLike '*Nothing was changed*'
+        $script:Dev.Writes.Count | Should -Be 0
+        @($script:Dev.Gets | Where-Object { $_ -like 'count *' }).Count | Should -Be 0
+    }
+
+    It '-Apply refuses when the rights check itself faults (a failed check refuses)' {
+        $script:Dev.Who.Fault = 'timeout'
+        $e = Get-Refusal { Invoke-Retirement $true $false $false 'owner OK' }
+        $e.GetType().Name | Should -Be 'EscalationException'
+        $e.Message | Should -BeLike '*the check failed (timeout)*'
+        $script:Dev.Writes.Count | Should -Be 0
+    }
+
+    It '-Apply proceeds for a System Administrator and for a non-admin with organization Read' {
+        Invoke-Retirement $true $false $false 'owner OK'
+        @($script:Dev.Writes | Where-Object { $_ -like 'DELETE *' }).Count | Should -Be 3
+        $script:Dev = New-Dev; $script:Dev.Who.Admin = $false; $script:Dev.Who.Depth = 'Global'
+        Invoke-Retirement $true $false $false 'owner OK'
+        @($script:Dev.Writes | Where-Object { $_ -like 'DELETE *' }).Count | Should -Be 3
+    }
+
+    It 'the report mode shows the gap and does not throw or write' {
+        $script:Dev.Who.Admin = $false; $script:Dev.Who.Depth = 'Local'
+        { Invoke-Retirement $false $false $false '' } | Should -Not -Throw
+        $script:Dev.Writes.Count | Should -Be 0
     }
 }
 
@@ -803,6 +922,13 @@ Describe 'structure (T7)' {
         $text = $script:Ast.Extent.Text
         $text | Should -Match "(?m)^\. \(Join-Path \`$PSScriptRoot '\.\.' 'lib' 'Publish-SolutionComponents\.ps1'\)"
         $text | Should -Not -Match "Path 'PublishXml'|Publish-Tables"
+    }
+
+    It 'Get-State checks that the caller reads every row before it counts (F1), and the module exports the check' {
+        $fn = $script:Ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Get-State' }, $true)[0].Extent.Text
+        $fn.IndexOf('Get-ReadAllRowsGap') | Should -BeGreaterOrEqual 0
+        $fn.IndexOf('Get-RowCountExact') | Should -BeGreaterThan $fn.IndexOf('Get-ReadAllRowsGap')
+        (Get-Content -Raw $script:ModulePath) | Should -Match "(?s)Export-ModuleMember.*'Get-ReadAllRowsGap'"
     }
 
     It 'Confirm-Write is ShouldProcess, so -WhatIf reaches it' {

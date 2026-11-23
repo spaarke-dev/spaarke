@@ -596,6 +596,35 @@ function Get-RowCountExact([string]$EntitySet, [string]$IdColumn, [string]$Filte
     return $null
 }
 
+# Read only. $null when the signed-in caller is shown to read EVERY row of the table (the System Administrator role, or organization-wide
+# (Global) Read on the table); otherwise the reason that cannot be confirmed. A count (Get-RowCountExact) is taken as the caller: on a
+# user-owned table a row outside the caller's read depth is not returned and not masked, so the count is silently short. Any fault in the
+# check is a gap, never a pass. Task 193 review pass 1 (the "any row holds a value" census before a column delete).
+function Get-ReadAllRowsGap([string]$Table) {
+    try {
+        $who = Invoke-Dv 'WhoAmI'
+        $userId = [string]$who.UserId
+        if (-not $userId) { return "cannot confirm every $Table row can be read: WhoAmI returned no user id" }
+        $admin = @((Invoke-Dv "systemusers($userId)/systemuserroles_association?`$select=name&`$filter=name eq 'System Administrator'").value).Count -gt 0
+        if ($admin) { return $null }
+        $priv = Invoke-Dv "privileges?`$select=privilegeid&`$filter=name eq 'prvRead$Table'"
+        $privilegeId = [string]@($priv.value)[0].privilegeid
+        if (-not $privilegeId) { return "cannot confirm every $Table row can be read: the Read privilege of $Table was not found" }
+        $held = Invoke-Dv "systemusers($userId)/Microsoft.Dynamics.CRM.RetrieveUserPrivileges()"
+        $rank = @{ Basic = 1; Local = 2; Deep = 3; Global = 4 }
+        $best = $null
+        foreach ($p in @($held.RolePrivileges)) {
+            if (([string]$p.PrivilegeId).ToLowerInvariant() -ne $privilegeId.ToLowerInvariant()) { continue }
+            $depth = [string]$p.Depth
+            if ($rank.ContainsKey($depth) -and (-not $best -or $rank[$depth] -gt $rank[$best])) { $best = $depth }
+        }
+        if ($best -eq 'Global') { return $null }
+        $shown = if ($best) { $best } else { 'none found' }
+        return "cannot confirm every $Table row can be read: the caller does not hold the System Administrator role and its Read depth on $Table is '$shown', not organization (Global). Run as a System Administrator or a user whose role reads the whole table; a count taken at a lower depth would be short."
+    }
+    catch { return "cannot confirm every $Table row can be read: the check failed ($($_.Exception.Message))" }
+}
+
 # The create body's MaxLength for the primary name column is ignored by Dataverse (it comes back as 850). Shorten the
 # primary name to the wanted length - only while the table has no rows, so no data can be cut.
 function Set-PrimaryNameLength([string]$Table, [string]$Column, [int]$Wanted) {
@@ -842,7 +871,7 @@ Export-ModuleMember -Function @(
     'Get-Attr', 'Assert-AttrType', 'Test-TableKnown', 'Invoke-DvCreate', 'Wait-AttrVisible',
     'Add-Column', 'Add-Lookup', 'Add-LocalChoice', 'Get-PicklistLabels', 'Add-Table',
     'New-StringDef', 'New-MemoDef', 'New-MoneyDef', 'New-DateOnlyDef', 'New-DateTimeDef',
-    'Get-RowCountExact', 'Set-PrimaryNameLength', 'Set-PrimaryNameRequired', 'Set-ColumnRequiredLevel',
+    'Get-RowCountExact', 'Get-ReadAllRowsGap', 'Set-PrimaryNameLength', 'Set-PrimaryNameRequired', 'Set-ColumnRequiredLevel',
     'Set-LookupRequiredLevel', 'Set-StringRequiredLevel', 'Set-PicklistRequiredLevel', 'Set-IntegerRequiredLevel',
     'Get-Keys', 'Add-AlternateKey', 'Get-ManyToMany', 'Add-ManyToMany'
 )
