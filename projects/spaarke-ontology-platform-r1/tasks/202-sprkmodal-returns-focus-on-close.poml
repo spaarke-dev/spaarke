@@ -4,7 +4,7 @@
     <title>SprkModal returns keyboard focus to the element that opened it when it closes (wizards and nested confirms)</title>
     <phase>12 Create-wizard lookups and composer (185 dev check fixes)</phase>
     <gate>startable</gate>
-    <status>in-progress</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies SprkModal.tsx in the shared UI library: every modal in every host; PCF bumps where bundles change.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -77,4 +77,5 @@
   <execution>
     <protocol>Run through task-execute. Fresh branch from origin/master; PR to master.</protocol>
   </execution>
+  <completion>Done 2026-11-23: PR #2996 merged (6311cd0a69) and follow-up #3004 merged (738648c7fb: SprkModal opener handover when one modal replaces another; RuleWizard Try again stays mounted), each after independent review. Console auto-deployed; 6 PCFs (CommunicationActions 1.3.26, CommunicationConversationPanel 1.18.7, SemanticSearchControl 1.1.93, TrackingFieldTrio 1.0.68, RelatedDocumentCount 1.21.8, CommunicationAttachments 1.3.5) and 12 code pages deployed to dev from master 9d08576e63 under the owner go "yes await CI and task 202 check and deploy" (deploy-log 2026-11-23; bundle PR #3021 merged 1c6a05678e). Main-session dev checks in the owner's Chrome: Worklist Start review Cancel, Decision wizard Keep deciding / Discard, Classification Edit/Cancel, New rule Cancel and Discard, composer Close and Cancel from the Tracking card: focus returns to the opener on every path (notes/task-185-notes.md). Open: six code pages outside the deploy list bundle the changed SprkModal and were not deployed (owner decision; deploy-log).</completion>
 </task>

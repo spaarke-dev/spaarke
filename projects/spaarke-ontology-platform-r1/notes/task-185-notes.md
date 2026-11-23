@@ -164,3 +164,13 @@ Main session, owner's Chrome, 2026-11-23. A fresh tab still carried the 17:59Z c
 | Classification → Edit / Cancel | Name field / that row's Edit | PASS |
 
 Nothing saved (the typed rule name and budget amount were discarded). Next: the 202 PCF + code-page deploy (owner go 2026-11-23), then the composer Close check.
+
+### Composer Close after the 202 PCF deploy (main session, owner's Chrome, 2026-11-23 ~22:40Z)
+
+TrackingFieldTrio on dev serves 1.0.68 (bundle SHA-256 prefix `63406a99c0dc`, matches the deploy); a tab open since before the deploy showed 1.0.67 until a hard reload. Nothing typed, nothing sent.
+
+| Path | Focus ends on | Result |
+|---|---|---|
+| Matter MAT-000113 → Tracking "Email members" → composer → Close (X) | Email members | PASS (was body) |
+| Same → composer → Cancel | Email members | PASS |
+| Tracking "Grant access" → its dialog → Cancel (opened by a mis-aimed click) | Grant access | PASS (its own opener) |
