@@ -249,6 +249,17 @@ internal sealed partial class RecordCreationService
                 refusedWrite.RefusalCode ?? InheritedAccessPermission.AppOnlyDocumentWriteReasonCode);
         }
 
+        // fm task 056 (owner 2026-11-22, Q5): a private message is never filed. Repair maps into an existing communication, so its
+        // one write asks the private-message guard on every column it sends (app-only read; a fault is a failed read, nothing
+        // written; a private message is skipped with the code, nothing written).
+        if (await Sprk.Bff.Api.Services.Communication.Access.PrivateMessageWriteGuard.RefuseUpdateAsync(
+                _entities, table, id, patch.Keys, _logger, ct).ConfigureAwait(false) is { } privateRefusal)
+        {
+            return privateRefusal.RefusalCode == Sprk.Bff.Api.Services.Communication.Access.PrivateMessageWriteGuard.CheckUnavailable
+                ? Outcome(RecordRepairStatus.Failed, privateRefusal.RefusalCode)
+                : Outcome(RecordRepairStatus.Skipped, privateRefusal.RefusalCode);
+        }
+
         var ownerWritten = patch.ContainsKey(OwnerColumn);
         var plannedOwner = ownerWritten ? patch[OwnerColumn] as EntityReference : null;
         try

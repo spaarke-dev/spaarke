@@ -236,6 +236,44 @@ public class SecureChildShareReconciliationJobPrivateFilingTests
         Value(message, CoreAncestorResolver.RegardingRecordTypeColumn).Should().BeNull();
     }
 
+    [Fact]
+    public async Task ASweptPrivateMessage_WithTheRegardingPair_HasThePairsDisplayColumnsClearedInTheSameUpdate()
+    {
+        _metadata = () => Columns(PrivateContextColumns.All.Concat(DirectMessageOwnerStep.PrivateFilingColumns)
+            .Concat(DirectMessageOwnerStep.PrivateDisplayColumns));
+        var message = Message(PrivateContextColumns.Matter, modifiedOn: null,
+            (CoreAncestorResolver.RegardingRecordIdColumn, FiledMatter.ToString()),
+            (CoreAncestorResolver.RegardingRecordTypeColumn, new EntityReference("sprk_recordtype_ref", RecordType)),
+            ("sprk_regardingrecordname", "Acme v. Example"),
+            ("sprk_regardingrecordnumber", "MAT-0042"),
+            ("sprk_regardingrecordurl", "https://example.invalid/main.aspx?etn=sprk_matter"));
+
+        var run = await RunAsync();
+
+        _clears.Should().ContainSingle().Which.Columns.Should().BeEquivalentTo(new[]
+        {
+            CoreAncestorResolver.RegardingRecordIdColumn, CoreAncestorResolver.RegardingRecordTypeColumn,
+            "sprk_regardingrecordname", "sprk_regardingrecordnumber", "sprk_regardingrecordurl",
+        });
+        foreach (var column in DirectMessageOwnerStep.PrivateDisplayColumns)
+            Value(message, column).Should().BeNull(column);
+        Value(message, PrivateContextColumns.Matter).Should().NotBeNull("the reference stays as written at create");
+        run.Success.Should().BeTrue(run.ErrorMessage);
+    }
+
+    [Fact]
+    public async Task WithTheDisplayColumns_BothMessageReadsSelectThem()
+    {
+        _metadata = () => Columns(PrivateContextColumns.All.Concat(DirectMessageOwnerStep.PrivateFilingColumns)
+            .Concat(DirectMessageOwnerStep.PrivateDisplayColumns));
+        Message(reference: null, (T0 - TimeSpan.FromMinutes(5)).UtcDateTime);
+
+        await RunAsync();
+
+        _queries.Should().ContainSingle(q => IsSweep(q)).Which.ColumnSet.Columns.Should().Contain(DirectMessageOwnerStep.PrivateDisplayColumns);
+        _queries.Should().ContainSingle(q => IsListing(q)).Which.ColumnSet.Columns.Should().Contain(DirectMessageOwnerStep.PrivateDisplayColumns);
+    }
+
     // ═════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
     // Rows that are left alone
     // ═════════════════════════════════════════════════════════════════════════════════════════════════════════════════════

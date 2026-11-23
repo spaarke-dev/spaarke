@@ -2374,6 +2374,16 @@ internal static class OwnedChildWrite
             };
         }
 
+        // fm task 056 (owner 2026-11-22, Q5): a private message is never filed or moved to another thread, by any writer. Asked once,
+        // before both the ordinary update and the re-file, on the columns this PATCH sends (app-only read; a fault, or no app-only
+        // reader, refuses: 503 check_unavailable; a private message: 409 not_fileable). Nothing written.
+        if (await Sprk.Bff.Api.Services.Communication.Access.PrivateMessageWriteGuard.RefuseUpdateAsync(
+                appOnlyEntities, table, recordId, item.Columns, logger ?? Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance, ct)
+                .ConfigureAwait(false) is { } privateRefusal)
+        {
+            return new RefileOutcome { OwnerRefusal = privateRefusal };
+        }
+
         var isChild = RecordOwnershipResolver.IsReparentableChild(table);
         if (!isChild && RecordOwnershipResolver.IsOwnershipParent(table))
         {

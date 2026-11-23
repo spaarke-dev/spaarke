@@ -2657,7 +2657,7 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
         // thread, by any writer. Asked on the row read above, before anything is written. A reference column absent from
         // metadata is absent from the row (it was read with every column), so no private message exists and the check passes.
         if (string.Equals(request.EntityLogicalName.Trim(), "sprk_communication", StringComparison.OrdinalIgnoreCase)
-            && HoldsAPrivateContextReference(current)
+            && Sprk.Bff.Api.Services.Communication.Access.PrivateContextColumns.IsPrivate(current)
             && (changesAParent || movesALineageLookup || MovesAFilingLink(request, current)))
         {
             _logger.LogWarning(
@@ -2668,10 +2668,6 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
                 RecordOwnerRefusal.PrivateMessageNotFileable,
                 "a private message stays between its two participants: it is never filed to a record and never moved to another thread");
         }
-
-        static bool HoldsAPrivateContextReference(Entity row) =>
-            Sprk.Bff.Api.Services.Communication.Access.PrivateContextColumns.All.Any(column =>
-                row.GetAttributeValue<EntityReference>(column) is { } reference && reference.Id != Guid.Empty);
 
         // Any filing link the change sets, moves or clears: a typed regarding lookup (one that files under no ownership parent
         // included, from ParentChanges or RegardingLinksSet), the ADR-024 pair's type, or the thread. A value equal to the one the

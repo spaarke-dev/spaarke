@@ -448,7 +448,7 @@ public class PrivateContextColumnGuardTests
     /// scope or ownership selector. A line that also names a column, an alias or any other member still fires.
     /// </summary>
     private static readonly IReadOnlySet<string> EncapsulatedMembers =
-        new HashSet<string>(StringComparer.Ordinal) { "IsPrivate", "PresentColumnsOf", "NotPrivateODataFilterAsync" };
+        new HashSet<string>(StringComparer.Ordinal) { "IsPrivate", "PresentColumnsOf", "PresentColumnsAsync", "NotPrivateODataFilterAsync" };
 
     private static List<string> Judge(
         IReadOnlyList<(string File, IReadOnlyList<string> Lines)> files, IReadOnlySet<string> allowed, string endpointsFile)

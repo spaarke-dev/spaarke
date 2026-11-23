@@ -202,6 +202,16 @@ public class DataverseUpdateHandler : IDataverseUpdateHandler
                 entityLogicalName, RecordReparent.ParentChangesWithClearsIn(entityLogicalName, fields), fields)
             : new Dictionary<string, Microsoft.Xrm.Sdk.EntityReference?>();
 
+        // fm task 056 (owner 2026-11-22, Q5): a private message is never filed or moved to another thread. An update that sets only
+        // a typed regarding that is no ownership parent, or only the regarding pair, is either a plain write or a reparent the
+        // reparent's own rule does not see as a filing, so the rule is asked here, on the columns this write sends, for both
+        // paths, after the bind check above and before anything is written (app-only read; a fault refuses).
+        if (await Sprk.Bff.Api.Services.Communication.Access.PrivateMessageWriteGuard.RefuseUpdateAsync(
+                _genericEntityService, entityLogicalName, recordId, fields.Keys, _logger, ct).ConfigureAwait(false) is { } privateRefusal)
+        {
+            throw Sprk.Bff.Api.Services.Communication.Access.PrivateMessageWriteGuard.UpdateRefused(entityLogicalName, privateRefusal);
+        }
+
         // #2091: a write that may re-file the row (the ONE predicate, RecordReparent.MayRefile) runs the ONE step after a
         // re-file (SecureChildReconciler.AfterRefileAsync), as every other re-file writer does. Whether the row was isolated
         // is read BEFORE the write (once more after a fault — a timeout included — then handed to the step as a fault): a move
