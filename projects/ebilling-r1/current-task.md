@@ -13,7 +13,11 @@
 - **Active task:** 123 (`tasks/123-invoice-supporting-file-upload.poml`), in progress since 2026-11-22. FULL, opus/high, directional; tags bff-api, api, auth, testing.
   - State 2026-11-23: branch `task/ebilling-123` tip `c15d510af3` (base `134f7a15cf`). Built, two Opus adversarial reviews done, fix round 1 done (every F fixed with fail-before tests; includes a SubmissionCommitGate change: Invoice PDF flipped last, early Passed once it is Servable, route 409 files_pending until then). Scoped Sonnet re-check: K-class only; ADR-002/008/010/018 pass.
   - word-add-in-r1 agreed the contract at c15d510af3 (both rounds).
-  - **Waiting on:** uac-r2 review (asked 2026-11-23, with the access details by message). On approval: `--no-ff` merge into work, record the approval and word-add-in-r1's agreement in `notes/123-invoice-supporting-file-upload.md`, close the POML/TASK-INDEX, remove both agent worktrees (`C:\code_files\spaarke\.claude\worktrees\agent-a7b5d698809b047ba` and `agent-adaa081eb1afa950c`) with Remove-WorktreeSafe.ps1.
+  - **uac-r2 APPROVED c15d510af3 (2026-11-23) with two conditions.**
+    - (1) Fix the 50-limit race before merge: after the upload, re-count; if over 50, remove own row via the existing compensation path, then 409 limit_reached. Fix round 2 agent running on `task/ebilling-123-fix2`; send uac-r2 the fix SHA, and it re-checks the fix diff only.
+    - (2) After the BFF deploy carrying 123, run a read-only dev check and report the count to uac-r2 (ids by message only): invoices whose InvoicePdf is Servable that still hold a commit non-PDF row Not yet servable. Zero closes K1.
+    - 123 is a candidate for a LATER dev deploy, not the one waiting on the owner (9df4e5c819).
+  - After uac-r2 accepts the fix diff: `--no-ff` merge into work, record the approval and word-add-in-r1's agreement in `notes/123-invoice-supporting-file-upload.md`, close the POML/TASK-INDEX, remove both agent worktrees (`C:\code_files\spaarke\.claude\worktrees\agent-a7b5d698809b047ba` and `agent-adaa081eb1afa950c`) with Remove-WorktreeSafe.ps1.
   - Filed in passing: ISS-043 #2978 (three other multipart routes answer a malformed body with 500).
   - Escalation trigger checked: `UploadForCallerAsync` already takes an invoice parent with purpose InvoiceSupportingFile (`StoredFileContracts.cs:177`).
   - Conflict check: soft pass. No open PR or master change touches the 123 files.
