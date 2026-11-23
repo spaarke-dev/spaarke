@@ -54,6 +54,9 @@ public class PrivateContextColumnGuardTests
             "DiscoverLookupsTargetingAsync never returns the columns on sprk_communication, so includeRelated never reads by them"),
         (Bff + "Services/Dataverse/RecordOwnershipResolver.cs", true,
             "CitationLookups: the columns are citations, so no parent derivation (ownership, secure-if-any, reparent) reads them"),
+        (Bff + "Services/Communication/Access/DirectMessageOwnerStep.cs", true,
+            "ClearPrivateFilingAsync (owner 2026-11-22, no filing): reads the reference only to find a private message filed outside " +
+            "the BFF, and clears its filing columns; it never writes the reference"),
     };
 
     /// <summary>The registry source files the scan checks by name (rule 1, the parts not read at run time).</summary>

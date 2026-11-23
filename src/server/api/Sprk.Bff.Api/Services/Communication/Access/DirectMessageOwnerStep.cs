@@ -700,6 +700,174 @@ public sealed class DirectMessageOwnerStep
             ? $"it names no Direct pair ({derivation.NoPair ?? derivation.Unknown})"
             : null;
 
+    // ── fm task 056: a private message is never filed ─────────────────────────────────────────────────────────────────────
+
+    /// <summary>Warning: a private message held filing columns set outside the BFF, and they were cleared.</summary>
+    internal const string PrivateFilingClearedEventCode = "private_message.filing_cleared";
+
+    /// <summary>Warning: a private message's filing columns were not cleared (or could not be checked); the next run retries.</summary>
+    internal const string PrivateFilingNotClearedEventCode = "private_message.filing_not_cleared";
+
+    internal static readonly EventId PrivateFilingClearedEvent = new(5428, PrivateFilingClearedEventCode);
+    internal static readonly EventId PrivateFilingNotClearedEvent = new(5429, PrivateFilingNotClearedEventCode);
+
+    /// <summary>
+    /// fm task 056 (owner 2026-11-22, "always stays 1:1 - no filing"): the columns that file a <c>sprk_communication</c> under a
+    /// record, which a private message never holds. Derived, never hand-listed: the ownership-parent lookups of the communication's
+    /// lineage (<see cref="SecureChildLineage.Children"/>, less the thread lookup, which is the pair's Direct thread), every typed
+    /// regarding lookup (<see cref="Sprk.Bff.Api.Services.Communication.Engine.RegardingFieldMap.AllRegardingFields"/>, the columns
+    /// <see cref="DirectMessageRecipient.CarriesATypedRegarding"/> reads), and the ADR-024 regarding pair
+    /// (<see cref="Sprk.Bff.Api.Services.Dataverse.CoreAncestorResolver.RegardingRecordIdColumn"/>,
+    /// <see cref="Sprk.Bff.Api.Services.Dataverse.CoreAncestorResolver.RegardingRecordTypeColumn"/>).
+    /// </summary>
+    internal static readonly IReadOnlyList<string> PrivateFilingColumns =
+        SecureChildLineage.Children[CommunicationTable].LineageColumns
+            .Where(c => !string.Equals(c, ThreadLookup, StringComparison.OrdinalIgnoreCase))
+            .Concat(Sprk.Bff.Api.Services.Communication.Engine.RegardingFieldMap.AllRegardingFields)
+            .Concat(new[]
+            {
+                Sprk.Bff.Api.Services.Dataverse.CoreAncestorResolver.RegardingRecordIdColumn,
+                Sprk.Bff.Api.Services.Dataverse.CoreAncestorResolver.RegardingRecordTypeColumn,
+            })
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+    /// <summary>
+    /// fm task 056: the columns a selection of <c>sprk_communication</c> adds so <see cref="NeedsPrivateFilingClear"/> and
+    /// <see cref="ClearPrivateFilingAsync"/> can judge and clear a row it read: the private-reference columns, the
+    /// <see cref="PrivateFilingColumns"/> and the row version. Empty when the reference columns are absent from metadata (no
+    /// private message can exist), when a filing column is absent, or when the metadata cannot be read: a select naming a missing
+    /// column fails the whole read, so the selection then stays as it was. Never throws (cancellation aside).
+    /// </summary>
+    internal static async Task<IReadOnlyList<string>> PrivateFilingSelectionAsync(
+        IGenericEntityService dataverse, ILogger logger, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(dataverse);
+        ArgumentNullException.ThrowIfNull(logger);
+        try
+        {
+            if (await PrivateMessageSendGate.CommunicationColumnsPresentAsync(dataverse, PrivateContextColumns.All, ct)
+                    .ConfigureAwait(false) != true)
+            {
+                logger.LogDebug("[PRIVATE-FILING] The private-reference columns are not on sprk_communication; no private message is checked.");
+                return [];
+            }
+
+            if (await PrivateMessageSendGate.CommunicationColumnsPresentAsync(dataverse, PrivateFilingColumns.ToArray(), ct)
+                    .ConfigureAwait(false) != true)
+            {
+                logger.LogWarning(PrivateFilingNotClearedEvent,
+                    "[PRIVATE-FILING] Not every filing column is on sprk_communication; no private message is checked for filing.");
+                return [];
+            }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            logger.LogWarning(PrivateFilingNotClearedEvent, ex,
+                "[PRIVATE-FILING] Whether the private-reference columns exist could not be read; no private message is checked this time.");
+            return [];
+        }
+
+        return PrivateContextColumns.All.Concat(PrivateFilingColumns).Append(VersionColumn)
+            .Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+    }
+
+    /// <summary>
+    /// fm task 056: <c>true</c> when <paramref name="row"/> (read with <see cref="PrivateFilingSelectionAsync"/>'s columns) is a
+    /// private message (a non-empty private reference) that holds any of <see cref="PrivateFilingColumns"/>: the row
+    /// <see cref="ClearPrivateFilingAsync"/> clears.
+    /// </summary>
+    internal static bool NeedsPrivateFilingClear(Entity row) =>
+        row is not null && IsPrivateCommunication(row) && SetFilingColumnsOf(row).Count > 0;
+
+    /// <summary>
+    /// fm task 056: a private message is never filed, by any writer. A member of the Direct team can still set a filing lookup, a
+    /// typed regarding or the regarding pair on the row outside the BFF (a form, the Web API); the share reconcile hands such a row,
+    /// already read, here. Clears exactly the <see cref="PrivateFilingColumns"/> the row holds, app-only, in ONE update conditional
+    /// on the version it was read at. Writes nothing else: no owner, no share, no thread. A row that is not a private message, or
+    /// holds no filing column, is not written. A fault (no version, a version mismatch, the update refused) is logged and returned;
+    /// the next run retries. Logs name the row id and the column names, never a value. Never throws (cancellation aside).
+    /// </summary>
+    internal static async Task<PrivateFilingClearOutcome> ClearPrivateFilingAsync(
+        IGenericEntityService dataverse, Entity row, ILogger logger, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(dataverse);
+        ArgumentNullException.ThrowIfNull(row);
+        ArgumentNullException.ThrowIfNull(logger);
+
+        if (!IsPrivateCommunication(row))
+            return PrivateFilingClearOutcome.NotPrivate;
+
+        var columns = SetFilingColumnsOf(row);
+        if (columns.Count == 0)
+            return PrivateFilingClearOutcome.NotFiled;
+
+        var names = string.Join(",", columns);
+        if (VersionOf(row) is not { } version)
+        {
+            logger.LogWarning(PrivateFilingNotClearedEvent,
+                "[PRIVATE-FILING] Private message {CommunicationId} holds filing columns ({Columns}) but its version was not read; " +
+                "nothing was written, and the next run retries.", row.Id, names);
+            return PrivateFilingClearOutcome.Faulted;
+        }
+
+        // The row as the clear leaves it, judged by the join's and the unfile's own rule: anything still filing it (a column this
+        // list does not name) is logged; the listed columns are still cleared.
+        var after = RowAfterChange(
+            row, columns.ToDictionary(c => c, _ => (EntityReference?)null, StringComparer.OrdinalIgnoreCase),
+            new Dictionary<string, EntityReference>(), row.GetAttributeValue<EntityReference>(ThreadLookup)?.Id);
+        if (WhyFiledUnderARecord(after) is { } stillFiled)
+        {
+            logger.LogError(PrivateFilingNotClearedEvent,
+                "[PRIVATE-FILING] Private message {CommunicationId}: after clearing {Columns}, {Reason} through a column the filing " +
+                "list does not name.", row.Id, names, stillFiled);
+        }
+
+        var fields = columns.ToDictionary(c => c, _ => (object)DBNull.Value, StringComparer.OrdinalIgnoreCase);
+        try
+        {
+            await dataverse.UpdateIfRowVersionMatchesAsync(
+                CommunicationTable, row.Id, version.ToString(System.Globalization.CultureInfo.InvariantCulture), fields, ct)
+                .ConfigureAwait(false);
+        }
+        catch (System.Data.DBConcurrencyException)
+        {
+            logger.LogWarning(PrivateFilingNotClearedEvent,
+                "[PRIVATE-FILING] Private message {CommunicationId} holds filing columns ({Columns}) but changed after it was read; " +
+                "nothing was written, and the next run retries.", row.Id, names);
+            return PrivateFilingClearOutcome.VersionMismatch;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            logger.LogWarning(PrivateFilingNotClearedEvent, ex,
+                "[PRIVATE-FILING] Private message {CommunicationId} holds filing columns ({Columns}); clearing them failed, and the " +
+                "next run retries.", row.Id, names);
+            return PrivateFilingClearOutcome.Faulted;
+        }
+
+        logger.LogWarning(PrivateFilingClearedEvent,
+            "[PRIVATE-FILING] Private message {CommunicationId} held filing columns set outside the BFF ({Columns}); they were " +
+            "cleared. A private message is never filed.", row.Id, names);
+        return PrivateFilingClearOutcome.Cleared;
+    }
+
+    /// <summary>A <c>sprk_communication</c> row with a non-empty private reference (<see cref="PrivateContextColumns.All"/>).</summary>
+    private static bool IsPrivateCommunication(Entity row) =>
+        string.Equals(row.LogicalName, CommunicationTable, StringComparison.OrdinalIgnoreCase)
+        && row.Id != Guid.Empty
+        && PrivateContextColumns.All.Any(c => row.GetAttributeValue<EntityReference>(c) is { } reference && reference.Id != Guid.Empty);
+
+    /// <summary>The <see cref="PrivateFilingColumns"/> <paramref name="row"/> holds a value in: a lookup to a non-empty id,
+    /// non-blank text, or any other value.</summary>
+    private static IReadOnlyList<string> SetFilingColumnsOf(Entity row) =>
+        PrivateFilingColumns.Where(c => row.Attributes.TryGetValue(c, out var value) && value switch
+        {
+            null => false,
+            EntityReference reference => reference.Id != Guid.Empty,
+            string text => !string.IsNullOrWhiteSpace(text),
+            _ => true,
+        }).ToArray();
+
     /// <summary>The thread's type and default flag, the two columns task 198 narrows on. A fault propagates to the caller.</summary>
     private static async Task<Entity?> ReadThreadAsync(IGenericEntityService dataverse, Guid threadId, CancellationToken ct)
     {
@@ -950,6 +1118,25 @@ public sealed record DirectUnfileDue(Guid ThreadId, bool LeavesSecureOwner);
 /// <param name="PreviousOwnerTeamId">The team that owned the communication before the unfile; only content rows it owns move.</param>
 /// <param name="TeamId">The team the communication was settled to.</param>
 public sealed record UnfiledContentMove(Guid PreviousOwnerTeamId, Guid TeamId);
+
+/// <summary>fm task 056: what <see cref="DirectMessageOwnerStep.ClearPrivateFilingAsync"/> did with a row.</summary>
+public enum PrivateFilingClearOutcome
+{
+    /// <summary>Not a private message: nothing written.</summary>
+    NotPrivate,
+
+    /// <summary>A private message holding no filing column: nothing written.</summary>
+    NotFiled,
+
+    /// <summary>The filing columns it held were cleared in one conditional update.</summary>
+    Cleared,
+
+    /// <summary>The row changed after it was read: nothing written; the next run retries.</summary>
+    VersionMismatch,
+
+    /// <summary>Its version was not read, or the update failed: logged; the next run retries.</summary>
+    Faulted,
+}
 
 /// <summary>The pre-send check of a 1:1 message (<see cref="DirectMessageOwnerStep.CheckBeforeSendAsync"/>).</summary>
 public sealed record DirectOwnerSendCheck(bool CanSend, bool IsTransient, string? RefusalCode)
