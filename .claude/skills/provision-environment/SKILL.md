@@ -617,6 +617,7 @@ if ($BatchIntakeFile) {
   $openAiMonthlyLimitUsd = $intake.openAiMonthlyLimitUsd  # T254 — OPTIONAL: monthly OpenAI spend limit (USD); absent = no limit (Step 1b-quater)
   $solutionPackageType = $intake.solutionPackageType  # T218b — OPTIONAL: managed (default) | unmanaged on explicit instruction (Step 1b-quinquies)
   $secureRecordSetupDryRun = $intake.secureRecordSetupDryRun  # T256 — OPTIONAL: true = H7b dry run (plan only; the run stops at H7b); absent/false = apply (Step 1b-sexies)
+  $buildId        = $intake.buildId             # ISS-036 — OPTIONAL: pin the BFF CI build H9 deploys (e.g. 2026.10.16-2); absent = latest.json. H9 refuses the run when it is not latest.json's buildId — set it on an upgrade that must not change the BFF
   $notes          = $intake.notes               # optional
   # T245c — operator intake H11 / H14 / H4 need (schema-required; POST /api/runs re-validates with the handlers' rules)
   $identityPreset              = $intake.identityPreset               # B2BGuest | NativeAccount (exact case); Model1 → B2BGuest only (T232)
@@ -1681,6 +1682,11 @@ if (-not [string]::IsNullOrWhiteSpace("$solutionPackageType")) {
 # else with 400 secure_setup.dry_run_invalid.
 if ($secureRecordSetupDryRun -eq $true) {
   $runRequest.nonSecretParameters.secureRecordSetupDryRun = 'true'
+}
+# ISS-036 — the BFF build pin: sent only when the intake sets it; absent = H9 deploys latest.json's build. H9 is the
+# guard: it refuses the run (before any swap) when the value is not latest.json's own buildId.
+if (-not [string]::IsNullOrWhiteSpace("$buildId")) {
+  $runRequest.nonSecretParameters.buildId = "$buildId"
 }
 $body = $runRequest | ConvertTo-Json -Depth 5
 

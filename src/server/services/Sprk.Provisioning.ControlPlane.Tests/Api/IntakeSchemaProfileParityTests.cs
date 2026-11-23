@@ -389,7 +389,7 @@ public sealed class IntakeSchemaProfileParityTests
             ["msalClientId"] = "H7 env-var override for a direct POST; H7 resolves it itself",
             ["shareLinkBaseUrl"] = "H7 env-var override for a direct POST; H7 resolves it itself",
             // Upgrade-mode compatibility inputs: the skill does not send them (it has an `acknowledgeUpgradeMode` flag only).
-            ["provisionedOn"] = "upgrade-mode H0 input; the skill does not send it",
+            ["provisionedOn"] = "upgrade acknowledgement; never an intake-file value — on an upgrade the skill copies it from the registry row (ISS-031)",
             ["currentBffVersion"] = "upgrade-mode H0 input; the skill does not send it",
             ["currentSolutionVersion"] = "upgrade-mode H0 input; the skill does not send it",
             ["targetBffVersion"] = "upgrade-mode H0 input; the skill does not send it",
