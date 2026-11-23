@@ -28,6 +28,7 @@ public class CommunicationAppOnlyPrivateMessageReadTests
     private const string ThreadSet = "sprk_communicationthreads";
     private const int PrivacyOpen = 100000000;
     private const int StatusDelivered = 659490003;
+    private const int ThreadTypeDirect = 100000001; // sprk_threadtype Direct (DirectMessageRecipient)
 
     private static readonly Guid MatterId = Guid.Parse("aaaaaaaa-0000-0000-0000-000000000056");
     private static readonly Guid CallerSystemUserId = Guid.Parse("22222222-2222-2222-2222-222222220056");
@@ -72,6 +73,20 @@ public class CommunicationAppOnlyPrivateMessageReadTests
         var ordinary = AddMessage(thread);
 
         (await ListAsync(callerSystemUserId: null)).Should().Equal(ordinary);
+    }
+
+    [Fact(DisplayName = "fm 056 must-fire: a contact who can read the record does not read a private message in an Open Direct pair thread filed under it")]
+    public async Task List_ContactWithAccessToTheRecord_OnAnOpenDirectThread_DoesNotReadThePrivateMessage()
+    {
+        // Direct pair threads are created Open (ThreadResolver), so the thread gate does not keep a contact out; the contact can
+        // read the matter (AllRootsReadable). Only the query's private exclusion keeps the message out (UAC-r2, 056b review).
+        var directThread = AddThread(ThreadTypeDirect);
+        AddMessage(directThread, privateAbout: MatterId, internalOnly: false);
+        var ordinary = AddMessage(AddThread());
+
+        (await ListAsync(callerSystemUserId: null)).Should().Equal(ordinary);
+        (await FeedAsync(callerSystemUserId: null)).Should().Equal(ordinary);
+        _messageQueries.Should().OnlyContain(q => q.Contains(NotPrivateClause));
     }
 
     [Fact(DisplayName = "fm 056 must-not-fire: an ordinary message filed under the record is still in the app-only list")]
@@ -173,7 +188,7 @@ public class CommunicationAppOnlyPrivateMessageReadTests
         return AppOnlySelectProjection.Project(rows.OrderByDescending(r => r["createdon"].GetDateTimeOffset()), odata);
     }
 
-    private Guid AddThread()
+    private Guid AddThread(int? threadType = null)
     {
         var id = Guid.NewGuid();
         _threads[id] = new Dictionary<string, JsonElement>
@@ -181,6 +196,8 @@ public class CommunicationAppOnlyPrivateMessageReadTests
             ["sprk_communicationthreadid"] = El(id.ToString("D")),
             ["sprk_privacystate"] = El(PrivacyOpen),
         };
+        if (threadType is { } type)
+            _threads[id]["sprk_threadtype"] = El(type);
         return id;
     }
 
