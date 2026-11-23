@@ -50,6 +50,7 @@ import { CheckmarkCircleRegular, DismissRegular, SearchRegular } from '@fluentui
 import type { AssociateToStepProps, AssociationResult, EntityTypeOption } from './types';
 import { useAssociateToStepStyles } from './AssociateToStep.styles';
 import { cleanGuid } from '../../utils/guid';
+import { closestDialogOrSelf, useFocusReturn } from '../../utils/focusReturn';
 
 // ---------------------------------------------------------------------------
 // AssociateToStep
@@ -99,6 +100,15 @@ export const AssociateToStep: React.FC<AssociateToStepProps> = ({
   });
   const [isLookupPending, setIsLookupPending] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
+
+  // Focus return (task 200): the platform lookup pane leaves focus on <body> or on the link behind the dialog, and
+  // the Select Record button is disabled while the pane is open, so once the lookup settles focus goes back to it.
+  const rootRef = React.useRef<HTMLDivElement>(null);
+  const selectButtonRef = React.useRef<HTMLButtonElement>(null);
+  const returnFocus = useFocusReturn({
+    getRoot: () => rootRef.current,
+    getRegion: () => closestDialogOrSelf(rootRef.current),
+  });
 
   // Sync selectedEntityType default when entityTypes prop changes (e.g., async load)
   React.useEffect(() => {
@@ -151,8 +161,9 @@ export const AssociateToStep: React.FC<AssociateToStepProps> = ({
       setError(err instanceof Error ? err.message : 'Failed to open record lookup. Please try again.');
     } finally {
       setIsLookupPending(false);
+      returnFocus(() => selectButtonRef.current);
     }
-  }, [selectedEntityType, selectedTypeDef, navigationService, onChange]);
+  }, [selectedEntityType, selectedTypeDef, navigationService, onChange, returnFocus]);
 
   /** Clear the current selection. */
   const handleClear = React.useCallback(() => {
@@ -219,7 +230,7 @@ export const AssociateToStep: React.FC<AssociateToStepProps> = ({
   }
 
   return (
-    <div className={styles.root}>
+    <div className={styles.root} ref={rootRef}>
       {/* Step header. Compact variant (round-5 modal) shrinks the heading to
           field-label size and drops the subtitle so "Associate To" reads as a
           sibling field label rather than a wizard-step banner. */}
@@ -264,6 +275,7 @@ export const AssociateToStep: React.FC<AssociateToStepProps> = ({
         </div>
 
         <Button
+          ref={selectButtonRef}
           data-testid="associate-to-step-select-record-button"
           appearance="primary"
           icon={isLookupPending ? <Spinner size="tiny" /> : <SearchRegular />}

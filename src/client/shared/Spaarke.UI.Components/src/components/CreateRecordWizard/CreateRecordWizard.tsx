@@ -45,6 +45,7 @@ import { FileUploadZone } from '../FileUpload/FileUploadZone';
 import { UploadedFileList } from '../FileUpload/UploadedFileList';
 import type { IUploadedFile, IFileValidationError } from '../FileUpload/fileUploadTypes';
 import { cleanGuid } from '../../utils/guid';
+import { closestDialogOrSelf, useFocusReturn } from '../../utils/focusReturn';
 import type { ILookupItem } from '../../types/LookupTypes';
 
 import type { ICreateRecordWizardProps, FollowOnActionId, AssociationResult } from './types';
@@ -583,6 +584,14 @@ export const CreateRecordWizard: React.FC<ICreateRecordWizardProps> = ({
   const handleClearErrors = React.useCallback(() => fileDispatch({ type: 'CLEAR_VALIDATION_ERRORS' }), []);
 
   // -- Existing-record picker (task 040) --------------------------------------
+  // Focus return (task 200): the platform lookup pane leaves focus on <body> or on the link behind the dialog, and the
+  // Select button is disabled while it is open (then replaced by Clear after a pick), so once the lookup settles focus
+  // goes to the one button the row renders, found after the re-render.
+  const existingRecordRowRef = React.useRef<HTMLDivElement>(null);
+  const returnFocus = useFocusReturn({
+    getRoot: () => existingRecordRowRef.current,
+    getRegion: () => closestDialogOrSelf(existingRecordRowRef.current),
+  });
   const handleSelectExistingRecord = React.useCallback(async () => {
     const picker = config.existingRecordPicker;
     if (!picker) return;
@@ -615,8 +624,9 @@ export const CreateRecordWizard: React.FC<ICreateRecordWizardProps> = ({
       );
     } finally {
       setExistingRecordLookupPending(false);
+      returnFocus(() => existingRecordRowRef.current?.querySelector<HTMLElement>('button'));
     }
-  }, [config.existingRecordPicker]);
+  }, [config.existingRecordPicker, returnFocus]);
 
   const handleClearExistingRecord = React.useCallback(() => {
     setExistingRecordLookupError(null);
@@ -721,7 +731,7 @@ export const CreateRecordWizard: React.FC<ICreateRecordWizardProps> = ({
 
           {/* Existing-record picker (task 040) — opt-in via config.existingRecordPicker */}
           {config.existingRecordPicker && fileState.uploadedFiles.length === 0 && (
-            <div className={styles.existingRecordRow}>
+            <div className={styles.existingRecordRow} ref={existingRecordRowRef}>
               {existingRecordLookupError && (
                 <MessageBar intent="error" className={styles.errorBar}>
                   <MessageBarBody>{existingRecordLookupError}</MessageBarBody>

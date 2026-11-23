@@ -14,6 +14,9 @@
  * A pane is opened at most once at a time (single flight). A rejection from
  * openLookup (for example no Xrm host) is logged and treated as a cancel.
  *
+ * When the pane settles (pick, cancel or failure) keyboard focus returns to the field's own control, the Select button
+ * or, after a pick, the Clear button, unless focus is already inside the host dialog on purpose (utils/focusReturn.ts).
+ *
  * Usage:
  * ```tsx
  * <DataverseLookupField
@@ -46,6 +49,7 @@ import type { ILookupItem } from '../../types/LookupTypes';
 import type { INavigationService, LookupOptions } from '../../types/serviceInterfaces';
 import { LookupField } from './LookupField';
 import { cleanGuid } from '../../services/PolymorphicResolverService';
+import { closestDialogOrSelf, useFocusReturn } from '../../utils/focusReturn';
 
 // ---------------------------------------------------------------------------
 // Props
@@ -218,6 +222,16 @@ export const DataverseLookupField: React.FC<IDataverseLookupFieldProps> = ({
     };
   }, []);
 
+  // Focus return (task 200): the platform pane leaves focus on <body> (or on the link behind the dialog), and the Select
+  // button is disabled while the pane is open, so it has lost focus anyway. The control is found AFTER the re-render:
+  // an empty field renders the Select button, a picked value renders the Clear button, never the same element.
+  const wrapperRef = React.useRef<HTMLDivElement>(null);
+  const controlRef = React.useRef<HTMLButtonElement>(null);
+  const returnFocus = useFocusReturn({
+    getRoot: () => wrapperRef.current,
+    getRegion: () => closestDialogOrSelf(wrapperRef.current),
+  });
+
   // ── Open Dataverse lookup side pane ──────────────────────────────────────
   const handleOpenLookup = React.useCallback(async () => {
     if (!navigationService || opening.current) return;
@@ -241,8 +255,10 @@ export const DataverseLookupField: React.FC<IDataverseLookupFieldProps> = ({
     } finally {
       opening.current = false;
       if (mounted.current) setIsOpening(false);
+      // After onChange and the state reset above, so the control is looked up once the re-render has happened.
+      returnFocus(() => controlRef.current);
     }
-  }, [navigationService, entityType, filters, onChange]);
+  }, [navigationService, entityType, filters, onChange, returnFocus]);
 
   // ── Clear selection ───────────────────────────────────────────────────────
   const handleClear = React.useCallback(() => {
@@ -292,7 +308,7 @@ export const DataverseLookupField: React.FC<IDataverseLookupFieldProps> = ({
 
   // ── Dataverse side-pane lookup mode ─────────────────────────────────────
   return (
-    <div className={styles.wrapper}>
+    <div className={styles.wrapper} ref={wrapperRef}>
       <Field
         label={<LabelContent label={label} required={required} labelExtra={labelExtra} styles={styles} />}
         required={required}
@@ -305,6 +321,7 @@ export const DataverseLookupField: React.FC<IDataverseLookupFieldProps> = ({
               {value.name}
             </Text>
             <Button
+              ref={controlRef}
               appearance="subtle"
               size="small"
               icon={<DismissRegular fontSize={14} />}
@@ -316,6 +333,7 @@ export const DataverseLookupField: React.FC<IDataverseLookupFieldProps> = ({
           // Empty: show "Select" button that opens the Dataverse lookup pane
           <div className={styles.selectRow}>
             <Button
+              ref={controlRef}
               className={styles.selectButton}
               appearance="outline"
               size="medium"
