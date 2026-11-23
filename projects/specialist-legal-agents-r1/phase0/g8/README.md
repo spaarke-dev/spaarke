@@ -69,7 +69,10 @@ Run every step in **Chat**. Also run P1 in **Word (web)** and **Teams** where th
    Compress-Archive -Path .\package\* -DestinationPath .\spaarke-legal-g8-pkg-test.zip -Force
    ```
 
-2. Upload it in the **dev tenant only**. Use the same place as the T2 spike, or Teams Developer Portal › Apps › Import app, scoped to the owner or the test user if offered.
+2. Upload it in the **dev tenant only**, and install it for the **owner and the test user only, never All users** (coordination rule R7).
+   - In admin center › Agents › Tools › Registry, or Integrated apps, choose **Specific users/groups** and pick those two accounts.
+   - Alternatively, use Teams Developer Portal › Apps › Import app, then Preview/Install for yourself only.
+   - If the route you use cannot be scoped this way, **don't upload**. Tell this session where it would land, so the removal step is right and coordination can be told.
 3. In the agent (Chat), send:
    - `Call the Spaarke MCP tool spike_echo with the message g8-P1`
    - `Call the Spaarke MCP tool spike_whoami`
