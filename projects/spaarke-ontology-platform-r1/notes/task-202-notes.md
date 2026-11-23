@@ -148,8 +148,7 @@ Files all under `src/client/shared/Spaarke.UI.Components/src/components/`.
    form is open and the person is typing in Name -> form gone, New category back, focus on the table; and focus held on another control
    (the switch the person used) is left there. Fail-before (old `ClassificationArea.tsx`): both fail (New category absent / focus lost).
 
-Results: filtered jest `src/components/SprkModal src/components/OntologyAdmin` 24 suites, 382 tests, 0 failed (was 378 before: +4 here
-counting the three Classification tests above plus the SprkModal test; the second-press test is the fourth). Package `tsc --noEmit`
+Results: filtered jest `src/components/SprkModal src/components/OntologyAdmin` 24 suites, 382 tests, 0 failed (five new tests: one SprkModal, two for the Save focus, two for the row-gone case). Package `tsc --noEmit`
 clean. `client-lint check`: `ui-components` ok (the touched surface); `ai-widgets`, `compose-components`, `daily-briefing-components`,
 `legal-workspace-app`, `reporting` report errors in files this round does not touch (e.g. `PinnedMemoryEditDialog.tsx:463`,
 `AISummaryDialog.tsx:455`) and a stale-suppression warning; not caused by this change.
