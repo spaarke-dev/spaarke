@@ -32,7 +32,7 @@ As approved on 2026-11-06 in `projects/spaarkeai-mcp-bff-api-r1/notes/coordinati
 | Declarative agent | "Spaarke AI" for the core agent; practice agents "Spaarke {Practice}" |
 | Test artifacts | Must contain `spike`, `probe` or `test` in the display name so they cannot be mistaken for product |
 
-Existing skills `nda-review`, `legal-hold-review`, `accelerator-setup` and `nda-library-review` predate the gate. The new names were agreed between sessions on 2026-11-06 (accelerator OD-42: `spaarke-nda-review`, `spaarke-nda-setup`, `spaarke-nda-library-review`, plugin `spaarke-nda`). OD-42 still needs the owner's decision, and the rename happens at the first build after OD-20, which waits on the Word probe (WP-2). Approving R3 approves OD-42.
+Existing skills `nda-review`, `legal-hold-review`, `accelerator-setup` and `nda-library-review` predate the gate. The new names were agreed between sessions on 2026-11-06 (accelerator OD-42: `spaarke-nda-review`, `spaarke-nda-setup`, `spaarke-nda-library-review`, plugin `spaarke-nda`). OD-42 still needs the owner's decision, and the rename happens at the first build after OD-20, which waits on the Word probe (WP-2). OD-42 stays the accelerator's decision record; approving R3 here does not by itself settle it unless the owner says so.
 
 ## R4. Inventory first
 
