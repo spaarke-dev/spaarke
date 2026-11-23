@@ -519,6 +519,16 @@ public sealed class IncomingAssociationResolver
         var parentChanges = Sprk.Bff.Api.Services.Dataverse.RecordReparent.ParentChangesIn(fields);
         if (ownerAlreadyResolved || parentChanges.Count == 0)
         {
+            // fm task 056 (a private message is never filed): this plain write can set a typed regarding that is no ownership
+            // parent, or the regarding pair, on a row the reparent rule never sees. The write guard asks the rule first (app-only
+            // read; a fault refuses). A refusal throws before anything is written, as a refused reparent below does: this class's
+            // fail-closed contract (the communication survives, unassociated — NFR-06). The guard logs the Warning.
+            if (await Sprk.Bff.Api.Services.Communication.Access.PrivateMessageWriteGuard.RefuseUpdateAsync(
+                    _genericEntityService, "sprk_communication", communicationId, fields.Keys, _logger, ct).ConfigureAwait(false) is { } privateRefusal)
+            {
+                throw Sprk.Bff.Api.Services.Communication.Access.PrivateMessageWriteGuard.UpdateRefused("sprk_communication", privateRefusal);
+            }
+
             await _genericEntityService.UpdateAsync("sprk_communication", communicationId, fields, ct);
         }
         else
