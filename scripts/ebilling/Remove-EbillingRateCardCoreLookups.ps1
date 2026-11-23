@@ -569,6 +569,7 @@ function Publish-RateCard($State, [bool]$AllowPending) {
     }
     # The shared Invoke-PublishXml has no retry of its own: a publish lock or throttling is retried with the module's transient test and
     # backoff (bounded); any other error fails at once.
+    $script:WriteStarted = $true   # a publish is a write: an error after it must not say "Nothing was written"
     Invoke-WithTransientRetry { Invoke-PublishXml -Context (Get-PublishContext) -ParameterXml "<importexportxml><entities><entity>$Table</entity></entities></importexportxml>" }
     Write-Host "  published $Table" -ForegroundColor Green
 }

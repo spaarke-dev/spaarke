@@ -380,6 +380,7 @@ function Publish-Invoice($State, [bool]$AllowPending) {
     }
     # The shared Invoke-PublishXml has no retry of its own: a publish lock or throttling is retried with the module's transient test and
     # backoff (bounded); any other error fails at once.
+    $script:WriteStarted = $true   # a publish is a write: an error after it must not say "Nothing was written"
     Invoke-WithTransientRetry { Invoke-PublishXml -Context (Get-PublishContext) -ParameterXml "<importexportxml><entities><entity>$Table</entity></entities></importexportxml>" }
     Write-Host "  published $Table" -ForegroundColor Green
 }
@@ -444,7 +445,7 @@ function Invoke-Cleanup([bool]$ApplyRequested, [bool]$VerifyRequested, [bool]$Dr
 }
 
 # What the error handler tells the operator: after the first write the run is partly applied (re-run to resume); before it, nothing was
-# written (an error in a read, e.g. the pending read, changes nothing). $script:WriteStarted is set right before the first PATCH.
+# written (an error in a read, e.g. the pending read, changes nothing). $script:WriteStarted is set right before the first PATCH and before the publish.
 function Get-ErrorTrailer {
     if ($script:WriteStarted) { return 'Steps already done stay done; re-run to continue (every step skips work already done).' }
     return 'Nothing was written (the error happened before the first write).'
