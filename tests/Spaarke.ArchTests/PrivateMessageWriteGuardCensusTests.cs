@@ -220,6 +220,62 @@ public class PrivateMessageWriteGuardCensusTests
         Assert.Empty(FindCallers(file, definition));
     }
 
+    /// <summary>
+    /// The writers the census above cannot see, because they do not ask the app-only column rule: the filing route
+    /// (<c>OwnedChildWrite.RefileAsync</c>) and the inbound association's plain write
+    /// (<c>IncomingAssociationResolver.ApplyDecisionAsync</c>). Each must ask the guard in the same method.
+    /// </summary>
+    private static readonly IReadOnlyList<Member> GuardedWithoutTheColumnRule = new[]
+    {
+        new Member("src/server/api/Sprk.Bff.Api/Services/Dataverse/OwnedChildWrite.cs", "RefileAsync"),
+        new Member("src/server/api/Sprk.Bff.Api/Services/Communication/IncomingAssociationResolver.cs", "ApplyDecisionAsync"),
+    };
+
+    [Fact(DisplayName = "056 (Q5): the filing route and the inbound association write ask the private-message write guard")]
+    public void TheFilingRoute_AndTheInboundAssociationWrite_AskThePrivateMessageWriteGuard()
+    {
+        var members = new Dictionary<Member, bool>();
+        foreach (var file in SourceScan.ServerSourceFiles())
+        {
+            var relative = SourceScan.Relative(file).Replace('\\', '/');
+            if (!GuardedWithoutTheColumnRule.Any(m => m.File == relative))
+                continue;
+            foreach (var (member, asksGuard) in MemberGuards(relative, File.ReadAllLines(file)))
+                members[member] = members.TryGetValue(member, out var seen) ? seen | asksGuard : asksGuard;
+        }
+
+        var problems = GuardedWithoutTheColumnRule.Where(m => !members.TryGetValue(m, out var asks) || !asks)
+            .Select(m => $"{m}: expected to ask {Guard} in the method; the method moved, or the guard call was removed.").ToList();
+
+        Assert.True(problems.Count == 0,
+            "A private message is never filed by any writer (fm task 056). These writers do not ask the column rule, so the census "
+            + "above cannot see them; each asks the guard before it writes:\n" + string.Join("\n", problems));
+    }
+
+    [Fact(DisplayName = "056 (Q5): the filing-route check fires on a method that lost the guard call and not on one that has it")]
+    public void FilingRouteCheck_MustFireWithoutTheGuardCall_AndMustNotFireWithIt()
+    {
+        const string file = "src/server/api/Sprk.Bff.Api/Services/Seeded/SeededFiling.cs";
+        var without = Source(
+            "    internal static async Task<Outcome> RefileAsync(IGenericEntityService entities, Guid id, CancellationToken ct)",
+            "    {",
+            "        // PrivateMessageWriteGuard.RefuseUpdateAsync( in a comment does not count",
+            "        await entities.UpdateAsync(\"sprk_communication\", id, new(), ct);",
+            "        return Outcome.Done;",
+            "    }");
+        var with = Source(
+            "    internal static async Task<Outcome> RefileAsync(IGenericEntityService entities, Guid id, CancellationToken ct)",
+            "    {",
+            "        if (await PrivateMessageWriteGuard.RefuseUpdateAsync(entities, \"sprk_communication\", id, [], NullLogger.Instance, ct) is { })",
+            "            return Outcome.Refused;",
+            "        await entities.UpdateAsync(\"sprk_communication\", id, new(), ct);",
+            "        return Outcome.Done;",
+            "    }");
+
+        Assert.False(MemberGuards(file, without).Single(m => m.Member.Method == "RefileAsync").AsksGuard);
+        Assert.True(MemberGuards(file, with).Single(m => m.Member.Method == "RefileAsync").AsksGuard);
+    }
+
     /// <summary>Seeded source for the controls, in a file-scoped namespace as the BFF's files are.</summary>
     private static string[] Source(params string[] lines) => new[] { "namespace Seeded;", string.Empty }.Concat(lines).ToArray();
 
