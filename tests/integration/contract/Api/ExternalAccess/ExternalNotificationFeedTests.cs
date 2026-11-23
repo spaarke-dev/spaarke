@@ -321,7 +321,9 @@ public class ExternalNotificationFeedTests
         Mock.Of<ICallerSystemUserResolver>(MockBehavior.Strict),
         _identity.Object,
         Mock.Of<ILogger<CommunicationThreadReadService>>(),
-        _appOnly.Object);
+        _appOnly.Object,
+        // fm task 056: an environment without the private-message reference columns, so the read is unchanged.
+        entities: CommunicationSchemaDouble.WithoutReferenceColumns());
 
     private Task<IResult> Feed(CallerPrincipal caller, ExternalModuleRegistry? registry = null, DateTimeOffset? now = null) =>
         ExternalNotificationFeedEndpoints.GetFeedCoreAsync(
