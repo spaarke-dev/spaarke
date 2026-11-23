@@ -103,6 +103,17 @@ Exit codes: 0 done / report / verified; 1 error, verification failed, or stopped
 
 Acceptance criterion 4 (forms on dev show neither field; `-Verify` passes; recorded here) is open until the main session runs step 2 and pastes the `-Verify` output below.
 
+Main-session re-check of fix round 2: the scripts now set `$script:WriteStarted` before the PublishXml call as well. Before, an error after a resume-only publish, with no PATCH in that run, said "Nothing was written" (5cef9c088a). Pester 5.7.1: 68/0 and 135/0, again after the merge into work (96bcf65dbb), plus `Deploy-EbillingFormsViews` 7/0.
+
 ## Result of -Apply / -Verify on dev
 
-(to be filled in by the main session)
+2026-11-23, https://spaarkedev1.crm.dynamics.com, code work/ebilling-r1 96bcf65dbb. The owner's go was typed in session ("yes proceed with these"). uac-r2 was sent the BEFORE notice (no hold) and the AFTER notice.
+
+| Step | Result |
+|---|---|
+| `-Apply -WhatIf` | exit 0, VERDICT READY. Two forms in scope, 0 other forms, 0 pending items, nothing written. |
+| `-Apply` | exit 0. EDITED the quick-create form `c5e5807d-e20c-f111-8342-7c1e520aa4df`: both controls, their emptied rows, section `tab_1_column_3_section_1` and the emptied column. EDITED the main form `93aa1c69-0406-f111-8406-7c1e525abd8b`: control `sprk_extractionstatus`. Published sprk_invoice, entity-scoped. |
+| `-Verify` | exit 0, "ALREADY CLEAN - neither control is on the invoice main or quick-create form". |
+| Handler check (uac-r2 ask) | Both forms had 0 `formLibraries` and 0 event handlers before the change. They still have 0, so no registration could be dropped. Neither form's published formxml mentions `sprk_extract` any more. |
+
+Acceptance criterion 4 is met.

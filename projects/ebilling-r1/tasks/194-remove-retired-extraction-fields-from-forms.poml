@@ -4,7 +4,7 @@
     <title>Take the retired extraction fields (sprk_extractionstatus, sprk_extractedjson) off the invoice main and quick-create forms; drop PB-013 from the seed and verify script (ISS-045, #2997)</title>
     <phase>050b follow-up (ontology-r1 review of #2992, item 3); added 2026-11-23</phase>
     <gate>Owner's go typed in the ebilling-r1 session 2026-11-23 ("yes proceed with these"); the dev form step also needs uac-r2 notices before and after.</gate>
-    <status>in-progress</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Edits SpaarkeMaster form source and a deploy script that writes live forms on dev.</rigor-reason>
     <model-tier>sonnet</model-tier>

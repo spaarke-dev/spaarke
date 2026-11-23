@@ -2501,7 +2501,7 @@ Three existing multipart routes catch only `InvalidDataException` and `BadHttpRe
 
 | Field | Value |
 |---|---|
-| **Status** | Open |
+| **Status** | Fixed in work 96bcf65dbb, dev forms cleaned 2026-11-23; closes when the next eBilling master PR merges |
 | **Urgency** | next-round |
 | **Filed** | 2026-11-23 |
 | **Source** | ontology-r1 review of #2992 (050b follow-up 3) |
