@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="135" project="spaarkeai-word-add-in-r1">
+  <metadata>
+    <title>Invoice tab: stop the pre-submit "filed to another record" claims that read the newest saved copy</title>
+    <phase>Phase 6 — owner UAT fixes (found in the 2026-11-23 dev check of task 134)</phase>
+    <status>in-progress</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .tsx and its tests in the Outlook Invoice view.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Main-session fix on a finance surface; small, but the wording is the contract with the server's refusal.</model-tier-reason>
+    <effort>high</effort>
+    <deps>134</deps>
+    <tags>office-addins, react, fluent-ui, invoice</tags>
+  </metadata>
+  <prompt>Owner 2026-11-23: "Yes, fix it". In the dev check the correction view said "This email is filed to REAL-2026-123456.02 ... Spaarke accepts a correction only from an email filed to the invoice's record", yet the server accepted the correction (INV-792345.5). Cause: the view's `filedRecord` is the email identity's record, which is the NEWEST saved `.eml` copy (an 11-13 re-save filed to REAL), while the server judges the email's communication (filed to PAT-792345).</prompt>
+  <goal>The Invoice view never states a server acceptance rule from the newest saved copy. Correction mode shows no filed-record note. New mode states only the fact about the saved copy ("A saved copy of this email is filed to …") with no "can only be submitted" claim. The server's refusal (409 document_core_record_mismatch with filedUnder, and "Use {name}") stays the one authoritative answer.</goal>
+  <constraints>
+    <constraint>Client only: no BFF change, no new route or field (the refusal's filedUnder already names the record the server judges).</constraint>
+    <constraint>Keep the New-mode seeding of the core record from filedRecord and the refusal's "Use {name}" switch unchanged.</constraint>
+    <constraint>Fail-before: the new tests fail on the old view.</constraint>
+  </constraints>
+  <steps mode="directional">
+    <step>Remove the correction-mode filed-record note.</step>
+    <step>Reword the New-mode note to the saved-copy fact for both the same-record and other-record cases.</step>
+    <step>Update the view header comment and the tests; add must-not-fire for correction mode.</step>
+    <step>Gates: InvoiceView + App invoice tests, full add-in suite, tsc baseline, ESLint/Prettier, webpack; one adversarial review.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion testable="true">Correction mode with a filed record other than the invoice's shows no filed-record note.</criterion>
+    <criterion testable="true">New mode never shows "can only be submitted to that record"; it shows "A saved copy of this email is filed to …".</criterion>
+    <criterion testable="true">A refusal with filedUnder still offers "Use {name}" in New mode.</criterion>
+  </acceptance-criteria>
+  <justification>
+    <existing>Modifies existing text in InvoiceView only.</existing>
+    <extension>n/a — no new surface.</extension>
+    <cost-of-doing-nothing>The pane tells users a correction will be refused when the server accepts it (seen live on INV-792345.5).</cost-of-doing-nothing>
+  </justification>
+</task>
