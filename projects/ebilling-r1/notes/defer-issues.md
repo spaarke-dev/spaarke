@@ -2465,3 +2465,30 @@ Three existing multipart routes catch only `InvalidDataException` and `BadHttpRe
 **Estimated effort**: 1–2 hours
 **Blockers**: none
 **Related**: task 123 (`notes/123-invoice-supporting-file-upload.md`)
+
+---
+
+### ISS-044 — D-170 Signal close reads not-in-force policies without paging (stops past 5,000)
+
+| Field | Value |
+|---|---|
+| **Status** | Open (code owner: spaarke-ontology-platform-r1; told 2026-11-23) |
+| **Urgency** | next-round |
+| **Filed** | 2026-11-23 |
+| **Source** | Task 117 adversarial review, pass A (found in passing) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2982 |
+
+**Description**
+
+`SignalClosureService.ReadPoliciesNotInForceAsync` reads the Off and the Inactive policies with one `RetrieveMultipleAsync` each, with no paging and no `MoreRecords` check; `IGenericEntityService` does not page either. Once more than 5,000 policies are not in force, the rest never have their open Signals closed (D-170), silently. Task 117's sweep switches record rules Off on every core-record delete, so the count grows.
+
+**Entry-points**
+
+- `src/server/api/Sprk.Bff.Api/Services/Signals/SignalClosureService.cs:200-216`
+- `src/server/api/Sprk.Bff.Api/Services/Signals/SignalReevaluationJob.cs` (`ClosePoliciesNotInForceAsync`)
+
+**Suggested fix**: page with the id cursor (as `SecureChildReconciliationJob.cs:1384`) and report a truncated read; consider limiting to policies that still have open Signals.
+
+**Estimated effort**: half a day.
+**Blockers**: none; ontology-r1 owns `Services/Signals/**`.
+**Related**: D-170; task 117.
