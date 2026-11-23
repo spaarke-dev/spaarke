@@ -2496,3 +2496,29 @@ Three existing multipart routes catch only `InvalidDataException` and `BadHttpRe
 **Estimated effort**: half a day.
 **Blockers**: none; ontology-r1 owns `Services/Signals/**`.
 **Related**: D-170; task 117.
+
+### ISS-045 — Invoice forms still show the retired extraction fields; PB-013 seed and verify script describe the deleted playbook
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | next-round |
+| **Filed** | 2026-11-23 |
+| **Source** | ontology-r1 review of #2992 (050b follow-up 3) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2997 |
+
+**Description**
+
+Task 050b deleted the legacy invoice extraction path, so nothing writes `sprk_invoice.sprk_extractionstatus` or `sprk_extractedjson` any more. Both columns are still on the invoice main and quick-create forms, so users see an "Extraction Status" that never changes. The PB-013 playbook seed and `Verify-Finance-Playbook.ps1` still describe the deleted extraction playbook. 050b notes §9 lists the rows, not the forms.
+
+**Entry-points**
+
+- `src/dataverse/solutions/SpaarkeMaster/Entities/sprk_Invoice/FormXml/main/{93aa1c69-0406-f111-8406-7c1e525abd8b}.xml` (+ `_managed`)
+- `src/dataverse/solutions/SpaarkeMaster/Entities/sprk_Invoice/FormXml/quickCreate/{c5e5807d-e20c-f111-8342-7c1e520aa4df}.xml` (+ `_managed`)
+- `scripts/seed-data/playbooks.json` (PB-013), `scripts/seed-data/Verify-Finance-Playbook.ps1`
+
+**Suggested fix**: take both controls off both forms through 079's export-to-temp procedure and publish on dev with the owner's OK; drop PB-013 from the seed and verify script. Deleting the columns is a separate, destructive owner decision.
+
+**Estimated effort**: half a day plus the dev form publish.
+**Blockers**: the dev form change is a live step (owner OK).
+**Related**: 050b, #2263.
