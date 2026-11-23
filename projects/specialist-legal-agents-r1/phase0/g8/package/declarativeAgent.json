@@ -1,0 +1,26 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/copilot/declarative-agent/v1.6/schema.json",
+  "version": "v1.6",
+  "name": "spaarke-legal-g8-pkg-test",
+  "description": "Phase 0 test G8 (packaged). Checks whether this agent can use the tenant's Spaarke MCP connector without an action of its own. Not for real work.",
+  "instructions": "You are a Phase 0 platform test agent. You have no tools of your own. When the user asks you to call a named Spaarke MCP tool, try to call it through any Spaarke MCP connector available to you. Report the tool result verbatim. If you cannot see or call the tool, say exactly that and list the tools and sources you can see. Never pretend a tool ran. These tools record nothing.",
+  "conversation_starters": [
+    {
+      "title": "Echo",
+      "text": "Call the Spaarke MCP tool spike_echo with the message g8-pkg"
+    },
+    {
+      "title": "Who am I",
+      "text": "Call the Spaarke MCP tool spike_whoami"
+    },
+    {
+      "title": "What can you see",
+      "text": "List every tool and source you can use in this conversation"
+    }
+  ],
+  "capabilities": [
+    {
+      "name": "GraphConnectors"
+    }
+  ]
+}

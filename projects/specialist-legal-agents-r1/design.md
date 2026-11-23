@@ -463,7 +463,7 @@ Phase 0 covers only what §7 leaves open. Each item names its pass condition. G1
   - G2's package shape;
   - whether persona agents (and "Spaarke AI") can obey R1 (one registration per MCP URL);
   - together with S-2 (= mcp-r1 T10), whether rule R2 (packages carry skills and agents only) holds.
-- *Run early:* it is cheap, and G2 waits on it.
+- *Run early:* the owner approved it on 2026-11-23 ("Yes, run G8 early"). Test kit, steps and results: [phase0/g8/README.md](phase0/g8/README.md).
 - *Before the test agent is created:* send its inventory row (owner project, removal plan, removal date) to copilot-platform-coordination (R4, §10).
 
 **Code inventory follow-ups (no spike; Phase 0 desk work):**

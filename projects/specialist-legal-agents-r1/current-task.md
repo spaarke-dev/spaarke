@@ -9,7 +9,7 @@
 | Field | Value |
 |---|---|
 | **Active work** | The owner asked (2026-11-23): (1) "I'm still not clear on the structure and core components of the model" — this program must build on accelerator-r1 both for NDA capabilities and **as the pattern for other persona/skill-based agents**; (2) explain the capability differences between Word Copilot and the M365 Copilot app, and within it between Chat and Cowork, and check whether Ignite 2026 collapsed Chat/Cowork, and what "Copilot Home" is |
-| **Step** | DONE: design.md v0.5 has §0 (model) and §3.11 (surfaces, from notes/research/copilot-surfaces-post-ignite-2026-11-23.md). Next: owner reviews the model; D-A11 still "discuss first" |
+| **Step** | G8 test kit ready (phase0/g8/README.md): waiting for the owner to create the A1/A2 Agent Builder agent and upload the P1 package. Then this session checks App Insights and records the result. Inventory rows G8-a and G8-p sent to copilot-platform-coordination. D-A11 still "discuss first" |
 | **Design version** | design.md v0.5 (commit `b5ebb37b3c`) |
 | **Uncommitted** | none |
 
