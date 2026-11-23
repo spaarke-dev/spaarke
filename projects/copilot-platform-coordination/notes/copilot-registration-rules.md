@@ -15,7 +15,7 @@ Each MCP URL (`/mcp/{area}`) is registered **once** per tenant: either as a fede
 
 A Spaarke plugin package adds `agentSkills` and, where a practice needs one, a declarative agent. It does **not** add an `agentConnectors` entry for an MCP URL already registered under R1.
 
-- **Pending evidence:** whether a package skill can drive the tools of a connector registered outside the package is mcp-r1's **T10** ("a skill naming a connector tool", not yet run). If T10 fails, the owner chooses between (a) the package carries the one connector registration and the federated connector is removed, or (b) another shape. This rule is re-decided then; until then, no new package connector for an already-registered URL.
+- **Pending evidence:** whether a package skill can drive the tools of a connector registered outside the package is mcp-r1's **T10** ("a skill naming a connector tool", not yet run). If T10 fails, mcp-r1's fallback (2026-11-23) is one "core" package carrying the single connector registration (the federated connector is then removed), with every other package carrying skills only; that still satisfies R1. The owner decides. This rule is re-decided then; until then, no new package connector for an already-registered URL.
 - **Known host gap:** a package connector worked in Cowork but failed in Chat before reaching the BFF (T2/T13/T14). Another reason not to rely on package connectors for Chat yet.
 
 ## R3. Naming

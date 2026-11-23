@@ -23,6 +23,6 @@
 
 | Session | Sent | Reply |
 |---|---|---|
-| mcp-r1 | see current-task.md | — |
-| acclerator-r1 | see current-task.md | — |
-| specialist-legal-agents-r1 setup session | see current-task.md | — |
+| mcp-r1 | 2026-11-23 | **Ack 2026-11-23:** rows C1/C2/A1/A2 correct. Order: #2587 → master; uac-r2 dev deploy from master without the spike, `Mcp:Enabled` on (task 041, owner per-SHA go); 040 builds the skills-only package (slug `spaarke`, skill `spaarke-decisions`, no `agentConnectors`, owner + test user, KEEP); T10 runs on it. Inventory row comes before upload |
+| acclerator-r1 | 2026-11-23 | pending (asked: S6 installed now, D4 installed?, S4 still used?) |
+| specialist-legal-agents-r1 setup session | 2026-11-23 | pending |
