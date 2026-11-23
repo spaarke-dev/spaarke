@@ -110,6 +110,7 @@
 - [EXO app-only DC-write error (2026-10-04)](exo-apponly-dc-write-error-2026-10-04.md) — -Organization = primary .onmicrosoft.com
 
 ## AI platform / models / competitors
+- [G9 custom engine agent + Work IQ (2026-11-23)](g9-custom-engine-agent-work-iq-2026-11-23.md) — CEA Chat+Teams GA, no Copilot licence; Word/Outlook docs conflict; Bot OAuth FIC single-tenant only; Work IQ.Read/Act scopes; BFF /api/agent/message not an Activity endpoint
 - [Legal enablement-kit deploy paths (2026-10-29)](copilot-legal-enablement-kit-deployment-paths-2026-10-29.md) — users upload/share Cowork skills+plugins (Claude auto-convert, MCP) w/o admin; Word legal not extensible; store 4-6 wks
 - [Copilot for Legal + Cowork + plugin registry (2026-10-29)](ms-copilot-for-legal-cowork-registry-2026-10-29.md) — legal plugins GA 10-15, Legal Agent retired; .docx playbooks only; ISV MCP plugin path; Business-apps plugin writes Dataverse
 - [Foundry + Work IQ delta (2026-10-29)](foundry-work-iq-delta-2026-10-29.md) — Foundry IQ unchanged; GPT-6 GA; Routines GA; Work IQ `retrieve` (SPE, preview); Dataverse-in-Work-IQ deprioritised; AF 1.26
