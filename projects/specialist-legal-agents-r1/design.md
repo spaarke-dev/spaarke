@@ -1,6 +1,6 @@
 # Specialist Legal Agents — Program Design (`specialist-legal-agents-r1`)
 
-> **Status:** Draft v0.2, umbrella program design. v0.2 (2026-11-23) adds §3.9 (function vs persona framing, D-A12) and Phase 0 test G5. The next step is to split off the Phase 0 child and run `/design-to-spec` on it (§4). `/design-to-spec` has not been run.
+> **Status:** Draft v0.3, umbrella program design. **Blocked on gate A0: alignment with spaarke-legal-ai-accelerator-r1 (§10.1).** v0.2 (2026-11-23) added §3.9 (function vs persona framing, D-A12) and Phase 0 test G5. v0.3 (2026-11-23) adds §3.10 (Microsoft's legal skills, D-A13), §10.1 (accelerator alignment, D-A14) and Phase 0 test G6. The next step is to split off the Phase 0 child and run `/design-to-spec` on it (§4). `/design-to-spec` has not been run.
 > **Date:** 2026-11-23
 > **Author:** Ralph Schroeder + Claude Code
 > **Source:** [notes/source/design-synopsis-2026-11-22.md](notes/source/design-synopsis-2026-11-22.md), the owner's synopsis of 22 Nov 2026 (verbatim copy). This document keeps the synopsis's design. It changes four things: the primitives table is corrected against code (§6), live Copilot evidence is folded in (§7), the Phase 0 scope is narrowed to what that evidence leaves open (§8), and coordination points and ADR tensions are added (§10, §11).
@@ -156,6 +156,58 @@ A firm can still publish a role-named agent if it wants one; it is the same arch
 
 **Open for the owner:** confirm the three-layer model, and whether the persona grouping is the **practice area** (proposed) or the **professional role**.
 
+### 3.10 Microsoft's legal skills: coverage, coexistence and riding their upgrades (D-A13, proposed 2026-11-23)
+
+**Source.** Accelerator r1 researched this in depth: its design §2.1, §2.4, §5.2, §5.2a, §5.7 and §5.8a; `notes/legal-for-cowork-skills/` (the 20 skill texts, extracted 2026-11-05); and `notes/copilot-app-components.md`. This section adopts its findings. It does not re-derive them.
+
+**What Microsoft ships.** "Copilot for legal" (shipped 2026-10-15) is two plugins, included with the M365 Copilot seat:
+- **Legal for Cowork.** A built-in plugin of **20 skills**. The tenant showed v1.0.10. The user adds it from Customize › Roles & Industry › Legal. It is read-only to us.
+- **The legal plugin in Word** (Word for Windows desktop only). Three skills share Legal for Cowork's names: *Legal reasoning*, *Edit contract* and *Draft new contract*. It runs "Review contract" against a four-column Word playbook, producing native tracked changes.
+
+Microsoft ships **no** practice content, no default playbooks, no playbook schema and no per-attorney personalization that carries across surfaces. Those gaps are where Spaarke adds value.
+
+**Microsoft's 20 Cowork skills, grouped by function** (each has a "Do NOT use for … use X instead" line pointing to its neighbours):
+
+| Group | Microsoft skills | Spaarke stance |
+|---|---|---|
+| Contract review and markup | `review-contract` (against a supplied playbook), `edit-contract` (tracked changes), `summarize-redlines` | **Microsoft-first.** Spaarke supplies the attorney's positions as the playbook. Exception: **NDA in Cowork routes to Spaarke `nda-review`** (packaged, script-checked output; owner-approved 2026-11-02, accelerator §5.7) |
+| Drafting from precedent | `draft-new-contract`, `create-playbook` | Microsoft-first. `create-playbook` is the onboarding route that turns precedents into a first-draft playbook |
+| Portfolio and extraction | `compare-key-terms`, `analyze-related-contracts`, `extract-obligations-and-deadlines` | Microsoft-first. Spaarke adds only where its data or engines differ (for example the accelerator's `nda-library-review` with playbook-rated cells) |
+| Document checks | `check-defined-terms`, `check-cross-references`, `check-execution-readiness` | Microsoft-first as **skills**. The synopsis's "deterministic checks (defined-term consistency, cross-references)" stay **inside** Spaarke functions as engines or eval assertions, never as competing skills |
+| Reasoning and writing | `legal-reasoning` (the neutral fallback), `draft-legal-memo`, `explain-legal-concepts`, `improve-legal-prompt` | Microsoft-first |
+| Litigation | `build-case-chronology` | Microsoft-first. The accelerator rejected a chronology accelerator as a duplicate |
+| Regulatory | `identify-regulatory-gaps`, `compare-across-jurisdictions` | Microsoft-first |
+| Governance and matters | `draft-minutes-and-resolutions`, `summarize-legal-matters` | Microsoft-first. Spaarke matter data could ground them later, through the connector |
+| **Not covered by Microsoft** | — | **Spaarke-owned functions:** NDA packaged review, legal hold review, legal intake, invoice review (accelerator wave 1), and all **IP practice** functions (patent claim drafting, office-action response, trademark clearance search, IP docketing). IP has the lowest collision risk |
+
+**Why Microsoft-first.** Microsoft's skills are first-party, come with the seat, and will keep improving. A Spaarke skill that competes with one of them risks three things:
+1. losing routing to it;
+2. confusing the attorney;
+3. being overtaken by Microsoft's next release.
+
+What we know about routing:
+- Copilot picks a skill by matching the request against enabled skills' descriptions. Accelerator test S9: "Review this NDA" went to `nda-review`, and "Review this MSA" went to Microsoft's `review-contract`.
+- Plugin skills **cannot override** a built-in of the same name.
+- Users cannot switch individual built-ins off.
+- Precedence when both plugins are on is not documented. Accelerator T-P2 / T-14 is still open.
+
+**Rules adopted program-wide** (from accelerator §5.7 and its non-overlap rules):
+1. **Microsoft first.** Before building any function, inventory what Microsoft Legal (Word + Cowork) and installed partners already do. Where Microsoft owns a task, Spaarke supplies **content** (the attorney's positions as a playbook), **data** (the connector) and **governance** (profile, gates, ledger), not a competing skill.
+2. **No name or primary-trigger collision** with a Microsoft legal or built-in skill. This is gated in the build (accelerator SC-10 and its lint; reuse that check, do not fork it).
+3. **Every Spaarke function description names its Microsoft neighbours** ("Do NOT use for MSAs — use review-contract"), the way Microsoft's own descriptions do.
+4. **Positions render to Microsoft's format.** The four-column contract-review playbook (Topic | Instructions | Example Text | Compromise Positions) is what Word's Legal plugin and `review-contract` read. An attorney's tuned positions (L3) are **exported** to that format. Tuning in Spaarke then improves Microsoft's skills for that attorney too, so every Microsoft upgrade to `review-contract` becomes an upgrade to the attorney's specialist.
+5. **Track Microsoft's catalogue.** Keep a dated snapshot of the Microsoft legal skills (name, description, version), currently the accelerator's `notes/legal-for-cowork-skills/` and its planned `knowledge/copilot-for-legal/` (K3). The collision gate runs against it. When Microsoft's version changes, refresh the snapshot. When a new or changed Microsoft skill overlaps a Spaarke function, record a decision: retire ours and keep our content feeding theirs, or keep ours with the differentiator written down. That differentiator must be packaged output, Spaarke data, deterministic verification, the per-attorney profile, or governance.
+
+**How this fits the persona layer (§3.9).** An archetype's function list may name **Microsoft functions** as well as Spaarke functions, for example a "commercial contracts counsel" = {Spaarke `nda-review`, Microsoft `review-contract` + the attorney's exported playbook, Microsoft `summarize-redlines`, …}. The profile then supplies positions to both kinds.
+
+What is not known is whether a Spaarke declarative agent can **invoke** Microsoft's skills:
+- A declarative agent carries only the skills in its own package (up to 8).
+- No source documents a custom agent or skill triggering a Legal for Cowork skill by name. Skill-to-skill hand-off is prose only, and the model's choice.
+
+So the persona agent may only be able to *recommend* the Microsoft skill. Phase 0 test **G6** (§8) settles this.
+
+**Differentiation that survives Microsoft's roadmap.** Per-attorney, governed positions with a ratchet and tested diffs; Spaarke matter and document data through the connector; verified deterministic output (engines checked by script); golden sets and audit; gated autonomy; and the IP practice. Generic legal reasoning, drafting from precedent and document checks are Microsoft's to own.
+
 ## 4. Program structure (OD-3)
 
 This folder is the umbrella. It holds this design, the decision log, the coordination register and the Phase 0 go/no-go record. It carries no implementation tasks of its own. Each phase is a child project registered under the same Epic. A child starts only after the previous gate passes.
@@ -168,7 +220,9 @@ This folder is the umbrella. It holds this design, the decision log, the coordin
 | 3 | `specialist-legal-agents-governance-r1` | Agent 365 plugin governance, background identity (after T-2), per-archetype budgets (ADR-016), dashboards, autonomous NDA intake (after T-1) | Owner and counsel sign-off on autonomy |
 | 4 | `specialist-legal-agents-archetypes-r1` | Second archetype (biotech patent associate + supervision protocol), CRE partner, L2 firm-policy editor, template distribution | — |
 
-Slugs are proposals, to be confirmed when each child is created. Phase 0's design is §7–§8 of this document. Next step: create the Phase 0 child folder with a `design.md` drawn from those sections, then run `/design-to-spec` on it.
+Slugs are proposals, to be confirmed when each child is created. Phase 0's design is §7–§8 of this document.
+
+**Gate A0, before any child starts:** alignment with spaarke-legal-ai-accelerator-r1 (§10.1, D-A14). Then create the Phase 0 child folder with a `design.md` drawn from §7–§8 and run `/design-to-spec` on it.
 
 ## 5. Scope boundaries
 
@@ -195,10 +249,10 @@ The inventory ran on 2026-11-23 against master `1aedc9ea74` (read-only `code-map
 | **Skill** | Exists (Skills), with worked examples | **Partial.** `sprk_analysisskill` with `PromptFragment` (`Services/Ai/AnalysisSkillService.cs:403`); siblings `AnalysisKnowledgeService` and `AnalysisToolService`. Separately, the accelerator `SKILL.md` skills (Cowork/Copilot) live on the accelerator branch, not master | No examples field on the skill model (Dataverse columns not checked). Two different things are both called "skill": the Scope-System `sprk_analysisskill` (a BFF prompt fragment) and the Agent Skills `SKILL.md` (a Copilot package component) | Decide which one the synopsis's Skill is. Probably both: `SKILL.md` in the package and `sprk_analysisskill` server-side (D-A10) |
 | **Tool** | Exists: BFF `IAiToolHandler`, exposed as MCP | **Partial: three separate surfaces, not one.** (1) `Services/Ai/IAiToolHandler.cs:13` has **one** implementation (`Services/Finance/Tools/FinancialCalculationToolHandler.cs:15`). (2) About 37 `IAnalysisToolHandler` handlers via `ToolHandlerRegistry`, wrapped for chat by `AgentToolCatalogProjector` / `ToolHandlerToAIFunctionAdapter`. (3) MCP: `Api/Mcp/McpEndpoints.cs:41,58` (`MapMcp`), `McpToolCatalog.cs`, `McpToolAuthorization.cs`, `Infrastructure/DI/McpModule.cs`, with 5 decision tools + 1 widget in `Api/Mcp/LegalOperations/Decisions/` | No file under `Api/Mcp` references `IAiToolHandler`, `IAnalysisToolHandler` or `ToolHandlerRegistry` | A profile "whitelists tools" across which surface? The MCP catalog is what Copilot sees; the analysis handlers are what playbooks run. Phase 0 inventory item I-1 |
 | **Knowledge Scope** | Exists (index v2) | **Partial.** RAG index `spaarke-discovery-index` (`Configuration/AiSearchOptions.cs:31`), records index `spaarke-records-index`, references index `spaarke-rag-references`. Filters in `Services/Ai/RagService.cs`: tenant (`:205`, `:1075`, `:1172`), `speFileId` (`:939`), `ParentEntityId` (`:1192`). Named scopes are `sprk_analysisknowledge` rows | "Index v2" matches nothing in code. Trimming is by tenant and optionally parent entity or document; **no per-user ACL trim in `RagService`** | Security trimming to the caller and ethical-wall combinations (L2) are not there today. That is a dependency on UAC (§10) |
-| **Position Library** | Extends Playbooks; `PlaybookExecutionEngine` is the execution path | **Playbooks exist; positions are absent in the BFF.** There is **no `PlaybookExecutionEngine`** (0 hits). The real path is `Services/Ai/PlaybookOrchestrationService.cs` (+ `IPlaybookOrchestrationService`, `NullPlaybookOrchestrationService`), with nodes via `Services/Ai/Nodes/AiAnalysisNodeExecutor.cs`; data `sprk_aiplaybook` / `sprk_playbooknode`; chat playbooks `Services/Ai/Chat/Playbooks/*.playbook.json` | No clause-position or per-attorney construct in `src/`. NDA positions exist as Markdown on the accelerator branch (`src/accelerators/practices/nda/positions/`, §9) | Position schema (position, fallbacks, rationale, owner, layer) and its binding into playbook nodes |
+| **Position Library** | Extends Playbooks; `PlaybookExecutionEngine` is the execution path | **Playbooks exist; positions are absent in the BFF.** There is **no `PlaybookExecutionEngine`** (0 hits). The real path is `Services/Ai/PlaybookOrchestrationService.cs` (+ `IPlaybookOrchestrationService`, `NullPlaybookOrchestrationService`), with nodes via `Services/Ai/Nodes/AiAnalysisNodeExecutor.cs`; data `sprk_aiplaybook` / `sprk_playbooknode`; chat playbooks `Services/Ai/Chat/Playbooks/*.playbook.json` | No clause-position or per-attorney construct in `src/`. NDA positions exist as Markdown on the accelerator branch (`src/accelerators/practices/nda/positions/`, §9) | **Do not invent a new schema.** Adopt the accelerator's content model (§10.1): positions are keyed by `topics.yaml` topic IDs and written in its legal playbook format; outputs use its review-result schema. At T3 the master is the ontology project's **Policy versions**, exported to the Markdown and four-column `.docx` files that Cowork and Word read (accelerator §6.2). Binding into playbook nodes follows from that |
 | **Authority and Gate Policy** | Exists; needs per-profile binding | **Exists, but hard-coded rather than policy-driven.** "The ONE Confirmation Gate": `Services/Ai/Chat/SideEffectGateAIFunction.cs:13`; `PendingPlanManager.cs:172` `RequiresConfirmation(ToolSideEffectClass?, BindingRisk, bool)`; `Services/Ai/Chat/Gate/GateRiskProfile.cs`; `PublicContracts/DecisionGateTier.cs`, `GateDecisionV2.cs`; `Services/Signals/GateDecisionRecordJob.cs` | The gate is a static function of the tool's `sprk_sideeffectclass` + `BindingRisk`. It fails closed, but takes no per-user, per-profile or per-tenant policy input. Whether the chat gate also covers MCP-invoked tools is not shown. MCP writes are gated by the widget's own Confirm (T3) | A policy input (L0–L4 ratchet) to the gate, the same gate on the MCP path, and an autonomy ceiling |
 | **Supervision Protocol** | `[PROPOSED]`, Agent Framework workflow | **Absent.** `Microsoft.Agents.AI` (Agent Framework) was **removed** from the BFF on 2026-09-29 (#1027, zero call sites; `Sprk.Bff.Api.csproj:66–76`). The M365 Agents SDK (`Microsoft.Agents.Hosting.AspNetCore` 1.0.1) and `Microsoft.Extensions.AI` 10.11.0 remain | No delegation or supervisor workflow code | Moves to Phase 4 with the patent associate (OD-2). Re-adding Agent Framework goes back through `agent-framework-fit-assessment-r1` (§10) |
-| **Golden Set** | Exists; needs per-agent scoping | **Exists, global and per-capability.** CI "Eval Gate (Golden Utterances)" in `.github/workflows/ci-tier1-blocking.yml:674–702` (`Category=GoldenUtteranceEval`); 15 suites in `tests/integration/contract/Eval/*`, including **`NdaReviewDispatchEvalTests`**; `tests/unit/Sprk.Bff.Api.Tests/Eval/PredictMatterCostEvalHarnessTests.cs`. Accelerator NDA eval corpus (4 documents + expected outputs) on the accelerator branch | No per-agent or per-owner golden-set concept, and no data-driven registry: suites are code | Per-agent golden set as data (owner-promotable cases), runnable on a profile diff outside CI |
+| **Golden Set** | Exists; needs per-agent scoping | **Exists, global and per-capability.** CI "Eval Gate (Golden Utterances)" in `.github/workflows/ci-tier1-blocking.yml:674–702` (`Category=GoldenUtteranceEval`); 15 suites in `tests/integration/contract/Eval/*`, including **`NdaReviewDispatchEvalTests`**; `tests/unit/Sprk.Bff.Api.Tests/Eval/PredictMatterCostEvalHarnessTests.cs`. Accelerator NDA eval corpus (4 documents + expected outputs) on the accelerator branch | No per-agent or per-owner golden-set concept, and no data-driven registry: suites are code | Per-agent golden set as data (owner-promotable cases), runnable on a profile diff outside CI. Seed from the accelerator's per-practice eval sets (`practices/<p>/evals`, rubric in its §13) and keep its **cross-surface gate** (§6.5 there: the same corpus through Cowork and the Spaarke Action must agree), rather than a second fixture set |
 | **Run Ledger** | Exists (session ledger), Dataverse + Cosmos | **Exists, but session-scoped and erasable.** `Models/Ai/Chat/SessionLedgerEntries.cs:32` (ADR-040): `SessionOutput`, `SessionToolChain`, `SessionToolCall`, `SessionWidgetEvent`, `SessionGate`, `SessionContextFingerprint`. Redis hot, Cosmos warm (`Services/Ai/Sessions/StoredLedgerEntries.cs`), Dataverse cold | No profile-version or reviewer-action fields found. ADR-040 makes the ledger **Tier 3, GDPR-erasable, per session**. That is not the synopsis's "immutable, exportable for a regulator" record (T-3) | Profile version + owner + reviewer action on every run; a durable record (the Decision Record?) that does not depend on session erasure |
 
 **Declarative agents in the repo.** On master there is one: `src/solutions/CopilotAgent/declarativeAgent.json` ("Spaarke AI", general legal ops, no NDA content). The NDA Review / Legal Review / Legal Hold Review agents and the `nda-review` / `nda-library-review` / `legal-hold-review` skills seen in the tenant's Plugins page were built on the accelerator r1 branch (`src/accelerators/`, not merged), §9.
@@ -260,6 +314,12 @@ Phase 0 covers only what §7 leaves open. Each item names its pass condition. G1
 - *If it fails:* the front door falls back to one agent per function, with the persona kept server-side as profile only.
 - This decides D-A12's delivery shape, not the go/no-go.
 
+**G6 — Coexistence with Microsoft's legal plugins (§3.10).** With Legal for Cowork on, run the persona agent and Spaarke skills together. This extends accelerator T-P2 / T-14; reuse its prompt set rather than building a second one.
+- *Measure:* the share of prompts that reach the intended owner (Spaarke or Microsoft) in Chat and Cowork, and whether a Spaarke declarative agent can invoke or hand off to a Microsoft skill (`review-contract`, `summarize-redlines`).
+- *Also check* that an exported attorney playbook is honoured by Microsoft's `review-contract` and by Word's Run Review.
+- *Pass:* no Spaarke function captures a Microsoft-owned task, and no Microsoft skill captures a Spaarke-owned one, across the shared prompt set.
+- This decides whether personas compose Microsoft functions directly or only recommend them (D-A13).
+
 **Code inventory follow-ups (no spike; Phase 0 desk work):**
 - **I-1 Tool surface:** which surface the profile governs (MCP catalog vs `IAnalysisToolHandler` vs `IAiToolHandler`), and whether the chat Confirmation Gate (`SideEffectGateAIFunction`) also applies on the MCP path.
 - **I-2 Gate policy input:** can `RequiresConfirmation` take a policy argument (the ratchet) without forking the one gate, given ADR-039 "one dispatch protocol".
@@ -283,7 +343,7 @@ Phase 0 covers only what §7 leaves open. Each item names its pass condition. G1
 
 | Project | Overlap | What we need, or must not break |
 |---|---|---|
-| **spaarke-legal-ai-accelerator-r1** (worktree `spaarke-wt-spaarke-legal-ai-accelerator-r1`, PR #2528) | NDA and Legal Hold agents and skills, NDA positions and evals, the `accelerator-setup` tailoring step, four-tier packaging with declarative agents in the advanced tiers | Agree the **naming rule**: plugin `spaarke-{area}`, skills `spaarke-{area}-{capability}` (core drops the area), MCP tools `spaarke_{verb}_{object}`, build gate `^spaarke(-[a-z0-9]+)+$` ≤ 64 chars. Agree who owns the NDA declarative agent and how a file-based (T0/T1) accelerator relates to a profile-driven specialist. Reuse positions and evals rather than fork them |
+| **spaarke-legal-ai-accelerator-r1** (worktree `spaarke-wt-spaarke-legal-ai-accelerator-r1`, PR #2528, Desktop session `acclerator-r1`) | **Source of every existing NDA capability** and of the Microsoft-legal research; see **§10.1**, which is a gate for this program | See §10.1 |
 | **spaarke-legal-ai-accelerator-claude-r2** | Claude for Legal research (practice plugins, tailoring interviews, watcher templates) | Synopsis's "borrow and benchmark" item. Check licence terms and quality there, not here |
 | **spaarkeai-mcp-bff-api-r1** (PR #2587) | The single `/mcp/{area}` connector host; **ADR-028 A10** connector auth (OBO as caller, `systemuser` only); **task 040** plugin package + skill (held on T2/T14/T10); naming O-25; T13 route-per-area; widget budget | All specialist tools go on that host. No second MCP server (the synopsis also wants the two existing entries consolidated). Phase 0 G2/G3 build on 040 and T13 rather than duplicating them. Record T2/T14 from mcp-r1's results |
 | **ai-spaarke-action-engine-r1** (ON HOLD, Issue #435) | Archetype = Template, Agent Instance = Action (synopsis) | Its resumption trigger (redesign-r1 G-P3) has passed and it waits on an owner go. D-A9: resume it, or let Phase 1 define Archetype independently and have the Action Engine adopt it |
@@ -292,6 +352,45 @@ Phase 0 covers only what §7 leaves open. Each item names its pass condition. G1
 | **agent-framework-fit-assessment-r1** (COMPLETE, `docs/assessments/agent-framework-fit-assessment-2026-06-03.md`) | Supervision protocol "on Microsoft Agent Framework"; the BFF removed `Microsoft.Agents.AI` (#1027) | Any re-adoption (Phase 4) cites that assessment and passes BFF hygiene §10 (publish-size delta, CVE) |
 | **unified-access-control-r2** (Issue #808, in progress) | **Entra Agent ID** for background agents and any ADR-028 change; ethical walls and scope trimming (L2); per-user knowledge trimming (I-4) | Auth ADR amendments go through its owners. Ethical walls build on its access model, not a parallel one |
 | spaarke-ai-architecture-redesign-r1 / r2 (r1 COMPLETE) | One confirmation gate, Binding capability model, ADR-039 | The profile feeds the existing gate and catalogs. No second gate or dispatch path |
+
+### 10.1 Alignment with spaarke-legal-ai-accelerator-r1 (gate A0, before Phase 0)
+
+**Status: not yet aligned.** This program must not start Phase 0 until the accelerator session has reviewed this section and the open questions below are answered. The accelerator is where the NDA capability, the Microsoft-legal research and the content model already live. This program is its **T2/T3 continuation**, not a parallel effort. The detailed brief is [notes/accelerator-alignment-2026-11-23.md](notes/accelerator-alignment-2026-11-23.md).
+
+**How the two fit (proposed).** The accelerator's strategy defines four tiers:
+
+| Tier | Who sets it up | Runtime | Owner |
+|---|---|---|---|
+| T0 individual, T1 team | Attorney or practice team | Files and skills on Microsoft's runtime | Accelerator |
+| T2 firm or department | Customer IT + Spaarke | Admin-deployed package + the **Spaarke connector** | Shared: accelerator content, this program's runtime and connector tools |
+| T3 Spaarke platform | Spaarke engagement | The platform: Policy versions, matters, Decision Record | **This program** (with ontology) |
+
+This program is the governed runtime behind T2 and T3. The attorney profile, positions, functions and evals are **the same content at every tier**, rendered for each surface (accelerator §6 "one content model, three surfaces").
+
+**What this program adopts from the accelerator, instead of designing anew:**
+
+| Accelerator asset | Where it lives | Use here |
+|---|---|---|
+| Microsoft-legal boundary research, the 20-skill inventory, "Microsoft first" non-overlap rules, skill design rules, the name-collision lint | design §2.4, §5.2a, §5.7; `notes/legal-for-cowork-skills/` | §3.10 adopts them program-wide |
+| One content model: `topics.yaml` topic IDs, legal playbook format, **review-result schema**, version stamp, **one customer master** | design §6, §5.3 | Positions (§6 row) and run outputs use them. The synopsis's "Position Library" = topic-keyed positions in this model |
+| **Attorney profile** `Documents/Cowork/Profile/legal-profile.md` (practice, usual side, posture, defaults), written by `accelerator-setup` | design §5.3, §8.1a | The **seed of the L3 owner profile**. At T3 Spaarke holds the master and exports this file, so T0/T1 skills read the same profile |
+| Onboarding `accelerator-setup` (role, practice, side, toggle set per role) | design §8.1a | The tailoring interview for an Agent Instance. Note the accelerator already gives a **recommended toggle set per role**: a persona idea at T0/T1 |
+| **Specialist reviewers** (§5.8a): specialist panel inside a skill (T0/T1); **specialist as a server-side agent** via the connector (T2) | design §5.8a | The T2 pattern *is* this program's runtime. The specialist roster files become archetype content (§3.9) |
+| NDA practice: positions, eval corpus (incl. an injection case) + rubric, `nda-review` / `nda-library-review` / `accelerator-setup` skills, engines (`ooxml_redline` etc.) | `src/accelerators/practices/nda/`, `core/` | Phase 1 NDA content and golden-set seed (§9) |
+| **Skills first** (owner, 2026-11-12): agents review in chat only, never build redlines, point to the skill; enforced by the package build | `notes/copilot-app-components.md` | Holds for T0–T2 agents. At T3 the redline can come from the BFF engine (G1 variant c), which the accelerator already plans ("engines exist twice", tested on the same fixtures) |
+| Four-tier package (2026-11-19): agents only in the advanced tiers; the **team-with-IT** tier has admin-deployed packaged agents | `notes/accelerator-components-by-surface.md` | The area agent of §3.9 is a candidate for exactly that tier (question Q1) |
+| Naming: plugin `spaarke-{area}`, skills `spaarke-{area}-{capability}`, tools `spaarke_{verb}_{object}`, build gate `^spaarke(-[a-z0-9]+)+$` | OD-20/OD-42, shared with mcp-r1 | Adopted |
+| T2 connector tool list (`spaarke_find_documents`, `spaarke_get_document`, `spaarke_log_analysis` taking the review-result schema, `spaarke_matter_card`, …) | design §10 | `spaarke_log_analysis` is the natural input to this program's run record (§6 Run Ledger, T-3) |
+
+**Questions for the accelerator session (answer before Phase 0):**
+- **Q1.** Is the team-with-IT tier's admin-deployed packaged agent the same thing as this program's area agent (§3.9), or something separate? Who owns the NDA declarative agent (D-A11)?
+- **Q2.** Agree that the T3 positions master is the ontology Policy versions, exporting to the legal playbook and four-column `.docx` files? And that the L3 owner profile is a superset of `legal-profile.md`?
+- **Q3.** Is there a written schema for `legal-profile.md` and `topics.yaml` we should version against, or is that still forming?
+- **Q4.** Can the NDA eval corpus and rubric seed the per-agent golden set as is? Which parts are off-limits to the repo or the BFF (the `answer-key/` rule; the excluded real NDAs)?
+- **Q5.** Status of T-P2 / T-14 (routing with Legal for Cowork on). Should G6 extend it, or wait for it?
+- **Q6.** Does the skills-first rule extend to T2/T3, or only to agents without server-side tools?
+- **Q7.** Who keeps the Microsoft legal catalogue snapshot current (K3 `knowledge/copilot-for-legal/`), and should the collision lint move to a shared place both projects run?
+- **Q8.** Do the four-tier package and this program's phases need one roadmap, given the accelerator design body is still being revised to the four tiers?
 
 ## 11. ADR tensions (root CLAUDE.md §6.5)
 
@@ -321,6 +420,8 @@ The paths are proposals. The human chooses the path for each tension before the 
 | D-A9 | Archetype vs Action Engine Template | Phase 1 defines Archetype minimally; the Action Engine adopts it if and when it resumes | Owner, with action-engine-r1 |
 | D-A10 | What "Skill" means here | Both: the `SKILL.md` package component (shared with the accelerator) and server-side `sprk_analysisskill` prompt fragments; name them differently in the spec | Phase 0 spec |
 | D-A11 | Ownership of the NDA declarative agent | This program owns the profile-driven NDA specialist; the accelerator keeps file-based tiers. To agree with accelerator r1 | Owner + accelerator r1 |
+| **D-A13** | **Microsoft's legal skills (§3.10)** | Microsoft-first program-wide: Spaarke adds content (exported positions), data (connector) and governance where Microsoft owns a function; Spaarke-owned functions only where Microsoft has none (NDA packaged output, legal hold, intake, invoice review, IP); collision gate + catalogue snapshot; G6 decides whether personas compose or only recommend Microsoft skills | **Owner**, with accelerator r1 |
+| **D-A14** | **Alignment gate A0 (§10.1)** | Phase 0 waits until the accelerator session has reviewed §10.1 and Q1–Q8 are answered | **Owner** |
 | **D-A12** | **Framing: function, persona, or both (§3.9)** | Both, in layers: functions (skill + Action, with golden set and position schema) are the machinery; archetypes (persona) are configuration and the Chat front door; instances are per attorney. One agent per **practice area**, with role as a profile dimension; validate routing in G5 | **Owner.** Proposed 2026-11-23, not yet decided |
 
 ## 13. Market position `[Synopsis]`, summary
