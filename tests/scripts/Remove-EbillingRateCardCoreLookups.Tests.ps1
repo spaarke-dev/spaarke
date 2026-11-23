@@ -801,7 +801,8 @@ Describe 'the attestation scan (T6): the deployed source must not select the thr
             return (& git -C $script:Repo rev-parse HEAD).Trim()
         }
         Invoke-TestGit init -q
-        $script:Spa = @{ 'src/client/x.ts' = 'export const a = 1;'; 'src/solutions/y.ts' = 'export const b = 2;' }
+        $script:Wr = @{ 'src/dataverse/webresources/a.js' = 'var a = 1;'; 'src/dataverse/solutions/SpaarkeMaster/WebResources/b.js' = 'var b = 2;' }
+        $script:Spa = @{ 'src/client/x.ts' = 'export const a = 1;'; 'src/solutions/y.ts' = 'export const b = 2;' } + $script:Wr
 
         # A BFF whose code touches the table and the matter table in different files, as the real one does: must not fire.
         $script:Clean = New-Commit ($script:Spa + @{
@@ -819,11 +820,14 @@ Describe 'the attestation scan (T6): the deployed source must not select the thr
             'src/server/Nav.cs'             = 'var rel = "sprk_workassignment_ratecard_workassignment";'
             'src/server/Ok.cs'              = 'var x = 1;'
         })
-        $script:SpaReads = New-Commit @{
-            'src/server/Ok.cs'              = 'var x = 1;'
+        $script:SpaReads = New-Commit (@{
+            'src/server/Ok.cs'             = 'var x = 1;'
             'src/client/RateCards.tsx'      = 'fetch("/sprk_ratecards?$select=sprk_name,_sprk_matter_value");'
             'src/solutions/y.ts'            = 'export const b = 2;'
-        }
+        } + $script:Wr)
+        $script:WebResourceReads = New-Commit ($script:Spa + @{
+            'src/dataverse/webresources/sprk_RateCardForm.js' = 'Xrm.WebApi.retrieveMultipleRecords("sprk_ratecard", "?$select=sprk_name,_sprk_project_value");'
+        })
         $script:NoSolutions = New-Commit @{ 'src/server/Ok.cs' = 'var x = 1;'; 'src/client/x.ts' = 'export const a = 1;' }
     }
 
@@ -861,11 +865,23 @@ Describe 'the attestation scan (T6): the deployed source must not select the thr
         @(Get-ReaderProblems $script:SpaReads $BffScanPaths '-BffDeployAttestation').Count | Should -Be 0
     }
 
+    It 'scans the web resources under src/dataverse too: a form script that selects the table and a column is refused (K2), a clean one is not' {
+        $RepoRoot = $script:Repo
+        $p = @(Get-ReaderProblems $script:WebResourceReads $SpaScanPaths '-SpaDeployAttestation')
+        $p.Count | Should -Be 1
+        $p[0] | Should -BeLike '*src/dataverse/webresources/sprk_RateCardForm.js*'
+        @(Get-ReaderProblems $script:Clean $SpaScanPaths '-SpaDeployAttestation').Count | Should -Be 0
+        $SpaScanPaths | Should -Contain 'src/dataverse/webresources'
+        $SpaScanPaths | Should -Contain 'src/dataverse/solutions/SpaarkeMaster/WebResources'
+    }
+
     It 'refuses a path that does not exist at the commit, so the scan cannot pass vacuously' {
         $RepoRoot = $script:Repo
         $p = @(Get-ReaderProblems $script:NoSolutions $SpaScanPaths '-SpaDeployAttestation')
-        $p.Count | Should -Be 1
-        $p[0] | Should -BeLike '*src/solutions does not exist at that commit*'
+        $p.Count | Should -Be 3
+        ($p -join '|') | Should -BeLike '*src/solutions does not exist at that commit*'
+        ($p -join '|') | Should -BeLike '*src/dataverse/webresources does not exist at that commit*'
+        ($p -join '|') | Should -BeLike '*SpaarkeMaster/WebResources does not exist at that commit*'
     }
 
     It 'refuses an unknown sha and a malformed one' {

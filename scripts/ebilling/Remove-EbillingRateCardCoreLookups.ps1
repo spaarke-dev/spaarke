@@ -59,11 +59,15 @@
       2. no file that names the rate card table (sprk_ratecard / sprk_ratecards / RateCardEntity) also names one of the three columns
          (sprk_matter, sprk_project, sprk_workassignment, or their _..._value filter spelling).
     Scanned paths: -BffDeployAttestation src/server; -SpaDeployAttestation src/client and src/solutions (the external SPA, the shared UI
-    library and the code pages). Rule 2 is a file-level heuristic: it can refuse a file that names both for an unrelated reason (the
-    refusal names the file; fix or reword it), and it cannot see a reader that reaches the table through a name it never spells. Limit,
-    stated plainly: a code page deployed from an older commit than the attested one is not covered; the owner confirms every deployed
-    surface is at or after the attested commit. A path that does not exist at the commit is refused (a missing path would pass the
-    scan vacuously).
+    library and the code pages) and the two web resource folders under src/dataverse (webresources and
+    solutions/SpaarkeMaster/WebResources: form scripts and HTML web resources that Dataverse serves). Limits, stated plainly:
+      - Rule 2 is a file-level heuristic: it can refuse a file that names both for an unrelated reason (the refusal names the file; fix
+        or reword it);
+      - it cannot see a reader that reaches the table or a column through a name it never spells in one file (a constant defined in
+        another file, a name assembled at run time);
+      - a code page or web resource deployed from an older commit than the attested one is not covered; the owner confirms every deployed
+        surface is at or after the attested commit.
+    A path that does not exist at the commit is refused (a missing path would pass the scan vacuously).
 
     Every Dataverse Web API call goes through EbillingSchema.psm1 (Consistency: Strong, #2833).
 
@@ -143,7 +147,7 @@ $RelationshipNamesRegex = 'sprk_matter_ratecard_matter|sprk_project_ratecard_pro
 $RateCardMentionRegex = 'sprk_ratecards?([^A-Za-z0-9_]|$)|RateCardEntity'
 $CoreColumnMentionRegex = '(^|[^A-Za-z0-9])sprk_(matter|project|workassignment)([^A-Za-z0-9]|$)'
 $BffScanPaths = @('src/server')
-$SpaScanPaths = @('src/client', 'src/solutions')
+$SpaScanPaths = @('src/client', 'src/solutions', 'src/dataverse/webresources', 'src/dataverse/solutions/SpaarkeMaster/WebResources')
 $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 
 # ---------------------------------------------------------------------------------------------------------------
@@ -576,7 +580,7 @@ Write-Host ''
 try {
     $refusals = @(Get-PreflightRefusals ([bool]$Apply) $DryRun $OwnerApproval $BffDeployAttestation $SpaDeployAttestation $EnvironmentUrl)
     if ($refusals.Count -gt 0) { throw [EscalationException]::new("Refusing to apply: $($refusals.Count) reason(s): $($refusals -join '; '). Nothing was changed.") }
-    if ($Apply) { Write-Host "Pre-flight (git only, before any Dataverse call) passed: -BffDeployAttestation $BffDeployAttestation (src/server), -SpaDeployAttestation $SpaDeployAttestation (src/client, src/solutions)" -ForegroundColor Green }
+    if ($Apply) { Write-Host "Pre-flight (git only, before any Dataverse call) passed: -BffDeployAttestation $BffDeployAttestation (src/server), -SpaDeployAttestation $SpaDeployAttestation (src/client, src/solutions, the web resources under src/dataverse)" -ForegroundColor Green }
 
     $null = Initialize-EbillingSchema -EnvironmentUrl $EnvironmentUrl -SolutionUniqueName 'SpaarkeMaster' -DryRun:$DryRun -Entity $Table
     Invoke-Retirement ([bool]$Apply) ([bool]$Verify) $DryRun $OwnerApproval ([bool]$AllowPendingCollateral)
