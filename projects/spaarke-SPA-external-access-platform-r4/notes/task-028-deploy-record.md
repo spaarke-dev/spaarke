@@ -80,6 +80,32 @@ FR-11 and FR-13 can both be checked in this round; neither is deferred.
 
 So the Information field SHOULD show "The client is reviewing this invoice." It doesn't. That is a defect, F1, in task 020's code.
 
+**Server side of round 1** (uac-r2's readout, BFF `9df4e5c819`, 14:59–15:45Z):
+
+- 50 external requests, all 2xx: 48 × 200, 1 × 201, 1 × 204.
+- None of these occurred:
+  - 403s on `/documents`, `/invoices`, `/invoices/{id}/files` or grid config;
+  - `DV_FETCHXML_COLUMN_NOT_PERMITTED`;
+  - 5xx responses;
+  - exceptions.
+- Response times, p50 / p90 in ms:
+
+  | Route | p50 | p90 | Note |
+  |---|---|---|---|
+  | `dataverse/fetch` | 956 | 1553 | n = 19 |
+  | metadata | 530 | 728 | |
+  | `/me` | 720 | 1118 | |
+  | project documents | 1155 | 1411 | |
+  | notifications | 2459 | 2575 | #2845 not met yet |
+  | upload | 4657 | — | single request |
+  | delete | 6479 | — | single request |
+
+- Not R4's: IDX40001 Error-level traces on every partner request (the ExternalCollaboration policy tries the non-matching schemes). They existed before R4, and the requests are unaffected. Filed as #3003 (uac-r2).
+
+**Fix round:** PR #3000 has both fixes, the option-set value shape and the DataGrid column resize. One adversarial review found two F1s in the first resize fix, and both are fixed.
+
+**Round 2** runs on BFF `a48398746d` (uac-r2 swap, owner-named SHA) after the SPA redeploy.
+
 Likely cause: the record and the Invoices-section rows come from the module fetch seam. `FetchService.ProjectEntity` passes SDK values through as objects, so `statuscode` arrives as the serialised `OptionSetValue`, about `{"value":1,...}`. The status label still shows because `formatDetailValue` uses `@formattedValues`. But `reviewDetail.ts` `wholeNumberOf` accepts only a number or a digit string, so the gate always answers blank. The task 020 tests used a bare `statuscode: 1`, so they never saw the live shape.
 
 The same gate feeds all four render points: the grid cell, the section line, the header line and Information. So a real review detail value would be hidden everywhere too. The BFF-side gate (`ExternalInvoiceReviewDetail.IsInReview`) does handle `OptionSetValue`, so the server is right; the SPA is not.
