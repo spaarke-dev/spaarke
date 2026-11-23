@@ -58,7 +58,9 @@ public class WriterOnlyTablesDeleteGuardTests
         // ebilling-r1 task 117 (O-17): uac-r2 core-record-delete design §14 — "an assignment row left with no core lookup ... is removed by
         // ebilling's O-17 sweep". uac-r2 to agree this entry in its review of the 117 hand-off.
         (typeof(Sprk.Bff.Api.Services.Finance.Procedures.ProcedureAssignmentService), "DeleteOrphanAssignmentsAsync",
-            "Removes a sprk_procedureassignment row (AssignmentTable) left with every core lookup null, after a re-read (the O-17 sweep, task 117)."),
+            "Removes a sprk_procedureassignment row (AssignmentTable) left with every core lookup null, after a re-read (the O-17 sweep, task 117). "
+            + "ADR-002: no plugin cleans up after a core-record delete, so the BFF's scheduled sweep does; uac-r2 core-record-delete design §14 "
+            + "(projects/unified-access-control-r2/notes/core-record-delete-design.md) assigns this delete to ebilling's O-17 sweep."),
         (typeof(Sprk.Bff.Api.Services.Finance.RateCardImportService), "CompensateAsync",
             "Rolls back rate-card rows this import just created; the tables are the import's own."),
         (typeof(Sprk.Bff.Api.Services.Finance.RuleSetService), "CreateDraftRuleAsync",
