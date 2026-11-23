@@ -136,7 +136,6 @@ using Sprk.Provisioning.ControlPlane.Handlers.SecureRecordSetup;
 using Sprk.Provisioning.ControlPlane.Handlers.UserProvisioning;
 using Sprk.Provisioning.ControlPlane.Models;
 using Sprk.Provisioning.ControlPlane.Modules;
-using Sprk.Provisioning.ControlPlane.Registry;
 using Sprk.Provisioning.ControlPlane.Repositories;
 using Sprk.Provisioning.ControlPlane.Rollback;
 
@@ -651,8 +650,10 @@ public static class RunsEndpoints
         //     recovery path (H13 marks Resumable but Cosmos still carries the
         //     wrong environmentId).
         //   - CustomerId mismatch → same cross-customer bleed risk.
-        //   - SetupStatus != InProgress → row is already finalized (Ready)
-        //     or in a rollback state; a second run should never overwrite it.
+        //   - A finalized (Ready) or rollback-state row overwritten by accident.
+        //     ISS-031: a row with sprk_provisionedon set is admitted (Ready or
+        //     InProgress) only with intake upgradeOfProvisionedOn equal to it;
+        //     a never-provisioned row only when InProgress (RegistryRunAdmissionRule).
         //
         // Best-effort: a registry lookup infra fault (client throws) is treated
         // as inconclusive — CreateRun proceeds so the operator isn't blocked
@@ -662,7 +663,6 @@ public static class RunsEndpoints
         // when the registry is degraded — Cosmos write + audit trail are the
         // fallback source of truth. Null-Object registry (P2 fallback per
         // ADR-032) returns null → the strict check is skipped (WARN in logs).
-        string? readyRowToMove = null;
         try
         {
             var snapshot = await registryClient
@@ -685,18 +685,12 @@ public static class RunsEndpoints
                         $"'{snapshot.CustomerId}', not requested customer '{request.CustomerId}' " +
                         "(§4D I1 cross-customer bleed guard).");
                 }
-                // ISS-031: status + upgrade acknowledgement in one rule (RegistryRunAdmissionRule).
-                request.NonSecretParameters.TryGetValue(IntakeParameterCatalog.ProvisionedOn, out var intakeProvisionedOn);
+                // ISS-031: status + existing-stamp acknowledgement in one rule (RegistryRunAdmissionRule). An admitted row is
+                // left as it is: H13 sets Ready whatever it says, and nothing would move a live stamp back from InProgress.
+                request.NonSecretParameters.TryGetValue(IntakeParameterCatalog.UpgradeOfProvisionedOn, out var acknowledgedProvisionedOn);
                 var admission = Sprk.Provisioning.ControlPlane.Core.Models.RegistryRunAdmissionRule.Evaluate(
-                    snapshot.SetupStatus, snapshot.ProvisionedOn, intakeProvisionedOn);
-                if (admission is Sprk.Provisioning.ControlPlane.Core.Models.RegistryRunAdmission.Admit admit)
-                {
-                    if (admit.MoveToInProgress)
-                    {
-                        readyRowToMove = snapshot.EnvironmentId;
-                    }
-                }
-                else
+                    snapshot.SetupStatus, snapshot.ProvisionedOn, acknowledgedProvisionedOn);
+                if (admission is not Sprk.Provisioning.ControlPlane.Core.Models.RegistryRunAdmission.Admit)
                 {
                     _ = await runGuard.ReleaseAsync(request.CustomerId, runId, cancellationToken).ConfigureAwait(false);
                     var (errorCode, detail) = admission switch
@@ -736,8 +730,17 @@ public static class RunsEndpoints
                     request.EnvironmentId);
             }
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
+            // The caller went away after the guard was acquired: release it (not with the cancelled token) so the
+            // customer is not blocked by a guard naming a run that was never written (ISS-031 review).
+            _ = await runGuard.ReleaseAsync(request.CustomerId, runId, CancellationToken.None).ConfigureAwait(false);
+            throw;
+        }
+        catch (Exception ex)
+        {
+            // An HttpClient timeout surfaces as a TaskCanceledException with the caller's token NOT cancelled: it is an
+            // infra fault like any other, not a cancellation (ISS-031 review — it used to escape as a 500 holding the guard).
             // Registry-lookup infra fault — do NOT block CreateRun. Cosmos +
             // audit trail are the fallback source of truth; the concurrency
             // guard prevents dual-dispatch even if the strict check was
@@ -745,56 +748,6 @@ public static class RunsEndpoints
             logger.LogWarning(ex,
                 "CreateRun: REG-07 registry lookup infra fault for environmentId={EnvironmentId} — proceeding without strict check.",
                 request.EnvironmentId);
-        }
-
-        // ISS-031: an acknowledged upgrade of a Ready stamp — this endpoint is the one owner of Ready → InProgress
-        // (H13 moves it back to Ready). Fail closed: if the move does not land, refuse rather than run against a row that
-        // still says Ready. Before the Cosmos write, so a refusal leaves nothing behind; if the Cosmos write fails after
-        // it, the row is InProgress with the same provisionedOn and a retry is admitted without another move.
-        if (readyRowToMove is not null)
-        {
-            RegistryUpdateOutcome moveOutcome;
-            try
-            {
-                moveOutcome = await registryClient.UpdateSetupStatusAsync(
-                    new RegistrySetupStatusUpdate(
-                        readyRowToMove,
-                        Sprk.Provisioning.ControlPlane.Core.Models.RegistryRunAdmissionRule.InProgressStatus,
-                        ClearCurrentRunId: false,
-                        CustomerIdForLog: request.CustomerId,
-                        RunIdForLog: runId),
-                    cancellationToken).ConfigureAwait(false);
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException)
-            {
-                moveOutcome = new RegistryUpdateOutcome.Failure($"{ex.GetType().Name}: {ex.Message}");
-            }
-
-            if (moveOutcome is not RegistryUpdateOutcome.Success)
-            {
-                _ = await runGuard.ReleaseAsync(request.CustomerId, runId, cancellationToken).ConfigureAwait(false);
-                var why = moveOutcome switch
-                {
-                    RegistryUpdateOutcome.NotFound nf => nf.Diagnostic,
-                    RegistryUpdateOutcome.Failure f => f.Diagnostic,
-                    _ => moveOutcome.GetType().Name,
-                };
-                logger.LogWarning(
-                    "CreateRun: 502 — upgrade could not move the registry row Ready → InProgress. CustomerId={CustomerId} " +
-                    "EnvironmentId={EnvironmentId} Diagnostic={Diagnostic}",
-                    request.CustomerId, readyRowToMove, why);
-                return ControlPlaneProblems.Create(
-                    httpContext,
-                    StatusCodes.Status502BadGateway,
-                    ControlPlaneErrorCodes.RegistryUpgradeTransitionFailed,
-                    $"REG-07: the upgrade was acknowledged, but the registry row '{readyRowToMove}' could not be moved " +
-                    $"from Ready to InProgress ({why}). Nothing was started; retry when the registry is reachable.");
-            }
-
-            logger.LogInformation(
-                "CreateRun: upgrade acknowledged — registry row moved Ready → InProgress. CustomerId={CustomerId} " +
-                "EnvironmentId={EnvironmentId} RunId={RunId}",
-                request.CustomerId, readyRowToMove, runId);
         }
 
         var run = new ProvisioningRun
