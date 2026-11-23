@@ -217,7 +217,9 @@ describe('InvoiceView — the core record starts where the email is filed', () =
     async () => {
       const loadFirms = jest.fn(async () => [{ firmId: FIRM_ID, name: 'Firm F' }]);
       render(view({ filedRecord: MATTER, loadFirms }));
-      expect(await screen.findByText('This email is filed to this record in Spaarke.')).toBeInTheDocument();
+      expect(
+        await screen.findByText('A saved copy of this email is filed to this record in Spaarke.')
+      ).toBeInTheDocument();
       await waitFor(() => expect(loadFirms).toHaveBeenCalledWith({ entityType: 'Matter', entityId: MATTER_ID }));
       // The only linked firm is chosen, so only the invoice number is still needed.
       expect(await screen.findByText(/Still needed: the firm's invoice number\./)).toBeInTheDocument();
@@ -231,7 +233,9 @@ describe('InvoiceView — the core record starts where the email is filed', () =
       const { rerender } = render(view({ filedRecord: null }));
       expect(screen.queryByTestId('invoice-filed-record-note')).toBeNull();
       rerender(view({ filedRecord: MATTER }));
-      expect(await screen.findByText('This email is filed to this record in Spaarke.')).toBeInTheDocument();
+      expect(
+        await screen.findByText('A saved copy of this email is filed to this record in Spaarke.')
+      ).toBeInTheDocument();
     },
     TIMEOUT
   );
@@ -246,11 +250,11 @@ describe('InvoiceView — the core record starts where the email is filed', () =
       await userEvent.click(screen.getByRole('button', { name: 'Search' }));
       await userEvent.click(await screen.findByRole('button', { name: 'Select this record' }));
       rerender(view({ filedRecord: MATTER }));
+      // Task 135: a fact about the saved copy only, never which record the server will accept.
       expect(
-        await screen.findByText(
-          'This email is filed to MAT-1 Smith v Jones in Spaarke, so its invoice can only be submitted to that record.'
-        )
+        await screen.findByText('A saved copy of this email is filed to MAT-1 Smith v Jones in Spaarke.')
       ).toBeInTheDocument();
+      expect(screen.queryByText(/can only be submitted/)).toBeNull();
       expect(screen.getByText(/PRJ-9 : Project X/)).toBeInTheDocument();
     },
     TIMEOUT
@@ -1196,7 +1200,10 @@ describe('InvoiceView — Correction from the prefill (ebilling 097e)', () => {
   );
 
   it(
-    "names the email's filed record when it is not the invoice's record",
+    // Task 135 (dev 2026-11-23): `filedRecord` is the NEWEST saved copy's record, and the server judges the email's
+    // communication, so a correction (whose record is fixed) states no rule from it: INV-792345.5 was accepted under a
+    // note that said it would be refused.
+    'must-not-fire: a correction names no filed record and states no acceptance rule, even when a saved copy is filed elsewhere',
     async () => {
       const PROJECT: EntitySearchResult = {
         id: '2a7d4c1e-9b3f-4e8a-b6d2-7c5e1f0a9d33',
@@ -1210,9 +1217,13 @@ describe('InvoiceView — Correction from the prefill (ebilling 097e)', () => {
         filedRecord: PROJECT,
       });
       await chooseCorrection();
-      expect(await screen.findByTestId('invoice-correction-details')).toHaveTextContent(
-        "This email is filed to Project X in Spaarke, but this invoice is for PAT-792345. Spaarke accepts a correction only from an email filed to the invoice's record."
+      const details = await screen.findByTestId('invoice-correction-details');
+      expect(details).toHaveTextContent(
+        "A correction keeps the original invoice's firm, record and firm invoice number."
       );
+      expect(details).not.toHaveTextContent('Project X');
+      expect(details).not.toHaveTextContent(/accepts a correction only/);
+      expect(screen.queryByTestId('invoice-filed-record-note')).toBeNull();
     },
     TIMEOUT
   );

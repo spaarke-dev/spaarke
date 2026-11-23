@@ -105,9 +105,12 @@ import {
  * from `defaultInvoiceMarking`; `validateInvoiceMarking` always gets the attachments).
  *
  * The core record starts as the record the email is already filed to ({@link InvoiceViewProps.filedRecord}, the Save
- * tab's "Filed to"): the server files the email under the chosen record, and refuses a record other than the one it is
- * filed under (contract §6 `document_core_record_mismatch`), so the view names the filed record when the user picks
- * another. An email that is not filed gets the Save picker's suggested-record cards (`fetchRelatedCandidates`).
+ * tab's "Filed to"). An email that is not filed gets the Save picker's suggested-record cards (`fetchRelatedCandidates`).
+ * That record is the NEWEST saved `.eml` copy's, while the server judges the email's communication (contract §6
+ * `document_core_record_mismatch`); an email saved twice to different records has two answers (task 135, seen on dev
+ * 2026-11-23). So the view only states the saved copy's record as a fact, never which record the server will accept,
+ * and a correction (whose record is fixed) shows nothing. The server's refusal is the one answer: its `filedUnder`
+ * names the record it judged, and a new invoice offers "Use {name}".
  *
  * An email that was already submitted says so at the top ({@link InvoiceViewProps.loadPreviousSubmission}, contract §11,
  * ebilling 095a): when, as what tracking number and by whom, and where it stands. One still being processed is followed
@@ -1280,11 +1283,6 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
       <Text size={200} className={styles.note}>
         {"A correction keeps the original invoice's firm, record and firm invoice number."}
       </Text>
-      {filedRecord && !sameRecordId(filedRecord.id, c.coreRecord.entityId) && (
-        <Text size={200} className={styles.note} data-testid="invoice-filed-record-note">
-          {`This email is filed to ${filedRecord.displayInfo ? `${filedRecord.displayInfo} ` : ''}${filedRecord.name} in Spaarke, but this invoice is for ${c.coreRecord.name}. Spaarke accepts a correction only from an email filed to the invoice's record.`}
-        </Text>
-      )}
       {c.firm === null && (
         <>
           <Text size={200} className={styles.note} role="status" data-testid="invoice-correction-no-firm">
@@ -1436,8 +1434,8 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
         {filedRecord && coreRecord && (
           <Text size={200} className={styles.note} data-testid="invoice-filed-record-note">
             {sameRecordId(coreRecord.id, filedRecord.id)
-              ? 'This email is filed to this record in Spaarke.'
-              : `This email is filed to ${filedRecord.displayInfo ? `${filedRecord.displayInfo} ` : ''}${filedRecord.name} in Spaarke, so its invoice can only be submitted to that record.`}
+              ? 'A saved copy of this email is filed to this record in Spaarke.'
+              : `A saved copy of this email is filed to ${filedRecord.displayInfo ? `${filedRecord.displayInfo} ` : ''}${filedRecord.name} in Spaarke.`}
           </Text>
         )}
       </div>
