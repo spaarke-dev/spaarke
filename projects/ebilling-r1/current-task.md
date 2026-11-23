@@ -11,8 +11,8 @@
 ## Quick recovery
 
 - **Running now (agents, background):**
-  - **194** (ISS-045 #2997): implementer on branch `task/ebilling-194` from 105c79dfb3. It takes sprk_extractionstatus and sprk_extractedjson off the invoice main and quick-create forms (Deploy-EbillingFormsViews.ps1 Cols + SpaarkeMaster source), adds the guarded `Remove-EbillingInvoiceExtractionFormControls.ps1`, and drops PB-013.
-  - **096**: implementer on branch `task/ebilling-096` from 5fd8013fa8. Office save refuses an invoice target and quick-create refuses Invoice, each with a 400; the invoice leg is deleted.
+  - **194 ✅** merged 96bcf65dbb; dev forms cleaned, -Verify PASS, uac-r2 notified before and after.
+  - **096**: built on `task/ebilling-096` tip f9bc1465c7; Opus adversarial review running.
 - **Exact next actions:**
   1. When an agent reports: Opus adversarial review (one pass for 194; 096 is bff-api, one pass), fix rounds, a scoped re-check, then merge `--no-ff` into work.
   2. **194:** uac-r2 BEFORE notice, then `-Apply` on dev (owner go typed 2026-11-23: "yes proceed with these"), then `-Verify` and the AFTER notice.
@@ -23,7 +23,7 @@
   - M2: the Invoice Review page has NEVER been on dev. Wait for task 112, or a page-only upload after the next dev BFF?
 - **Master PR #2992 ✅ merged 2026-11-23 16:35Z (2d83b246ae).** ontology-r1s follow-ups (cd485c6c5e, 71496ac36c, dc628e7152) go in the NEXT eBilling PR.
 - **164 ✅ 2026-11-23:** dev was already in the target state; -Verify and the SecureChild -Verify PASS; uac-r2 acked.
-- **Next dev deploy (uac-r2):** once fm #2984 is on master, the candidate is master + spike-v2, carrying 123 and 124, on the owners exact-SHA go. Then run 123s read-only check (notes/123 §12) and send uac-r2 the count by message.
+- **Dev BFF a48398746d ✅ (uac-r2, 2026-11-23 18:43Z, carries #2992 = 117/123/124/193):** gate PASSED 18:43–19:11Z. 123 check count 0, K1 closed (notes/123 §12). DynamicCommandResolver exceptions are pre-existing (#3005, uac-r2).
 - **Stays off:**
   - 117s Apply stays off until 079 (owner OK), and needs #2982 first, or the dev count of not-in-force policies.
   - `Ebilling:StoredFileReconcileEnabled` stays false (F4, DEF-044, owner go via uac-r2).
