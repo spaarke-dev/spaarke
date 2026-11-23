@@ -934,13 +934,20 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
         var (senderParticipant, senderEmail, senderDisplayName) =
             await ResolveMessageSenderAsync(httpContext, correlationId, ct);
 
+        // fm task 056b: a private message passes its gate here, before anything is sent: the thread is the caller's own 1:1 Direct
+        // thread, then the sender's record checks in full, then the recipient's, then the reference columns. Any refusal throws
+        // (400/403/409/503) and nothing is sent or written. Every other send skips this.
+        var privateReference = request.PrivateContext is null
+            ? null
+            : await CheckPrivateMessageBeforeSendAsync(request, httpContext, senderParticipant.RecordId, correlationId, ct);
+
         // Task 146 r1 (verifier item 10): the message's record — its filing and OWNER — is prepared BEFORE it is sent: a
         // refusal is a 409 and nothing is sent or created; a fault is the request's 5xx. Deciding the owner after the send
         // left a delivered message with no record (and, for chat, an echo that would persist it UNFILED) behind a success
         // response.
         var preparedRecord = await BuildMessageDataverseRecordAsync(
             request, senderEmail, senderParticipant.RecordId, correlationId, ct,
-            Sprk.Bff.Api.Services.Dataverse.RecordRequester.OfCaller(httpContext.User));
+            Sprk.Bff.Api.Services.Dataverse.RecordRequester.OfCaller(httpContext.User), privateReference);
 
         // fm task 054 piece 3a: a 1:1 message is refused here, before anything is sent, when the Direct message owner team is
         // configured but unusable (409) or unreadable (503).
@@ -1168,7 +1175,8 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
         Guid senderSystemUserId,
         string correlationId,
         CancellationToken ct,
-        Sprk.Bff.Api.Services.Dataverse.RecordRequester? requestedBy = null)
+        Sprk.Bff.Api.Services.Dataverse.RecordRequester? requestedBy = null,
+        Access.PrivateMessageReference? privateReference = null)
     {
         var subject = string.IsNullOrWhiteSpace(request.Subject) ? "(No Subject)" : request.Subject;
         var isInternalOnly = RequestedInternalOnly(request);
@@ -1206,7 +1214,43 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
         var owner = await ResolveOutboundOwnerAsync(communication, request, correlationId, ct, requestedBy);
         owner.ApplyTo(communication);
 
+        // fm task 056b: a private message's record reference, after the owner is decided, so it never feeds the filing or the
+        // owner. It is not a typed regarding lookup: the message stays a Direct message of its pair. Always internal-only.
+        privateReference?.ApplyTo(communication);
+
         return communication;
+    }
+
+    /// <summary>
+    /// fm task 056b: the private-message gate (<see cref="Access.PrivateMessageSendGate.CheckBeforeSendAsync"/>), resolved from the
+    /// request's services (it asks as the caller). A host that does not compose it refuses the send with the gate's 503: a private
+    /// message is never sent unchecked.
+    /// </summary>
+    private async Task<Access.PrivateMessageReference> CheckPrivateMessageBeforeSendAsync(
+        SendCommunicationRequest request, HttpContext httpContext, Guid senderSystemUserId, string correlationId, CancellationToken ct)
+    {
+        var gate = httpContext.RequestServices?.GetService<Access.PrivateMessageSendGate>();
+        if (gate is null)
+        {
+            _logger.LogWarning(
+                Access.PrivateMessageSendGate.CheckUnavailableEvent,
+                "{EventCode}: a private message was not sent because its gate is not composed | CorrelationId: {CorrelationId}",
+                Access.PrivateMessageSendGate.CheckUnavailableEventCode, correlationId);
+            throw new SdapProblemException(
+                code: Access.PrivateMessageSendGate.CheckUnavailableCode,
+                title: "Private messages are temporarily unavailable",
+                detail: Access.PrivateMessageSendGate.CheckUnavailableDetail,
+                statusCode: StatusCodes.Status503ServiceUnavailable,
+                extensions: new Dictionary<string, object>
+                {
+                    ["correlationId"] = correlationId,
+                    ["reasonCode"] = Access.PrivateMessageSendGate.CheckUnavailableCode,
+                });
+        }
+
+        return await gate.CheckBeforeSendAsync(
+            request, senderSystemUserId, Sprk.Bff.Api.Infrastructure.Auth.TokenHelper.ExtractBearerTokenOrNull(httpContext),
+            correlationId, ct);
     }
 
     /// <summary>
@@ -2431,6 +2475,11 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
         // Dispatch still flows through the SAME CommunicationChannelDispatcher (ADR-045 — no second send path);
         // this branch only supplies the messaging-specific sender-identity + persistence shape (participant, not
         // mailbox; ACS correlation ids; echo-dedup mark), mirroring the SendMode.User branch below.
+        // fm task 056b: a request carrying a private context must be a private message (a Message into the caller's own 1:1 Direct
+        // thread, nobody in To/Cc/Bcc, no association or inheritance); anything else is a 400 before anything is read or sent.
+        if (request.PrivateContext is not null)
+            Access.PrivateMessageSendGate.RefuseInvalidRequest(request, correlationId);
+
         if (request.CommunicationType == CommunicationType.Message)
         {
             return await SendMessageAsync(request, httpContext, correlationId, cancellationToken);

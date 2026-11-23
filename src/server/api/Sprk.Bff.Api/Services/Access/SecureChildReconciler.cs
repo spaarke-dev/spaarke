@@ -1856,6 +1856,10 @@ public sealed class SecureChildReconciler
             "isolated, and every record it is filed under is ordinary: only Unsecure (a Full Access holder or the record's " +
             "creator) takes it out of isolation — left isolated (owner round 24)";
 
+        /// <summary>fm task 056: the report detail of a private message met under a record (<see cref="DecideRowAsync"/>).</summary>
+        private const string PrivateMessageDetail =
+            "a private message is never filed: not re-owned or shared, left as it is";
+
         /// <summary>
         /// Every descendant of the root through the lineage lookups, level by level, through rows of ANY owner, at most
         /// <see cref="SecureChildShareSynchronizer.MaxLineageDepth"/> levels; every column (the resolver reads a row's parents
@@ -2642,6 +2646,21 @@ public sealed class SecureChildReconciler
         private async Task<RowDecision> DecideRowAsync(Entity row, DataversePrincipalRef? current, DataversePrincipalRef? start)
         {
             var table = row.LogicalName;
+
+            // fm task 056 (owner 2026-11-22; UAC-r2: fail closed wherever a filing is read): a private message holds no filing, so a
+            // record it is filed under outside the BFF decides nothing here. Not re-owned, not mirrored, not failed (nothing to carry):
+            // the two-minute share job clears that filing, and the next pass no longer finds the row under the record. Every pass
+            // (secure, unsecure, sweep, recent changes, below a re-filed row, ordinary move) decides its rows here, and only here. The
+            // row was read with every column (LoadDescendantsAsync), so its reference columns are on it.
+            if (string.Equals(table, CommunicationTable, StringComparison.OrdinalIgnoreCase)
+                && Sprk.Bff.Api.Services.Communication.Access.PrivateContextColumns.IsPrivate(row))
+            {
+                Log.LogWarning("[SECURE-CHILD-RECONCILE] {Table} {Id} is a private message filed under {Root} {RootId}: a private message " +
+                    "is never filed, so it is not re-owned or shared and is left as it is.", table, row.Id, _root.EntityLogicalName,
+                    _root.RecordId);
+                return new(RowMove.None, SecureChildRowOutcome.Untouched, null, PrivateMessageDetail);
+            }
+
             if (RecordThreadFiling.ThreadOf(row) is { } threadId && _threadReadFaults.TryGetValue(threadId, out var threadFault))
             {
                 // #2143 round 6: its record thread's filing is not known — undecided, written nothing, left for the next pass.

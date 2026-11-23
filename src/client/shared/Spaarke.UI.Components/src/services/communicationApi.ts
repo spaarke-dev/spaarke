@@ -83,6 +83,27 @@ export interface ICommunicationAssociation {
   entityUrl?: string;
 }
 
+/**
+ * The core records a private message can be "about" (fm task 056). The server accepts exactly these three; the client
+ * offers "Send privately" only on them.
+ */
+export const PRIVATE_CONTEXT_ENTITY_TYPES = ['sprk_matter', 'sprk_project', 'sprk_workassignment'] as const;
+
+export function isPrivateContextEntityType(entityType: string | undefined | null): boolean {
+  return !!entityType && (PRIVATE_CONTEXT_ENTITY_TYPES as readonly string[]).includes(entityType);
+}
+
+/**
+ * The record a private message is about (fm task 056). It decides where the message is SHOWN, never who reads it:
+ * only the sender and the named recipient read a private message.
+ */
+export interface ICommunicationPrivateContext {
+  /** One of {@link PRIVATE_CONTEXT_ENTITY_TYPES}. */
+  entityType: string;
+  /** Record GUID (no braces). */
+  id: string;
+}
+
 /** Options accepted by {@link sendCommunication}. */
 export interface SendCommunicationOptions {
   /**
@@ -162,6 +183,12 @@ export interface SendCommunicationOptions {
    * reply/forward raise; only a Private target thread still floors it to `true`.
    */
   isInternalOnly?: boolean;
+  /**
+   * Private message about a record (fm task 056). Valid only on a `'message'` send to a Direct thread (`threadId` = the
+   * pair's thread, `to` empty, no associations). The server checks both people's access to the record and refuses with
+   * the `sdap.communication.private.*` codes read by {@link privateSendRefusalMessage}.
+   */
+  privateContext?: ICommunicationPrivateContext;
   /** Send mode. Default `'sharedMailbox'`. */
   sendMode?: CommunicationSendMode;
   /** Caller-provided correlation ID for tracing. Optional. */
@@ -269,6 +296,51 @@ export class SendCommunicationError extends Error {
     const correlationId = b.correlationId ?? b.traceId ?? b.instance;
     return new SendCommunicationError(status, code, detail, correlationId);
   }
+}
+
+// ---------------------------------------------------------------------------
+// Private-send refusals (fm task 056)
+// ---------------------------------------------------------------------------
+
+export const PRIVATE_SEND_CODE_RECIPIENT_ACCESS = 'sdap.communication.private.recipient_access';
+export const PRIVATE_SEND_CODE_SENDER_ACCESS = 'sdap.communication.private.sender_access';
+export const PRIVATE_SEND_CODE_CHECK_UNAVAILABLE = 'sdap.communication.private.check_unavailable';
+export const PRIVATE_SEND_CODE_COLUMNS_MISSING = 'sdap.communication.private.columns_missing';
+
+export const PRIVATE_SEND_RECIPIENT_ACCESS_TEXT = 'Recipient does not have required record access';
+export const PRIVATE_SEND_SENDER_ACCESS_TEXT = 'You do not have required record access';
+export const PRIVATE_SEND_CHECK_UNAVAILABLE_TEXT =
+  'Record access could not be checked right now, so nothing was sent. Please try again in a moment.';
+export const PRIVATE_SEND_COLUMNS_MISSING_TEXT = 'Private messages are not available yet in this environment.';
+export const PRIVATE_SEND_GENERIC_TEXT = 'The private message could not be sent.';
+
+/**
+ * The sentence to show for a failed private send, by the server's refusal code (fm task 056). The recipient and sender
+ * texts are the owner's exact wording and say nothing about the cause (a missing right, a No Access entry or a
+ * Restricted record all read the same). Any 400 gets the generic text; an unrecognised failure falls back to the
+ * error's own detail.
+ */
+export function privateSendRefusalMessage(err: unknown): string {
+  if (err instanceof SendCommunicationError) {
+    switch (err.code) {
+      case PRIVATE_SEND_CODE_RECIPIENT_ACCESS:
+        return PRIVATE_SEND_RECIPIENT_ACCESS_TEXT;
+      case PRIVATE_SEND_CODE_SENDER_ACCESS:
+        return PRIVATE_SEND_SENDER_ACCESS_TEXT;
+      case PRIVATE_SEND_CODE_CHECK_UNAVAILABLE:
+        return PRIVATE_SEND_CHECK_UNAVAILABLE_TEXT;
+      case PRIVATE_SEND_CODE_COLUMNS_MISSING:
+        return PRIVATE_SEND_COLUMNS_MISSING_TEXT;
+      default:
+        return err.status === 400 ? PRIVATE_SEND_GENERIC_TEXT : err.detail;
+    }
+  }
+  return err instanceof Error ? err.message : PRIVATE_SEND_GENERIC_TEXT;
+}
+
+/** True when the failed send was the recipient-side refusal (the one that offers "send as a direct message instead"). */
+export function isPrivateRecipientRefusal(err: unknown): boolean {
+  return err instanceof SendCommunicationError && err.code === PRIVATE_SEND_CODE_RECIPIENT_ACCESS;
 }
 
 /** Dependencies for the wrapper (kept explicit for testability). */
@@ -388,6 +460,9 @@ export async function sendCommunication(
     archiveToSpe: opts.archiveToSpe ?? false,
     attachmentDocumentIds: opts.attachmentDocumentIds,
     isInternalOnly: opts.isInternalOnly,
+    privateContext: opts.privateContext
+      ? { entityType: opts.privateContext.entityType, id: opts.privateContext.id }
+      : undefined,
     correlationId: opts.correlationId,
     associations: opts.associations?.map(a => ({
       entityType: a.entityType,

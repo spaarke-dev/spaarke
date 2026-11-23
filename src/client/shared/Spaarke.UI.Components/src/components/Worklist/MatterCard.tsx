@@ -36,6 +36,12 @@ export interface MatterCardProps {
   onOpenItem?: (event: OpenItemEvent) => void;
   /** A quiet sentence under the lines, for example "+1 other open item on this matter, not in this filter". */
   note?: string;
+  /**
+   * Optional seam for a host that shows some items differently (the MCP decisions widget shows a billing item as a link out, not as an
+   * openable line). Called once per item: a node replaces that item's `IssueLine`; `null` or `undefined` keeps the standard line.
+   * Absent, every item is the standard line, so every existing host is unchanged.
+   */
+  renderItem?: (item: WorklistItem) => React.ReactNode;
   /** Today in the viewer's local calendar; defaults to now. */
   today?: Date;
   className?: string;
@@ -95,6 +101,7 @@ export const MatterCard: React.FC<MatterCardProps> = ({
   visibleList,
   onOpenItem,
   note,
+  renderItem,
   today,
   className,
 }) => {
@@ -129,7 +136,9 @@ export const MatterCard: React.FC<MatterCardProps> = ({
       <ul className={styles.list}>
         {items.map(item => (
           <li key={item.signalId}>
-            <IssueLine itemId={item.signalId} view={composeIssueLine(item, now)} onOpen={open} />
+            {renderItem?.(item) ?? (
+              <IssueLine itemId={item.signalId} view={composeIssueLine(item, now)} onOpen={open} />
+            )}
           </li>
         ))}
       </ul>

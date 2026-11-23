@@ -43,6 +43,8 @@ export interface UseThreadPollOptions {
    * messages into the previous thread's (RB R3 UAT 2026-07-28). Delta ticks
    * (`false`) carry only messages newer than the cursor and are merged.
    */
+  /** fm task 056: read only the messages privately about this record (the record's "Private · you and …" entry). */
+  about?: { entityType: string; id: string };
   onMessages: (messages: TimelineMessage[], isInitialLoad: boolean) => void;
   onUnread: (unreadCount: number) => void;
   onError?: (error: unknown) => void;
@@ -77,7 +79,10 @@ export function useThreadPoll(options: UseThreadPollOptions): UseThreadPollResul
     onUnread,
     onError,
     enabled = true,
+    about,
   } = options;
+  const aboutType = about?.entityType;
+  const aboutId = about?.id;
 
   const inFlightRef = React.useRef(false);
 
@@ -90,7 +95,11 @@ export function useThreadPoll(options: UseThreadPollOptions): UseThreadPollResul
       try {
         const since = isInitialLoad ? undefined : sinceCursorRef.current;
         const [threadResult, unreadResult] = await Promise.all([
-          readThread(threadId, { since }, { authenticatedFetch, bffBaseUrl }),
+          readThread(
+            threadId,
+            { since, about: aboutType && aboutId ? { entityType: aboutType, id: aboutId } : undefined },
+            { authenticatedFetch, bffBaseUrl }
+          ),
           getUnreadCount(threadId, { since: unreadSinceRef.current }, { authenticatedFetch, bffBaseUrl }),
         ]);
 
@@ -102,7 +111,18 @@ export function useThreadPoll(options: UseThreadPollOptions): UseThreadPollResul
         inFlightRef.current = false;
       }
     },
-    [threadId, authenticatedFetch, bffBaseUrl, sinceCursorRef, unreadSinceRef, onMessages, onUnread, onError]
+    [
+      threadId,
+      aboutType,
+      aboutId,
+      authenticatedFetch,
+      bffBaseUrl,
+      sinceCursorRef,
+      unreadSinceRef,
+      onMessages,
+      onUnread,
+      onError,
+    ]
   );
 
   React.useEffect(() => {

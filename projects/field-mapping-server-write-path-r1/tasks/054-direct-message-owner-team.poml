@@ -4,7 +4,7 @@
     <title>Direct 1:1 messages: a dedicated owner team, BFF-only thread flags, and the existing-row move (owner ruling 2026-11-08)</title>
     <phase>6 W6 Ownership exceptions (follow-up)</phase>
     <gate>UAC-r2 reviewed this POML before code. Parts 054b (column lock) and 054c (existing-row move) each run live only with the owner's go in fm's session. UAC-r2's share-side changes (Decision Record share mirror for team-owned messages; Set-CustomerOwnerTeams.ps1 Direct-BU mode) land before or with 054a's deploy.</gate>
-    <status>not-started</status>
+    <status>in-progress</status>
     <rigor>FULL</rigor>
     <rigor-reason>Changes the owner of a communication row on create, update and unfile; adds field security; moves existing rows. Security-sensitive (.cs, bff-api, dataverse).</rigor-reason>
     <model-tier>opus</model-tier>

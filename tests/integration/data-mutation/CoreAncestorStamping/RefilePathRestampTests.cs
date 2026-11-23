@@ -10,6 +10,7 @@ using Sprk.Bff.Api.Models.FieldMapping;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Nodes;
 using Sprk.Bff.Api.Services.Dataverse;
+using Sprk.Bff.Api.Tests.DataMutation.Communication;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Integration.DataMutation.CoreAncestorStamping;
@@ -43,7 +44,7 @@ public class RefilePathRestampTests
         var services = new ServiceCollection()
             .AddSingleton(world.Restamper)
             .AddSingleton<IRecordOwnershipResolver>(new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble())
-            .AddSingleton(Sprk.Bff.Api.Tests.TestInfrastructure.EntitySetNameFixtures.Service())
+            .AddSingleton(Sprk.Bff.Api.Tests.TestInfrastructure.EntitySetNameFixtures.Mock().AnsweringNoPrivateMessage().Object)
             .BuildServiceProvider();
         var core = new UpdateRecordActionCore(
             new Mock<IFieldMappingDataverseService>().Object,
@@ -270,7 +271,7 @@ public class RefilePathRestampTests
                 .AddSingleton(world.Restamper)
                 .AddSingleton(ownership)
                 .AddSingleton(threads)
-                .AddSingleton(Sprk.Bff.Api.Tests.TestInfrastructure.EntitySetNameFixtures.Service())
+                .AddSingleton(Sprk.Bff.Api.Tests.TestInfrastructure.EntitySetNameFixtures.Mock().AnsweringNoPrivateMessage().Object)
                 .BuildServiceProvider()
                 .GetRequiredService<IServiceScopeFactory>(),
             NullLogger.Instance);
@@ -285,10 +286,18 @@ public class RefilePathRestampTests
             [("sprk_regardingdocument", "sprk_document", Document), ("sprk_regardingmatter", "sprk_matter", MatterA)],
             pairId: MatterA.ToString());
 
-    /// <summary>A communication now filed under matter B and a to-do under it still copying A.</summary>
-    private static StampWorld CommunicationWorld() => new StampWorld()
-        .Row("sprk_communication", Communication, [("sprk_regardingmatter", "sprk_matter", MatterB)])
-        .Row("sprk_todo", TodoUnderCommunication,
-            [("sprk_regardingcommunication", "sprk_communication", Communication), ("sprk_regardingmatter", "sprk_matter", MatterA)],
-            pairId: Communication.ToString());
+    /// <summary>
+    /// A communication now filed under matter B and a to-do under it still copying A. The communication is an ordinary message
+    /// (fm task 056: the private-message guard's read of it, through the world's service, finds no context reference).
+    /// </summary>
+    private static StampWorld CommunicationWorld()
+    {
+        var world = new StampWorld()
+            .Row("sprk_communication", Communication, [("sprk_regardingmatter", "sprk_matter", MatterB)])
+            .Row("sprk_todo", TodoUnderCommunication,
+                [("sprk_regardingcommunication", "sprk_communication", Communication), ("sprk_regardingmatter", "sprk_matter", MatterA)],
+                pairId: Communication.ToString());
+        Mock.Get(world.Service).AnsweringNoPrivateMessage();
+        return world;
+    }
 }

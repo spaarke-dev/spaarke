@@ -145,7 +145,9 @@ public class ExternalMessageEndpointsTests
         Mock.Of<ICallerSystemUserResolver>(MockBehavior.Strict),
         _identity.Object,
         Mock.Of<ILogger<CommunicationThreadReadService>>(),
-        _appOnly.Object);
+        _appOnly.Object,
+        // fm task 056: an environment without the private-message reference columns, so the read is unchanged.
+        entities: CommunicationSchemaDouble.WithoutReferenceColumns());
 
     // The double answers in the order the query asks for (createdon DESC, the production query's $orderby), as Dataverse
     // would, so tests can list rows in natural chronological order.

@@ -1,0 +1,16 @@
+{
+  "case": "decision.403.signal-subject-missing",
+  "status": 403,
+  "contentType": "application/problem+json",
+  "body": "{\"type\":\"https://tools.ietf.org/html/rfc9110#section-15.5.4\",\"title\":\"Forbidden\",\"status\":403,\"detail\":\"This Signal's subject no longer exists.\",\"reasonCode\":\"ontology.decision.signal_subject_missing\",\"correlationId\":\"<volatile>\",\"reviewId\":\"c0430011-0000-4000-8000-000000000008\",\"actionCode\":null}",
+  "bodyPretty": {
+    "type": "https://tools.ietf.org/html/rfc9110#section-15.5.4",
+    "title": "Forbidden",
+    "status": 403,
+    "detail": "This Signal's subject no longer exists.",
+    "reasonCode": "ontology.decision.signal_subject_missing",
+    "correlationId": "<volatile>",
+    "reviewId": "c0430011-0000-4000-8000-000000000008",
+    "actionCode": null
+  }
+}

@@ -832,3 +832,9 @@ Task 168, owner questions Q1 and Q2 (asked 2026-10-28, explained in detail 2026-
   - The derivable-id known limit applies to the two derived entries (detail by message only).
   - Owner to say here if this is not what they meant (they typed "Option 1" in this session earlier).
 - **Rejected:** an alternate key on a new key column (schema change and backfill, same derivable handle); a check after the write (detects, doesn't prevent; deletes from an append-only table).
+
+## D-226 — Reschedule keeps allowing a new due date in the past (owner, 2026-11-22, asked directly after the main session's Do-lane check)
+
+- **Finding:** the Do lane's Reschedule (`DecisionActionCatalog.cs` `reschedule`; `RescheduleExecutor.PreflightAsync`) checks only that the new due date is a valid date. A date in the past is accepted with no message; the item stays overdue and the rule may raise it again.
+- **Decision (owner, typed in this session: "No, allow them"):** keep allowing past dates. No validation added in the wizard or the BFF. Use case: correcting a due date that was entered wrong.
+- **Effect:** none in code. Testers and reviewers should not re-raise it as a defect.

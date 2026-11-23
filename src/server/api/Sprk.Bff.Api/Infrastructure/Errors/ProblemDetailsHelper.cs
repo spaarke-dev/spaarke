@@ -241,8 +241,11 @@ public static partial class ProblemDetailsHelper
 
         return Results.Problem(
             title: "Record owner unresolved",
+            // fm task 056: the private-message write guard's read fault is retryable too.
             statusCode: string.Equals(refusalCode, Sprk.Bff.Api.Services.Dataverse.RecordOwnerRefusal.DirectTeamUnavailable,
                 StringComparison.Ordinal)
+                || string.Equals(refusalCode, Sprk.Bff.Api.Services.Communication.Access.PrivateMessageWriteGuard.CheckUnavailable,
+                    StringComparison.Ordinal)
                 ? StatusCodes.Status503ServiceUnavailable
                 : StatusCodes.Status409Conflict,
             detail: $"The {noun} was not saved: {reason ?? "no owner could be resolved"}.",

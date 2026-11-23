@@ -1,4 +1,4 @@
-$version = "1.3.4"
+$version = "1.3.5"
 $solutionName = "CommunicationAttachmentsSolution"
 # Anchor output to the script folder so the pack works regardless of the caller's
 # working directory (.NET ZipFile uses the PROCESS cwd, which PowerShell's `cd`

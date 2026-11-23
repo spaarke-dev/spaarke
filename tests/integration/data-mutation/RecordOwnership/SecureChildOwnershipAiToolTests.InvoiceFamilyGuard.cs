@@ -288,7 +288,7 @@ public sealed partial class SecureChildOwnershipAiToolTests
         app.Setup(a => a.RetrieveAsync("sprk_workassignment", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((string _, Guid id, string[] _, CancellationToken _) =>
                 _appWorkAssignments.TryGetValue(id, out var row) ? row : null!);
-        return app.Object;
+        return GuardOverTheWorld(app).Object;
     }
 
     private readonly Dictionary<Guid, Entity> _appWorkAssignments = new();

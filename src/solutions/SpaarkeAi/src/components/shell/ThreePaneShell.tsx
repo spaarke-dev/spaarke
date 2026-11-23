@@ -58,7 +58,13 @@
 import * as React from "react";
 import { makeStyles, Toaster, useToastController, Toast, ToastTitle } from "@fluentui/react-components";
 import { ChatRegular, AppsListRegular, DocumentRegular } from "@fluentui/react-icons";
-import { ThreePaneLayout, InAppWizardHost, DecisionWizardHost, useUiScale } from "@spaarke/ui-components";
+import {
+  ThreePaneLayout,
+  InAppWizardHost,
+  DecisionWizardHost,
+  CONFIRM_GUARD_MS,
+  useUiScale,
+} from "@spaarke/ui-components";
 import { authenticatedFetch as spaarkeAuthenticatedFetch, resolveTenantIdSync } from "@spaarke/auth";
 import {
   PaneEventBusProvider,
@@ -970,11 +976,16 @@ export function ThreePaneShell(props: ThreePaneShellProps): React.JSX.Element {
                * SprkModal here (never a navigateTo code page, never WizardModal). The widget (task 059) owns
                * the Signal read route (task 038), so it brings the item reader and the lookup search with
                * the launch. Renders nothing until a launch.
+               *
+               * `confirmGuardMs` (NFR-06): Next and Record decision are the same button, so a double click on
+               * Next at the last action step used to record the decision before Confirm had been seen. With the
+               * guard the Confirm step cannot record until it has been showing half a second.
                */}
               <DecisionWizardHost
                 authenticatedFetch={spaarkeAuthenticatedFetch}
                 bffBaseUrl={bffBaseUrl}
                 uiScale={uiScale}
+                confirmGuardMs={CONFIRM_GUARD_MS}
               />
             </PaneCollapseContext.Provider>
            </AnalysisLaunchContext.Provider>

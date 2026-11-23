@@ -35,6 +35,7 @@ import {
   tokens,
 } from '@fluentui/react-components';
 import { StatusBadge } from '../../StatusBadge';
+import { useFocusReturn } from '../../../utils/focusReturn';
 import { CategoryForm } from './CategoryForm';
 import type { CategoryFormValues } from './CategoryForm';
 import type { ClassificationCategory, ClassificationList, ClassificationService } from './classificationService';
@@ -121,6 +122,33 @@ export const ClassificationArea: React.FC<ClassificationAreaProps> = ({ service 
   const [confirmOffId, setConfirmOffId] = React.useState<string | null>(null);
   const requests = React.useRef(0);
   const alive = React.useRef(true);
+
+  // Focus after the form closes (task 202). Opening it moves focus to its Name field (CategoryForm); Cancel and Save
+  // unmount it, and focus would fall to <body>. It goes back to the control that opened it: the row's Edit button, else
+  // the table (the row is gone), else the New category button.
+  const rootRef = React.useRef<HTMLDivElement>(null);
+  const tableRef = React.useRef<HTMLTableElement>(null);
+  const newButtonRef = React.useRef<HTMLButtonElement>(null);
+  const editButtons = React.useRef(new Map<string, HTMLButtonElement | null>());
+  const returnFocus = useFocusReturn({
+    getRoot: () => rootRef.current,
+    getFallback: () => tableRef.current ?? newButtonRef.current,
+  });
+  const previousForm = React.useRef<FormState>(null);
+  React.useEffect(() => {
+    const was = previousForm.current;
+    previousForm.current = form;
+    if (!was || form !== null) return; // only a form that went from open to closed
+    returnFocus(was.mode === 'edit' ? () => editButtons.current.get(was.id) ?? null : () => newButtonRef.current);
+  }, [form, returnFocus]);
+
+  // The row being edited disappears from the list (another administrator removed it; the next reload no longer has it):
+  // the form is not rendered any more (`editing` is undefined), so `form` is cleared too. Left set, it would keep "New
+  // category" hidden for good. Clearing it is also what makes the effect above return focus (to the table: the row is gone).
+  const loadedCategories = state.status === 'ready' ? state.data.categories : null;
+  React.useEffect(() => {
+    if (form?.mode === 'edit' && loadedCategories && !loadedCategories.some(c => c.id === form.id)) setForm(null);
+  }, [form, loadedCategories]);
 
   /** Reads the list; an answer that is no longer the latest request is ignored. Keeps the last good list on screen while reloading. */
   const load = React.useCallback(async () => {
@@ -236,7 +264,7 @@ export const ClassificationArea: React.FC<ClassificationAreaProps> = ({ service 
   const confirmOff = confirmOffId === null ? undefined : data.categories.find(c => c.id === confirmOffId && c.enabled);
 
   return (
-    <div className={styles.root} data-testid="classification-area">
+    <div className={styles.root} data-testid="classification-area" ref={rootRef}>
       <div className={styles.header}>
         <div className={styles.cellStack}>
           <Text weight="semibold" size={500}>
@@ -249,6 +277,7 @@ export const ClassificationArea: React.FC<ClassificationAreaProps> = ({ service 
         </div>
         {form === null && (
           <Button
+            ref={newButtonRef}
             appearance="primary"
             onClick={() => {
               setNotice(null);
@@ -326,7 +355,7 @@ export const ClassificationArea: React.FC<ClassificationAreaProps> = ({ service 
           There are no triage categories yet.
         </Text>
       ) : (
-        <Table aria-label="Triage categories" data-testid="classification-table">
+        <Table aria-label="Triage categories" data-testid="classification-table" ref={tableRef} tabIndex={-1}>
           <TableHeader>
             <TableRow>
               <TableHeaderCell className={styles.col0}>Category</TableHeaderCell>
@@ -348,6 +377,7 @@ export const ClassificationArea: React.FC<ClassificationAreaProps> = ({ service 
                 floor={data.recallFloor}
                 busy={busyId === category.id}
                 formOpen={editing?.id === category.id}
+                editButtons={editButtons.current}
                 onToggle={enabled => requestToggle(category, enabled)}
                 onEdit={() => {
                   setNotice(null);
@@ -370,12 +400,30 @@ interface CategoryRowProps {
   busy: boolean;
   /** This row's edit form is open: the switch is disabled so a reload cannot remount the form and lose what was typed (K4). */
   formOpen: boolean;
+  /** Where this row registers its Edit button, so the area can return focus to it when the form closes. */
+  editButtons: Map<string, HTMLButtonElement | null>;
   onToggle: (enabled: boolean) => void;
   onEdit: () => void;
 }
 
-const CategoryRow: React.FC<CategoryRowProps> = ({ category, floor, busy, formOpen, onToggle, onEdit }) => {
+const CategoryRow: React.FC<CategoryRowProps> = ({
+  category,
+  floor,
+  busy,
+  formOpen,
+  editButtons,
+  onToggle,
+  onEdit,
+}) => {
   const styles = useStyles();
+  const categoryId = category.id;
+  const registerEdit = React.useCallback(
+    (el: HTMLButtonElement | null) => {
+      if (el) editButtons.set(categoryId, el);
+      else editButtons.delete(categoryId);
+    },
+    [editButtons, categoryId]
+  );
   const recall = describeRecall(category.recall, floor);
   const readers = groupRuleReads(category.readBy);
   const guidance = category.guidance ?? '';
@@ -444,6 +492,7 @@ const CategoryRow: React.FC<CategoryRowProps> = ({ category, floor, busy, formOp
       </TableCell>
       <TableCell className={styles.col6}>
         <Button
+          ref={registerEdit}
           size="small"
           onClick={onEdit}
           aria-label={`Edit ${category.name}`}

@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="199" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>Email composer: after a host lookup (To/Cc/Bcc, Link a record, Link documents) closes, keyboard focus returns to the button that opened it</title>
+    <phase>12 Create-wizard lookups and composer (185 dev check fixes)</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .tsx in the shared UI library (EmailComposer, every composer host); PCF version bumps.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Located a11y defect with a stated fix and an existing in-file pattern (closeFailureNotice).</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>185-fixes</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>No other open task touches EmailComposer.</parallel-reason>
+    <deps>198 (merged)</deps>
+    <tags>react, fluent-ui, frontend, pcf, testing, a11y</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+  <prompt>Found by the main session's browser re-test of task 198 on dev, 2026-11-22 (SemanticSearchControl 1.1.90). Path: Matter form → Documents → file preview → ⋮ → Email → Compose → To → pick a contact → Add. The recipient lands in To correctly, but `document.activeElement` is then the document-name link in the matter's Documents grid (`button.fui-Link` in a `fui-DataGridCell`), BEHIND both the Email wizard and the (blocking again) preview. A keyboard user is lost: their next Tab / typing goes to the form behind two dialogs. Owner: "continue testing and fixing".</prompt>
+  <role>SPAARKE frontend developer. Expert in React 16-19, Fluent UI v9, accessibility, and the shared `@spaarke/ui-components` EmailComposer.</role>
+  <goal>Every composer action that awaits a host lookup (`onLookupRecipients` for to/cc/bcc, `onLookupRecord` for Link a record / Link documents / record search, and any other `await props.onX` that opens a platform pane) ends with keyboard focus on the button that started it, when that button is still mounted and enabled, and only when focus is not already inside the composer (a host or the user that put focus somewhere in the composer wins). On cancel (null result) the same. Works in every host because it lives in EmailComposer.</goal>
+  <context>
+    <background>
+- `EmailComposer.tsx` (origin/master): recipients `onLookup={props.onLookupRecipients ? () => props.onLookupRecipients!('to') : undefined}` ~1360/1369/1378 (passed to a recipient field subcomponent; find where it is invoked and awaited); `onLookupRecord` ~746-759 (`.then(picked => ...)`). Nothing restores focus afterwards.
+- Pattern to copy, in the same file ~680-687 (`closeFailureNotice`): `window.setTimeout(() => { if (root &amp;&amp; !root.contains(document.activeElement)) ... focus() }, 0)`. Use the TRIGGER element (captured from the click event's `currentTarget` or a ref) rather than the root; fall back to the root if the trigger is gone or disabled.
+- Why focus lands on the grid: the hosting SprkModal yields (task 198), Fluent/tabster restore focus to the dialog's opener while the surface is inert, and the platform pane returns focus to that element when it closes. The composer cannot prevent that, but it can take focus back after the lookup promise settles (after the host's `onSidePaneLookupChange(false)` has let the wizard/preview stop yielding — hence the setTimeout 0, or a short rAF; verify ordering in a test with a host that clears yielding on resolve).
+- Do NOT steal focus if the composer is unmounted, if the result handler moved focus somewhere inside the composer on purpose, or if `document.activeElement` is inside the composer already.
+    </background>
+    <relevant-files>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/EmailComposer.tsx</file>
+      <file role="modify">the recipient field subcomponent under EmailComposer/subcomponents/ that invokes onLookup (find it)</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/__tests__/ (new test file or the nearest existing lookup test)</file>
+      <file role="modify">src/client/pcf/SemanticSearchControl, CommunicationActions, TrackingFieldTrio and any other PCF that bundles EmailComposer (version bump + build:prod only if the bundle changes)</file>
+      <file role="canonical-reference">EmailComposer.tsx closeFailureNotice (~680-687)</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="CLAUDE.md §11">No new component or prop. A small internal helper in EmailComposer is fine if used by every lookup path (one helper, not one per path).</constraint>
+    <constraint source="project">Only focus after a host lookup changes. Recipients added, record linking, attachments, sends: unchanged; existing EmailComposer and host tests pass unmodified.</constraint>
+    <constraint source="project">PCF hosts that bundle EmailComposer get a version bump and `npm run build:prod` (list old → new in the notes). Console builds (src/solutions/SpaarkeAi). No deploy in this task.</constraint>
+    <constraint source="CLAUDE.md project §6">Run `node scripts/quality/client-lint/client-lint.mjs check` before pushing.</constraint>
+    <constraint source="ADR-038">Filtered jest only; tests assert where focus ends up, and fail on the old code.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+    </files>
+  </knowledge>
+  <steps mode="directional">
+    <step order="1">Failing tests first: To lookup resolving with a pick while focus has been moved to an element outside the composer (simulate the platform): after settle, focus is on the To button. Show it fails on unchanged code.</step>
+    <step order="2">Implement one helper used by every lookup path.</step>
+    <step order="3">Filtered jest (EmailComposer, DocumentEmailWizard, SendEmailDialog, WizardFollowOns, DecisionWizard email step), typecheck, client-lint.</step>
+    <step order="4">Bump and build:prod the PCFs whose bundle changes; build the Console.</step>
+    <step order="5">Notes in notes/task-199-notes.md.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion testable="true">Test: To lookup resolves with a pick while focus is outside the composer → focus ends on the To button. Fails on origin/master.</criterion>
+    <criterion testable="true">Test: same for Cc, for cancel (null), and for Link a record / Link documents.</criterion>
+    <criterion testable="true">Negative test: if focus is already inside the composer when the lookup settles (e.g. on the body editor), it is not moved.</criterion>
+    <criterion testable="true">Negative test: composer unmounted before the lookup settles → no error, no focus call.</criterion>
+    <criterion testable="true">Existing composer and host tests pass unmodified; typecheck clean; client-lint passes; PCF versions bumped where the bundle changed and build:prod succeeds; Console builds.</criterion>
+  </acceptance-criteria>
+  <escalation>
+    <trigger>If focus cannot be taken back reliably because the platform pane moves focus AFTER the lookup promise resolves (observable only on dev), STOP after the tests and report; the main session will verify on dev.</trigger>
+  </escalation>
+  <execution>
+    <protocol>Run through task-execute. Fresh worktree from origin/master; PR to master.</protocol>
+  </execution>
+  <completion>Done 2026-11-23: PR #2955 merged to master (1e6ee676d7) after independent review and fix round (1f9e2eedd4). Deployed to dev with task 200 from master 973d72b67e (deploy-log 2026-11-23): CommunicationActions 1.3.25, TrackingFieldTrio 1.0.67, SemanticSearchControl 1.1.92 and the composer code pages. Dev check 2026-11-23 (notes/task-185-notes.md): Tracking email composer, To lookup cancelled, focus returns to "Look up To recipients", and the retry reclaims focus after the platform's late hand-back. Not checked on dev: the Find Similar/DRV and preview iframe paths. Helper moved to utils/focusReturn.ts by task 200. Notes: notes/task-199-notes.md.</completion>
+</task>

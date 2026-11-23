@@ -20,6 +20,7 @@
  */
 import { accessFailureOf } from '../components/auth/BffAccessState';
 import { messageProblemOf } from './messages-client';
+import { rawWholeNumberOf } from '../utils/rawWholeNumber';
 
 // ---------------------------------------------------------------------------
 // Who the caller is (for "created by me")
@@ -109,11 +110,12 @@ export function isRequestedByCaller(
 /**
  * True when a service request is closed: `statecode` 1 (inactive) or `statuscode` 2 (the closed status reason). A closed
  * request cannot be deleted (the server answers 409 `service_request_closed`), so Delete is not offered. Unknown state
- * (the column was not read) is treated as open: the server's gate is the authority.
+ * (the column was not read) is treated as open: the server's gate is the authority. A raw value may be a number or the module
+ * fetch's SDK object (`{ value: 1, extensionData: null }`); both are read.
  */
 export function isServiceRequestClosed(record: Record<string, unknown> | null | undefined): boolean {
   if (!record) return false;
-  return Number(record.statecode) === 1 || Number(record.statuscode) === 2;
+  return rawWholeNumberOf(record.statecode) === 1 || rawWholeNumberOf(record.statuscode) === 2;
 }
 
 // ---------------------------------------------------------------------------
