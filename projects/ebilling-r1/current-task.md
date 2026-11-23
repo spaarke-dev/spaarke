@@ -10,13 +10,9 @@
 
 ## Quick recovery
 
-- **Active: master PR** (owner 2026-11-23: "you can merge when ready").
-  - Steps: merge origin/master into work, run the filtered tests, open the PR (known limits include 134's K2), and send it to ontology-r1.
-  - Merge as a merge commit once Router and Client lint are green.
-- **Exact next actions (checkpoint 2026-11-23):**
-  1. Merge origin/master into work/ebilling-r1, then run the filtered BFF tests, ArchTests and vitest.
-  2. Open the PR and send it to ontology-r1, with the 050b PR owed.
-  3. Merge on green.
+- **Master PR #2992 ✅ merged 2026-11-23 16:35Z (merge commit 2d83b246ae)** by auto-merge on the owners yes. Reviews: ontology-r1 OK, uac-r2 consistent. The office-scope CI timeout is known (#1474).
+  - ontology-r1s follow-ups were pushed after the merge (cd485c6c5e, 71496ac36c, dc628e7152). They go to master in the NEXT eBilling PR. ISS-045 is #2997.
+- **Next dev deploy (uac-r2):** once #2992 and fm #2984 are on master, the candidate is master + spike-v2. It carries 123 and 124 and deploys on the owners exact-SHA go. After it lands, run 123s read-only check (notes/123 §12) and send uac-r2 the count by message.
 - **117 ✅ just merged (f4a272136c).** Apply stays off until 079 (owner OK). 096 and 121 stay gated.
 - **123 deploy condition (uac-r2 condition 2):** 123's BFF change goes into a LATER dev deploy (not 9df4e5c819). After that deploy, run the read-only dev check in `notes/123-invoice-supporting-file-upload.md` §12 and send uac-r2 the count (ids by message only).
 - `Ebilling:StoredFileReconcileEnabled` stays false: its flip needs F4 merged, DEF-044 fixed and the owner's go through uac-r2.
