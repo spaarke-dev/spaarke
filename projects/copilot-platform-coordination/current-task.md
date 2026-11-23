@@ -26,7 +26,7 @@
 
 ## Waiting on other sessions
 
-- mcp-r1: S-1 tool-list check while C1 and C2 are both connected (asked 2026-11-23); T10 result; 040 ship date (triggers runbook step 5); response on R8.
+- mcp-r1: agreed R1 rationale; R8 already met by `spaarke_complete_decision`. S-1 needs the owner or test user (mcp-r1 puts it to the owner, before runbook step 5). Still waiting: T10 result, 040 ship date.
 - acclerator-r1: P1 Word probe upload/removal.
 - specialist-legal-agents-r1: S-3 as a Phase 0 item; D-A11.
 

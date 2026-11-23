@@ -54,7 +54,7 @@ Test artifacts are installed for **the owner and the test user only** ("Only you
 
 ## R8 (proposed). Write tools are safe to repeat
 
-A model can call a tool twice (a duplicate registration, a retry, or a skill that says "try again"). Every Spaarke MCP write tool checks before it creates, or takes a caller key, so a repeat cannot create a second record. This binds mcp-r1's server design, not tenant registration; proposed to mcp-r1 on 2026-11-23.
+A model can call a tool twice (a duplicate registration, a retry, or a skill that says "try again"). Every Spaarke MCP write tool checks before it creates, or takes a caller key, so a repeat cannot create a second record. The Spaarke MCP server already meets it: its only real write tool, `spaarke_complete_decision`, is app-only and replay-safe through `DecisionCommitService` (idempotency key, stored outcome returned on repeat; mcp-r1 FR-08 / NFR-06; deliberate "send again" = new intent, new key). R8 therefore binds **other** projects' write tools (for example the specialist agents' T2/T3 tools). Spike tools are exempt as throwaways.
 
 ## Which rules wait on structure tests
 
@@ -64,7 +64,7 @@ A model can call a tool twice (a duplicate registration, a retry, or a skill tha
 | R2 packages carry skills/agents, not a connector | **Open** | S-2 (= mcp-r1 T10), S-3 |
 | R3 naming | Holds for new artifacts | accelerator OD-42 for existing skills |
 | R4–R7 process rules | Independent of structure | — |
-| R8 safe-to-repeat writes | Proposed | mcp-r1 |
+| R8 safe-to-repeat writes | Proposed; mcp-r1 already compliant and agrees it fits other projects | owner |
 
 Tests S-1 to S-4 are in `copilot-structure.md` §4.
 
