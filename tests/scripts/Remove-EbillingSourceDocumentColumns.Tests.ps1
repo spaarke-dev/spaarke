@@ -281,7 +281,7 @@ Describe 'Get-DeleteRefusals (R3)' {
 Describe 'the caller must be shown to read every row before any count is believed (review pass 1, F1)' {
     BeforeEach { $script:Fake = New-Fake }
 
-    It 'an administrator is counted as before' {
+    It 'a caller with organization Read (a System Administrator holds it) is counted as before' {
         $script:Fake.Rows['sprk_rulesets'] = 5; $script:Fake.NonNull['sprk_rulesets'] = 2
         $c = Get-Census $Targets[0]
         $c.ReadGap | Should -BeNullOrEmpty
@@ -292,6 +292,11 @@ Describe 'the caller must be shown to read every row before any count is believe
     It 'a non-admin with organization (Global) Read is counted' {
         $script:Fake.Who.Admin = $false; $script:Fake.Who.Depth = 'Global'
         (Get-Census $Targets[1]).ReadGap | Should -BeNullOrEmpty
+    }
+
+    It 'a role named System Administrator is no pass: below organization depth it is a gap (no role-name shortcut, fix round 2)' {
+        $script:Fake.Who.Admin = $true; $script:Fake.Who.Depth = 'Local'
+        (Get-Census $Targets[1]).ReadGap | Should -BeLike "*Read depth on sprk_ratecard is 'Local'*"
     }
 
     It 'a non-admin below organization depth: nothing is counted (unknown), the gap names the depth and the table, and the column is blocked' {

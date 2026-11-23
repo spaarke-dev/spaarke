@@ -111,9 +111,15 @@ BeforeAll {
         if ($Path -eq 'WhoAmI' -or $Path -match '^systemusers\(|^privileges\?') {
             if ($w.Fault) { throw $w.Fault }
             if ($Path -eq 'WhoAmI') { return [pscustomobject]@{ UserId = 'u-1' } }
-            if ($Path -match 'systemuserroles_association') { return [pscustomobject]@{ value = @(if ($w.Admin) { [pscustomobject]@{ name = 'System Administrator' } }) } }
-            if ($Path -match '^privileges\?') { return [pscustomobject]@{ value = @([pscustomobject]@{ privilegeid = 'P-READ' }) } }
+            # The caller's roles are never asked any more (no role-name shortcut); the double still answers, so a regression to the shortcut shows:
+            # RolesNoValue = an answer with no `value` property at all (a malformed one), Admin = a role named System Administrator.
+            if ($Path -match 'systemuserroles_association') {
+                if ($w.RolesNoValue) { return [pscustomobject]@{ note = 'no value property' } }
+                return [pscustomobject]@{ value = @(if ($w.Admin) { [pscustomobject]@{ name = 'System Administrator' } }) }
+            }
+            if ($Path -match '^privileges\?') { return $(if ($w.PrivilegeAnswer) { $w.PrivilegeAnswer } else { [pscustomobject]@{ value = @([pscustomobject]@{ privilegeid = 'P-READ' }) } }) }
             if ($Path -match 'RetrieveUserPrivileges') {
+                if ($w.HeldAnswer) { return $w.HeldAnswer }
                 $held = @(if ($w.Depth) { [pscustomobject]@{ PrivilegeId = 'p-read'; Depth = $w.Depth } }; [pscustomobject]@{ PrivilegeId = 'p-other'; Depth = 'Global' })
                 return [pscustomobject]@{ RolePrivileges = $held }
             }
@@ -345,15 +351,45 @@ Describe 'Get-State (T2)' {
 Describe 'the caller must be shown to read every sprk_ratecard row before any count is believed (review pass 1, F1)' {
     BeforeEach { $script:Dev = New-Dev; $script:Allow = $true }
 
-    It 'Get-ReadAllRowsGap: a System Administrator reads every row (no gap, and the privileges are not even asked for)' {
-        $script:Dev.Who.Admin = $true
+    It 'Get-ReadAllRowsGap: organization (Global) Read reads every row, whatever case the privilege id comes in (a System Administrator holds it)' {
+        $script:Dev.Who.Depth = 'Global'
         Get-ReadAllRowsGap 'sprk_ratecard' | Should -BeNullOrEmpty
-        @($script:Dev.Gets | Where-Object { $_ -like '*RetrieveUserPrivileges*' }).Count | Should -Be 0
     }
 
-    It 'Get-ReadAllRowsGap: a non-admin with organization (Global) Read reads every row, whatever case the privilege id comes in' {
-        $script:Dev.Who.Admin = $false; $script:Dev.Who.Depth = 'Global'
+    It 'Get-ReadAllRowsGap: there is no role-name shortcut. A role named System Administrator without organization Read is a gap, and roles are never asked (fix round 2)' {
+        $script:Dev.Who.Admin = $true; $script:Dev.Who.Depth = 'Local'
+        Get-ReadAllRowsGap 'sprk_ratecard' | Should -BeLike "*Read depth on sprk_ratecard is 'Local'*"
+        @($script:Dev.Gets | Where-Object { $_ -like '*systemuserroles_association*' }).Count | Should -Be 0
+    }
+
+    It 'Get-ReadAllRowsGap: a malformed role answer (no value property) can never pass a caller below organization depth (fix round 2)' {
+        $script:Dev.Who.Admin = $false; $script:Dev.Who.RolesNoValue = $true; $script:Dev.Who.Depth = 'Local'
+        $gap = Get-ReadAllRowsGap 'sprk_ratecard'
+        $gap | Should -BeLike 'cannot confirm every sprk_ratecard row can be read*'
+    }
+
+    It 'Get-ReadAllRowsGap: a privilege lookup with no value list, a null value list, or a null entry in it is a gap, never a pass (fix round 2)' -ForEach @(
+        @{ Answer = [pscustomobject]@{ note = 'no value property' }; Expect = '*malformed*' }
+        @{ Answer = [pscustomobject]@{ value = $null };              Expect = '*Read privilege of sprk_ratecard was not found*' }
+        @{ Answer = [pscustomobject]@{ value = @($null) };           Expect = '*Read privilege of sprk_ratecard was not found*' }
+    ) {
+        $script:Dev.Who.PrivilegeAnswer = $Answer
+        Get-ReadAllRowsGap 'sprk_ratecard' | Should -BeLike $Expect
+    }
+
+    It 'Get-ReadAllRowsGap: a caller privilege list with no RolePrivileges is a gap, not "none held" and not a pass (fix round 2)' {
+        $script:Dev.Who.HeldAnswer = [pscustomobject]@{ note = 'no RolePrivileges property' }
+        Get-ReadAllRowsGap 'sprk_ratecard' | Should -BeLike '*RolePrivileges*malformed*'
+    }
+
+    It 'Get-ReadAllRowsGap: a null entry among the caller privileges is skipped, the Global grant after it still counts' {
+        $script:Dev.Who.HeldAnswer = [pscustomobject]@{ RolePrivileges = @($null, [pscustomobject]@{ PrivilegeId = 'P-READ'; Depth = 'Global' }) }
         Get-ReadAllRowsGap 'sprk_ratecard' | Should -BeNullOrEmpty
+    }
+
+    It 'Get-ReadAllRowsGap: -Wording replaces only the clause after "cannot confirm"' {
+        $script:Dev.Who.Depth = 'Basic'
+        Get-ReadAllRowsGap 'sprk_ratecard' 'every version was read' | Should -BeLike "cannot confirm every version was read: the caller's Read depth on sprk_ratecard is 'Basic'*"
     }
 
     It 'Get-ReadAllRowsGap: a non-admin below organization depth is a gap naming the depth (<Depth>)' -ForEach @(
@@ -424,7 +460,7 @@ Describe 'the caller must be shown to read every sprk_ratecard row before any co
         $script:Dev.Writes.Count | Should -Be 0
     }
 
-    It '-Apply proceeds for a System Administrator and for a non-admin with organization Read' {
+    It '-Apply proceeds for a caller whose Read is organization-wide, whatever role names it holds' {
         Invoke-Retirement $true $false $false 'owner OK'
         @($script:Dev.Writes | Where-Object { $_ -like 'DELETE *' }).Count | Should -Be 3
         $script:Dev = New-Dev; $script:Dev.Who.Admin = $false; $script:Dev.Who.Depth = 'Global'

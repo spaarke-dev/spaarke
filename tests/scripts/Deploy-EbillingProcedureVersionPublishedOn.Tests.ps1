@@ -16,7 +16,7 @@ BeforeAll {
     if ($errors.Count -gt 0) { throw "The script does not parse: $($errors[0].Message)" }
 
     $wantedVariables = 'Table', 'Column', 'StatusActive', 'StatusSuperseded', 'StatusRetired'
-    $wantedFunctions = 'ConvertTo-UtcInstant', 'ConvertTo-StartOfDayUtc', 'Get-OperatorReadDepth', 'Get-ReadabilityGap', 'Get-StampPlan', 'Write-RowsRead'
+    $wantedFunctions = 'ConvertTo-UtcInstant', 'ConvertTo-StartOfDayUtc', 'Get-ReadabilityGap', 'Get-StampPlan', 'Write-RowsRead'
 
     $pieces = [System.Collections.Generic.List[string]]::new()
     $found = [System.Collections.Generic.List[string]]::new()
@@ -33,13 +33,23 @@ BeforeAll {
     $missing = @($wantedVariables + $wantedFunctions | Where-Object { $_ -notin $found })
     if ($missing.Count -gt 0) { throw "Not found in the script: $($missing -join ', ')" }
 
-    # The Dataverse call, as a test double: WhoAmI, the privilege lookup and the operator's privileges.
+    # The readability check itself is the shared Get-ReadAllRowsGap of EbillingSchema.psm1 (one copy; this script's own Get-ReadabilityGap
+    # only gives it this script's wording): lifted from the module's syntax tree and run against the same test double.
+    $script:ModulePath = Join-Path (Resolve-Path (Join-Path $PSScriptRoot '..' '..')).Path 'scripts' 'ebilling' 'EbillingSchema.psm1'
+    $moduleAst = [System.Management.Automation.Language.Parser]::ParseFile($script:ModulePath, [ref]$tokens, [ref]$errors)
+    if ($errors.Count -gt 0) { throw "The module does not parse: $($errors[0].Message)" }
+    $gapFunction = @($moduleAst.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Get-ReadAllRowsGap' }, $true))
+    if ($gapFunction.Count -ne 1) { throw 'Get-ReadAllRowsGap not found in EbillingSchema.psm1' }
+    $pieces.Add($gapFunction[0].Extent.Text)
+
+    # The Dataverse call, as a test double: WhoAmI, the privilege lookup and the operator's privileges. Every path asked is recorded.
     function Invoke-Dv {
         param([string]$Path)
+        $script:Fake.Calls.Add($Path)
         if ($script:Fake.Throw) { throw $script:Fake.Throw }
         if ($Path -eq 'WhoAmI') { return [pscustomobject]@{ UserId = 'u-1' } }
-        if ($Path -like 'privileges?*') { return [pscustomobject]@{ value = @($script:Fake.Privilege) } }
-        if ($Path -like 'systemusers(u-1)/*RetrieveUserPrivileges*') { return [pscustomobject]@{ RolePrivileges = @($script:Fake.Held) } }
+        if ($Path -like 'privileges?*') { return $(if ($script:Fake.PrivilegeAnswer) { $script:Fake.PrivilegeAnswer } else { [pscustomobject]@{ value = @($script:Fake.Privilege) } }) }
+        if ($Path -like 'systemusers(u-1)/*RetrieveUserPrivileges*') { return $(if ($script:Fake.HeldAnswer) { $script:Fake.HeldAnswer } else { [pscustomobject]@{ RolePrivileges = @($script:Fake.Held) } }) }
         throw "unexpected GET $Path"
     }
 
@@ -127,8 +137,29 @@ Describe 'ConvertTo-StartOfDayUtc: the effective-from fallback' {
 
 Describe 'Get-ReadabilityGap: the operator must be shown to read every version' {
     BeforeEach {
-        $script:Fake = @{ Throw = $null; Privilege = [pscustomobject]@{ privilegeid = 'P-READ' }
+        $script:Fake = @{ Throw = $null; Privilege = [pscustomobject]@{ privilegeid = 'P-READ' }; PrivilegeAnswer = $null; HeldAnswer = $null
+            Calls = [System.Collections.Generic.List[string]]::new()
             Held = @([pscustomobject]@{ PrivilegeId = 'p-read'; Depth = 'Global' }, [pscustomobject]@{ PrivilegeId = 'p-other'; Depth = 'Basic' }) }
+    }
+
+    It 'does not look at role names: only the privileges decide (one copy of the check, no System Administrator name shortcut)' {
+        $script:Fake.Held = @([pscustomobject]@{ PrivilegeId = 'P-READ'; Depth = 'Local' })
+        Get-ReadabilityGap | Should -BeLike "cannot confirm every version was read*'Local'*"
+        @($script:Fake.Calls | Where-Object { $_ -like '*role*' }).Count | Should -Be 0
+    }
+
+    It 'keeps this script''s own wording for a malformed answer: no value list, or no RolePrivileges, is a gap' {
+        $script:Fake.PrivilegeAnswer = [pscustomobject]@{ note = 'no value property' }
+        Get-ReadabilityGap | Should -BeLike 'cannot confirm every version was read*malformed*'
+        $script:Fake.PrivilegeAnswer = $null
+        $script:Fake.HeldAnswer = [pscustomobject]@{ note = 'no RolePrivileges property' }
+        Get-ReadabilityGap | Should -BeLike 'cannot confirm every version was read*malformed*'
+    }
+
+    It 'calls the shared check, and the script keeps no private copy of the depth logic' {
+        $text = Get-Content -Raw $script:ScriptPath
+        $text | Should -Match "Get-ReadAllRowsGap \`$Table 'every version was read'"
+        $text | Should -Not -Match 'function Get-OperatorReadDepth|RetrieveUserPrivileges'
     }
 
     It 'passes at organization depth' {
