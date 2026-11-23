@@ -89,6 +89,18 @@ public class PrivateMessageWriteGuardTests
     }
 
     [Fact]
+    public void AnOwnerWrite_AsksTheGuard_ButTheOwnerIsNoFilingColumn()
+    {
+        // fm 056b: a private message's owner is the Direct team's, never a generic writer's (Repair decides ownerid itself), so an
+        // owner write asks the guard; it is not a filing link, so the private-filing clear never clears it.
+        PrivateMessageWriteGuard.Triggers(Communication, new[] { "ownerid" }).Should().BeTrue();
+        PrivateMessageWriteGuard.Triggers(Communication, new[] { "ownerid@odata.bind" }).Should().BeTrue();
+        PrivateMessageWriteGuard.Triggers("sprk_event", new[] { "ownerid" }).Should().BeFalse();
+        PrivateMessageWriteGuard.TriggerColumns.Should().NotContain("ownerid");
+        DirectMessageOwnerStep.PrivateFilingColumns.Should().NotContain("ownerid");
+    }
+
+    [Fact]
     public void TheUnfileList_IsTheTriggerListWithoutTheThread()
     {
         DirectMessageOwnerStep.PrivateFilingColumns.Should().Equal(

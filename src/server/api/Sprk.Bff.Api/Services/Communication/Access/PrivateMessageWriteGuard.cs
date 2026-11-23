@@ -57,12 +57,21 @@ internal static class PrivateMessageWriteGuard
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
 
-    private static readonly IReadOnlySet<string> TriggerSet = new HashSet<string>(TriggerColumns, StringComparer.OrdinalIgnoreCase);
+    /// <summary>
+    /// The owner column. A private message's owner is the Direct team, written only by <see cref="DirectMessageOwnerStep"/>; no
+    /// generic writer may change it (the generic update writers refuse <c>ownerid</c> from every caller; Repair decides it
+    /// itself). So an update writing it also asks the guard, and a private message refuses. It is NOT a filing column, so it is
+    /// not in <see cref="TriggerColumns"/> and the private-filing clear never touches it.
+    /// </summary>
+    private const string OwnerColumn = "ownerid";
+
+    private static readonly IReadOnlySet<string> TriggerSet =
+        new HashSet<string>(TriggerColumns.Append(OwnerColumn), StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
     /// Whether an update of <paramref name="table"/> writing <paramref name="columns"/> must ask the guard: the table is
     /// <c>sprk_communication</c> and a column (in any key form: <c>column@odata.bind</c>, <c>_column_value</c>) is in
-    /// <see cref="TriggerColumns"/>.
+    /// <see cref="TriggerColumns"/> or is the owner column.
     /// </summary>
     internal static bool Triggers(string table, IEnumerable<string> columns)
     {
