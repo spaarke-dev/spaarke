@@ -3,7 +3,7 @@
 > **Last Updated**: 2026-11-22 (198 fixed + live; 199 running; 200 queued; D2/D4/A8/C3 checked). State only; history in git log, task `<completion>` blocks and
 > `notes/handoff-history/2026-11.md` (previous checkpoint archived there verbatim). Standing rules: [`CLAUDE.md`](CLAUDE.md) §3 and §6.
 > Decisions: [`notes/decisions.md`](notes/decisions.md) (D-1..**D-226**). Deferred work: one GitHub issue per item, label `ontology-deferred`,
-> plus a DI-nn row in both tables of `notes/defer-issues.md` (next free: **DI-163**). Sub-agents never edit this file.
+> plus a DI-nn row in both tables of `notes/defer-issues.md` (next free: **DI-164**). Sub-agents never edit this file.
 
 ## Quick Recovery (READ THIS FIRST)
 
