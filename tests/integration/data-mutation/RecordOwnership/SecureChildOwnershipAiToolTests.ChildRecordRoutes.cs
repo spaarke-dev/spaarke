@@ -1518,7 +1518,7 @@ public sealed partial class SecureChildOwnershipAiToolTests
                 NullLogger<Sprk.Bff.Api.Services.Ai.Handlers.DataverseUpdateRecordHandler>.Instance,
                 _world.Resolver(),
                 Sprk.Bff.Api.Tests.TestInfrastructure.SecureRootFilingGateFixtures.NothingSecure(),
-                scopes)
+                scopes, appOnlyEntities: GuardReaderOverTheWorld())
             .ExecuteChatAsync(
                 BuildChatInvocationContext(
                     toolArgumentsJson: JsonSerializer.Serialize(new
@@ -1776,7 +1776,8 @@ public sealed partial class SecureChildOwnershipAiToolTests
         Sprk.Bff.Api.Services.Communication.IThreadResolver? threads = null) =>
         ChildRecordEndpoints.UpdateAsync(
             "sprk_communication", communication, Payload(payload), _user, _world.Resolver(), Restamper(), Children(threads),
-            HttpContextOfCaller(), NullLogger<Program>.Instance, CancellationToken.None, filingOnly: true);
+            HttpContextOfCaller(), NullLogger<Program>.Instance, CancellationToken.None, filingOnly: true,
+            appOnlyEntities: GuardReaderOverTheWorld());
 
     private static CoreAncestorRestamper Restamper() =>
         new Sprk.Bff.Api.Tests.Integration.DataMutation.CoreAncestorStamping.StampWorld().Restamper;

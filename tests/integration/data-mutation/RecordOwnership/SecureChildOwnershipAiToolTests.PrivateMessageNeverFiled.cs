@@ -29,7 +29,7 @@ public sealed partial class SecureChildOwnershipAiToolTests
     private Task<IResult> FileTheMessageUnderTheOrdinaryMatter() =>
         CommunicationEndpoints.RefileCommunicationAsync(
             DirectUnfileMessage, Payload(new() { ["sprk_RegardingMatter@odata.bind"] = $"/sprk_matters({OrdinaryMatter:D})" }),
-            _user, _world.Resolver(), Restamper(), Children(), Mock.Of<IGenericEntityService>(), signalTrigger: null,
+            _user, _world.Resolver(), Restamper(), Children(), GuardReaderOverTheWorld(), signalTrigger: null,
             HttpContextOfCaller(), NullLogger<Program>.Instance, CancellationToken.None);
 
     [Fact(DisplayName = "fm 056 Q5: PATCH /api/communications/{id}/filing of a private message is 409 sdap.communication.private.not_fileable and nothing is written")]
@@ -73,7 +73,7 @@ public sealed partial class SecureChildOwnershipAiToolTests
             {
                 Lookups = [new DataverseWriteItemMapper.MappedLookup("sprk_regardingmatter", "sprk_matter", "sprk_matters", OrdinaryMatter)],
             },
-            callerObjectId: null, CancellationToken.None);
+            callerObjectId: null, CancellationToken.None, appOnlyEntities: GuardReaderOverTheWorld());
 
         outcome.Written.Should().BeFalse();
         outcome.OwnerRefusal?.RefusalCode.Should().Be(RecordOwnerRefusal.PrivateMessageNotFileable);

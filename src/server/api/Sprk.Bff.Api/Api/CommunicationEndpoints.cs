@@ -88,7 +88,9 @@ public static class CommunicationEndpoints
 
         var result = await ChildRecordEndpoints.UpdateAsync(
             "sprk_communication", id, body, user, ownership, restamper, children, httpContext, logger, ct,
-            filingOnly: true).ConfigureAwait(false);
+            filingOnly: true,
+            // fm task 056: the app-only reader the re-file core asks whether the message is a private message with.
+            appOnlyEntities: entities).ConfigureAwait(false);
 
         if (result is Microsoft.AspNetCore.Http.HttpResults.NoContent)
         {
