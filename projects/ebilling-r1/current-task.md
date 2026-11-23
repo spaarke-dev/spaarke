@@ -21,6 +21,7 @@
   - 050a §9 items 2-4: reject after confirm; drop InvoiceDate/TotalAmount from the confirm request; the confirm privilege.
   - 089: refuse "change rule" on a rule a newer Procedure version dropped (record not pinned); 089d live child-BU proof on dev, now or later.
   - M2: the Invoice Review page has NEVER been on dev. Wait for task 112, or a page-only upload after the next dev BFF?
+- **Master PR #3029 OPEN (2026-11-23):** 194 + 096 + ontology-r1 follow-ups; ontology-r1 asked to review; merge needs the owner's go in THIS session. After merge: uac-r2 builds dev BFF from master (the deploy go is the owner naming the exact SHA in uac-r2's session, not here) and checks 096's OFFICE_023 first; uac-r2 sends the live notice to us and word-add-in-r1.
 - **Master PR #2992 ✅ merged 2026-11-23 16:35Z (2d83b246ae).** ontology-r1s follow-ups (cd485c6c5e, 71496ac36c, dc628e7152) go in the NEXT eBilling PR.
 - **164 ✅ 2026-11-23:** dev was already in the target state; -Verify and the SecureChild -Verify PASS; uac-r2 acked.
 - **Dev BFF a48398746d ✅ (uac-r2, 2026-11-23 18:43Z, carries #2992 = 117/123/124/193):** gate PASSED 18:43–19:11Z. 123 check count 0, K1 closed (notes/123 §12). DynamicCommandResolver exceptions are pre-existing (#3005, uac-r2).
