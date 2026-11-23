@@ -193,7 +193,10 @@ describe('ConversationWorkspace — create modals keep a send-failure warning (f
     await screen.findByRole('dialog', { name: /New message/i });
     fireEvent.click(screen.getByRole('button', { name: 'Select To' }));
     await screen.findByText('Carol Chen');
-    fireEvent.change(await screen.findByRole('textbox', { name: 'Message' }), { target: { value: 'Hi Carol' } });
+    // Picking replaces the focused "Select To" button: focus moves on to the message box, so the dialog stays exposed to
+    // assistive technology (otherwise Fluent's focus manager marks it aria-hidden and this query finds no textbox).
+    await waitFor(() => expect(screen.getByRole('textbox', { name: 'Message' })).toHaveFocus());
+    fireEvent.change(screen.getByRole('textbox', { name: 'Message' }), { target: { value: 'Hi Carol' } });
     fireEvent.click(screen.getByRole('button', { name: 'Start' }));
 
     expect(await screen.findByText(/couldn't be sent/i)).toBeInTheDocument();

@@ -352,3 +352,13 @@ Two-write rule: every entry here has a GitHub issue, and every issue has an entr
 | **Class** | Feature follow-up for `messages-enhancements-r1` |
 | **Need** | Participants invite named people into a private conversation about a record; each invitee passes the recipient's record-access check; the conversation widens only by invitation, never by filing. |
 | **Status** | Filed. 056 ships strictly 1:1, never filed (decisions.md 2026-11-22). The Direct access model is pair-only and belongs to UAC-r2, so this needs a design reviewed with UAC-r2 first. |
+
+## DI-037 — Flaky client test: EmailComposer.lookupFocus under full ui-components jest load (found, not ours)
+
+| Field | Value |
+|---|---|
+| **Found** | 2026-11-23, verifying master PR #2984 (full `@spaarke/ui-components` jest at ef2bb76a73) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2990 |
+| **Class** | Pre-existing test flake from master (task 199); this project does not touch EmailComposer |
+| **Need** | Make the focus-return assertion robust to slow jsdom ticks under full-suite load. It passes alone. |
+| **Status** | Filed. The same run's OntologyAdmin Rules failure is already #2597. |

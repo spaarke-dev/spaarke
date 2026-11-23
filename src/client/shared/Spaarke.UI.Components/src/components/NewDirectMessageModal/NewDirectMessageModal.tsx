@@ -316,6 +316,10 @@ export const NewDirectMessageModal: React.FC<INewDirectMessageModalProps> = ({
         onChange={item => {
           setPerson(item);
           setPersonError(undefined);
+          // Picking replaces the focused "Select To" button with the chosen person, which drops focus out of the dialog;
+          // Fluent's focus manager (tabster) then marks the open dialog aria-hidden. Move focus on to the message box,
+          // the next field.
+          if (item) requestAnimationFrame(() => bodyRef.current?.focus());
         }}
         navigationService={navigationService}
         filters={INTERNAL_USER_LOOKUP_FILTERS}

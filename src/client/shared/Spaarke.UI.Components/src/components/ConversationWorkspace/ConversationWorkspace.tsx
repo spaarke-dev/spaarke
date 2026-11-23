@@ -805,7 +805,7 @@ export const ConversationWorkspace: React.FC<ConversationWorkspaceProps> = ({
         />
       )}
       {/* "Send privately…" (fm task 056): the same person picker, with the record fixed as context. */}
-      {navigationService && canSendPrivately && regarding && (
+      {navigationService && canSendPrivately && (
         <NewDirectMessageModal
           open={sendPrivatelyOpen}
           onDismiss={() => setSendPrivatelyOpen(false)}
