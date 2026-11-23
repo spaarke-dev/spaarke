@@ -2522,3 +2522,27 @@ Task 050b deleted the legacy invoice extraction path, so nothing writes `sprk_in
 **Estimated effort**: half a day plus the dev form publish.
 **Blockers**: the dev form change is a live step (owner OK).
 **Related**: 050b, #2263.
+
+### ISS-046 — Deploy-EbillingFormsViews.ps1 Section mode would delete the invoice main form's Batch quick view on re-run
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | next-round |
+| **Filed** | 2026-11-23 |
+| **Source** | Task 194 adversarial review, finding 7 (found in passing; pre-existing) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/3001 |
+
+**Description**
+
+In Section mode the forms script rebuilds `section_ebilling` from its `Cols` list and replaces the whole section, which drops the `qv_billingexport` "Batch" quick view that 151e added to the source and that no script creates. Once the 151e form is on an environment, a later run there silently removes the quick view.
+
+**Entry-points**
+
+- `scripts/ebilling/Deploy-EbillingFormsViews.ps1:350-352`, `:176-186`
+- `src/dataverse/solutions/SpaarkeMaster/Entities/sprk_Invoice/FormXml/main/{93aa1c69-0406-f111-8406-7c1e525abd8b}.xml` (`qv_billingexport`)
+
+**Suggested fix**: keep the existing section's non-managed cells (quick views, subgrids), or list the quick view; add a re-run test.
+
+**Estimated effort**: half a day.
+**Blockers**: none. Task 194 does not use the forms script for its removal.
