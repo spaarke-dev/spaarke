@@ -3129,11 +3129,19 @@ public sealed partial class RuleSetServiceTests
 
     private static readonly DateTime RetireCutoff = new(2026, 11, 23, 11, 45, 0, DateTimeKind.Utc);
 
+    /// <summary>A Published Billing set of the shape 089's record-set creator writes (its name, a record scope), with no core lookup.</summary>
+    private static Guid RecordSetOf089(Harness h, int scope, Guid? firm = null)
+    {
+        var set = h.RuleSet(status: RuleSetService.RuleSetPublished, scope: scope, firm: firm);
+        h.Row("sprk_ruleset", set)["sprk_name"] = RecordRuleSet.Name;
+        return set;
+    }
+
     [Fact(DisplayName = "117: a set re-linked between the selection and its write is re-read, skipped and not written")]
     public async Task RetireUnlinked_ASetReLinkedBeforeItsWrite_IsSkipped()
     {
         var h = new Harness();
-        var set = h.RuleSet(status: RuleSetService.RuleSetPublished, scope: RecordRuleSet.ScopeRecord);
+        var set = RecordSetOf089(h, RecordRuleSet.ScopeRecord);
         var (policy, _) = h.Rule(set, "BRR-1", ProposalState.Accepted, current: true);
         var core = InvoiceFamilyCoreRecordGuard.FilingCoreTables[0];
         var selections = 0;
@@ -3160,8 +3168,8 @@ public sealed partial class RuleSetServiceTests
     public async Task RetireUnlinked_ReportOnly_CountsAndWritesNothing()
     {
         var h = new Harness();
-        var record = h.RuleSet(status: RuleSetService.RuleSetPublished, scope: RecordRuleSet.ScopeRecord);
-        var firmRecord = h.RuleSet(status: RuleSetService.RuleSetPublished, scope: RecordRuleSet.ScopeFirmRecord, firm: FirmId);
+        var record = RecordSetOf089(h, RecordRuleSet.ScopeRecord);
+        var firmRecord = RecordSetOf089(h, RecordRuleSet.ScopeFirmRecord, FirmId);
         h.Rule(record, "BRR-1", ProposalState.Accepted, current: true);
         h.Rule(firmRecord, "BRR-2", ProposalState.Accepted, current: true);
 

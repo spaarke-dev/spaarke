@@ -2942,7 +2942,8 @@ public class RuleSetService
     /// <summary>
     /// Task 117 (model 5.2 / 12, O-17, D-146 amended, I-P5): retires the record-scoped Billing rule sets whose core record is gone. Selected,
     /// in id order, <paramref name="pageSize"/> rows a page and at most <paramref name="maxPages"/> pages: Billing domain, a record scope
-    /// (Record or Firm record) with no Procedure and EVERY core-record lookup null (<see cref="RecordRuleSet.IsUnlinked"/>), not Retired, and
+    /// (Record or Firm record) of the shape 089 creates (its record-set name), with no Procedure and EVERY core-record lookup null
+    /// (<see cref="RecordRuleSet.IsUnlinked"/>), not Retired, and
     /// last modified before <paramref name="modifiedBefore"/> (the age floor: a row whose lookup a create or a wizard has not written yet is
     /// never taken). Each row read is re-checked in memory too.
     /// <para>With <paramref name="apply"/> false nothing is written and only <see cref="UnlinkedRecordSetRetireResult.Selected"/> is counted.

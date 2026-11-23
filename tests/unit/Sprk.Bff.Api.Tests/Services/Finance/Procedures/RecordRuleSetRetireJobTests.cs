@@ -65,14 +65,15 @@ public sealed class RecordRuleSetRetireJobTests
     // ── Seeding ──────────────────────────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>A rule set (Billing, Published, owned by a team, with a creator person) of <paramref name="scope"/>; <paramref name="core"/> sets one
-    /// core-record lookup, <paramref name="procedure"/> the Procedure lookup.</summary>
+    /// core-record lookup, <paramref name="procedure"/> the Procedure lookup. Named as 089's record-set creator names it unless
+    /// <paramref name="name"/> says otherwise.</summary>
     private Guid Set(
         int scope = RecordRuleSet.ScopeRecord, string? core = null, Guid? procedure = null, int status = RuleSetService.RuleSetPublished,
-        int? domain = RuleDomains.PolicyDomainBilling, Guid? firm = null)
+        int? domain = RuleDomains.PolicyDomainBilling, Guid? firm = null, string name = RecordRuleSet.Name)
     {
         var set = new Entity(RuleSet, Guid.NewGuid())
         {
-            ["sprk_name"] = "Billing instructions for this record",
+            ["sprk_name"] = name,
             ["sprk_scope"] = new OptionSetValue(scope),
             ["statuscode"] = new OptionSetValue(status),
             ["statecode"] = new OptionSetValue(status == RuleSetService.RuleSetRetired ? 1 : 0),
@@ -329,6 +330,27 @@ public sealed class RecordRuleSetRetireJobTests
         sets.Should().OnlyContain(s => Status(s) == RuleSetService.RuleSetPublished && State(s) == 0);
         rules.Should().OnlyContain(p => Enabled(p));
         Enabled(retiredRule.Policy).Should().BeTrue("a Retired set is not selected again, so its rules are not written");
+        WriteCount.Should().Be(0);
+        result.GetProperty("ruleSets").GetProperty("selected").GetInt32().Should().Be(0);
+    }
+
+    [Theory(DisplayName = "117: a record-scoped set with no lookup that is not of 089's shape (another name) is untouched, Record and Firm record")]
+    [InlineData("Acme guidelines")]                         // a legacy ClientDefault set hand-edited to a record scope in the app
+    [InlineData("billing instructions for this record")]    // not 089's name exactly (ordinal)
+    [InlineData("")]
+    public async Task ASetNotOf089sShape_IsUntouched(string name)
+    {
+        var record = Set(RecordRuleSet.ScopeRecord, name: name);
+        var firmRecord = Set(RecordRuleSet.ScopeFirmRecord, firm: Guid.NewGuid(), name: name);
+        var rule = Rule(record, "BRR-1");
+        var firmRule = Rule(firmRecord, "BRR-2");
+
+        var result = await RunAsync();
+
+        Status(record).Should().Be(RuleSetService.RuleSetPublished);
+        Status(firmRecord).Should().Be(RuleSetService.RuleSetPublished);
+        Enabled(rule.Policy).Should().BeTrue();
+        Enabled(firmRule.Policy).Should().BeTrue();
         WriteCount.Should().Be(0);
         result.GetProperty("ruleSets").GetProperty("selected").GetInt32().Should().Be(0);
     }

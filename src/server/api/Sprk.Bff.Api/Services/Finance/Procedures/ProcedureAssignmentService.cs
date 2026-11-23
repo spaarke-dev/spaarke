@@ -194,6 +194,7 @@ public static class RecordRuleSet
     internal const string Name = "Billing instructions for this record";
 
     internal const string ScopeColumn = "sprk_scope";
+    private const string NameColumn = "sprk_name";
     private const string FirmColumn = "sprk_firm";
     private const string ProcedureColumn = "sprk_procedure";
 
@@ -212,9 +213,14 @@ public static class RecordRuleSet
     /// <see cref="ScopeColumn"/>, the Procedure lookup and every <see cref="InvoiceFamilyCoreRecordGuard.FilingCoreTables"/> column. The
     /// predicate lives here, beside the scope values, for the reason this class does (089a K4: <see cref="RuleSetService"/> may name no record
     /// scope); the retire itself is <see cref="RuleSetService"/>'s, the one rule-set lifecycle writer.
+    /// <para>Fix round 1 (K2): only a set of the shape 089 creates — its name exactly <see cref="Name"/>, which
+    /// <c>RecordRuleSetCreateAsync</c> always writes (ordinal, fail closed). A set hand-edited in the app to a record scope with no lookup (a
+    /// legacy ClientDefault set, say) keeps its own name and is never taken. The creator person is NOT a condition: 089's creator stamps it
+    /// only when the caller resolves to a person (<c>RecordOwnerResolution.ApplyTo</c>), so a set 089 made can lack it.</para>
     /// </summary>
     internal static bool IsUnlinked(Entity set) =>
         set.GetAttributeValue<OptionSetValue>(ScopeColumn)?.Value is ScopeRecord or ScopeFirmRecord
+        && string.Equals(set.GetAttributeValue<string>(NameColumn), Name, StringComparison.Ordinal)
         && set.GetAttributeValue<EntityReference>(ProcedureColumn) is null
         && InvoiceFamilyCoreRecordGuard.FilingCoreTables.All(core => set.GetAttributeValue<EntityReference>(core) is null);
 
@@ -224,6 +230,7 @@ public static class RecordRuleSet
     {
         ArgumentNullException.ThrowIfNull(query);
         query.Criteria.AddCondition(ScopeColumn, ConditionOperator.In, ScopeRecord, ScopeFirmRecord);
+        query.Criteria.AddCondition(NameColumn, ConditionOperator.Equal, Name);
         query.Criteria.AddCondition(ProcedureColumn, ConditionOperator.Null);
         foreach (var core in InvoiceFamilyCoreRecordGuard.FilingCoreTables)
         {
@@ -233,7 +240,7 @@ public static class RecordRuleSet
 
     /// <summary>Task 117: the columns <see cref="IsUnlinked"/> reads.</summary>
     internal static IReadOnlyList<string> UnlinkedColumns { get; } =
-        new[] { ScopeColumn, ProcedureColumn }.Concat(InvoiceFamilyCoreRecordGuard.FilingCoreTables).ToArray();
+        new[] { ScopeColumn, NameColumn, ProcedureColumn }.Concat(InvoiceFamilyCoreRecordGuard.FilingCoreTables).ToArray();
 
     /// <summary>
     /// ebilling-r1 task 089e: where a record-scoped set lives, for the rule-set by-id routes' authorization. Null for a set that is not
