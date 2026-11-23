@@ -71,11 +71,18 @@ export const CategoryForm: React.FC<CategoryFormProps> = ({ category, onSubmit, 
   const [saving, setSaving] = React.useState(false);
   const [error, setError] = React.useState<ClassificationRequestError | null>(null);
   const alive = React.useRef(true);
+  const nameRef = React.useRef<HTMLInputElement>(null);
   React.useEffect(() => {
     alive.current = true;
     return () => {
       alive.current = false;
     };
+  }, []);
+  // Opening the form moves focus to its first field (task 202): the Edit / New category button the person pressed
+  // stays where it is behind the form, so without this a keyboard or screen-reader user is left on it. Closing returns
+  // focus to that button (ClassificationArea).
+  React.useEffect(() => {
+    nameRef.current?.focus();
   }, []);
 
   const trimmed = name.trim();
@@ -94,7 +101,9 @@ export const CategoryForm: React.FC<CategoryFormProps> = ({ category, onSubmit, 
       } catch (err) {
         if (alive.current) {
           setError(
-            err instanceof ClassificationRequestError ? err : new ClassificationRequestError('The category could not be saved.', null)
+            err instanceof ClassificationRequestError
+              ? err
+              : new ClassificationRequestError('The category could not be saved.', null)
           );
         }
       } finally {
@@ -110,20 +119,30 @@ export const CategoryForm: React.FC<CategoryFormProps> = ({ category, onSubmit, 
   const renameRefused = renameBlocked || RENAME_REFUSALS.has(error?.reasonCode ?? '');
 
   return (
-    <form className={styles.form} onSubmit={submit} data-testid="classification-form" aria-label={category ? `Edit ${category.name}` : 'New category'}>
+    <form
+      className={styles.form}
+      onSubmit={submit}
+      data-testid="classification-form"
+      aria-label={category ? `Edit ${category.name}` : 'New category'}
+    >
       {category === undefined && (
         <Text className={styles.hint} data-testid="classification-form-new-note">
-          A new category is saved Off. Turn it On from the list once its guidance reads right; it changes how the next email is classified.
+          A new category is saved Off. Turn it On from the list once its guidance reads right; it changes how the next
+          email is classified.
         </Text>
       )}
       {readers.length > 0 && (
         <Text className={styles.hint} data-testid="classification-form-readers">
-          Read by {readers.map(r => r.policyCode).join(', ')}. The name cannot be changed while a rule reads this category.
+          Read by {readers.map(r => r.policyCode).join(', ')}. The name cannot be changed while a rule reads this
+          category.
         </Text>
       )}
 
       {error && !nameErrors && !guidanceErrors && (
-        <MessageBar intent={renameRefused || error.httpStatus === 409 ? 'warning' : 'error'} data-testid="classification-form-error">
+        <MessageBar
+          intent={renameRefused || error.httpStatus === 409 ? 'warning' : 'error'}
+          data-testid="classification-form-error"
+        >
           <MessageBarBody>
             <MessageBarTitle>{renameRefused ? 'Rename refused' : 'Not saved'}</MessageBarTitle>
             {error.message}
@@ -149,6 +168,7 @@ export const CategoryForm: React.FC<CategoryFormProps> = ({ category, onSubmit, 
         hint="This is also the value the classifier chooses from."
       >
         <Input
+          ref={nameRef}
           value={name}
           maxLength={MAX_NAME_LENGTH}
           onChange={(_e, data) => setName(data.value)}
