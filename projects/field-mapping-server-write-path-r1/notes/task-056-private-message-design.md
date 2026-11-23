@@ -333,6 +333,12 @@ code, and it is open.
 **Deploy order, per environment.** Run the schema script (`Set-PrivateContextSchema.ps1`), then field security (`Set-ThreadFlagFieldSecurity.ps1 -Apply`, then `-Verify`), then the BFF. Each step needs the owner's go.
 After `-Verify` passes and before the BFF goes live, run a read-only count of `sprk_communication` rows that hold any `sprk_privatecontext*` value. It must be 0, because no deployed BFF writes those columns yet. Send the count to unified-access-control-r2. A nonzero count holds the deploy (UAC-r2 approval of 056b, 2026-11-23).
 
+**Applied (live).**
+
+| Environment | Date | Schema | Field security | Count | BFF |
+|---|---|---|---|---|---|
+| dev (`spaarkedev1`) | 2026-11-23 | `-Apply` and `-Verify` PASS | `-Apply` and `-Verify` PASS (masked windows 20.0 s, 14.2 s, 16.1 s) | 0 (out of 398 rows) | Not deployed yet |
+
 **Known limits.**
 - A refused private send can leave the pair's Direct thread with no message in it.
 - If the message row is created and a later send step fails, a retried echo saves an ordinary Direct message without the reference.
